@@ -43,6 +43,7 @@ This discovers and unpacks all supported archives into ignored `.local/extracted
 ## Project guide
 
 - [Roadmap](docs/ROADMAP.md): milestones and parity goals.
+- [Parity progress](docs/progress.md): completed work and remaining menu, original-terrain, simulation and aircraft steps.
 - [Development](docs/DEVELOPMENT.md): environment and everyday commands.
 - [Extraction](docs/EXTRACTION.md): shared script, filtering, output layout, and supported containers.
 - [Architecture](docs/ARCHITECTURE.md): baseline choices and boundaries.

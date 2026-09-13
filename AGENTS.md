@@ -3,6 +3,8 @@
 Read [docs/ROADMAP.md](docs/ROADMAP.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), and [docs/formats/menu.md](docs/formats/menu.md) before changing the project. Current work is the first M1a main-menu slice; M0 research and the rest of M1a remain open.
 
 - Keep documentation in lowercase `docs/`; validation evidence in `docs/baselines/`; format coverage in `docs/formats/coverage.md` when importer work starts.
+- Maintain [docs/progress.md](docs/progress.md) with completed substeps, remaining parity work and acceptance evidence. The remaining menu screens are deferred until explicitly scheduled.
+- Recover terrain and environment systems from retail assets and verified native behavior. Do not port USNF-ATF's custom terrain system or substitute its DEM-based theaters for original terrain; its partial T2 research is reference evidence only.
 - This is a native Rust rebuild. `USNF-ATF/` is an ignored reference checkout: use recovered specifications and baselines, not its engine or TypeScript runtime.
 - `gameassets/`, `USNF-ATF/`, `.local/`, and `target/` are local only. Never force-add retail media, extracted art/audio/fonts, generated retail derivatives, or reference checkout contents. Use synthetic fixtures in committed tests.
 - The importer reads user-owned media at runtime and writes selected decompressed resources to platform application data. Never embed retail bytes with `include_bytes!` or build scripts. Keep snapshots, inventories, and comparison outputs in ignored `.local/`.
