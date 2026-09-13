@@ -1,9 +1,10 @@
 # Agent instructions
 
-Read [docs/ROADMAP.md](docs/ROADMAP.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), and [docs/formats/menu.md](docs/formats/menu.md) before changing the project. Current work is the first M1a main-menu slice; M0 research and the rest of M1a remain open.
+Read [docs/ROADMAP.md](docs/ROADMAP.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), and [docs/formats/menu.md](docs/formats/menu.md) before changing the project. Current work includes the first M1a menu slice and partial M1b Ukraine viewer; M0 research and the rest of M1a remain open.
 
 - Keep documentation in lowercase `docs/`; validation evidence in `docs/baselines/`; format coverage in `docs/formats/coverage.md` when importer work starts.
 - Maintain [docs/progress.md](docs/progress.md) with completed substeps, remaining parity work and acceptance evidence. The remaining menu screens are deferred until explicitly scheduled.
+- Read [docs/formats/theater.md](docs/formats/theater.md) before terrain/weather changes; its native T2 byte layout supersedes the reference reader. Keep the shared theater definition table, extraction profiles and sky/celestial dependencies aligned between app and CLI. Validate both creator and viewer smoke tests for rendering changes.
 - Recover terrain and environment systems from retail assets and verified native behavior. Do not port USNF-ATF's custom terrain system or substitute its DEM-based theaters for original terrain; its partial T2 research is reference evidence only.
 - This is a native Rust rebuild. `USNF-ATF/` is an ignored reference checkout: use recovered specifications and baselines, not its engine or TypeScript runtime.
 - `gameassets/`, `USNF-ATF/`, `.local/`, and `target/` are local only. Never force-add retail media, extracted art/audio/fonts, generated retail derivatives, or reference checkout contents. Use synthetic fixtures in committed tests.

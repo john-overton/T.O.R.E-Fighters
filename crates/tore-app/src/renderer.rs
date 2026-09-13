@@ -48,9 +48,21 @@ pub struct Renderer {
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
     pipeline: wgpu::RenderPipeline,
+    sim: crate::sim_renderer::SimRenderer,
 }
 impl Renderer {
-    pub async fn new(window: Arc<Window>) -> AppResult<Self> {
+    pub fn set_world(&mut self, world: &crate::terrain::World) {
+        self.sim = crate::sim_renderer::SimRenderer::new(
+            &self.device,
+            &self.queue,
+            self.config.format,
+            world,
+            self.config.width,
+            self.config.height,
+        );
+    }
+
+    pub async fn new(window: Arc<Window>, world: &crate::terrain::World) -> AppResult<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let surface = instance.create_surface(window.clone())?;
         let adapter = instance
@@ -111,7 +123,7 @@ impl Renderer {
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: None,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -136,7 +148,16 @@ impl Renderer {
                 },
             ],
         });
+        let sim = crate::sim_renderer::SimRenderer::new(
+            &device,
+            &queue,
+            config.format,
+            world,
+            config.width,
+            config.height,
+        );
         Ok(Self {
+            sim,
             window,
             surface,
             device,
@@ -146,6 +167,98 @@ impl Renderer {
             bind_group,
             pipeline,
         })
+    }
+    pub fn capture_sim(
+        &mut self,
+        path: &std::path::Path,
+        camera: &crate::terrain::Camera,
+        world: &crate::terrain::World,
+    ) -> AppResult<()> {
+        use std::io::Write;
+        let (width, height) = (960u32, 720u32);
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Terrain validation capture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.sim.draw(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &view,
+            [width, height],
+            camera,
+            world,
+        );
+        let stride = (width * 4).div_ceil(256) * 256;
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Terrain capture readback"),
+            size: (stride * height) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(stride),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit([encoder.finish()]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(30)),
+        })?;
+        rx.recv()??;
+        let data = buffer.slice(..).get_mapped_range();
+        let mut file = std::fs::File::create(path)?;
+        write!(file, "P6\n{width} {height}\n255\n")?;
+        let bgra = matches!(
+            self.config.format,
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        );
+        for row in data.chunks_exact(stride as usize) {
+            for pixel in row[..width as usize * 4].chunks_exact(4) {
+                file.write_all(&if bgra {
+                    [pixel[2], pixel[1], pixel[0]]
+                } else {
+                    [pixel[0], pixel[1], pixel[2]]
+                })?;
+            }
+        }
+        drop(data);
+        buffer.unmap();
+        println!("Terrain capture: {}", path.display());
+        Ok(())
     }
     pub fn viewport(&self) -> Viewport {
         let s = self.window.inner_size();
@@ -160,7 +273,11 @@ impl Renderer {
             self.window.request_redraw();
         }
     }
-    pub fn draw(&mut self, pixels: &[u8]) -> AppResult<bool> {
+    pub fn draw(
+        &mut self,
+        pixels: &[u8],
+        scene: Option<(&crate::terrain::Camera, &crate::terrain::World)>,
+    ) -> AppResult<bool> {
         let s = self.window.inner_size();
         if s.width == 0 || s.height == 0 {
             return Ok(false);
@@ -198,6 +315,17 @@ impl Renderer {
         );
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
+        if let Some((camera, world)) = scene {
+            self.sim.draw(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &view,
+                [s.width, s.height],
+                camera,
+                world,
+            );
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Main menu"),
@@ -206,7 +334,11 @@ impl Renderer {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        load: if scene.is_some() {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],

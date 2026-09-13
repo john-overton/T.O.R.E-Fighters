@@ -23,6 +23,8 @@ def main():
     parser.add_argument('--source', type=Path, default=repo / 'gameassets/fighters-anthology',
                         help='An archive or directory; default: local Fighters Anthology media')
     parser.add_argument('--out', type=Path, default=repo / '.local/extracted', help='Output directory outside source media')
+    parser.add_argument('--theater', help='Defined theater code (e.g. UKR, TVIET), or all; includes shared sky/weather dependencies')
+    parser.add_argument('--exclude-archive', action='append', default=[], help='Skip source-relative archive path glob; repeatable (e.g. disc1/LHX/*)')
     parser.add_argument('--include', action='append', default=[], help='Case-insensitive resource glob (* and ?); repeatable')
     parser.add_argument('--list', action='store_true', help='List matches without writing extracted files')
     parser.add_argument('--dry-run', action='store_true', help='Validate archive directories and preview counts; no output writes')
@@ -41,6 +43,10 @@ def main():
         parser.error('Output must be outside the source media directory')
     command = [cargo, 'run', '--release', '--locked', '-p', 'tore-extract', '--',
                '--source', str(source), '--out', str(output), '--max-entry-mib', str(args.max_entry_mib)]
+    if args.theater:
+        command.extend(['--theater', args.theater])
+    for pattern in args.exclude_archive:
+        command.extend(['--exclude-archive', pattern])
     for pattern in args.include:
         command.extend(['--include', pattern])
     for flag in ('list', 'dry_run', 'overwrite'):

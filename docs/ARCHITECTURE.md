@@ -1,6 +1,6 @@
 # Initial architecture
 
-The M0 environment now supports the first M1a main-menu slice. M0's full title census, salvage inventory, parity specification, and AI VM decision remain open.
+The M0 environment supports the first M1a menu slice and a partial M1b Ukraine viewer. M0's full title census, salvage inventory, parity specification, and AI VM decision remain open.
 
 | Component | Choice | Purpose |
 | --- | --- | --- |
@@ -10,7 +10,7 @@ The M0 environment now supports the first M1a main-menu slice. M0's full title c
 | Graphics | `wgpu` 27 | Metal on macOS; native backends for Windows/Linux |
 | Startup bridge | `pollster` 0.4 | Wait for GPU initialization without a general async runtime |
 | Audio device | `cpal` 0.16 | Native output for the small PCM mixer; [upstream API](https://docs.rs/cpal/0.16.0/cpal/) |
-| Formats | Dependency-free `crates/tore-formats` | Bounded EALIB, raw-literal DCL, PIC/glyphs, and a narrow CHOOSEAC DLG reader |
+| Formats | Dependency-free `crates/tore-formats` | Bounded EALIB, raw-literal DCL, PIC/glyphs, a narrow CHOOSEAC DLG reader, BIT2, mission environment fields and PL weather palettes |
 | Extraction | `crates/tore-extract` + `tools/extract_assets.py` | Title-independent archive discovery/extraction, safe output paths, provenance |
 | Checks | Cargo, Python standard library, GitHub Actions | Local and CI checks |
 
@@ -33,3 +33,11 @@ Keep `tore-formats` independent of windowing and GPU APIs. The future simulation
 Menu rendering should consume decoded palettes, indexed images, font data, and recovered layout geometry. Recover specifications from the TypeScript reference; implement runtime behavior in Rust. Do not introduce a web shell, copy the Three.js engine, or select a modern widget toolkit before checking retail geometry requirements.
 
 Import user-owned media at runtime into platform application data. The v1 pack is a development cache of selected decompressed resources, not a stable mod/save format. `gameassets/` is a local source-media convenience, not a runtime bundle or save-data location. See [menu formats](formats/menu.md) for the current limits and provenance.
+
+## First simulation renderer
+
+`terrain.rs` constructs a world from the selected retail T2/MM, numbered texture family and its DAY2 variant palette. Its camera and surface queries have no GPU/window dependency. `sim_renderer.rs` uploads geometry and a texture array, owns depth targets and draws terrain plus a fullscreen sky pass; `terrain.wgsl` supplies the initial perspective, sampling and fog. `renderer.rs` composes this scene with the transparent CPU HUD, resizing depth and surface together. This separation allows aircraft/object/weather passes and a deterministic simulation to be added without coupling format readers to wgpu.
+
+The initial implementation uses full-resolution fixed triangles and an authored sky/fog projection. It is not the native adaptive renderer. All geometry/colors come from local source data at runtime; no retail derivatives are embedded. See [theater findings](formats/theater.md) for recovered versus authored behavior. A deterministic fixed-step flight simulation is still future work; the free camera uses elapsed wall time only for inspection.
+
+The creator selects among all 16 base theaters. Scene replacement rebuilds the GPU vertex/texture buffers for that world; a variable texture-array layer count also supplies the sky shader's layer index. Only the active world mesh is built, while the bounded source bundle remains cached. Maps and fonts stay in the menu compositor. Source text shading is preserved when tinting; ARMFont/SMLFONT replace the unsuitable BODYFONT in the investigation UI and notices.

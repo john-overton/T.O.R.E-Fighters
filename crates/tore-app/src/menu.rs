@@ -19,6 +19,10 @@ pub enum Action {
     None,
     Hover,
     Click,
+    QuickMission,
+    Viewer,
+    Theater(usize),
+    Back,
     Exit,
     Music(bool),
     Effects(bool),
@@ -162,6 +166,7 @@ impl State {
                 };
                 self.focus = Some(Target::Bar(bar));
             }
+            Target::Button(1) => return Action::QuickMission,
             Target::Button(i) if enabled(i) => {
                 self.toast = Some((
                     format!("{} - coming soon", self.buttons[i].label),
@@ -293,15 +298,16 @@ impl State {
     }
 }
 
-struct Sprite {
+pub(crate) struct Sprite {
     width: usize,
     height: usize,
-    rgba: Vec<u8>,
+    pub(crate) rgba: Vec<u8>,
     glyphs: Vec<[usize; 3]>,
 }
 pub struct Menu {
     pub state: State,
     sprites: BTreeMap<String, Sprite>,
+    pub quick_sprites: BTreeMap<String, Sprite>,
     pub pixels: Vec<u8>,
     background: String,
 }
@@ -309,6 +315,9 @@ impl Menu {
     pub fn preview_state(&mut self, name: &str) -> crate::AppResult<()> {
         match name {
             "normal" => {}
+            "notice" => {
+                self.state.activate(Target::Button(0));
+            }
             "hover" | "pressed" => {
                 self.state.hover = Some(Target::Button(0));
                 self.state.glow[0] = 1.0;
@@ -327,7 +336,8 @@ impl Menu {
             }
             _ => {
                 return Err(
-                    "snapshot state must be normal, hover, pressed, help, pref, or multi".into(),
+                    "snapshot state must be normal, hover, pressed, help, pref, multi, or notice"
+                        .into(),
                 );
             }
         }
@@ -372,6 +382,40 @@ impl Menu {
             _ => 0,
         };
         println!("Main-menu background: {background}");
+        let quick_palette: [[u8; 3]; 256] = assets.pics["QUIKMIS3.PIC"]
+            .palette
+            .clone()
+            .try_into()
+            .map_err(|_| "quick mission palette missing")?;
+        let mut quick_sprites = BTreeMap::new();
+        for (name, p) in &assets.pics {
+            quick_sprites.insert(
+                name.clone(),
+                Sprite {
+                    width: p.width,
+                    height: p.height,
+                    rgba: p.rgba(&quick_palette),
+                    glyphs: p.glyphs.clone(),
+                },
+            );
+        }
+        for (name, bytes) in &assets.theater_resources {
+            if name.ends_with(".T2") {
+                let t = tore_formats::theater::Theater::parse(bytes)?;
+                if let Some(bytes) = assets.theater_resources.get(&t.map) {
+                    let p = tore_formats::Pic::parse(bytes)?;
+                    quick_sprites.insert(
+                        t.map,
+                        Sprite {
+                            width: p.width,
+                            height: p.height,
+                            rgba: p.rgba(&quick_palette),
+                            glyphs: p.glyphs,
+                        },
+                    );
+                }
+            }
+        }
         let sprites = assets
             .pics
             .into_iter()
@@ -391,6 +435,7 @@ impl Menu {
         Ok(Self {
             state,
             sprites,
+            quick_sprites,
             pixels: vec![0; WIDTH * HEIGHT * 4],
             background,
         })
@@ -441,7 +486,7 @@ impl Menu {
             }
             canvas.text(menu_font, label, rect.0 + 2, rect.1, None);
         }
-        let body = &self.sprites["BODYFONT.PIC"];
+        let body = &self.sprites["ARMFONT.PIC"];
         if let Some(bar) = self.state.open {
             let (x, y, w, h) = self.state.popup_rect(bar);
             canvas.rect((x + 3, y + 3, w, h), [20, 23, 26, 255]);
@@ -462,7 +507,7 @@ impl Menu {
             let width = (text_width(body, message) + 20).min(610);
             canvas.rect((14, 449, width, 23), [22, 31, 43, 255]);
             canvas.outline((14, 449, width, 23), [145, 161, 180, 255]);
-            canvas.text(body, message, 24, 456, Some([235, 239, 243]));
+            canvas.text(body, message, 24, 453, Some([235, 239, 243]));
         }
         active
     }
@@ -482,9 +527,50 @@ fn text_width(font: &Sprite, text: &str) -> i32 {
         .map(|c| font.glyphs[c as usize][1] as i32)
         .sum()
 }
-struct Canvas<'a>(&'a mut [u8]);
+pub(crate) struct Canvas<'a>(pub &'a mut [u8]);
 impl Canvas<'_> {
-    fn rect(&mut self, (x, y, w, h): (i32, i32, i32, i32), color: [u8; 4]) {
+    pub(crate) fn scaled(&mut self, s: &Sprite, (x, y, w, h): (i32, i32, i32, i32)) {
+        for yy in 0..h {
+            for xx in 0..w {
+                let src = ((yy as usize * s.height / h as usize) * s.width
+                    + xx as usize * s.width / w as usize)
+                    * 4;
+                self.rect(
+                    (x + xx, y + yy, 1, 1),
+                    s.rgba[src..src + 4].try_into().unwrap(),
+                );
+            }
+        }
+    }
+    pub(crate) fn button(
+        &mut self,
+        sprites: &BTreeMap<String, Sprite>,
+        label: &str,
+        (x, y, w): (i32, i32, i32),
+        gain: f32,
+    ) {
+        let l = &sprites["ACTION0L.PIC"];
+        let m = &sprites["ACTION0M.PIC"];
+        let r = &sprites["ACTION0R.PIC"];
+        self.blit(l, (x, y), 0, l.width, gain);
+        let end = w - r.width as i32;
+        let mut at = l.width as i32;
+        while at < end {
+            self.blit(m, (x + at, y), 0, m.width.min((end - at) as usize), gain);
+            at += m.width as i32;
+        }
+        self.blit(r, (x + end, y), 0, r.width, gain);
+        let font = &sprites["FONTACT.PIC"];
+        self.text(
+            font,
+            label,
+            x + (w - 10 - text_width(font, label)) / 2,
+            y + 4,
+            None,
+        );
+    }
+
+    pub(crate) fn rect(&mut self, (x, y, w, h): (i32, i32, i32, i32), color: [u8; 4]) {
         for yy in y.max(0)..(y + h).min(HEIGHT as i32) {
             for xx in x.max(0)..(x + w).min(WIDTH as i32) {
                 let at = (yy as usize * WIDTH + xx as usize) * 4;
@@ -521,7 +607,14 @@ impl Canvas<'_> {
             }
         }
     }
-    fn text(&mut self, font: &Sprite, text: &str, mut x: i32, y: i32, tint: Option<[u8; 3]>) {
+    pub(crate) fn text(
+        &mut self,
+        font: &Sprite,
+        text: &str,
+        mut x: i32,
+        y: i32,
+        tint: Option<[u8; 3]>,
+    ) {
         for c in text.bytes() {
             let [sx, w, h] = font.glyphs[c as usize];
             if let Some(rgb) = tint {
@@ -531,7 +624,12 @@ impl Canvas<'_> {
                         if font.rgba[at + 3] > 0 {
                             self.rect(
                                 (x + xx as i32, y + yy as i32, 1, 1),
-                                [rgb[0], rgb[1], rgb[2], 255],
+                                [
+                                    ((rgb[0] as u16 * font.rgba[at] as u16) / 255) as u8,
+                                    ((rgb[1] as u16 * font.rgba[at + 1] as u16) / 255) as u8,
+                                    ((rgb[2] as u16 * font.rgba[at + 2] as u16) / 255) as u8,
+                                    255,
+                                ],
                             );
                         }
                     }
@@ -546,6 +644,22 @@ impl Canvas<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tinted_text_preserves_shading_and_transparency() {
+        let mut glyphs = vec![[0, 0, 0]; 256];
+        glyphs[b'A' as usize] = [0, 3, 1];
+        let font = Sprite {
+            width: 3,
+            height: 1,
+            glyphs,
+            rgba: vec![255, 255, 255, 255, 64, 64, 64, 255, 255, 255, 255, 0],
+        };
+        let mut pixels = vec![17; WIDTH * HEIGHT * 4];
+        Canvas(&mut pixels).text(&font, "A", 0, 0, Some([200, 200, 200]));
+        assert_eq!(&pixels[..4], &[200, 200, 200, 255]);
+        assert_eq!(&pixels[4..8], &[50, 50, 50, 255]);
+        assert_eq!(&pixels[8..12], &[17; 4]);
+    }
     #[test]
     fn shifted_background_bar_uses_matching_hit_regions() {
         let mut s = state();

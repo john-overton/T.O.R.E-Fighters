@@ -2,7 +2,7 @@
 
 Updated 2026-09-13. This is the actionable checklist for the [roadmap](ROADMAP.md), covering menus, original flight environments and aircraft. Checked items describe work in this Rust repository, not work completed in USNF-ATF. An unchecked item remains open even when a reference decoder or prototype exists. Keep format status in [coverage](formats/coverage.md) and acceptance evidence in [baselines](baselines/).
 
-**Current scope:** the first main-menu slice is implemented. The rest of the menu system is documented below for later work; this plan does not authorize building all those screens now. Terrain, aircraft and simulation are not implemented in Rust yet.
+**Current scope:** Choose Activity now leads to a Quick Mission Creator mock and a Ukraine free-camera viewer. Original T2 heights, texture placements, briefing map and a fixed weather-palette/sky preview are implemented in Rust. The remaining menu system, full environment fidelity, aircraft and flight simulation remain open. See [theater recovery](formats/theater.md) and [viewer baseline](baselines/ukraine-viewer.md).
 
 ## Fidelity and evidence rules
 
@@ -39,6 +39,14 @@ Updated 2026-09-13. This is the actionable checklist for the [roadmap](ROADMAP.m
 - [ ] Decode the actual MNU tree and general DLG controls, including separators, accelerators, nested menus, modal behavior and enabled-state rules. Current dropdown entries/chrome are not a recovered complete tree.
 - [ ] Confirm menu music selection, transitions and cue mapping. `AIR003.11K` is a preview with unconfirmed activity-menu association; PIC fonts do not establish FNT support.
 
+### MENU1b — Quick Mission Creator investigation shell
+
+- [x] Reuse original FA `QUIKMIS3.PIC`, PIC fonts and button pieces; provide authored hover/press states with silent hover and click-only effects.
+- [x] Connect Create Quick Mission, temporary Terrain Viewer, Cancel and `?` back/exit actions; stub Aircraft and mission fields.
+- [x] Show the original Ukraine briefing map and a selector catalog from all 16 T2 names. All 16 base theaters are enabled; object/campaign dependencies remain incomplete.
+- [ ] Recover actual quick-mission DLG/MNU controls, selections and native state behavior; the temporary theater/viewer layout is explicitly authorized investigation UI.
+- [ ] Wire mission generation, aircraft/loadout, opponents, start conditions and launch/debrief after the dependent systems exist.
+
 ### MENU2 — Inventory and shared controls, deferred
 
 - [ ] Enumerate screens and transitions from DLG/MNU assets, sequence references and native captures per supported title. Record each screen's art, palette, fonts, controls, audio, dependencies and return path.
@@ -73,6 +81,12 @@ These are flow categories to inventory, not a claim that every title has identic
 
 ### ENV1 — Recover theater data before designing the renderer
 
+- [x] Extend extraction to all 16 defined profiles, source aliases and shared atmosphere assets: 1,129 resources / 75 MM layouts; added retail discs inventoried. See [validation](baselines/all-theaters.md) and [extraction guide](EXTRACTION.md#all-defined-theaters-and-the-retail-discs). This does not enable the other theaters in the renderer.
+
+- [x] Parse all 16 supplied T2 grids with bounded Rust readers; export dimensions, elevation range and resource names through the shared Ukraine extraction profile.
+- [x] Verify packed header offsets, color/class/elevation triples, 8,192-foot cell spacing, 256-foot height steps and fine/coarse lookup against FA.EXE. See [addresses and corrections](formats/theater.md).
+- [x] Recover UKR.MM's 697 texture placements and UKR0–28 texture naming/quarter-turn mapping; preserve raw `tdic` and object data for further work.
+
 - [ ] Inventory all local T2 resources and their dependencies: briefing maps, tile/material data, palettes/textures, object shapes and mission/layout references. Record duplicate/variant names and verify alias resolution per title.
 - [ ] Implement bounded Rust T2 parsing, preserving unknown header, cell and tile-table data. Compare decoded structures with independently inspected bytes and the reference reader.
 - [ ] Resolve elevation classes, vertical scale, tile selection and any supporting geometry/tables through asset cross-references and native executable analysis. Determine how the game builds the actual surface.
@@ -80,19 +94,32 @@ These are flow categories to inventory, not a claim that every title has identic
 - [ ] Calibrate axes, handedness, origin, horizontal/vertical units and mission placement against native landmarks. Verify across titles instead of assuming the reference coordinate conversion applies universally.
 - [ ] Write a retail terrain specification with confirmed rules, unknowns and fixtures. **Gate:** do not substitute real-world elevation or USNF-ATF terrain where recovery is incomplete.
 
-The reference [T2 notes](../USNF-ATF/Docs/formats/t2.md) recover a coarse cell grid but leave elevation semantics and the tile table unresolved. Their statement that elevation must come from a DEM describes that project's chosen pipeline; it does not establish how the retail renderer reconstructs terrain. This remains a research task here.
+The reference [T2 notes](../USNF-ATF/Docs/formats/t2.md) used a misaligned cell offset and left elevation unresolved. Native executable analysis now establishes the packed layout and real height samples; our [corrected specification](formats/theater.md) supersedes that interpretation. Remaining research concerns exact adaptive geometry, classification, shorelines, variants and native comparisons.
 
 ### ENV2 — Reconstruct and render original theaters
+
+- [x] Enable all 16 base theaters in the creator and direct CLI, including per-theater palettes, texture-array sizes, briefing maps and camera reset. Each passed a Metal smoke test; this does not close native parity acceptance.
+- [x] Correct TVIET's TVI texture alias and preserve signed border placements; all-profile extraction now contains 1,171 resources.
+
+- [x] Build a Ukraine GPU mesh directly from source heights and texture placements, with matching triangle-based ground-height queries.
+- [x] Add an extensible depth-tested sim renderer and original SKY0 preview, separate from format/world data and menu composition.
+- [x] Provide repeatable initial camera, GPU capture, arrow translation, Shift acceleration, altitude/look controls and return navigation; test camera boundaries/height and held-key clearing.
 
 - [ ] Build runtime theater data from confirmed retail surface rules and dependencies; retain traceability from generated terrain back to source cells/tiles/resources.
 - [ ] Render original surface geometry, material/palette selection, texture orientation/repetition, water and shoreline behavior. Recover native detail/visibility rules before choosing equivalent Rust rendering techniques.
 - [ ] Recover runway/airfield, roads, buildings, vegetation and other placement rules where present; distinguish terrain-owned content from mission-owned objects.
 - [ ] Make terrain height/contact queries and rendering agree on the physical surface, including boundaries, water and runways. Test seams, winding, out-of-bounds queries and coordinate conversions.
 - [ ] Add bounded loading/caching, culling, precision handling and rendering detail appropriate to recovered data. These are new Rust implementation choices, not a port of the reference terrain system.
-- [ ] Add repeatable free-camera poses/routes and landmark overlays for investigation, without adding custom controls to the retail menu.
+- [ ] Add recorded camera routes and landmark overlays beyond the current repeatable startup pose; remove or relocate the authorized temporary viewer control when the actual quick-mission flow is implemented.
 - [ ] **M1b acceptance:** fly a free camera over retail Ukraine and one other recovered theater; compare coasts, relief, airfields, landmarks and mission positions with native evidence. Record actual frame times, memory and screenshots on all three platforms.
 
 ### ENV3 — Atmosphere and environment systems
+
+- [x] Extract all LAY modules, SKY0–8, SUN/MOON/STARS SH, CLOUD1/CLOUDS SH and their named PIC dependencies with provenance.
+- [x] Parse top-level mission layer/cloud/wind/time fields without assigning absent values or unverified wind units.
+- [x] Recover PL palette RVAs, 352-byte records and native palette ramp destinations; render an explicit DAY2 midday keyframe. Raw weather modules are preserved without execution.
+- [ ] Decode celestial/cloud shapes and native placement/animation; they are extracted but not rendered yet.
+- [ ] Port native weather keyframe selection/interpolation and fog updates; replace authored spherical sky/distance fog after recovering native presentation.
 
 - [ ] Inventory environment settings in mission/theater assets and trace their consumers: sky, horizon, visibility/fog, time of day, weather, wind and lighting where supported.
 - [ ] Reconstruct original sky/horizon/palette and visibility transitions. Label missing behavior as unknown rather than borrowing the reference's authored atmosphere.
@@ -162,12 +189,12 @@ Use the local [aircraft-porting guide](../USNF-ATF/Docs/aircraft-porting.md) and
 ## 4. Sequencing and open gates
 
 1. Preserve the working menu baseline; schedule further screens explicitly from MENU2–3.
-2. Complete source/provenance inventory and begin ENV1 recovery. Unknown terrain semantics are a blocker to claiming original terrain, not permission to substitute the custom reference terrain.
-3. Build ENV2's original-theater free-camera slice, then environment fidelity in ENV3. Aircraft format investigation can proceed independently; flight acceptance needs a validated ground/environment contract.
+2. Extend ENV1 recovery beyond the confirmed T2/Ukraine subset. Complete dependency inventory, classification, native adaptive geometry and shoreline semantics.
+3. Validate and extend ENV2's implemented Ukraine free-camera slice, then environment fidelity in ENV3. Aircraft format investigation can proceed independently; flight acceptance needs a validated ground/environment contract.
 4. Develop AIR1–5 incrementally for the four M1 aircraft. Use developer harness entry points while deferred menu flows are unavailable.
 5. Wire the quick-fight flow and combat/AI systems in roadmap order, then missions, campaigns, remaining screens/theaters/aircraft in M2.
 
-Open gates include unresolved T2 elevation/tile/water rules, per-title source completeness, native animation/music mapping, applicable flight-oracle coverage, the roadmap AI VM-versus-observation decision and full cross-platform runtime evidence. Do not mark these resolved by copying reference behavior.
+Open gates include native adaptive terrain/tile coverage/water rules, per-title source completeness, native animation/music mapping, applicable flight-oracle coverage, the roadmap AI VM-versus-observation decision and full cross-platform runtime evidence. Do not mark these resolved by copying reference behavior.
 
 ## Reference index
 

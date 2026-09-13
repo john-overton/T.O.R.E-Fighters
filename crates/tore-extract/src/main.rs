@@ -13,6 +13,8 @@ struct Options {
     source: PathBuf,
     out: PathBuf,
     patterns: Vec<String>,
+    exclude_archives: Vec<String>,
+    theater: Option<String>,
     list: bool,
     dry_run: bool,
     overwrite: bool,
@@ -27,6 +29,7 @@ struct Record {
     decoded: usize,
     status: &'static str,
     error: String,
+    analysis: String,
 }
 fn quote(value: &str) -> String {
     let mut s = String::from("\"");
@@ -175,10 +178,72 @@ fn write_resource(path: &Path, bytes: &[u8], overwrite: bool) -> Result<&'static
     result?;
     Ok(if exists { "replaced" } else { "written" })
 }
+
+fn analyze(name: &str, bytes: &[u8]) -> Result<String> {
+    use tore_formats::theater::{Environment, Theater};
+    if name.ends_with(".T2") {
+        let t = Theater::parse(bytes)?;
+        let min = t.cells.iter().map(|c| c.elevation).min().unwrap_or(0);
+        let max = t.cells.iter().map(|c| c.elevation).max().unwrap_or(0);
+        return Ok(format!(
+            "{{\"format\":\"BIT2\",\"name\":{},\"briefing_map\":{},\"cols\":{},\"rows\":{},\"cells_per_tile\":{},\"tile_cols\":{},\"tile_rows\":{},\"cell_offset\":149,\"elevation_byte_range\":[{},{}],\"cell_feet\":8192,\"elevation_step_feet\":256}}",
+            quote(&t.name),
+            quote(&t.map),
+            t.cols,
+            t.rows,
+            t.cells_per_tile,
+            t.tiles[0],
+            t.tiles[1],
+            min,
+            max
+        ));
+    }
+    if name.ends_with(".MM") || name.ends_with(".M") {
+        let e = Environment::parse(bytes)?;
+        let pair =
+            |v: Option<[i32; 2]>| v.map_or("null".into(), |v| format!("[{},{}]", v[0], v[1]));
+        let placements = e
+            .textures
+            .values()
+            .map(|p| format!("[{},{},{},{}]", p.col, p.row, p.texture, p.rotation))
+            .collect::<Vec<_>>()
+            .join(",");
+        return Ok(format!(
+            "{{\"format\":\"mission-environment\",\"map\":{},\"layer\":{},\"layer_parameter\":{},\"clouds\":{},\"wind_raw\":{},\"time\":{},\"tmap_col_row_texture_rotation\":[{}]}}",
+            quote(&e.map),
+            quote(&e.layer),
+            e.layer_parameter.map_or("null".into(), |v| v.to_string()),
+            e.clouds.map_or("null".into(), |v| v.to_string()),
+            pair(e.wind),
+            pair(e.time),
+            placements
+        ));
+    }
+    Ok("null".into())
+}
+
 fn extract(options: Options) -> Result<bool> {
     let source = options.source.canonicalize()?;
     let mut archives = Vec::new();
     discover(&source, &mut archives)?;
+    // Retail discs also bundle other games/installers whose .LIB files are not EALIB.
+    // Only directory-based theater discovery skips them; explicit/raw inputs stay strict.
+    if source.is_dir() && options.theater.is_some() {
+        let mut supported = Vec::new();
+        for path in archives {
+            let mut magic = [0; 5];
+            let count = fs::File::open(&path)?.read(&mut magic)?;
+            if count == 5 && &magic == b"EALIB" {
+                supported.push(path);
+            } else {
+                eprintln!(
+                    "Skipping non-EALIB file in theater scan: {}",
+                    path.display()
+                );
+            }
+        }
+        archives = supported;
+    }
     if archives.is_empty() {
         return Err("No EALIB archives found. Supply a loose archive or an installed/extracted media directory; ISO/ESA containers are not supported yet.".into());
     }
@@ -202,6 +267,18 @@ fn extract(options: Options) -> Result<bool> {
     let mut selected = 0;
     let mut destinations = HashSet::new();
     for path in archives {
+        let relative_name = path
+            .strip_prefix(source_root)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if options
+            .exclude_archives
+            .iter()
+            .any(|p| wildcard(p, &relative_name))
+        {
+            eprintln!("Skipping excluded archive: {relative_name}");
+            continue;
+        }
         let archive = match Archive::open(&path) {
             Ok(archive) => archive,
             Err(error) => {
@@ -212,6 +289,13 @@ fn extract(options: Options) -> Result<bool> {
         let relative = path.strip_prefix(source_root)?;
         let mut matched = 0;
         for entry in archive.entries.values() {
+            if options
+                .theater
+                .as_ref()
+                .is_some_and(|code| !tore_formats::theater::theater_resource(&entry.name, code))
+            {
+                continue;
+            }
             if !options.patterns.is_empty()
                 && !options.patterns.iter().any(|p| wildcard(p, &entry.name))
             {
@@ -229,6 +313,7 @@ fn extract(options: Options) -> Result<bool> {
                 decoded: 0,
                 status: "planned",
                 error: String::new(),
+                analysis: "null".into(),
             };
             let result = (|| -> Result<()> {
                 if !portable_name(&entry.name) || relative.components().any(|c|!matches!(c,Component::Normal(n) if portable_name(&n.to_string_lossy()))){return Err("resource/archive name is not a portable safe output path".into());}
@@ -249,6 +334,9 @@ fn extract(options: Options) -> Result<bool> {
                 }
                 let bytes = archive.read_with_limit(&entry.name, options.limit)?;
                 record.decoded = bytes.len();
+                if options.theater.is_some() {
+                    record.analysis = analyze(&entry.name, &bytes)?;
+                }
                 let directory = safe_directory(&out, relative)?;
                 record.status =
                     write_resource(&directory.join(&entry.name), &bytes, options.overwrite)?;
@@ -277,7 +365,7 @@ fn extract(options: Options) -> Result<bool> {
         eprintln!("{}/{}: {}", record.archive, record.name, record.error);
     }
     if !planning {
-        let entries=records.iter().map(|r|format!("{{\"archive\":{},\"name\":{},\"output\":{},\"offset\":{},\"stored_bytes\":{},\"decoded_bytes\":{},\"status\":{},\"error\":{}}}",quote(&r.archive),quote(&r.name),quote(&r.output),r.offset,r.stored,r.decoded,quote(r.status),quote(&r.error))).collect::<Vec<_>>().join(",\n");
+        let entries=records.iter().map(|r|format!("{{\"archive\":{},\"name\":{},\"output\":{},\"offset\":{},\"stored_bytes\":{},\"decoded_bytes\":{},\"status\":{},\"error\":{},\"analysis\":{}}}",quote(&r.archive),quote(&r.name),quote(&r.output),r.offset,r.stored,r.decoded,quote(r.status),quote(&r.error),r.analysis)).collect::<Vec<_>>().join(",\n");
         let report = format!(
             "{{\"schema_version\":1,\"source\":{},\"output_root\":{},\"complete\":{},\"selected\":{},\"errors\":[{}],\"entries\":[{}]}}\n",
             quote(&source.to_string_lossy()),
@@ -309,6 +397,8 @@ fn main() -> Result<()> {
         source: PathBuf::new(),
         out: PathBuf::from(".local/extracted"),
         patterns: vec![],
+        exclude_archives: vec![],
+        theater: None,
         list: false,
         dry_run: false,
         overwrite: false,
@@ -324,6 +414,32 @@ fn main() -> Result<()> {
             "--include" => options
                 .patterns
                 .push(args.next().ok_or("--include needs a glob")?),
+            "--exclude-archive" => options.exclude_archives.push(
+                args.next()
+                    .ok_or("--exclude-archive needs a source-relative glob")?,
+            ),
+            "--theater" => {
+                let code = args
+                    .next()
+                    .ok_or("--theater needs a code or all")?
+                    .to_ascii_uppercase();
+                if code != "ALL"
+                    && !tore_formats::theater::THEATERS
+                        .iter()
+                        .any(|(id, _)| *id == code)
+                {
+                    return Err(format!(
+                        "Unknown theater {code}; use all or one of: {}",
+                        tore_formats::theater::THEATERS
+                            .iter()
+                            .map(|(id, _)| *id)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                    .into());
+                }
+                options.theater = Some(code);
+            }
             "--list" => options.list = true,
             "--dry-run" => options.dry_run = true,
             "--overwrite" => options.overwrite = true,
@@ -339,7 +455,7 @@ fn main() -> Result<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--include GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and format conversion are not implemented.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
+                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and format conversion are not implemented.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
                 );
                 return Ok(());
             }

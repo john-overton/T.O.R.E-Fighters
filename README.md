@@ -1,8 +1,8 @@
 # T.O.R.E-Fighters
 
-Tasteful Opinionated Reverse Engineered: a native Rust rebuild of Fighters Anthology, following [the roadmap](docs/ROADMAP.md). The first game-facing work will be the original menus.
+Tasteful Opinionated Reverse Engineered: a native Rust rebuild of Fighters Anthology, following [the roadmap](docs/ROADMAP.md). The current slices are the original menus and a viewer for all 16 original theaters.
 
-The app launches into the original **Choose Activity** menu using artwork, button pieces, proportional fonts, and sounds imported from your own Fighters Anthology files. Buttons animate and show placeholder responses; `?`, `Pref`, and `Multi` open dropdowns. Gameplay and navigation to other screens are not implemented yet. No retail game data ships in this repository.
+The app launches into the original **Choose Activity** menu using artwork, button pieces, proportional fonts, and sounds imported from your own Fighters Anthology files. Buttons animate; `?`, `Pref`, and `Multi` open dropdowns. **Create Quick Mission → Terrain Viewer** opens the selected theater using recovered original height samples, terrain textures and a sky preview. The creator is a mock; aircraft and mission gameplay remain unimplemented. No retail game data ships in this repository.
 
 Each launch randomly selects one of the five original menu backgrounds. Hovering is silent; sounds play on clicks/toggles.
 
@@ -15,7 +15,7 @@ source "$HOME/.cargo/env"
 cargo run --locked -p tore-app
 ```
 
-On first run, local `gameassets/fighters-anthology/` media is imported into platform application data. Later launches use that cache. To import another location or refresh the menu assets:
+On first run, local `gameassets/fighters-anthology/` media is imported into platform application data. Later launches use that cache. To import another location or refresh the menu and theater assets:
 
 ```sh
 cargo run --locked -p tore-app -- --import /path/to/fighters-anthology
@@ -31,11 +31,23 @@ cargo run --locked -p tore-app -- --smoke-test
 
 See [development setup](docs/DEVELOPMENT.md) for fresh-machine setup, Linux/Windows prerequisites, checks, and troubleshooting.
 
+## Explore the theaters
+
+Use **Create Quick Mission → Terrain Viewer**, or launch directly:
+
+```sh
+cargo run --locked -p tore-app -- --viewer
+```
+
+Arrow keys move, **Shift** moves 8× faster, **Q/E** or **PageDown/PageUp** lower/raise altitude, **A/D** turn and **W/S** look up/down. **Escape** returns to the creator, then the main menu. All 16 theaters are selectable. Launch a particular theater directly with `--viewer --theater TVIET` (Vietnam), for example. Weather uses a fixed midday preview; sun, moon, stars and cloud shapes are extracted for further recovery but are not yet rendered. See [recovery findings](docs/formats/theater.md) and [viewer validation](docs/baselines/ukraine-viewer.md).
+
 ## Extract assets for research
 
 ```sh
 python3 tools/extract_assets.py --dry-run
 python3 tools/extract_assets.py
+# All 16 defined theaters and shared environment resources:
+python3 tools/extract_assets.py --theater all --exclude-archive 'disc1/LHX/*' --out .local/all-theaters
 ```
 
 This discovers and unpacks all supported archives into ignored `.local/extracted/`, preserving archive boundaries and writing a report with hashes. Use `--source` for other media and `--include "*.PIC"` for filtering. The app does not require this full extraction. See [the extraction guide](docs/EXTRACTION.md) for Windows commands, limits, and repeat-run behavior.

@@ -1,7 +1,8 @@
-//! Bounded readers for user-owned Fighters Anthology menu resources.
-//! No executable resource is ever executed. See docs/formats/menu.md.
+//! Bounded readers for user-owned Fighters Anthology menu and theater resources.
+//! No executable resource is ever executed. See docs/formats/menu.md and theater.md.
 mod dcl;
 mod pic;
+pub mod theater;
 mod ui;
 pub use pic::Pic;
 use std::{

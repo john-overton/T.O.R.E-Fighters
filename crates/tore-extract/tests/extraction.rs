@@ -130,3 +130,87 @@ fn refuses_output_symlink_escape() {
     assert!(!f.run(&[]).status.success());
     assert!(!elsewhere.join("TEXT.TXT").exists());
 }
+
+#[test]
+fn theater_profile_preserves_environment_dependencies_and_reports_metadata_errors() {
+    let f = Fixture::new(vec![
+        (
+            "UKR.MM",
+            0,
+            b"textFormat\nmap ukr.T2\nlayer day2.LAY 0\ntime 12 0\ntmap 4 8 2 3\n".to_vec(),
+        ),
+        ("SUN.SH", 0, b"synthetic shape".to_vec()),
+        ("_MOON.PIC", 0, b"synthetic texture".to_vec()),
+        ("_CLOUD1.PIC", 0, b"synthetic cloud".to_vec()),
+        ("SKY8.PIC", 0, b"synthetic sky".to_vec()),
+        ("UNRELATED", 0, b"other".to_vec()),
+    ]);
+    assert!(f.run(&["--theater", "ukr"]).status.success());
+    for name in ["UKR.MM", "SUN.SH", "_MOON.PIC", "_CLOUD1.PIC", "SKY8.PIC"] {
+        assert!(f.out.join("OTHER.DAT").join(name).exists());
+    }
+    assert!(!f.out.join("OTHER.DAT/UNRELATED").exists());
+    let report = fs::read_to_string(f.out.join("extraction-report.json")).unwrap();
+    assert!(report.contains("mission-environment"));
+    assert!(report.contains("\"wind_raw\":null"));
+    assert!(report.contains("[4,8,2,3]"));
+    assert!(!f.run(&["--theater", "UNKNOWN"]).status.success());
+
+    let invalid = Fixture::new(vec![("UKR.T2", 0, b"bad terrain".to_vec())]);
+    assert!(!invalid.run(&["--theater", "UKR"]).status.success());
+    assert!(!invalid.out.join("OTHER.DAT/UKR.T2").exists());
+    assert!(
+        fs::read_to_string(invalid.out.join("extraction-report.json"))
+            .unwrap()
+            .contains("\"complete\":false")
+    );
+    // General raw extraction deliberately does not require decoded terrain validity.
+    assert!(invalid.run(&[]).status.success());
+}
+
+#[test]
+fn all_theaters_include_aliases_and_skip_unrelated_disc_libraries() {
+    let f = Fixture::new(vec![
+        ("VIET0.PIC", 0, b"texture".to_vec()),
+        ("KURIL.PIC", 0, b"map".to_vec()),
+        (
+            "~BAL0.MM",
+            0,
+            b"textFormat\nmap bal.T2\ntime 12 0\n".to_vec(),
+        ),
+        ("IFMFRA.PIC", 0, b"map".to_vec()),
+        ("SKY0.PIC", 0, b"sky".to_vec()),
+        ("OTHER.PIC", 0, b"unrelated".to_vec()),
+    ]);
+    fs::write(f.source.join("INSTALL.LIB"), b"not EALIB").unwrap();
+    let result = f.run(&["--theater", "all"]);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stderr).contains("Skipping non-EALIB"));
+    for name in [
+        "VIET0.PIC",
+        "KURIL.PIC",
+        "~BAL0.MM",
+        "IFMFRA.PIC",
+        "SKY0.PIC",
+    ] {
+        assert!(f.out.join("OTHER.DAT").join(name).exists());
+    }
+    assert!(!f.out.join("OTHER.DAT/OTHER.PIC").exists());
+    assert!(!f.run(&[]).status.success());
+    assert!(
+        f.run(&["--exclude-archive", "INSTALL.LIB"])
+            .status
+            .success()
+    );
+    let one = Fixture::new(vec![
+        ("VIET0.PIC", 0, b"texture".to_vec()),
+        ("UKR0.PIC", 0, b"other theater".to_vec()),
+    ]);
+    assert!(one.run(&["--theater", "tviet"]).status.success());
+    assert!(one.out.join("OTHER.DAT/VIET0.PIC").exists());
+    assert!(!one.out.join("OTHER.DAT/UKR0.PIC").exists());
+}

@@ -27,7 +27,11 @@ pub struct Audio {
 }
 fn cue(action: Action) -> Option<&'static str> {
     match action {
-        Action::Click => Some("&BUTTON.11K"),
+        Action::Theater(_)
+        | Action::Click
+        | Action::QuickMission
+        | Action::Viewer
+        | Action::Back => Some("&BUTTON.11K"),
         Action::Music(_) | Action::Effects(_) => Some("&TOGGLE1.5K"),
         // Mouse hover and keyboard focus changes never play a sound.
         _ => None,

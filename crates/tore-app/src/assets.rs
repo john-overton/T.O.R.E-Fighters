@@ -8,6 +8,7 @@ use std::{
 use tore_formats::{Archive, Button, Pic};
 
 const ART: &[&str] = &[
+    "QUIKMIS3.PIC",
     "CHOOSEV.PIC",
     "CHOOSEAC.PIC",
     "CHOOSE3.PIC",
@@ -23,6 +24,8 @@ const ART: &[&str] = &[
     "FONTACD.PIC",
     "MENUFONT.PIC",
     "BODYFONT.PIC",
+    "ARMFONT.PIC",
+    "SMLFONT.PIC",
 ];
 const DATA: &[&str] = &[
     "CHOOSEAC.DLG",
@@ -33,6 +36,7 @@ const DATA: &[&str] = &[
     "&TOGGLE1.5K",
 ];
 pub struct Assets {
+    pub theater_resources: BTreeMap<String, Vec<u8>>,
     pub pics: BTreeMap<String, Pic>,
     pub buttons: Vec<Button>,
     pub sounds: BTreeMap<String, Vec<u8>>,
@@ -69,6 +73,27 @@ fn archive(root: &Path, name: &str) -> AppResult<Archive> {
 }
 impl Assets {
     fn decode(resources: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
+        for name in [
+            "UKR.T2",
+            "UKR.MM",
+            "SUN.SH",
+            "MOON.SH",
+            "STARS.SH",
+            "_MOON.PIC",
+            "_CLOUD1.PIC",
+        ] {
+            if !resources.contains_key(name) {
+                return Err(format!("cache missing {name}; re-import media").into());
+            }
+        }
+        for (code, _) in tore_formats::theater::THEATERS {
+            if !resources.contains_key(&format!("{code}.MM")) {
+                return Err(format!("cache missing {code}.MM; re-import all theaters").into());
+            }
+        }
+        if !resources.contains_key("TVI0.PIC") {
+            return Err("cache missing Vietnam textures; re-import media".into());
+        }
         let mut pics = BTreeMap::new();
         for name in ART {
             let bytes = resources
@@ -97,7 +122,14 @@ impl Assets {
             .clone()
             .try_into()
             .map_err(|_| "invalid background palette")?;
-        for name in ["FONTACT.PIC", "FONTACD.PIC", "MENUFONT.PIC", "BODYFONT.PIC"] {
+        for name in [
+            "FONTACT.PIC",
+            "FONTACD.PIC",
+            "MENUFONT.PIC",
+            "BODYFONT.PIC",
+            "ARMFONT.PIC",
+            "SMLFONT.PIC",
+        ] {
             if pics[name].glyphs.len() != 256 {
                 return Err(format!("{name}: missing glyph table").into());
             }
@@ -124,6 +156,11 @@ impl Assets {
             return Err("invalid menu PCM size".into());
         }
         Ok(Self {
+            theater_resources: resources
+                .iter()
+                .filter(|(n, _)| tore_formats::theater::theater_resource(n, "ALL"))
+                .map(|(n, b)| (n.clone(), b.clone()))
+                .collect(),
             pics,
             buttons,
             sounds,
@@ -141,9 +178,17 @@ impl Assets {
                 "{filename}: {} unique entries\n",
                 lib.entries.len()
             ));
-            for name in names {
+            let selected: Vec<_> = lib
+                .entries
+                .keys()
+                .filter(|n| {
+                    names.contains(&n.as_str()) || tore_formats::theater::theater_resource(n, "ALL")
+                })
+                .cloned()
+                .collect();
+            for name in &selected {
                 let bytes = lib.read(name)?;
-                let entry = &lib.entries[*name];
+                let entry = &lib.entries[name];
                 report.push_str(&format!(
                     "{filename}/{name}: offset={}, stored={}, decoded={}\n",
                     entry.offset,
@@ -188,7 +233,10 @@ impl Assets {
         }
         file.sync_all()?;
         fs::write(destination.join("import-report.txt"), report)?;
-        println!("Imported main-menu resources to {}", path.display());
+        println!(
+            "Imported menu and all theater resources to {}",
+            path.display()
+        );
         Ok(assets)
     }
     pub fn load(directory: &Path) -> AppResult<Self> {
@@ -217,11 +265,11 @@ impl Assets {
     }
     fn load_pack(path: &Path) -> AppResult<Self> {
         let file = fs::File::open(path)?;
-        if file.metadata()?.len() > 8 * 1024 * 1024 {
-            return Err("menu pack exceeds 8 MiB".into());
+        if file.metadata()?.len() > 128 * 1024 * 1024 {
+            return Err("menu pack exceeds 32 MiB".into());
         }
         let mut data = Vec::new();
-        file.take(8 * 1024 * 1024 + 1).read_to_end(&mut data)?;
+        file.take(128 * 1024 * 1024 + 1).read_to_end(&mut data)?;
         let mut cursor = std::io::Cursor::new(data);
         let mut header = [0; 12];
         cursor.read_exact(&mut header)?;
@@ -234,7 +282,7 @@ impl Assets {
             Ok(u32::from_le_bytes(b) as usize)
         }
         let count = word(&mut cursor)?;
-        if count > 64 {
+        if count > 2048 {
             return Err("too many menu resources".into());
         }
         let mut resources = BTreeMap::new();

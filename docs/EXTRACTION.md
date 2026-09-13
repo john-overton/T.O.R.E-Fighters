@@ -6,11 +6,11 @@
 
 | Task | Command | Output |
 | --- | --- | --- |
-| Play/test the menu | `cargo run --locked -p tore-app -- --import gameassets/fighters-anthology` | Selective menu cache in application data; launches the app |
+| Run the menu/viewer | `cargo run --locked -p tore-app -- --import gameassets/fighters-anthology` | Selective menu/theater cache in application data; launches the app |
 | Explore/extract any supported archives | `python3 tools/extract_assets.py` | All resources under ignored `.local/extracted/` |
 | Inspect archive metadata only | `python3 tools/explore_assets.py` | Inventory under ignored `.local/exploration/` |
 
-The app does not need a full extraction. It reads the original archives directly through the same format library and imports only what its menu needs. Full extraction is for research and future format development.
+The app does not need a full extraction. It reads the original archives directly through the same format library and imports its menu and all defined theater profiles. Full extraction is for research and future format development.
 
 ## Common commands
 
@@ -78,7 +78,7 @@ Default decoded-resource cap: 256 MiB. Raise deliberately with `--max-entry-mib 
 
 The extractor is format-based, not tied to `FA_1.LIB` or another title's filenames. It discovers files with an EALIB signature, validates directories/sentinels, and handles stored entries plus raw-literal PKWare DCL compression. This covers the archive structure used by the supplied Fighters Anthology installation and the USNF/ATF format references. Actual other-title media has not been tested in this session.
 
-It unpacks **all resource types** as their original decompressed bytes. It does not claim to decode every resource: a `.SH` remains a shape resource, `.PIC` remains an indexed game image, `.FNT` remains a compiled resource, and `.11K` remains PCM. Nothing extracted is executed. The app currently interprets only its menu subset.
+It unpacks **all resource types** as their original decompressed bytes. It does not claim to decode every resource: a `.SH` remains a shape resource, `.PIC` remains an indexed game image, `.FNT` remains a compiled resource, and `.11K` remains PCM. Nothing extracted is executed. The app interprets its menu subset and the initial T2/mission/weather data subset described in [theater recovery](formats/theater.md).
 
 ISO images, ESA installer containers, coded-literal DCL mode 1, missing/truncated media repair, PNG/WAV/model conversion, and cross-title gameplay import are not implemented by this command. Supply loose archives from your own installed or extracted media. Unknown/non-EALIB `.LIB` files are reported as errors rather than silently accepted.
 
@@ -98,3 +98,36 @@ The first full local run extracted **7,520 resources / 301,951,459 decoded bytes
 A repeat full run reused all 7,520 outputs as `unchanged`, with zero errors. Running the wrapper from `/tmp` against one explicit archive also passed. Linux and Windows are configured in CI; local runtime validation was performed on the M3 Mac.
 
 All extracted media, caches, snapshots, and derivative assets stay local. Commit parser code, synthetic tests, and research notes only.
+
+## Ukraine and shared environment profile
+
+```sh
+python3 tools/extract_assets.py --theater UKR --out .local/ukraine-import
+python3 tools/extract_assets.py --theater UKR --list
+```
+
+`--theater UKR` selects the Ukraine profile; `--theater all` selects all 16 defined profiles. The general extractor still handles arbitrary resource names and supported archives. Additional `--include` filters intersect the profile; unknown theater codes are rejected explicitly. The profile selects all T2 files for the selector catalog, UKR/~UKR resources and maps, every LAY module, standalone palette, ground/fallback textures, nine sky textures, sun/moon/stars/cloud shapes and their named textures, and Quick Mission artwork. It does not recursively resolve every SH, mission-object or campaign alias dependency.
+
+The supplied installation yields **213 resources with zero errors**. Other theaters' height grids are available for inventory; their complete texture/map/object bundles are not imported into the viewer. For T2 entries, the report's `analysis` contains dimensions, sample scales and elevation range. Selected M/MM entries include top-level weather and texture placements; unknown fields remain in the raw extracted files. Other entries have null analysis. LAY and SH remain original bytes; the app separately decodes a bounded weather palette subset.
+
+The app uses the same profile predicate at import time, reading FA_1/FA_2 directly. It does not consume `.local/ukraine-import` as a runtime directory. Refresh an external-media cache with `--import`; a missing theater resource invalidates an older menu-only cache and triggers local automatic import when default media exists. The app pack now permits 2,048 entries and 128 MiB total; it is still a development cache, not an interchange format.
+
+See [theater recovery](formats/theater.md) for native addresses, sky/celestial dependencies, corrected T2 fields and remaining weather-engine work.
+
+## All defined theaters and the retail discs
+
+```sh
+python3 tools/extract_assets.py --theater all --exclude-archive 'disc1/LHX/*' --out .local/all-theaters
+# Individual profiles use the same rules (codes are case-insensitive):
+python3 tools/extract_assets.py --theater TVIET --exclude-archive 'disc1/LHX/*' --out .local/vietnam
+```
+
+Defined codes live in Rust's shared `THEATERS` table: APA, BAL, CUB, EGY, FRA, GRE, IRA, KURILE, LFA, NSK, PGU, SPA, TVIET, UKR, VLA, WTA. Aliases include KURIL map resources and VIET maps/campaign names and TVI numbered textures. Each profile selects its named resource family, `~` variants, IFM maps and shared environment resources. All T2 grids remain included for catalog use, even with one profile. This is conservative filename-based dependency selection, not complete recursive object/SH resolution. The app now imports and renders all 16 defined base theaters.
+
+Discovery recursively includes `disc1/` and `disc2/`. Directory-based theater scans print and skip non-EALIB files such as the bundled MPlayer `_SETUP.LIB`; corrupt/unsupported EALIB archives still fail. Explicit archive inputs and generic extraction remain strict. The bundled LHX demo has unsupported EALIB compression flags, so exclude that separate game explicitly with `--exclude-archive 'disc1/LHX/*'`. The option is repeatable, case-insensitive, matches source-relative archive paths using `/`, and also works for generic extraction. Adjust the path when using a different source root; exclusions are printed and excluded resources are absent from the report.
+
+On the supplied installation plus both disc folders, the command above extracted **1,129 resources with zero errors**: 852 from FA_1 and 277 from FA_2, including 16 T2 grids and 75 MM layouts. No additional terrain-profile matches came from the added disc archives. They add reference pictures, video and audio for later work; keep them available. `disc1/SETUP.ESA` is also present but is not decoded by this tool. Its presence alone does not establish package completeness.
+
+Pakistan and Persian Gulf layouts contain `tmap` coordinates of -4 along grid borders. These are preserved as signed values in metadata, not rejected or converted to large unsigned positions. Rendering those border patches and native edge semantics remains future work.
+
+The runtime integration pass found the TVI texture alias for TVIET. All-theater extraction now selects **1,171 resources** (894 FA_1, 277 FA_2), including the previously omitted 42 Vietnam textures. Earlier 1,129-resource counts describe the prior extraction checkpoint. App import uses this corrected shared profile. Rendering is a base-theater preview; recursive object dependencies and campaign-generated surfaces remain incomplete.

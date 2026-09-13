@@ -87,3 +87,13 @@ The app previews that original PCM recording at low volume and allows disabling 
 Local reference sources: `USNF-ATF/Docs/formats/{ealib,dcl,pic,pal,mnu,fnt}.md` and `USNF-ATF/tools/retail/retail/{ealib,dcl,pic,mnu,audio}.py`, checkout `2d818054ff51db9f3353d0548dbd0e469b275a1a`.
 
 Run `python3 tools/explore_assets.py` for a fresh inventory with archive hashes/offsets. Run `cargo run --locked -p tore-app -- --import gameassets/fighters-anthology --import-only` for native selective extraction. See [development commands](../DEVELOPMENT.md) for cache locations and preview generation. Detailed inventories, decoder hashes, and images remain local under `.local/exploration/`.
+
+## Quick Mission Creator investigation shell (2026-09-13)
+
+Choose Activity's Create Quick Mission action now opens the creator mock. Native setup at FA.EXE `0x42eb20–0x42eb33` chooses `QUIKMIS3.PIC` versus `QUIKMISS.PIC`; the former carries the Fighters Anthology logo matching the supplied reference photo. Bar placement around `0x42eb3c` uses an 84-pixel origin. The mock uses QUIKMIS3's own palette, original PIC font strips and button pieces, plus the original Ukraine briefing map.
+
+The fields, Aircraft stub, theater dropdown, temporary Terrain Viewer button and help entries are authored for the requested investigation workflow. They do not establish recovered general DLG/MNU support. Click activation requires press/release on the same control; hover and focus stay silent. Escape dismisses the dropdown before returning to the previous screen. See [viewer baseline](../baselines/ukraine-viewer.md) and [parity backlog](../progress.md).
+
+### Typography correction
+
+The initial creator/notice BODYFONT face was unsuitable, and the tint path incorrectly replaced dark/edge pixels with solid white. The creator and placeholder notices now use the retail ARMFont sans-serif strip, with original shading multiplied by the requested tint; SMLFONT serves the compact HUD. FONTACT remains the button font. Synthetic tests verify shading and transparency; local font comparison and creator/notice captures are under `.local/font-audit/`. This is an authored face choice matching the supplied reference more closely, not a claim to have decoded the original font-selection call. All fonts remain raster artwork.
