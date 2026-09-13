@@ -1,8 +1,8 @@
 # T.O.R.E-Fighters
 
-Tasteful Opinionated Reverse Engineered: a native Rust rebuild of Fighters Anthology, following [the roadmap](docs/ROADMAP.md). The current slices are the original menus and a viewer for all 16 original theaters.
+Tasteful Opinionated Reverse Engineered: a native Rust rebuild of Fighters Anthology, following [the roadmap](docs/ROADMAP.md). The current slices are original menus, all 16 original theaters, and F/A-18D free flight with raster instrument windows.
 
-The app launches into the original **Choose Activity** menu using artwork, button pieces, proportional fonts, and sounds imported from your own Fighters Anthology files. Buttons animate; `?`, `Pref`, and `Multi` open dropdowns. **Create Quick Mission → Terrain Viewer** opens the selected theater using recovered original height samples, terrain textures and a sky preview. The creator is a mock; aircraft and mission gameplay remain unimplemented. No retail game data ships in this repository.
+The app launches into the original **Choose Activity** menu using artwork, button pieces, proportional fonts, and sounds imported from your own Fighters Anthology files. Buttons animate; `?`, `Pref`, and `Multi` open dropdowns. **Create Quick Mission → Free Flight** launches the imported F/A-18D over the selected theater. Other mission selectors are placeholders; loadout and combat are deferred. No retail game data ships in this repository.
 
 Each launch randomly selects one of the five original menu backgrounds. Hovering is silent; sounds play on clicks/toggles.
 
@@ -15,7 +15,7 @@ source "$HOME/.cargo/env"
 cargo run --locked -p tore-app
 ```
 
-On first run, local `gameassets/fighters-anthology/` media is imported into platform application data. Later launches use that cache. To import another location or refresh the menu and theater assets:
+On first run, local `gameassets/fighters-anthology/` media is imported into platform application data. Later launches use that cache. To import another location or refresh the menu, theater and aircraft assets:
 
 ```sh
 cargo run --locked -p tore-app -- --import /path/to/fighters-anthology
@@ -33,7 +33,7 @@ See [development setup](docs/DEVELOPMENT.md) for fresh-machine setup, Linux/Wind
 
 ## Explore the theaters
 
-Use **Create Quick Mission → Terrain Viewer**, or launch directly:
+The free-camera terrain diagnostic remains available from the command line:
 
 ```sh
 cargo run --locked -p tore-app -- --viewer
@@ -68,3 +68,5 @@ This discovers and unpacks all supported archives into ignored `.local/extracted
 `crates/tore-app/` contains the native shell, `crates/tore-formats/` the shared readers, and `crates/tore-extract/` the headless extractor. `tools/` contains portable extraction/research scripts and the asset guard. GitHub Actions is configured to build and check macOS, Linux, and Windows.
 
 Your game files belong in ignored `gameassets/fighters-anthology/`. The ignored `USNF-ATF/` checkout supplies reference specifications; it is not needed by the Rust importer or runtime. Music currently previews recovered `AIR003.11K`; its original activity-menu mapping is not confirmed. Run with `--no-audio` for a silent session.
+
+F/A-18D free flight is available through **Create Quick Mission → Free Flight**, or `cargo run --locked -p tore-app -- --free-flight`. Choose any imported theater; other mission selectors remain dotted placeholders and the loadout page is skipped. The cockpit adapts to the window aspect, with a compact original-font HUD and instrument windows anchored to the screen edges. Arrows fly; PageUp/PageDown adjusts throttle; Shift-B enables afterburner. F1/F2/F3 looks forward/back/up, F10 selects external view, Backspace toggles cockpit art, and Shift-0..9 toggles instruments. **Escape → Pref → Large windows?** switches between four inset corner windows and six smaller bottom windows (three per side). Escape opens the paused flight menu, Ctrl-P pauses/resumes, and F11 opens keyboard help. See the [complete current control reference](docs/FLIGHT-CONTROLS.md). See [controls/setup](docs/DEVELOPMENT.md#hornet-free-flight) and [aircraft/weapon extraction](docs/EXTRACTION.md#fa-18d-and-weapons). This is a playable development adapter; full native flight and instrument parity remain [tracked work](docs/formats/aircraft.md#next-parity-gates).

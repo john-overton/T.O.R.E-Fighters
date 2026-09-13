@@ -131,7 +131,7 @@ An editor with rust-analyzer is useful but optional. No global editor configurat
 
 ## Terrain development loop
 
-The main-menu Create Quick Mission action opens the original `QUIKMIS3.PIC` artwork with a theater selector and Terrain Viewer button. This is an authored shell, not the full quick-mission system. Launch it with `--quick-mission`, or skip to the world with `--viewer`.
+The main-menu Create Quick Mission action opens the original `QUIKMIS3.PIC` artwork with a theater selector and Free Flight button. The terrain inspection camera is now a CLI diagnostic. This is an authored shell, not the full quick-mission system. Launch it with `--quick-mission`, or skip to the world with `--viewer`.
 
 ```sh
 cargo run --locked -p tore-app -- --quick-mission --smoke-test
@@ -155,3 +155,23 @@ All 16 creator entries now select/load a theater, rebuild its GPU resources, upd
 Older Ukraine-only caches automatically re-import from default local media. For external media, refresh with `--import`. The selective all-theater pack is capped at 128 MiB / 2,048 resources; it is still a development cache. Source textures use the first three theater-code characters (TVI for TVIET); Kurile's base MM has no numbered texture placements and currently renders palette-colored height geometry.
 
 The creator and placeholder notices now use original `ARMFONT.PIC` sans-serif glyphs; the compact viewer HUD uses `SMLFONT.PIC`. Tinted glyphs preserve source shading instead of flattening every visible pixel to white. Button labels retain original FONTACT artwork. These remain legacy raster fonts scaled with the menu; they are not resolution-independent vector text. No system font or new dependency is required. Use `--snapshot-state notice --snapshot .local/notice.ppm` to inspect the placeholder message.
+
+## Hornet free flight
+
+Create Quick Mission now launches **Free Flight** directly, skipping the deferred loadout page. Theater selection remains functional; dotted placeholders identify other deferred mission selectors. The initial aircraft is the retail F/A-18D, clean external fit, full internal fuel, 450 KTAS, at 5,000 feet or 2,000 feet above local terrain when necessary.
+
+```sh
+cargo run --locked -p tore-app -- --free-flight --theater UKR
+cargo run --locked -p tore-app -- --free-flight --theater TVIET --flight-view 1
+cargo run --locked -p tore-app -- --headless-flight 1200 --maneuver pull
+```
+
+Arrows: pitch/bank (Down pulls up). Z/X: rudder. PageUp/PageDown: throttle; 1..9/0 selects 10..90%/full. Shift-B: afterburner (requires >95% throttle). E: engine. G/F/B/H: gear/flaps/airbrake/hook. R/J: radar/jammer. F1/F2/F3: front/back/up; F10: external. Shift-0..9: instrument windows (four large or six small). Backspace toggles cockpit art. Escape opens the paused in-flight menu; Ctrl-P pauses/resumes; Ctrl-Q ends flight. Focus loss pauses automatically. On Macs use Fn/Globe for function keys and Fn-Up/Down for PageUp/PageDown. See [all current controls and source status](FLIGHT-CONTROLS.md).
+
+Instrument window numbers: 1 envelope, 2 front view, 3 other view, 4 target, 5 RWR, 6 navigation, 7 systems, 8 weapons, 9 radar. Range/mode buttons work on the scopes; unsupported readings and no-target states remain explicit. Older Hornet-less caches refresh from local media. `--viewer` remains a developer terrain diagnostic but has no creator button. Source data, authored integration and remaining parity work are distinguished in [aircraft notes](formats/aircraft.md); [baseline commands](baselines/f18-free-flight.md) cover screenshots and tests.
+
+
+The full-height cockpit and live HUD can be captured with `--capture-flight .local/cockpit.ppm`. Add `--flight-menu` to capture the paused Escape menu. `--flight-view 0|1|2|3|4` selects front/chase/oblique/back/up for inspection. These flags require a display for GPU capture. See [cockpit/control validation](baselines/cockpit-controls.md).
+
+
+Flight UI now adapts to drawable aspect ratio independently of menu letterboxing. Use `--window-size 1280x720` (or resize normally) to inspect widescreen behavior. `--capture-flight` preserves the current aspect and writes at the flight overlay resolution, capped proportionally at 1920×1080. The original `--capture-terrain` remains 960×720. Small instruments resample directly from their native rasters; HUD readouts have transparent backgrounds. See [responsive-flight checks](baselines/responsive-flight-ui.md).

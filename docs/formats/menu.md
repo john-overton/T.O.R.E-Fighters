@@ -97,3 +97,16 @@ The fields, Aircraft stub, theater dropdown, temporary Terrain Viewer button and
 ### Typography correction
 
 The initial creator/notice BODYFONT face was unsuitable, and the tint path incorrectly replaced dark/edge pixels with solid white. The creator and placeholder notices now use the retail ARMFont sans-serif strip, with original shading multiplied by the requested tint; SMLFONT serves the compact HUD. FONTACT remains the button font. Synthetic tests verify shading and transparency; local font comparison and creator/notice captures are under `.local/font-audit/`. This is an authored face choice matching the supplied reference more closely, not a claim to have decoded the original font-selection call. All fonts remain raster artwork.
+
+## F/A-18D launch follow-up
+
+The temporary Terrain Viewer button is replaced by Free Flight. The creator starts the selected theater with the imported Hornet, clean external fit and no loadout page. Other mission fields use dotted placeholders. The original menu and click-only sounds remain. See [aircraft/instrument coverage](aircraft.md).
+
+
+## FA in-flight menu tree recovery
+
+`FMENUD.MNU` is now parsed as bounded inert data in `tore-formats::ui::flight_menu`. The reviewed CODE tree begins at offset zero. Each node starts with sibling and child RVAs at +0/+4. Top-level/anonymous container labels begin at +24; selectable row labels follow the +18 `0x1e` marker. NUL terminates labels, `0x01` separates accelerators, `0x7f` marks submenu text, and inline `0x1d` is rendered as an arrow. Anonymous containers are flattened while preserving their child order. The reader checks RVA bounds, label lengths/encoding, cycles, depth (8), and total nodes (256); it never executes handlers or uses native pointers.
+
+This recovers the supplied FA tree including `?`, Control, Pref, View, Window, Cheat, Multi, Map and Pos. It supersedes treating the flight menu tree as entirely authored. Runtime validates that reviewed root structure before presenting it. Generic menu flags, check-state callbacks, visibility of Map/Pos in different native modes, and other editions remain unverified. Native tree recovery does not implement its underlying cheats, multiplayer or flight systems.
+
+`flight_ui.rs` provides keyboard/mouse traversal and action dispatch, with matching press/release and silent hover. Native actions without a port show explicit feedback. The paused overlay's placement, submenu presentation, and bottom Resume/Restart/Keyboard Shortcuts actions are authored. Portable Exit to Desktop wording replaces the source Exit to Windows label. Source labels/accelerators remain external imported data. See [controls](../FLIGHT-CONTROLS.md).

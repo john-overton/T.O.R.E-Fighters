@@ -74,6 +74,14 @@ fn archive(root: &Path, name: &str) -> AppResult<Archive> {
 impl Assets {
     fn decode(resources: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
         for name in [
+            "&GEARUP.5K",
+            "WIN11.FNT",
+            "HUDSYM11.FNT",
+            "HUD11.FNT",
+            "F18.PT",
+            "F18.HUD",
+            "~F18H.PIC",
+            "WIN01.FNT",
             "UKR.T2",
             "UKR.MM",
             "SUN.SH",
@@ -94,6 +102,8 @@ impl Assets {
         if !resources.contains_key("TVI0.PIC") {
             return Err("cache missing Vietnam textures; re-import media".into());
         }
+        tore_formats::aircraft::Aircraft::parse(&resources["F18.PT"])?;
+        tore_formats::font::Font::parse(&resources["WIN11.FNT"])?;
         let mut pics = BTreeMap::new();
         for name in ART {
             let bytes = resources
@@ -158,7 +168,6 @@ impl Assets {
         Ok(Self {
             theater_resources: resources
                 .iter()
-                .filter(|(n, _)| tore_formats::theater::theater_resource(n, "ALL"))
                 .map(|(n, b)| (n.clone(), b.clone()))
                 .collect(),
             pics,
@@ -172,6 +181,12 @@ impl Assets {
         let mut report = String::from(
             "T.O.R.E-Fighters menu import v1\nOnly selected resources decompressed. No executable resources executed.\n",
         );
+        let aircraft_libs = [archive(source, "FA_1.LIB")?, archive(source, "FA_2.LIB")?];
+        let aircraft_names = tore_formats::aircraft::dependencies(
+            &aircraft_libs.iter().collect::<Vec<_>>(),
+            true,
+            false,
+        )?;
         for (filename, names) in [("FA_1.LIB", ART), ("FA_2.LIB", DATA)] {
             let lib = archive(source, filename)?;
             report.push_str(&format!(
@@ -182,7 +197,9 @@ impl Assets {
                 .entries
                 .keys()
                 .filter(|n| {
-                    names.contains(&n.as_str()) || tore_formats::theater::theater_resource(n, "ALL")
+                    names.contains(&n.as_str())
+                        || aircraft_names.contains(*n)
+                        || tore_formats::theater::theater_resource(n, "ALL")
                 })
                 .cloned()
                 .collect();
@@ -266,7 +283,7 @@ impl Assets {
     fn load_pack(path: &Path) -> AppResult<Self> {
         let file = fs::File::open(path)?;
         if file.metadata()?.len() > 128 * 1024 * 1024 {
-            return Err("menu pack exceeds 32 MiB".into());
+            return Err("asset pack exceeds 128 MiB".into());
         }
         let mut data = Vec::new();
         file.take(128 * 1024 * 1024 + 1).read_to_end(&mut data)?;

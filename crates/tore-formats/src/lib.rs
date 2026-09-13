@@ -1,9 +1,13 @@
 //! Bounded readers for user-owned Fighters Anthology menu and theater resources.
 //! No executable resource is ever executed. See docs/formats/menu.md and theater.md.
+pub mod aircraft;
 mod dcl;
+pub mod font;
+pub mod module;
 mod pic;
+pub mod shape;
 pub mod theater;
-mod ui;
+pub mod ui;
 pub use pic::Pic;
 use std::{
     collections::BTreeMap,

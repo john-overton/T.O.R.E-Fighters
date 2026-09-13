@@ -16,6 +16,12 @@ struct Voice {
 }
 struct Mixer {
     music: Option<Voice>,
+    engine: Option<Voice>,
+    burner: Option<Voice>,
+    flight_on: bool,
+    flight_paused: bool,
+    engine_gain: f32,
+    burner_gain: f32,
     voices: Vec<Voice>,
     music_on: bool,
     effects_on: bool,
@@ -30,7 +36,7 @@ fn cue(action: Action) -> Option<&'static str> {
         Action::Theater(_)
         | Action::Click
         | Action::QuickMission
-        | Action::Viewer
+        | Action::FreeFlight
         | Action::Back => Some("&BUTTON.11K"),
         Action::Music(_) | Action::Effects(_) => Some("&TOGGLE1.5K"),
         // Mouse hover and keyboard focus changes never play a sound.
@@ -84,6 +90,12 @@ impl Audio {
         });
         let mixer = Arc::new(Mutex::new(Mixer {
             music,
+            engine: None,
+            burner: None,
+            flight_on: false,
+            flight_paused: false,
+            engine_gain: 0.,
+            burner_gain: 0.,
             voices: Vec::with_capacity(8),
             music_on: true,
             effects_on: true,
@@ -111,6 +123,96 @@ impl Audio {
             mixer,
             clips,
         })
+    }
+    pub fn control(&self, key: &str, state: &crate::flight::State) {
+        let name = match key {
+            "g" => {
+                if state.gear_down {
+                    "&GEARDWN.5K"
+                } else {
+                    "&GEARUP.5K"
+                }
+            }
+            "f" => {
+                if state.flaps_down {
+                    "&FLAPOPN.5K"
+                } else {
+                    "&FLAPCLS.5K"
+                }
+            }
+            "h" => "&HOOK.5K",
+            _ => return,
+        };
+        if let Ok(mut m) = self.mixer.lock()
+            && m.effects_on
+            && m.voices.len() < 8
+            && let Some(clip) = self.clips.get(name)
+        {
+            m.voices.push(Voice {
+                clip: clip.clone(),
+                position: 0.,
+            });
+        }
+    }
+    pub fn pause_flight(&self, paused: bool) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.flight_paused = paused;
+        }
+    }
+    pub fn flight(
+        &self,
+        state: Option<(&tore_formats::aircraft::Aircraft, &crate::flight::State)>,
+    ) {
+        if let Ok(mut m) = self.mixer.lock() {
+            m.flight_on = state.is_some();
+            if let Some((a, s)) = state {
+                if m.engine.is_none() {
+                    m.engine = a
+                        .sounds
+                        .get("loopSound")
+                        .and_then(|n| self.clips.get(n))
+                        .map(|clip| Voice {
+                            clip: clip.clone(),
+                            position: 0.,
+                        });
+                    m.burner = a
+                        .sounds
+                        .get("secondSound")
+                        .and_then(|n| self.clips.get(n))
+                        .map(|clip| Voice {
+                            clip: clip.clone(),
+                            position: 0.,
+                        });
+                }
+                if (m.engine_gain > 0.) != s.engine
+                    && m.effects_on
+                    && m.voices.len() < 8
+                    && let Some(clip) = a
+                        .sounds
+                        .get(if s.engine {
+                            "engineOnSound"
+                        } else {
+                            "engineOffSound"
+                        })
+                        .and_then(|n| self.clips.get(n))
+                {
+                    m.voices.push(Voice {
+                        clip: clip.clone(),
+                        position: 0.,
+                    });
+                }
+                m.engine_gain = if s.engine {
+                    0.08 + 0.15 * s.throttle as f32
+                } else {
+                    0.
+                };
+                m.burner_gain = if s.engine && s.burner && s.throttle > 0.95 {
+                    0.15
+                } else {
+                    0.
+                };
+            }
+        }
     }
     pub fn action(&self, action: Action) {
         let Ok(mut mixer) = self.mixer.lock() else {
@@ -156,9 +258,19 @@ fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
             for frame in output.chunks_mut(channels) {
                 let mut value = 0.0;
                 if mixer.music_on
+                    && !mixer.flight_on
                     && let Some(music) = &mut mixer.music
                 {
                     value += music.next(rate, true) * 0.16;
+                }
+                if mixer.flight_on && !mixer.flight_paused && mixer.effects_on {
+                    let (eg, bg) = (mixer.engine_gain, mixer.burner_gain);
+                    if let Some(v) = &mut mixer.engine {
+                        value += v.next(rate, true) * eg;
+                    }
+                    if let Some(v) = &mut mixer.burner {
+                        value += v.next(rate, true) * bg;
+                    }
                 }
                 for voice in &mut mixer.voices {
                     value += voice.next(rate, false) * 0.4;

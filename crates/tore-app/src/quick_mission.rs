@@ -75,7 +75,7 @@ impl QuickMission {
                 self.theaters = !self.theaters;
                 self.help = false;
             }
-            3 => return Action::Viewer,
+            3 => return Action::FreeFlight,
             4 | 5 => return Action::Back,
             6 => return Action::Exit,
             7..=22 => {
@@ -125,28 +125,32 @@ impl QuickMission {
         let font = &sprites["ARMFONT.PIC"];
         let menu = &sprites["MENUFONT.PIC"];
         c.text(menu, "Aircraft", 103, 36, None);
+        let start = Camera::for_world(world);
+        let altitude = 5000f32.max(world.height(start.position[0], start.position[2]) + 2000.);
         let text = |c: &mut Canvas<'_>, s: &str, x, y| c.text(font, s, x, y, Some([220, 220, 216]));
         text(&mut c, "FRIENDLY SITUATION", 116, 104);
-        text(&mut c, "ENEMY SITUATION", 429, 104);
+        text(&mut c, "FLIGHT SETUP", 429, 104);
         for (i, line) in [
             "Friendly forces are American.",
-            "Wing 1: 1 average F-14D Tomcat.",
-            "Wing 2: 0 novice F-4B Phantom II.",
-            "Wing 3: 0 novice MiG-15.",
+            "Wing 1: 1 .... F/A-18D Hornet ....",
+            "Wing 2: 0 .... aircraft ....",
+            "Wing 3: 0 .... aircraft ....",
             "",
             "You are flying over Ukraine.",
-            "You are at 28,000 feet. It is clear.",
-            "Your situation is neutral.",
+            "You are at 5,000 feet .... clear ....",
+            "Your situation is .... free flight ....",
             "",
-            "Mission and aircraft settings are stubs.",
-            "Terrain viewer uses a free camera.",
+            "You carry .... no external stores ....",
+            "Air combat .... disabled ....",
         ]
         .iter()
         .enumerate()
         {
             text(
                 &mut c,
-                &line.replace("Ukraine", &world.theater.name),
+                &line
+                    .replace("Ukraine", &world.theater.name)
+                    .replace("5,000", &format!("{altitude:.0}")),
                 34,
                 141 + i as i32 * 16,
             );
@@ -154,7 +158,7 @@ impl QuickMission {
         text(&mut c, "Theater", 350, 136);
         c.rect(CONTROLS[2], [102, 106, 103, 255]);
         text(&mut c, &format!("{}   v", world.theater.name), 357, 162);
-        text(&mut c, "Weather: clear / midday preview", 350, 191);
+        text(&mut c, "Weather .... clear / midday ....", 350, 191);
         text(
             &mut c,
             &format!("Source: {}", world.environment.layer),
@@ -165,7 +169,7 @@ impl QuickMission {
         if let Some(map) = sprites.get(&world.theater.map) {
             c.scaled(map, (375, 231, 184, 170));
         }
-        for (i, label) in [(3, "Terrain Viewer"), (4, "Cancel")] {
+        for (i, label) in [(3, "Free Flight"), (4, "Cancel")] {
             let r = CONTROLS[i];
             let gain = if self.pressed == Some(i) && self.hover == Some(i) {
                 0.8
@@ -259,7 +263,7 @@ mod tests {
         assert_eq!(q.up(), Action::None);
         q.pointer(Some((380.0, 425.0)));
         q.down();
-        assert_eq!(q.up(), Action::Viewer);
+        assert_eq!(q.up(), Action::FreeFlight);
     }
     #[test]
     fn escape_dismisses_selector_then_returns() {

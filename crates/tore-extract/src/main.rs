@@ -15,6 +15,8 @@ struct Options {
     patterns: Vec<String>,
     exclude_archives: Vec<String>,
     theater: Option<String>,
+    aircraft: bool,
+    weapons: bool,
     list: bool,
     dry_run: bool,
     overwrite: bool,
@@ -179,8 +181,91 @@ fn write_resource(path: &Path, bytes: &[u8], overwrite: bool) -> Result<&'static
     Ok(if exists { "replaced" } else { "written" })
 }
 
+fn field_json(
+    fields: &std::collections::BTreeMap<String, tore_formats::aircraft::Token>,
+) -> String {
+    format!(
+        "{{{}}}",
+        fields
+            .iter()
+            .map(|(name, t)| format!(
+                "{}:{{\"kind\":{},\"value\":{},\"scaled\":{}}}",
+                quote(name),
+                quote(&t.kind),
+                if matches!(t.kind.as_str(), "byte" | "word" | "dword") {
+                    t.number().unwrap().to_string()
+                } else {
+                    quote(&t.value)
+                },
+                t.scaled
+            ))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
 fn analyze(name: &str, bytes: &[u8]) -> Result<String> {
     use tore_formats::theater::{Environment, Theater};
+    if name == "F18.PT" {
+        let a = tore_formats::aircraft::Aircraft::parse(bytes)?;
+        let envelopes = a
+            .envelopes
+            .iter()
+            .map(|e| {
+                format!(
+                    "{{\"g\":{},\"points_ft_s_ft\":[{}]}}",
+                    e.g,
+                    e.points
+                        .iter()
+                        .map(|p| format!("[{},{}]", p[0], p[1]))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let hardpoints=a.hardpoints.iter().map(|h|format!("{{\"flags\":{},\"position_raw\":{:?},\"store\":{},\"count\":{},\"weight_class_raw\":{}}}",h.flags,h.position,h.store.as_ref().map_or("null".into(),|s|quote(s)),h.count,h.weight_class)).collect::<Vec<_>>().join(",");
+        return Ok(format!(
+            "{{\"format\":\"BRF aircraft\",\"name\":{},\"shape\":{},\"object_fields\":{},\"flight_fields\":{},\"hardpoints\":[{}],\"envelopes\":[{}],\"runtime_parity\":false}}",
+            quote(&a.name),
+            quote(&a.shape),
+            field_json(&a.object),
+            field_json(&a.fields),
+            hardpoints,
+            envelopes
+        ));
+    }
+    if [".JT", ".SEE", ".ECM"]
+        .iter()
+        .any(|ext| name.ends_with(ext))
+    {
+        let e = tore_formats::aircraft::Equipment::parse(name, bytes)?;
+        return Ok(format!(
+            "{{\"format\":\"BRF equipment\",\"name\":{},\"object_fields\":{},\"equipment_fields\":{}}}",
+            quote(&e.name),
+            field_json(&e.object),
+            field_json(&e.fields)
+        ));
+    }
+    if name == "F18.SH" {
+        let sh = tore_formats::shape::Shape::parse(bytes)?;
+        return Ok(format!(
+            "{{\"format\":\"SH static projection\",\"faces\":{},\"state_words\":{:?},\"native_vm_parity\":false}}",
+            sh.faces.len(),
+            sh.state_words.iter().collect::<Vec<_>>()
+        ));
+    }
+    if [".JT", ".SEE", ".ECM", ".GAS"]
+        .iter()
+        .any(|ext| name.ends_with(ext))
+    {
+        let b = tore_formats::aircraft::Brf::parse(bytes)?;
+        return Ok(format!(
+            "{{\"format\":\"BRF\",\"blocks\":{},\"statements\":{}}}",
+            b.blocks.len(),
+            b.blocks.values().map(Vec::len).sum::<usize>()
+        ));
+    }
+
     if name.ends_with(".T2") {
         let t = Theater::parse(bytes)?;
         let min = t.cells.iter().map(|c| c.elevation).min().unwrap_or(0);
@@ -228,7 +313,7 @@ fn extract(options: Options) -> Result<bool> {
     discover(&source, &mut archives)?;
     // Retail discs also bundle other games/installers whose .LIB files are not EALIB.
     // Only directory-based theater discovery skips them; explicit/raw inputs stay strict.
-    if source.is_dir() && options.theater.is_some() {
+    if source.is_dir() && (options.theater.is_some() || options.aircraft || options.weapons) {
         let mut supported = Vec::new();
         for path in archives {
             let mut magic = [0; 5];
@@ -262,6 +347,27 @@ fn extract(options: Options) -> Result<bool> {
     if source.is_dir() && out.starts_with(&source) {
         return Err("output directory must be outside the source media tree".into());
     }
+    let mut profile_archives = Vec::new();
+    if options.aircraft || options.weapons {
+        for path in &archives {
+            let relative = path
+                .strip_prefix(source_root)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if !options
+                .exclude_archives
+                .iter()
+                .any(|p| wildcard(p, &relative))
+            {
+                profile_archives.push(Archive::open(path)?);
+            }
+        }
+    }
+    let aircraft_names = tore_formats::aircraft::dependencies(
+        &profile_archives.iter().collect::<Vec<_>>(),
+        options.aircraft,
+        options.weapons,
+    )?;
     let mut records = Vec::new();
     let mut errors = Vec::new();
     let mut selected = 0;
@@ -289,10 +395,13 @@ fn extract(options: Options) -> Result<bool> {
         let relative = path.strip_prefix(source_root)?;
         let mut matched = 0;
         for entry in archive.entries.values() {
-            if options
-                .theater
-                .as_ref()
-                .is_some_and(|code| !tore_formats::theater::theater_resource(&entry.name, code))
+            let profile = options.theater.is_some() || options.aircraft || options.weapons;
+            if profile
+                && !aircraft_names.contains(&entry.name)
+                && !options
+                    .theater
+                    .as_ref()
+                    .is_some_and(|code| tore_formats::theater::theater_resource(&entry.name, code))
             {
                 continue;
             }
@@ -334,7 +443,7 @@ fn extract(options: Options) -> Result<bool> {
                 }
                 let bytes = archive.read_with_limit(&entry.name, options.limit)?;
                 record.decoded = bytes.len();
-                if options.theater.is_some() {
+                if profile {
                     record.analysis = analyze(&entry.name, &bytes)?;
                 }
                 let directory = safe_directory(&out, relative)?;
@@ -399,6 +508,8 @@ fn main() -> Result<()> {
         patterns: vec![],
         exclude_archives: vec![],
         theater: None,
+        aircraft: false,
+        weapons: false,
         list: false,
         dry_run: false,
         overwrite: false,
@@ -418,6 +529,17 @@ fn main() -> Result<()> {
                 args.next()
                     .ok_or("--exclude-archive needs a source-relative glob")?,
             ),
+            "--aircraft" => {
+                if !args
+                    .next()
+                    .ok_or("--aircraft needs f18")?
+                    .eq_ignore_ascii_case("f18")
+                {
+                    return Err("supported aircraft: f18".into());
+                }
+                options.aircraft = true;
+            }
+            "--weapons" => options.weapons = true,
             "--theater" => {
                 let code = args
                     .next()
@@ -455,7 +577,7 @@ fn main() -> Result<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and format conversion are not implemented.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
+                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--aircraft f18] [--weapons] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and format conversion are not implemented.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
                 );
                 return Ok(());
             }

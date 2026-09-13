@@ -131,3 +131,18 @@ On the supplied installation plus both disc folders, the command above extracted
 Pakistan and Persian Gulf layouts contain `tmap` coordinates of -4 along grid borders. These are preserved as signed values in metadata, not rejected or converted to large unsigned positions. Rendering those border patches and native edge semantics remains future work.
 
 The runtime integration pass found the TVI texture alias for TVIET. All-theater extraction now selects **1,171 resources** (894 FA_1, 277 FA_2), including the previously omitted 42 Vietnam textures. Earlier 1,129-resource counts describe the prior extraction checkpoint. App import uses this corrected shared profile. Rendering is a base-theater preview; recursive object dependencies and campaign-generated surfaces remain incomplete.
+
+## F/A-18D and weapons
+
+```sh
+python3 tools/extract_assets.py --aircraft f18 --exclude-archive 'disc1/LHX/*' --out .local/f18-import
+python3 tools/extract_assets.py --aircraft f18 --weapons --exclude-archive 'disc1/LHX/*' --out .local/f18-import
+python3 tools/extract_assets.py --theater all --aircraft f18 --weapons --exclude-archive 'disc1/LHX/*' --out .local/flight-import
+```
+
+The aircraft profile automatically includes its default weapons, sensors, tank, shapes, textures, cockpit variants, instrument fonts/chrome and available audio dependencies. `--weapons` expands to the whole JT library. Profiles combine as a union; optional `--include` globs filter that union. Native Rust readers and the dependency resolver are shared with app startup; no reference checkout, Bun or extra Python packages are needed. Dry-run/list performs dependency reads but writes nothing. Keep the report alongside the extracted files for source hashes and named fields, envelopes and hardpoint evidence.
+
+This preserves/imports data; it does not establish full flight, radar, instrument or weapon behavior. See [aircraft format and runtime coverage](formats/aircraft.md). F/A-18C is a separate variant, not an alias for this F/A-18D profile. The app currently imports the selected Hornet dependencies from FA_1/FA_2 directly into its cache, rather than consuming the CLI output directory.
+
+
+The cockpit/control follow-up adds mandatory `HUD11.FNT` and `FMENUD.MNU` to `--aircraft f18`, and preserves all available HUD mode fonts. Re-run the same extraction command to extend an existing output; unchanged files remain untouched. The runtime cache detects the newly required font and can refresh itself from the local media. The recovered menu tree is interpreted as data; no native module is executed.

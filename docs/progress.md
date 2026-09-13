@@ -110,7 +110,7 @@ The reference [T2 notes](../USNF-ATF/Docs/formats/t2.md) used a misaligned cell 
 - [ ] Recover runway/airfield, roads, buildings, vegetation and other placement rules where present; distinguish terrain-owned content from mission-owned objects.
 - [ ] Make terrain height/contact queries and rendering agree on the physical surface, including boundaries, water and runways. Test seams, winding, out-of-bounds queries and coordinate conversions.
 - [ ] Add bounded loading/caching, culling, precision handling and rendering detail appropriate to recovered data. These are new Rust implementation choices, not a port of the reference terrain system.
-- [ ] Add recorded camera routes and landmark overlays beyond the current repeatable startup pose; remove or relocate the authorized temporary viewer control when the actual quick-mission flow is implemented.
+- [ ] Add recorded camera routes and landmark overlays beyond the current repeatable startup pose; the temporary viewer control has now been replaced by Free Flight, while `--viewer` remains a CLI diagnostic.
 - [ ] **M1b acceptance:** fly a free camera over retail Ukraine and one other recovered theater; compare coasts, relief, airfields, landmarks and mission positions with native evidence. Record actual frame times, memory and screenshots on all three platforms.
 
 ### ENV3 — Atmosphere and environment systems
@@ -130,6 +130,8 @@ The reference [T2 notes](../USNF-ATF/Docs/formats/t2.md) used a misaligned cell 
 ## 3. Aircraft and original simulation systems — M1c–M2
 
 Use the local [aircraft-porting guide](../USNF-ATF/Docs/aircraft-porting.md) and [worksheet](../USNF-ATF/Docs/templates/aircraft-port.md) as research starting points. Its helper exports reviewed bundles; successful export is explicitly not full native flight acceptance. Bun/Electron commands in that guide are reference-project commands, not commands for this Rust app.
+
+The checklist below tracks full roster/native parity. The implemented F/A-18D subset and its evidence are itemized at the end of this document; partial progress does not check off full-parity rows.
 
 ### AIR1 — Intake and identity, repeated for every aircraft/variant
 
@@ -183,7 +185,7 @@ Use the local [aircraft-porting guide](../USNF-ATF/Docs/aircraft-porting.md) and
 | F-14 | Reviewed recipe; recovered native helpers; model/rig differs by source and override | Not started; choose and document actual FA variant before reusing findings |
 | A-4E | Reviewed FA model recipe; reference flight integration retains authored behavior | Not started; intake, SH/PT and capability checks |
 | X-31 | Reviewed recipe; vectoring/control-law fidelity remains a specific concern | Not started; intake and device/flight evidence |
-| F/A-18 | Roadmap's nominated fourth aircraft; not one of the three reviewed helper recipes | Not started; full intake/recovery; roadmap retains a fourth-aircraft decision |
+| F/A-18D | Supplied FA F18.PT / F18.SH | Development free-flight slice implemented; full native parity open; see [evidence](formats/aircraft.md) |
 | Remaining aircraft | Inventory per title, model and profile variant | Not started; M2 batches after shared pipeline acceptance |
 
 ## 4. Sequencing and open gates
@@ -209,3 +211,60 @@ Local links below require the ignored `USNF-ATF/` checkout; it is not a build/ru
 | Cockpit/combat/audio | [HUD](../USNF-ATF/Docs/formats/hud.md), [native guns](../USNF-ATF/Docs/formats/native-guns.md), [audio](../USNF-ATF/Docs/formats/audio.md), [music](../USNF-ATF/Docs/formats/music.md) | Recover dependency mappings and runtime behavior separately |
 
 When updating this tracker, check only the completed substep, link its evidence and update format coverage if applicable. A milestone remains open until its acceptance gate is met; no percentage estimate substitutes for evidence.
+
+## F/A-18D free flight and instrument-window slice (2026-09-13)
+
+- [x] Identify FA F18.PT as F/A-18D, distinct from F18C; document source facts and unsupported variants.
+- [x] Shared aircraft dependency closure through `tools/extract_assets.py`; optional full weapon library; preserve original boundaries/hashes.
+- [x] Bounded BRF PT/JT/SEE/ECM fields, G envelope points, hardpoint/sound references and raw unknowns.
+- [x] Static nearest-detail SH geometry, source 256×644 skin and observed gear/brake/hook/burner endpoint poses.
+- [x] Native cockpit artwork and bounded compiled bitmap-font recovery.
+- [x] Fixed-tick Rust free-flight adapter, clean fit and headless input probes; native force/control parity remains unchecked.
+- [x] Creator Free Flight action, theater selection, dotted deferred selectors and direct launch without loadout.
+- [x] Small raster instrument windows; live fuel/throttle/navigation/envelope, radar power/range, imported equipment inventory and actual GPU front/other views.
+- [ ] Exact native instrument layout, font dispatch, draw rounding, window controls and all page modes.
+- [ ] Temperature/oil/hydraulic/system-health simulation and original gauge/failure mapping (`---` until recovered).
+- [ ] Native radar/RWR/seeker contacts, RCS outline, target acquisition/tracking, waypoint planning and camera labels.
+- [ ] Weapon execution, loadout/compatibility, payload/fuel partition, expendables and damage.
+- [ ] Native flight helpers, continuous SH articulation, control surfaces, scale acceptance, ground support, takeoff/landing, mirror rendering and full cockpit/HUD behavior.
+- [ ] Native side-by-side flight/instrument and audible acceptance; Linux/Windows runtime checks.
+
+See [format evidence and per-page coverage](formats/aircraft.md) and [validation baseline](baselines/f18-free-flight.md). Imported data and a runnable flight do not close the full M1c/1f parity gates.
+
+
+### Cockpit, HUD and desktop controls follow-up
+
+- [x] Replace rejected half-height cockpit world with a full-canvas world and uniformly scaled source frame; retain independent instrument overlays.
+- [x] Import HUD11 and all HUD mode fonts through the shared aircraft extraction profile.
+- [x] Read the FA FMENUD menu hierarchy/accelerators as bounded data, including nested items and Shift-0 RCS.
+- [x] Add keyboard/mouse flight menu, pause/resume/end/restart, focus-loss pause, help and explicit unavailable-command feedback.
+- [x] Correct F1/F2/F3/F10, cockpit toggle, pause, menu/desktop exit and window shortcuts; preserve modifier separation. Document provisional flight bindings.
+- [x] Draw source-font HUD with heading, TAS/MSL/AGL, vertical speed, G, throttle, device state, projected pitch ladder and flight-path marker.
+- [ ] Recover the complete FA non-menu keyboard dispatch, controller/joystick bindings, native camera transition and zoom/pan behavior.
+- [ ] Implement remaining menu handlers (preferences mixer, cheats, multiplayer, map/position), RCS and combat/navigation/radio commands.
+- [ ] Recover native F18 HUD caller/symbol layout, mirrors, ILS/weapon/corner-speed cues and full cockpit panel composition; compare against retail flight.
+- [ ] Validate Windows/Linux input, rendering and audio; perform manual native-game parity acceptance.
+
+Current behavior and binding provenance: [FLIGHT-CONTROLS.md](FLIGHT-CONTROLS.md). Follow-up evidence: [cockpit/control baseline](baselines/cockpit-controls.md).
+
+
+### Instrument layout follow-up
+
+- [x] Large mode: four 160×156 corner windows with margins, using the supplied F-14 catapult capture as the placement reference.
+- [x] Small mode: six 96×94 bottom windows, grouped three left and three right, with inter-window spacing and a center gutter.
+- [x] Wire original Pref → Large windows? to switch layouts and preserve each layout's session selections; add `--instrument-layout large|small` for captures.
+- [x] Share layout rectangles between rendering and inverse-scaled button hit testing; cancel pending clicks when pages/layouts change.
+- [x] Test capacity/selection restoration, non-overlap/margins and matching button release at both sizes; validate both layouts on Metal.
+
+Exact native placement and independent high-resolution instrument typography remain open. Small mode currently scales the existing source-font raster. See [layout validation](baselines/instrument-layouts.md).
+
+
+### Responsive flight UI follow-up
+
+- [x] Separate the flight overlay from the fixed 4:3 menu canvas; reveal source cockpit side art on wider screens and preserve uniform scaling.
+- [x] Anchor corner/bottom groups to the actual display bounds, with matching pointer conversion and responsive margins.
+- [x] Draw small windows directly from native instrument rasters, eliminating the intermediate downscale; cache unchanged imagery.
+- [x] Shrink HUD presentation 15%, preserve attitude projection, remove opaque TAS/MSL readout backings and avoid overlapping tape labels.
+- [x] Add repeatable `--window-size WIDTHxHEIGHT` captures and aspect/alpha/pointer regression coverage.
+
+See [responsive-flight validation](baselines/responsive-flight-ui.md). Native HUD symbol mapping, mirror rendering, dynamic native instrument typography and cross-platform acceptance remain open.

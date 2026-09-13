@@ -134,6 +134,9 @@ pub struct Camera {
     pub position: [f32; 3],
     pub yaw: f32,
     pub pitch: f32,
+    pub roll: f32,
+    pub view_fraction: f32,
+    pub zoom: f32,
     pub keys: BTreeSet<String>,
 }
 impl Camera {
@@ -142,6 +145,9 @@ impl Camera {
             position: [1_070_000.0, 28_000.0, 590_000.0],
             yaw: 0.3,
             pitch: -0.32,
+            roll: 0.,
+            view_fraction: 1.,
+            zoom: 1.,
             keys: BTreeSet::new(),
         }
     }
@@ -184,11 +190,14 @@ impl Camera {
     pub fn uniform(&self, aspect: f32, fog: f32, sky: [u8; 3]) -> Vec<f32> {
         let (sy, cy) = self.yaw.sin_cos();
         let (sp, cp) = self.pitch.sin_cos();
+        let (sr, cr) = self.roll.sin_cos();
+        let right = [cy * cr - sy * sp * sr, cp * sr, -sy * cr - cy * sp * sr];
+        let up = [-cy * sr - sy * sp * cr, cp * cr, sy * sr - cy * sp * cr];
         [
             self.position.to_vec(),
             vec![aspect],
-            vec![cy, 0.0, -sy, 0.0],
-            vec![-sy * sp, cp, -cy * sp, 0.0],
+            vec![right[0], right[1], right[2], 0.],
+            vec![up[0], up[1], up[2], self.zoom],
             vec![sy * cp, sp, cy * cp, 0.0],
             vec![
                 sky[0] as f32 / 255.0,

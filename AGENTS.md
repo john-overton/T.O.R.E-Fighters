@@ -1,6 +1,6 @@
 # Agent instructions
 
-Read [docs/ROADMAP.md](docs/ROADMAP.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), and [docs/formats/menu.md](docs/formats/menu.md) before changing the project. Current work includes the first M1a menu slice and partial M1b Ukraine viewer; M0 research and the rest of M1a remain open.
+Read [docs/ROADMAP.md](docs/ROADMAP.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), and [docs/formats/menu.md](docs/formats/menu.md) before changing the project. Current work includes the first M1a menu slice, all-theater M1b preview and partial M1c Hornet free flight; M0 research and the rest of M1a remain open.
 
 - Keep documentation in lowercase `docs/`; validation evidence in `docs/baselines/`; format coverage in `docs/formats/coverage.md` when importer work starts.
 - Maintain [docs/progress.md](docs/progress.md) with completed substeps, remaining parity work and acceptance evidence. The remaining menu screens are deferred until explicitly scheduled.
@@ -18,3 +18,10 @@ Read [docs/ROADMAP.md](docs/ROADMAP.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.
 - Run formatting, Clippy with warnings denied, tests, and a build as listed in `docs/DEVELOPMENT.md`. For rendering changes, run the window smoke test on a display-capable host. Run the asset guard when files or artifacts change. Report unavailable platform checks honestly.
 - Keep README, setup docs, and baseline evidence aligned with actual behavior. Record open decisions instead of silently choosing AI behavior, menu fidelity, or import formats.
 - Summarize in plain English: outcome, validation, and material limitations. Do not commit or push unless asked.
+- Read [docs/formats/aircraft.md](docs/formats/aircraft.md) before aircraft, equipment or instrument changes. F18.PT is the reviewed FA F/A-18D; do not silently alias F18C or borrow another aircraft's native metadata. Keep the CLI/app dependency resolver shared, PT/JT/SEE/ECM fields bounded, and external stores clean for free flight until loadout is implemented.
+- Instrument windows refer to the small raster RWR/radar/systems/target displays, separate from cockpit frame artwork. Use the supplied `gameassets/reference-photos/` captures, not the custom reference app's layout. Keep source facts, fitted rendering and missing native behavior explicit; never fabricate contacts or system readings to fill gaps.
+- Simulation advances in fixed 120 Hz ticks independently of rendering. Preserve headless probes, matching input/release behavior, and flight/camera-window GPU checks. Never execute imported native modules; readers only interpret reviewed bounded data/glyph/shape grammars.
+
+- Read [docs/FLIGHT-CONTROLS.md](docs/FLIGHT-CONTROLS.md) before changing flight input/UI. Preserve the full-canvas world/cockpit with independent instrument overlays; do not restore a half-height world viewport. Recover menu labels/shortcuts through the bounded FMENUD reader, and distinguish source bindings, provisional mappings and unavailable systems. Test modifier/release isolation and pause/resume without hidden tick catch-up.
+
+- Flight overlays use the responsive `flight_canvas` path, independently of 640×480 menu letterboxing. Keep cockpit cover-fit, screen-edge instrument anchoring, pointer transforms and HUD projection aligned when resizing. Do not downscale small instrument text through an intermediate menu canvas or reintroduce opaque HUD number backgrounds. Capture wide and tall layouts after composition changes.

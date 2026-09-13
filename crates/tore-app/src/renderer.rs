@@ -51,6 +51,24 @@ pub struct Renderer {
     sim: crate::sim_renderer::SimRenderer,
 }
 impl Renderer {
+    pub fn aircraft(
+        &mut self,
+        hornet: &crate::aircraft::Hornet,
+        state: &crate::flight::State,
+        visible: bool,
+        camera: &crate::terrain::Camera,
+    ) {
+        if visible {
+            self.sim.aircraft(
+                &self.device,
+                &self.queue,
+                hornet,
+                &hornet.vertices(state, camera),
+            );
+        } else {
+            self.sim.hide_aircraft();
+        }
+    }
     pub fn set_world(&mut self, world: &crate::terrain::World) {
         self.sim = crate::sim_renderer::SimRenderer::new(
             &self.device,
@@ -173,9 +191,35 @@ impl Renderer {
         path: &std::path::Path,
         camera: &crate::terrain::Camera,
         world: &crate::terrain::World,
+        overlay: bool,
     ) -> AppResult<()> {
         use std::io::Write;
-        let (width, height) = (960u32, 720u32);
+        let [width, height] = if overlay {
+            self.flight_size()
+        } else {
+            [960, 720]
+        };
+        let pixels = self.scene_pixels(camera, world, width, height, overlay)?;
+        let mut file = std::fs::File::create(path)?;
+        write!(file, "P6\n{width} {height}\n255\n")?;
+        for p in pixels.chunks_exact(4) {
+            file.write_all(&p[..3])?;
+        }
+        println!("Scene capture: {}", path.display());
+        Ok(())
+    }
+    pub fn scene_pixels(
+        &mut self,
+        camera: &crate::terrain::Camera,
+        world: &crate::terrain::World,
+        width: u32,
+        height: u32,
+        overlay: bool,
+    ) -> AppResult<Vec<u8>> {
+        if width == 0 || height == 0 || width > 1920 || height > 1080 {
+            return Err("capture dimensions outside bounds".into());
+        }
+
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Terrain validation capture"),
             size: wgpu::Extent3d {
@@ -201,6 +245,24 @@ impl Renderer {
             camera,
             world,
         );
+        if overlay {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Flight UI capture"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
         let stride = (width * 4).div_ceil(256) * 256;
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Terrain capture readback"),
@@ -240,25 +302,72 @@ impl Renderer {
         })?;
         rx.recv()??;
         let data = buffer.slice(..).get_mapped_range();
-        let mut file = std::fs::File::create(path)?;
-        write!(file, "P6\n{width} {height}\n255\n")?;
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
         let bgra = matches!(
             self.config.format,
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
         );
         for row in data.chunks_exact(stride as usize) {
             for pixel in row[..width as usize * 4].chunks_exact(4) {
-                file.write_all(&if bgra {
-                    [pixel[2], pixel[1], pixel[0]]
+                pixels.extend_from_slice(&if bgra {
+                    [pixel[2], pixel[1], pixel[0], 255]
                 } else {
-                    [pixel[0], pixel[1], pixel[2]]
-                })?;
+                    [pixel[0], pixel[1], pixel[2], 255]
+                });
             }
         }
         drop(data);
         buffer.unmap();
-        println!("Terrain capture: {}", path.display());
-        Ok(())
+        Ok(pixels)
+    }
+    pub fn flight_size(&self) -> [u32; 2] {
+        let s = self.window.inner_size();
+        let scale = (1920. / s.width.max(1) as f64)
+            .min(1080. / s.height.max(1) as f64)
+            .min(1.);
+        [
+            (s.width as f64 * scale).round().max(1.) as u32,
+            (s.height as f64 * scale).round().max(1.) as u32,
+        ]
+    }
+    fn canvas_texture(&mut self, size: [u32; 2]) {
+        if self.texture.width() == size[0] && self.texture.height() == size[1] {
+            return;
+        }
+        self.texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Responsive UI"),
+            size: wgpu::Extent3d {
+                width: size[0],
+                height: size[1],
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = self.texture.create_view(&Default::default());
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        self.bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Responsive UI"),
+            layout: &self.pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
     }
     pub fn viewport(&self) -> Viewport {
         let s = self.window.inner_size();
@@ -277,6 +386,7 @@ impl Renderer {
         &mut self,
         pixels: &[u8],
         scene: Option<(&crate::terrain::Camera, &crate::terrain::World)>,
+        flight_size: Option<[u32; 2]>,
     ) -> AppResult<bool> {
         let s = self.window.inner_size();
         if s.width == 0 || s.height == 0 {
@@ -294,6 +404,8 @@ impl Renderer {
             }
             Err(error) => return Err(error.into()),
         };
+        let size = flight_size.unwrap_or([WIDTH as u32, HEIGHT as u32]);
+        self.canvas_texture(size);
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,
@@ -304,12 +416,12 @@ impl Renderer {
             pixels,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(WIDTH as u32 * 4),
-                rows_per_image: Some(HEIGHT as u32),
+                bytes_per_row: Some(size[0] * 4),
+                rows_per_image: Some(size[1]),
             },
             wgpu::Extent3d {
-                width: WIDTH as u32,
-                height: HEIGHT as u32,
+                width: size[0],
+                height: size[1],
                 depth_or_array_layers: 1,
             },
         );
@@ -344,8 +456,10 @@ impl Renderer {
                 })],
                 ..Default::default()
             });
-            let v = self.viewport();
-            pass.set_viewport(v.x, v.y, v.width, v.height, 0.0, 1.0);
+            if flight_size.is_none() {
+                let v = self.viewport();
+                pass.set_viewport(v.x, v.y, v.width, v.height, 0., 1.);
+            }
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.draw(0..3, 0..1);

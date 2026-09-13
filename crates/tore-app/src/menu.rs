@@ -20,7 +20,7 @@ pub enum Action {
     Hover,
     Click,
     QuickMission,
-    Viewer,
+    FreeFlight,
     Theater(usize),
     Back,
     Exit,
@@ -299,10 +299,10 @@ impl State {
 }
 
 pub(crate) struct Sprite {
-    width: usize,
-    height: usize,
+    pub(crate) width: usize,
+    pub(crate) height: usize,
     pub(crate) rgba: Vec<u8>,
-    glyphs: Vec<[usize; 3]>,
+    pub(crate) glyphs: Vec<[usize; 3]>,
 }
 pub struct Menu {
     pub state: State,
@@ -535,6 +535,9 @@ impl Canvas<'_> {
                 let src = ((yy as usize * s.height / h as usize) * s.width
                     + xx as usize * s.width / w as usize)
                     * 4;
+                if s.rgba[src + 3] == 0 {
+                    continue;
+                }
                 self.rect(
                     (x + xx, y + yy, 1, 1),
                     s.rgba[src..src + 4].try_into().unwrap(),

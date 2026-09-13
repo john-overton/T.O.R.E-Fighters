@@ -96,3 +96,110 @@ pub fn activity_buttons(data: &[u8]) -> Result<Vec<Button>> {
     }
     Ok(buttons)
 }
+
+/// Inert FA menu nodes: sibling/child RVAs, fixed header, inline text.
+/// Top-level and anonymous submenu containers have a 24-byte header;
+/// selectable rows have an 18-byte header followed by the 0x1e marker.
+#[derive(Clone, Debug)]
+pub struct MenuNode {
+    pub label: String,
+    pub shortcut: String,
+    pub children: Vec<MenuNode>,
+}
+pub fn flight_menu(data: &[u8]) -> Result<Vec<MenuNode>> {
+    let (code, base) = crate::module::code(data)?;
+    fn nodes(
+        code: &[u8],
+        base: usize,
+        mut at: usize,
+        depth: usize,
+        seen: &mut std::collections::BTreeSet<usize>,
+    ) -> Result<Vec<MenuNode>> {
+        if depth > 8 {
+            return Err(invalid("menu nesting limit"));
+        }
+        let mut result = Vec::new();
+        loop {
+            if seen.len() >= 256 || !seen.insert(at) {
+                return Err(invalid("cyclic/oversize menu"));
+            }
+            let header = slice(code, at, 24)?;
+            let next = u32_at(header, 0)?;
+            let child = u32_at(header, 4)?;
+            let start = at
+                + if depth == 0 || header[18] == 0 {
+                    24
+                } else {
+                    19
+                };
+            if depth > 0 && header[18] != 0 && header[18] != 0x1e {
+                return Err(invalid("unreviewed menu row"));
+            }
+            let tail = code
+                .get(start..)
+                .ok_or_else(|| invalid("menu label outside CODE"))?;
+            let end = tail
+                .iter()
+                .take(161)
+                .position(|b| *b == 0)
+                .ok_or_else(|| invalid("unterminated menu label"))?;
+            if !tail[..end]
+                .iter()
+                .all(|b| (32..=127).contains(b) || [1, 0x1d].contains(b))
+            {
+                return Err(invalid("unsupported menu text"));
+            }
+            let raw =
+                String::from_utf8(tail[..end].to_vec()).map_err(|_| invalid("menu encoding"))?;
+            let (label, shortcut) = raw.split_once('\x01').unwrap_or((&raw, ""));
+            let children = if child == 0 {
+                vec![]
+            } else {
+                nodes(
+                    code,
+                    base,
+                    child
+                        .checked_sub(base)
+                        .ok_or_else(|| invalid("menu child RVA"))?,
+                    depth + 1,
+                    seen,
+                )?
+            };
+            if label.is_empty() {
+                result.extend(children);
+            } else {
+                result.push(MenuNode {
+                    label: label.replace('\x1d', "->"),
+                    shortcut: shortcut.replace('\x7f', "").trim().into(),
+                    children,
+                });
+            }
+            if next == 0 {
+                break;
+            }
+            at = next
+                .checked_sub(base)
+                .ok_or_else(|| invalid("menu sibling RVA"))?;
+        }
+        Ok(result)
+    }
+    nodes(code, base, 0, 0, &mut Default::default())
+}
+#[cfg(test)]
+mod menu_tests {
+    use super::*;
+    #[test]
+    fn menu_links_are_bounded_and_cycles_rejected() {
+        let mut c = vec![0; 60];
+        c[4..8].copy_from_slice(&4122u32.to_le_bytes());
+        c[24] = b'?';
+        c[44] = 0x1e;
+        c[45..57].copy_from_slice(b"End\x01Ctrl-Q\0\0");
+        let tree = flight_menu(&crate::module::fixture(&c)).unwrap();
+        assert_eq!(tree[0].children[0].shortcut, "Ctrl-Q");
+        c[26..30].copy_from_slice(&4122u32.to_le_bytes());
+        assert!(flight_menu(&crate::module::fixture(&c)).is_err());
+        c[26..30].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(flight_menu(&crate::module::fixture(&c)).is_err());
+    }
+}
