@@ -2,6 +2,8 @@
 
 T.O.R.E-Fighters in the Repo - Tasteful Opinionated Reverse Engineered
 
+Development baseline: see [DEVELOPMENT.md](DEVELOPMENT.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [recorded validation](baselines/environment.md). The Rust shell and build checks are established; M0 remains in progress. The next game-facing focus is M1a menus.
+
 This is the sequencing document for the ground-up rebuild in Rust.  The existing TypeScript repo /USNF-ATF is the guide, not the gospel: its format docs, decoders, recovered geometry, audio recovery, and baselines are the reference material.  Its engine is not being ported.
 
 ## Principles
@@ -11,7 +13,7 @@ This is the sequencing document for the ground-up rebuild in Rust.  The existing
 3. **Hand-rolled where it counts.**  External dependencies are kept to a minimum.  Formats, synth, terrain, and sim are ours.
 4. **Importer grows with the game.**  There is no "import everything" phase.  Each step decodes exactly the formats the next playable piece needs.  Breadth is tracked in a coverage table, not a milestone.
 5. **Cross-platform from day one.**  Linux, Windows, and macOS build and run at every milestone.  No platform is "deferred" this time.
-6. **Baselines are recorded, not remembered.**  Every milestone writes its measurements and acceptance evidence to `Docs/baselines/`.
+6. **Baselines are recorded, not remembered.**  Every milestone writes its measurements and acceptance evidence to `docs/baselines/`.
 7. **Deterministic and headless from the start.**  Massive battles and live campaigns are the reason for the rewrite.  The sim runs without a renderer and produces identical results from identical inputs from M1 onward.  This is a constraint, not a feature.
 
 ## What "1:1" means
@@ -40,7 +42,7 @@ Open decision (see bottom): whether the retail AI VM is reimplemented from the r
 Work:
 - Inventory the TS repo and mark every artifact as *spec* (format docs, byte layouts, recovered DLG geometry, MUS scripts, PT field maps, baselines) or *implementation* (engine code, React shell, Three.js render).  Spec carries forward.  Implementation is reference only.
 - Inventory the full Fighters Anthology disc layout: USNF '97, ATF Gold, NATO Fighters, Marine Fighters, and the Pro Mission Creator.  Produce a format-by-title census.
-- Write the 1:1 definition above into `Docs/` and get it settled.
+- Write the 1:1 definition above into `docs/` and get it settled.
 - Decide the AI VM question.
 - Set up the Rust workspace, three-platform build, and the retail signature scan.
 
@@ -204,7 +206,7 @@ Work:
 
 ## Importer coverage table
 
-Maintained in `Docs/formats/coverage.md` and updated every milestone.  Rows are formats.  Columns are titles.  Cells are: not started, partial, decoded, validated in game.
+Maintained in `docs/formats/coverage.md` and updated every milestone.  Rows are formats.  Columns are titles.  Cells are: not started, partial, decoded, validated in game.
 
 Formats: ESA, LIB, DCL, PAL, PIC, FNT, DLG, MNU, LAY, XMI, MUS, 5K, 11K, T2, PT, SH, OT, JT, NT, HUD, M, MT, CB8, VDO, FBC, INF, campaign and save structures, Pro Mission Creator.
 

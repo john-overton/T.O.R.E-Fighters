@@ -1,0 +1,47 @@
+name: Rust baseline
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux windowing libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxrandr-dev
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: rustup show
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Build
+        run: cargo build --workspace --locked
+      - name: Test asset guard
+        run: python -m unittest discover -s tools -p "test_*.py"
+      - name: Check source assets
+        run: python tools/check_assets.py
+      - name: Check executable assets
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            python tools/check_assets.py target/debug/tore-app.exe
+          else
+            python tools/check_assets.py target/debug/tore-app
+          fi
