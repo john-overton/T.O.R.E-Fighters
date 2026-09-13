@@ -2,7 +2,7 @@
 
 T.O.R.E-Fighters in the Repo - Tasteful Opinionated Reverse Engineered
 
-Development baseline: see [DEVELOPMENT.md](DEVELOPMENT.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [recorded validation](baselines/environment.md). The Rust shell and build checks are established; M0 remains in progress. The next game-facing focus is M1a menus.
+Development baseline: see [DEVELOPMENT.md](DEVELOPMENT.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [recorded validation](baselines/environment.md). The first M1a [main-menu slice](baselines/main-menu.md) now imports original menu assets and runs natively. M0 research and the remaining M1a screens/audio work remain in progress.
 
 This is the sequencing document for the ground-up rebuild in Rust.  The existing TypeScript repo /USNF-ATF is the guide, not the gospel: its format docs, decoders, recovered geometry, audio recovery, and baselines are the reference material.  Its engine is not being ported.
 

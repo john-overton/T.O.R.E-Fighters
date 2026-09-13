@@ -2,7 +2,7 @@
 
 ## Baseline
 
-The initial host is an Apple Silicon MacBook Air M3 running macOS. Build natively as `aarch64-apple-darwin`; Rosetta is unnecessary. The baseline needs Rust, a native C linker, Git, and Python 3 for the asset guard. It needs no Node/Bun, retail media, external synth, or Vulkan SDK on macOS.
+The initial host is an Apple Silicon MacBook Air M3 running macOS. Build natively as `aarch64-apple-darwin`; Rosetta is unnecessary. Development needs Rust, a native C linker, Git, and Python 3 for research/check tools. Building and unit tests need no retail media. Running the menu needs imported Fighters Anthology resources. There is no Node/Bun runtime, external synth, or Vulkan SDK requirement on macOS.
 
 Rust **1.91.1** is intentionally pinned to match the compiler already present on the initial host. It is a reproducible starting version, not a claim to be the newest release. `rust-toolchain.toml` selects the minimal profile plus rustfmt and Clippy; `Cargo.lock` fixes resolved dependencies. Upgrade both deliberately and validate all three platforms.
 
@@ -43,7 +43,19 @@ cargo build --workspace --locked
 cargo run --locked -p tore-app
 ```
 
-Expect a 960 × 720 logical-pixel dark window and a terminal message such as `Renderer: Apple M3 (Metal, IntegratedGpu)`. There is no menu art yet. Resize the window; close it or press Escape to exit.
+Expect a 960 × 720 logical-pixel window showing Choose Activity and a terminal message such as `Renderer: Apple M3 (Metal, IntegratedGpu)`. The original 640 × 480 canvas scales proportionally, with letterboxing in wider windows. Close the window or use `? → Exit to Desktop`; Escape dismisses menus. On macOS, Command-Q also quits.
+
+First launch automatically imports `gameassets/fighters-anthology/` if no valid cache exists. Use `--import <directory>` to refresh or choose other media. `--import-only` imports and exits without opening a window/audio device. Required archives: `FA_1.LIB` and `FA_2.LIB`; optional `FA_4B.LIB` supplies the music preview. Missing required media produces an actionable terminal error; there is no file-picker UI yet.
+
+Cache locations:
+
+| Platform | Directory |
+| --- | --- |
+| macOS | `~/Library/Application Support/T.O.R.E-Fighters/` |
+| Linux | `$XDG_DATA_HOME/T.O.R.E-Fighters/`, falling back to `~/.local/share/T.O.R.E-Fighters/` |
+| Windows | `%APPDATA%\T.O.R.E-Fighters\` |
+
+`TORE_DATA_DIR` overrides this directory for isolated checks, e.g. `TORE_DATA_DIR=.local/test-profile cargo run --locked -p tore-app -- --import gameassets/fighters-anthology --import-only`. Each import creates a versioned `menu-*.pack`; the latest valid pack is loaded, with fallback to earlier valid packs if a write was interrupted. `import-report.txt` records resource names and offsets. Older generations are retained; cache cleanup is manual for now. Imported resources never go into the executable.
 
 ## Linux and Windows
 
@@ -51,7 +63,7 @@ Linux: install rustup and a native toolchain. On Ubuntu 24.04:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y build-essential pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxrandr-dev python3
+sudo apt-get install -y build-essential pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxrandr-dev libasound2-dev python3
 ```
 
 Running the app also requires a graphical session and a working Vulkan or OpenGL/EGL driver. CI builds and tests without creating a window.
@@ -72,7 +84,7 @@ python3 tools/check_assets.py
 python3 tools/check_assets.py target/debug/tore-app
 ```
 
-On Windows, the executable is `target/debug/tore-app.exe`. There are no Rust unit tests yet; `cargo test` currently validates compilation of the test target. Python tests exercise the data guard with synthetic inputs.
+On Windows, the executable is `target/debug/tore-app.exe`. Rust tests cover malformed formats, decompression, menu hit testing and interaction, PCM resampling, and letterboxing using synthetic inputs. Python tests exercise the data guard. None requires a display, audio device, or retail files.
 
 With a working desktop session, also run:
 
@@ -80,19 +92,32 @@ With a working desktop session, also run:
 cargo run --locked -p tore-app -- --smoke-test
 ```
 
-This uses a real window and GPU, prints the renderer, presents one frame, and exits. It is not a headless simulation test. Normal mode waits for window events instead of rendering continuously.
+This uses the imported menu, a real window and GPU, prints the renderer, presents one frame without audio, and exits. It is not a headless simulation test. Normal mode waits while idle and schedules frames for short hover transitions and placeholder messages.
+
+`--no-audio` silences a session. Normal playback uses the system's default output device, original PCM effects, and a quiet looping `AIR003.11K` preview when available. Device initialization failure is reported and the menu continues silently. M toggles music; `Pref` exposes music/effect toggles. Preferences are session-only.
+
+## Explore media and capture previews
+
+```sh
+python3 tools/explore_assets.py
+mkdir -p .local/exploration
+cargo run --locked -p tore-app -- --snapshot .local/exploration/menu.ppm
+cargo run --locked -p tore-app -- --snapshot .local/exploration/pref.ppm --snapshot-state pref
+```
+
+The inventory records archive SHA-256 hashes, entry offsets, compression headers, and format counts without extracting everything. Snapshots render the native CPU menu canvas without a GPU/audio device; they are not window screenshots. States: `normal`, `hover`, `pressed`, `help`, `pref`, `multi`. On macOS, convert for viewing with `sips -s format png .local/exploration/menu.ppm --out .local/exploration/menu.png`. Keep all resulting retail derivatives ignored.
 
 ## Data guard
 
-`tools/check_assets.py` scans tracked and non-ignored untracked files. It rejects Git-visible local media/reference directories, common retail asset extensions, binary EALIB markers, and recognizable PIC headers. Text documentation may name formats. Pass explicit files/directories to inspect artifacts, including ignored outputs.
+`tools/check_assets.py` scans tracked and non-ignored untracked files. It rejects Git-visible local media/reference directories, retail asset/cache extensions, plausible embedded EALIB archives, and recognizable standalone or embedded PIC headers. A format-name constant in the decoder is allowed; a plausible archive directory/sentinel is rejected. Pass explicit files/directories to inspect artifacts, including ignored outputs.
 
-This is an initial guard, not proof that an artifact contains no retail derivatives. PIC has a structured header rather than ASCII magic. The check recognizes standalone PIC headers and embedded EALIB markers; it does not decode compressed packages, detect embedded PIC at arbitrary offsets, or identify converted art/audio. Extend it as importers and packaging arrive. Run it against exact release contents before shipping; a debug executable check alone is not a release audit.
+This is an initial guard, not proof that an artifact contains no retail derivatives. PIC has a structured header rather than ASCII magic. The guard does not decode compressed packages or identify converted art/audio. Extend it as packaging arrives. Run it against exact release contents before shipping; a debug executable check alone is not a release audit.
 
 ## Troubleshooting
 
 - Wrong Rust version: source `~/.cargo/env`, check `command -v cargo`, and run `rustup show` from this repository. Homebrew Cargo does not honor rustup overrides by itself.
 - Linker/SDK error: check `xcode-select -p` and complete any pending Xcode first-launch setup.
 - No graphics adapter or display: run from a logged-in desktop session with working drivers. Compilation and tests do not require a window; the smoke test does.
-- Missing reference/media folders: the shell still runs. See [REFERENCES.md](REFERENCES.md) before importer work.
+- Missing reference folder: the Rust app does not need it. Missing media: an existing valid cache still runs; otherwise import your own media. See [REFERENCES.md](REFERENCES.md).
 
 An editor with rust-analyzer is useful but optional. No global editor configuration is required.

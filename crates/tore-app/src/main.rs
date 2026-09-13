@@ -1,127 +1,58 @@
-use std::{error::Error, sync::Arc};
+mod assets;
+mod audio;
+mod menu;
+mod renderer;
+
+use assets::Assets;
+use menu::{Action, Menu};
+use renderer::Renderer;
+use std::{
+    error::Error,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{ElementState, WindowEvent},
+    event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{Key, NamedKey},
-    window::{Window, WindowId},
+    keyboard::{Key, ModifiersState},
+    window::{CursorIcon, Window, WindowId},
 };
-
 type AppResult<T> = Result<T, Box<dyn Error>>;
-
-struct Renderer {
-    window: Arc<Window>,
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-}
-
-impl Renderer {
-    async fn new(window: Arc<Window>) -> AppResult<Self> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-        let surface = instance.create_surface(window.clone())?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
-            .await?;
-        let info = adapter.get_info();
-        println!(
-            "Renderer: {} ({:?}, {:?})",
-            info.name, info.backend, info.device_type
-        );
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default())
-            .await?;
-        let size = window.inner_size();
-        let config = surface
-            .get_default_config(&adapter, size.width.max(1), size.height.max(1))
-            .ok_or("The display surface has no supported configuration")?;
-        surface.configure(&device, &config);
-        Ok(Self {
-            window,
-            surface,
-            device,
-            queue,
-            config,
-        })
-    }
-
-    fn resize(&mut self) {
-        let size = self.window.inner_size();
-        if size.width > 0 && size.height > 0 {
-            self.config.width = size.width;
-            self.config.height = size.height;
-            self.surface.configure(&self.device, &self.config);
-            self.window.request_redraw();
-        }
-    }
-
-    fn draw(&mut self) -> AppResult<bool> {
-        let size = self.window.inner_size();
-        if size.width == 0 || size.height == 0 {
-            return Ok(false);
-        }
-        let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                self.resize();
-                return Ok(false);
-            }
-            Err(wgpu::SurfaceError::Timeout | wgpu::SurfaceError::Other) => {
-                self.window.request_redraw();
-                return Ok(false);
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let view = frame.texture.create_view(&Default::default());
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Baseline shell"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.025,
-                            g: 0.04,
-                            b: 0.065,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-        }
-        self.queue.submit([encoder.finish()]);
-        self.window.pre_present_notify();
-        frame.present();
-        Ok(true)
-    }
-}
-
-#[derive(Default)]
 struct App {
+    menu: Menu,
+    audio: Option<audio::Audio>,
     renderer: Option<Renderer>,
+    modifiers: ModifiersState,
     smoke_test: bool,
-    smoke_complete: bool,
+    finished: bool,
+    next_frame: Option<Instant>,
     error: Option<Box<dyn Error>>,
 }
-
 impl App {
-    fn fail(&mut self, event_loop: &ActiveEventLoop, error: Box<dyn Error>) {
-        self.error = Some(error);
-        event_loop.exit();
+    fn action(&mut self, event_loop: &ActiveEventLoop, action: Action) {
+        if action == Action::Exit {
+            self.finished = true;
+            event_loop.exit();
+            return;
+        }
+        if let Some(audio) = &self.audio {
+            audio.action(action);
+        }
+        if let Some(renderer) = &self.renderer {
+            renderer
+                .window
+                .set_cursor(if self.menu.state.hover.is_some() {
+                    CursorIcon::Pointer
+                } else {
+                    CursorIcon::Default
+                });
+            renderer.window.request_redraw();
+        }
     }
 }
-
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.renderer.is_some() {
@@ -131,8 +62,9 @@ impl ApplicationHandler for App {
             let window = Arc::new(
                 event_loop.create_window(
                     Window::default_attributes()
-                        .with_title("T.O.R.E-Fighters — Development shell")
-                        .with_inner_size(LogicalSize::new(960.0, 720.0)),
+                        .with_title("T.O.R.E-Fighters — Choose Activity")
+                        .with_inner_size(LogicalSize::new(960.0, 720.0))
+                        .with_min_inner_size(LogicalSize::new(640.0, 480.0)),
                 )?,
             );
             pollster::block_on(Renderer::new(window))
@@ -142,12 +74,14 @@ impl ApplicationHandler for App {
                 renderer.window.request_redraw();
                 self.renderer = Some(renderer);
             }
-            Err(error) => self.fail(event_loop, error),
+            Err(error) => {
+                self.error = Some(error);
+                event_loop.exit();
+            }
         }
     }
-
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        if self.smoke_complete {
+        if self.finished {
             return;
         }
         let Some(renderer) = self.renderer.as_mut() else {
@@ -156,50 +90,177 @@ impl ApplicationHandler for App {
         if renderer.window.id() != id {
             return;
         }
-        match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::KeyboardInput { event, .. }
-                if event.state == ElementState::Pressed
-                    && event.logical_key == Key::Named(NamedKey::Escape) =>
-            {
-                event_loop.exit()
+        let action = match event {
+            WindowEvent::CloseRequested => Action::Exit,
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                renderer.resize();
+                self.menu.state.cancel();
+                Action::None
             }
-            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => renderer.resize(),
-            WindowEvent::RedrawRequested => match renderer.draw() {
-                Ok(true) if self.smoke_test => {
-                    self.smoke_complete = true;
-                    println!("Smoke test: presented one frame successfully");
-                    event_loop.exit();
+            WindowEvent::CursorMoved { position, .. } => self
+                .menu
+                .state
+                .pointer(renderer.viewport().point(position.x, position.y)),
+            WindowEvent::CursorLeft { .. } => self.menu.state.pointer(None),
+            WindowEvent::Focused(false) => {
+                self.menu.state.cancel();
+                Action::None
+            }
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => {
+                if state == ElementState::Pressed {
+                    self.menu.state.down();
+                    Action::None
+                } else {
+                    self.menu.state.up()
                 }
-                Ok(_) => {}
-                Err(error) => self.fail(event_loop, error),
-            },
-            _ => {}
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers.state();
+                Action::None
+            }
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed && !event.repeat =>
+            {
+                let name = match &event.logical_key {
+                    Key::Named(k) => format!("{k:?}"),
+                    Key::Character(c) => c.to_string(),
+                    _ => String::new(),
+                };
+                if (self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+                    || (self.modifiers.alt_key() && name == "F4")
+                {
+                    Action::Exit
+                } else {
+                    self.menu.state.key(
+                        if name == "Space" { " " } else { &name },
+                        self.modifiers.shift_key(),
+                    )
+                }
+            }
+            WindowEvent::RedrawRequested => {
+                let animating = self.menu.render();
+                match renderer.draw(&self.menu.pixels) {
+                    Ok(true) if self.smoke_test => {
+                        println!("Smoke test: main menu presented successfully");
+                        self.finished = true;
+                        event_loop.exit();
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        self.error = Some(error);
+                        event_loop.exit();
+                    }
+                }
+                self.next_frame = animating.then(|| Instant::now() + Duration::from_millis(16));
+                return;
+            }
+            _ => return,
+        };
+        self.action(event_loop, action);
+    }
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(next) = self.next_frame {
+            if Instant::now() >= next {
+                if let Some(renderer) = &self.renderer {
+                    renderer.window.request_redraw();
+                }
+                self.next_frame = None;
+                event_loop.set_control_flow(ControlFlow::Wait);
+            } else {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(next));
+            }
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
         }
     }
 }
-
 fn main() -> AppResult<()> {
-    let mut smoke_test = false;
-    for argument in std::env::args().skip(1) {
-        match argument.as_str() {
+    let mut args = std::env::args().skip(1);
+    let (mut import, mut snapshot) = (None, None);
+    let mut snapshot_state = String::from("normal");
+    let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--snapshot-state" => {
+                snapshot_state = args.next().ok_or("--snapshot-state needs a state name")?
+            }
+            "--import" => {
+                import = Some(PathBuf::from(
+                    args.next().ok_or("--import needs a media directory")?,
+                ))
+            }
+            "--snapshot" => {
+                snapshot = Some(PathBuf::from(
+                    args.next().ok_or("--snapshot needs a .ppm output path")?,
+                ))
+            }
             "--smoke-test" => smoke_test = true,
+            "--no-audio" => no_audio = true,
+            "--import-only" => import_only = true,
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-app [--smoke-test]\n\n--smoke-test  Open a window, present one frame, then exit. Requires a display."
+                    "Usage: tore-app [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE]\n\nImports original menu assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--snapshot writes a headless 640x480 menu preview and exits.\n--snapshot-state: normal, hover, pressed, help, pref, multi.\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
             }
-            _ => return Err(format!("Unknown argument: {argument}").into()),
+            _ => return Err(format!("Unknown argument: {arg}").into()),
         }
     }
-    let event_loop = EventLoop::new()?;
-    event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App {
-        smoke_test,
-        ..Default::default()
+    if snapshot.is_none() && snapshot_state != "normal" {
+        return Err("--snapshot-state requires --snapshot".into());
+    }
+    let data = assets::data_directory()?;
+    let assets = if let Some(source) = import {
+        Assets::import(&source, &data)?
+    } else {
+        match Assets::load(&data) {
+            Ok(assets) => assets,
+            Err(error) => {
+                let local = PathBuf::from("gameassets/fighters-anthology");
+                if local.is_dir() {
+                    Assets::import(&local, &data)?
+                } else {
+                    return Err(format!("{error}\nImport your own Fighters Anthology media with --import <directory>.").into());
+                }
+            }
+        }
     };
-    event_loop.run_app(&mut app)?;
+    if import_only {
+        return Ok(());
+    }
+    let audio = if no_audio || smoke_test || snapshot.is_some() {
+        None
+    } else {
+        match audio::Audio::new(&assets.sounds) {
+            Ok(audio) => Some(audio),
+            Err(error) => {
+                eprintln!("Continuing without audio: {error}");
+                None
+            }
+        }
+    };
+    let mut menu = Menu::new(assets);
+    if let Some(path) = snapshot {
+        menu.preview_state(&snapshot_state)?;
+        menu.save_ppm(&path)?;
+        println!("Menu preview: {}", path.display());
+        return Ok(());
+    }
+    let mut app = App {
+        menu,
+        audio,
+        renderer: None,
+        modifiers: ModifiersState::empty(),
+        smoke_test,
+        finished: false,
+        next_frame: None,
+        error: None,
+    };
+    EventLoop::new()?.run_app(&mut app)?;
     match app.error {
         Some(error) => Err(error),
         None => Ok(()),

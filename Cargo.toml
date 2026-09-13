@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/tore-app"]
+members = ["crates/tore-app", "crates/tore-formats"]
 resolver = "3"
 
 [workspace.package]
@@ -9,4 +9,3 @@ publish = false
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
-

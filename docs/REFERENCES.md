@@ -1,5 +1,7 @@
 # Local reference material
 
+The first native exploration and selective import are now recorded in [menu extraction](formats/menu.md) and the [main-menu baseline](baselines/main-menu.md). The supplied photo is at ignored `gameassets/reference-photos/Main-Screen.jpeg`; the matching original background is `FA_1.LIB/CHOOSEV.PIC`. The TypeScript menu's custom controls must not be treated as the faithful UI specification.
+
 Both directories below are ignored, user-supplied inputs. Neither is required to compile the Rust shell, and neither should be copied into tracked source or bundled in releases.
 
 | Location | Use |
