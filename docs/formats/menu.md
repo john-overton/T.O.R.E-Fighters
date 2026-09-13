@@ -7,6 +7,7 @@ This is the first native menu slice, researched against the user's local media o
 | Resource | Archive | Purpose |
 | --- | --- | --- |
 | `CHOOSEV.PIC` | `FA_1.LIB` | Exact aircraft/background variant in the user's photo; 640 × 480, embedded 256-color palette, title, logo, blank menu bar, panels, screws and Jane's plaque |
+| `CHOOSEAC.PIC`, `CHOOSE3.PIC`, `CHOOSEU.PIC`, `CHOOSEM.PIC` | `FA_1.LIB` | Other original backgrounds; randomly selected on menu setup |
 | `ACTION0L/M/R.PIC` | `FA_1.LIB` | Original enabled green button caps/middle/shadow |
 | `ACTIOD0L/M/R.PIC` | `FA_1.LIB` | Original disabled gray button caps/middle/shadow |
 | `FONTACT.PIC` / `FONTACD.PIC` | `FA_1.LIB` | Enabled/disabled proportional button labels, each a 1064 × 12 strip with 256 glyph records |
@@ -14,14 +15,30 @@ This is the first native menu slice, researched against the user's local media o
 | `BODYFONT.PIC` | `FA_1.LIB` | Original small font used for temporary placeholder messages |
 | `CHOOSEAC.DLG` | `FA_2.LIB` | Original eight button labels and positions |
 | `MAINMENU.MNU`, `FMENUD.MNU` | `FA_2.LIB` | Imported for menu research; runtime submenu structure is still authored |
-| `&CLICK.11K`, `&BUTTON.11K`, `&TOGGLE1.5K` | `FA_2.LIB` | Hover, activation, and toggle sound cues; trigger mapping is reconstructed |
+| `&CLICK.11K`, `&BUTTON.11K`, `&TOGGLE1.5K` | `FA_2.LIB` | Recovered cue bank; activation uses BUTTON and toggles use TOGGLE1. CLICK is retained for research. Hover/focus is silent. |
 | `AIR003.11K` | `FA_4B.LIB` (optional) | Recorded PCM music preview; 278,585 samples at the inferred 11,025 Hz rate (~25.27 seconds) |
 
-There are 18 selected resources including optional music. All were decompressed by Rust and compared byte for byte against the reference Python decoders. Only these resources are imported. No photo is used as the rendered background; the app reconstructs the scene from retail resources.
+There are 22 selected resources including optional music. All were decompressed by Rust and compared byte for byte against the reference Python decoders. Only these resources are imported into the app cache. The separate [general extraction tool](../EXTRACTION.md) can unpack every resource for research. No photo is used as the rendered background; the app reconstructs the scene from retail resources.
 
 `CHOOSEAC.PIC` itself shows a stealth aircraft, not the supplied photo. Other alternatives found are `CHOOSE3` (Rafale), `CHOOSEM` (pilot/cockpit), and `CHOOSEU` (carrier deck). `CHOOSEV` matches the photo's aircraft pair. The embedded screen palette must also color the button/font sprites: using the flight `PALETTE.PAL` produces incorrect UI colors.
 
 ## Recovered layout
+
+### Background selection in the executable
+
+The menu setup routine at `FA.EXE` VA `0x4a08a0` requests a random value with upper bound five at `0x4a08f2..0x4a08f7` (`ECX=5`, call `0x4562f0`, which delegates to the generator at `0x4561d0`). The jump table at `0x4a0f24` selects these branches:
+
+| Choice | Branch VA | Background | Native bar X |
+| ---: | --- | --- | ---: |
+| 0 | `0x4a091e` | CHOOSEAC | 70 |
+| 1 | `0x4a0931` | CHOOSE3 | 185 |
+| 2 | `0x4a0947` | CHOOSEU | 76 |
+| 3 | `0x4a094e` | CHOOSEM | 76 |
+| 4 | `0x4a0955` | CHOOSEV | 76 |
+
+The app now chooses among all five on startup/menu construction, uses each background's embedded palette, and shifts top-bar rendering/hit regions to match. This is startup selection, not an invented timed slideshow; the original random sequence itself is not reproduced. `--background NAME` pins a variant for comparisons. Snapshots default to CHOOSEV unless explicitly overridden.
+
+### Action layout
 
 `CHOOSEAC.DLG` reports panel rectangle `(379, 80, 238, 361)`. Coordinates below are absolute, in the 640 × 480 canvas. Width includes the sprite's shadow area; the visible button face/hit area is ten pixels narrower.
 
@@ -43,7 +60,7 @@ These differ from the USNF/ATF records described in the older menu port. Runtime
 ## Formats and limits
 
 - **EALIB:** validates magic, directory bounds, monotonic offsets, flags, and terminal sentinel. Flag 0 reads stored content; flag 4 reads a size prefix and DCL stream. Lookup is case-insensitive, last duplicate wins. No resource paths are used for extraction.
-- **DCL:** raw literals (mode 0), dictionary bits 4–6, canonical length/distance codes, overlapping back-references, explicit terminator, and exact output size. A 16 MiB output cap prevents oversized allocations. All 7,372 compressed entries in the inspected archive directories advertise `00 06`; only the selected menu resources have been decompressed/validated by the runtime in this pass. Coded-literal mode 1 is rejected. See [third-party notices](../../THIRD_PARTY_NOTICES.md).
+- **DCL:** raw literals (mode 0), dictionary bits 4–6, canonical length/distance codes, overlapping back-references, explicit terminator, and exact output size. The menu uses a 16 MiB output cap; the general extractor has a configurable cap. All 7,372 compressed entries advertise `00 06` and were successfully decompressed by the general extractor. The 22 menu resources also matched independent reference output byte for byte. Coded-literal mode 1 is rejected. See [third-party notices](../../THIRD_PARTY_NOTICES.md).
 - **PIC:** bounded raw rasters and span sprites, 6-bit palette expansion, row-offset checks, span terminator/coverage checks, and 256 glyph records. Menu images are capped at 4,194,304 pixels. Font-strip index 255 is transparent; ordinary sprite transparency comes from span coverage, not a universal palette key.
 - **DLG:** narrow CHOOSEAC reader. Parses PE/PL sections and relocation records as data, identifies plausible relocated label fields, and validates eight in-bounds button records. This is not a general widget/thunk-class decoder. It never executes x86 resource code.
 - **MNU:** reference decoder recovers some labels, including `Exit to Windows` with `Alt-F4` in `MAINMENU.MNU` and `Pref`, `Graphics...`, `Sound...`, `Multi` in `FMENUD.MNU`. Tree flags, exact activity-menu composition, and native dropdown drawing are unresolved.

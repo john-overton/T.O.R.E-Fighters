@@ -1908,6 +1908,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tore-extract"
+version = "0.1.0"
+dependencies = [
+ "tore-formats",
+]
+
+[[package]]
 name = "tore-formats"
 version = "0.1.0"
 

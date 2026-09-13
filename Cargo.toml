@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/tore-app", "crates/tore-formats"]
+members = ["crates/tore-app", "crates/tore-formats", "crates/tore-extract"]
 resolver = "3"
 
 [workspace.package]

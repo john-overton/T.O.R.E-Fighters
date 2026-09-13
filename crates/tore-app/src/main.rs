@@ -182,9 +182,13 @@ fn main() -> AppResult<()> {
     let mut args = std::env::args().skip(1);
     let (mut import, mut snapshot) = (None, None);
     let mut snapshot_state = String::from("normal");
+    let mut background = None;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--background" => {
+                background = Some(args.next().ok_or("--background needs an asset name")?)
+            }
             "--snapshot-state" => {
                 snapshot_state = args.next().ok_or("--snapshot-state needs a state name")?
             }
@@ -203,7 +207,7 @@ fn main() -> AppResult<()> {
             "--import-only" => import_only = true,
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-app [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE]\n\nImports original menu assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--snapshot writes a headless 640x480 menu preview and exits.\n--snapshot-state: normal, hover, pressed, help, pref, multi.\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+                    "Usage: tore-app [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menu assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--snapshot writes a headless 640x480 menu preview and exits.\n--snapshot-state: normal, hover, pressed, help, pref, multi.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
             }
@@ -243,7 +247,11 @@ fn main() -> AppResult<()> {
             }
         }
     };
-    let mut menu = Menu::new(assets);
+    // Saved previews stay reproducible; normal launches randomly select all five.
+    if snapshot.is_some() && background.is_none() {
+        background = Some("CHOOSEV".into());
+    }
+    let mut menu = Menu::new(assets, background.as_deref())?;
     if let Some(path) = snapshot {
         menu.preview_state(&snapshot_state)?;
         menu.save_ppm(&path)?;

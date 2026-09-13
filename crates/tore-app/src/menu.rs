@@ -1,6 +1,7 @@
 use crate::assets::Assets;
 use std::{
     collections::BTreeMap,
+    hash::BuildHasher,
     time::{Duration, Instant},
 };
 use tore_formats::Button;
@@ -34,6 +35,7 @@ pub struct State {
     keyboard: bool,
     glow: Vec<f32>,
     last_frame: Instant,
+    bar_offset: i32,
 }
 fn enabled(index: usize) -> bool {
     !matches!(index, 3 | 6)
@@ -60,6 +62,7 @@ impl State {
             keyboard: false,
             glow: vec![0.0; count],
             last_frame: Instant::now(),
+            bar_offset: 0,
         }
     }
     pub fn items(&self, bar: usize) -> Vec<String> {
@@ -85,16 +88,20 @@ impl State {
     }
     fn popup_rect(&self, bar: usize) -> (i32, i32, i32, i32) {
         (
-            BARS[bar].0,
+            self.bar_rect(bar).0,
             59,
             if bar == 0 { 240 } else { 190 },
             self.items(bar).len() as i32 * 20 + 8,
         )
     }
+    fn bar_rect(&self, bar: usize) -> (i32, i32, i32, i32) {
+        let (x, y, w, h) = BARS[bar];
+        (x + self.bar_offset, y, w, h)
+    }
     pub fn hit(&self, point: Option<(f64, f64)>) -> Option<Target> {
         let p = point?;
-        for (i, rect) in BARS.iter().enumerate() {
-            if in_rect(p, *rect) {
+        for i in 0..BARS.len() {
+            if in_rect(p, self.bar_rect(i)) {
                 return Some(Target::Bar(i));
             }
         }
@@ -296,6 +303,7 @@ pub struct Menu {
     pub state: State,
     sprites: BTreeMap<String, Sprite>,
     pub pixels: Vec<u8>,
+    background: String,
 }
 impl Menu {
     pub fn preview_state(&mut self, name: &str) -> crate::AppResult<()> {
@@ -325,8 +333,45 @@ impl Menu {
         }
         Ok(())
     }
-    pub fn new(assets: Assets) -> Self {
-        let state = State::new(assets.buttons, assets.sounds.contains_key("AIR003.11K"));
+    pub fn new(mut assets: Assets, selected: Option<&str>) -> crate::AppResult<Self> {
+        let choices = [
+            "CHOOSEAC.PIC",
+            "CHOOSE3.PIC",
+            "CHOOSEU.PIC",
+            "CHOOSEM.PIC",
+            "CHOOSEV.PIC",
+        ];
+        let background = if let Some(name) = selected {
+            let name = name.to_ascii_uppercase();
+            let name = if name.ends_with(".PIC") {
+                name
+            } else {
+                format!("{name}.PIC")
+            };
+            if !choices.contains(&name.as_str()) {
+                return Err(
+                    "background must be CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, or CHOOSEV".into(),
+                );
+            }
+            name
+        } else {
+            // Menu-only randomness; never shares state with the future deterministic sim.
+            let seed = std::collections::hash_map::RandomState::new().hash_one(());
+            choices[seed as usize % choices.len()].to_string()
+        };
+        assets.palette = assets.pics[&background]
+            .palette
+            .clone()
+            .try_into()
+            .map_err(|_| "invalid background palette")?;
+        let mut state = State::new(assets.buttons, assets.sounds.contains_key("AIR003.11K"));
+        // Native bar origins are 70, 185 and 76, respectively (FA.EXE 0x4a091a..64).
+        state.bar_offset = match background.as_str() {
+            "CHOOSEAC.PIC" => -6,
+            "CHOOSE3.PIC" => 109,
+            _ => 0,
+        };
+        println!("Main-menu background: {background}");
         let sprites = assets
             .pics
             .into_iter()
@@ -343,16 +388,17 @@ impl Menu {
                 )
             })
             .collect();
-        Self {
+        Ok(Self {
             state,
             sprites,
             pixels: vec![0; WIDTH * HEIGHT * 4],
-        }
+            background,
+        })
     }
     pub fn render(&mut self) -> bool {
         let active = self.state.animate();
         self.pixels
-            .copy_from_slice(&self.sprites["CHOOSEV.PIC"].rgba);
+            .copy_from_slice(&self.sprites[&self.background].rgba);
         let mut canvas = Canvas(&mut self.pixels);
         for (i, b) in self.state.buttons.iter().enumerate() {
             let pressed = self.state.pressed == Some(Target::Button(i))
@@ -389,7 +435,7 @@ impl Menu {
         }
         let menu_font = &self.sprites["MENUFONT.PIC"];
         for (i, label) in ["?", "Pref", "Multi"].iter().enumerate() {
-            let rect = BARS[i];
+            let rect = self.state.bar_rect(i);
             if self.state.open == Some(i) || self.state.highlighted(Target::Bar(i)) {
                 canvas.rect(rect, [190, 200, 215, 255]);
             }
@@ -500,6 +546,13 @@ impl Canvas<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shifted_background_bar_uses_matching_hit_regions() {
+        let mut s = state();
+        s.bar_offset = 109;
+        assert_eq!(s.hit(Some((85.0, 44.0))), None);
+        assert_eq!(s.hit(Some((194.0, 44.0))), Some(Target::Bar(0)));
+    }
     fn state() -> State {
         State::new(
             (0..8)

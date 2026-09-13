@@ -4,9 +4,9 @@ Status is for this **Rust rebuild**, not the reference project's decoders. The a
 
 | Format | Fighters Anthology | Scope/evidence |
 | --- | --- | --- |
-| LIB / EALIB | Partial | Five archives inventoried; selected resources from three archives imported |
-| DCL | Partial | Raw-literal mode; 18 selected menu resources match reference output; coded literals unimplemented |
-| PIC / embedded PAL | Partial | Background, six action pieces, four glyph strips rendered; malformed-input bounds checks |
+| LIB / EALIB | Decoded for supplied installation | All 7,520 unique resources from five archives extracted; no cross-title validation yet |
+| DCL | Partial | All 7,372 raw-literal entries extracted; 22 menu resources match reference output; coded literals unimplemented |
+| PIC / embedded PAL | Partial | Five backgrounds, six action pieces, four glyph strips rendered; malformed-input bounds checks |
 | Standalone PAL | Not started | Main menu uses its background's embedded palette |
 | DLG | Partial | CHOOSEAC rectangle and eight action labels/positions recovered at runtime |
 | MNU | Partial research only | Selected files extracted; labels inspected through reference decoder; runtime tree remains authored |

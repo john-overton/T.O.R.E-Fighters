@@ -9,6 +9,10 @@ use tore_formats::{Archive, Button, Pic};
 
 const ART: &[&str] = &[
     "CHOOSEV.PIC",
+    "CHOOSEAC.PIC",
+    "CHOOSE3.PIC",
+    "CHOOSEU.PIC",
+    "CHOOSEM.PIC",
     "ACTION0L.PIC",
     "ACTION0M.PIC",
     "ACTION0R.PIC",
@@ -61,10 +65,7 @@ fn archive(root: &Path, name: &str) -> AppResult<Archive> {
                 .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(name))
         })
         .ok_or_else(|| format!("{}: missing {name}", root.display()))?;
-    if fs::metadata(&path)?.len() > 128 * 1024 * 1024 {
-        return Err("archive exceeds initial importer limit of 128 MiB".into());
-    }
-    Ok(Archive::parse(fs::read(path)?)?)
+    Ok(Archive::open(path)?)
 }
 impl Assets {
     fn decode(resources: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
@@ -75,10 +76,22 @@ impl Assets {
                 .ok_or_else(|| format!("menu cache missing {name}; re-import media"))?;
             pics.insert(name.to_string(), Pic::parse(bytes)?);
         }
-        let background = &pics["CHOOSEV.PIC"];
-        if background.width != 640 || background.height != 480 || background.palette.len() != 256 {
-            return Err("expected a 640x480 menu background with a full palette".into());
+        for name in [
+            "CHOOSEV.PIC",
+            "CHOOSEAC.PIC",
+            "CHOOSE3.PIC",
+            "CHOOSEU.PIC",
+            "CHOOSEM.PIC",
+        ] {
+            let background = &pics[name];
+            if background.width != 640
+                || background.height != 480
+                || background.palette.len() != 256
+            {
+                return Err("expected 640x480 menu backgrounds with full palettes".into());
+            }
         }
+        let background = &pics["CHOOSEV.PIC"];
         let palette = background
             .palette
             .clone()

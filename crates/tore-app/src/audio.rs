@@ -25,6 +25,14 @@ pub struct Audio {
     mixer: Arc<Mutex<Mixer>>,
     clips: BTreeMap<String, Arc<Clip>>,
 }
+fn cue(action: Action) -> Option<&'static str> {
+    match action {
+        Action::Click => Some("&BUTTON.11K"),
+        Action::Music(_) | Action::Effects(_) => Some("&TOGGLE1.5K"),
+        // Mouse hover and keyboard focus changes never play a sound.
+        _ => None,
+    }
+}
 impl Voice {
     fn next(&mut self, rate: f64, looping: bool) -> f32 {
         if self.position >= self.clip.samples.len() as f64 {
@@ -104,22 +112,19 @@ impl Audio {
         let Ok(mut mixer) = self.mixer.lock() else {
             return;
         };
-        let name = match action {
+        match action {
             Action::Music(enabled) => {
                 mixer.music_on = enabled;
-                Some("&TOGGLE1.5K")
             }
             Action::Effects(enabled) => {
                 mixer.effects_on = enabled;
                 if !enabled {
                     mixer.voices.clear();
                 }
-                Some("&TOGGLE1.5K")
             }
-            Action::Hover => Some("&CLICK.11K"),
-            Action::Click => Some("&BUTTON.11K"),
-            _ => None,
-        };
+            _ => {}
+        }
+        let name = cue(action);
         if mixer.effects_on
             && mixer.voices.len() < 8
             && let Some(clip) = name.and_then(|n| self.clips.get(n))
@@ -167,6 +172,12 @@ fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hover_is_silent_and_activation_has_one_cue() {
+        assert_eq!(cue(Action::Hover), None);
+        assert_eq!(cue(Action::None), None);
+        assert_eq!(cue(Action::Click), Some("&BUTTON.11K"));
+    }
     #[test]
     fn pcm_resampling_and_loop_boundaries() {
         let clip = Arc::new(Clip {

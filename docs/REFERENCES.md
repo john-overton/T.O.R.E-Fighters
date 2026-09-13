@@ -9,7 +9,7 @@ Both directories below are ignored, user-supplied inputs. Neither is required to
 | `gameassets/fighters-anthology/` | User's local Fighters Anthology installation/media |
 | `USNF-ATF/` | TypeScript/Three.js project, recovered specifications and comparison baselines |
 
-The initial media folder contains `FA_1.LIB`, `FA_2.LIB`, `FA_4B.LIB`, `FA_4D.LIB`, `swpatch.lib`, executables, and mission files. This is a presence check, not the full disc/title census required by M0.
+The media folder contains `FA_1.LIB`, `FA_2.LIB`, `FA_4B.LIB`, `FA_4D.LIB`, `swpatch.lib`, executables, and mission files. All five archives have now been inventoried and extracted with the [shared extraction script](EXTRACTION.md). This is an installation inventory, not the full disc/title census required by M0.
 
 Reference checkout observed at commit `2d818054ff51db9f3353d0548dbd0e469b275a1a`, with a clean working tree. If missing, clone from the repository root:
 

@@ -2,6 +2,8 @@
 
 ## Baseline
 
+Clone this repository and enter its root before running Cargo commands. Source code is under `crates/`, project documentation under `docs/`, and developer scripts under `tools/`. User-owned media belongs under ignored `gameassets/`; optional reference code under ignored `USNF-ATF/`; research output under ignored `.local/`. See [README](../README.md) for the short run workflow and [EXTRACTION](EXTRACTION.md) for the shared extraction script.
+
 The initial host is an Apple Silicon MacBook Air M3 running macOS. Build natively as `aarch64-apple-darwin`; Rosetta is unnecessary. Development needs Rust, a native C linker, Git, and Python 3 for research/check tools. Building and unit tests need no retail media. Running the menu needs imported Fighters Anthology resources. There is no Node/Bun runtime, external synth, or Vulkan SDK requirement on macOS.
 
 Rust **1.91.1** is intentionally pinned to match the compiler already present on the initial host. It is a reproducible starting version, not a claim to be the newest release. `rust-toolchain.toml` selects the minimal profile plus rustfmt and Clippy; `Cargo.lock` fixes resolved dependencies. Upgrade both deliberately and validate all three platforms.
@@ -45,6 +47,8 @@ cargo run --locked -p tore-app
 
 Expect a 960 × 720 logical-pixel window showing Choose Activity and a terminal message such as `Renderer: Apple M3 (Metal, IntegratedGpu)`. The original 640 × 480 canvas scales proportionally, with letterboxing in wider windows. Close the window or use `? → Exit to Desktop`; Escape dismisses menus. On macOS, Command-Q also quits.
 
+Startup chooses randomly among all five original backgrounds; it does not run a timed slideshow. Force a variant for comparison with `--background CHOOSEV` (also accepts CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM). The top bar moves to match each artwork's native origin. Hovering and keyboard focus are silent. An older single-background cache requires re-import; the local default media is automatically used if available.
+
 First launch automatically imports `gameassets/fighters-anthology/` if no valid cache exists. Use `--import <directory>` to refresh or choose other media. `--import-only` imports and exits without opening a window/audio device. Required archives: `FA_1.LIB` and `FA_2.LIB`; optional `FA_4B.LIB` supplies the music preview. Missing required media produces an actionable terminal error; there is no file-picker UI yet.
 
 Cache locations:
@@ -82,9 +86,10 @@ cargo build --workspace --locked
 python3 -m unittest discover -s tools -p 'test_*.py'
 python3 tools/check_assets.py
 python3 tools/check_assets.py target/debug/tore-app
+python3 tools/check_assets.py target/debug/tore-extract
 ```
 
-On Windows, the executable is `target/debug/tore-app.exe`. Rust tests cover malformed formats, decompression, menu hit testing and interaction, PCM resampling, and letterboxing using synthetic inputs. Python tests exercise the data guard. None requires a display, audio device, or retail files.
+On Windows, append `.exe` to both executable paths. Rust tests cover malformed formats, decompression, menu hit testing and interaction, PCM resampling, letterboxing, and extraction filesystem behavior using synthetic inputs. Python tests exercise the data guard. None requires a display, audio device, or retail files.
 
 With a working desktop session, also run:
 
@@ -105,7 +110,9 @@ cargo run --locked -p tore-app -- --snapshot .local/exploration/menu.ppm
 cargo run --locked -p tore-app -- --snapshot .local/exploration/pref.ppm --snapshot-state pref
 ```
 
-The inventory records archive SHA-256 hashes, entry offsets, compression headers, and format counts without extracting everything. Snapshots render the native CPU menu canvas without a GPU/audio device; they are not window screenshots. States: `normal`, `hover`, `pressed`, `help`, `pref`, `multi`. On macOS, convert for viewing with `sips -s format png .local/exploration/menu.ppm --out .local/exploration/menu.png`. Keep all resulting retail derivatives ignored.
+The inventory records archive SHA-256 hashes, entry offsets, compression headers, and format counts without extracting everything. Snapshots render the native CPU menu canvas without a GPU/audio device; they are not window screenshots. States: `normal`, `hover`, `pressed`, `help`, `pref`, `multi`. Snapshots default to CHOOSEV for repeatability; `--background` overrides it. On macOS, convert for viewing with `sips -s format png .local/exploration/menu.ppm --out .local/exploration/menu.png`. Keep all resulting retail derivatives ignored.
+
+For the general extractor, use `python3 tools/extract_assets.py --dry-run` followed by `python3 tools/extract_assets.py`. It runs the standalone Rust tool in release mode without the app's window/audio dependencies. See [EXTRACTION.md](EXTRACTION.md) for filters, alternate source directories, and reports.
 
 ## Data guard
 

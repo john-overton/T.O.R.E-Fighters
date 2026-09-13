@@ -4,7 +4,13 @@ mod dcl;
 mod pic;
 mod ui;
 pub use pic::Pic;
-use std::{collections::BTreeMap, io};
+use std::{
+    collections::BTreeMap,
+    fs::File,
+    io::{self, Read, Seek, SeekFrom},
+    path::Path,
+    sync::Mutex,
+};
 pub use ui::{Button, activity_buttons};
 
 pub type Result<T> = io::Result<T>;
@@ -35,20 +41,54 @@ pub struct Entry {
     pub size: usize,
 }
 pub struct Archive {
-    data: Vec<u8>,
+    source: Source,
     pub entries: BTreeMap<String, Entry>,
+}
+enum Source {
+    Memory(Vec<u8>),
+    File(Mutex<File>),
 }
 impl Archive {
     pub fn parse(data: Vec<u8>) -> Result<Self> {
-        if slice(&data, 0, 5)? != b"EALIB" {
+        let entries = Self::directory(&data, data.len())?;
+        Ok(Self {
+            source: Source::Memory(data),
+            entries,
+        })
+    }
+    /// Read just the directory; resource reads seek directly into the archive.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let mut file = File::open(path)?;
+        let file_size = usize::try_from(file.metadata()?.len())
+            .map_err(|_| invalid("archive too large for this host"))?;
+        let mut header = [0; 7];
+        file.read_exact(&mut header)?;
+        if &header[..5] != b"EALIB" {
             return Err(invalid("not an EALIB archive"));
         }
-        let count = u16_at(&data, 5)?;
+        let size = 7 + (u16_at(&header, 5)? + 1) * 18;
+        if size > file_size {
+            return Err(invalid("archive directory exceeds file"));
+        }
+        let mut directory = vec![0; size];
+        directory[..7].copy_from_slice(&header);
+        file.read_exact(&mut directory[7..])?;
+        let entries = Self::directory(&directory, file_size)?;
+        Ok(Self {
+            source: Source::File(Mutex::new(file)),
+            entries,
+        })
+    }
+    fn directory(data: &[u8], file_size: usize) -> Result<BTreeMap<String, Entry>> {
+        if slice(data, 0, 5)? != b"EALIB" {
+            return Err(invalid("not an EALIB archive"));
+        }
+        let count = u16_at(data, 5)?;
         let end = 7 + (count + 1) * 18;
-        slice(&data, 0, end)?;
+        slice(data, 0, end)?;
         let sentinel = 7 + count * 18;
         if data[sentinel..sentinel + 14].iter().any(|b| *b != 0)
-            || u32_at(&data, sentinel + 14)? != data.len()
+            || u32_at(data, sentinel + 14)? != file_size
         {
             return Err(invalid("invalid archive sentinel"));
         }
@@ -62,9 +102,9 @@ impl Archive {
             if name.is_empty() || name.contains(['/', '\\']) || name == ".." {
                 return Err(invalid("unsafe archive name"));
             }
-            let offset = u32_at(&data, at + 14)?;
-            let next = u32_at(&data, at + 32)?;
-            if offset < end || next < offset || next > data.len() {
+            let offset = u32_at(data, at + 14)?;
+            let next = u32_at(data, at + 32)?;
+            if offset < end || next < offset || next > file_size {
                 return Err(invalid("archive entry outside data"));
             }
             let flag = data[at + 13];
@@ -81,25 +121,46 @@ impl Archive {
                 },
             );
         }
-        Ok(Self { data, entries })
+        Ok(entries)
     }
     pub fn read(&self, name: &str) -> Result<Vec<u8>> {
+        self.read_with_limit(name, 16 * 1024 * 1024)
+    }
+    /// Generic extraction can choose a larger cap; the menu retains 16 MiB.
+    pub fn read_with_limit(&self, name: &str, limit: usize) -> Result<Vec<u8>> {
         let entry = self
             .entries
             .get(&name.to_ascii_uppercase())
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, format!("missing resource {name}"))
             })?;
-        let data = slice(&self.data, entry.offset, entry.size)?;
-        if entry.flag == 0 {
-            if data.len() > 16 * 1024 * 1024 {
-                return Err(invalid("menu resource exceeds 16 MiB"));
+        let stored_limit = if entry.flag == 0 {
+            limit
+        } else {
+            limit.saturating_mul(2).saturating_add(4)
+        };
+        if entry.size > stored_limit {
+            return Err(invalid("resource exceeds configured byte limit"));
+        }
+        let data = match &self.source {
+            Source::Memory(data) => slice(data, entry.offset, entry.size)?.to_vec(),
+            Source::File(file) => {
+                let mut file = file
+                    .lock()
+                    .map_err(|_| io::Error::other("archive file lock poisoned"))?;
+                file.seek(SeekFrom::Start(entry.offset as u64))?;
+                let mut data = vec![0; entry.size];
+                file.read_exact(&mut data)?;
+                data
             }
-            return Ok(data.to_vec());
+        };
+        if entry.flag == 0 {
+            return Ok(data);
         }
         dcl::explode(
-            slice(data, 4, data.len().saturating_sub(4))?,
-            u32_at(data, 0)?,
+            slice(&data, 4, data.len().saturating_sub(4))?,
+            u32_at(&data, 0)?,
+            limit,
         )
     }
 }

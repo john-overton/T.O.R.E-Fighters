@@ -60,14 +60,14 @@ impl Alphabet {
         Err(invalid("invalid DCL Huffman code"))
     }
 }
-pub fn explode(data: &[u8], expected: usize) -> Result<Vec<u8>> {
+pub fn explode(data: &[u8], expected: usize, limit: usize) -> Result<Vec<u8>> {
     if data.len() < 2 || data[0] != 0 || !(4..=6).contains(&data[1]) {
         return Err(invalid(
             "unsupported DCL header (only raw literals supported)",
         ));
     }
-    if expected > 16 * 1024 * 1024 {
-        return Err(invalid("DCL output exceeds 16 MiB"));
+    if expected > limit {
+        return Err(invalid("DCL output exceeds configured byte limit"));
     }
     static TABLES: OnceLock<(Alphabet, Alphabet)> = OnceLock::new();
     let (lengths, distances) = TABLES.get_or_init(|| {
@@ -110,11 +110,11 @@ pub fn explode(data: &[u8], expected: usize) -> Result<Vec<u8>> {
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
     #[test]
     fn known_dcl_vector_and_truncations() {
         // Public blast format example; synthetic text, no game bytes.
         let data = [0, 4, 0x82, 0x24, 0x25, 0x8f, 0x80, 0x7f];
+        let explode = |data: &[u8], expected| super::explode(data, expected, 16 * 1024 * 1024);
         assert_eq!(explode(&data, 13).unwrap(), b"AIAIAIAIAIAIA");
         for end in 0..data.len() {
             assert!(explode(&data[..end], 13).is_err());
