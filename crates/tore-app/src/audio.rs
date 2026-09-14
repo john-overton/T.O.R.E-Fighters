@@ -206,11 +206,7 @@ impl Audio {
                 } else {
                     0.
                 };
-                m.burner_gain = if s.engine && s.burner && s.throttle > 0.95 {
-                    0.15
-                } else {
-                    0.
-                };
+                m.burner_gain = if s.afterburner_active() { 0.15 } else { 0. };
             }
         }
     }

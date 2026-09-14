@@ -24,6 +24,7 @@ def main():
                         help='An archive or directory; default: local Fighters Anthology media')
     parser.add_argument('--out', type=Path, default=repo / '.local/extracted', help='Output directory outside source media')
     parser.add_argument('--aircraft', choices=['f18'], help='F/A-18D and its transitive aircraft, cockpit, sensor, store and audio dependencies')
+    parser.add_argument('--native-flight', action='store_true', help='Static FA.EXE/FA.SMS research instead of archive extraction; no retail code execution')
     parser.add_argument('--weapons', action='store_true', help='All projectile definitions and their available dependencies')
     parser.add_argument('--theater', help='Defined theater code (e.g. UKR, TVIET), or all; includes shared sky/weather dependencies')
     parser.add_argument('--exclude-archive', action='append', default=[], help='Skip source-relative archive path glob; repeatable (e.g. disc1/LHX/*)')
@@ -35,6 +36,15 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.max_entry_mib <= 1024:
         parser.error('--max-entry-mib must be 1..1024')
+    if args.native_flight:
+        if args.aircraft or args.weapons or args.theater or args.include or args.exclude_archive:
+            parser.error('--native-flight is a separate executable-research pass; omit archive selection flags')
+        from extract_native_flight import extract
+        try:
+            extract(args.source, args.out, overwrite=args.overwrite, preview=args.list or args.dry_run)
+        except (ValueError, OSError, subprocess.SubprocessError) as error:
+            parser.exit(1, f'{error}\n')
+        return 0
     cargo_home = Path(os.environ.get('CARGO_HOME', str(Path.home() / '.cargo')))
     rustup_cargo = cargo_home / 'bin' / ('cargo.exe' if os.name == 'nt' else 'cargo')
     cargo = str(rustup_cargo) if rustup_cargo.is_file() else shutil.which('cargo')

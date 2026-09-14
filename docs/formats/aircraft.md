@@ -48,7 +48,7 @@ Static branch comparison in this exact F18.SH established these geometry differe
 | 0x7912 | Gear struts/wheels/doors | +24 |
 | 0x791e | Lower rear hook | +2 |
 
-Sixteen combined endpoint poses are decoded at load. The runtime requires the reviewed 26,934-byte CODE layout and observed guard words before applying this device mapping; different layouts fail for review. Runtime maps controls to those observed poses; three-second actuator travel and switching at half travel are authored. Exact native timing/continuous hinges and control-surface schedules remain unported. Other guard words are not assigned guessed meanings. Scale is a provisional uniform one-third foot per model coordinate, giving a 56-foot neutral length. Native scale and real-world dimension acceptance remain open; no independent axes are stretched. Baked hot nozzle art remains in the neutral source skin.
+Sixteen combined endpoint poses are decoded at load. The runtime requires the reviewed 26,934-byte CODE layout and observed guard words before applying this device mapping; different layouts fail for review. The renderer now animates reviewed original parts continuously from the fully deployed source pose; three-second device travel, folding hinges and door sequencing are authored. See [animation evidence](../baselines/f18-animations.md). Exact native timing/continuous hinges and control-surface schedules remain unported. Other guard words are not assigned guessed meanings. Scale is a provisional uniform one-third foot per model coordinate, giving a 56-foot neutral length. Native scale and real-world dimension acceptance remain open; no independent axes are stretched. The baked hot nozzle faces use an authored dark material when the exhaust effect is off.
 
 ## Cockpit, fonts and instrument windows
 
@@ -90,8 +90,16 @@ See [control reference](../FLIGHT-CONTROLS.md) for recovered/menu/manual versus 
 
 ## Momentum and vertical-flight follow-up
 
-The authored flight adapter now integrates a separate world velocity from thrust, drag, lift and gravity. Control rates settle over 0.2 seconds for roll and 0.1 seconds for pitch; load-factor response retains its 0.25-second filter. A fitted 0.7/s aerodynamic alignment term reduces sustained nose/velocity misalignment. These are development response parameters, not newly decoded PT fields or native flight equations. Source thrust/fuel/envelopes/drag inputs remain in use.
+The authored flight adapter now integrates a separate world velocity from thrust, drag, lift and gravity. Control rates settle over 0.2 seconds for roll and 0.1 seconds for pitch; load-factor response retains its 0.25-second filter. A fitted 0.7/s alignment response now tracks a bounded load/speed-dependent AoA target rather than zero nose/velocity separation; body-yaw transport also accounts for banked turn geometry. See [banked-pull evidence and unresolved PT fields](../baselines/banked-pull-aoa.md). These are development response parameters, not newly decoded PT fields or native flight equations. Source thrust/fuel/envelopes/drag inputs remain in use.
 
 Attitude updates use Rodrigues rotation of an orthonormal body basis; yaw/pitch/bank are derived presentation coordinates, not singular Euler-rate integration. Canonical pitch may still read ±90 degrees while heading/bank change through vertical, but the physical orientation continues. Rendering interpolates basis vectors and restores orthonormality rather than blending Euler angles across that change. Velocity integration supplies true vertical speed and lateral/vertical flight-path-marker displacement. Stall/spin parity, angle-of-attack lift curves, inertia tensors, control moments and native force-law recovery remain open; this is not a complete six-degree-of-freedom implementation.
 
-Cockpit look keeps the original frame visible as a fixed 2D overlay. The retained forward frame is reused for rear/up views until directional art/geometry is mapped; it is not claimed as correct rear/up artwork. [Validation](../baselines/flight-response-sky.md).
+Cockpit and HUD share a body-fixed forward-plane projection; the source does not supply complete rear/up geometry. See [directional rendering](../baselines/directional-cockpit.md). [Validation](../baselines/flight-response-sky.md).
+
+### Native flight consumer research
+
+The [FA native flight pass](native-flight.md) now traces the consumers of
+`gpullAOA`, `lowAOASpeed`, and `lowAOAPitch`, alongside control, envelope, power and
+fuel helpers. This supersedes their earlier wholly unresolved status. Pure Rust
+translations and repeatable probes exist; the full native tick and its integration
+remain open. Visual device animation remains separate from native physics schedules.

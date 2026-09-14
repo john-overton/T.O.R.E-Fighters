@@ -19,6 +19,10 @@ pub struct State {
     pub fuel: f64,
     pub engine: bool,
     pub burner: bool,
+    pub exhaust: f64,
+    pub rudder: f64,
+    pub elevator: f64,
+    pub aileron: f64,
     pub gear: f64,
     pub flaps: f64,
     pub brake: f64,
@@ -49,6 +53,10 @@ impl State {
             fuel: a.number("internalFuel"),
             engine: true,
             burner: false,
+            exhaust: 0.,
+            rudder: 0.,
+            elevator: 0.,
+            aileron: 0.,
             gear: 0.,
             flaps: 0.,
             brake: 0.,
@@ -82,7 +90,18 @@ impl State {
         result.speed = lerp(previous.speed, self.speed);
         result.vertical_speed = lerp(previous.vertical_speed, self.vertical_speed);
         result.g = lerp(previous.g, self.g);
+        result.gear = lerp(previous.gear, self.gear);
+        result.flaps = lerp(previous.flaps, self.flaps);
+        result.brake = lerp(previous.brake, self.brake);
+        result.hook = lerp(previous.hook, self.hook);
+        result.exhaust = lerp(previous.exhaust, self.exhaust);
+        result.rudder = lerp(previous.rudder, self.rudder);
+        result.elevator = lerp(previous.elevator, self.elevator);
+        result.aileron = lerp(previous.aileron, self.aileron);
         result
+    }
+    pub fn afterburner_active(&self) -> bool {
+        self.engine && self.fuel > 0. && self.burner && self.throttle > 0.95 && !self.crashed
     }
     pub fn toggle(&mut self, key: &str) {
         match key {
@@ -121,7 +140,13 @@ impl State {
             self.engine = false;
             self.burner = false;
         }
-        let ab = self.burner && self.engine && self.throttle > 0.95 && a.number("aftThrust") > 0.;
+        let ab = self.afterburner_active() && a.number("aftThrust") > 0.;
+        let target = f64::from(ab);
+        self.exhaust =
+            (self.exhaust + (target - self.exhaust).clamp(-DT / 0.2, DT / 0.2)).clamp(0., 1.);
+        self.rudder += ((k("x") - k("z")) - self.rudder) * (DT / 0.1);
+        self.elevator += ((k("ArrowDown") - k("ArrowUp")) - self.elevator) * (DT / 0.1);
+        self.aileron += ((k("ArrowRight") - k("ArrowLeft")) - self.aileron) * (DT / 0.1);
         let rate = if ab {
             a.number("aftFuelConsumption")
         } else {
@@ -161,11 +186,23 @@ impl State {
         self.roll_rate += (roll_command - self.roll_rate) * (DT / 0.2);
         let pitch_command = (command - basis.up[1]) * 32.174 / self.speed.max(60.);
         self.pitch_rate += (pitch_command - self.pitch_rate) * (DT / 0.1);
-        // Authored aerodynamic alignment: the nose responds before the flight path settles.
-        let alignment = cross(basis.forward, unit(self.velocity));
+        // Authored trim target, not decoded gpullAOA units. Preserve a positive
+        // nose/flight-path separation under load rather than aligning to zero AoA.
+        let direction = unit(self.velocity);
+        let along = dot(basis.up, direction);
+        let lift_axis = unit(std::array::from_fn(|i| basis.up[i] - along * direction[i]));
+        let alpha = ((2. + 1.25 * (self.g - 1.)) * (450. * 1.68781 / self.speed.max(150.)).powi(2))
+            .clamp(-12., 20.)
+            .to_radians();
+        let desired_nose =
+            std::array::from_fn(|i| direction[i] * alpha.cos() + lift_axis[i] * alpha.sin());
+        let alignment = cross(basis.forward, desired_nose);
+        // The gravity component across aircraft-right contributes to body yaw
+        // as the flight path turns. Pitch alone misses this during a banked pull.
+        let turn_yaw = -basis.right[1] * 32.174 / self.speed.max(60.);
         let rotation = std::array::from_fn(|i| {
             DT * (-basis.right[i] * self.pitch_rate - basis.forward[i] * self.roll_rate
-                + basis.up[i] * (k("x") - k("z")) * 0.12 * authority
+                + basis.up[i] * (turn_yaw + (k("x") - k("z")) * 0.12 * authority)
                 + alignment[i] * 0.7 * authority)
         });
         let basis = basis.rotated(rotation);
@@ -420,4 +457,241 @@ mod integration_tests {
         }
         assert_eq!(wet.gear, 0.);
     }
+    #[test]
+    fn animation_travel_reverses_and_presentation_interpolates() {
+        let a = profile();
+        let mut s = State::new(&a, [0., 5000., 0.]);
+        s.gear_down = true;
+        s.flaps_down = true;
+        s.brake_out = true;
+        s.hook_down = true;
+        for _ in 0..180 {
+            s.step(&a, &Default::default(), |_, _| 0.);
+        }
+        for value in [s.gear, s.flaps, s.brake, s.hook] {
+            assert!((value - 0.5).abs() < 1e-8);
+        }
+        let previous = s.clone();
+        s.gear_down = false;
+        s.flaps_down = false;
+        s.brake_out = false;
+        s.hook_down = false;
+        s.step(&a, &Default::default(), |_, _| 0.);
+        let render = s.presented(&previous, 0.5);
+        assert!(s.gear < render.gear && render.gear < previous.gear);
+        for _ in 0..180 {
+            s.step(&a, &Default::default(), |_, _| 0.);
+        }
+        assert_eq!([s.gear, s.flaps, s.brake, s.hook], [0.; 4]);
+    }
+    #[test]
+    fn exhaust_and_controls_respond_then_settle() {
+        let a = profile();
+        let mut s = State::new(&a, [0., 5000., 0.]);
+        s.throttle = 1.;
+        s.burner = true;
+        let keys = ["ArrowDown", "ArrowRight", "x"].map(String::from).into();
+        for _ in 0..30 {
+            s.step(&a, &keys, |_, _| 0.);
+        }
+        assert_eq!(s.exhaust, 1.);
+        assert!(s.afterburner_active());
+        assert!(s.elevator > 0.9 && s.aileron > 0.9 && s.rudder > 0.9);
+        s.throttle = 0.95;
+        assert!(!s.afterburner_active());
+        for _ in 0..120 {
+            s.step(&a, &Default::default(), |_, _| 0.);
+        }
+        assert_eq!(s.exhaust, 0.);
+        assert!(s.elevator.abs() < 0.001 && s.rudder.abs() < 0.001);
+        s.throttle = 1.;
+        s.engine = false;
+        assert!(!s.afterburner_active());
+        s.engine = true;
+        s.fuel = 0.;
+        assert!(!s.afterburner_active());
+    }
+    #[test]
+    fn animated_source_faces_preserve_deployed_endpoints_and_uvs() {
+        use crate::aircraft_animation::animate;
+        use tore_formats::shape::Face;
+        let mut s = State::new(&profile(), [0., 5000., 0.]);
+        s.gear = 1.;
+        s.brake = 1.;
+        s.hook = 1.;
+        s.exhaust = 1.;
+        for address in [0x5059, 0x4a03, 0x4bfa, 0x4d33, 0x4f64, 0x5310] {
+            let f = Face {
+                address,
+                positions: vec![[1., 2., 3.], [5., 2., 3.], [1., 6., 3.]],
+                colors: vec![20; 3],
+                uv: vec![[0., 0.], [1., 0.], [0., 1.]],
+                texture: "SYNTHETIC".into(),
+                subtype: 0x4c,
+                normal: Some([0., 1., 0.]),
+            };
+            let open = animate(&f, &s).unwrap();
+            assert_eq!(open.positions, f.positions);
+            assert_eq!(open.uv, f.uv);
+            let mut half = s.clone();
+            half.gear = 0.5;
+            half.brake = 0.5;
+            half.hook = 0.5;
+            half.exhaust = 0.5;
+            let middle = animate(&f, &half).unwrap();
+            assert_ne!(middle.positions, f.positions);
+            assert_eq!(middle.uv, f.uv);
+            let mut closed = s.clone();
+            closed.gear = 0.;
+            closed.brake = 0.;
+            closed.hook = 0.;
+            closed.exhaust = 0.;
+            assert!(animate(&f, &closed).is_none());
+        }
+    }
+    #[test]
+    fn rudder_split_preserves_texture_attributes_and_fixed_fin() {
+        use tore_formats::shape::Face;
+        let f = Face {
+            address: 0x5467,
+            positions: vec![
+                [8., -40., 4.],
+                [8., -20., 4.],
+                [18., -30., 24.],
+                [18., -45., 24.],
+            ],
+            colors: vec![20; 4],
+            uv: vec![[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
+            texture: "SYNTHETIC".into(),
+            subtype: 0xed,
+            normal: Some([1., 0., 0.]),
+        };
+        let mut s = State::new(&profile(), [0., 5000., 0.]);
+        s.rudder = 0.5;
+        let positive = crate::aircraft_animation::rudder_faces(&f, &s);
+        s.rudder = -0.5;
+        let negative = crate::aircraft_animation::rudder_faces(&f, &s);
+        assert_eq!(positive.len(), 2);
+        assert_eq!(positive[0].positions, negative[0].positions);
+        assert_ne!(positive[1].positions, negative[1].positions);
+        for face in positive {
+            assert_eq!(face.positions.len(), face.uv.len());
+            assert_eq!(face.positions.len(), face.colors.len());
+            assert!(face.uv.iter().flatten().all(|v| (0. ..=1.).contains(v)));
+        }
+    }
+    #[test]
+    fn banked_pulls_retain_aoa_and_mirror_left_right() {
+        let a = profile();
+        let mut outputs = Vec::new();
+        for bank in [-45f64, 45.] {
+            let mut s = State::new(&a, [0., 15000., 0.]);
+            s.bank = bank.to_radians();
+            let keys = ["ArrowDown".to_string()].into();
+            for _ in 0..360 {
+                s.step(&a, &keys, |_, _| 0.);
+            }
+            let body = Basis::new(s.yaw, s.pitch, s.bank);
+            let forward = dot(s.velocity, body.forward);
+            let side = dot(s.velocity, body.right);
+            let up = dot(s.velocity, body.up);
+            let alpha = (-up).atan2(forward);
+            let beta = side.atan2(forward.hypot(up));
+            assert!(
+                alpha > 2f64.to_radians() && alpha < 20f64.to_radians(),
+                "alpha={alpha}"
+            );
+            assert!(beta.abs() < 1f64.to_radians(), "beta={beta}");
+            outputs.push((alpha, beta, s.position[1], s.speed));
+        }
+        assert!((outputs[0].0 - outputs[1].0).abs() < 1e-9);
+        assert!((outputs[0].1 + outputs[1].1).abs() < 1e-9);
+        assert!((outputs[0].2 - outputs[1].2).abs() < 1e-9);
+        assert!((outputs[0].3 - outputs[1].3).abs() < 1e-9);
+    }
+    #[test]
+    fn roll_in_and_pull_preserve_lateral_flight_path_lag() {
+        let a = profile();
+        let mut sides = Vec::new();
+        for roll in ["ArrowLeft", "ArrowRight"] {
+            let mut s = State::new(&a, [0., 15000., 0.]);
+            let keys = [roll.to_string(), "ArrowDown".to_string()].into();
+            for _ in 0..90 {
+                s.step(&a, &keys, |_, _| 0.);
+            }
+            let b = Basis::new(s.yaw, s.pitch, s.bank);
+            sides.push(dot(s.velocity, b.right));
+            assert!(dot(s.velocity, b.up) < -1.);
+        }
+        assert!(sides[0].abs() > 0.1, "lateral lag {sides:?}");
+        assert!((sides[0] + sides[1]).abs() < 1e-9);
+    }
+}
+
+/// Reproducible probes of reviewed helper translations using the imported PT.
+/// Deliberately separate from the authored 120 Hz integrator.
+pub fn native_report(a: &Aircraft) -> tore_formats::Result<()> {
+    use tore_formats::flight_model as n;
+    let word = |key: &str| -> tore_formats::Result<i16> {
+        let token = a
+            .fields
+            .get(key)
+            .ok_or_else(|| std::io::Error::other(format!("missing PT {key}")))?;
+        i16::try_from(token.number()?)
+            .map_err(|_| std::io::Error::other(format!("invalid word {key}")))
+    };
+    let coefficient = word("gpullAOA")?;
+    println!(
+        "native_helpers_v1 aircraft={} method=static_translation complete_model=false",
+        a.name
+    );
+    println!(
+        "gpullAOA={coefficient} lowAOASpeed={} lowAOAPitch={}",
+        word("lowAOASpeed")?,
+        word("lowAOAPitch")?
+    );
+    for g in [-3, 0, 1, 3, 6, 9] {
+        let mut aoa = 0;
+        for _ in 0..128 {
+            aoa = n::pull_aoa(aoa, g * 256, coefficient, 2);
+        }
+        println!(
+            "g={g} pull_offset_after_1s_deg={:.6} turn_at_750fps_deg_s={:.6}",
+            aoa as f64 / 256.,
+            n::g_to_turn(g * 256, 750)? as f64 / 256.
+        );
+    }
+    let envelope = a
+        .envelopes
+        .iter()
+        .find(|e| e.g == 1)
+        .ok_or_else(|| std::io::Error::other("missing 1G envelope"))?;
+    for altitude in [0, 5000, 20000, 36000, 50000] {
+        let limits = n::envelope_limits(
+            envelope,
+            altitude * 256,
+            false,
+            [word("structure[0]")?, word("structure[1]")?],
+        )?;
+        let upper = i16::try_from(limits.maximum)
+            .map_err(|_| std::io::Error::other("native upper speed overflow"))?;
+        println!(
+            "altitude_ft={altitude} min_fps={} max_fps={} structure_fps={} drag_percent_at_750fps={}",
+            limits.minimum,
+            limits.maximum,
+            limits.structural,
+            n::drag_percent(750 * 256, altitude * 256, upper)?
+        );
+    }
+    for throttle in [0, 50, 100, 101] {
+        println!(
+            "throttle={throttle} fuel_rate_fixed8={}",
+            n::fuel_rate(
+                word("fuelConsumption")?,
+                word("aftFuelConsumption")?,
+                throttle
+            )
+        );
+    }
+    Ok(())
 }

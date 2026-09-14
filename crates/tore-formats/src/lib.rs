@@ -193,3 +193,5 @@ mod tests {
         assert!(Archive::parse(data).is_err());
     }
 }
+
+pub mod flight_model;

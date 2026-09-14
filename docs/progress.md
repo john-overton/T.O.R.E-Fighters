@@ -313,3 +313,42 @@ See [flight-response and sky evidence](baselines/flight-response-sky.md). That f
 - [ ] Recover full side/rear/overhead geometry, native view mapping and working mirrors; compare against retail flight.
 
 See [directional cockpit evidence](baselines/directional-cockpit.md). This completes the authored directional projection of available forward art, not native 360-degree cockpit parity.
+
+## 2026-09-13: F/A-18 exterior animation follow-up
+
+- [x] Audit source device deltas, flap panels, tail surfaces, fin faces and exhaust artwork.
+- [x] Replace halfway endpoint switching with continuous gear/door, brake and hook motion using fitted hinges.
+- [x] Animate source flap panels, stabilators and fitted trailing-rudder partitions; retain UVs and rotate visibility normals.
+- [x] Add exhaust transition, cold nozzle presentation and shared afterburner activation checks.
+- [x] Add repeatable pose captures and regression tests for reversal, interpolation, control release and source endpoint preservation.
+- [ ] Recover native schedules and remaining leading-edge/outboard surfaces, nozzle mechanics, ground devices, canopy and damage/store animation.
+
+See [animation evidence and limitations](baselines/f18-animations.md). This is original geometry with fitted motion, not complete native animation parity.
+
+## 2026-09-13: Banked pull / AoA correction
+
+- [x] Reproduce combined bank-and-pull with mirrored retail-profile headless probes.
+- [x] Verify HUD velocity projection against aircraft axes; preserve actual velocity rather than adding display offsets.
+- [x] Correct missing body-yaw transport and replace zero-AoA alignment with a documented load/speed-dependent fit.
+- [x] Retain lateral transient lag, deterministic ticks and full loops; add probe telemetry and rendered capture support.
+- [ ] Recover native gpullAOA/lowAOA consumers, force and rotational response, wind-relative air data, and stall/spin behavior.
+
+See [measurements, source fields and limitations](baselines/banked-pull-aoa.md).
+
+## Native flight model decoding pass
+
+- [x] Inventory FA.EXE/FA.SMS statically with hashes, bounded metadata and symbol spans.
+- [x] Add repeatable `tools/extract_assets.py --native-flight` research entry point.
+- [x] Derive direct PT field references from the shared packed schema for the reviewed build.
+- [x] Trace native movement/display separation and load/low-speed AoA consumers.
+- [x] Translate pure control, AoA, envelope, power and fuel helper arithmetic into Rust.
+- [x] Add synthetic regression checks and imported-Hornet `--native-flight-report` probes.
+- [ ] Finish native instance layout, timer conversion and movement/force integrator.
+- [ ] Decode load/damage/store-adjusted limits and thrust/drag consumers end to end.
+- [ ] Port stall/spin, turbulence, ground/contact and device schedules.
+- [ ] Integrate a complete native model; replace fitted adapter only after trajectory acceptance.
+- [ ] Compare original-game level flight, banked pulls, loops, stalls/recovery and device transients.
+
+See [addresses, lessons and coverage](formats/native-flight.md) and
+[validation record](baselines/native-flight.md). Pure-helper tests are not proof
+of full native flight parity.

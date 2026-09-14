@@ -1,4 +1,5 @@
 mod aircraft;
+mod aircraft_animation;
 mod assets;
 mod attitude;
 mod audio;
@@ -701,7 +702,11 @@ fn main() -> AppResult<()> {
     let mut instrument_page = None;
     let mut instrument_layout = instruments::Layout::Large;
     let mut capture_terrain = None;
+    let mut native_flight_report = false;
     let mut headless_ticks = None;
+    let mut flight_probe_ticks = None;
+    let mut flight_devices = None;
+    let mut flight_controls = None;
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
@@ -784,14 +789,57 @@ fn main() -> AppResult<()> {
                 initial_screen = Screen::Flight;
             }
             "--free-flight" => initial_screen = Screen::Flight,
-            "--maneuver" => {
-                maneuver = args
+            "--flight-probe-ticks" => {
+                let ticks = args
                     .next()
-                    .ok_or("--maneuver needs level, pull, loop, roll or stall")?;
-                if !["level", "pull", "loop", "roll", "stall"].contains(&maneuver.as_str()) {
+                    .ok_or("--flight-probe-ticks needs a tick count")?
+                    .parse::<usize>()?;
+                if ticks > 120 * 60 {
+                    return Err("rendered flight probe limited to one minute".into());
+                }
+                flight_probe_ticks = Some(ticks);
+            }
+            "--flight-devices" | "--flight-controls" => {
+                let raw = args
+                    .next()
+                    .ok_or("animation preview needs comma-separated values")?;
+                let values = raw
+                    .split(',')
+                    .map(str::parse::<f64>)
+                    .collect::<Result<Vec<_>, _>>()?;
+                let devices = arg == "--flight-devices";
+                if values.len() != if devices { 5 } else { 3 }
+                    || values
+                        .iter()
+                        .any(|v| !v.is_finite() || *v > 1. || *v < if devices { 0. } else { -1. })
+                {
+                    return Err("--flight-devices requires G,F,B,H,AB in 0..1; --flight-controls requires pitch,roll,rudder in -1..1".into());
+                }
+                if devices {
+                    flight_devices = Some(values);
+                } else {
+                    flight_controls = Some(values);
+                }
+            }
+            "--maneuver" => {
+                maneuver = args.next().ok_or(
+                    "--maneuver needs level, pull, loop, roll, stall, bank-left or bank-right",
+                )?;
+                if ![
+                    "level",
+                    "pull",
+                    "loop",
+                    "roll",
+                    "stall",
+                    "bank-left",
+                    "bank-right",
+                ]
+                .contains(&maneuver.as_str())
+                {
                     return Err("unsupported maneuver".into());
                 }
             }
+            "--native-flight-report" => native_flight_report = true,
             "--headless-flight" => {
                 headless_ticks = Some(
                     args.next()
@@ -825,7 +873,7 @@ fn main() -> AppResult<()> {
             "--import-only" => import_only = true,
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and F/A-18D assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--free-flight launches the Hornet; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall.\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and F/A-18D assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--free-flight launches the Hornet; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-report prints static-translated helper probes (not a native simulation).\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
             }
@@ -862,11 +910,11 @@ fn main() -> AppResult<()> {
         return Ok(());
     }
     let hornet = aircraft::Hornet::load(&assets.theater_resources)?;
-    if let Some(ticks) = headless_ticks {
-        if ticks > 120 * 3600 {
-            return Err("headless flight limited to one hour".into());
-        }
-        let mut state = flight::State::new(&hornet.profile, [0., 5000., 0.]);
+    if native_flight_report {
+        flight::native_report(&hornet.profile)?;
+        return Ok(());
+    }
+    let setup_maneuver = |state: &mut flight::State| {
         let mut keys = std::collections::BTreeSet::new();
         match maneuver.as_str() {
             "pull" | "loop" => {
@@ -875,6 +923,17 @@ fn main() -> AppResult<()> {
                     state.throttle = 1.;
                     state.burner = true;
                 }
+            }
+            "bank-left" | "bank-right" => {
+                state.bank = if maneuver == "bank-left" {
+                    -45f64
+                } else {
+                    45f64
+                }
+                .to_radians();
+                state.throttle = 1.;
+                state.burner = true;
+                keys.insert("ArrowDown".to_string());
             }
             "roll" => {
                 keys.insert("ArrowRight".to_string());
@@ -888,6 +947,14 @@ fn main() -> AppResult<()> {
             }
             _ => {}
         }
+        keys
+    };
+    if let Some(ticks) = headless_ticks {
+        if ticks > 120 * 3600 {
+            return Err("headless flight limited to one hour".into());
+        }
+        let mut state = flight::State::new(&hornet.profile, [0., 5000., 0.]);
+        let keys = setup_maneuver(&mut state);
         let initial_forward = attitude::Basis::new(state.yaw, state.pitch, state.bank).forward;
         let (mut vertical, mut inverted, mut completed) = (false, false, false);
         for _ in 0..ticks {
@@ -902,6 +969,16 @@ fn main() -> AppResult<()> {
                 break;
             }
         }
+        let body = attitude::Basis::new(state.yaw, state.pitch, state.bank);
+        let forward = attitude::dot(state.velocity, body.forward);
+        let side = attitude::dot(state.velocity, body.right);
+        let up = attitude::dot(state.velocity, body.up);
+        println!(
+            "aoa_deg={:.4} sideslip_deg={:.4} bank_deg={:.4}",
+            (-up).atan2(forward).to_degrees(),
+            side.atan2(forward.hypot(up)).to_degrees(),
+            state.bank.to_degrees()
+        );
         println!("vertical={vertical} inverted={inverted} loop_completed={completed}");
 
         println!(
@@ -979,7 +1056,38 @@ fn main() -> AppResult<()> {
         .unwrap_or(0);
     let mut quick = quick_mission::QuickMission::default();
     quick.selection = selection;
-    let flight = hornet.start(&world);
+    let animation_capture = capture_terrain.is_some()
+        && (flight_devices.is_some() || flight_controls.is_some() || flight_probe_ticks.is_some());
+    let mut flight = hornet.start(&world);
+    if let Some(ticks) = flight_probe_ticks {
+        let keys = setup_maneuver(&mut flight);
+        for _ in 0..ticks {
+            flight.step(&hornet.profile, &keys, |x, z| {
+                world.height(x as f32, z as f32) as f64
+            });
+        }
+    }
+    if let Some(v) = flight_devices {
+        flight.gear = v[0];
+        flight.flaps = v[1];
+        flight.brake = v[2];
+        flight.hook = v[3];
+        flight.exhaust = v[4];
+        flight.gear_down = v[0] > 0.;
+        flight.flaps_down = v[1] > 0.;
+        flight.brake_out = v[2] > 0.;
+        flight.hook_down = v[3] > 0.;
+        flight.burner = v[4] > 0.;
+        if flight.burner {
+            flight.throttle = 1.;
+        }
+    }
+    if let Some(v) = flight_controls {
+        flight.elevator = v[0];
+        flight.aileron = v[1];
+        flight.rudder = v[2];
+    }
+
     let mut app = App {
         performance: performance::Performance::from_env()?,
         hornet,
@@ -992,6 +1100,7 @@ fn main() -> AppResult<()> {
         flight_ui: {
             let mut ui = flight_ui::FlightUi::default();
             ui.menu = flight_menu;
+            ui.paused = animation_capture;
             ui.look = flight_look.map(f32::to_radians);
             if !matches!(flight_view, 1 | 2) {
                 ui.look[1] = ui.look[1].clamp(0., std::f32::consts::FRAC_PI_2);

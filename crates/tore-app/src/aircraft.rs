@@ -88,6 +88,36 @@ impl Hornet {
             poses.push(Shape::with_state(get(&profile.shape)?, &words)?);
         }
 
+        use crate::aircraft_animation::{Part, part};
+        for (group, expected) in [
+            (Part::Flame, 8),
+            (Part::Nozzle, 4),
+            (Part::Brake, 2),
+            (Part::Hook, 2),
+            (Part::GearLeft, 6),
+            (Part::GearRight, 6),
+            (Part::GearNose, 6),
+            (Part::DoorLeft, 2),
+            (Part::DoorRight, 2),
+            (Part::DoorNose, 2),
+            (Part::FlapLeft, 2),
+            (Part::FlapRight, 2),
+            (Part::TailLeft, 4),
+            (Part::TailRight, 4),
+        ] {
+            if poses[15]
+                .faces
+                .iter()
+                .filter(|f| part(f.address) == group)
+                .count()
+                != expected
+            {
+                return Err(format!(
+                    "unreviewed F18 animation group {group:?}; inspect source before applying rig"
+                )
+                .into());
+            }
+        }
         println!(
             "Aircraft: {} — {} exterior faces, {} G rows, {} hardpoints; atlas {}x{}, instrument font {}px",
             profile.name,
@@ -158,17 +188,20 @@ impl Hornet {
         let (sy, cy) = (s.yaw as f32).sin_cos();
         let (sp, cp) = (s.pitch as f32).sin_cos();
         let (sb, cb) = (s.bank as f32).sin_cos();
-        let mask = usize::from(s.engine && s.burner && s.throttle > 0.95)
-            + 2 * usize::from(s.brake > 0.5)
-            + 4 * usize::from(s.gear > 0.5)
-            + 8 * usize::from(s.hook > 0.5);
         let orient = |p: [f32; 3]| {
             let (x, y, z) = (p[0], p[1], p[2]);
             let (x, y) = (x * cb + y * sb, -x * sb + y * cb);
             let (y, z) = (y * cp + z * sp, -y * sp + z * cp);
             [x * cy + z * sy, y, -x * sy + z * cy]
         };
-        for f in &self.poses[mask].faces {
+        for source in self.poses[15]
+            .faces
+            .iter()
+            .flat_map(|f| crate::aircraft_animation::rudder_faces(f, s))
+        {
+            let Some(f) = crate::aircraft_animation::animate(&source, s) else {
+                continue;
+            };
             if let Some(n) = f.normal {
                 let normal = orient(n);
                 let p = f.positions[0];
@@ -198,8 +231,15 @@ impl Hornet {
                                 / self.atlas.height as f32,
                         ]
                     };
-                    let color = self.palette[f.colors[j] as usize];
-                    let textured = !f.uv.is_empty();
+                    let cold_nozzle = crate::aircraft_animation::part(f.address)
+                        == crate::aircraft_animation::Part::Nozzle
+                        && s.exhaust <= 0.;
+                    let color = if cold_nozzle {
+                        [35, 36, 38]
+                    } else {
+                        self.palette[f.colors[j] as usize]
+                    };
+                    let textured = !f.uv.is_empty() && !cold_nozzle;
                     let layer = if textured {
                         if matches!(f.subtype, 0x4c | 0x5c | 0x6c | 0x7c) {
                             -2.

@@ -146,3 +146,11 @@ This preserves/imports data; it does not establish full flight, radar, instrumen
 
 
 The cockpit/control follow-up adds mandatory `HUD11.FNT` and `FMENUD.MNU` to `--aircraft f18`, and preserves all available HUD mode fonts. Re-run the same extraction command to extend an existing output; unchanged files remain untouched. The runtime cache detects the newly required font and can refresh itself from the local media. The recovered menu tree is interpreted as data; no native module is executed.
+
+## Repeatable native flight research
+
+`python3 tools/extract_assets.py --native-flight --source gameassets/fighters-anthology --out .local/native-flight/repro`
+performs static PE/SMS inventory and disassembly, independently of archive extraction.
+Add `--dry-run` to inspect metadata first. It requires LLVM `objdump`; it never runs
+retail code. Hash-gated PT references, bounds, overwrite rules, limitations and the
+Rust helper probe are documented in [native flight research](formats/native-flight.md).

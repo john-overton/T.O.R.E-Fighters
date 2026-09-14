@@ -204,3 +204,18 @@ Shift/Ctrl + arrows look around in the cockpit or orbit around the aircraft exte
 ## Directional cockpit checks
 
 The original forward cockpit and HUD now share a body-fixed GPU projection. Inspect with `--free-flight --flight-look 8,4`, `--flight-look 40,5`, and `--flight-look 0,35`; add `--capture-flight .local/directional.ppm` for a repeatable GPU capture. Check both `--window-size 1280x720` and `--window-size 640x900`. F1 restores the centered frame; F2 should not repeat forward art behind the pilot. Instrument windows and the Escape menu remain screen-anchored. See [asset limits and measurements](baselines/directional-cockpit.md).
+
+## Aircraft animation inspection
+
+Use `--flight-devices G,F,B,H,AB` for initial fractions (0..1) and `--flight-controls pitch,roll,rudder` for initial visual deflections (-1..1). Combine with `--capture-flight` to pause at an exact pose. Without a capture, normal actuator and control response resumes after startup. See [examples and evidence](baselines/f18-animations.md).
+
+## Banked-pull probes
+
+`--headless-flight 360 --maneuver bank-left` (or `bank-right`) tests three seconds of pull from a 45-degree bank and reports AoA/sideslip. `--maneuver bank-right --flight-probe-ticks 120 --capture-flight .local/bank.ppm` captures the same maneuver after one second; rendered probes are limited to one minute. See [flight-model evidence](baselines/banked-pull-aoa.md).
+
+## Native flight helper probes
+
+`cargo run --locked -p tore-app -- --native-flight-report` prints deterministic
+static-translated helper probes using the imported Hornet profile, without a
+window. This does not select a different playable flight model. Recreate the local
+executable/symbol inventory with the commands in [native flight research](formats/native-flight.md).

@@ -186,7 +186,7 @@ pub fn draw(
     p.text(font, &format!("{:.0}", s.position[1]), 402, 223);
     p.text(font, &format!("{:.1}G", s.g), 235, 164);
     p.text(font, &format!("{:.0}%", s.throttle * 100.), 235, 178);
-    if s.engine && s.burner && s.throttle > 0.95 {
+    if s.afterburner_active() {
         p.text(font, "AFT", 235, 150);
     }
     for (i, (label, value)) in [
@@ -232,5 +232,23 @@ mod tests {
         let a = project(0., 0., 0.1, 0., 1.).unwrap();
         let b = project(0., std::f64::consts::FRAC_PI_2, 0.1, 0., 1.).unwrap();
         assert!(a.0 > 320. && (b.0 - 320.).abs() < 0.001 && b.1 < 240.);
+    }
+    #[test]
+    fn velocity_marker_matches_body_axes_through_banked_pulls() {
+        use crate::attitude::{Basis, dot};
+        for bank in [-2., -0.8, 0., 0.8, 2.] {
+            let body = Basis::new(0.3, 0.4, bank);
+            // Synthetic nose-up AoA plus side-slip, rotated with the aircraft.
+            let velocity = std::array::from_fn(|i| {
+                body.forward[i] * 700. - body.up[i] * 40. + body.right[i] * 15.
+            });
+            let gamma = velocity[1].atan2(velocity[0].hypot(velocity[2]));
+            let bearing = velocity[0].atan2(velocity[2]) - 0.3;
+            let (x, y) = project(0.4, bank, bearing, gamma, 1.).unwrap();
+            let focal = 240. * 3f64.sqrt();
+            let z = dot(velocity, body.forward);
+            assert!((x - (320. + focal * dot(velocity, body.right) / z)).abs() < 1e-9);
+            assert!((y - (240. - focal * dot(velocity, body.up) / z)).abs() < 1e-9);
+        }
     }
 }

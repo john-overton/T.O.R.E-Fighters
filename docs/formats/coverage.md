@@ -28,3 +28,11 @@ No M1a completion or all-title format validation is implied. See [theater recove
 ### F/A-18D slice
 
 FA PT: typed bounded reader for the reviewed F18/660 layout, all source G rows and hardpoints exported; runtime physics is an authored adapter. FA JT/SEE/ECM: named schema decoding and raw data extraction, including transitive shape/texture/audio dependencies; weapon/sensor execution remains partial/unimplemented. GAS: raw preservation and BRF validation. SH: nearest-detail static Hornet geometry and observed device endpoint branches, not a general native VM. FNT: bounded bitmap-writing glyph grammar, WIN11 used in instrument windows. HUD: associated source artwork/data preserved, general native HUD composition not decoded. [Detailed scope](aircraft.md).
+
+## Native flight research
+
+The separate `--native-flight` extraction mode inventories PE32/i386 FA.EXE and
+FA.SMS statically. It writes local symbol spans, hashes and reviewed-build PT
+references. Pure Rust flight helper translations have synthetic checks and an
+imported-Hornet report; they are not a complete native simulation. See
+[native flight coverage](native-flight.md) and [validation](../baselines/native-flight.md).

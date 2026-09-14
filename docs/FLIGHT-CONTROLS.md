@@ -16,7 +16,7 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | G / F / B / H | Gear / flaps / airbrake / hook | Adapter controls; full FA keyboard table still needs verification |
 | R / J | Radar / jammer | Existing system toggles; no radar detection or ECM threat simulation |
 | F1 | Forward cockpit view; reset pan/zoom | FA `FMENUD.MNU` |
-| F2 / F3 | Look back / up | FA menu; authored angles, forward frame reused until rear/up artwork is mapped |
+| F2 / F3 | Look back / up | FA menu; authored angles, forward artwork projects out of view naturally |
 | F10 | External chase view | FA menu; authored camera placement |
 | Shift + arrows / Ctrl + arrows | Cockpit look-around; exterior orbit | Shift is a convenience alias; Ctrl has USNF manual evidence; FA-specific dispatch unverified |
 | Shift + / | Recenter look/orbit without changing view or zoom | Development shortcut |
@@ -110,3 +110,9 @@ The local USNF manual's “View Panning & Zooming” section specifies Ctrl+arro
 The development adapter now carries an independent world-space velocity vector. Thrust, drag, lift and gravity accelerate that vector rather than setting it to the nose direction each tick. Pitch/roll controls have finite response, and the HUD flight-path marker uses both lateral and vertical velocity. The nose and actual travel direction can differ. These response constants are authored, not recovered native FA control laws.
 
 Attitude rotates as an orthonormal basis and is interpolated in that basis. The old ±1.5-radian flight pitch clamp is removed; flight can pass through vertical/inverted attitudes and complete loops with sufficient energy. Cockpit head-look still cannot look below its forward eye line—this separate viewing restriction does not limit aircraft pitch. [Evidence and limitations](baselines/flight-response-sky.md).
+
+## Exterior animations
+
+Use **0 then Shift+B** for full throttle and afterburner, and **F10** to inspect the model. G/F/B/H animate gear/flaps/airbrake/hook continuously. Pitch/roll inputs move fitted stabilators; Z/X move fitted trailing rudders. Engine/fuel/throttle gate afterburner consistently across HUD and audio; flame length has a short visual transition. These reuse original polygons with authored hinges and schedules. [Coverage, captures and remaining work](baselines/f18-animations.md).
+
+During a banked pull, the adapter now retains load-related nose/flight-path separation and accounts for body-yaw turn response. The velocity marker remains projected from actual velocity: coordinated AoA is below the nose, while transient sideslip appears laterally. Native AoA/control-law parity remains open. [Details and probes](baselines/banked-pull-aoa.md).
