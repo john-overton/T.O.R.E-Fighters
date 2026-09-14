@@ -27,7 +27,7 @@ cargo run --locked -p tore-app -- --monitor-inputs 30
 | Left / right shoulder | Decrease / increase throttle while held |
 | South / east face button (A/B on Xbox layout) | Gear / airbrake toggle |
 | West / north face button (X/Y on Xbox layout) | Flaps / afterburner toggle |
-| Select / left-stick click | External / forward cockpit view |
+| Select / left-stick click | Combat modifier / forward cockpit view |
 | Start | Pause/resume |
 | Guide | Escape flight menu, if not intercepted by the desktop |
 | Right-stick click | Recenter look |
@@ -382,3 +382,84 @@ Native API references: [Linux event protocol](https://docs.kernel.org/input/even
 [HID support query](https://developer.apple.com/documentation/gamecontroller/gccontroller/supportshiddevice(_:)),
 [Windows vibration](https://learn.microsoft.com/en-us/uwp/api/windows.gaming.input.gamepad.vibration).
 See [acceptance and open hardware checks](baselines/input.md).
+
+## Manual combat layer — 2026-09-14
+
+New standard Linux gamepad profiles reserve **Select as a held combat modifier**.
+Press Select first, then the action control. Release the action before switching
+layers; a held control cannot become a new action when Select is pressed/released.
+Old saved explicit profiles retain their assignments; use the editor to add the
+new bindings or regenerate a profile deliberately. No saved file is overwritten.
+
+| While holding Select | Keyboard equivalent / action |
+| --- | --- |
+| Right shoulder | Space: hold fire/release |
+| Left shoulder | Semicolon: next weapon |
+| South (A) | T/Enter: designate |
+| East (B) | L: clear designation |
+| West (X) | U: master arm/safe |
+| North (Y) | J: own jammer toggle |
+| Left-stick click | R: radar toggle |
+| Right-stick click | K: selected external group jettison |
+| D-pad up | Backslash: replace range target |
+| D-pad down | D: explicit player-hit fixture |
+| D-pad left | `]`: next damage class fixture |
+| D-pad right | `[`: selected station failure fixture |
+| Start | Y: target jammer fixture |
+| Guide | I: one incoming selected source weapon fixture |
+
+Guide may be intercepted by the desktop; bind `incoming` to another exposed
+button or combo in **Escape → Control** when necessary. No desktop shortcuts are
+changed. Unmodified Start still pauses; unmodified flight buttons, shoulders,
+rudder triggers and instrument navigation retain their functions. External view
+uses F10 or a custom `view-external` binding; Select is no longer its default.
+No AI makes the incoming launch decision. Fixtures/jettison require `--live-fire`.
+
+Profile chord syntax is `MODIFIER+CONTROL`, for example:
+
+```text
+bind pad button:314+button:311 fire hold
+bind pad button:314+button:304 designate press
+bind pad button:314+axis:17 range-target position=-1
+```
+
+Two distinct nonempty controls are required. Keyboard shortcuts retain their
+existing `Ctrl-`/`Shift-` syntax. `fire` requires **hold** behavior; press/release
+or axis modes are rejected instead of silently doing nothing. The editor lists
+combat actions and standard Select combinations in its Input row. Capture remains
+single-control capture; choose the combo through Input or edit the profile. Exact
+Windows/macOS device IDs/control names still need an explicit platform profile.
+
+Combo actions suppress the base control, including throttle and menu actions.
+Pause/focus changes, disconnect, layer transitions and reset cancel fire;
+physical neutral/release is required before rearming. Keyboard and controller fire
+are independent, so releasing one cannot cancel a trigger held by the other.
+
+## Weapon haptic envelopes
+
+Rumble remains opt-in in Control → Rumble → Save & apply. Cues are authored,
+not native force-feedback recovery. Strong/weak motor amplitudes are normalized:
+
+| Confirmed event | Duration | Strong / weak |
+| --- | ---: | ---: |
+| Gun representative shot (sustained fire refreshes) | 67 ms | 0.08 / 0.16 |
+| Own missile launch | 150 ms | 0.18 / 0.10 |
+| Bomb release | 100 ms | 0.12 / 0.07 |
+| Player-owned bomb impact confirmation | 200 ms | 0.08 / 0.04 |
+| Rocket launch | 83 ms | 0.10 / 0.16 |
+| Actual player damage | 167 ms | 0.25 / 0.18 |
+| Player destruction/crash | 183 ms | 0.35 / 0.20 |
+
+Gun/missile/player-damage/destruction producers are connected. Bomb/rocket cues
+are tested mixer contracts; the two PT defaults contain no bombs/rockets and
+there is no runtime producer or enabled alternative loadout for those cues yet.
+Remote target hits and incoming fixture launches do not masquerade as ownship
+haptic events. A defeated incoming contact causes no damage impulse.
+
+Nine fixed slots mix by maximum amplitude, never additive escalation; native
+requests are capped at 20 Hz and use finite leases. Repeats have cooldowns.
+Pause, focus loss, restart, profile replacement, disconnect and shutdown stop
+feedback. Unsupported devices continue silently. A native API failure disables
+feedback on that device until reconnect and reports one explanation. Native
+worker deadlines and bounded requests guard against stuck effects. Actual motor
+strength and comfort still require physical controller acceptance.

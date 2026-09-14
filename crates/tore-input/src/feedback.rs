@@ -7,6 +7,8 @@ pub enum FeedbackEvent {
     GunFired,
     MissileLaunched,
     BombReleased,
+    /// Quiet confirmation for a player-owned bomb impact, not a damage impulse.
+    BombImpact,
     RocketLaunched,
     /// Actual turbulence producer supplies normalized severity, not steady wind or G-load.
     Turbulence {
@@ -32,11 +34,11 @@ struct Slot {
     strong: f64,
     weak: f64,
 }
-/// Eight fixed effect slots; overlapping motor strengths use max, never summation.
+/// Nine fixed effect slots; overlapping motor strengths use max, never summation.
 /// Call event() for confirmed events, then tick() exactly once per 120 Hz tick.
 #[derive(Clone, Debug)]
 pub struct FeedbackMixer {
-    slots: [Slot; 8],
+    slots: [Slot; 9],
     quiet_ticks: u16,
     dirty: bool,
     playing: bool,
@@ -45,7 +47,7 @@ pub struct FeedbackMixer {
 impl Default for FeedbackMixer {
     fn default() -> Self {
         Self {
-            slots: [Slot::default(); 8],
+            slots: [Slot::default(); 9],
             quiet_ticks: 6,
             dirty: false,
             playing: false,
@@ -78,6 +80,7 @@ impl FeedbackMixer {
             FeedbackEvent::GunFired => (0, 8, 6, 0.08, 0.16),
             FeedbackEvent::MissileLaunched => (1, 18, 12, 0.18, 0.10),
             FeedbackEvent::BombReleased => (2, 12, 12, 0.12, 0.07),
+            FeedbackEvent::BombImpact => (8, 24, 60, 0.08, 0.04),
             FeedbackEvent::RocketLaunched => (3, 10, 6, 0.10, 0.16),
             FeedbackEvent::Turbulence { intensity } => {
                 if !intensity.is_finite() || intensity <= 0. {
@@ -262,6 +265,7 @@ mod tests {
             FeedbackEvent::GunFired,
             FeedbackEvent::MissileLaunched,
             FeedbackEvent::BombReleased,
+            FeedbackEvent::BombImpact,
             FeedbackEvent::RocketLaunched,
             FeedbackEvent::AfterburnerEngaged,
             FeedbackEvent::Damage,
@@ -271,6 +275,38 @@ mod tests {
             assert!(m.event(event));
             assert!(!m.event(event));
             assert!(matches!(m.tick(), Some(FeedbackUpdate::Pulse { .. })));
+        }
+    }
+
+    #[test]
+    fn material_weapon_cues_have_distinct_envelopes_and_always_expire() {
+        let mut signatures = std::collections::BTreeSet::new();
+        for event in [
+            FeedbackEvent::GunFired,
+            FeedbackEvent::MissileLaunched,
+            FeedbackEvent::BombReleased,
+            FeedbackEvent::BombImpact,
+            FeedbackEvent::RocketLaunched,
+            FeedbackEvent::Damage,
+            FeedbackEvent::Crash,
+        ] {
+            let mut m = FeedbackMixer::default();
+            m.event(event);
+            let Some(FeedbackUpdate::Pulse {
+                strong,
+                weak,
+                duration,
+            }) = m.tick()
+            else {
+                panic!("no pulse")
+            };
+            assert!(signatures.insert((strong.to_bits(), weak.to_bits(), duration)));
+            assert!(duration <= Duration::from_millis(200));
+            assert!(strong <= 0.35 && weak <= 0.2);
+            assert!((0..120).any(|_| m.tick() == Some(FeedbackUpdate::Stop)));
+            for _ in 0..120 {
+                assert_eq!(m.tick(), None);
+            }
         }
     }
 }

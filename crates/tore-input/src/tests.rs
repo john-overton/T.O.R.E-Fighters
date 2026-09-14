@@ -283,3 +283,58 @@ fn invalid_live_sample_releases_previous_deflection_and_requests_pause() {
     assert_eq!(frame(&mut r).roll, 0.);
     assert!(r.take_overflow());
 }
+
+#[test]
+fn combat_chords_suppress_flight_actions_and_require_release_after_interruptions() {
+    let mut r = resolver(
+        "bind pad rb throttle-rate positive\nbind pad select+rb fire hold\nbind pad a gear press\nbind pad select+a designate press\nbind pad select+hat damage-class position=-1\nbind pad select+hat fail-station position=1",
+    );
+    for c in ["select", "rb", "a", "hat"] {
+        event(&mut r, "pad", c, 0., true);
+    }
+    event(&mut r, "pad", "select", 1., false);
+    event(&mut r, "pad", "rb", 1., false);
+    assert!(r.held("fire"));
+    assert_eq!(frame(&mut r).throttle_rate, 0.);
+    event(&mut r, "pad", "a", 1., false);
+    assert_eq!(
+        r.drain(),
+        vec![("pad".into(), Action::Ui("designate".into()))]
+    );
+    event(&mut r, "pad", "hat", -1., false);
+    assert_eq!(r.drain().len(), 1);
+    r.context(true, true);
+    assert!(!r.held("fire"));
+    r.context(false, true);
+    assert!(!r.held("fire"));
+    event(&mut r, "pad", "rb", 1., false);
+    assert!(!r.held("fire"));
+    event(&mut r, "pad", "rb", 0., false);
+    event(&mut r, "pad", "rb", 1., false);
+    assert!(r.held("fire"));
+    event(&mut r, "pad", "select", 0., false);
+    assert!(!r.held("fire"));
+    assert_eq!(frame(&mut r).throttle_rate, 0.);
+    event(&mut r, "pad", "rb", 0., false);
+    event(&mut r, "pad", "rb", 1., false);
+    assert_eq!(frame(&mut r).throttle_rate, 1.);
+    event(&mut r, "pad", "select", 1., false);
+    assert!(!r.held("fire"));
+    event(&mut r, "pad", "rb", 0., false);
+    event(&mut r, "pad", "rb", 1., false);
+    assert!(r.held("fire"));
+    r.disconnect("pad");
+    assert!(!r.held("fire"));
+    assert_eq!(frame(&mut r).throttle_rate, 0.);
+}
+
+#[test]
+fn fire_profiles_cannot_silently_select_edge_or_axis_modes() {
+    for mode in ["press", "release", "switch", "axis", "delta"] {
+        assert!(Profile::parse(&format!("tore-input 1\nbind pad b fire {mode}")).is_err());
+    }
+    for control in ["+a", "a+", "a+a", "a+b+c"] {
+        assert!(Profile::parse(&format!("tore-input 1\nbind pad {control} fire hold")).is_err());
+    }
+    assert!(Profile::parse("tore-input 1\nbind pad modifier+b fire hold").is_ok());
+}

@@ -85,7 +85,19 @@ impl Action {
         }
         if matches!(
             s,
-            "pause"
+            "fire"
+                | "weapon-next"
+                | "designate"
+                | "clear-designation"
+                | "master-arm"
+                | "jettison"
+                | "range-target"
+                | "damage-class"
+                | "fail-station"
+                | "damage-player"
+                | "target-jammer"
+                | "incoming"
+                | "pause"
                 | "menu"
                 | "end-flight"
                 | "restart"
@@ -311,6 +323,7 @@ impl Profile {
                                 matches!(action, Action::Axis(a) if a != Axis::Throttle)
                             }
                             Mode::Unit => action == Action::Axis(Axis::Throttle),
+                            Mode::HoldState if action == Action::Ui("fire".into()) => true,
                             Mode::Switch | Mode::Follow | Mode::HoldState => {
                                 matches!(action, Action::Pilot(PilotCommand::Toggle(_)))
                             }
@@ -320,6 +333,17 @@ impl Profile {
                             }
                             _ => !matches!(action, Action::Axis(_)),
                         };
+                        if action == Action::Ui("fire".into()) && mode != Mode::HoldState {
+                            return Err("fire requires hold behavior".into());
+                        }
+                        if control.contains('+')
+                            && (device == &"keyboard"
+                                || control.split('+').count() != 2
+                                || control.split('+').any(str::is_empty)
+                                || control.split_once('+').is_some_and(|(m, c)| m == c))
+                        {
+                            return Err("invalid two-control chord".into());
+                        }
                         if !compatible {
                             return Err("mode incompatible with action".into());
                         }
@@ -371,6 +395,7 @@ pub struct Resolver {
     focused: bool,
     overflow: bool,
     held_switches: BTreeSet<Switch>,
+    physical: BTreeMap<(String, String), f64>,
 }
 impl Resolver {
     pub fn new(profile: Profile) -> Self {
@@ -399,8 +424,8 @@ impl Resolver {
     pub fn flight_bound(&self, device: &str, control: &str) -> bool {
         self.profile.bindings.iter().any(|b| {
             self.matches(b, device)
-                && b.control == control
-                && matches!(
+                && b.control.rsplit('+').next() == Some(control)
+                && (matches!(
                     b.action,
                     Action::Pilot(_)
                         | Action::Axis(
@@ -410,7 +435,7 @@ impl Resolver {
                                 | Axis::Throttle
                                 | Axis::ThrottleRate
                         )
-                )
+                ) || b.action == Action::Ui("fire".into()))
         })
     }
     pub fn context(&mut self, paused: bool, focused: bool) {
@@ -442,7 +467,88 @@ impl Resolver {
             s.pickup = false;
         }
     }
+    /// Modifier-first chords use `button-id+control-id`. Entering/leaving a
+    /// layer baselines its controls, requiring neutral before a new action.
     pub fn event(&mut self, event: Event) {
+        if event.device == "keyboard" || !event.value.is_finite() {
+            self.resolve_event(event);
+            return;
+        }
+        self.physical
+            .insert((event.device.clone(), event.control.clone()), event.value);
+        let chords: BTreeSet<_> = self
+            .profile
+            .bindings
+            .iter()
+            .filter(|b| self.matches(b, &event.device))
+            .filter_map(|b| {
+                b.control
+                    .split_once('+')
+                    .map(|(m, c)| (m.to_owned(), c.to_owned()))
+            })
+            .collect();
+        let modifier_changed = chords.iter().any(|(m, _)| m == &event.control);
+        if modifier_changed {
+            let mut controls = BTreeSet::new();
+            for (m, c) in &chords {
+                if m != &event.control {
+                    continue;
+                }
+                let raw = *self
+                    .physical
+                    .get(&(event.device.clone(), c.clone()))
+                    .unwrap_or(&0.);
+                self.resolve_event(Event {
+                    device: event.device.clone(),
+                    control: format!("{m}+{c}"),
+                    value: if event.value != 0. { raw } else { 0. },
+                    baseline: true,
+                });
+                controls.insert(c.clone());
+            }
+            for c in controls {
+                let raw = *self
+                    .physical
+                    .get(&(event.device.clone(), c.clone()))
+                    .unwrap_or(&0.);
+                self.resolve_event(Event {
+                    device: event.device.clone(),
+                    control: c,
+                    value: if event.value != 0. { 0. } else { raw },
+                    baseline: true,
+                });
+            }
+        }
+        let mut consumed = false;
+        for (m, c) in chords {
+            if c == event.control
+                && self
+                    .physical
+                    .get(&(event.device.clone(), m.clone()))
+                    .is_some_and(|v| *v != 0.)
+            {
+                consumed = true;
+                self.resolve_event(Event {
+                    control: format!("{m}+{c}"),
+                    ..event.clone()
+                });
+            }
+        }
+        if !consumed {
+            self.resolve_event(event);
+        }
+    }
+    pub fn held(&self, name: &str) -> bool {
+        !self.paused
+            && self.focused
+            && self.states.iter().any(|((i, _), s)| {
+                s.armed
+                    && s.value != 0.
+                    && self.profile.bindings[*i].mode == Mode::HoldState
+                    && self.profile.bindings[*i].action == Action::Ui(name.into())
+            })
+    }
+    fn resolve_event(&mut self, event: Event) {
         if !event.value.is_finite() {
             self.disconnect(&event.device);
             self.overflow = true;
@@ -591,6 +697,7 @@ impl Resolver {
         let primary = self.owners.iter().any(|(axis, (_, d))| {
             d == device && matches!(axis, Axis::Pitch | Axis::Roll | Axis::Yaw | Axis::Throttle)
         });
+        self.physical.retain(|(d, _), _| d != device);
         self.states.retain(|(_, d), _| d != device);
         self.owners.retain(|_, (_, d)| d != device);
         self.events.retain(|(d, _)| d != device);

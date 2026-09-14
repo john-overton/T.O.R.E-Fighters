@@ -21,7 +21,7 @@ pub struct Editor {
     pressed: Option<(usize, i32)>,
 }
 fn actions() -> Vec<String> {
-    let mut a="pitch roll yaw throttle throttle-rate look-x look-y gear flaps airbrake hook engine burner radar jammer pause menu end-flight restart view-front view-back view-up view-external center-look cockpit hud zoom-in zoom-out range-down range-up radar-mode instrument-next instrument-previous menu-up menu-down menu-left menu-right menu-accept menu-back".split_whitespace().map(str::to_owned).collect::<Vec<_>>();
+    let mut a="pitch roll yaw throttle throttle-rate look-x look-y gear flaps airbrake hook engine burner radar jammer fire weapon-next designate clear-designation master-arm jettison range-target damage-class fail-station damage-player target-jammer incoming pause menu end-flight restart view-front view-back view-up view-external center-look cockpit hud zoom-in zoom-out range-down range-up radar-mode instrument-next instrument-previous menu-up menu-down menu-left menu-right menu-accept menu-back".split_whitespace().map(str::to_owned).collect::<Vec<_>>();
     for n in 0..10 {
         a.push(format!("page-{n}"));
     }
@@ -105,6 +105,20 @@ impl Editor {
             .filter(|d| id == "*" || &d.id == id)
             .flat_map(|d| d.controls.iter().map(|c| c.id.clone()))
             .collect::<Vec<_>>();
+        if self
+            .devices
+            .iter()
+            .any(|d| (id == "*" || &d.id == id) && d.controls.iter().any(|c| c.id == "button:314"))
+        {
+            values.extend(
+                values
+                    .clone()
+                    .into_iter()
+                    .filter(|c| c != "button:314")
+                    .map(|c| format!("button:314+{c}")),
+            );
+        }
+        values.push(b.control.clone());
         values.sort();
         values.dedup();
         if values.is_empty() {
@@ -253,6 +267,7 @@ impl Editor {
                     Mode::Axis
                 }
             }
+            Action::Ui(ref name) if name == "fire" => Mode::HoldState,
             _ => Mode::Press,
         };
         self.capture = false;

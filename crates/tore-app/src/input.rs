@@ -294,7 +294,14 @@ impl Input {
                 }
                 Notification::Warning(message) => warnings.push(message),
                 Notification::Feedback(id, Err(error)) => {
-                    warnings.push(format!("feedback {id}: {error}"))
+                    if let Some(d) = self.devices.get_mut(&id) {
+                        d.rumble = false;
+                    }
+                    self.feedback_targets.remove(&id);
+                    self.backend.stop();
+                    warnings.push(format!(
+                        "feedback disabled until reconnect for {id}: {error}"
+                    ))
                 }
                 Notification::Feedback(_, Ok(())) => {}
                 Notification::Overflow => {
@@ -639,7 +646,6 @@ fn gamepad_text(device: &Device) -> String {
         ("button:305", "airbrake", "press", 1.),
         ("button:307", "flaps", "press", 1.),
         ("button:308", "burner", "press", 1.),
-        ("button:314", "view-external", "press", 1.),
         ("button:315", "pause", "press", 1.),
         ("button:316", "menu", "press", 1.),
         ("button:317", "view-front", "press", 1.),
@@ -660,6 +666,31 @@ fn gamepad_text(device: &Device) -> String {
         if device.controls.iter().any(|c| c.id == control) {
             text.push_str(&format!(
                 "bind {} {control} {action} {mode} -1 0 1 0.1 1 {scale} 10\n",
+                device.id
+            ));
+        }
+    }
+    for (control, action, mode) in [
+        ("button:311", "fire", "hold"),
+        ("button:310", "weapon-next", "press"),
+        ("button:304", "designate", "press"),
+        ("button:305", "clear-designation", "press"),
+        ("button:307", "master-arm", "press"),
+        ("button:308", "jammer", "press"),
+        ("button:317", "radar", "press"),
+        ("button:318", "jettison", "press"),
+        ("axis:16", "damage-class", "position=-1"),
+        ("axis:16", "fail-station", "position=1"),
+        ("axis:17", "range-target", "position=-1"),
+        ("axis:17", "damage-player", "position=1"),
+        ("button:315", "target-jammer", "press"),
+        ("button:316", "incoming", "press"),
+    ] {
+        if device.controls.iter().any(|c| c.id == "button:314")
+            && device.controls.iter().any(|c| c.id == control)
+        {
+            text.push_str(&format!(
+                "bind {} button:314+{control} {action} {mode}\n",
                 device.id
             ));
         }
@@ -833,5 +864,98 @@ mod tests {
         let (p, look) = i.frame(&BTreeSet::new(), 0.7);
         assert_eq!(p.pitch, 0.);
         assert_eq!(look, [0., 0.]);
+    }
+
+    #[test]
+    fn every_default_combat_combo_emits_only_its_intended_action() {
+        let ids = [
+            "axis:0",
+            "axis:1",
+            "axis:2",
+            "axis:3",
+            "axis:4",
+            "axis:5",
+            "axis:16",
+            "axis:17",
+            "button:304",
+            "button:305",
+            "button:307",
+            "button:308",
+            "button:310",
+            "button:311",
+            "button:314",
+            "button:315",
+            "button:316",
+            "button:317",
+            "button:318",
+        ];
+        let d = Device {
+            id: "linux-synthetic".into(),
+            name: "synthetic".into(),
+            rumble: false,
+            controls: ids
+                .iter()
+                .map(|id| tore_input_native::Control {
+                    id: (*id).into(),
+                    kind: if id.starts_with("button") {
+                        Kind::Button
+                    } else {
+                        Kind::Axis
+                    },
+                    min: -1.,
+                    max: 1.,
+                    value: 0.,
+                })
+                .collect(),
+        };
+        let profile = Profile::parse(&gamepad_text(&d)).unwrap();
+        let chords: Vec<_> = profile
+            .bindings
+            .iter()
+            .filter(|b| b.control.contains('+'))
+            .cloned()
+            .collect();
+        assert_eq!(chords.len(), 14);
+        for binding in chords {
+            let mut r = Resolver::new(profile.clone());
+            for id in ids {
+                r.event(Event {
+                    device: d.id.clone(),
+                    control: id.into(),
+                    value: 0.,
+                    baseline: true,
+                });
+            }
+            r.event(Event {
+                device: d.id.clone(),
+                control: "button:314".into(),
+                value: 1.,
+                baseline: false,
+            });
+            let (_, control) = binding.control.split_once('+').unwrap();
+            r.event(Event {
+                device: d.id.clone(),
+                control: control.into(),
+                value: if let tore_input::Mode::Position(n) = binding.mode {
+                    f64::from(n)
+                } else {
+                    1.
+                },
+                baseline: false,
+            });
+            let actions = r.drain();
+            if binding.action == Action::Ui("fire".into()) {
+                assert!(r.held("fire"));
+                assert!(actions.is_empty());
+            } else {
+                assert_eq!(
+                    actions,
+                    vec![(d.id.clone(), binding.action.clone())],
+                    "{}",
+                    binding.control
+                );
+            }
+            assert_eq!(r.frame(0.5).0.throttle_rate, 0.);
+        }
     }
 }
