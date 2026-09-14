@@ -91,3 +91,15 @@ and isolated contact, equipment/control and clock/RNG components. See
 [development commands](docs/DEVELOPMENT.md) and
 [extraction status and limits](docs/formats/native-flight.md). These diagnostic
 translations are not yet the playable flight adapter.
+
+The shared `tore-sim` kernel now supports tested hybrid flight for the F/A-18D
+and extracted Rafale C data. Run the Hornet with `cargo run --locked -p tore-app --
+--free-flight --researched-flight`; Rafale support is currently extraction and
+headless flight, not a visual aircraft port. Use `tools/extract_assets.py
+--aircraft rafale --validate-flight` with your media options to reproduce the
+second-aircraft workflow. See [flight-model commands and scope](docs/FLIGHT-MODEL.md).
+
+F/A-18D and Rafale C now own separate flight-law modules and independently editable
+typed configurations for mass, thrust/fuel, aerodynamics, departure/contact, equipment
+and tuning. The simulator reads these directly. A typed air-data interface supports future analog instruments; see the
+[model and instrument extension guide](docs/FLIGHT-MODEL.md).

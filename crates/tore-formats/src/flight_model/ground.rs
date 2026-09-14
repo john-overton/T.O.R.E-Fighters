@@ -1,5 +1,5 @@
 //! FA 0x477140 landing-limit classifier, separate from terrain/carrier callbacks.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LandingLimits {
     pub forward_fps: i16,
     pub side_fps: i16,
@@ -80,7 +80,7 @@ mod tests {
 }
 
 /// FA 0x4774f0: query results are caller supplied, not guessed from a terrain pixel.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ContactSurface {
     pub difficulty_bypass: bool,
     pub water: bool,
@@ -109,7 +109,7 @@ pub fn contact_code(surface: ContactSurface, severity: LandingSeverity) -> u8 {
 }
 /// FA height retention preceding the *second* OnTheGround query (0x477258..2e9).
 /// Keep the ground PA word separate: this branch compares PA+364 against F8.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ContactRetention {
     pub previous_ground: bool,
     pub previous_height: i32,
@@ -183,7 +183,7 @@ mod contact_tests {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ContactState {
     pub y_f8: i32,
     pub pitch_f8: i32,
@@ -195,7 +195,7 @@ pub struct ContactState {
     pub side_f8: i32,
     pub down_f8: i32,
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ContactInput {
     /// Result of 0x411910 after height retention.
     pub touching: bool,

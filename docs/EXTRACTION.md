@@ -172,3 +172,11 @@ Fifth-pass native output uses schema 2 in `reviewed-components.json`: each of
 52 regions includes `entry_references` listing direct incoming calls/jumps.
 This is a static reference index, not execution order or an indirect call graph.
 For reproducibility, use a new directory such as `.local/native-flight/queries-final`.
+
+Reviewed aircraft selection now supports `--aircraft rafale` as well as `f18`.
+Rafale C starts from RAFALE.PT, RAFALE.HUD, RAF.SH and ~RAFH.PIC and follows the
+same bounded dependency closure. RAFALEE/RAFALEF are not aliases. Named PT
+analysis is included in the extraction report. `--validate-flight` runs the
+shared headless hybrid-model suite after successful full extraction; it does
+not execute imported code or certify visual/native parity. Full examples:
+[FLIGHT-MODEL.md](FLIGHT-MODEL.md).

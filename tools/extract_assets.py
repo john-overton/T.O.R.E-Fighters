@@ -23,7 +23,8 @@ def main():
     parser.add_argument('--source', type=Path, default=repo / 'gameassets/fighters-anthology',
                         help='An archive or directory; default: local Fighters Anthology media')
     parser.add_argument('--out', type=Path, default=repo / '.local/extracted', help='Output directory outside source media')
-    parser.add_argument('--aircraft', choices=['f18'], help='F/A-18D and its transitive aircraft, cockpit, sensor, store and audio dependencies')
+    parser.add_argument('--aircraft', choices=['f18', 'rafale'], help='Reviewed F/A-18D or Rafale C and its transitive aircraft, cockpit, sensor, store and audio dependencies')
+    parser.add_argument('--validate-flight', action='store_true', help='After aircraft extraction, run the shared headless hybrid-flight acceptance suite')
     parser.add_argument('--native-flight', action='store_true', help='Static FA.EXE/FA.SMS research instead of archive extraction; no retail code execution')
     parser.add_argument('--weapons', action='store_true', help='All projectile definitions and their available dependencies')
     parser.add_argument('--theater', help='Defined theater code (e.g. UKR, TVIET), or all; includes shared sky/weather dependencies')
@@ -36,6 +37,8 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.max_entry_mib <= 1024:
         parser.error('--max-entry-mib must be 1..1024')
+    if args.validate_flight and (not args.aircraft or args.native_flight or args.list or args.dry_run or args.include):
+        parser.error('--validate-flight requires --aircraft and full extraction (no preview/include/native-flight)')
     if args.native_flight:
         if args.aircraft or args.weapons or args.theater or args.include or args.exclude_archive:
             parser.error('--native-flight is a separate executable-research pass; omit archive selection flags')
@@ -85,6 +88,25 @@ def main():
             stream.write('\n')
         temporary.replace(report_path)
         print(f'SHA-256 provenance added: {report_path}')
+    if result.returncode == 0 and args.validate_flight:
+        report = json.loads(report_path.read_text())
+        identity = {'f18': 'F18.PT', 'rafale': 'RAFALE.PT'}[args.aircraft]
+        profiles = []
+        hashes = set()
+        for entry in report['entries']:
+            path = (output / entry['output']).resolve()
+            if path.name.upper() != identity or entry['status'] not in ('written', 'replaced', 'unchanged'):
+                continue
+            if not path.is_relative_to(output):
+                parser.error('flight profile escapes extraction output')
+            digest = sha256(path)
+            if digest not in hashes:
+                profiles.append(str(path))
+                hashes.add(digest)
+        if not profiles:
+            parser.error('no extracted flight profile to validate')
+        return subprocess.run([cargo, 'run', '--release', '--locked', '-p', 'tore-sim',
+                               '--example', 'flight_suite', '--', *profiles], cwd=repo, check=False).returncode
     return result.returncode
 
 

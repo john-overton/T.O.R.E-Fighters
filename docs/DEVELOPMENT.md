@@ -235,3 +235,13 @@ The example validates table lengths, prints supplied world/cockpit angle probes,
 and checks that 120 authored fixed-clock steps account for 256 native time units.
 Its seeded RNG draws and sample inputs are diagnostics, not recorded native
 trajectories. It does not change the app's flight model.
+
+## Shared flight-model development
+
+`tore-sim` has no renderer/audio/platform dependency. It owns flight state and
+attitude math shared by the app and headless tools. Use `--researched-flight` to
+select the hybrid Hornet model; the default remains the legacy adapter. Extract
+and validate either reviewed aircraft with `tools/extract_assets.py --aircraft
+f18|rafale --validate-flight` (choose one literal identity).
+See [FLIGHT-MODEL.md](FLIGHT-MODEL.md) for complete commands, surface inputs,
+acceptance scenarios, and the explicit fitted/native boundary.

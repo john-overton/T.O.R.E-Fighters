@@ -404,3 +404,35 @@ Details and limitations: [native format research](formats/native-flight.md).
 - [ ] Connect remaining loaded-state producers and verify whole-tick trajectories before enabling native flight.
 
 See [fifth-pass findings](formats/native-flight.md) and [validation](baselines/native-flight.md).
+
+### Shared working flight model and second-aircraft extraction
+
+- [x] Review RAFALE.PT as the distinct Rafale C, with its own 660-byte data layout, envelopes, engines and equipment.
+- [x] Add `--aircraft rafale` to shared dependency extraction and portable scripting; preserve output/source provenance.
+- [x] Move flight/attitude simulation into dependency-light `tore-sim`; retain renderer-specific animation tests in the app.
+- [x] Resolve scalar parameters at state construction and remove per-tick envelope intersection allocation.
+- [x] Implement selectable hybrid departure/spin, runway contact, braking/takeoff, wind and payload behavior with explicit fitted provenance.
+- [x] Exercise both aircraft with the same headless scenario/replay suite; connect `--validate-flight` to extraction.
+- [x] Expose Hornet hybrid flight through `--researched-flight`, preserving the legacy default for comparison.
+- [ ] Original-game trajectory parity, collision/airfield/carrier producers, damage/loadout/fuel-transfer systems and exact native scheduling remain separate gates.
+- [ ] Rafale cockpit, instruments, rendering and animation mapping remain a separate aircraft-visual port.
+
+Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
+
+### Separate aircraft laws and instrument data — 2026-09-14
+
+- [x] Separate F/A-18D and Rafale C flight-law modules and per-instance validated tuning behind `FlightModel`.
+- [x] Route selected model response/ground tuning into simulation; preserve existing baseline coefficients without inventing new aircraft calibration.
+- [x] Add typed air/ground speed, atmosphere, altitude-datum and attitude telemetry for future instruments.
+- [x] Keep unavailable IAS/CAS and barometric/pressure-altitude channels explicit rather than aliasing TAS/MSL.
+- [ ] Add pitot/static and altimeter sensor/calibration/lag models and connect future analog gauge rendering.
+- [ ] External mod-file schema/loading and independent native/real-aircraft calibration remain open.
+
+### Complete typed flight configuration — 2026-09-14
+
+- [x] Move mass, propulsion, envelopes, loading, native limits and fitted equipment/tuning into each aircraft model's validated configuration.
+- [x] Remove the string scalar cache and duplicated research configuration; resolve PT fields once and fail on missing required data.
+- [x] Wire startup, fuel/forces, payload checks, devices, departure/spin and ground contact to the selected model; remove alternate-aircraft update arguments.
+- [x] Add validated configuration replacement before flight, preserving independent model instances and cheap presentation clones.
+- [x] Preserve both aircraft's 26-scenario baseline; test configuration effects and rejected invalid edits. See [evidence](baselines/shared-flight-model.md).
+- [ ] Native parity, unresolved PT fields and an external mod-file loader remain open; this is an ownership refactor, not additional native decoding.

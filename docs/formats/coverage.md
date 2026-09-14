@@ -51,3 +51,10 @@ Fifth-pass native research: 52 reviewed regions with incoming entry references;
 translated landing nearest-object selection/distance, ground query flags,
 signed-word RNG reseeding/chance and object-due comparison. Collision geometry,
 queue rescheduling, remaining state producers and whole-tick parity stay open.
+
+The shared BRF aircraft reader now reviews F18.PT and RAFALE.PT (Rafale C), both
+FA plane type 5/size 660, with named extraction reports and transitive dependencies.
+`--validate-flight` runs identical hybrid flight acceptance on either identity.
+Other Rafale variants remain rejected; RAF.SH is preserved but does not receive
+F18-specific animation assumptions. See [shared model](../FLIGHT-MODEL.md) and
+[acceptance evidence](../baselines/shared-flight-model.md).

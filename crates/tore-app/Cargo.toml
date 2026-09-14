@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+tore-sim = { path = "../tore-sim" }
 cpal = "0.16"
 tore-formats = { path = "../tore-formats" }
 pollster = "0.4"

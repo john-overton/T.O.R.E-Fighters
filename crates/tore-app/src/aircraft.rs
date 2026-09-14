@@ -7,6 +7,7 @@ use crate::{
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::{Pic, aircraft::Aircraft, font::Font, shape::Shape};
 pub struct Hornet {
+    model: tore_sim::models::AircraftModel,
     pub profile: Aircraft,
     pub atlas: Pic,
     pub palette: [[u8; 3]; 256],
@@ -141,6 +142,7 @@ impl Hornet {
             return Err("unreviewed FA in-flight menu structure".into());
         }
         Ok(Self {
+            model: tore_sim::models::AircraftModel::for_aircraft(&profile)?,
             profile,
             atlas,
             palette,
@@ -156,7 +158,7 @@ impl Hornet {
         let c = Camera::for_world(world);
         let mut p = c.position.map(|v| v as f64);
         p[1] = 5000f64.max(world.height(p[0] as f32, p[2] as f32) as f64 + 2000.);
-        flight::State::new(&self.profile, p)
+        flight::State::from_model(self.model.clone(), p)
     }
     pub fn camera(&self, state: &flight::State, view: u8, keys: BTreeSet<String>) -> Camera {
         let mut c = Camera::new();

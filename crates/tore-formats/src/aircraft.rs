@@ -146,32 +146,30 @@ fn fields(tokens: &[Token], layout: &[(&str, &str)]) -> Result<BTreeMap<String, 
         })
         .collect()
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Envelope {
     pub g: i32,
     pub points: Vec<[f64; 2]>,
 }
 impl Envelope {
     pub fn speeds(&self, alt: f64) -> Option<(f64, f64)> {
-        let mut hits = Vec::new();
+        let mut low = f64::INFINITY;
+        let mut high = f64::NEG_INFINITY;
+        let mut hit = |v: f64| {
+            low = low.min(v);
+            high = high.max(v);
+        };
         for i in 0..self.points.len() {
             let a = self.points[i];
             let b = self.points[(i + 1) % self.points.len()];
             if (a[1] - alt).abs() < 1e-9 {
-                hits.push(a[0]);
+                hit(a[0]);
             }
             if (a[1] < alt && b[1] > alt) || (a[1] > alt && b[1] < alt) {
-                hits.push(a[0] + (b[0] - a[0]) * (alt - a[1]) / (b[1] - a[1]));
+                hit(a[0] + (b[0] - a[0]) * (alt - a[1]) / (b[1] - a[1]));
             }
         }
-        if hits.is_empty() {
-            None
-        } else {
-            Some((
-                hits.iter().copied().fold(f64::INFINITY, f64::min),
-                hits.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-            ))
-        }
+        (low <= high).then_some((low, high))
     }
 }
 #[derive(Debug)]
@@ -208,8 +206,14 @@ impl Aircraft {
             return Err(invalid("expected reviewed FA aircraft layout (660)"));
         }
         let names = b.strings("ot_names")?;
-        if names.len() != 3 || !names[2].eq_ignore_ascii_case("F18.PT") {
-            return Err(invalid("only reviewed F18.PT aircraft supported"));
+        if names.len() != 3
+            || !["F18.PT", "RAFALE.PT"]
+                .iter()
+                .any(|n| names[2].eq_ignore_ascii_case(n))
+        {
+            return Err(invalid(
+                "only reviewed F18.PT and RAFALE.PT aircraft supported",
+            ));
         }
         let resolve = |t: &Token| -> Result<Option<String>> {
             if t.kind == "ptr" {
@@ -338,18 +342,31 @@ pub fn dependencies(
     aircraft: bool,
     weapons: bool,
 ) -> Result<BTreeSet<String>> {
+    dependencies_for(archives, aircraft.then_some("f18"), weapons)
+}
+/// Reviewed aircraft identities share metadata parsing, not visual animation layouts.
+pub fn dependencies_for(
+    archives: &[&Archive],
+    aircraft: Option<&str>,
+    weapons: bool,
+) -> Result<BTreeSet<String>> {
+    let (pt, hud, shape, cockpit, prefix) = match aircraft {
+        None | Some("f18") => ("F18.PT", "F18.HUD", "F18.SH", "~F18H.PIC", "F18"),
+        Some("rafale") => ("RAFALE.PT", "RAFALE.HUD", "RAF.SH", "~RAFH.PIC", "RAF"),
+        _ => return Err(invalid("unsupported aircraft profile")),
+    };
     let catalog: BTreeSet<String> = archives
         .iter()
         .flat_map(|a| a.entries.keys().cloned())
         .collect();
     let mut selected = BTreeSet::new();
-    if aircraft {
+    if aircraft.is_some() {
         for n in [
-            "F18.PT",
-            "F18.HUD",
-            "F18.SH",
+            pt,
+            hud,
+            shape,
             "PALETTE.PAL",
-            "~F18H.PIC",
+            cockpit,
             "WIN11.FNT",
             "HUD11.FNT",
             "FMENUD.MNU",
@@ -366,9 +383,9 @@ pub fn dependencies(
                 || n.starts_with("&STALL")
                 || n == "&HOOK.5K"
                 || n == "&WIND.11K"
-                || n.starts_with("~F18")
-                || n.starts_with("F18_")
-                || n.starts_with("_F18")
+                || n.starts_with(&format!("~{prefix}"))
+                || n.starts_with(&format!("{prefix}_"))
+                || n.starts_with(&format!("_{prefix}"))
                 || INSTRUMENT_ART.contains(&n.as_str())
                 || (n.starts_with("WIN") || n.starts_with("HUD")) && n.ends_with(".FNT")
             {
@@ -558,6 +575,8 @@ mod profile_tests {
         assert_eq!(a.envelopes.len(), 2);
         assert!(Aircraft::parse(t.replacen("word 660", "dword 660", 1).as_bytes()).is_err());
         assert!(Aircraft::parse(t.replace("F18.PT", "OTHER.PT").as_bytes()).is_err());
+        assert!(Aircraft::parse(t.replace("F18.PT", "RAFALE.PT").as_bytes()).is_ok());
+        assert!(Aircraft::parse(t.replace("F18.PT", "RAFALEE.PT").as_bytes()).is_err());
         assert!(Aircraft::parse(t.replacen("dword 100", "dword 3000", 1).as_bytes()).is_err());
     }
 }

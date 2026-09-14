@@ -540,3 +540,25 @@ jumps into a region's interior are not a complete call graph. New components
 remain diagnostic. Next gates are collision dispatcher geometry/cache producers,
 object rescheduling and RNG seed producers, event consumers, loaded field
 semantics, then a complete state/update harness with native trajectory evidence.
+
+## Working hybrid adapter and Rafale C cross-check
+
+The next pass builds a working free-flight adapter in `tore-sim` and verifies the
+same extraction/model workflow on RAFALE.PT (retail long name “Rafale C”). The
+660-byte reviewed layout is shared with F18.PT; RAFALEE/RAFALEF are distinct and
+remain rejected. Extracted Rafale facts: 17,100 lb empty, 9,900 lb internal fuel,
+24,000 lbf military thrust, 32,000 lbf AB thrust, spinEntry 1 and spinExit −2.
+Hornet spinEntry is 0, so the second aircraft exercises different native thresholds.
+
+This changes the earlier diagnostic-only boundary **for selected helper rules**:
+`--researched-flight` uses native departure/recovery rules and source spin yaw
+ranges in an explicitly fitted continuous adapter. The exact integer force/
+matrix/scheduler model is still incomplete. The legacy app default remains intact.
+See [FLIGHT-MODEL](../FLIGHT-MODEL.md) for component provenance and remaining gates.
+
+Lessons from integrated tests: constant drag must not reverse a stopped wheel
+roll; ground pitch needs support instead of integrating through the runway;
+controlled takeoff must transition from rotation to a climb command rather than
+hold a loop-producing high-G pull. Wind must be subtracted for air-relative
+forces and added back for position, not change TAS merely through advection.
+These are fitted integration decisions, not newly decoded native instructions.

@@ -1,7 +1,7 @@
 //! FA 0x47a970 drag assembly. Loaded coefficients are supplied by setup/loadout code.
 use super::clean_drag;
 use crate::Result;
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DragProfile {
     pub rudder: i16,
     pub flaps: i16,
