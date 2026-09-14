@@ -39,6 +39,7 @@ pub enum Readiness {
     TargetDestroyed,
     RadarOff,
     RadarCoverage,
+    TerrainMasked,
     MinimumRange,
     MaximumRange,
     Altitude,
@@ -57,6 +58,7 @@ impl Readiness {
             Self::TargetDestroyed => "TARGET DESTROYED",
             Self::RadarOff => "RADAR OFF",
             Self::RadarCoverage => "RADAR COVERAGE",
+            Self::TerrainMasked => "TERRAIN MASKED",
             Self::MinimumRange => "MIN RANGE",
             Self::MaximumRange => "MAX RANGE",
             Self::Altitude => "ALTITUDE LIMIT",
@@ -103,6 +105,7 @@ pub struct Configuration {
     pub target_category: u16,
     pub external_equipment_lbs: i32,
     pub radar: tore_formats::weapons::Seeker,
+    pub visual: tore_formats::weapons::Seeker,
 }
 impl Configuration {
     fn validate(&self) -> Result<()> {
@@ -211,8 +214,16 @@ impl Configuration {
             .find(|n| *n == "F18R.SEE")
             .ok_or_else(|| super::invalid("missing reviewed radar station"))?;
         let radar = tore_formats::weapons::Seeker::parse(radar_name, &read(radar_name)?)?;
+        let visual_name = a
+            .hardpoints
+            .iter()
+            .filter_map(|h| h.store.as_deref())
+            .find(|n| *n == "VIS340.SEE")
+            .ok_or_else(|| super::invalid("missing reviewed visual sensor"))?;
+        let visual = tore_formats::weapons::Seeker::parse(visual_name, &read(visual_name)?)?;
         Ok(Self {
             radar,
+            visual,
             external_equipment_lbs,
             aircraft: a.id,
             stations,
@@ -282,6 +293,7 @@ pub struct State {
     pub history: Vec<HitRecord>,
     pub range_category: u16,
     next_target_id: u32,
+    masked_targets: Vec<u32>,
     external: bool,
     tick: u64,
     service_remainder: u16,
@@ -314,6 +326,7 @@ impl State {
             history: vec![],
             range_category,
             next_target_id: 1,
+            masked_targets: vec![],
             config,
             ammo,
             selected: 0,
@@ -338,19 +351,19 @@ impl State {
         self.release();
         self.selected = (self.selected + 1) % self.ammo.len();
     }
-    pub fn designate_next(&mut self) {
+    pub fn designate_next(&mut self, launcher: Launcher) {
         self.designated = self
             .targets
             .iter()
-            .filter(|t| t.hp > 0)
+            .filter(|t| self.detects(launcher, t))
             .find(|t| Some(t.id) > self.designated)
-            .or_else(|| self.targets.iter().find(|t| t.hp > 0))
+            .or_else(|| self.targets.iter().find(|t| self.detects(launcher, t)))
             .map(|t| t.id);
     }
     pub fn command(&mut self, command: Command, launcher: Launcher) {
         match command {
             Command::NextWeapon => self.select_next(),
-            Command::Designate => self.designate_next(),
+            Command::Designate => self.designate_next(launcher),
             Command::ClearDesignation => self.designated = None,
             Command::ToggleArm => {
                 self.armed = !self.armed;
@@ -411,6 +424,9 @@ impl State {
         if t.hp <= 0 {
             return Readiness::TargetDestroyed;
         }
+        if self.masked_targets.contains(&t.id) {
+            return Readiness::TerrainMasked;
+        }
         if w.seeker.signature == 3 {
             if !launcher.radar {
                 return Readiness::RadarOff;
@@ -455,6 +471,7 @@ impl State {
         self.projectiles.clear();
         self.effects.clear();
         self.targets.clear();
+        self.masked_targets.clear();
         let id = self.next_target_id;
         self.next_target_id = self
             .next_target_id
@@ -472,8 +489,23 @@ impl State {
         });
         self.designated = None;
     }
+    pub fn detects(&self, launcher: Launcher, target: &Target) -> bool {
+        target.hp > 0
+            && !self.masked_targets.contains(&target.id)
+            && (self.radar_detects(launcher, target.position)
+                || cone(
+                    &self.config.visual.zones[0],
+                    launcher.position,
+                    launcher.basis.forward,
+                    target.position,
+                ))
+    }
     pub fn radar_detects(&self, launcher: Launcher, target: Vector) -> bool {
-        launcher.radar
+        !self
+            .targets
+            .iter()
+            .any(|t| t.position == target && self.masked_targets.contains(&t.id))
+            && launcher.radar
             && cone(
                 &self.config.radar.zones[0],
                 launcher.position,
@@ -518,6 +550,14 @@ impl State {
             e.ticks = e.ticks.saturating_sub(1);
         }
         self.effects.retain(|e| e.ticks > 0);
+        // Authored bounded terrain line-of-sight test shared by acquisition
+        // and scope contacts. Native masking/cadence remains unverified.
+        self.masked_targets = self
+            .targets
+            .iter()
+            .filter(|t| t.hp > 0 && terrain_hit(launcher.position, t.position, &ground).is_some())
+            .map(|t| t.id)
+            .collect();
         let index = self.selected;
         let allowed = self.readiness(launcher) == Readiness::Ready;
         let station = &self.config.stations[index];
@@ -585,7 +625,9 @@ impl State {
                 .target
                 .and_then(|id| self.targets.iter().find(|t| t.id == id && t.hp > 0))
             {
-                if acquisition(w, p.position, p.direction, t.position, launcher.radar, 0) {
+                if acquisition(w, p.position, p.direction, t.position, launcher.radar, 0)
+                    && terrain_hit(p.position, t.position, &ground).is_none()
+                {
                     let desired = unit(sub(t.position, p.position));
                     let rate = if phase == EnginePhase::Powered {
                         m.powered_turn_rate
@@ -897,6 +939,7 @@ mod tests {
                 target_category: 0x80,
                 external_equipment_lbs: 0,
                 radar: seeker,
+                visual: seeker,
             },
             true,
         )
@@ -950,7 +993,7 @@ mod tests {
         let mut s = fixture(true);
         let mut l = launcher();
         s.range_target(l);
-        s.designate_next();
+        s.designate_next(launcher());
         l.radar = false;
         assert!(!s.radar_detects(l, s.targets[0].position));
         assert!(!s.can_lock(l));
@@ -1097,7 +1140,7 @@ mod tests {
         assert_eq!(s.rounds(0), 11);
         s.command(Command::ToggleArm, l);
         s.range_target(l);
-        s.designate_next();
+        s.designate_next(launcher());
         assert_eq!(s.readiness(l), Readiness::Ready);
         let z = &mut s.config.stations[0].weapon.seeker.zones[1];
         z.minimum_range = 4000;
@@ -1110,7 +1153,7 @@ mod tests {
     fn replacement_clears_old_engagement_and_uses_fresh_identity() {
         let mut s = fixture(true);
         s.range_target(launcher());
-        s.designate_next();
+        s.designate_next(launcher());
         s.step(true, launcher(), |_, _| 0.);
         let ammo = s.ammo.clone();
         assert!(!s.projectiles.is_empty());
@@ -1124,7 +1167,7 @@ mod tests {
         let mut s = fixture(true);
         s.config.stations[0].weapon.flags &= !0x200;
         s.range_target(launcher());
-        s.designate_next();
+        s.designate_next(launcher());
         s.step(true, launcher(), |_, _| 0.);
         let mut l = launcher();
         l.radar = false;
@@ -1135,5 +1178,66 @@ mod tests {
         let events = s.step(false, l, |_, _| 0.);
         assert_eq!(s.projectiles[0].target, None);
         assert!(events.contains(&Event::TrackLost(1)));
+    }
+    #[test]
+    fn terrain_visibility_gates_designation_launch_scope_and_tracking() {
+        let mut s = fixture(true);
+        let l = launcher();
+        s.range_target(l);
+        s.designate_next(l);
+        let wall = |_: f64, z: f64| {
+            if (1000. ..2000.).contains(&z) {
+                2000.
+            } else {
+                0.
+            }
+        };
+        s.step(true, l, wall);
+        assert_eq!(s.readiness(l), Readiness::TerrainMasked);
+        assert_eq!(s.rounds(0), 11);
+        assert!(!s.radar_detects(l, s.targets[0].position));
+        s.command(Command::ClearDesignation, l);
+        s.designate_next(l);
+        assert_eq!(s.designated, None);
+        s.step(false, l, |_, _| 0.);
+        s.designate_next(l);
+        s.step(true, l, |_, _| 0.);
+        assert_eq!(s.projectiles[0].target, Some(1));
+        assert!(s.step(false, l, wall).contains(&Event::TrackLost(1)));
+    }
+    #[test]
+    fn manual_command_tape_is_identical_with_pause_and_render_cadence() {
+        let run = |fps: usize| {
+            let mut s = fixture(true);
+            let l = launcher();
+            let mut clock = crate::flight::Clock { remainder: 0. };
+            let mut tick = 0;
+            for frame in 0..fps * 5 {
+                if (fps..fps * 2).contains(&frame) {
+                    continue;
+                }
+                for _ in 0..clock.steps(1. / fps as f64) {
+                    let command = match tick {
+                        0 => Some(Command::ReplaceTarget),
+                        1 => Some(Command::Designate),
+                        10 | 20 => Some(Command::ToggleArm),
+                        40 => Some(Command::ClearDesignation),
+                        50 => Some(Command::Designate),
+                        60 => Some(Command::FailStation),
+                        90 => Some(Command::Jettison),
+                        100 => Some(Command::CycleClass),
+                        _ => None,
+                    };
+                    if let Some(command) = command {
+                        s.command(command, l);
+                    }
+                    s.step(tick % 30 == 0, l, |_, _| 0.);
+                    tick += 1;
+                }
+            }
+            (tick, format!("{s:?}"))
+        };
+        assert_eq!(run(30), run(60));
+        assert_eq!(run(60), run(144));
     }
 }

@@ -14,6 +14,9 @@ REGIONS = (
     ('unpowered_fall', 0x4c14e4, 0x4c153d, 'movement'),
     ('fov', 0x4c2860, 0x4c2b50, 'sensors'),
     ('lock', 0x4c2f20, 0x4c3250, 'sensors'),
+    ('damage_category', 0x411470, 0x4114ec, 'damage'),
+    ('damage_amount', 0x40f9b0, 0x40f9ec, 'damage'),
+    ('station_failure', 0x4103f1, 0x4104bc, 'damage'),
     ('hit_chance', 0x4c3380, 0x4c39a0, 'damage'),
     ('fire', 0x4c2170, 0x4c26f0, 'weapons'),
     ('service_weapon', 0x4c4700, 0x4c5570, 'weapons'),
@@ -40,7 +43,7 @@ def artifacts(exe, rows, instructions, repo):
     manifest['open_contracts'] = [
         'complete native service clock and player trigger dispatch',
         'generic object movement and target command producers',
-        'terrain/collision and damage-class producers',
+        'terrain/collision, damage scaling/RNG and subsystem selection',
         'radar/signature/illumination and countermeasure state',
         'full effect tables and drawing module execution semantics',
         'whole engagement comparison against original-game observations',
