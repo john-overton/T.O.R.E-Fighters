@@ -446,6 +446,39 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 if no_target.ammo[index] != initial {
                     return Err("undesignated launch consumed ammo".into());
                 }
+                let weapon = &combat.state.configuration().stations[index].weapon;
+                let mut too_close = combat.state.clone();
+                let distance = f64::from(weapon.seeker.zones[1].minimum_range) - 1.;
+                too_close.targets[0].position =
+                    std::array::from_fn(|k| l.position[k] + l.basis.forward[k] * distance);
+                let close_reason = too_close.readiness(l);
+                too_close.step(true, l, |_, _| 0.);
+                if too_close.rounds(index) != initial
+                    || close_reason != live::Readiness::MinimumRange
+                {
+                    return Err("source minimum-range launch was not inhibited".into());
+                }
+                let mut tracking = combat.state.clone();
+                tracking.step(true, l, |_, _| 0.);
+                if tracking.projectiles.is_empty() {
+                    return Err("source guidance probe did not launch".into());
+                }
+                tracking.step(false, Launcher { radar: false, ..l }, |_, _| 0.);
+                let loses_track = weapon.seeker.signature == 3 && weapon.flags & 0x200 != 0;
+                if tracking
+                    .projectiles
+                    .iter()
+                    .any(|p| p.target.is_none() != loses_track)
+                {
+                    return Err("source radar-off tracking contract failed".into());
+                }
+                let mut jettison = combat.state.clone();
+                let expected_mass =
+                    jettison.payload_lbs() - f64::from(weapon.weight) * f64::from(initial);
+                jettison.command(live::Command::Jettison, l);
+                if jettison.rounds(index) != 0 || jettison.payload_lbs() != expected_mass {
+                    return Err("source jettison mass/ammunition contract failed".into());
+                }
                 if combat.state.configuration().stations[index]
                     .weapon
                     .seeker
@@ -603,6 +636,21 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     combat.cancel();
                     combat.command(command, launcher(&flight));
                     combat.step(&mut flight, &world)?;
+                }
+                combat
+                    .recorder
+                    .as_mut()
+                    .ok_or("missing smoke recorder")?
+                    .flush()?;
+                let decoded = crate::combat_tape::replay(
+                    path,
+                    data,
+                    combat.state.configuration().clone(),
+                    "UKR",
+                    &world,
+                )?;
+                if format!("{decoded:?}") != format!("{:?}", combat.state) {
+                    return Err("serialized manual-command replay diverged before reset".into());
                 }
                 combat.reset(&mut flight)?;
                 combat.step(&mut flight, &world)?;

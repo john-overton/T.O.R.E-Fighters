@@ -371,14 +371,14 @@ impl State {
             }
             Command::Jettison => {
                 if !self.config.stations[self.selected].internal {
-                    self.ammo[self.selected] = 0;
+                    unload(&mut self.ammo[self.selected], 0);
                     self.release();
                 }
             }
             Command::ReplaceTarget => self.range_target(launcher),
             Command::CycleClass => {
-                self.range_category =
-                    [0x80, 0x2000, 0x100, 0x400, 0x40][(damage_class(self.range_category) + 1) % 5];
+                self.range_category = [self.config.target_category, 0x2000, 0x100, 0x400, 0x40]
+                    [(damage_class(self.range_category) + 1) % 5];
                 self.range_target(launcher);
             }
             // Native equipment damage marks the station's high bit. Selecting
@@ -1125,6 +1125,7 @@ mod tests {
         assert_eq!(s.shots, 0);
         s.command(Command::Jettison, launcher());
         assert_eq!(s.payload_lbs(), 0.);
+        assert_eq!(s.ammo[0], 0x8000); // Unloading cannot repair a failed station.
         let mut gun = fixture(false);
         gun.command(Command::Jettison, launcher());
         assert_eq!(gun.rounds(0), 11);
@@ -1239,5 +1240,16 @@ mod tests {
         };
         assert_eq!(run(30), run(60));
         assert_eq!(run(60), run(144));
+    }
+    #[test]
+    fn cycling_classes_restores_exact_source_category() {
+        let mut s = fixture(false);
+        s.config.target_category = 0x8000;
+        s.range_category = s.config.target_category;
+        for _ in 0..5 {
+            s.command(Command::CycleClass, launcher());
+        }
+        assert_eq!(s.range_category, 0x8000);
+        assert_eq!(s.targets[0].category, 0x8000);
     }
 }
