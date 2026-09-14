@@ -290,3 +290,51 @@ or a complete call graph.
 
 Do not classify the inventory symbol `_explode` as combat explosion code merely
 from its name.
+
+## Development live-fire adapter (subsequent implementation)
+
+The user's subsequent live-fire request explicitly permits documented
+approximations. `tore-sim::combat::live` is that connected development adapter;
+it does not promote the diagnostic components to native-parity status.
+
+Identity resolution follows `AircraftId::ALL`, the F18 and Rafale C model modules,
+reviewed cockpit/exterior assets and each PT's actual hardpoint records. Only
+F18.PT (F/A-18D) and RAFALE.PT (Rafale C) are supported. Live configuration resolves
+PT weapon counts/mounts and JT movement/damage/sensor/effect fields once. The
+Hornet has M61/570, AIM120/2, two AGM65G/4 groups and AIM9M/2; Rafale C has
+DEFA/250, AGM65G/4, MICA/2, R530/2 and R550/2. These are **PT defaults**, not a
+recovered mission-specific loadout preset or a new compatibility claim.
+
+Source launch speed, motor states, axial acceleration/deceleration, altitude
+performance, expiry, fall and ammo-debit arithmetic are reused. The connected
+adapter advances at 120 Hz with an authored remainder conversion to 256-unit
+service time and four-unit-per-second deadlines. Representative burst count
+and per-projectile ammunition debit come from JT; burst grouping and input
+service ordering remain approximate. No real-world RPM replaces FA data.
+
+The explicit range's targets are scripted instances of the selected ported
+aircraft, with source HP (116 Hornet; 100 Rafale). They do not return fire.
+Designation refers to real target IDs; dead targets cannot lock or receive
+another destruction. SEE range/FOV plus radar emission gate radar contacts and
+radar-guided launch; JT launch/track zones gate guided weapons. The current
+cone test, direct pursuit capped by source turn-rate fields, all-radar-weapons
+illumination requirement and irreversible loss of track are approximations.
+Native lead/PN, active/semi-active distinctions, signature strength, ground/air
+eligibility, aspect/Doppler, terrain masking, sun, ECM and difficulty/RNG remain
+open. AGM65G can engage the same range aircraft surrogate; this is not native
+AGM65 target-class acceptance.
+
+Swept relative-motion sphere intersection prevents round/target tunneling;
+eight terrain samples plus bisection find the earliest sampled ground crossing.
+This is not native polygon collision. Fuzes use source arm time/radius; damage
+subtracts the source aircraft-class entry from source target HP. Native hit
+probability, subsystem damage, immunity, collateral, debris and water effects
+remain open. Ordinary free flight stays externally clean; explicit live range
+loads the PT weapon counts and auxiliary external equipment mass. Tank fuel is
+carried mass only, with no transfer/jettison. Released stores reduce payload
+through the existing aircraft-owned model; rack pairing, weapon-specific drag
+and carried-store rendering are not recovered.
+
+See [live-fire validation](../baselines/live-fire.md) for controls, screenshots,
+end-to-end results and presentation approximations. This is a working test range,
+not a completed W3–W5 vanilla acceptance gate.
