@@ -80,7 +80,7 @@ The extractor is format-based, not tied to `FA_1.LIB` or another title's filenam
 
 It unpacks **all resource types** as their original decompressed bytes. It does not claim to decode every resource: a `.SH` remains a shape resource, `.PIC` remains an indexed game image, `.FNT` remains a compiled resource, and `.11K` remains PCM. Nothing extracted is executed. The app interprets its menu subset and the initial T2/mission/weather data subset described in [theater recovery](formats/theater.md).
 
-ISO images, ESA installer containers, coded-literal DCL mode 1, missing/truncated media repair, PNG/WAV/model conversion, and cross-title gameplay import are not implemented by this command. Supply loose archives from your own installed or extracted media. Unknown/non-EALIB `.LIB` files are reported as errors rather than silently accepted.
+ISO images, ESA installer containers, coded-literal DCL mode 1, missing/truncated media repair, general PNG/WAV/model conversion, and cross-title gameplay import are not implemented by this command. The explicit `--music --wav-previews` option described below supports lossless music PCM WAV wrapping. Supply loose archives from your own installed or extracted media. Unknown/non-EALIB `.LIB` files are reported as errors rather than silently accepted.
 
 ## Native command and tests
 
@@ -194,3 +194,30 @@ analysis is included in the extraction report. `--validate-flight` runs the
 shared headless hybrid-model suite after successful full extraction; it does
 not execute imported code or certify visual/native parity. Full examples:
 [FLIGHT-MODEL.md](FLIGHT-MODEL.md).
+
+
+## Recorded music profile
+
+```sh
+python3 tools/extract_assets.py --music --out .local/music
+python3 tools/extract_assets.py --music --wav-previews --out .local/music
+python3 tools/extract_assets.py --music --list
+```
+
+`--music` selects the shared FA music resource profile: recorded PCM and all nine
+MUS scripts. It does not select MIDI or synthesize audio. The supplied installation
+has 108 matching resources (99 recordings, nine scripts). Music combines as a union
+with aircraft/theater profiles; `--include` subsequently narrows that union.
+Directory scans skip non-EALIB installer files, while explicit archive inputs remain
+strict. App and CLI share resource selection; the app still imports from source
+archives into application data, not from the research output directory.
+
+`--wav-previews` requires `--music`. It creates `NAME.11K.wav` beside each original
+recording with byte-identical PCM samples. Both originals and previews retain the
+normal safe-path, conflict and overwrite protections. `preview_output` and
+`preview_sha256` in the extraction report identify each preview. PCM analysis
+records rate, sample count and duration; MUS analysis records PCM references,
+unreachable byte count and `missing_pcm` against the non-excluded source catalog.
+A successful extraction is not a promise that every score reference exists or a
+narrowed `--include` selection is playable. All WAVs and source resources remain
+local and ignored. [Music evidence and runtime scope](formats/music.md).

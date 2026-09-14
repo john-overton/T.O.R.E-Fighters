@@ -4,6 +4,8 @@ pub mod aircraft;
 mod dcl;
 pub mod font;
 pub mod module;
+pub mod music;
+pub mod pcm;
 mod pic;
 pub mod shape;
 pub mod theater;

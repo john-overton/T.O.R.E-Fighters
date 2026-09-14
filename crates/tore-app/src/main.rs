@@ -402,6 +402,9 @@ impl App {
                 self.menu.state.cancel();
             }
             Action::FreeFlight => {
+                if let Some(audio) = &self.audio {
+                    audio.restart_flight();
+                }
                 if self.recorded_ticks > 0 {
                     self.finish_recording();
                 }
@@ -464,6 +467,11 @@ impl App {
             });
         }
         if let Some(audio) = &self.audio {
+            audio.scene(match self.screen {
+                Screen::Flight => audio::music::Scene::Score(0),
+                Screen::Main => audio::music::Scene::Main,
+                _ => audio::music::Scene::Brief,
+            });
             audio.action(action);
         }
         self.save_preferences();
@@ -751,6 +759,9 @@ impl ApplicationHandler for App {
                         let elapsed = (now - self.frame_time).as_secs_f64().min(0.25);
                         let steps = self.flight_ui.steps(&mut self.flight_clock, elapsed);
                         self.frame_time = now;
+                        if let Some(audio) = &self.audio {
+                            audio.pause_flight(self.flight_ui.frozen());
+                        }
                         for _ in 0..steps {
                             self.previous_flight.clone_from(&self.flight);
                             let (pilot, _) =
@@ -770,18 +781,7 @@ impl ApplicationHandler for App {
                             self.flight
                                 .step(&pilot, |x, z| self.world.height(x as f32, z as f32) as f64);
                             if let Some(audio) = &self.audio {
-                                for (key, changed) in [
-                                    ("g", self.previous_flight.gear_down != self.flight.gear_down),
-                                    (
-                                        "f",
-                                        self.previous_flight.flaps_down != self.flight.flaps_down,
-                                    ),
-                                    ("h", self.previous_flight.hook_down != self.flight.hook_down),
-                                ] {
-                                    if changed {
-                                        audio.control(key, &self.flight);
-                                    }
-                                }
+                                audio.controls(&self.previous_flight, &self.flight);
                             }
                             if self.flight.crashed && !self.previous_flight.crashed {
                                 self.input.feedback(tore_input::FeedbackEvent::Crash);
@@ -1417,7 +1417,7 @@ fn main() -> AppResult<()> {
         None
     };
     let data = assets::data_directory()?;
-    let assets = if let Some(source) = import {
+    let mut assets = if let Some(source) = import {
         Assets::import(&source, &data)?
     } else {
         match Assets::load(&data) {
@@ -1567,7 +1567,7 @@ fn main() -> AppResult<()> {
     let audio = if no_audio || smoke_test || snapshot.is_some() {
         None
     } else {
-        match audio::Audio::new(&assets.sounds) {
+        match audio::Audio::new(std::mem::take(&mut assets.sounds), &assets.music_scores) {
             Ok(audio) => Some(audio),
             Err(error) => {
                 eprintln!("Continuing without audio: {error}");
@@ -1776,6 +1776,11 @@ fn main() -> AppResult<()> {
     app.preference_saved =
         preferences::Preferences::capture(&app.flight_ui, &app.instruments, &app.menu.state).text();
     if let Some(audio) = &app.audio {
+        audio.scene(match app.screen {
+            Screen::Flight => audio::music::Scene::Score(0),
+            Screen::Main => audio::music::Scene::Main,
+            _ => audio::music::Scene::Brief,
+        });
         audio.preferences(app.menu.state.music, app.menu.state.effects);
     }
     if controls_menu {

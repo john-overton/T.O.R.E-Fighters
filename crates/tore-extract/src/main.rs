@@ -17,6 +17,8 @@ struct Options {
     theater: Option<String>,
     aircraft: Vec<tore_formats::aircraft::AircraftId>,
     weapons: bool,
+    music: bool,
+    wav_previews: bool,
     list: bool,
     dry_run: bool,
     overwrite: bool,
@@ -32,6 +34,7 @@ struct Record {
     status: &'static str,
     error: String,
     analysis: String,
+    preview: Option<String>,
 }
 fn quote(value: &str) -> String {
     let mut s = String::from("\"");
@@ -203,8 +206,42 @@ fn field_json(
             .join(",")
     )
 }
-fn analyze(name: &str, bytes: &[u8]) -> Result<String> {
+fn analyze(
+    name: &str,
+    bytes: &[u8],
+    available: &std::collections::BTreeSet<String>,
+) -> Result<String> {
     use tore_formats::theater::{Environment, Theater};
+    if tore_formats::music::resource(name) {
+        if name.ends_with(".MUS") {
+            let score = tore_formats::music::Score::parse(bytes)?;
+            return Ok(format!(
+                "{{\"format\":\"FA MUS\",\"pcm_references\":[{}],\"unreachable_bytes\":{},\"missing_pcm\":[{}]}}",
+                score
+                    .tracks
+                    .iter()
+                    .map(|n| quote(&score.filename(*n)))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                score.unreachable_bytes,
+                score
+                    .tracks
+                    .iter()
+                    .map(|n| score.filename(*n))
+                    .filter(|n| !available.contains(n))
+                    .map(|n| quote(&n))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+        let pcm = tore_formats::pcm::Pcm::parse(name, bytes)?;
+        return Ok(format!(
+            "{{\"format\":\"PCM8 mono\",\"sample_rate\":{},\"samples\":{},\"duration_seconds\":{}}}",
+            pcm.rate,
+            pcm.samples.len(),
+            pcm.samples.len() as f64 / pcm.rate as f64
+        ));
+    }
     if matches!(name, "F18.PT" | "RAFALE.PT") {
         let a = tore_formats::aircraft::Aircraft::parse(bytes)?;
         let envelopes = a
@@ -312,9 +349,12 @@ fn extract(options: Options) -> Result<bool> {
     let mut archives = Vec::new();
     discover(&source, &mut archives)?;
     // Retail discs also bundle other games/installers whose .LIB files are not EALIB.
-    // Only directory-based theater discovery skips them; explicit/raw inputs stay strict.
+    // Only directory-based profile discovery skips them; explicit/raw inputs stay strict.
     if source.is_dir()
-        && (options.theater.is_some() || !options.aircraft.is_empty() || options.weapons)
+        && (options.theater.is_some()
+            || !options.aircraft.is_empty()
+            || options.weapons
+            || options.music)
     {
         let mut supported = Vec::new();
         for path in archives {
@@ -324,7 +364,7 @@ fn extract(options: Options) -> Result<bool> {
                 supported.push(path);
             } else {
                 eprintln!(
-                    "Skipping non-EALIB file in theater scan: {}",
+                    "Skipping non-EALIB file in profile scan: {}",
                     path.display()
                 );
             }
@@ -350,7 +390,7 @@ fn extract(options: Options) -> Result<bool> {
         return Err("output directory must be outside the source media tree".into());
     }
     let mut profile_archives = Vec::new();
-    if !options.aircraft.is_empty() || options.weapons {
+    if !options.aircraft.is_empty() || options.weapons || options.music {
         for path in &archives {
             let relative = path
                 .strip_prefix(source_root)?
@@ -365,6 +405,10 @@ fn extract(options: Options) -> Result<bool> {
             }
         }
     }
+    let available = profile_archives
+        .iter()
+        .flat_map(|a| a.entries.keys().cloned())
+        .collect();
     let aircraft_names = tore_formats::aircraft::dependencies(
         &profile_archives.iter().collect::<Vec<_>>(),
         &options.aircraft,
@@ -397,15 +441,17 @@ fn extract(options: Options) -> Result<bool> {
         let relative = path.strip_prefix(source_root)?;
         let mut matched = 0;
         for entry in archive.entries.values() {
-            let profile =
-                options.theater.is_some() || !options.aircraft.is_empty() || options.weapons;
-            if profile
-                && !aircraft_names.contains(&entry.name)
-                && !options
+            let profile = options.theater.is_some()
+                || !options.aircraft.is_empty()
+                || options.weapons
+                || options.music;
+            let in_profile = (options.music && tore_formats::music::resource(&entry.name))
+                || aircraft_names.contains(&entry.name)
+                || options
                     .theater
                     .as_ref()
-                    .is_some_and(|code| tore_formats::theater::theater_resource(&entry.name, code))
-            {
+                    .is_some_and(|code| tore_formats::theater::theater_resource(&entry.name, code));
+            if profile && !in_profile {
                 continue;
             }
             if !options.patterns.is_empty()
@@ -426,6 +472,7 @@ fn extract(options: Options) -> Result<bool> {
                 status: "planned",
                 error: String::new(),
                 analysis: "null".into(),
+                preview: None,
             };
             let result = (|| -> Result<()> {
                 if !portable_name(&entry.name) || relative.components().any(|c|!matches!(c,Component::Normal(n) if portable_name(&n.to_string_lossy()))){return Err("resource/archive name is not a portable safe output path".into());}
@@ -447,11 +494,25 @@ fn extract(options: Options) -> Result<bool> {
                 let bytes = archive.read_with_limit(&entry.name, options.limit)?;
                 record.decoded = bytes.len();
                 if profile {
-                    record.analysis = analyze(&entry.name, &bytes)?;
+                    record.analysis = analyze(&entry.name, &bytes, &available)?;
                 }
                 let directory = safe_directory(&out, relative)?;
                 record.status =
                     write_resource(&directory.join(&entry.name), &bytes, options.overwrite)?;
+                if options.wav_previews
+                    && tore_formats::music::resource(&entry.name)
+                    && entry.name.ends_with(".11K")
+                {
+                    let preview = format!("{}.wav", entry.name);
+                    let relative_preview =
+                        relative.join(&preview).to_string_lossy().replace('\\', "/");
+                    if !destinations.insert(relative_preview.to_ascii_lowercase()) {
+                        return Err("WAV output collision".into());
+                    }
+                    let pcm = tore_formats::pcm::Pcm::parse(&entry.name, &bytes)?;
+                    write_resource(&directory.join(preview), &pcm.wav(), options.overwrite)?;
+                    record.preview = Some(relative_preview);
+                }
                 Ok(())
             })();
             if let Err(error) = result {
@@ -477,7 +538,7 @@ fn extract(options: Options) -> Result<bool> {
         eprintln!("{}/{}: {}", record.archive, record.name, record.error);
     }
     if !planning {
-        let entries=records.iter().map(|r|format!("{{\"archive\":{},\"name\":{},\"output\":{},\"offset\":{},\"stored_bytes\":{},\"decoded_bytes\":{},\"status\":{},\"error\":{},\"analysis\":{}}}",quote(&r.archive),quote(&r.name),quote(&r.output),r.offset,r.stored,r.decoded,quote(r.status),quote(&r.error),r.analysis)).collect::<Vec<_>>().join(",\n");
+        let entries=records.iter().map(|r|format!("{{\"archive\":{},\"name\":{},\"output\":{},\"offset\":{},\"stored_bytes\":{},\"decoded_bytes\":{},\"status\":{},\"error\":{},\"analysis\":{},\"preview_output\":{}}}",quote(&r.archive),quote(&r.name),quote(&r.output),r.offset,r.stored,r.decoded,quote(r.status),quote(&r.error),r.analysis,r.preview.as_ref().map_or("null".into(), |p| quote(p)))).collect::<Vec<_>>().join(",\n");
         let report = format!(
             "{{\"schema_version\":1,\"source\":{},\"output_root\":{},\"complete\":{},\"selected\":{},\"errors\":[{}],\"entries\":[{}]}}\n",
             quote(&source.to_string_lossy()),
@@ -513,6 +574,8 @@ fn main() -> Result<()> {
         theater: None,
         aircraft: Vec::new(),
         weapons: false,
+        music: false,
+        wav_previews: false,
         list: false,
         dry_run: false,
         overwrite: false,
@@ -540,6 +603,8 @@ fn main() -> Result<()> {
                     )?);
             }
             "--weapons" => options.weapons = true,
+            "--music" => options.music = true,
+            "--wav-previews" => options.wav_previews = true,
             "--theater" => {
                 let code = args
                     .next()
@@ -577,7 +642,7 @@ fn main() -> Result<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--aircraft f18|rafale] [--weapons] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and format conversion are not implemented.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
+                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--aircraft f18|rafale] [--weapons] [--music] [--wav-previews] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and general format conversion are not implemented. --music --wav-previews adds lossless PCM WAV wrappers.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
                 );
                 return Ok(());
             }
@@ -586,6 +651,9 @@ fn main() -> Result<()> {
     }
     if options.source.as_os_str().is_empty() {
         return Err("--source is required; use --help".into());
+    }
+    if options.wav_previews && !options.music {
+        return Err("--wav-previews requires --music".into());
     }
     if !extract(options)? {
         std::process::exit(1);

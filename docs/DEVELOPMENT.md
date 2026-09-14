@@ -49,7 +49,7 @@ Expect a 960 × 720 logical-pixel window showing Choose Activity and a terminal 
 
 Startup chooses randomly among all five original backgrounds; it does not run a timed slideshow. Force a variant for comparison with `--background CHOOSEV` (also accepts CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM). The top bar moves to match each artwork's native origin. Hovering and keyboard focus are silent. An older menu-only cache requires re-import; the local default media is automatically used if available.
 
-First launch automatically imports `gameassets/fighters-anthology/` if no valid cache exists. Use `--import <directory>` to refresh or choose other media. `--import-only` imports and exits without opening a window/audio device. Required archives: `FA_1.LIB` and `FA_2.LIB`; optional `FA_4B.LIB` supplies the music preview. Missing required media produces an actionable terminal error; there is no file-picker UI yet.
+First launch automatically imports `gameassets/fighters-anthology/` if no valid cache exists. Use `--import <directory>` to refresh or choose other media. `--import-only` imports and exits without opening a window/audio device. Required archives: `FA_1.LIB` and `FA_2.LIB`; optional `FA_4B.LIB` and `FA_4D.LIB` supply flight and shell music. Missing required media produces an actionable terminal error; there is no file-picker UI yet.
 
 Cache locations:
 
@@ -107,7 +107,7 @@ cargo run --locked -p tore-app -- --smoke-test
 
 This uses the imported menu, a real window and GPU, prints the renderer, presents one frame without audio, and exits. It is not a headless simulation test. Normal mode waits while idle and schedules frames for short hover transitions and placeholder messages.
 
-`--no-audio` silences a session. Normal playback uses the system's default output device, original PCM effects, and a quiet looping `AIR003.11K` preview when available. Device initialization failure is reported and the menu continues silently. M toggles music; `Pref` exposes music/effect toggles. Music/effects and flight display preferences are restored from `preferences-v1.conf` in the application data directory.
+`--no-audio` silences a session. Normal playback uses the system's default output device, original PCM effects, recorded main/briefing playlists and the NORMAL score during free flight when available. Device initialization failure is reported and the menu continues silently. Main-menu M toggles music; `Pref` exposes music/effect toggles. Music follows the saved preference into flight and freezes on flight pause. In-flight Sound still toggles effects only. No MIDI or synth is used. See [audio behavior and limits](formats/music.md). Music/effects and flight display preferences are restored from `preferences-v1.conf` in the application data directory.
 
 ## Explore media and capture previews
 

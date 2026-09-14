@@ -422,6 +422,7 @@ pub fn dependencies(
                 || n.starts_with("&STALL")
                 || n == "&HOOK.5K"
                 || n == "&WIND.11K"
+                || n == "&SQUEAL.5K"
                 || n.starts_with(&format!("~{}", id.stem()))
                 || n.starts_with(&format!("{}_", id.stem()))
                 || n.starts_with(&format!("_{}", id.stem()))

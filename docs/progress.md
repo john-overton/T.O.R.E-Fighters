@@ -39,7 +39,7 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 - [x] Provide deterministic background/state snapshots and record [menu recovery](formats/menu.md) and [validation](baselines/main-menu.md).
 - [ ] Recover original hover/pressed/disabled state semantics and timing. Current brightness, press displacement, focus outline, hit-area assumptions and placeholder messages are authored.
 - [ ] Decode the actual MNU tree and general DLG controls, including separators, accelerators, nested menus, modal behavior and enabled-state rules. Current dropdown entries/chrome are not a recovered complete tree.
-- [ ] Confirm menu music selection, transitions and cue mapping. `AIR003.11K` is a preview with unconfirmed activity-menu association; PIC fonts do not establish FNT support.
+- [ ] Complete audible acceptance of menu music transitions and remaining cue mappings. Native main/briefing playlists now replace the AIR003 preview; context resets/gains remain authored. See [audio evidence](baselines/audio.md).
 
 ### MENU1b — Quick Mission Creator investigation shell
 
@@ -55,7 +55,7 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 - [ ] Recover generic dialog primitives: lists, scrolling, selection, text entry, sliders, tabs and confirmation/error dialogs as actually encountered. Do not assume LAY is a UI format.
 - [ ] Support compiled FNT and remaining PIC/palette variants when required; preserve glyph metrics, masking, alignment and original control artwork.
 - [ ] Recover settings persistence, keyboard/controller bindings, mixer behavior and reset/default rules. Validate focus, cancellation and modal input across window sizes and display scales.
-- [ ] Recover XMI, instrument banks, MUS scheduling and sequence/audio references; implement internal synthesis and original transitions. Track absent samples/video separately from decoder gaps.
+- [ ] Complete music host transitions and sequence/audio references. PCM/MUS playback supersedes MIDI/synthesis per the user decision on 2026-09-14; missing samples/video remain distinct from decoder gaps.
 
 ### MENU3 — Screen and navigation backlog, deferred
 
@@ -539,3 +539,17 @@ Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
 - [x] Add a low continuous afterburner rumble beneath the ignition impulse, with finite renewable leases and explicit disengagement/context cancellation.
 - [x] Validate synthetic capture/cancellation, profile save/reload/failure, preference round-trips/layout restoration and sustained-effect expiry; inspect wide/tall editor captures and creator/viewer/menu smoke checks. [Evidence](baselines/input.md).
 - [ ] User tactile tuning and full Windows/macOS app/hardware tests; persistent per-player Apple assignment, radial/wizard calibration and physical HOTAS/MFD/button-box validation remain open.
+
+
+## Recorded audio pass — 2026-09-14
+
+- [x] Select original recorded PCM without MIDI conversion, soundfonts or a synth dependency.
+- [x] Add shared app/CLI `--music` resource selection and optional `--wav-previews`; preserve archive boundaries, conflicts, bounds and SHA-256 provenance. Recover 99 recordings and nine scripts; report four unresolved PCM references separately from extraction success.
+- [x] Parse the reviewed FA MUS data grammar with bounded CFG validation and phrase execution. Prepare all nine scores; use complete NORMAL (43/43 phrases) in both aircraft's free flight.
+- [x] Replace the arbitrary AIR003 menu loop with the recovered main/briefing tables. Preserve repeated table entries; document authored creator/viewer mapping, context resets, gains and audio-only RNG.
+- [x] Wire brake deploy/release cues on actual 120 Hz state changes for F18 and Rafale; include the explicit-contact SQUEAL dependency. Clear old aircraft loops on flight restart/exit.
+- [x] Keep music/effects independent, pause without playhead catch-up, and preserve paused UI clicks in a separate bounded pool. Refresh the local app cache for the new music profile.
+- [ ] Bind AIR/DANGER/DECK/LAUNCH/HOME/EJECT/SUCC/VALK only as their real systems arrive; complete native host priority, trigger, missing-media and audible transition acceptance.
+- [ ] Finish hook/flap cue-polarity audit and native wheel-brake behavior; verify actual sound output/listening parity on Windows and macOS.
+
+Validation and material limits: [audio baseline](baselines/audio.md). Further menu screens remain deferred. No retail/generated audio is committed.

@@ -64,11 +64,11 @@ Work:
 - Importer: ESA, EALIB, DCL, PAL, PIC, FNT, DLG, MNU, LAY.
 - Main menu, quick fight setup, aircraft selection, loadout screen at recovered geometry with retail art, fonts, and title music.
 - Pause bar, settings, volume mixer, briefing and debrief screens as shells.
-- XMI playback with instrument banks pulled from game files (the synth module).
+- Original recorded PCM music with bounded MUS scheduling. User decision 2026-09-14: use FA recordings; MIDI conversion/synthesis is excluded from this slice.
 
 Deliverable: every retail menu screen navigable with the correct art and audio.
 
-Exit: side-by-side comparison against retail screenshots recorded in the baseline.  Title and menu music plays from game data with no external synth.
+Exit: side-by-side comparison against retail screenshots recorded in the baseline.  Title and menu music plays from recorded game data with no synth.
 
 ### 1b. Original terrain
 

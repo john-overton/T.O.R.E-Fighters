@@ -61,6 +61,43 @@ impl Drop for Fixture {
     }
 }
 #[test]
+fn recorded_music_profile_wav_provenance_and_conflict_protection() {
+    let f = Fixture::new(vec![
+        ("AIR003.11K", 0, vec![0, 128, 255]),
+        ("AIR003.XMI", 0, b"not selected".to_vec()),
+        ("&CLICK.11K", 0, vec![128]),
+    ]);
+    assert!(
+        f.run(&["--music", "--wav-previews", "--dry-run"])
+            .status
+            .success()
+    );
+    assert!(!f.out.exists());
+    assert!(f.run(&["--music", "--wav-previews"]).status.success());
+    assert!(!f.out.join("OTHER.DAT/AIR003.XMI").exists());
+    assert!(!f.out.join("OTHER.DAT/&CLICK.11K").exists());
+    let path = f.out.join("OTHER.DAT/AIR003.11K.wav");
+    let bytes = fs::read(&path).unwrap();
+    let pcm = tore_formats::pcm::Pcm::parse("preview.wav", &bytes).unwrap();
+    assert_eq!(pcm.samples, [0, 128, 255]);
+    assert_eq!(pcm.rate, 11025);
+    assert!(
+        fs::read_to_string(f.out.join("extraction-report.json"))
+            .unwrap()
+            .contains("preview_output")
+    );
+    assert!(f.run(&["--music", "--wav-previews"]).status.success());
+    fs::write(&path, b"user recording").unwrap();
+    assert!(!f.run(&["--music", "--wav-previews"]).status.success());
+    assert_eq!(fs::read(&path).unwrap(), b"user recording");
+    assert!(
+        f.run(&["--music", "--wav-previews", "--overwrite"])
+            .status
+            .success()
+    );
+    assert!(!f.run(&["--wav-previews"]).status.success());
+}
+#[test]
 fn extracts_stored_and_compressed_resources_and_preserves_changes() {
     let mut compressed = 13u32.to_le_bytes().to_vec();
     compressed.extend_from_slice(&[0, 4, 0x82, 0x24, 0x25, 0x8f, 0x80, 0x7f]);

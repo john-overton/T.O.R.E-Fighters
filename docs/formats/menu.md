@@ -70,6 +70,11 @@ The menu fonts are **PIC glyph strips**, not the separate compiled `.FNT` resour
 
 ## Music evidence and uncertainty
 
+**Superseded for current playback (2026-09-14):** the [FA audio pass](music.md)
+recovers native shell playlists and uses original recorded PCM. AIR003 is no
+longer the menu preview loop. The following paragraph records the earlier
+investigation, not current selection.
+
 `FA_4B.LIB` contains 77 PCM tracks named like the XMI tracks in `FA_2.LIB`. `AIR003.11K` also occurs in the supplied `FA.EXE`: string VA `0x50c838`, referenced at `0x4b27cd` in a small routine starting at `0x4b27c0`. That routine copies the filename and calls routines at `0x4a6cc0` and `0x4a6ce0`. This establishes executable interest in the file, **not** that it is the activity-menu loop; call semantics and callers remain untraced.
 
 The app previews that original PCM recording at low volume and allows disabling it. Native title/menu music mapping, loop behavior, and mixer rates are not claimed. `TITLE95.SEQ` references `^MF.11K`, but that asset was not found in the supplied archives. No replacement title recording was invented or downloaded.

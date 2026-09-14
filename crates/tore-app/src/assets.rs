@@ -43,6 +43,7 @@ pub struct Assets {
     pub pics: BTreeMap<String, Pic>,
     pub buttons: Vec<Button>,
     pub sounds: BTreeMap<String, Vec<u8>>,
+    pub music_scores: BTreeMap<String, Vec<u8>>,
     pub palette: [[u8; 3]; 256],
 }
 pub fn data_directory() -> AppResult<PathBuf> {
@@ -76,6 +77,16 @@ fn archive(root: &Path, name: &str) -> AppResult<Archive> {
 }
 impl Assets {
     fn decode(resources: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
+        if resources.get("TORE_MUSIC_V1").map(Vec::as_slice) != Some(b"PCM1") {
+            return Err("cache predates recorded music profile; re-import media".into());
+        }
+        let mut music_scores = BTreeMap::new();
+        for name in tore_formats::music::SCORES {
+            if let Some(bytes) = resources.get(*name) {
+                tore_formats::music::Score::parse(bytes)?;
+                music_scores.insert(name.to_string(), bytes.clone());
+            }
+        }
         for name in [
             "&GEARUP.5K",
             "WIN11.FNT",
@@ -176,11 +187,13 @@ impl Assets {
         Ok(Self {
             theater_resources: resources
                 .iter()
+                .filter(|(name, _)| !tore_formats::music::resource(name))
                 .map(|(n, b)| (n.clone(), b.clone()))
                 .collect(),
             pics,
             buttons,
             sounds,
+            music_scores,
             palette,
         })
     }
@@ -207,6 +220,7 @@ impl Assets {
                 .filter(|n| {
                     names.contains(&n.as_str())
                         || aircraft_names.contains(*n)
+                        || tore_formats::music::resource(n)
                         || tore_formats::theater::theater_resource(n, "ALL")
                 })
                 .cloned()
@@ -223,20 +237,48 @@ impl Assets {
                 resources.insert(name.to_string(), bytes);
             }
         }
-        // AIR003 is present as both XMI and recorded PCM. Its use here is a preview choice.
-        match archive(source, "FA_4B.LIB").and_then(|lib| Ok(lib.read("AIR003.11K")?)) {
-            Ok(bytes) => {
+        for filename in ["FA_4B.LIB", "FA_4D.LIB"] {
+            let lib = match archive(source, filename) {
+                Ok(lib) => lib,
+                Err(error) => {
+                    eprintln!("Optional recorded music unavailable: {error}");
+                    report.push_str(&format!("Optional recorded music unavailable: {error}\n"));
+                    continue;
+                }
+            };
+            for name in lib
+                .entries
+                .keys()
+                .filter(|n| tore_formats::music::resource(n))
+            {
+                let bytes = lib.read(name)?;
+                if resources.get(name).is_some_and(|old| *old != bytes) {
+                    return Err(format!("conflicting music resource {filename}/{name}").into());
+                }
+                let entry = &lib.entries[name];
                 report.push_str(&format!(
-                    "FA_4B.LIB/AIR003.11K: {} decoded PCM bytes; menu preview mapping unverified\n",
+                    "{filename}/{name}: offset={}, stored={}, decoded={}\n",
+                    entry.offset,
+                    entry.size,
                     bytes.len()
                 ));
-                resources.insert("AIR003.11K".into(), bytes);
-            }
-            Err(error) => {
-                eprintln!("Music preview unavailable: {error}");
-                report.push_str(&format!("Music preview unavailable: {error}\n"));
+                resources.insert(name.clone(), bytes);
             }
         }
+        for name in tore_formats::music::SCORES {
+            if let Some(bytes) = resources.get(*name) {
+                let score = tore_formats::music::Score::parse(bytes)?;
+                for track in &score.tracks {
+                    let file = score.filename(*track);
+                    if !resources.contains_key(&file) {
+                        report.push_str(&format!("{name}: unavailable {file}; no substitution\n"));
+                    }
+                }
+            } else {
+                report.push_str(&format!("Unavailable score {name}\n"));
+            }
+        }
+        resources.insert("TORE_MUSIC_V1".into(), b"PCM1".to_vec());
         let assets = Self::decode(&resources)?;
         fs::create_dir_all(destination)?;
         // Generation files keep the previous import usable until the new pack is complete.

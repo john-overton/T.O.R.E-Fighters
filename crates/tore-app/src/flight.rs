@@ -2,7 +2,7 @@
 pub use tore_sim::flight::*;
 
 #[cfg(test)]
-mod animation_tests {
+pub(crate) mod animation_tests {
     use super::*;
     use crate::attitude::dot;
     use std::collections::BTreeMap;
@@ -51,7 +51,7 @@ mod animation_tests {
                 .collect(),
         }
     }
-    fn profile() -> Aircraft {
+    pub(crate) fn profile() -> Aircraft {
         let mut a = base_profile();
         for key in [
             "rudderDrag",

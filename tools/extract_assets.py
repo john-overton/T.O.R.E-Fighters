@@ -26,6 +26,8 @@ def main():
     parser.add_argument('--aircraft', choices=['f18', 'rafale'], help='Reviewed F/A-18D or Rafale C and its transitive aircraft, cockpit, sensor, store and audio dependencies')
     parser.add_argument('--validate-flight', action='store_true', help='After aircraft extraction, run the shared headless hybrid-flight acceptance suite')
     parser.add_argument('--native-flight', action='store_true', help='Static FA.EXE/FA.SMS research instead of archive extraction; no retail code execution')
+    parser.add_argument('--music', action='store_true', help='Original PCM music and bounded FA situation scripts; no MIDI/synth')
+    parser.add_argument('--wav-previews', action='store_true', help='With --music, also wrap recorded tracks as lossless local WAV previews')
     parser.add_argument('--weapons', action='store_true', help='All projectile definitions and their available dependencies')
     parser.add_argument('--theater', help='Defined theater code (e.g. UKR, TVIET), or all; includes shared sky/weather dependencies')
     parser.add_argument('--exclude-archive', action='append', default=[], help='Skip source-relative archive path glob; repeatable (e.g. disc1/LHX/*)')
@@ -40,7 +42,7 @@ def main():
     if args.validate_flight and (not args.aircraft or args.native_flight or args.list or args.dry_run or args.include):
         parser.error('--validate-flight requires --aircraft and full extraction (no preview/include/native-flight)')
     if args.native_flight:
-        if args.aircraft or args.weapons or args.theater or args.include or args.exclude_archive:
+        if args.aircraft or args.weapons or args.music or args.wav_previews or args.theater or args.include or args.exclude_archive:
             parser.error('--native-flight is a separate executable-research pass; omit archive selection flags')
         from extract_native_flight import extract
         try:
@@ -60,6 +62,12 @@ def main():
                '--source', str(source), '--out', str(output), '--max-entry-mib', str(args.max_entry_mib)]
     if args.aircraft:
         command.extend(['--aircraft', args.aircraft])
+    if args.wav_previews and not args.music:
+        parser.error('--wav-previews requires --music')
+    if args.music:
+        command.append('--music')
+    if args.wav_previews:
+        command.append('--wav-previews')
     if args.weapons:
         command.append('--weapons')
     if args.theater:
@@ -81,6 +89,8 @@ def main():
         for entry in report['entries']:
             if entry['status'] in ('written', 'replaced', 'unchanged'):
                 entry['sha256'] = sha256(output / entry['output'])
+                if entry.get('preview_output'):
+                    entry['preview_sha256'] = sha256(output / entry['preview_output'])
         # Replace only the report created by this invocation, never media files.
         temporary = report_path.with_suffix(f'.{os.getpid()}.tmp')
         with temporary.open('x', encoding='utf-8') as stream:

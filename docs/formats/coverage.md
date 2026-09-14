@@ -10,11 +10,12 @@ Status is for this **Rust rebuild**, not the reference project's decoders. The a
 | Standalone PAL | Decoded | Aircraft palette and cockpit overlays; viewer uses recovered LAY palette data |
 | DLG | Partial | CHOOSEAC rectangle and eight action labels/positions recovered at runtime |
 | MNU | Partial | Bounded FA FMENUD sibling/child tree, labels and accelerators decoded and used by in-flight menu; native handlers/flags and other editions unported |
-| 5K / 11K | Partial | Menu effects/music plus PT-selected engine/AB/start/stop and actuator samples; authored mixer scheduling |
+| 5K / 11K | Partial | 99 recorded music tracks, lossless WAV previews, PT-selected engine/AB/start/stop and actuator samples including speed brakes; bounded PCM8 mono reader, authored mixer gains |
 | FNT | Partial | Bounded bitmap-writing grammar; WIN11 instrument/menu and HUD11 flight fonts rendered |
 | ESA | Not started | Loose LIB installation used |
 | LAY / PL weather | Partial | Bounded CODE/RVA palette reader and native ramp mapping; fixed DAY2 keyframe, no runtime interpolation |
-| XMI / MUS / instrument banks | Not started | Directory inventory only; PCM preview does not count as synthesis |
+| MUS | Partial | All nine FA score grammars parsed; NORMAL drives recorded free-flight phrases, native host events/priority deferred; four missing PCM references reported |
+| XMI / instrument banks | Excluded from current playback scope | User selected original recordings without MIDI/synthesis; general raw extraction remains available |
 | PT / PTS / SH / HUD | Partial | FA F18 PT fields, Hornet static SH/device geometry and cockpit artwork; PTS and complete native HUD/shape VM remain unimplemented |
 | T2 / BIT2 | Partial | All 16 grids parsed; native packed layout, heights and lookup verified; All 16 base theaters render as fixed-triangle previews (Kurile has no tmap textures) |
 | JT / SEE / ECM | Partial | Named schemas, dependency closure and 135 JT definitions extracted; combat/sensor execution not complete |
