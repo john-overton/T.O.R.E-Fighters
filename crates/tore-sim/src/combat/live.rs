@@ -14,6 +14,80 @@ use tore_formats::{
 
 pub const MAX_PROJECTILES: usize = 256;
 pub const MAX_EFFECTS: usize = 64;
+pub const MAX_HIT_RECORDS: usize = 128;
+
+/// Exact category switch at FA 0x411470; category is not a bitmask here.
+pub fn damage_class(category: u16) -> usize {
+    match category {
+        0x40 | 0x200 | 0x800 | 0x1000 => 4,
+        0x100 => 2,
+        0x400 => 3,
+        0x2000 => 1,
+        _ => 0,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Readiness {
+    Ready,
+    Safe,
+    LauncherLost,
+    StationFailed,
+    Empty,
+    Capacity,
+    NoTarget,
+    TargetDestroyed,
+    RadarOff,
+    RadarCoverage,
+    MinimumRange,
+    MaximumRange,
+    Altitude,
+    FieldOfView,
+}
+impl Readiness {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ready => "READY",
+            Self::Safe => "SAFE",
+            Self::LauncherLost => "LAUNCHER LOST",
+            Self::StationFailed => "STATION FAILED",
+            Self::Empty => "EMPTY",
+            Self::Capacity => "PROJECTILE LIMIT",
+            Self::NoTarget => "NO TARGET",
+            Self::TargetDestroyed => "TARGET DESTROYED",
+            Self::RadarOff => "RADAR OFF",
+            Self::RadarCoverage => "RADAR COVERAGE",
+            Self::MinimumRange => "MIN RANGE",
+            Self::MaximumRange => "MAX RANGE",
+            Self::Altitude => "ALTITUDE LIMIT",
+            Self::FieldOfView => "SEEKER FOV",
+        }
+    }
+}
+
+/// Authored manual-range commands. Apply at tick boundaries for deterministic replay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Command {
+    NextWeapon,
+    Designate,
+    ClearDesignation,
+    ToggleArm,
+    Jettison,
+    ReplaceTarget,
+    CycleClass,
+    FailStation,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HitRecord {
+    pub tick: u64,
+    pub target: u32,
+    pub station: usize,
+    pub class: usize,
+    pub nominal: i32,
+    pub applied: i32,
+    pub hp_after: i32,
+}
 #[derive(Clone, Debug)]
 pub struct Station {
     pub weapon: Weapon,
@@ -26,6 +100,7 @@ pub struct Configuration {
     pub aircraft: AircraftId,
     pub stations: Vec<Station>,
     pub hit_points: i32,
+    pub target_category: u16,
     pub external_equipment_lbs: i32,
     pub radar: tore_formats::weapons::Seeker,
 }
@@ -142,6 +217,11 @@ impl Configuration {
             aircraft: a.id,
             stations,
             hit_points,
+            target_category: a
+                .object
+                .get("obj_class")
+                .ok_or_else(|| super::invalid("missing object category"))?
+                .number()? as u16,
         })
     }
 }
@@ -152,6 +232,7 @@ pub struct Target {
     pub velocity: Vector,
     pub radius: f64,
     pub hp: i32,
+    pub category: u16,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projectile {
@@ -183,6 +264,7 @@ pub enum Event {
     Hit(u32),
     Destroyed(u32),
     Ground,
+    TrackLost(u32),
 }
 #[derive(Clone, Debug)]
 pub struct State {
@@ -196,6 +278,10 @@ pub struct State {
     pub shots: u32,
     pub hits: u32,
     pub kills: u32,
+    pub armed: bool,
+    pub history: Vec<HitRecord>,
+    pub range_category: u16,
+    next_target_id: u32,
     external: bool,
     tick: u64,
     service_remainder: u16,
@@ -221,8 +307,13 @@ impl State {
             .map(|s| if s.internal || external { s.count } else { 0 })
             .collect();
         let triggers = vec![PlayerTrigger::default(); config.stations.len()];
+        let range_category = config.target_category;
         Ok(Self {
             external,
+            armed: true,
+            history: vec![],
+            range_category,
+            next_target_id: 1,
             config,
             ammo,
             selected: 0,
@@ -256,6 +347,85 @@ impl State {
             .or_else(|| self.targets.iter().find(|t| t.hp > 0))
             .map(|t| t.id);
     }
+    pub fn command(&mut self, command: Command, launcher: Launcher) {
+        match command {
+            Command::NextWeapon => self.select_next(),
+            Command::Designate => self.designate_next(),
+            Command::ClearDesignation => self.designated = None,
+            Command::ToggleArm => {
+                self.armed = !self.armed;
+                self.release();
+            }
+            Command::Jettison => {
+                if !self.config.stations[self.selected].internal {
+                    self.ammo[self.selected] = 0;
+                    self.release();
+                }
+            }
+            Command::ReplaceTarget => self.range_target(launcher),
+            Command::CycleClass => {
+                self.range_category =
+                    [0x80, 0x2000, 0x100, 0x400, 0x40][(damage_class(self.range_category) + 1) % 5];
+                self.range_target(launcher);
+            }
+            // Native equipment damage marks the station's high bit. Selecting
+            // the failure manually is a test fixture, not a recovered damage roll.
+            Command::FailStation => {
+                self.ammo[self.selected] |= 0x8000;
+                self.release();
+            }
+        }
+    }
+    pub fn rounds(&self, station: usize) -> u16 {
+        self.ammo[station] & 0x7fff
+    }
+    pub fn readiness(&self, launcher: Launcher) -> Readiness {
+        if !launcher.alive {
+            return Readiness::LauncherLost;
+        }
+        if !self.armed {
+            return Readiness::Safe;
+        }
+        if self.ammo[self.selected] & 0x8000 != 0 {
+            return Readiness::StationFailed;
+        }
+        if self.rounds(self.selected) == 0 {
+            return Readiness::Empty;
+        }
+        if self.projectiles.len() >= MAX_PROJECTILES {
+            return Readiness::Capacity;
+        }
+        self.launch_solution(launcher)
+    }
+    fn launch_solution(&self, launcher: Launcher) -> Readiness {
+        let w = &self.config.stations[self.selected].weapon;
+        if w.seeker.signature == 0 {
+            return Readiness::Ready;
+        }
+        let Some(t) = self
+            .designated
+            .and_then(|id| self.targets.iter().find(|t| t.id == id))
+        else {
+            return Readiness::NoTarget;
+        };
+        if t.hp <= 0 {
+            return Readiness::TargetDestroyed;
+        }
+        if w.seeker.signature == 3 {
+            if !launcher.radar {
+                return Readiness::RadarOff;
+            }
+            if !self.radar_detects(launcher, t.position) {
+                return Readiness::RadarCoverage;
+            }
+        }
+        zone_readiness(
+            &w.seeker.zones[1],
+            launcher.position,
+            launcher.basis.forward,
+            t.position,
+        )
+    }
     pub fn payload_lbs(&self) -> f64 {
         f64::from(if self.external {
             self.config.external_equipment_lbs
@@ -267,7 +437,7 @@ impl State {
             .iter()
             .zip(&self.ammo)
             .filter(|(s, _)| !s.internal)
-            .map(|(s, count)| f64::from(s.weapon.weight.max(0)) * f64::from(*count))
+            .map(|(s, count)| f64::from(s.weapon.weight.max(0)) * f64::from(*count & 0x7fff))
             .sum::<f64>()
     }
     /// An explicit, non-AI range target of the selected ported aircraft. No
@@ -279,9 +449,20 @@ impl State {
         } else {
             f64::from(w.seeker.zones[1].minimum_range) + 3000.
         };
+        // Retire the previous engagement atomically. Never let an old missile
+        // hit or track a replacement fixture with a reused identity.
+        self.release();
+        self.projectiles.clear();
+        self.effects.clear();
         self.targets.clear();
+        let id = self.next_target_id;
+        self.next_target_id = self
+            .next_target_id
+            .checked_add(1)
+            .expect("range ID exhaustion");
         self.targets.push(Target {
-            id: 1,
+            id,
+            category: self.range_category,
             position: std::array::from_fn(|i| {
                 launcher.position[i] + launcher.basis.forward[i] * distance
             }),
@@ -301,24 +482,10 @@ impl State {
             )
     }
     pub fn can_lock(&self, launcher: Launcher) -> bool {
-        let w = &self.config.stations[self.selected].weapon;
-        if w.seeker.signature == 0 {
-            return false;
-        }
-        self.designated
-            .and_then(|id| self.targets.iter().find(|t| t.id == id && t.hp > 0))
-            .is_some_and(|t| {
-                (w.seeker.signature != 3 || self.radar_detects(launcher, t.position))
-                    && acquisition(
-                        w,
-                        launcher.position,
-                        launcher.basis.forward,
-                        t.position,
-                        launcher.radar,
-                        1,
-                    )
-            })
+        self.config.stations[self.selected].weapon.seeker.signature != 0
+            && self.launch_solution(launcher) == Readiness::Ready
     }
+
     fn effect(&mut self, position: Vector, kind: EffectKind) {
         if self.effects.len() == MAX_EFFECTS {
             self.effects.remove(0);
@@ -352,10 +519,10 @@ impl State {
         }
         self.effects.retain(|e| e.ticks > 0);
         let index = self.selected;
+        let allowed = self.readiness(launcher) == Readiness::Ready;
         let station = &self.config.stations[index];
         let w = &station.weapon;
         let guided = w.seeker.signature != 0;
-        let allowed = !guided || self.can_lock(launcher);
         let due =
             self.triggers[index].poll(held && launcher.alive, w.flags, w.burst.game_burst_t, now);
         if due && allowed {
@@ -437,8 +604,11 @@ impl State {
                         p.direction[i] * (1. - fraction) + desired[i] * fraction
                     }));
                 } else {
+                    events.push(Event::TrackLost(t.id));
                     p.target = None;
                 }
+            } else if let Some(id) = p.target.take() {
+                events.push(Event::TrackLost(id));
             }
             if w.flags & 0x40 != 0 {
                 let target =
@@ -487,9 +657,22 @@ impl State {
                     std::array::from_fn(|i| p.previous[i] + (p.position[i] - p.previous[i]) * at);
                 if let Some(i) = target {
                     let t = &mut self.targets[i];
-                    // Source damage class 0 is used for the aircraft range target.
-                    // HP subtraction/destruction replaces unported subsystem rolls.
-                    t.hp = (t.hp - i32::from(w.damage.by_class[0]).max(0)).max(0);
+                    let class = damage_class(t.category);
+                    let nominal = i32::from(w.damage.by_class[class]).max(0);
+                    let applied = nominal.min(t.hp);
+                    t.hp -= applied;
+                    if self.history.len() == MAX_HIT_RECORDS {
+                        self.history.remove(0);
+                    }
+                    self.history.push(HitRecord {
+                        tick: self.tick,
+                        target: t.id,
+                        station: p.station,
+                        class,
+                        nominal,
+                        applied,
+                        hp_after: t.hp,
+                    });
                     self.hits += 1;
                     events.push(Event::Hit(t.id));
                     if t.hp == 0 {
@@ -529,7 +712,9 @@ fn acquisition(
     radar: bool,
     zone: usize,
 ) -> bool {
-    if w.seeker.signature == 3 && !radar {
+    // PROJLock checks launcher illumination under flag 0x200. The reviewed
+    // default radar stores all require radar at launch; only R530 has 0x200.
+    if w.seeker.signature == 3 && !radar && (zone == 1 || w.flags & 0x200 != 0) {
         return false;
     }
     cone(&w.seeker.zones[zone], position, forward, target)
@@ -540,15 +725,30 @@ fn cone(
     forward: Vector,
     target: Vector,
 ) -> bool {
+    zone_readiness(z, position, forward, target) == Readiness::Ready
+}
+fn zone_readiness(
+    z: &tore_formats::weapons::Zone,
+    position: Vector,
+    forward: Vector,
+    target: Vector,
+) -> Readiness {
     let d = sub(target, position);
     let distance = dot(d, d).sqrt();
     let angle = dot(unit(d), forward).clamp(-1., 1.).acos();
-    distance >= f64::from(z.minimum_range)
-        && distance <= f64::from(z.maximum_range)
-        && d[1] >= f64::from(z.minimum_altitude)
-        && d[1] <= f64::from(z.maximum_altitude)
-        && angle <= f64::from(z.heading.min(z.pitch).max(0)) * std::f64::consts::TAU / 65520.
+    if distance < f64::from(z.minimum_range) {
+        Readiness::MinimumRange
+    } else if distance > f64::from(z.maximum_range) {
+        Readiness::MaximumRange
+    } else if d[1] < f64::from(z.minimum_altitude) || d[1] > f64::from(z.maximum_altitude) {
+        Readiness::Altitude
+    } else if angle > f64::from(z.heading.min(z.pitch).max(0)) * std::f64::consts::TAU / 65520. {
+        Readiness::FieldOfView
+    } else {
+        Readiness::Ready
+    }
 }
+
 pub fn segment_sphere(a: Vector, b: Vector, radius: f64) -> Option<f64> {
     let d = sub(b, a);
     let c = dot(a, a) - radius * radius;
@@ -621,7 +821,7 @@ mod tests {
             shape: None,
             fire_sound: None,
             native_callback: "_PROJProc".into(),
-            flags: if guided { 0x40 } else { 0x844 },
+            flags: if guided { 0x240 } else { 0x844 },
             object_flags: 0,
             weight: 10,
             movement: Movement {
@@ -694,6 +894,7 @@ mod tests {
                     internal: !guided,
                 }],
                 hit_points: 20,
+                target_category: 0x80,
                 external_equipment_lbs: 0,
                 radar: seeker,
             },
@@ -775,6 +976,7 @@ mod tests {
             velocity: [0.; 3],
             radius: 20.,
             hp: 20,
+            category: 0x80,
         });
         let mut kills = 0;
         for _ in 0..180 {
@@ -825,5 +1027,113 @@ mod tests {
             s.step(true, l, |_, _| 0.);
         }
         assert_eq!(s.ammo, ammo);
+    }
+    #[test]
+    fn native_damage_category_switch_is_exact_not_a_mask() {
+        for (category, index) in [
+            (0x80, 0),
+            (0x2000, 1),
+            (0x100, 2),
+            (0x400, 3),
+            (0x40, 4),
+            (0x200, 4),
+            (0x800, 4),
+            (0x1000, 4),
+            (0x4000, 0),
+            (0x8000, 0),
+            (0x240, 0),
+        ] {
+            assert_eq!(damage_class(category), index);
+        }
+    }
+    #[test]
+    fn all_damage_classes_report_nominal_applied_and_cumulative_hp() {
+        for (index, category) in [0x80, 0x2000, 0x100, 0x400, 0x40].into_iter().enumerate() {
+            let mut s = fixture(false);
+            s.config.stations[0].weapon.damage.by_class = [3, 7, 9, 11, 25];
+            s.targets.push(Target {
+                id: 7,
+                position: [0., 1000., 150.],
+                velocity: [0.; 3],
+                radius: 20.,
+                hp: 20,
+                category,
+            });
+            for _ in 0..180 {
+                s.step(true, launcher(), |_, _| 0.);
+            }
+            assert!(s.history.iter().all(|h| h.class == index));
+            assert_eq!(
+                s.history.iter().map(|h| h.applied).sum::<i32>(),
+                20 - s.targets[0].hp
+            );
+            assert!(s.history.iter().all(|h| h.applied <= h.nominal));
+        }
+    }
+    #[test]
+    fn failed_station_keeps_mass_and_jettison_cannot_remove_internal_gun() {
+        let mut s = fixture(true);
+        let mass = s.payload_lbs();
+        s.command(Command::FailStation, launcher());
+        assert_eq!(s.readiness(launcher()), Readiness::StationFailed);
+        assert_eq!(s.rounds(0), 11);
+        assert_eq!(s.payload_lbs(), mass);
+        s.step(true, launcher(), |_, _| 0.);
+        assert_eq!(s.shots, 0);
+        s.command(Command::Jettison, launcher());
+        assert_eq!(s.payload_lbs(), 0.);
+        let mut gun = fixture(false);
+        gun.command(Command::Jettison, launcher());
+        assert_eq!(gun.rounds(0), 11);
+    }
+    #[test]
+    fn readiness_reports_inhibits_without_ammunition_consumption() {
+        let mut s = fixture(true);
+        let l = launcher();
+        assert_eq!(s.readiness(l), Readiness::NoTarget);
+        s.command(Command::ToggleArm, l);
+        assert_eq!(s.readiness(l), Readiness::Safe);
+        s.step(true, l, |_, _| 0.);
+        assert_eq!(s.rounds(0), 11);
+        s.command(Command::ToggleArm, l);
+        s.range_target(l);
+        s.designate_next();
+        assert_eq!(s.readiness(l), Readiness::Ready);
+        let z = &mut s.config.stations[0].weapon.seeker.zones[1];
+        z.minimum_range = 4000;
+        assert_eq!(s.readiness(l), Readiness::MinimumRange);
+        s.config.stations[0].weapon.seeker.zones[1].minimum_range = 0;
+        s.config.stations[0].weapon.seeker.zones[1].maximum_range = 2000;
+        assert_eq!(s.readiness(l), Readiness::MaximumRange);
+    }
+    #[test]
+    fn replacement_clears_old_engagement_and_uses_fresh_identity() {
+        let mut s = fixture(true);
+        s.range_target(launcher());
+        s.designate_next();
+        s.step(true, launcher(), |_, _| 0.);
+        let ammo = s.ammo.clone();
+        assert!(!s.projectiles.is_empty());
+        s.range_target(launcher());
+        assert_eq!(s.targets[0].id, 2);
+        assert!(s.projectiles.is_empty() && s.effects.is_empty() && s.designated.is_none());
+        assert_eq!(s.ammo, ammo);
+    }
+    #[test]
+    fn autonomous_tracking_survives_radar_off_but_dead_target_is_retired() {
+        let mut s = fixture(true);
+        s.config.stations[0].weapon.flags &= !0x200;
+        s.range_target(launcher());
+        s.designate_next();
+        s.step(true, launcher(), |_, _| 0.);
+        let mut l = launcher();
+        l.radar = false;
+        assert_eq!(s.readiness(l), Readiness::RadarOff);
+        s.step(false, l, |_, _| 0.);
+        assert_eq!(s.projectiles[0].target, Some(1));
+        s.targets[0].hp = 0;
+        let events = s.step(false, l, |_, _| 0.);
+        assert_eq!(s.projectiles[0].target, None);
+        assert!(events.contains(&Event::TrackLost(1)));
     }
 }
