@@ -51,3 +51,12 @@ Fifth-pass native research: 52 reviewed regions with incoming entry references;
 translated landing nearest-object selection/distance, ground query flags,
 signed-word RNG reseeding/chance and object-due comparison. Collision geometry,
 queue rescheduling, remaining state producers and whole-tick parity stay open.
+
+
+Rafale C follow-up: reviewed `RAFALE.PT`/660 identity now has typed BRF/envelope
+coverage alongside F18; the shared per-aircraft resolver imports its 95-resource
+loose-media closure. RAF.SH neutral geometry, original atlas/cockpit and source
+equipment/audio are consumed in selectable free flight. Other Rafale variants,
+native Rafale animation laws and whole native dynamics remain unimplemented;
+a reviewed-part presentation rig is now available. This is
+not general SH/HUD or full aircraft-system parity. [Scope](aircraft.md#rafale-c-import-and-runtime-selection--2026-09-14).

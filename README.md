@@ -1,12 +1,12 @@
 # T.O.R.E-Fighters
 
-Tasteful Opinionated Reverse Engineered: a native Rust rebuild of Fighters Anthology, following [the roadmap](docs/ROADMAP.md). The current slices are original menus, all 16 original theaters, and F/A-18D free flight with raster instrument windows.
+Tasteful Opinionated Reverse Engineered: a native Rust rebuild of Fighters Anthology, following [the roadmap](docs/ROADMAP.md). The current slices are original menus, all 16 original theaters, and F/A-18D / Rafale C free flight with raster instrument windows.
 
-The app launches into the original **Choose Activity** menu using artwork, button pieces, proportional fonts, and sounds imported from your own Fighters Anthology files. Buttons animate; `?`, `Pref`, and `Multi` open dropdowns. **Create Quick Mission → Free Flight** launches the imported F/A-18D over the selected theater. Other mission selectors are placeholders; loadout and combat are deferred. No retail game data ships in this repository.
+The app launches into the original **Choose Activity** menu using artwork, button pieces, proportional fonts, and sounds imported from your own Fighters Anthology files. Buttons animate; `?`, `Pref`, and `Multi` open dropdowns. **Create Quick Mission** opens the original-style briefing: click the aircraft name in Wing 1 or the theater name in “You are flying over…” to select, then **OK** to fly. F/A-18D and Rafale C are available. Enemy fields are ghosted and inert; loadout and combat are deferred. No retail game data ships in this repository.
 
 Each launch randomly selects one of the five original menu backgrounds. Hovering is silent; sounds play on clicks/toggles.
 
-## Run on this Mac
+## Run locally
 
 Rust 1.91.1 is pinned through rustup. From the repository root:
 
@@ -69,7 +69,7 @@ This discovers and unpacks all supported archives into ignored `.local/extracted
 
 Your game files belong in ignored `gameassets/fighters-anthology/`. The ignored `USNF-ATF/` checkout supplies reference specifications; it is not needed by the Rust importer or runtime. Music currently previews recovered `AIR003.11K`; its original activity-menu mapping is not confirmed. Run with `--no-audio` for a silent session.
 
-F/A-18D free flight is available through **Create Quick Mission → Free Flight**, or `cargo run --locked -p tore-app -- --free-flight`. Choose any imported theater; other mission selectors remain dotted placeholders and the loadout page is skipped. The cockpit adapts to the window aspect, with a compact original-font HUD and instrument windows anchored to the screen edges. Arrows fly; PageUp/PageDown adjusts throttle; Shift-B enables afterburner. F1/F2/F3 looks forward/back/up, F10 selects external view, Backspace toggles cockpit art, and Shift-0..9 toggles instruments. **Escape → Pref → Large windows?** switches between four inset corner windows and six smaller bottom windows (three per side). Escape opens the paused flight menu, Ctrl-P pauses/resumes, and F11 opens keyboard help. See the [complete current control reference](docs/FLIGHT-CONTROLS.md). See [controls/setup](docs/DEVELOPMENT.md#hornet-free-flight) and [aircraft/weapon extraction](docs/EXTRACTION.md#fa-18d-and-weapons). This is a playable development adapter; full native flight and instrument parity remain [tracked work](docs/formats/aircraft.md#next-parity-gates).
+F/A-18D and Rafale C free flight are available through **Create Quick Mission → OK**, or `cargo run --locked -p tore-app -- --free-flight --aircraft rafale` (use `--aircraft f18` for the Hornet). Select either aircraft and any imported theater through the highlighted briefing text; other mission fields are ghosted and loadout is skipped. The cockpit adapts to the window aspect, with a compact original-font HUD and instrument windows anchored to the screen edges. Arrows fly; PageUp/PageDown adjusts throttle; Shift-B enables afterburner. F1/F2/F3 looks forward/back/up, F10 selects external view, Backspace toggles cockpit art, and Shift-0..9 toggles instruments. **Escape → Pref → Large windows?** switches between four inset corner windows and six smaller bottom windows (three per side). Escape opens the paused flight menu, Ctrl-P pauses/resumes, and F11 opens keyboard help. See the [complete current control reference](docs/FLIGHT-CONTROLS.md). See [controls/setup](docs/DEVELOPMENT.md#hornet-free-flight) and [aircraft/weapon extraction](docs/EXTRACTION.md#fa-18d-and-weapons). This is a playable development adapter; full native flight and instrument parity remain [tracked work](docs/formats/aircraft.md#next-parity-gates).
 
 Flight performance: ordinary debug runs now optimize the app's rendering loops and use display-paced presentation with interpolated 120 Hz simulation. Use **F10** for the exterior aircraft view; **F2/F3** look back/up from the aircraft. See [performance diagnostics and measurements](docs/baselines/flight-performance.md) for repeatable frame-time checks.
 
@@ -91,3 +91,5 @@ and isolated contact, equipment/control and clock/RNG components. See
 [development commands](docs/DEVELOPMENT.md) and
 [extraction status and limits](docs/formats/native-flight.md). These diagnostic
 translations are not yet the playable flight adapter.
+
+Rafale C uses its own retail PT, cockpit, exterior and equipment/audio dependencies. Its original canards, elevons, gear, airbrakes, rudder and exhaust now animate through a fitted presentation rig. The imported model has no hook control. Exact native animation and flight-model parity remain open. See [Rafale and creator evidence](docs/baselines/rafale-quick-mission.md).

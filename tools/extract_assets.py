@@ -23,7 +23,7 @@ def main():
     parser.add_argument('--source', type=Path, default=repo / 'gameassets/fighters-anthology',
                         help='An archive or directory; default: local Fighters Anthology media')
     parser.add_argument('--out', type=Path, default=repo / '.local/extracted', help='Output directory outside source media')
-    parser.add_argument('--aircraft', choices=['f18'], help='F/A-18D and its transitive aircraft, cockpit, sensor, store and audio dependencies')
+    parser.add_argument('--aircraft', choices=['f18', 'rafale'], help='Selected aircraft and its transitive aircraft, cockpit, sensor, store and audio dependencies')
     parser.add_argument('--native-flight', action='store_true', help='Static FA.EXE/FA.SMS research instead of archive extraction; no retail code execution')
     parser.add_argument('--weapons', action='store_true', help='All projectile definitions and their available dependencies')
     parser.add_argument('--theater', help='Defined theater code (e.g. UKR, TVIET), or all; includes shared sky/weather dependencies')

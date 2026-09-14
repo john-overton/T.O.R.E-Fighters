@@ -1,6 +1,6 @@
 //! Small independent raster instruments. Layout fitted to supplied retail captures;
 //! data is live, unsupported native sensors/camera modes are explicit.
-use crate::{aircraft::Hornet, flight::State, menu::Sprite};
+use crate::{aircraft::Airframe, flight::State, menu::Sprite};
 use tore_formats::font::Font;
 pub const WIDTH: usize = 160;
 pub const HEIGHT: usize = 156;
@@ -229,7 +229,7 @@ impl Instruments {
         }
         false
     }
-    pub fn page(&self, id: u8, h: &Hornet, s: &State) -> Raster {
+    pub fn page(&self, id: u8, h: &Airframe, s: &State) -> Raster {
         let mut r = Raster::new();
         r.rect(0, 0, 160, 156, [98, 115, 143, 255]);
         r.rect(0, 0, 160, 2, [190, 207, 216, 255]);
@@ -355,7 +355,7 @@ impl Instruments {
                 }
             }
             8 => {
-                text(&mut r, "M61", 20, 35);
+                text(&mut r, h.profile.id.gun().trim_end_matches(".JT"), 20, 35);
                 text(
                     &mut r,
                     &format!(
@@ -363,7 +363,7 @@ impl Instruments {
                         h.profile
                             .hardpoints
                             .iter()
-                            .find(|p| p.store.as_deref() == Some("M61.JT"))
+                            .find(|p| p.store.as_deref() == Some(h.profile.id.gun()))
                             .map_or(0, |p| p.count)
                     ),
                     94,

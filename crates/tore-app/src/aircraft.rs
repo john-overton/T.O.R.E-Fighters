@@ -1,4 +1,4 @@
-//! Imported Hornet geometry, cockpit and data. Does not use reference runtime code.
+//! Imported aircraft geometry, cockpit and data. Does not use reference runtime code.
 use crate::{
     AppResult, flight,
     menu::Sprite,
@@ -6,7 +6,7 @@ use crate::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::{Pic, aircraft::Aircraft, font::Font, shape::Shape};
-pub struct Hornet {
+pub struct Airframe {
     pub profile: Aircraft,
     pub atlas: Pic,
     pub palette: [[u8; 3]; 256],
@@ -17,22 +17,31 @@ pub struct Hornet {
     pub equipment: BTreeMap<String, tore_formats::aircraft::Equipment>,
     pub poses: Vec<Shape>,
 }
-impl Hornet {
-    pub fn load(data: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
+impl Airframe {
+    pub fn load(
+        data: &BTreeMap<String, Vec<u8>>,
+        id: tore_formats::aircraft::AircraftId,
+    ) -> AppResult<Self> {
         let get = |s: &str| {
             data.get(s)
                 .ok_or_else(|| format!("aircraft cache missing {s}; re-import media"))
         };
-        let profile = Aircraft::parse(get("F18.PT")?)?;
+        let profile = Aircraft::parse(get(id.pt())?)?;
+        if profile.id != id || profile.shape != format!("{}.SH", id.stem()) {
+            return Err(
+                "aircraft identity/shape does not match the selected retail profile".into(),
+            );
+        }
         let shape = Shape::parse(get(&profile.shape)?)?;
-        if ![0x7900, 0x790c, 0x7912, 0x791e]
-            .iter()
-            .all(|word| shape.state_words.contains(word))
-            || tore_formats::module::code(get(&profile.shape)?)?.0.len() != 26934
+        if id == tore_formats::aircraft::AircraftId::F18
+            && (![0x7900, 0x790c, 0x7912, 0x791e]
+                .iter()
+                .all(|word| shape.state_words.contains(word))
+                || tore_formats::module::code(get(&profile.shape)?)?.0.len() != 26934)
         {
             return Err("unreviewed F18.SH device layout; preserve raw import and review its rig before flying".into());
         }
-        let atlas = Pic::parse(get("_F18.PIC")?)?;
+        let atlas = Pic::parse(get(&format!("_{}.PIC", id.stem()))?)?;
         let raw = get("PALETTE.PAL")?;
         if raw.len() != 768 || raw.iter().any(|v| *v > 63) {
             return Err("invalid aircraft palette".into());
@@ -40,14 +49,20 @@ impl Hornet {
         let palette = std::array::from_fn(|i| {
             std::array::from_fn(|j| ((raw[i * 3 + j] as u16 * 255 + 31) / 63) as u8)
         });
-        let frame = Pic::parse(get("~F18H.PIC")?)?;
+        let frame = Pic::parse(get(id.cockpit())?)?;
         let mut cockpit_palette = palette;
         cockpit_palette[..frame.palette.len()].copy_from_slice(&frame.palette);
         let mut sprites = BTreeMap::new();
+        let cockpit_art = [
+            id.cockpit().to_string(),
+            format!("~{}_LH.PIC", id.stem()),
+            format!("~{}_CH.PIC", id.stem()),
+            format!("~{}_RH.PIC", id.stem()),
+        ];
         for name in tore_formats::aircraft::INSTRUMENT_ART
             .iter()
             .copied()
-            .chain(["~F18H.PIC", "~F18_LH.PIC", "~F18_CH.PIC", "~F18_RH.PIC"])
+            .chain(cockpit_art.iter().map(String::as_str))
         {
             {
                 let p = Pic::parse(get(name)?)?;
@@ -77,46 +92,67 @@ impl Hornet {
             }
         }
         let mut poses = Vec::new();
-        for mask in 0..16 {
-            let words = [
-                (0x7900, i32::from(mask & 1 != 0)),
-                (0x790c, i32::from(mask & 2 != 0)),
-                (0x7912, i32::from(mask & 4 != 0)),
-                (0x791e, i32::from(mask & 8 != 0)),
-            ]
-            .into();
-            poses.push(Shape::with_state(get(&profile.shape)?, &words)?);
-        }
+        if id == tore_formats::aircraft::AircraftId::F18 {
+            for mask in 0..16 {
+                let words = [
+                    (0x7900, i32::from(mask & 1 != 0)),
+                    (0x790c, i32::from(mask & 2 != 0)),
+                    (0x7912, i32::from(mask & 4 != 0)),
+                    (0x791e, i32::from(mask & 8 != 0)),
+                ]
+                .into();
+                poses.push(Shape::with_state(get(&profile.shape)?, &words)?);
+            }
 
-        use crate::aircraft_animation::{Part, part};
-        for (group, expected) in [
-            (Part::Flame, 8),
-            (Part::Nozzle, 4),
-            (Part::Brake, 2),
-            (Part::Hook, 2),
-            (Part::GearLeft, 6),
-            (Part::GearRight, 6),
-            (Part::GearNose, 6),
-            (Part::DoorLeft, 2),
-            (Part::DoorRight, 2),
-            (Part::DoorNose, 2),
-            (Part::FlapLeft, 2),
-            (Part::FlapRight, 2),
-            (Part::TailLeft, 4),
-            (Part::TailRight, 4),
-        ] {
-            if poses[15]
-                .faces
-                .iter()
-                .filter(|f| part(f.address) == group)
-                .count()
-                != expected
-            {
-                return Err(format!(
+            use crate::aircraft_animation::{Part, part};
+            for (group, expected) in [
+                (Part::Flame, 8),
+                (Part::Nozzle, 4),
+                (Part::Brake, 2),
+                (Part::Hook, 2),
+                (Part::GearLeft, 6),
+                (Part::GearRight, 6),
+                (Part::GearNose, 6),
+                (Part::DoorLeft, 2),
+                (Part::DoorRight, 2),
+                (Part::DoorNose, 2),
+                (Part::FlapLeft, 2),
+                (Part::FlapRight, 2),
+                (Part::TailLeft, 4),
+                (Part::TailRight, 4),
+            ] {
+                if poses[15]
+                    .faces
+                    .iter()
+                    .filter(|f| part(f.address) == group)
+                    .count()
+                    != expected
+                {
+                    return Err(format!(
                     "unreviewed F18 animation group {group:?}; inspect source before applying rig"
                 )
                 .into());
+                }
             }
+        } else {
+            if tore_formats::module::code(get(&profile.shape)?)?.0.len() != 19334
+                || shape.state_words != [0x5b50, 0x5b56, 0x5b62, 0x5b6e, 0x5b74, 0x5b7a].into()
+                || shape
+                    .faces
+                    .iter()
+                    .any(|f| !f.texture.is_empty() && f.texture != "_RAF.PIC")
+            {
+                return Err("unreviewed RAF.SH layout or texture references".into());
+            }
+            // Keep neutral flap/rudder geometry: their nonzero branches contain
+            // native arithmetic outside the bounded reader's reviewed grammar.
+            for gear in [0, 1] {
+                poses.push(Shape::with_state(
+                    get(&profile.shape)?,
+                    &[(0x5b50, 1), (0x5b56, 1), (0x5b62, gear)].into(),
+                )?);
+            }
+            crate::rafale_animation::validate(&poses)?;
         }
         println!(
             "Aircraft: {} — {} exterior faces, {} G rows, {} hardpoints; atlas {}x{}, instrument font {}px",
@@ -194,12 +230,26 @@ impl Hornet {
             let (y, z) = (y * cp + z * sp, -y * sp + z * cp);
             [x * cy + z * sy, y, -x * sy + z * cy]
         };
-        for source in self.poses[15]
-            .faces
-            .iter()
-            .flat_map(|f| crate::aircraft_animation::rudder_faces(f, s))
-        {
-            let Some(f) = crate::aircraft_animation::animate(&source, s) else {
+        let hornet_rig = self.profile.id == tore_formats::aircraft::AircraftId::F18;
+        for source in self.poses[if hornet_rig {
+            15
+        } else {
+            usize::from(s.gear > 0.)
+        }]
+        .faces
+        .iter()
+        .flat_map(|f| {
+            if hornet_rig {
+                crate::aircraft_animation::rudder_faces(f, s)
+            } else {
+                vec![f.clone()]
+            }
+        }) {
+            let Some(f) = (if hornet_rig {
+                crate::aircraft_animation::animate(&source, s)
+            } else {
+                crate::rafale_animation::animate(&source, s)
+            }) else {
                 continue;
             };
             if let Some(n) = f.normal {
@@ -231,9 +281,14 @@ impl Hornet {
                                 / self.atlas.height as f32,
                         ]
                     };
-                    let cold_nozzle = crate::aircraft_animation::part(f.address)
-                        == crate::aircraft_animation::Part::Nozzle
-                        && s.exhaust <= 0.;
+                    let cold_nozzle = s.exhaust <= 0.
+                        && if hornet_rig {
+                            crate::aircraft_animation::part(f.address)
+                                == crate::aircraft_animation::Part::Nozzle
+                        } else {
+                            crate::rafale_animation::part(f.address)
+                                == crate::rafale_animation::Part::Nozzle
+                        };
                     let color = if cold_nozzle {
                         [35, 36, 38]
                     } else {

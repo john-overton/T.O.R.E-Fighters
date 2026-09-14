@@ -110,3 +110,23 @@ The temporary Terrain Viewer button is replaced by Free Flight. The creator star
 This recovers the supplied FA tree including `?`, Control, Pref, View, Window, Cheat, Multi, Map and Pos. It supersedes treating the flight menu tree as entirely authored. Runtime validates that reviewed root structure before presenting it. Generic menu flags, check-state callbacks, visibility of Map/Pos in different native modes, and other editions remain unverified. Native tree recovery does not implement its underlying cheats, multiplayer or flight systems.
 
 `flight_ui.rs` provides keyboard/mouse traversal and action dispatch, with matching press/release and silent hover. Native actions without a port show explicit feedback. The paused overlay's placement, submenu presentation, and bottom Resume/Restart/Keyboard Shortcuts actions are authored. Portable Exit to Desktop wording replaces the source Exit to Windows label. Source labels/accelerators remain external imported data. See [controls](../FLIGHT-CONTROLS.md).
+
+## Briefing text selectors — 2026-09-14
+
+The creator now follows `gameassets/reference-photos/quick-mission-creator-screen.jpg`:
+Friendly Situation at left, Enemy Situation at right, selectable aircraft in
+Wing 1, and selectable theater inside “You are flying over…”. The separate map
+inset and Theater/Flight Setup box are removed. Aircraft on the top bar opens
+the same aircraft selector. OK starts clean free flight; Cancel returns.
+
+Original QUIKMIS3, ARMFONT/MENUFONT/FONTACT and button pieces are retained. The
+blue OK button uses imported ACTDFT0L/M/R; Cancel uses ACTION0L/M/R. Briefing field
+rectangles derive from the original font's glyph advances. Unavailable wing,
+enemy, loadout, weather and mission options have dim text/boxes without hit
+regions. The exact fills, popup layouts, keyboard traversal and hover/press
+presentation are fitted/authored, not decoded native DLG behavior. No opponents
+are spawned and no editable setting is represented as implemented merely to fill
+the screenshot. Matching press/release and click-only audio remain enforced.
+
+Both selectors support mouse and keyboard, commit only on selection, and close
+on Escape before leaving the creator. [Acceptance evidence](../baselines/rafale-quick-mission.md).

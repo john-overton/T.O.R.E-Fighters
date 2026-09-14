@@ -13,6 +13,7 @@ mod look;
 mod menu;
 mod performance;
 mod quick_mission;
+mod rafale_animation;
 mod renderer;
 mod sim_renderer;
 mod terrain;
@@ -44,7 +45,7 @@ enum Screen {
 }
 struct App {
     performance: performance::Performance,
-    hornet: aircraft::Hornet,
+    hornet: aircraft::Airframe,
     flight: flight::State,
     previous_flight: flight::State,
     flight_clock: flight::Clock,
@@ -82,6 +83,10 @@ impl App {
             Command::Restart => Action::FreeFlight,
             Command::Effects(on) => Action::Effects(on),
             Command::Toggle(key) => {
+                if key == "h" && !self.flight.hook_available {
+                    self.flight_ui.message("Hook unavailable for this aircraft");
+                    return Action::None;
+                }
                 self.flight.toggle(key);
                 if let Some(audio) = &self.audio {
                     audio.control(key, &self.flight);
@@ -162,6 +167,26 @@ impl App {
                     }
                 }
             }
+            Action::Aircraft(index) => {
+                if let Some(&id) = tore_formats::aircraft::AircraftId::ALL.get(index) {
+                    match aircraft::Airframe::load(&self.theater_resources, id) {
+                        Ok(aircraft) => {
+                            if let Some(renderer) = &mut self.renderer {
+                                renderer.prepare_aircraft(&aircraft);
+                            }
+                            self.hornet = aircraft;
+                            self.flight = self.hornet.start(&self.world);
+                            self.previous_flight = self.flight.clone();
+                            self.instruments = instruments::Instruments::default();
+                            self.flight_canvas = flight_canvas::FlightCanvas::default();
+                        }
+                        Err(error) => {
+                            self.error = Some(error);
+                            event_loop.exit();
+                        }
+                    }
+                }
+            }
             Action::QuickMission => {
                 self.screen = Screen::Quick;
                 self.menu.state.cancel();
@@ -191,7 +216,10 @@ impl App {
         }
         if let Some(renderer) = &self.renderer {
             renderer.window.set_title(&match self.screen {
-                Screen::Flight => "T.O.R.E-Fighters - F/A-18D Free Flight".to_string(),
+                Screen::Flight => format!(
+                    "T.O.R.E-Fighters - {} Free Flight",
+                    self.hornet.profile.id.label()
+                ),
                 Screen::Main => "T.O.R.E-Fighters - Choose Activity".to_string(),
                 Screen::Quick => "T.O.R.E-Fighters - Quick Mission Creator".to_string(),
                 Screen::Viewer => format!(
@@ -227,7 +255,10 @@ impl ApplicationHandler for App {
                 event_loop.create_window(
                     Window::default_attributes()
                         .with_title(match self.screen {
-                            Screen::Flight => "T.O.R.E-Fighters - F/A-18D Free Flight".to_string(),
+                            Screen::Flight => format!(
+                                "T.O.R.E-Fighters - {} Free Flight",
+                                self.hornet.profile.id.label()
+                            ),
                             Screen::Main => "T.O.R.E-Fighters - Choose Activity".to_string(),
                             Screen::Quick => "T.O.R.E-Fighters - Quick Mission Creator".to_string(),
                             Screen::Viewer => format!(
@@ -672,6 +703,10 @@ impl ApplicationHandler for App {
         };
         self.action(event_loop, action);
     }
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // Release GPU backends while the event loop's display connection is alive.
+        self.renderer = None;
+    }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(next) = self.next_frame {
             if Instant::now() >= next {
@@ -694,6 +729,7 @@ fn main() -> AppResult<()> {
     let mut snapshot_state = String::from("normal");
     let mut background = None;
     let mut theater_code = String::from("UKR");
+    let mut aircraft_id = tore_formats::aircraft::AircraftId::F18;
     let mut initial_screen = Screen::Main;
     let mut flight_view = 0;
     let mut flight_look = [0f32; 2];
@@ -719,6 +755,11 @@ fn main() -> AppResult<()> {
                 ));
                 initial_screen = Screen::Viewer;
                 smoke_test = true;
+            }
+            "--aircraft" => {
+                aircraft_id = tore_formats::aircraft::AircraftId::parse(
+                    &args.next().ok_or("--aircraft needs f18 or rafale")?,
+                )?;
             }
             "--theater" => {
                 theater_code = args
@@ -881,7 +922,7 @@ fn main() -> AppResult<()> {
             "--import-only" => import_only = true,
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and F/A-18D assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--free-flight launches the Hornet; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D and Rafale C assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
             }
@@ -917,7 +958,7 @@ fn main() -> AppResult<()> {
     if import_only {
         return Ok(());
     }
-    let hornet = aircraft::Hornet::load(&assets.theater_resources)?;
+    let hornet = aircraft::Airframe::load(&assets.theater_resources, aircraft_id)?;
     if native_flight_report {
         flight::native_report(&hornet.profile)?;
         if let Some(path) = native_flight_trig {
@@ -1046,11 +1087,15 @@ fn main() -> AppResult<()> {
             );
         }
         if initial_screen == Screen::Quick {
-            quick_mission::QuickMission::default().render(
-                &mut menu.pixels,
-                &menu.quick_sprites,
-                &world,
-            );
+            let mut quick = quick_mission::QuickMission::for_aircraft(aircraft_id);
+            quick.selection = world
+                .catalog
+                .iter()
+                .position(|(code, _)| code == &theater_code)
+                .unwrap_or(0);
+            quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
+            quick.preview_selector(&snapshot_state)?;
+            quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
             use std::io::Write;
             let mut f = std::fs::File::create(&path)?;
             write!(f, "P6\n640 480\n255\n")?;
@@ -1071,7 +1116,7 @@ fn main() -> AppResult<()> {
         .iter()
         .position(|(code, _)| code == &theater_code)
         .unwrap_or(0);
-    let mut quick = quick_mission::QuickMission::default();
+    let mut quick = quick_mission::QuickMission::for_aircraft(aircraft_id);
     quick.selection = selection;
     let animation_capture = capture_terrain.is_some()
         && (flight_devices.is_some() || flight_controls.is_some() || flight_probe_ticks.is_some());
@@ -1085,6 +1130,11 @@ fn main() -> AppResult<()> {
         }
     }
     if let Some(v) = flight_devices {
+        if v[3] > 0. && !flight.hook_available {
+            return Err(
+                "the imported Rafale model has no hook; set the fourth device fraction to 0".into(),
+            );
+        }
         flight.gear = v[0];
         flight.flaps = v[1];
         flight.brake = v[2];

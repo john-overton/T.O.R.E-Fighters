@@ -2,7 +2,7 @@
 
 The F/A-18D cockpit now covers the full flight canvas. The world renders behind transparent cockpit artwork and independently toggled instrument windows. There is no half-height viewport or opaque lower PANEL fill. Menus retain the proportional 640×480 canvas. This is still a development flight adapter, not accepted native flight/system parity.
 
-Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity → Create Quick Mission → Free Flight. Free flight skips loadout and starts with clean external stations. On a MacBook, use **Fn/Globe with the function keys** when macOS assigns those keys to system actions. Fn-Up/Down supplies PageUp/PageDown on compact keyboards. The physical US key positions are used in flight, including shifted numbers and Option combinations.
+Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity → Create Quick Mission → OK. Free flight skips loadout and starts with clean external stations. On a MacBook, use **Fn/Globe with the function keys** when macOS assigns those keys to system actions. Fn-Up/Down supplies PageUp/PageDown on compact keyboards. The physical US key positions are used in flight, including shifted numbers and Option combinations.
 
 ## Working flight commands
 
@@ -116,3 +116,19 @@ Attitude rotates as an orthonormal basis and is interpolated in that basis. The 
 Use **0 then Shift+B** for full throttle and afterburner, and **F10** to inspect the model. G/F/B/H animate gear/flaps/airbrake/hook continuously. Pitch/roll inputs move fitted stabilators; Z/X move fitted trailing rudders. Engine/fuel/throttle gate afterburner consistently across HUD and audio; flame length has a short visual transition. These reuse original polygons with authored hinges and schedules. [Coverage, captures and remaining work](baselines/f18-animations.md).
 
 During a banked pull, the adapter now retains load-related nose/flight-path separation and accounts for body-yaw turn response. The velocity marker remains projected from actual velocity: coordinated AoA is below the nose, while transient sideslip appears laterally. Native AoA/control-law parity remains open. [Details and probes](baselines/banked-pull-aoa.md).
+
+## Rafale C selection
+
+Select Rafale C by clicking the Wing 1 aircraft name in Quick Mission, or use
+`--aircraft rafale --free-flight`. The same input/release, pause and camera
+bindings apply to the selected aircraft. Its PT values, cockpit artwork, DEFA
+250-round inventory and engine clips come from its own retail profile. This is
+the existing fixed-tick adapter using Rafale data, not a complete native flight
+model. The Rafale exterior remains in its decoded neutral pose: device/control
+visual animations have not been mapped to its SH state words. The Hornet retains
+its separately reviewed fitted rig. See [scope and evidence](baselines/rafale-quick-mission.md).
+
+Rafale C: H reports unavailable because the recovered RAF.SH model has no hook
+animation import. G/F/B and pitch/roll/rudder animate its own gear, elevons,
+airbrakes, canards and rudder; motion schedules are fitted. Aircraft changes now
+replace the GPU cockpit texture as well as exterior resources.

@@ -14,6 +14,9 @@ const ART: &[&str] = &[
     "CHOOSE3.PIC",
     "CHOOSEU.PIC",
     "CHOOSEM.PIC",
+    "ACTDFT0L.PIC",
+    "ACTDFT0M.PIC",
+    "ACTDFT0R.PIC",
     "ACTION0L.PIC",
     "ACTION0M.PIC",
     "ACTION0R.PIC",
@@ -78,6 +81,9 @@ impl Assets {
             "WIN11.FNT",
             "HUDSYM11.FNT",
             "HUD11.FNT",
+            "RAFALE.PT",
+            "RAFALE.HUD",
+            "~RAFH.PIC",
             "F18.PT",
             "F18.HUD",
             "~F18H.PIC",
@@ -102,7 +108,9 @@ impl Assets {
         if !resources.contains_key("TVI0.PIC") {
             return Err("cache missing Vietnam textures; re-import media".into());
         }
-        tore_formats::aircraft::Aircraft::parse(&resources["F18.PT"])?;
+        for id in tore_formats::aircraft::AircraftId::ALL {
+            tore_formats::aircraft::Aircraft::parse(&resources[id.pt()])?;
+        }
         tore_formats::font::Font::parse(&resources["WIN11.FNT"])?;
         let mut pics = BTreeMap::new();
         for name in ART {
@@ -184,7 +192,7 @@ impl Assets {
         let aircraft_libs = [archive(source, "FA_1.LIB")?, archive(source, "FA_2.LIB")?];
         let aircraft_names = tore_formats::aircraft::dependencies(
             &aircraft_libs.iter().collect::<Vec<_>>(),
-            true,
+            &tore_formats::aircraft::AircraftId::ALL,
             false,
         )?;
         for (filename, names) in [("FA_1.LIB", ART), ("FA_2.LIB", DATA)] {

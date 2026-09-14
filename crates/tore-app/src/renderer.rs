@@ -67,7 +67,6 @@ impl Readback {
 }
 pub struct Renderer {
     previews: std::collections::BTreeMap<u8, Readback>,
-    pub window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -77,12 +76,19 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     sim: crate::sim_renderer::SimRenderer,
     cockpit: crate::cockpit_renderer::CockpitRenderer,
+    // Fields drop in declaration order; keep the window alive through GPU cleanup.
+    pub window: Arc<Window>,
 }
 impl Renderer {
-    pub fn prepare_aircraft(&mut self, hornet: &crate::aircraft::Hornet) {
+    pub fn prepare_aircraft(&mut self, hornet: &crate::aircraft::Airframe) {
+        self.previews.clear();
+        self.sim.clear_aircraft();
         self.sim.aircraft(&self.device, &self.queue, hornet, &[]);
-        self.cockpit
-            .prepare(&self.device, &self.queue, &hornet.sprites["~F18H.PIC"]);
+        self.cockpit.prepare(
+            &self.device,
+            &self.queue,
+            &hornet.sprites[hornet.profile.id.cockpit()],
+        );
     }
     pub fn cockpit(
         &mut self,
@@ -104,7 +110,7 @@ impl Renderer {
     }
     pub fn aircraft(
         &mut self,
-        hornet: &crate::aircraft::Hornet,
+        hornet: &crate::aircraft::Airframe,
         state: &crate::flight::State,
         visible: bool,
         camera: &crate::terrain::Camera,
@@ -136,7 +142,7 @@ impl Renderer {
         let surface = instance.create_surface(window.clone())?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
+                power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             })

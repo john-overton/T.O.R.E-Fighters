@@ -103,3 +103,43 @@ The [FA native flight pass](native-flight.md) now traces the consumers of
 fuel helpers. This supersedes their earlier wholly unresolved status. Pure Rust
 translations and repeatable probes exist; the full native tick and its integration
 remain open. Visual device animation remains separate from native physics schedules.
+
+## Rafale C import and runtime selection — 2026-09-14
+
+The shared `AircraftId` catalog now admits reviewed FA `F18.PT` and `RAFALE.PT`
+identities with the same bounded 660-byte BRF schema. `RAFALE.PT` names itself
+RAFALE / Rafale C and references `RAF.SH`; `RAFALEF`, `RAFALEE` and `F18C` remain
+separate, unsupported identities. CLI and app use the same per-aircraft dependency
+closure; the app imports their union. `--aircraft rafale` is accepted by both the
+app and cross-platform extraction script.
+
+Rafale facts: 17,100 lb empty, 9,900 lb internal fuel, 40,100 lb maximum takeoff
+weight, two engines, 24,000 lbf military / 32,000 lbf afterburner thrust, 14 G
+rows and nine hardpoints. Its source includes DEFA.JT with 250 rounds,
+`&JET1N.11K` and `&JET6A.11K`. F18R.SEE and F18.ECM are explicit references in
+this Rafale PT, not substituted Hornet metadata. External stations stay clean;
+the source default stores are preserved for later loadout work.
+
+`RAF.SH` decodes to 206 neutral faces with `_RAF.PIC` (256×457); its reviewed CODE
+length is 19,334 and state-word set is 0x5b50/56/62/6e/74/7a. The six guards select
+afterburner, brake, gear, left/right flap and rudder branches respectively.
+A separate Rafale rig now animates original gear/doors, airbrakes, trailing
+elevons, canards, rudder and exhaust. Hinges, control mixing and actuator timing
+are fitted, not translated native laws; the one-third-foot scale remains
+provisional. The reader retains neutral flap/rudder polygons because nonzero
+branches contain unreviewed native arithmetic. It never executes that code.
+Gear uses the original closed/open belly branches, switching at the start/end
+of travel; native continuous door/well topology remains unverified.
+`RAF.SH` imports `_PLcanardPos` and the corresponding device globals, but no
+`_PLhook`. H is unavailable for this imported model (not a claim about physical
+emergency equipment on real aircraft). `~RAFH.PIC` supplies the forward cockpit, using
+the existing body-fixed art/HUD projection and screen-anchored instruments.
+Full rear/overhead interior and native HUD composition remain unavailable.
+
+The 95-resource standalone profile extraction succeeded with provenance hashes;
+all selected bytes remain external. Runtime selection refreshes the aircraft
+atlas, cockpit, camera previews, instruments and initial state. Native helper
+reports can consume Rafale fields; whole-tick parity remains gated by
+[native flight acceptance](native-flight.md). Native dynamics, exact native animation laws,
+combat/loadout and complete systems are not complete. See the
+[cockpit-switch and animation follow-up](../baselines/rafale-animations.md). [Validation](../baselines/rafale-quick-mission.md).

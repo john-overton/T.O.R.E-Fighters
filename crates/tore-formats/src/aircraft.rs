@@ -182,8 +182,61 @@ pub struct Hardpoint {
     pub count: i32,
     pub weight_class: i32,
 }
+/// Reviewed retail identities. Other variants require their own profile review.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AircraftId {
+    F18,
+    Rafale,
+}
+impl AircraftId {
+    pub const ALL: [Self; 2] = [Self::F18, Self::Rafale];
+    pub fn parse(name: &str) -> Result<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "f18" | "f18.pt" => Ok(Self::F18),
+            "rafale" | "rafale.pt" => Ok(Self::Rafale),
+            _ => Err(invalid("supported aircraft: f18, rafale")),
+        }
+    }
+    pub fn pt(self) -> &'static str {
+        match self {
+            Self::F18 => "F18.PT",
+            Self::Rafale => "RAFALE.PT",
+        }
+    }
+    pub fn hud(self) -> &'static str {
+        match self {
+            Self::F18 => "F18.HUD",
+            Self::Rafale => "RAFALE.HUD",
+        }
+    }
+    pub fn stem(self) -> &'static str {
+        match self {
+            Self::F18 => "F18",
+            Self::Rafale => "RAF",
+        }
+    }
+    pub fn cockpit(self) -> &'static str {
+        match self {
+            Self::F18 => "~F18H.PIC",
+            Self::Rafale => "~RAFH.PIC",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::F18 => "F/A-18D Hornet",
+            Self::Rafale => "Rafale C",
+        }
+    }
+    pub fn gun(self) -> &'static str {
+        match self {
+            Self::F18 => "M61.JT",
+            Self::Rafale => "DEFA.JT",
+        }
+    }
+}
 #[derive(Debug)]
 pub struct Aircraft {
+    pub id: AircraftId,
     pub name: String,
     pub shape: String,
     pub fields: BTreeMap<String, Token>,
@@ -208,8 +261,12 @@ impl Aircraft {
             return Err(invalid("expected reviewed FA aircraft layout (660)"));
         }
         let names = b.strings("ot_names")?;
-        if names.len() != 3 || !names[2].eq_ignore_ascii_case("F18.PT") {
-            return Err(invalid("only reviewed F18.PT aircraft supported"));
+        if names.len() != 3 {
+            return Err(invalid("invalid aircraft identity"));
+        }
+        let id = AircraftId::parse(&names[2])?;
+        if !names[2].eq_ignore_ascii_case(id.pt()) {
+            return Err(invalid("aircraft identity must name its PT resource"));
         }
         let resolve = |t: &Token| -> Result<Option<String>> {
             if t.kind == "ptr" {
@@ -294,6 +351,7 @@ impl Aircraft {
             return Err(invalid("aircraft empty plus fuel exceeds MTOW"));
         }
         Ok(Self {
+            id,
             name: names[0].clone(),
             shape: resolve(&object["shape"])?.ok_or_else(|| invalid("missing aircraft shape"))?,
             fields: plane,
@@ -335,7 +393,7 @@ pub const INSTRUMENT_ART: &[&str] = &[
 /// Same dependency closure for CLI and app, independent of Python/reference checkout.
 pub fn dependencies(
     archives: &[&Archive],
-    aircraft: bool,
+    aircraft: &[AircraftId],
     weapons: bool,
 ) -> Result<BTreeSet<String>> {
     let catalog: BTreeSet<String> = archives
@@ -343,13 +401,13 @@ pub fn dependencies(
         .flat_map(|a| a.entries.keys().cloned())
         .collect();
     let mut selected = BTreeSet::new();
-    if aircraft {
+    for &id in aircraft {
         for n in [
-            "F18.PT",
-            "F18.HUD",
-            "F18.SH",
+            id.pt(),
+            id.hud(),
+            &format!("{}.SH", id.stem()),
             "PALETTE.PAL",
-            "~F18H.PIC",
+            id.cockpit(),
             "WIN11.FNT",
             "HUD11.FNT",
             "FMENUD.MNU",
@@ -366,9 +424,9 @@ pub fn dependencies(
                 || n.starts_with("&STALL")
                 || n == "&HOOK.5K"
                 || n == "&WIND.11K"
-                || n.starts_with("~F18")
-                || n.starts_with("F18_")
-                || n.starts_with("_F18")
+                || n.starts_with(&format!("~{}", id.stem()))
+                || n.starts_with(&format!("{}_", id.stem()))
+                || n.starts_with(&format!("_{}", id.stem()))
                 || INSTRUMENT_ART.contains(&n.as_str())
                 || (n.starts_with("WIN") || n.starts_with("HUD")) && n.ends_with(".FNT")
             {
@@ -551,6 +609,16 @@ mod profile_tests {
         text
     }
     #[test]
+    fn rafale_identity_keeps_its_own_profile_and_rejects_other_variants() {
+        let text = fixture().replace("F18.PT", "RAFALE.PT");
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(a.id, AircraftId::Rafale);
+        assert_eq!(a.number("weight"), 1000.);
+        for unsupported in ["RAFALEF.PT", "RAFALEE.PT", "F18C.PT", "RAFALE"] {
+            assert!(Aircraft::parse(text.replace("RAFALE.PT", unsupported).as_bytes()).is_err());
+        }
+    }
+    #[test]
     fn typed_profile_rejects_misalignment_and_wrong_identity() {
         let t = fixture();
         let a = Aircraft::parse(t.as_bytes()).unwrap();
@@ -559,5 +627,86 @@ mod profile_tests {
         assert!(Aircraft::parse(t.replacen("word 660", "dword 660", 1).as_bytes()).is_err());
         assert!(Aircraft::parse(t.replace("F18.PT", "OTHER.PT").as_bytes()).is_err());
         assert!(Aircraft::parse(t.replacen("dword 100", "dword 3000", 1).as_bytes()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod dependency_tests {
+    use super::*;
+    fn archive(mut resources: BTreeMap<String, Vec<u8>>, omit: Option<&str>) -> Archive {
+        if let Some(name) = omit {
+            resources.remove(name);
+        }
+        let count = resources.len();
+        let mut data = vec![0; 7 + (count + 1) * 18];
+        data[..5].copy_from_slice(b"EALIB");
+        data[5..7].copy_from_slice(&(count as u16).to_le_bytes());
+        for (i, (name, bytes)) in resources.iter().enumerate() {
+            let at = 7 + i * 18;
+            data[at..at + name.len()].copy_from_slice(name.as_bytes());
+            let offset = data.len() as u32;
+            data[at + 14..at + 18].copy_from_slice(&offset.to_le_bytes());
+            data.extend(bytes);
+        }
+        let end = data.len() as u32;
+        let at = 7 + count * 18 + 14;
+        data[at..at + 4].copy_from_slice(&end.to_le_bytes());
+        Archive::parse(data).unwrap()
+    }
+    fn resources() -> BTreeMap<String, Vec<u8>> {
+        let mut resources = BTreeMap::new();
+        for name in [
+            "PALETTE.PAL",
+            "WIN11.FNT",
+            "HUD11.FNT",
+            "FMENUD.MNU",
+            "PANEL.PIC",
+        ] {
+            resources.insert(name.into(), vec![0]);
+        }
+        for id in AircraftId::ALL {
+            let sound = format!("&{}.11K", id.stem());
+            resources.insert(
+                id.pt().into(),
+                format!("[brent's_relocatable_format]\nstring \"{sound}\"\nend\n").into_bytes(),
+            );
+            resources.insert(id.hud().into(), vec![0]);
+            resources.insert(id.cockpit().into(), vec![0]);
+            resources.insert(
+                format!("{}.SH", id.stem()),
+                format!("_{}.PIC", id.stem()).into_bytes(),
+            );
+            resources.insert(format!("_{}.PIC", id.stem()), vec![0]);
+            resources.insert(sound, vec![0]);
+        }
+        resources
+    }
+    #[test]
+    fn selected_profile_follows_its_own_texture_and_audio_and_union_keeps_both() {
+        let a = archive(resources(), None);
+        let rafale = dependencies(&[&a], &[AircraftId::Rafale], false).unwrap();
+        for name in [
+            "RAFALE.PT",
+            "RAFALE.HUD",
+            "RAF.SH",
+            "~RAFH.PIC",
+            "_RAF.PIC",
+            "&RAF.11K",
+        ] {
+            assert!(rafale.contains(name), "{name}");
+        }
+        for name in ["F18.PT", "F18.SH", "~F18H.PIC", "_F18.PIC", "&F18.11K"] {
+            assert!(!rafale.contains(name), "{name}");
+        }
+        let both = dependencies(&[&a], &AircraftId::ALL, false).unwrap();
+        assert!(both.is_superset(&rafale));
+        assert!(both.contains("F18.PT"));
+        assert!(both.contains("&F18.11K"));
+    }
+    #[test]
+    fn missing_selected_shape_does_not_fall_back_to_other_aircraft() {
+        let a = archive(resources(), Some("RAF.SH"));
+        assert!(dependencies(&[&a], &[AircraftId::Rafale], false).is_err());
+        assert!(dependencies(&[&a], &[AircraftId::F18], false).is_ok());
     }
 }

@@ -27,6 +27,7 @@ pub struct State {
     pub flaps: f64,
     pub brake: f64,
     pub hook: f64,
+    pub hook_available: bool,
     pub gear_down: bool,
     pub flaps_down: bool,
     pub brake_out: bool,
@@ -61,6 +62,7 @@ impl State {
             flaps: 0.,
             brake: 0.,
             hook: 0.,
+            hook_available: a.id == tore_formats::aircraft::AircraftId::F18,
             gear_down: false,
             flaps_down: false,
             brake_out: false,
@@ -108,7 +110,7 @@ impl State {
             "g" => self.gear_down = !self.gear_down,
             "f" => self.flaps_down = !self.flaps_down,
             "b" => self.brake_out = !self.brake_out,
-            "h" => self.hook_down = !self.hook_down,
+            "h" if self.hook_available => self.hook_down = !self.hook_down,
             "e" => self.engine = !self.engine,
             "t" => self.burner = !self.burner,
             "r" => self.radar = !self.radar,
@@ -340,6 +342,7 @@ mod integration_tests {
         })
         .collect();
         Aircraft {
+            id: tore_formats::aircraft::AircraftId::F18,
             name: "Synthetic".into(),
             shape: "TEST.SH".into(),
             fields,
@@ -547,6 +550,89 @@ mod integration_tests {
             closed.hook = 0.;
             closed.exhaust = 0.;
             assert!(animate(&f, &closed).is_none());
+        }
+    }
+    #[test]
+    fn rafale_devices_preserve_endpoints_and_reverse_without_mutating_source() {
+        use crate::rafale_animation::animate;
+        use tore_formats::shape::Face;
+        let mut a = profile();
+        a.id = tore_formats::aircraft::AircraftId::Rafale;
+        let mut s = State::new(&a, [0., 5000., 0.]);
+        s.toggle("h");
+        assert!(!s.hook_available && !s.hook_down);
+        s.gear = 1.;
+        s.brake = 1.;
+        s.exhaust = 1.;
+        for address in [
+            0x3c50, 0x3be5, 0x3cbb, 0x3b2f, 0x3ad4, 0x3b8a, 0x3e1e, 0x3ebb, 0x4265,
+        ] {
+            let f = Face {
+                address,
+                positions: vec![[1., 2., 3.], [5., 2., 3.], [1., 6., 3.]],
+                colors: vec![20; 3],
+                uv: vec![[0., 0.], [1., 0.], [0., 1.]],
+                texture: "SYNTHETIC".into(),
+                subtype: 0x4c,
+                normal: Some([0., 1., 0.]),
+            };
+            assert_eq!(animate(&f, &s).unwrap().positions, f.positions);
+            let mut middle = s.clone();
+            middle.gear = 0.1;
+            middle.brake = 0.1;
+            middle.exhaust = 0.1;
+            let moved = animate(&f, &middle).unwrap();
+            assert_ne!(moved.positions, f.positions);
+            assert_eq!(moved.uv, f.uv);
+            assert_eq!(moved.colors, f.colors);
+            assert!(
+                (dot(
+                    moved.normal.unwrap().map(f64::from),
+                    moved.normal.unwrap().map(f64::from)
+                ) - 1.)
+                    .abs()
+                    < 1e-5
+            );
+            assert_eq!(animate(&f, &s).unwrap().positions, f.positions);
+            middle.gear = 0.;
+            middle.brake = 0.;
+            middle.exhaust = 0.;
+            assert!(animate(&f, &middle).is_none());
+        }
+    }
+    #[test]
+    fn rafale_control_surfaces_move_both_ways_and_leave_body_fixed() {
+        use crate::rafale_animation::animate;
+        use tore_formats::shape::Face;
+        let mut s = State::new(&profile(), [0., 5000., 0.]);
+        for address in [0x4190, 0x40a9, 0x3d81, 0x3d26, 0x3f08] {
+            let f = Face {
+                address,
+                positions: vec![[1., 2., 3.], [5., 2., 3.], [1., 6., 3.]],
+                colors: vec![20; 3],
+                uv: vec![],
+                texture: String::new(),
+                subtype: 0,
+                normal: Some([0., 1., 0.]),
+            };
+            s.elevator = 0.;
+            s.rudder = 0.;
+            assert_eq!(animate(&f, &s).unwrap().positions, f.positions);
+            s.elevator = 1.;
+            s.rudder = 1.;
+            let positive = animate(&f, &s).unwrap();
+            s.elevator = -1.;
+            s.rudder = -1.;
+            let negative = animate(&f, &s).unwrap();
+            assert_ne!(positive.positions, negative.positions);
+            for moved in [positive, negative] {
+                let edge: [f64; 3] =
+                    std::array::from_fn(|i| (moved.positions[1][i] - moved.positions[0][i]) as f64);
+                assert!((dot(edge, edge) - 16.).abs() < 1e-3);
+            }
+            let mut body = f.clone();
+            body.address = 0;
+            assert_eq!(animate(&body, &s).unwrap().positions, body.positions);
         }
     }
     #[test]

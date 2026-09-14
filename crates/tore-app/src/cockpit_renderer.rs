@@ -111,9 +111,8 @@ impl CockpitRenderer {
         }
     }
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, source: &Sprite) {
-        if self.bind.is_some() {
-            return;
-        }
+        // Called when an aircraft is prepared, including selection changes.
+        // A previous binding belongs to the previous aircraft's cockpit.
         self.art_size = [source.width as u32, source.height as u32];
         let art = texture(device, self.art_size[0], self.art_size[1]);
         // Native PIC and current HUD rasters have binary alpha. Zero invisible RGB

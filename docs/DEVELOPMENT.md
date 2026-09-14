@@ -72,6 +72,14 @@ sudo apt-get install -y build-essential pkg-config libxkbcommon-dev libwayland-d
 
 Running the app also requires a graphical session and a working Vulkan or OpenGL/EGL driver. CI builds and tests without creating a window.
 
+An Omarchy x86_64 host has also passed local build, import and Wayland/Vulkan
+startup checks with Rust 1.91.1; see the [Linux setup baseline](baselines/linux-setup.md).
+The app requests a high-performance compatible GPU. On the tested AMD/NVIDIA
+desktop this selects the RTX 4070; requesting the integrated AMD adapter produced
+a blank visible window despite successful frame submission.
+The renderer must be released in the event loop's exit callback, before its
+display connection closes, and keep its window alive through GPU cleanup.
+
 Windows: install rustup from the official installer and Visual Studio 2022 Build Tools with **Desktop development with C++** and a Windows SDK. Use the MSVC Rust host toolchain. Install Python 3 and Git. Run the same Cargo commands in PowerShell; use `python` instead of `python3` where appropriate. The renderer can use Direct3D 12 or Vulkan.
 
 ## Everyday checks
@@ -235,3 +243,29 @@ The example validates table lengths, prints supplied world/cockpit angle probes,
 and checks that 120 authored fixed-clock steps account for 256 native time units.
 Its seeded RNG draws and sample inputs are diagnostics, not recorded native
 trajectories. It does not change the app's flight model.
+
+## Aircraft selection and briefing selectors
+
+Quick Mission now selects the theater through its highlighted briefing name and
+F/A-18D or Rafale C through the Wing 1 aircraft name (the Aircraft menu opens the
+same selector). OK launches clean free flight. Enemy fields and unsupported
+mission settings are ghosted and cannot be activated.
+
+```sh
+cargo run --locked -p tore-app -- --quick-mission --aircraft rafale
+cargo run --locked -p tore-app -- --free-flight --aircraft rafale --theater FRA
+cargo run --locked -p tore-app -- --aircraft rafale --headless-flight 10800 --maneuver loop
+cargo run --locked -p tore-app -- --quick-mission --snapshot-state aircraft --snapshot .local/aircraft-selector.ppm
+cargo run --locked -p tore-app -- --quick-mission --snapshot-state theaters --snapshot .local/theater-selector.ppm
+```
+
+`--aircraft f18` remains the default. Quick-mission snapshot states are `normal`,
+`aircraft`, `theaters`, and `help`; they use the original 640×480 menu canvas.
+Old caches re-import when local media is present. Aircraft switching refreshes
+GPU atlas/cockpit resources, camera previews and instruments before launch.
+See [validation and remaining parity](baselines/rafale-quick-mission.md).
+
+Rafale animation inspection: use `--aircraft rafale --flight-view 2
+--flight-devices 1,1,1,0,1 --flight-controls 1,0,1 --capture-flight
+.local/rafale-deployed.ppm` (on one command line). The fourth fraction must be
+zero: the imported model has no hook. [Animation and cockpit-switch evidence](baselines/rafale-animations.md).

@@ -22,6 +22,7 @@ pub enum Action {
     QuickMission,
     FreeFlight,
     Theater(usize),
+    Aircraft(usize),
     Back,
     Exit,
     Music(bool),
@@ -522,39 +523,24 @@ impl Menu {
         Ok(())
     }
 }
-fn text_width(font: &Sprite, text: &str) -> i32 {
+pub(crate) fn text_width(font: &Sprite, text: &str) -> i32 {
     text.bytes()
         .map(|c| font.glyphs[c as usize][1] as i32)
         .sum()
 }
 pub(crate) struct Canvas<'a>(pub &'a mut [u8]);
 impl Canvas<'_> {
-    pub(crate) fn scaled(&mut self, s: &Sprite, (x, y, w, h): (i32, i32, i32, i32)) {
-        for yy in 0..h {
-            for xx in 0..w {
-                let src = ((yy as usize * s.height / h as usize) * s.width
-                    + xx as usize * s.width / w as usize)
-                    * 4;
-                if s.rgba[src + 3] == 0 {
-                    continue;
-                }
-                self.rect(
-                    (x + xx, y + yy, 1, 1),
-                    s.rgba[src..src + 4].try_into().unwrap(),
-                );
-            }
-        }
-    }
-    pub(crate) fn button(
+    pub(crate) fn button_style(
         &mut self,
         sprites: &BTreeMap<String, Sprite>,
         label: &str,
         (x, y, w): (i32, i32, i32),
         gain: f32,
+        prefix: &str,
     ) {
-        let l = &sprites["ACTION0L.PIC"];
-        let m = &sprites["ACTION0M.PIC"];
-        let r = &sprites["ACTION0R.PIC"];
+        let l = &sprites[&format!("{prefix}L.PIC")];
+        let m = &sprites[&format!("{prefix}M.PIC")];
+        let r = &sprites[&format!("{prefix}R.PIC")];
         self.blit(l, (x, y), 0, l.width, gain);
         let end = w - r.width as i32;
         let mut at = l.width as i32;

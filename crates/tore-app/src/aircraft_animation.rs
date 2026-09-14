@@ -43,7 +43,7 @@ pub fn part(address: usize) -> Part {
         _ => Body,
     }
 }
-fn rotate(v: [f32; 3], axis: [f64; 3], angle: f64) -> [f32; 3] {
+pub(crate) fn rotate(v: [f32; 3], axis: [f64; 3], angle: f64) -> [f32; 3] {
     let r = Basis::new(0., 0., 0.).rotated(axis.map(|x| x * angle));
     std::array::from_fn(|i| {
         (r.right[i] * v[0] as f64 + r.up[i] * v[1] as f64 + r.forward[i] * v[2] as f64) as f32

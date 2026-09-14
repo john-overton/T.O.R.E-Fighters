@@ -1,5 +1,5 @@
 //! Aspect-responsive flight composition; menus keep their original 640x480 canvas.
-use crate::{aircraft::Hornet, flight::State, instruments::Instruments, menu::Sprite};
+use crate::{aircraft::Airframe, flight::State, instruments::Instruments, menu::Sprite};
 pub const HUD_SCALE: f64 = 0.85;
 struct PanelCache {
     source: Vec<u8>,
@@ -13,7 +13,7 @@ pub struct FlightCanvas {
     panels: std::collections::BTreeMap<u8, PanelCache>,
 }
 impl FlightCanvas {
-    pub fn begin(&mut self, size: [u32; 2], h: &Hornet, s: &State, panels: &Instruments) {
+    pub fn begin(&mut self, size: [u32; 2], h: &Airframe, s: &State, panels: &Instruments) {
         self.size = size;
         self.pixels
             .resize(size[0] as usize * size[1] as usize * 4, 0);

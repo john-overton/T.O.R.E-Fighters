@@ -34,6 +34,7 @@ pub struct Audio {
 fn cue(action: Action) -> Option<&'static str> {
     match action {
         Action::Theater(_)
+        | Action::Aircraft(_)
         | Action::Click
         | Action::QuickMission
         | Action::FreeFlight
@@ -289,6 +290,7 @@ mod tests {
         assert_eq!(cue(Action::Hover), None);
         assert_eq!(cue(Action::None), None);
         assert_eq!(cue(Action::Click), Some("&BUTTON.11K"));
+        assert_eq!(cue(Action::Aircraft(1)), Some("&BUTTON.11K"));
     }
     #[test]
     fn pcm_resampling_and_loop_boundaries() {

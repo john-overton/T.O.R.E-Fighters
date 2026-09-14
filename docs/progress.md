@@ -1,6 +1,6 @@
 # Parity progress
 
-Updated 2026-09-13. This is the actionable checklist for the [roadmap](ROADMAP.md), covering menus, original flight environments and aircraft. Checked items describe work in this Rust repository, not work completed in USNF-ATF. An unchecked item remains open even when a reference decoder or prototype exists. Keep format status in [coverage](formats/coverage.md) and acceptance evidence in [baselines](baselines/).
+Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.md), covering menus, original flight environments and aircraft. Checked items describe work in this Rust repository, not work completed in USNF-ATF. An unchecked item remains open even when a reference decoder or prototype exists. Keep format status in [coverage](formats/coverage.md) and acceptance evidence in [baselines](baselines/).
 
 **Current scope:** Choose Activity now leads to a Quick Mission Creator mock and a Ukraine free-camera viewer. Original T2 heights, texture placements, briefing map and a fixed weather-palette/sky preview are implemented in Rust. The remaining menu system, full environment fidelity, aircraft and flight simulation remain open. See [theater recovery](formats/theater.md) and [viewer baseline](baselines/ukraine-viewer.md).
 
@@ -17,7 +17,9 @@ Updated 2026-09-13. This is the actionable checklist for the [roadmap](ROADMAP.m
 ## 0. Shared foundation and recovery workflow — M0 and ongoing
 
 - [x] Establish pinned Rust workspace, native window/GPU/audio dependencies and macOS Apple M3 development instructions.
-- [x] Configure macOS, Linux and Windows CI and retail-data guards. Local interactive acceptance currently covers macOS; configuration is not proof of an interactive run on the other platforms.
+- [x] Configure macOS, Linux and Windows CI and retail-data guards. Local interactive acceptance covers macOS; Linux now has real Wayland/Vulkan startup and shutdown evidence for the menu, creator, viewer and flight, but manual sound/input acceptance and Windows runtime checks remain open. See [Linux setup](baselines/linux-setup.md).
+- [x] Set up the Linux development host, copy and checksum-verify user-owned media, import the runtime cache, and fix renderer/window cleanup ordering before the event loop releases its display connection. See [acceptance evidence](baselines/linux-setup.md).
+- [x] Correct Linux desktop GPU selection: prefer the high-performance compatible adapter, and verify a visible menu on the RTX 4070. The initial AMD frame-submission smoke tests did not detect the blank on-screen window; see [follow-up evidence](baselines/linux-setup.md#visible-window-follow-up).
 - [x] Provide independent, documented extraction through `tools/extract_assets.py` and shared Rust EALIB/DCL readers, preserving archive boundaries and provenance reports.
 - [x] Extract the supplied five Fighters Anthology archives: 7,520 unique resources. See the [main-menu baseline](baselines/main-menu.md); resource counts do not establish decoded terrain or flyable-aircraft coverage.
 - [ ] **F1 — Complete source inventory.** Inventory editions/discs and missing dependencies per title; identify base assets, optional media and overrides. Record extraction success separately from format interpretation.
@@ -404,3 +406,25 @@ Details and limitations: [native format research](formats/native-flight.md).
 - [ ] Connect remaining loaded-state producers and verify whole-tick trajectories before enabling native flight.
 
 See [fifth-pass findings](formats/native-flight.md) and [validation](baselines/native-flight.md).
+
+
+## Rafale C and original-style Quick Mission follow-up — 2026-09-14
+
+- [x] Add the reviewed RAFALE.PT identity and shared CLI/app dependency profile,
+  preserving source-specific shape, cockpit, equipment, gun and audio metadata.
+- [x] Fly Rafale C with its own original exterior/cockpit and PT inputs through the
+  existing 120 Hz adapter; refresh render/instrument resources when switching.
+- [x] Restore the photo's Friendly/Enemy briefing layout, with inline aircraft and
+  theater text selectors, original blue OK/green Cancel pieces, and ghosted inert
+  opponents/unsupported fields. This explicitly scheduled creator revision does
+  not open the other deferred menu screens.
+- [x] Verify extraction/provenance, synthetic identity/dependency/selector tests,
+  Rafale/Hornet loops, and Rafale exterior/cockpit plus wide/tall layouts. See
+  [acceptance evidence](baselines/rafale-quick-mission.md).
+- [x] Fix cockpit texture replacement on aircraft selection and add an independent
+  Rafale presentation rig for original moving parts; gate the unsupported hook.
+  See [follow-up evidence](baselines/rafale-animations.md).
+- [ ] Translate exact Rafale animation hinges/schedules, continuous gear-well
+  topology and native HUD callers; current motion is explicitly fitted.
+- [ ] Complete native flight tick/contact/scheduler acceptance, mission generation,
+  opponents, combat, loadout and full systems. Import success does not close these.

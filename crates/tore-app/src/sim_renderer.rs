@@ -184,17 +184,20 @@ impl SimRenderer {
             size: [width, height],
         }
     }
+    pub fn clear_aircraft(&mut self) {
+        self.aircraft = None;
+    }
     pub fn aircraft(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        hornet: &crate::aircraft::Hornet,
+        hornet: &crate::aircraft::Airframe,
         vertices: &[f32],
     ) {
         if self.aircraft.is_none() {
             let pic = &hornet.atlas;
             let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("Retail Hornet atlas"),
+                label: Some("Retail aircraft atlas"),
                 size: wgpu::Extent3d {
                     width: pic.width as u32,
                     height: pic.height as u32,

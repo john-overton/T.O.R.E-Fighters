@@ -172,3 +172,17 @@ Fifth-pass native output uses schema 2 in `reviewed-components.json`: each of
 52 regions includes `entry_references` listing direct incoming calls/jumps.
 This is a static reference index, not execution order or an indirect call graph.
 For reproducibility, use a new directory such as `.local/native-flight/queries-final`.
+
+## Rafale C profile
+
+```sh
+python3 tools/extract_assets.py --aircraft rafale --exclude-archive 'disc*/*' --out .local/rafale-import
+```
+
+This selects the reviewed loose-installation Rafale C and its available transitive
+cockpit, shape, equipment, store and audio dependencies. Omit the archive exclusion
+to scan disc archives too. `--aircraft f18` remains supported. The Rust CLI accepts
+repeated `--aircraft` flags to form a union; the app imports both profiles through
+the same resolver. `RAFALEF.PT` and `RAFALEE.PT` are not aliases. Extraction is
+complete for the selected dependency closure, not native flight/animation/system
+parity. See [profile coverage](formats/aircraft.md#rafale-c-import-and-runtime-selection--2026-09-14).
