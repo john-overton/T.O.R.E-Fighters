@@ -76,18 +76,24 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     sim: crate::sim_renderer::SimRenderer,
     cockpit: crate::cockpit_renderer::CockpitRenderer,
+    mirror_camera: crate::terrain::Camera,
+    mirror_vertices: Vec<f32>,
+    pub mirror_frames: u64,
+    mirrors_enabled: bool,
     // Fields drop in declaration order; keep the window alive through GPU cleanup.
     pub window: Arc<Window>,
 }
 impl Renderer {
     pub fn prepare_aircraft(&mut self, hornet: &crate::aircraft::Airframe) {
         self.previews.clear();
+        self.mirror_vertices.clear();
         self.sim.clear_aircraft();
         self.sim.aircraft(&self.device, &self.queue, hornet, &[]);
         self.cockpit.prepare(
             &self.device,
             &self.queue,
             &hornet.sprites[hornet.profile.id.cockpit()],
+            hornet.profile.id,
         );
     }
     pub fn cockpit(
@@ -115,6 +121,10 @@ impl Renderer {
         visible: bool,
         camera: &crate::terrain::Camera,
     ) {
+        self.mirror_camera = crate::mirrors::camera(state);
+        if !visible {
+            self.mirror_vertices = hornet.vertices(state, &self.mirror_camera);
+        }
         if visible {
             self.sim.aircraft(
                 &self.device,
@@ -159,7 +169,14 @@ impl Renderer {
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .ok_or("surface has no configuration")?;
-        config.present_mode = wgpu::PresentMode::AutoVsync;
+        let modes = surface.get_capabilities(&adapter).present_modes;
+        config.present_mode = if modes.contains(&wgpu::PresentMode::Immediate) {
+            wgpu::PresentMode::Immediate
+        } else if modes.contains(&wgpu::PresentMode::Mailbox) {
+            wgpu::PresentMode::Mailbox
+        } else {
+            wgpu::PresentMode::Fifo
+        };
         config.desired_maximum_frame_latency = 1;
         println!(
             "Presentation: {:?}, maximum queued frames: {}",
@@ -239,6 +256,10 @@ impl Renderer {
         );
         let cockpit = crate::cockpit_renderer::CockpitRenderer::new(&device, config.format);
         Ok(Self {
+            mirror_camera: crate::terrain::Camera::new(),
+            mirror_vertices: Vec::new(),
+            mirror_frames: 0,
+            mirrors_enabled: std::env::var("TORE_MIRRORS").as_deref() != Ok("0"),
             cockpit,
             previews: Default::default(),
             sim,
@@ -251,6 +272,29 @@ impl Renderer {
             bind_group,
             pipeline,
         })
+    }
+    /// Submit before the primary pass writes the shared camera/vertex buffers.
+    /// GPU-only render-to-texture, every visible frame, with no rate timer/readback.
+    fn render_mirrors(&mut self, world: &crate::terrain::World) {
+        if !self.mirrors_enabled || !self.cockpit.mirrors_visible {
+            return;
+        }
+        self.sim
+            .update_aircraft_vertices(&self.queue, &self.mirror_vertices);
+        let view = self.cockpit.mirror_target.create_view(&Default::default());
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.sim.draw(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &view,
+            crate::mirrors::SIZE,
+            &self.mirror_camera,
+            world,
+        );
+        self.queue.submit([encoder.finish()]);
+        self.sim.hide_aircraft();
+        self.mirror_frames += 1;
     }
     pub fn capture_sim(
         &mut self,
@@ -350,6 +394,9 @@ impl Renderer {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
+        if overlay {
+            self.render_mirrors(world);
+        }
         let view = texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
         self.sim.draw(
@@ -530,6 +577,11 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
         );
+        if flight_size.is_some()
+            && let Some((_, world)) = scene
+        {
+            self.render_mirrors(world);
+        }
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
         if let Some((camera, world)) = scene {
@@ -573,7 +625,11 @@ impl Renderer {
             pass.draw(0..3, 0..1);
         }
         self.queue.submit([encoder.finish()]);
-        self.window.pre_present_notify();
+        // Wayland frame callbacks throttle redraw requests to compositor refresh.
+        // Only request that pacing when the surface must fall back to FIFO.
+        if self.config.present_mode == wgpu::PresentMode::Fifo {
+            self.window.pre_present_notify();
+        }
         frame.present();
         Ok(true)
     }

@@ -473,3 +473,28 @@ Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
 - [x] Validate the combined tree: 122 Rust tests, 11 Python tests, formatting,
   warnings-denied Clippy, locked build, source/debug-binary guards and GPU checks.
   See [integration evidence](baselines/rafale-animations.md#shared-simulation-integration).
+
+## Cockpit sliding and zoom follow-up — 2026-09-14
+
+- Replaced perspective-tilted forward artwork with a flat overlay fixed to the
+  aircraft-forward datum: head-look translates it in the opposite direction
+  without clamping movement to the image margins.
+- HUD and cockpit now scale with +/-; instrument windows remain screen-anchored.
+- Reference yaw/pitch fade thresholds are fitted presentation, not native
+  parity. Rear/overhead interior remains unavailable.
+- Added bounded `--flight-zoom` and wide/tall, zoom, side/up validation in
+  [the baseline](baselines/cockpit-slide.md).
+
+## Live cockpit mirrors and uncapped rendering — 2026-09-14
+
+- Extract three mirror silhouettes at runtime from each aircraft's original art.
+- Render one shared reflected rear view, including ownship, every visible frame;
+  no mirror timer or GPU-to-CPU transfer. Reuse world/aircraft GPU resources.
+- Preserve cockpit pan/zoom/fade and screen-anchored instruments; omit hidden
+  mirror passes and retain source fills when masks cannot be safely identified.
+- Select Immediate/Mailbox presentation where supported and remove Wayland
+  refresh callbacks in those modes; retain portable FIFO fallback and 120 Hz physics.
+- Validate synthetic mask/camera tests, wide/tall GPU captures, camera previews,
+  view cycling and measured mirror render counts. [Evidence](baselines/mirrors.md).
+- Remaining parity: native mirror optics/eye location, curved reflection and
+  complete interior geometry. No contacts or targets are fabricated.

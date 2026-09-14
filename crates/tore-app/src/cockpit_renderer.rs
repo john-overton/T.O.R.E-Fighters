@@ -1,4 +1,4 @@
-//! Directional projection of source cockpit artwork and its body-fixed HUD plane.
+//! Aircraft-forward cockpit and HUD with flat translation and directional fading.
 use crate::{
     attitude::{Basis, dot},
     flight::State,
@@ -13,6 +13,9 @@ pub struct CockpitRenderer {
     uniform: wgpu::Buffer,
     art_size: [u32; 2],
     enabled: bool,
+    pub mirror_target: wgpu::Texture,
+    mirror_rects: [[f32; 4]; 3],
+    pub mirrors_visible: bool,
 }
 
 fn texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
@@ -54,13 +57,26 @@ pub fn relative_axes(body: Basis, eye: Basis) -> [[f32; 3]; 3] {
         ]
     })
 }
-pub fn dimensions(size: [u32; 2], art: [u32; 2]) -> [f32; 4] {
+/// Fitted screen-space presentation. Bottom anchoring avoids a floating image edge;
+/// the forward datum projects opposite head-look without clamping to the screen.
+pub fn layout(size: [u32; 2], art: [u32; 2], yaw: f32, pitch: f32, zoom: f32) -> [f32; 4] {
     let [w, h] = size.map(|v| v as f32);
+    let scale = ((w / art[0] as f32).max(h / art[1] as f32) * zoom).max(w / art[0] as f32);
+    let opacity = ((65. - yaw.to_degrees().abs()) / 20.)
+        .min((55. - pitch.to_degrees().abs()) / 20.)
+        .clamp(0., 1.);
+    // Project the aircraft-forward datum with the world camera focal length,
+    // but translate the whole raster rather than tilting its rectangular plane.
+    // Invisible rear/up views need no projection across the tangent singularity.
+    if opacity == 0. {
+        return [0., 0., scale, 0.];
+    }
+    let focal = h * 0.5 * 3f32.sqrt() * zoom;
     [
-        w,
-        h,
-        h * 0.5 * 3f32.sqrt(),
-        (w / art[0] as f32).max(h / art[1] as f32),
+        -focal * yaw.tan() / pitch.cos(),
+        focal * pitch.tan(),
+        scale,
+        opacity,
     ]
 }
 impl CockpitRenderer {
@@ -97,11 +113,28 @@ impl CockpitRenderer {
         let hud = texture(device, 640, 480);
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Cockpit projection"),
-            size: 96,
+            size: 112,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let mirror_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Live rear mirrors"),
+            size: wgpu::Extent3d {
+                width: crate::mirrors::SIZE[0],
+                height: crate::mirrors::SIZE[1],
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
         Self {
+            mirror_target,
+            mirror_rects: [[0.; 4]; 3],
+            mirrors_visible: false,
             pipeline,
             bind: None,
             hud,
@@ -110,7 +143,13 @@ impl CockpitRenderer {
             enabled: false,
         }
     }
-    pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, source: &Sprite) {
+    pub fn prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        source: &Sprite,
+        id: tore_formats::aircraft::AircraftId,
+    ) {
         // Called when an aircraft is prepared, including selection changes.
         // A previous binding belongs to the previous aircraft's cockpit.
         self.art_size = [source.width as u32, source.height as u32];
@@ -129,6 +168,39 @@ impl CockpitRenderer {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        let masks = if std::env::var("TORE_MIRRORS").as_deref() == Ok("0") {
+            None
+        } else {
+            crate::mirrors::masks(source, id)
+        };
+        self.mirror_rects = masks.as_ref().map_or([[0.; 4]; 3], |m| m.rects);
+        println!(
+            "Cockpit mirrors: {} reviewed regions, {}x{} rear feed, every visible frame",
+            if masks.is_some() { 3 } else { 0 },
+            crate::mirrors::SIZE[0],
+            crate::mirrors::SIZE[1]
+        );
+        let mask = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Source mirror silhouettes"),
+            size: art.size(),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let mask_pixels = masks.map_or_else(|| vec![0; source.width * source.height], |m| m.pixels);
+        queue.write_texture(
+            mask.as_image_copy(),
+            &mask_pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(self.art_size[0]),
+                rows_per_image: Some(self.art_size[1]),
+            },
+            mask.size(),
+        );
         self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Body-fixed cockpit art and HUD"),
             layout: &self.pipeline.get_bind_group_layout(0),
@@ -150,6 +222,18 @@ impl CockpitRenderer {
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
                 wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(
+                        &mask.create_view(&Default::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(
+                        &self.mirror_target.create_view(&Default::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
                     binding: 3,
                     resource: self.uniform.as_entire_binding(),
                 },
@@ -168,18 +252,34 @@ impl CockpitRenderer {
         pixels: &[u8],
     ) {
         self.enabled = art || hud;
+        self.mirrors_visible = false;
         if !self.enabled {
             return;
         }
-        let mut values = Vec::with_capacity(24);
-        for axis in relative_axes(
+        let axes = relative_axes(
             Basis::new(state.yaw, state.pitch, state.bank),
             Basis::new(camera.yaw as f64, camera.pitch as f64, -camera.roll as f64),
-        ) {
-            values.extend_from_slice(&axis);
-            values.push(0.);
-        }
-        values.extend_from_slice(&dimensions(size, self.art_size));
+        );
+        let yaw = axes[2][0].atan2(axes[2][2]);
+        let pitch = axes[2][1].clamp(-1., 1.).asin();
+        let placement = layout(size, self.art_size, yaw, pitch, camera.zoom);
+        self.mirrors_visible = art
+            && placement[3] > 0.
+            && self.mirror_rects.iter().any(|r| {
+                let x = (size[0] as f32 - self.art_size[0] as f32 * placement[2]) * 0.5
+                    + placement[0]
+                    + r[0] * placement[2];
+                let base = size[1] as f32 - self.art_size[1] as f32 * placement[2];
+                let y = base.max(base * 0.5) + placement[1] + r[1] * placement[2];
+                r[2] > 0.
+                    && x < size[0] as f32
+                    && x + r[2] * placement[2] > 0.
+                    && y < size[1] as f32
+                    && y + r[3] * placement[2] > 0.
+            });
+        let mut values = Vec::with_capacity(28);
+        values.extend_from_slice(&placement);
+        values.extend_from_slice(&[size[0] as f32, size[1] as f32, camera.zoom, 0.]);
         values.extend_from_slice(&[
             self.art_size[0] as f32,
             self.art_size[1] as f32,
@@ -187,8 +287,12 @@ impl CockpitRenderer {
             f32::from(hud),
         ]);
         let scale = (size[0] as f32 / 640.).min(size[1] as f32 / 480.)
-            * crate::flight_canvas::HUD_SCALE as f32;
+            * crate::flight_canvas::HUD_SCALE as f32
+            * camera.zoom;
         values.extend_from_slice(&[640. * scale, 480. * scale, 0., 0.]);
+        for rect in self.mirror_rects {
+            values.extend_from_slice(&rect);
+        }
         let bytes: Vec<u8> = values.into_iter().flat_map(f32::to_le_bytes).collect();
         queue.write_buffer(&self.uniform, 0, &bytes);
         if hud {
@@ -242,15 +346,32 @@ mod tests {
         }
     }
     #[test]
-    fn native_forward_plane_preserves_cover_fit_on_wide_and_tall_windows() {
+    fn forward_datum_moves_opposite_head_look_without_edge_clamping() {
         for size in [[1920, 1080], [827, 1080], [1920, 800]] {
-            let [w, h, _, scale] = dimensions(size, [1280, 490]);
-            assert!(1280. * scale >= w - 0.001 && 490. * scale >= h - 0.001);
-            // The source top center remains the viewport top center at rest.
-            let source_x = 0. / scale + 1280. * 0.5;
-            let source_y = (-h * 0.5 + h * 0.5) / scale;
-            assert_eq!(source_x, 640.);
-            assert_eq!(source_y, 0.);
+            for zoom in [0.5, 1., 2., 4.] {
+                let center = layout(size, [1280, 490], 0., 0., zoom);
+                let right = layout(size, [1280, 490], 30f32.to_radians(), 0., zoom);
+                let left = layout(size, [1280, 490], -30f32.to_radians(), 0., zoom);
+                // At 30 degrees, the forward datum is half a viewport height
+                // to the opposite side, scaled by zoom, even beyond art margins.
+                assert!((right[0] + size[1] as f32 * 0.5 * zoom).abs() < 0.001);
+                assert_eq!(left[0], -right[0]);
+                assert_eq!(right[1], 0.);
+                assert_eq!(right[2], center[2]);
+                let farther = layout(size, [1280, 490], 40f32.to_radians(), 0., zoom);
+                assert!(farther[0] < right[0]);
+                let up = layout(size, [1280, 490], 0., 20f32.to_radians(), zoom);
+                assert!(up[1] > 0.);
+                assert_eq!(up[0], 0.);
+                for (yaw, pitch) in [
+                    (std::f32::consts::PI, 0.),
+                    (0., std::f32::consts::FRAC_PI_2),
+                ] {
+                    let hidden = layout(size, [1280, 490], yaw, pitch, zoom);
+                    assert_eq!(hidden[3], 0.);
+                    assert!(hidden.iter().all(|v| v.is_finite()));
+                }
+            }
         }
     }
 }

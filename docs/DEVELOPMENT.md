@@ -186,7 +186,7 @@ Flight UI now adapts to drawable aspect ratio independently of menu letterboxing
 
 ## Flight performance
 
-Normal `cargo run --locked -p tore-app -- --free-flight` now optimizes the app crate at level 2, retaining debug symbols/assertions. Dependencies keep their existing debug settings; Cargo may still label the overall dev profile “unoptimized.” No release build is required to benefit. Simulation remains fixed at 120 Hz; presentation interpolates its last two poses and uses AutoVsync with one requested queued frame. There is no additional 16 ms sleep in flight/viewer mode. The display/compositor can still limit presentation frequency.
+Normal `cargo run --locked -p tore-app -- --free-flight` now optimizes the app crate at level 2, retaining debug symbols/assertions. Dependencies keep their existing debug settings; Cargo may still label the overall dev profile “unoptimized.” No release build is required to benefit. Simulation remains fixed at 120 Hz; presentation interpolates its last two poses and requests uncapped Immediate presentation, then Mailbox, with FIFO only as a supported-mode fallback and one requested queued frame. There is no additional 16 ms sleep in flight/viewer mode. The display/compositor can still limit presentation frequency.
 
 Run a bounded desktop measurement (macOS/Linux shell):
 
@@ -211,7 +211,7 @@ Shift/Ctrl + arrows look around in the cockpit or orbit around the aircraft exte
 
 ## Directional cockpit checks
 
-The original forward cockpit and HUD now share a body-fixed GPU projection. Inspect with `--free-flight --flight-look 8,4`, `--flight-look 40,5`, and `--flight-look 0,35`; add `--capture-flight .local/directional.ppm` for a repeatable GPU capture. Check both `--window-size 1280x720` and `--window-size 640x900`. F1 restores the centered frame; F2 should not repeat forward art behind the pilot. Instrument windows and the Escape menu remain screen-anchored. See [asset limits and measurements](baselines/directional-cockpit.md).
+The original forward cockpit and HUD now share a flat GPU overlay that translates opposite head-look around the aircraft-forward datum, with a side/up fade. Inspect with `--free-flight --flight-look 8,4`, `--flight-look 40,5`, and `--flight-look 0,35`; add `--capture-flight .local/directional.ppm` for a repeatable GPU capture. Check both `--window-size 1280x720` and `--window-size 640x900`. F1 restores the centered frame; F2 should not repeat forward art behind the pilot. Instrument windows and the Escape menu remain screen-anchored. See [asset limits and measurements](baselines/directional-cockpit.md).
 
 ## Aircraft animation inspection
 
@@ -279,3 +279,26 @@ and validate either reviewed aircraft with `tools/extract_assets.py --aircraft
 f18|rafale --validate-flight` (choose one literal identity).
 See [FLIGHT-MODEL.md](FLIGHT-MODEL.md) for complete commands, surface inputs,
 acceptance scenarios, and the explicit fitted/native boundary.
+
+Use `--flight-zoom 0.5..4` for repeatable initial zoom, including `--capture-flight`. See [cockpit sliding/zoom evidence](baselines/cockpit-slide.md).
+
+## Live cockpit mirrors
+
+F/A-18D and Rafale C now render all three original mirror regions from a shared
+768×384 rear GPU view every visible flight frame. There is no mirror refresh
+rate cap or CPU readback. The aircraft is visible in the rear feed, while its
+exterior stays hidden from the forward cockpit camera. Mirrors share cockpit
+pan, zoom and fade. Source silhouettes are flood-filled at runtime from reviewed
+opaque fills; optics and viewpoint are fitted. See [mirror evidence](baselines/mirrors.md).
+
+Presentation requests Immediate, then Mailbox if Immediate is unavailable, then
+FIFO as the portable fallback. Uncapped modes omit Wayland frame callbacks that
+otherwise throttle redraw requests to compositor refresh. No compositor settings
+are changed. Platforms/drivers may still pace presentation; the selected mode is
+printed at startup. Physics remains fixed at 120 Hz.
+
+For a matched diagnostic without mirrors, set `TORE_MIRRORS=0` at launch; original
+flat fills remain. Omit it for normal live mirrors. Combine with
+`TORE_PERF_FRAMES=6030 TORE_PERF_ACTIVE=1` and the same aircraft/window size.
+The report includes rear-render counts. Instrument camera pages retain their
+separate asynchronous readback cadence; that does not pace cockpit mirrors.

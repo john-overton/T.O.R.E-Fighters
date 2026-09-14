@@ -1,32 +1,47 @@
-// Body-fixed forward artwork and HUD; head rotation changes their projection together.
+// Aircraft-forward datum translates the flat art and HUD together during head-look.
 struct Cockpit {
- right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>,
- size:vec4<f32>, art:vec4<f32>, hud:vec4<f32>
+ placement:vec4<f32>, size:vec4<f32>, art:vec4<f32>, hud:vec4<f32>, mirrors:array<vec4<f32>,3>
 }
 @group(0) @binding(0) var frame:texture_2d<f32>;
 @group(0) @binding(1) var symbols:texture_2d<f32>;
 @group(0) @binding(2) var filtering:sampler;
 @group(0) @binding(3) var<uniform> cockpit:Cockpit;
+@group(0) @binding(4) var mirror_mask:texture_2d<u32>;
+@group(0) @binding(5) var rear:texture_2d<f32>;
 struct Output { @builtin(position) position:vec4<f32>, @location(0) screen:vec2<f32> }
 @vertex fn vertex(@builtin(vertex_index) index:u32)->Output {
  let p=array<vec2<f32>,3>(vec2(-1.,-1.),vec2(3.,-1.),vec2(-1.,3.));
  var out:Output;out.position=vec4(p[index],0.,1.);out.screen=p[index];return out;
 }
 @fragment fn fragment(in:Output)->@location(0) vec4<f32> {
- let ray=cockpit.forward.xyz+cockpit.right.xyz*in.screen.x*cockpit.size.x/(2.*cockpit.size.z)
-     +cockpit.up.xyz*in.screen.y*cockpit.size.y/(2.*cockpit.size.z);
- if ray.z<=0.00001 { discard; }
- let point=vec2(ray.x,-ray.y)/ray.z*cockpit.size.z;
- let art_uv=vec2(point.x/cockpit.size.w+cockpit.art.x*0.5,
-     (point.y+cockpit.size.y*0.5)/cockpit.size.w)/cockpit.art.xy;
- let hud_uv=vec2(0.5)+point/cockpit.hud.xy;
+ let pixel=vec2((in.screen.x+1.)*.5,(1.-in.screen.y)*.5)*cockpit.size.xy;
+ let origin=vec2((cockpit.size.x-cockpit.art.x*cockpit.placement.z)*.5,
+     max(cockpit.size.y-cockpit.art.y*cockpit.placement.z,
+         (cockpit.size.y-cockpit.art.y*cockpit.placement.z)*.5))+cockpit.placement.xy;
+ let art_uv=(pixel-origin)/(cockpit.art.xy*cockpit.placement.z);
+ // Zoom in about the eye line; zoom out keeps the lower frame on screen.
+ let hud_center=vec2(cockpit.size.x*.5,cockpit.size.y*(.5+max(0.,.5*(1.-cockpit.size.z))))
+     +cockpit.placement.xy;
+ let hud_uv=vec2(.5)+(pixel-hud_center)/cockpit.hud.xy;
  var color=vec4(0.);
  if cockpit.art.z>0. && all(art_uv>=vec2(0.)) && all(art_uv<=vec2(1.)) {
      color=textureSampleLevel(frame,filtering,art_uv,0.);
+     let source=art_uv*cockpit.art.xy;
+     let id=textureLoad(mirror_mask,vec2<i32>(source),0).r;
+     if id>0u && id<=3u {
+         let rect=cockpit.mirrors[id-1u];
+         let uv=(source-rect.xy)/rect.zw;
+         // Aspect-preserving crops of one horizontally reflected rear panorama.
+         let crop_width=min(1.,rect.z/rect.w/2.);
+         let crop_height=min(1.,2.*rect.w/rect.z);
+         let center=array<f32,3>(.5,.8,.2)[id-1u];
+         let start=clamp(center-crop_width*.5,0.,1.-crop_width);
+         color=vec4(textureSampleLevel(rear,filtering,vec2(start+(1.-uv.x)*crop_width,.5+(uv.y-.5)*crop_height),0.).rgb,1.);
+     }
  }
  if cockpit.art.w>0. && all(hud_uv>=vec2(0.)) && all(hud_uv<=vec2(1.)) {
      let text=textureSampleLevel(symbols,filtering,hud_uv,0.);
      color=text+color*(1.-text.a);
  }
- return color; // Premultiplied filtering/compositing preserves transparent edge colors.
+ return color*cockpit.placement.w; // Premultiplied filtering/compositing preserves transparent edge colors.
 }

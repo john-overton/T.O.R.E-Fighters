@@ -279,6 +279,15 @@ impl SimRenderer {
             *count = (vertices.len() / 9) as u32;
         }
     }
+    pub fn update_aircraft_vertices(&mut self, queue: &wgpu::Queue, vertices: &[f32]) {
+        assert!(vertices.len() * 4 <= 2 * 1024 * 1024);
+        if let Some((_, buffer, count)) = &mut self.aircraft {
+            if !vertices.is_empty() {
+                queue.write_buffer(buffer, 0, &bytes(vertices));
+            }
+            *count = (vertices.len() / 9) as u32;
+        }
+    }
     pub fn hide_aircraft(&mut self) {
         if let Some((_, _, count)) = &mut self.aircraft {
             *count = 0;

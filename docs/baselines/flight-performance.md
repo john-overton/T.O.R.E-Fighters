@@ -51,3 +51,7 @@ Ten Metal smoke/capture cases passed: chase, oblique, back, up, wide/small cockp
 Remaining optimization options: GPU-native UI/panel composition, persistent preview color/readback pools, terrain LOD/streaming, occlusion-aware background scheduling and longer profiling on multiple platforms. Original terrain and flight-system parity remain separate work.
 
 Follow-up: [flight response, sky and retained cockpit](flight-response-sky.md) supersedes the earlier Euler interpolation, rigid nose/velocity coupling and hidden cockpit during head-look. Earlier measurements remain historical evidence.
+
+The 2026-09-14 [live-mirror pass](mirrors.md) supersedes AutoVsync pacing with
+Immediate/Mailbox where supported, retaining FIFO fallback. It removes Wayland
+frame-callback pacing in uncapped modes and records current Linux measurements.

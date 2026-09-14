@@ -80,7 +80,7 @@ Working menu actions include views, instrument windows, time/pause, cockpit, pit
 
 The HUD uses imported `HUD11.FNT`; instrument/menu text uses `WIN11.FNT`. It shows wrapped heading, true airspeed in knots, MSL altitude, terrain-relative AGL, vertical speed in ft/min, G, throttle, afterburner and actual gear/flap/brake/hook state. The pitch ladder uses five-degree steps, dashed below zero, and the renderer's perspective/bank convention. The flight-path marker comes from current kinematic vertical speed and airspeed. No target, weapon solution or navigation waypoint is invented.
 
-Layout, line symbology, frame scaling, pan, zoom and camera placement are authored. `~F18H.PIC` is uniformly scaled to cover the actual flight aspect ratio, showing more side artwork on wider screens and cropping only what is required to avoid stretching. Mirrors remain source flat fills. Native F18 HUD callers, HUDSYM glyph meanings, full cockpit composition, corner-speed/ILS/weapon modes and native pixel parity remain open. The HUD stays on its aircraft-forward combiner plane during head-look and leaves the view naturally with that plane. External views omit it.
+Layout, line symbology, frame scaling, pan, zoom and camera placement are authored. `~F18H.PIC` is uniformly scaled to cover the actual flight aspect ratio, showing more side artwork on wider screens and cropping only what is required to avoid stretching. Mirrors render live rear views every visible frame. Native F18 HUD callers, HUDSYM glyph meanings, full cockpit composition, corner-speed/ILS/weapon modes and native pixel parity remain open. The HUD remains aligned with the aircraft-forward datum and pans opposite head-look with the cockpit. External views omit it.
 
 See [recovery details](formats/aircraft.md), [progress](progress.md), and [validation](baselines/cockpit-controls.md).
 
@@ -91,7 +91,7 @@ The flight overlay is independent of the fixed menu canvas and tracks the window
 
 ## View and smoothness clarification
 
-F2/F3 replaced the early prototype exterior bindings when the native menu controls were recovered. They look back/up from ownship and omit the exterior mesh. The forward cockpit/HUD plane projects according to head direction; back/up views do not duplicate the forward frame behind or above the pilot. **F10 shows the aircraft from outside**; F1 restores the cockpit. The oblique developer camera remains available through `--flight-view 2` and instrument 3.
+F2/F3 replaced the early prototype exterior bindings when the native menu controls were recovered. They look back/up from ownship and omit the exterior mesh. The forward cockpit/HUD overlay translates opposite head-look and fades at its viewing limits; back/up views do not duplicate the forward frame behind or above the pilot. **F10 shows the aircraft from outside**; F1 restores the cockpit. The oblique developer camera remains available through `--flight-view 2` and instrument 3.
 
 The performance pass removes the extra post-render wait, interpolates camera/aircraft/HUD poses between fixed 120 Hz ticks, and keeps live instrument GPU readbacks asynchronous. Controls still drive the same authored flight adapter; this is not a new native flight-model claim. [Measurements and diagnostics](baselines/flight-performance.md).
 
@@ -101,7 +101,20 @@ Hold **Shift + arrows** (or **Ctrl + arrows**) to turn the camera at one radian/
 
 Release the arrow to stop moving the view; its orientation stays where you left it. **Shift + /** recenters the current camera without changing view or zoom. **F1** returns to the forward cockpit and resets look/zoom. A look arrow remains claimed until physical release even if Shift/Ctrl is released first, so a repeated key cannot unexpectedly pitch or roll the aircraft. Pause/focus loss clears held input. Shift-/ uses the physical slash key, so US keyboards may label the resulting character `?`.
 
-Head-look rotates about the aircraft’s axes, including during banked flight. The cockpit and HUD share a body-fixed GPU projection: they stay still relative to one another, move together as the pilot turns, and preserve the centered forward layout. Instruments remain screen-anchored. The original wide artwork exposes more side frame as the head turns, but it is a finite flat plane, not recovered 3D side/rear/overhead geometry. Mirrors remain flat source fills. See [directional cockpit evidence](baselines/directional-cockpit.md).
+Head-look rotates about the aircraft’s axes, including during banked flight.
+Cockpit artwork and HUD remain pointed straight ahead relative to the aircraft.
+Looking right moves both left on screen; looking left moves both right. Their
+shared translation follows the projected aircraft-forward datum and never
+clamps to available artwork width. The image remains flat, so horizontal look
+keeps its bottom level rather than tilting it like a nearby plane. Looking up
+moves it downward. Both fade from 45–65 degrees horizontal look and 35–55 degrees
+upward. These are fitted presentation rules, not recovered native FA projection.
+Instruments remain screen-anchored.
+
++/- scales artwork and HUD text/symbology with world zoom. Zoom-in crops around
+the eye line; zoom-out keeps the bottom anchored and constrains artwork width to
+cover the screen. The finite source art provides no rear/overhead interior.
+Mirrors use their original source silhouettes with live rear views. See [sliding cockpit validation](baselines/cockpit-slide.md).
 
 The local USNF manual's “View Panning & Zooming” section specifies Ctrl+arrows when keyboard flight control is used, and Right Shift plus joystick for joystick panning. The reference app chose Shift+arrows. The supplied FA readme did not resolve the Anthology-specific binding, so Shift remains an explicitly documented convenience alias rather than claimed recovered FA behavior. [Validation](baselines/look-around.md).
 
@@ -132,3 +145,12 @@ Rafale C: H reports unavailable because the recovered RAF.SH model has no hook
 animation import. G/F/B and pitch/roll/rudder animate its own gear, elevons,
 airbrakes, canards and rudder; motion schedules are fitted. Aircraft changes now
 replace the GPU cockpit texture as well as exterior resources.
+
+## Mirrors and uncapped presentation
+
+Both aircraft have live center/left/right mirrors. They render the world and
+ownship into one rear texture each visible frame, with reflected,
+aspect-preserving crops inside the original outlines. They follow cockpit pan,
+zoom and fade; hiding the cockpit hides the mirrors. Viewpoint/crops are fitted,
+not recovered native optics. The render loop requests uncapped presentation;
+physics stays at 120 Hz. [Implementation, checks and measurements](baselines/mirrors.md).

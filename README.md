@@ -105,3 +105,8 @@ F/A-18D and Rafale C now own separate flight-law modules and independently edita
 typed configurations for mass, thrust/fuel, aerodynamics, departure/contact, equipment
 and tuning. The simulator reads these directly. A typed air-data interface supports future analog instruments; see the
 [model and instrument extension guide](docs/FLIGHT-MODEL.md).
+
+Cockpit mirrors now render live rear views every visible frame for both aircraft,
+including the airframe. Rendering requests uncapped presentation; simulation
+remains fixed at 120 Hz. Mirror optics are fitted to the original artwork.
+See [measurements and limitations](docs/baselines/mirrors.md).

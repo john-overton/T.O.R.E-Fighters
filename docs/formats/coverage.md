@@ -67,3 +67,9 @@ FA plane type 5/size 660, with named extraction reports and transitive dependenc
 Other Rafale variants remain rejected; RAF.SH is preserved but does not receive
 F18-specific animation assumptions. See [shared model](../FLIGHT-MODEL.md) and
 [acceptance evidence](../baselines/shared-flight-model.md).
+
+Cockpit mirrors: reviewed F18/RAF high-resolution PIC flat fills supply three
+four-connected runtime silhouettes per aircraft. Bounded exact-color extraction
+preserves the source rims and rejects empty/overlapping/oversized regions. Live
+GPU rear views are fitted presentation, not decoded native mirror optics.
+[Validation](../baselines/mirrors.md).
