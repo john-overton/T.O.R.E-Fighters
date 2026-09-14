@@ -26,6 +26,12 @@ Status is for this **Rust rebuild**, not the reference project's decoders. The a
 
 No M1a completion or all-title format validation is implied. See [theater recovery](theater.md), [menu extraction](menu.md) and [baseline](../baselines/main-menu.md).
 
+Weapons audit (2026-09-14): 135 JT and 170 dependencies extract, but shared
+native effect roots are missing from selection. All 70 literal JT references
+across 145 PTs are present; PTS/compatibility and ordnance/sensor behavior remain
+open. No format status is promoted by this research. [Plan](weapons.md) and
+[evidence](../baselines/weapons-research.md).
+
 ### F/A-18D slice
 
 FA PT: typed bounded reader for the reviewed F18/660 layout, all source G rows and hardpoints exported; runtime physics is an authored adapter. FA JT/SEE/ECM: named schema decoding and raw data extraction, including transitive shape/texture/audio dependencies; weapon/sensor execution remains partial/unimplemented. GAS: raw preservation and BRF validation. SH: nearest-detail static Hornet geometry and observed device endpoint branches, not a general native VM. FNT: bounded bitmap-writing glyph grammar, WIN11 used in instrument windows. HUD: associated source artwork/data preserved, general native HUD composition not decoded. [Detailed scope](aircraft.md).

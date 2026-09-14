@@ -134,6 +134,10 @@ The runtime integration pass found the TVI texture alias for TVIET. All-theater 
 
 ## F/A-18D and weapons
 
+The [2026-09-14 weapons audit and plan](formats/weapons.md) confirms that
+`--weapons` preserves all 135 JT definitions but omits shared native combat-effect
+roots. It is not yet a complete combat export. See [measured evidence](baselines/weapons-research.md).
+
 ```sh
 python3 tools/extract_assets.py --aircraft f18 --exclude-archive 'disc1/LHX/*' --out .local/f18-import
 python3 tools/extract_assets.py --aircraft f18 --weapons --exclude-archive 'disc1/LHX/*' --out .local/f18-import

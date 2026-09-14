@@ -4,6 +4,24 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 
 **Current scope:** Choose Activity now leads to a Quick Mission Creator mock and a Ukraine free-camera viewer. Original T2 heights, texture placements, briefing map and a fixed weather-palette/sky preview are implemented in Rust. The remaining menu system, full environment fidelity, aircraft and flight simulation remain open. See [theater recovery](formats/theater.md) and [viewer baseline](baselines/ukraine-viewer.md).
 
+## Aircraft weapons research and scheduled plan — 2026-09-14
+
+- [x] Audit FA archives, native EXE/SMS and the shared exporter against reference
+  research; distinguish authored/reference behavior from FA evidence.
+- [x] Extract all 135 JT definitions and 170 dependent resources; audit literal
+  JT references across 145 PTs and reproduce both reviewed aircraft exports.
+- [x] Confirm missing shared smoke/fire/crater/debris/chaff/flare graphics roots;
+  inspect FA launch-speed arithmetic and ammunition-field offsets.
+- [x] Plan ordnance movement, sensor/guidance/ECM coupling, loadouts, graphics,
+  damage and vanilla acceptance: [weapons plan](formats/weapons.md).
+- [ ] Complete native weapon/compatibility/effect-table contracts and shared
+  exporter dependency reporting; this pass does not implement exporter changes.
+- [ ] Implement deterministic gun/rocket/bomb/missile lifecycles, sensor logic,
+  original effects and matched retail acceptance before claiming 1:1 performance.
+
+Evidence and limitations: [weapons research](baselines/weapons-research.md).
+Further menu screens remain deferred; clean external free flight is preserved.
+
 ## Fidelity and evidence rules
 
 - Recover the original game from user-owned retail assets and, where data alone is insufficient, executable analysis and observed native behavior. Reuse original pictures, fonts, textures, geometry, terrain data and audio wherever possible.
