@@ -186,3 +186,11 @@ repeated `--aircraft` flags to form a union; the app imports both profiles throu
 the same resolver. `RAFALEF.PT` and `RAFALEE.PT` are not aliases. Extraction is
 complete for the selected dependency closure, not native flight/animation/system
 parity. See [profile coverage](formats/aircraft.md#rafale-c-import-and-runtime-selection--2026-09-14).
+
+Reviewed aircraft selection now supports `--aircraft rafale` as well as `f18`.
+Rafale C starts from RAFALE.PT, RAFALE.HUD, RAF.SH and ~RAFH.PIC and follows the
+same bounded dependency closure. RAFALEE/RAFALEF are not aliases. Named PT
+analysis is included in the extraction report. `--validate-flight` runs the
+shared headless hybrid-model suite after successful full extraction; it does
+not execute imported code or certify visual/native parity. Full examples:
+[FLIGHT-MODEL.md](FLIGHT-MODEL.md).

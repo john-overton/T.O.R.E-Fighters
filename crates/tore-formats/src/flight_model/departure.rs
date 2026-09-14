@@ -3,7 +3,7 @@
 use super::{div32, integration::service_delta, match_f24, mul_div};
 use crate::{Result, invalid};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DepartureProfile {
     pub warning_delay: i16,
     pub stall_delay: i16,
@@ -129,7 +129,7 @@ pub fn stall_authority(severity_f8: i32, controls: [i32; 3], lift_f8: i32) -> ([
         lift_f8.wrapping_mul(remaining) / 256,
     )
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpinInput {
     pub pitch_stick: i32,
     pub rudder: i32,

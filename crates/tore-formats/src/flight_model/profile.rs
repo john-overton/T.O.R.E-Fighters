@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{Result, aircraft::Token, invalid};
 use std::collections::BTreeMap;
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FlightProfile {
     pub departure: DepartureProfile,
     pub landing: LandingLimits,
@@ -27,7 +27,7 @@ impl FlightProfile {
         Ok(limits)
     }
     /// Accepts named fields from a reviewed PT reader. Missing fields are errors.
-    /// Does not authorize new PT layouts or relax Aircraft::parse's F18 guard.
+    /// Does not authorize new PT layouts beyond Aircraft::parse's reviewed identities.
     pub fn from_fields(fields: &BTreeMap<String, Token>) -> Result<Self> {
         let number = |key: &str| -> Result<i32> {
             fields

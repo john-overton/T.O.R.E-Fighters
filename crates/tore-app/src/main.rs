@@ -47,6 +47,7 @@ struct App {
     performance: performance::Performance,
     hornet: aircraft::Airframe,
     flight: flight::State,
+    researched_flight: bool,
     previous_flight: flight::State,
     flight_clock: flight::Clock,
     flight_view: u8,
@@ -83,7 +84,7 @@ impl App {
             Command::Restart => Action::FreeFlight,
             Command::Effects(on) => Action::Effects(on),
             Command::Toggle(key) => {
-                if key == "h" && !self.flight.hook_available {
+                if key == "h" && !self.flight.hook_available() {
                     self.flight_ui.message("Hook unavailable for this aircraft");
                     return Action::None;
                 }
@@ -193,6 +194,13 @@ impl App {
             }
             Action::FreeFlight => {
                 self.flight = self.hornet.start(&self.world);
+                if self.researched_flight
+                    && let Err(error) = self.flight.enable_research(1)
+                {
+                    self.error = Some(error.into());
+                    event_loop.exit();
+                    return;
+                }
                 self.previous_flight = self.flight.clone();
                 self.flight_clock.remainder = 0.;
                 self.flight_view = 0;
@@ -484,10 +492,9 @@ impl ApplicationHandler for App {
                         self.frame_time = now;
                         for _ in 0..steps {
                             self.previous_flight.clone_from(&self.flight);
-                            self.flight
-                                .step(&self.hornet.profile, &self.camera.keys, |x, z| {
-                                    self.world.height(x as f32, z as f32) as f64
-                                });
+                            self.flight.step(&self.camera.keys, |x, z| {
+                                self.world.height(x as f32, z as f32) as f64
+                            });
                         }
                         if !self.flight_ui.frozen() {
                             look::step(
@@ -734,6 +741,7 @@ fn main() -> AppResult<()> {
     let mut flight_view = 0;
     let mut flight_look = [0f32; 2];
     let mut flight_menu = false;
+    let mut researched_flight = false;
     let mut window_size = [960, 720];
     let mut instrument_page = None;
     let mut instrument_layout = instruments::Layout::Large;
@@ -749,6 +757,7 @@ fn main() -> AppResult<()> {
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--researched-flight" => researched_flight = true,
             "--capture-terrain" => {
                 capture_terrain = Some(PathBuf::from(
                     args.next().ok_or("--capture-terrain needs a .ppm path")?,
@@ -922,7 +931,7 @@ fn main() -> AppResult<()> {
             "--import-only" => import_only = true,
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D and Rafale C assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D and Rafale C assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--researched-flight enables the hybrid flight/contact model (not native parity).\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
             }
@@ -1011,12 +1020,23 @@ fn main() -> AppResult<()> {
         if ticks > 120 * 3600 {
             return Err("headless flight limited to one hour".into());
         }
-        let mut state = flight::State::new(&hornet.profile, [0., 5000., 0.]);
+        let mut state = flight::State::new(&hornet.profile, [0., 5000., 0.])?;
+        if researched_flight {
+            state.enable_research(1)?;
+        }
+        println!(
+            "flight_model={}",
+            if state.research.is_some() {
+                "hybrid"
+            } else {
+                "legacy"
+            }
+        );
         let keys = setup_maneuver(&mut state);
         let initial_forward = attitude::Basis::new(state.yaw, state.pitch, state.bank).forward;
         let (mut vertical, mut inverted, mut completed) = (false, false, false);
         for _ in 0..ticks {
-            state.step(&hornet.profile, &keys, |_, _| 0.);
+            state.step(&keys, |_, _| 0.);
             let basis = attitude::Basis::new(state.yaw, state.pitch, state.bank);
             vertical |= basis.forward[1] > 0.999;
             inverted |= basis.up[1] < -0.9;
@@ -1051,7 +1071,7 @@ fn main() -> AppResult<()> {
     }
     if let Some(path) = panel_snapshot {
         use std::io::Write;
-        let state = flight::State::new(&hornet.profile, [0., 5000., 0.]);
+        let state = flight::State::new(&hornet.profile, [0., 5000., 0.])?;
         let r =
             instruments::Instruments::default().page(instrument_page.unwrap_or(7), &hornet, &state);
         let mut f = std::fs::File::create(path)?;
@@ -1121,16 +1141,17 @@ fn main() -> AppResult<()> {
     let animation_capture = capture_terrain.is_some()
         && (flight_devices.is_some() || flight_controls.is_some() || flight_probe_ticks.is_some());
     let mut flight = hornet.start(&world);
+    if researched_flight {
+        flight.enable_research(1)?;
+    }
     if let Some(ticks) = flight_probe_ticks {
         let keys = setup_maneuver(&mut flight);
         for _ in 0..ticks {
-            flight.step(&hornet.profile, &keys, |x, z| {
-                world.height(x as f32, z as f32) as f64
-            });
+            flight.step(&keys, |x, z| world.height(x as f32, z as f32) as f64);
         }
     }
     if let Some(v) = flight_devices {
-        if v[3] > 0. && !flight.hook_available {
+        if v[3] > 0. && !flight.hook_available() {
             return Err(
                 "the imported Rafale model has no hook; set the fourth device fraction to 0".into(),
             );
@@ -1158,6 +1179,7 @@ fn main() -> AppResult<()> {
     let mut app = App {
         performance: performance::Performance::from_env()?,
         hornet,
+        researched_flight,
         previous_flight: flight.clone(),
         flight,
         flight_clock: flight::Clock { remainder: 0. },

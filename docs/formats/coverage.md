@@ -60,3 +60,10 @@ equipment/audio are consumed in selectable free flight. Other Rafale variants,
 native Rafale animation laws and whole native dynamics remain unimplemented;
 a reviewed-part presentation rig is now available. This is
 not general SH/HUD or full aircraft-system parity. [Scope](aircraft.md#rafale-c-import-and-runtime-selection--2026-09-14).
+
+The shared BRF aircraft reader now reviews F18.PT and RAFALE.PT (Rafale C), both
+FA plane type 5/size 660, with named extraction reports and transitive dependencies.
+`--validate-flight` runs identical hybrid flight acceptance on either identity.
+Other Rafale variants remain rejected; RAF.SH is preserved but does not receive
+F18-specific animation assumptions. See [shared model](../FLIGHT-MODEL.md) and
+[acceptance evidence](../baselines/shared-flight-model.md).

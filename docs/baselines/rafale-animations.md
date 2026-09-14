@@ -79,3 +79,22 @@ volumetric wheels or wells. Native lighting/material fidelity, wheel spin,
 suspension, steering, nozzle petals, canopy operation, exact native animation
 schedules, native HUD composition and whole-tick dynamics remain open. Full
 rear/overhead cockpit coverage is also unavailable in the recovered forward art.
+
+## Shared simulation integration
+
+Before pushing, remote commit `51efbcc` introduced the shared `tore-sim` kernel,
+independent aircraft laws and typed model configurations. The merge preserves
+those changes and the separate app-side Rafale rig. Hook availability now derives
+from the selected shared model instead of duplicating a mutable capability flag.
+Animation regression tests remain in the app and use shared simulation state.
+
+The combined tree passed 122 Rust tests, 11 Python tests, formatting, Clippy with
+warnings denied, locked build and source/both debug binary guards. Both portable
+`--validate-flight` extraction workflows passed all 13 scenarios per aircraft.
+Creator, viewer, both aircraft, device-pose and camera-panel GPU checks passed;
+Quick Mission cockpit switching in both directions was also exercised with
+`--researched-flight` enabled. The merged 330-frame active benchmark measured
+mean CPU frame interval 16.78 ms, p95 16.86 ms and max 32.29 ms, with zero paused
+frames and zero camera readbacks. These remain CPU wall timings, not displayed
+FPS or native flight parity. Logs are local in `.local/merge-review/` and
+`.local/rafale-animation/`. Windows/macOS checks were not rerun on this Linux host.

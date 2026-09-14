@@ -1,8 +1,14 @@
-# F/A-18D recovery and free-flight adapter
+# Aircraft recovery and free-flight adapters
 
 The 2026-09-13 port uses the supplied Fighters Anthology `F18.PT`, not the distinct `F18C.PT`. Its retail name is F/A-18D. The reference checkout's `docs/aircraft-porting.md`, `formats/{pt,jt,sh,hud,instrument-windows}.md` and bounded Python readers were research guides. No TypeScript runtime, terrain engine, converted reference bundle, external font or retail bytes are required by the Rust application or extractor.
 
 This is a development port with recovered data and a playable adapter, **not completed native flight, cockpit, instrument or weapon parity**. In particular, extracting executable modules does not implement all their behavior. The user clarified that 1:1 instrument rendering means the separate RWR/radar/systems/target windows; cockpit-frame resolution is a different question.
+
+The subsequent shared-model pass also reviews `RAFALE.PT` (Rafale C) for
+extraction and headless flight. `--aircraft rafale --validate-flight` reuses the
+same reader and simulator; Rafale visual/cockpit animation acceptance remains
+separate. The original flight description below describes the legacy adapter;
+[FLIGHT-MODEL](../FLIGHT-MODEL.md) documents the selectable hybrid model.
 
 ## Import contract
 

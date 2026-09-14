@@ -146,32 +146,30 @@ fn fields(tokens: &[Token], layout: &[(&str, &str)]) -> Result<BTreeMap<String, 
         })
         .collect()
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Envelope {
     pub g: i32,
     pub points: Vec<[f64; 2]>,
 }
 impl Envelope {
     pub fn speeds(&self, alt: f64) -> Option<(f64, f64)> {
-        let mut hits = Vec::new();
+        let mut low = f64::INFINITY;
+        let mut high = f64::NEG_INFINITY;
+        let mut hit = |v: f64| {
+            low = low.min(v);
+            high = high.max(v);
+        };
         for i in 0..self.points.len() {
             let a = self.points[i];
             let b = self.points[(i + 1) % self.points.len()];
             if (a[1] - alt).abs() < 1e-9 {
-                hits.push(a[0]);
+                hit(a[0]);
             }
             if (a[1] < alt && b[1] > alt) || (a[1] > alt && b[1] < alt) {
-                hits.push(a[0] + (b[0] - a[0]) * (alt - a[1]) / (b[1] - a[1]));
+                hit(a[0] + (b[0] - a[0]) * (alt - a[1]) / (b[1] - a[1]));
             }
         }
-        if hits.is_empty() {
-            None
-        } else {
-            Some((
-                hits.iter().copied().fold(f64::INFINITY, f64::min),
-                hits.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-            ))
-        }
+        (low <= high).then_some((low, high))
     }
 }
 #[derive(Debug)]
@@ -626,6 +624,8 @@ mod profile_tests {
         assert_eq!(a.envelopes.len(), 2);
         assert!(Aircraft::parse(t.replacen("word 660", "dword 660", 1).as_bytes()).is_err());
         assert!(Aircraft::parse(t.replace("F18.PT", "OTHER.PT").as_bytes()).is_err());
+        assert!(Aircraft::parse(t.replace("F18.PT", "RAFALE.PT").as_bytes()).is_ok());
+        assert!(Aircraft::parse(t.replace("F18.PT", "RAFALEE.PT").as_bytes()).is_err());
         assert!(Aircraft::parse(t.replacen("dword 100", "dword 3000", 1).as_bytes()).is_err());
     }
 }
