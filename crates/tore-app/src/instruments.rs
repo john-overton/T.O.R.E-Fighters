@@ -120,8 +120,9 @@ impl Layout {
 }
 pub struct Instruments {
     pub pages: Vec<u8>,
+    pub selected: usize,
     pub layout: Layout,
-    other_pages: Vec<u8>,
+    pub(crate) other_pages: Vec<u8>,
     pub cameras: std::collections::BTreeMap<u8, Vec<u8>>,
     pub rwr_range: usize,
     pub radar_range: usize,
@@ -132,6 +133,7 @@ impl Default for Instruments {
     fn default() -> Self {
         Self {
             pages: vec![7, 5, 9, 4],
+            selected: 0,
             layout: Layout::Large,
             other_pages: vec![7, 5, 6, 4, 9, 8],
             cameras: Default::default(),
@@ -154,6 +156,7 @@ impl Instruments {
         result
     }
     pub fn toggle_layout(&mut self) {
+        self.selected = 0;
         self.pressed = None;
         std::mem::swap(&mut self.pages, &mut self.other_pages);
         self.layout = if self.layout == Layout::Large {
@@ -164,6 +167,7 @@ impl Instruments {
     }
 
     pub fn toggle(&mut self, page: u8) {
+        self.selected = 0;
         self.pressed = None;
         if let Some(i) = self.pages.iter().position(|p| *p == page) {
             self.pages.remove(i);
@@ -217,17 +221,35 @@ impl Instruments {
         }
         let before = self.pressed.take();
         if let Some((i, b)) = hit.filter(|h| Some(*h) == before) {
-            match (self.pages[i], b) {
-                (5, 0) => self.rwr_range = self.rwr_range.saturating_sub(1),
-                (5, 1) => self.rwr_range = (self.rwr_range + 1).min(4),
-                (9, 0) => self.radar_range = self.radar_range.saturating_sub(1),
-                (9, 1) => self.radar_range = (self.radar_range + 1).min(4),
-                (9, 2) => self.mode = (self.mode + 1) % 3,
-                _ => return false,
-            }
-            return true;
+            return self.control(i, b);
         }
         false
+    }
+    pub fn select(&mut self, slot: usize) -> bool {
+        if slot >= self.pages.len() {
+            return false;
+        }
+        self.selected = slot;
+        true
+    }
+    pub fn cycle_selection(&mut self, delta: i32) -> bool {
+        if self.pages.is_empty() {
+            return false;
+        }
+        self.selected = (self.selected as i32 + delta).rem_euclid(self.pages.len() as i32) as usize;
+        true
+    }
+    /// Same stock scope operations for pointer and hardware buttons; no new sensor behavior.
+    pub fn control(&mut self, slot: usize, button: usize) -> bool {
+        match (self.pages.get(slot), button) {
+            (Some(5), 0) => self.rwr_range = self.rwr_range.saturating_sub(1),
+            (Some(5), 1) => self.rwr_range = (self.rwr_range + 1).min(4),
+            (Some(9), 0) => self.radar_range = self.radar_range.saturating_sub(1),
+            (Some(9), 1) => self.radar_range = (self.radar_range + 1).min(4),
+            (Some(9), 2) => self.mode = (self.mode + 1) % 3,
+            _ => return false,
+        }
+        true
     }
     pub fn page(&self, id: u8, h: &Airframe, s: &State) -> Raster {
         let mut r = Raster::new();
@@ -531,5 +553,32 @@ mod tests {
             i.toggle(page);
             assert!(i.pages.len() <= 6);
         }
+    }
+}
+
+#[cfg(test)]
+mod input_selection_tests {
+    use super::*;
+    #[test]
+    fn logical_focus_uses_existing_buttons_without_changing_pages_or_rasters() {
+        let mut i = Instruments::default();
+        let pages = i.pages.clone();
+        assert!(i.select(1));
+        assert!(i.control(i.selected, 0));
+        assert_eq!(i.rwr_range, 3);
+        assert!(i.cycle_selection(1));
+        assert!(i.control(i.selected, 2));
+        assert_eq!(i.mode, 1);
+        assert!(!i.control(0, 0));
+        assert!(!i.control(2, 3));
+        assert!(!i.select(5));
+        assert_eq!(i.pages, pages);
+        i.toggle_layout();
+        assert!(i.select(5));
+        assert!(i.cycle_selection(1));
+        assert_eq!(i.selected, 0);
+        i.pages.clear();
+        assert!(!i.cycle_selection(1));
+        assert!(!i.control(0, 0));
     }
 }

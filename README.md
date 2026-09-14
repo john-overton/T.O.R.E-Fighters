@@ -110,3 +110,20 @@ Cockpit mirrors now render live rear views every visible frame for both aircraft
 including the airframe. Rendering requests uncapped presentation; simulation
 remains fixed at 120 Hz. Mirror optics are fitted to the original artwork.
 See [measurements and limitations](docs/baselines/mirrors.md).
+
+Controller input is available through a hand-rolled shared binding layer.
+Standard Linux gamepads have default flight/menu bindings; sticks, throttles,
+pedals and button boxes can use explicit profiles. Run
+`cargo run --locked -p tore-app -- --list-inputs` to inspect hardware without
+loading retail media. See [controller setup, bindings and instrument focus](docs/INPUT.md)
+and [platform/hardware acceptance](docs/baselines/input.md).
+
+Controller rumble: `cargo run --locked -p tore-app -- --test-rumble only` tests
+exactly one capable connected controller. Linux Ultimate 2 pulse response is
+user-confirmed; Windows and macOS 11+ haptics have cross-compile checks but still
+need hardware acceptance. See [controller setup and platform limits](docs/INPUT.md).
+
+In flight, **Escape → Control** now edits bindings and enables rumble through
+**Save & apply**. Instrument layouts/pages, scope settings, cockpit/HUD/zoom and
+sound preferences persist between normal sessions. Afterburner provides a quiet
+continuous rumble beneath its engagement pulse while active. [Settings guide](docs/INPUT.md).

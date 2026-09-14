@@ -154,3 +154,31 @@ aspect-preserving crops inside the original outlines. They follow cockpit pan,
 zoom and fade; hiding the cockpit hides the mirrors. Viewpoint/crops are fitted,
 not recovered native optics. The render loop requests uncapped presentation;
 physics stays at 120 Hz. [Implementation, checks and measurements](baselines/mirrors.md).
+
+## Shared controller input and instrument focus
+
+The authored [controller layer](INPUT.md) accepts gamepads, sticks, throttles,
+pedals and button boxes through typed pilot commands. Standard Linux gamepads
+have documented default bindings; custom profiles cover other descriptors and
+platforms. Keyboard and controller inputs may be assigned together, with explicit
+axis priority, throttle pickup and independent release/disconnect handling.
+`--list-inputs` and `--monitor-inputs 30` run without a window or retail media.
+
+Ctrl-Tab / Ctrl-Shift-Tab selects the next/previous existing instrument;
+Ctrl-1..6 selects a slot and Ctrl-Shift-1..4 operates its stock button positions.
+Selection does not move windows or alter their raster content. Unimplemented
+controls remain unavailable. These shortcuts are T.O.R.E additions, not native
+FA dispatch evidence. Optional rumble and input-only tick tapes are documented
+in [INPUT.md](INPUT.md); [acceptance](baselines/input.md) distinguishes physical
+hardware checks from synthetic and cross-compilation evidence.
+
+Enable rumble through **Escape → Control → Rumble: On → Save & apply**. Actual
+afterburner engagement produces a subtle impulse followed by a quiet continuous
+low-frequency rumble while it remains active. The switch alone below the model's activation
+threshold does not. Event feedback designs and future weapon/turbulence hooks
+are listed in [INPUT.md](INPUT.md); unavailable fire controls remain unavailable.
+
+The flight **Control** tab now opens the authored binding editor rather than the
+retail device-selection stub. Instrument page sets/layout, scope controls, zoom,
+cockpit/HUD options and sound preferences save automatically between normal
+sessions and survive aircraft changes/restarts. [Full settings contract](INPUT.md).

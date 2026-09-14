@@ -1,9 +1,9 @@
 //! Repeatable aircraft-agnostic flight acceptance using user-extracted PT data.
-use std::{collections::BTreeSet, env, fs::File, io::Read};
+use std::{env, fs::File, io::Read};
 use tore_formats::aircraft::Aircraft;
 use tore_sim::{
     attitude::{Basis, dot, unit},
-    flight::State,
+    flight::{PilotInput, State},
     research::Surface,
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -49,28 +49,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ] {
             let mut s = State::new(&a, [0., 15000., 0.])?;
             s.enable_research(1)?;
-            let mut keys = BTreeSet::new();
+            let mut keys = PilotInput::default();
             match scenario {
                 "loop" => {
                     s.throttle = 1.;
                     s.burner = true;
-                    keys.insert("ArrowDown".into());
+                    keys.pitch = 1.;
                 }
                 "bank-left" => {
                     s.bank = -0.7;
-                    keys.insert("ArrowDown".into());
+                    keys.pitch = 1.;
                 }
                 "bank-right" => {
                     s.bank = 0.7;
-                    keys.insert("ArrowDown".into());
+                    keys.pitch = 1.;
                 }
                 "stall" | "spin" => {
                     s.speed = 180.;
                     s.engine = false;
                     s.velocity = Basis::new(s.yaw, 0., 0.).forward.map(|v| v * s.speed);
                     if scenario == "spin" {
-                        keys.insert("ArrowDown".into());
-                        keys.insert("x".into());
+                        keys.pitch = 1.;
+                        keys.yaw = 1.;
                     }
                 }
                 "landing" | "gear-up" | "taxi" | "takeoff" | "water" | "hard-landing" => {
@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if scenario == "takeoff" {
                         s.throttle = 1.;
                         s.burner = true;
-                        keys.insert("ArrowDown".into());
+                        keys.pitch = 1.;
                     }
                 }
                 _ => {}
@@ -120,19 +120,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 (false, false, false, false, false);
             for tick in 0..120 * 90 {
                 if scenario == "spin" && tick == 120 * 12 {
-                    keys.remove("ArrowDown");
-                    keys.remove("x");
-                    keys.insert("ArrowUp".into());
-                    keys.insert("z".into());
+                    keys.pitch = 0.;
+                    keys.yaw = 0.;
+                    keys.pitch = -1.;
+                    keys.yaw = -1.;
                 }
                 if scenario == "takeoff" {
-                    keys.remove("ArrowDown");
-                    keys.remove("ArrowUp");
+                    keys.pitch = 0.;
+                    keys.pitch = 0.;
                     if s.speed > 240. && s.pitch.to_degrees() < 8. {
-                        keys.insert("ArrowDown".into());
+                        keys.pitch = 1.;
                     }
                     if s.pitch.to_degrees() > 12. {
-                        keys.insert("ArrowUp".into());
+                        keys.pitch = -1.;
                     }
                     if s.position[1] > 500. {
                         s.gear_down = false;

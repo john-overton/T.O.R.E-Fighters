@@ -98,8 +98,9 @@ impl Audio {
             engine_gain: 0.,
             burner_gain: 0.,
             voices: Vec::with_capacity(8),
-            music_on: true,
-            effects_on: true,
+            // Stay silent until the app has restored the user's saved preferences.
+            music_on: false,
+            effects_on: false,
         }));
         let device = cpal::default_host()
             .default_output_device()
@@ -208,6 +209,16 @@ impl Audio {
                     0.
                 };
                 m.burner_gain = if s.afterburner_active() { 0.15 } else { 0. };
+            }
+        }
+    }
+    /// Restore user preferences without synthesizing a menu click at startup.
+    pub fn preferences(&self, music: bool, effects: bool) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.music_on = music;
+            mixer.effects_on = effects;
+            if !effects {
+                mixer.voices.clear();
             }
         }
     }

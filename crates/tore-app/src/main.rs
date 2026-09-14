@@ -4,15 +4,18 @@ mod assets;
 mod attitude;
 mod audio;
 mod cockpit_renderer;
+mod controls_editor;
 mod flight;
 mod flight_canvas;
 mod flight_ui;
 mod hud;
+mod input;
 mod instruments;
 mod look;
 mod menu;
 mod mirrors;
 mod performance;
+mod preferences;
 mod quick_mission;
 mod rafale_animation;
 mod renderer;
@@ -45,6 +48,12 @@ enum Screen {
     Flight,
 }
 struct App {
+    preference_path: Option<PathBuf>,
+    preference_saved: String,
+    input: input::Input,
+    focused: bool,
+    input_recording: Option<std::io::BufWriter<std::fs::File>>,
+    recorded_ticks: u64,
     performance: performance::Performance,
     hornet: aircraft::Airframe,
     flight: flight::State,
@@ -75,6 +84,158 @@ struct App {
     error: Option<Box<dyn Error>>,
 }
 impl App {
+    fn save_preferences(&mut self) {
+        let Some(path) = &self.preference_path else {
+            return;
+        };
+        let text =
+            preferences::Preferences::capture(&self.flight_ui, &self.instruments, &self.menu.state)
+                .text();
+        if text == self.preference_saved {
+            return;
+        }
+        match preferences::write(path, &text) {
+            Ok(()) => self.preference_saved = text,
+            Err(e) => {
+                eprintln!("Preferences: {e}");
+                self.flight_ui
+                    .message(format!("Could not save preferences: {e}"));
+            }
+        }
+    }
+    fn finish_recording(&mut self) {
+        use std::io::Write;
+        if let Some(mut recording) = self.input_recording.take()
+            && let Err(error) = recording.flush()
+        {
+            self.error = Some(error.into());
+        }
+    }
+
+    fn input_action(&mut self, action: tore_input::Action) -> Action {
+        use flight_ui::Command;
+        let name = match action {
+            tore_input::Action::Pilot(command) => {
+                if self.screen == Screen::Flight && !self.flight_ui.frozen() {
+                    if matches!(
+                        command,
+                        tore_input::PilotCommand::Toggle(tore_input::Switch::Hook)
+                            | tore_input::PilotCommand::Set(tore_input::Switch::Hook, _)
+                    ) && !self.flight.hook_available()
+                    {
+                        self.flight_ui.message("Hook unavailable for this aircraft");
+                    } else {
+                        self.input.queue(command);
+                    }
+                }
+                return Action::None;
+            }
+            tore_input::Action::Axis(_) => return Action::None,
+            tore_input::Action::Ui(name) => name,
+        };
+        let key = match name.as_str() {
+            "menu-up" => Some("ArrowUp"),
+            "menu-down" => Some("ArrowDown"),
+            "menu-left" => Some("ArrowLeft"),
+            "menu-right" => Some("ArrowRight"),
+            "menu-accept" => Some("Enter"),
+            "menu-back" | "menu" => Some("Escape"),
+            _ => None,
+        };
+        if self.screen != Screen::Flight {
+            return match (self.screen, key) {
+                (Screen::Main, Some(key)) => self.menu.state.key(key, false),
+                (Screen::Quick, Some(key)) => self.quick.key(key, false),
+                _ => Action::None,
+            };
+        }
+        if let Some(key) = key {
+            // Menu navigation buttons have no flight semantics while the menu is closed.
+            if self.flight_ui.menu || name == "menu" {
+                let command =
+                    self.flight_ui
+                        .key(key, false, false, false, &self.hornet.flight_menu);
+                return self.flight_command(command);
+            }
+            return Action::None;
+        }
+        if name == "pause" {
+            let command = self
+                .flight_ui
+                .key("p", false, true, false, &self.hornet.flight_menu);
+            return self.flight_command(command);
+        }
+        if self.flight_ui.frozen() {
+            return Action::None;
+        }
+        if let Some(mut key) = name.strip_prefix("key:") {
+            let ctrl = key.starts_with("Ctrl-");
+            if ctrl {
+                key = &key[5..];
+            }
+            let alt = key.starts_with("Alt-");
+            if alt {
+                key = &key[4..];
+            }
+            let shift = key.starts_with("Shift-");
+            if shift {
+                key = &key[6..];
+            }
+            let command = self
+                .flight_ui
+                .key(key, shift, ctrl, alt, &self.hornet.flight_menu);
+            return self.flight_command(command);
+        }
+        let command = match name.as_str() {
+            "end-flight" => Command::End,
+            "restart" => Command::Restart,
+            "view-front" => Command::View(0),
+            "view-back" => Command::View(3),
+            "view-up" => Command::View(4),
+            "view-external" => Command::View(1),
+            "center-look" => Command::CenterLook,
+            "instrument-next" => Command::InstrumentCycle(1),
+            "instrument-previous" => Command::InstrumentCycle(-1),
+            "range-down" => Command::Range(-1),
+            "range-up" => Command::Range(1),
+            "radar-mode" => Command::Mode,
+            "cockpit" => {
+                self.flight_ui.cockpit = !self.flight_ui.cockpit;
+                Command::Click
+            }
+            "hud" => {
+                self.flight_ui.hud = !self.flight_ui.hud;
+                Command::Click
+            }
+            "zoom-in" => {
+                self.flight_ui.zoom = (self.flight_ui.zoom * 1.1).min(4.);
+                Command::None
+            }
+            "zoom-out" => {
+                self.flight_ui.zoom = (self.flight_ui.zoom / 1.1).max(0.5);
+                Command::None
+            }
+            s if s.starts_with("page-") => Command::Panel(s[5..].parse().unwrap_or(0)),
+            s if s.starts_with("control-") => {
+                Command::InstrumentControl(s[8..].parse::<usize>().unwrap_or(1) - 1)
+            }
+            s if s.starts_with("instrument-") => {
+                if let Some((slot, button)) = s[11..].split_once("-control-") {
+                    let slot = slot.parse::<usize>().unwrap_or(1) - 1;
+                    let button = button.parse::<usize>().unwrap_or(1) - 1;
+                    if self.instruments.control(slot, button) {
+                        return Action::Click;
+                    }
+                    self.flight_ui.message("Instrument control unavailable");
+                    return Action::None;
+                }
+                Command::InstrumentSelect(s[11..].parse::<usize>().unwrap_or(1) - 1)
+            }
+            _ => Command::None,
+        };
+        self.flight_command(command)
+    }
+
     fn flight_command(&mut self, command: flight_ui::Command) -> Action {
         use flight_ui::Command;
         match command {
@@ -84,16 +245,59 @@ impl App {
             Command::Exit => Action::Exit,
             Command::Restart => Action::FreeFlight,
             Command::Effects(on) => Action::Effects(on),
-            Command::Toggle(key) => {
-                if key == "h" && !self.flight.hook_available() {
+            Command::ControlsOpen => {
+                self.flight_ui.menu = true;
+                self.input.context(true, self.focused);
+                self.camera.keys.clear();
+                self.flight_clock.remainder = 0.;
+                self.flight_ui.controls_editor = Some(controls_editor::Editor::new(
+                    self.input.settings_profile(),
+                    self.input.devices.values().cloned().collect(),
+                ));
+                Action::Click
+            }
+            Command::ControlsSave => {
+                if let Some(editor) = &mut self.flight_ui.controls_editor {
+                    editor.message = match self.input.save_settings(&editor.profile) {
+                        Ok(()) => "Controls saved and applied".into(),
+                        Err(e) => e,
+                    };
+                }
+                Action::Click
+            }
+            Command::Toggle(switch) => {
+                if switch == tore_input::Switch::Hook && !self.flight.hook_available() {
                     self.flight_ui.message("Hook unavailable for this aircraft");
                     return Action::None;
                 }
-                self.flight.toggle(key);
-                if let Some(audio) = &self.audio {
-                    audio.control(key, &self.flight);
+                self.input.queue(tore_input::PilotCommand::Toggle(switch));
+                Action::None
+            }
+            Command::InstrumentSelect(slot) => {
+                if self.instruments.select(slot) {
+                    self.flight_ui
+                        .message(format!("Instrument {} selected", slot + 1));
+                } else {
+                    self.flight_ui.message("Instrument slot unavailable");
                 }
                 Action::None
+            }
+            Command::InstrumentCycle(delta) => {
+                if self.instruments.cycle_selection(delta) {
+                    self.flight_ui.message(format!(
+                        "Instrument {} selected",
+                        self.instruments.selected + 1
+                    ));
+                }
+                Action::None
+            }
+            Command::InstrumentControl(button) => {
+                if self.instruments.control(self.instruments.selected, button) {
+                    Action::Click
+                } else {
+                    self.flight_ui.message("Instrument control unavailable");
+                    Action::None
+                }
             }
             Command::CenterLook => {
                 self.flight_ui.look = [0.; 2];
@@ -121,7 +325,7 @@ impl App {
                 Action::Click
             }
             Command::Throttle(value) => {
-                self.flight.throttle = value;
+                self.input.queue(tore_input::PilotCommand::Throttle(value));
                 Action::None
             }
             Command::Range(delta) => {
@@ -147,6 +351,9 @@ impl App {
             return;
         }
         match action {
+            Action::Music(on) => {
+                self.menu.state.music = on;
+            }
             Action::Effects(on) => {
                 self.menu.state.effects = on;
                 self.flight_ui.effects = on;
@@ -179,7 +386,8 @@ impl App {
                             self.hornet = aircraft;
                             self.flight = self.hornet.start(&self.world);
                             self.previous_flight = self.flight.clone();
-                            self.instruments = instruments::Instruments::default();
+                            self.instruments.cameras.clear();
+                            self.instruments.pressed = None;
                             self.flight_canvas = flight_canvas::FlightCanvas::default();
                         }
                         Err(error) => {
@@ -194,6 +402,10 @@ impl App {
                 self.menu.state.cancel();
             }
             Action::FreeFlight => {
+                if self.recorded_ticks > 0 {
+                    self.finish_recording();
+                }
+                self.input.context(true, self.focused);
                 self.flight = self.hornet.start(&self.world);
                 if self.researched_flight
                     && let Err(error) = self.flight.enable_research(1)
@@ -205,7 +417,17 @@ impl App {
                 self.previous_flight = self.flight.clone();
                 self.flight_clock.remainder = 0.;
                 self.flight_view = 0;
+                let saved = preferences::Preferences::capture(
+                    &self.flight_ui,
+                    &self.instruments,
+                    &self.menu.state,
+                );
                 self.flight_ui = flight_ui::FlightUi::default();
+                saved.apply(
+                    &mut self.flight_ui,
+                    &mut self.instruments,
+                    &mut self.menu.state,
+                );
                 self.flight_ui.effects = self.menu.state.effects;
                 self.screen = Screen::Flight;
                 self.camera.keys.clear();
@@ -213,6 +435,10 @@ impl App {
                 self.frame_time = Instant::now();
             }
             Action::Back => {
+                if self.recorded_ticks > 0 {
+                    self.finish_recording();
+                }
+                self.input.context(true, self.focused);
                 self.screen = if matches!(self.screen, Screen::Viewer | Screen::Flight) {
                     Screen::Quick
                 } else {
@@ -240,6 +466,7 @@ impl App {
         if let Some(audio) = &self.audio {
             audio.action(action);
         }
+        self.save_preferences();
         if let Some(renderer) = &self.renderer {
             renderer.window.set_cursor(
                 if (self.screen == Screen::Main && self.menu.state.hover.is_some())
@@ -275,6 +502,9 @@ impl ApplicationHandler for App {
                                 self.world.theater.name
                             ),
                         })
+                        // Fixed-size diagnostic windows preserve requested capture aspect ratios
+                        // on compositors that otherwise tile/rescale newly created windows.
+                        .with_resizable(!self.smoke_test)
                         .with_inner_size(LogicalSize::new(self.window_size[0], self.window_size[1]))
                         .with_min_inner_size(LogicalSize::new(640.0, 480.0)),
                 )?,
@@ -333,7 +563,13 @@ impl ApplicationHandler for App {
                 self.quick.pointer(None);
                 self.menu.state.pointer(None)
             }
+            WindowEvent::Focused(true) => {
+                self.focused = true;
+                Action::None
+            }
             WindowEvent::Focused(false) => {
+                self.focused = false;
+                self.input.context(true, false);
                 if self.screen == Screen::Flight {
                     self.flight_ui.paused = true;
                 }
@@ -405,6 +641,30 @@ impl ApplicationHandler for App {
                 };
                 if self.screen == Screen::Flight {
                     name = flight_key(event.physical_key, &name);
+                }
+                if self.screen == Screen::Flight
+                    && (event.state == ElementState::Released
+                        || (self.flight_ui.controls_editor.is_none()
+                            && !(self.flight_ui.menu
+                                && matches!(
+                                    name.as_str(),
+                                    "Escape"
+                                        | "Tab"
+                                        | "ArrowUp"
+                                        | "ArrowDown"
+                                        | "ArrowLeft"
+                                        | "ArrowRight"
+                                        | "Enter"
+                                        | "Space"
+                                ))))
+                    && (if event.repeat {
+                        self.input.claimed(&name)
+                    } else {
+                        self.input
+                            .key(&name, event.state == ElementState::Pressed, self.modifiers)
+                    })
+                {
+                    return;
                 }
                 if matches!(self.screen, Screen::Viewer | Screen::Flight)
                     && event.state == ElementState::Released
@@ -493,14 +753,55 @@ impl ApplicationHandler for App {
                         self.frame_time = now;
                         for _ in 0..steps {
                             self.previous_flight.clone_from(&self.flight);
-                            self.flight.step(&self.camera.keys, |x, z| {
-                                self.world.height(x as f32, z as f32) as f64
-                            });
+                            let (pilot, _) =
+                                self.input.frame(&self.camera.keys, self.flight.throttle);
+                            if let Some(recording) = &mut self.input_recording {
+                                self.recorded_ticks += 1;
+                                if let Err(error) = tore_input::recording::write_frame(
+                                    recording,
+                                    self.recorded_ticks,
+                                    &pilot,
+                                ) {
+                                    self.error = Some(error.into());
+                                    event_loop.exit();
+                                    return;
+                                }
+                            }
+                            self.flight
+                                .step(&pilot, |x, z| self.world.height(x as f32, z as f32) as f64);
+                            if let Some(audio) = &self.audio {
+                                for (key, changed) in [
+                                    ("g", self.previous_flight.gear_down != self.flight.gear_down),
+                                    (
+                                        "f",
+                                        self.previous_flight.flaps_down != self.flight.flaps_down,
+                                    ),
+                                    ("h", self.previous_flight.hook_down != self.flight.hook_down),
+                                ] {
+                                    if changed {
+                                        audio.control(key, &self.flight);
+                                    }
+                                }
+                            }
+                            if self.flight.crashed && !self.previous_flight.crashed {
+                                self.input.feedback(tore_input::FeedbackEvent::Crash);
+                            }
+                            if self.flight.afterburner_active()
+                                && !self.previous_flight.afterburner_active()
+                            {
+                                self.input
+                                    .feedback(tore_input::FeedbackEvent::AfterburnerEngaged);
+                            }
+                            self.input
+                                .afterburner_feedback(self.flight.afterburner_active());
+                            self.input.feedback_tick();
                         }
+                        self.input.feedback_flush();
                         if !self.flight_ui.frozen() {
-                            look::step(
+                            let analog_look = self.input.resolver.look();
+                            look::step_axes(
                                 &mut self.flight_ui.look,
-                                &self.camera.keys,
+                                analog_look,
                                 elapsed,
                                 matches!(self.flight_view, 1 | 2),
                             );
@@ -714,29 +1015,103 @@ impl ApplicationHandler for App {
             _ => return,
         };
         self.action(event_loop, action);
+        self.input.context(
+            self.screen != Screen::Flight || self.flight_ui.frozen(),
+            self.focused,
+        );
     }
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         // Release GPU backends while the event loop's display connection is alive.
+        self.input.stop();
+        self.save_preferences();
+        if let Some(recording) = &mut self.input_recording {
+            use std::io::Write;
+            if let Err(error) = recording.flush() {
+                self.error = Some(error.into());
+            }
+        }
         self.renderer = None;
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(next) = self.next_frame {
-            if Instant::now() >= next {
-                if let Some(renderer) = &self.renderer {
+        let paused = self.screen != Screen::Flight || self.flight_ui.frozen();
+        self.input.context(paused, self.focused);
+        if Instant::now() >= self.input.next_poll {
+            let (actions, lost, warnings) = self.input.poll();
+            let mut changed = lost || !actions.is_empty();
+            if let Some(editor) = &mut self.flight_ui.controls_editor {
+                if !editor.capture {
+                    editor.devices = self.input.devices.values().cloned().collect();
+                } else {
+                    editor
+                        .devices
+                        .retain(|d| self.input.devices.contains_key(&d.id));
+                    for d in self.input.devices.values() {
+                        if !editor.devices.iter().any(|old| old.id == d.id) {
+                            editor.devices.push(d.clone());
+                        }
+                    }
+                }
+                for event in &self.input.observed {
+                    changed |= editor.observe(event);
+                }
+                if changed && let Some(renderer) = &self.renderer {
                     renderer.window.request_redraw();
                 }
-                self.next_frame = None;
-                event_loop.set_control_flow(ControlFlow::Wait);
-            } else {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(next));
             }
-        } else {
-            event_loop.set_control_flow(ControlFlow::Wait);
+            for warning in warnings {
+                eprintln!("Input: {warning}");
+            }
+            if lost && self.screen == Screen::Flight {
+                self.flight_ui.paused = true;
+                self.flight_ui
+                    .message("Active controller disconnected; resume explicitly");
+                self.camera.keys.clear();
+                self.input.context(true, self.focused);
+                self.flight_clock.remainder = 0.;
+                self.frame_time = Instant::now();
+            } else {
+                for action in actions {
+                    if self.flight_ui.controls_editor.is_some() {
+                        continue;
+                    }
+                    let was_frozen = self.flight_ui.frozen();
+                    let result = self.input_action(action);
+                    self.action(event_loop, result);
+                    if was_frozen != self.flight_ui.frozen() {
+                        self.camera.keys.clear();
+                        self.flight_clock.remainder = 0.;
+                        self.previous_flight.clone_from(&self.flight);
+                        self.frame_time = Instant::now();
+                        self.input.context(self.flight_ui.frozen(), self.focused);
+                        break; // Remaining events belong to the previous context.
+                    }
+                }
+            }
+            if changed && let Some(renderer) = &self.renderer {
+                renderer.window.request_redraw();
+            }
         }
+        if self.next_frame.is_some_and(|next| Instant::now() >= next) {
+            if let Some(renderer) = &self.renderer {
+                renderer.window.request_redraw();
+            }
+            self.next_frame = None;
+        }
+        let next = self
+            .next_frame
+            .map_or(self.input.next_poll, |n| n.min(self.input.next_poll));
+        event_loop.set_control_flow(ControlFlow::WaitUntil(next));
     }
 }
 fn main() -> AppResult<()> {
     let mut args = std::env::args().skip(1);
+    let mut input_profile = None;
+    let mut native_input = true;
+    let mut record_input = None;
+    let mut replay_input = None;
+    let mut input_seconds = None;
+    let mut write_input_profile = None;
+    let mut test_rumble = None;
     let (mut import, mut snapshot) = (None, None);
     let mut snapshot_state = String::from("normal");
     let mut background = None;
@@ -747,6 +1122,7 @@ fn main() -> AppResult<()> {
     let mut flight_look = [0f32; 2];
     let mut flight_zoom = 1f32;
     let mut flight_menu = false;
+    let mut controls_menu = false;
     let mut researched_flight = false;
     let mut window_size = [960, 720];
     let mut instrument_page = None;
@@ -763,6 +1139,44 @@ fn main() -> AppResult<()> {
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--no-controllers" => native_input = false,
+            "--record-input" => {
+                record_input = Some(PathBuf::from(
+                    args.next().ok_or("--record-input needs a new path")?,
+                ))
+            }
+            "--replay-input" => {
+                replay_input = Some(PathBuf::from(
+                    args.next().ok_or("--replay-input needs a tape path")?,
+                ))
+            }
+            "--input-profile" => {
+                input_profile = Some(PathBuf::from(
+                    args.next().ok_or("--input-profile needs a path")?,
+                ))
+            }
+            "--list-inputs" => input_seconds = Some(2),
+            "--monitor-inputs" => {
+                input_seconds = Some(
+                    args.next()
+                        .ok_or("--monitor-inputs needs seconds")?
+                        .parse::<u64>()?,
+                )
+            }
+            "--write-input-profile" => {
+                write_input_profile = Some(PathBuf::from(
+                    args.next()
+                        .ok_or("--write-input-profile needs a new path")?,
+                ));
+                input_seconds.get_or_insert(2);
+            }
+            "--test-rumble" => {
+                test_rumble = Some(
+                    args.next()
+                        .ok_or("--test-rumble needs a device id or only")?,
+                );
+                input_seconds.get_or_insert(2);
+            }
             "--researched-flight" => researched_flight = true,
             "--capture-terrain" => {
                 capture_terrain = Some(PathBuf::from(
@@ -846,6 +1260,11 @@ fn main() -> AppResult<()> {
                 ));
                 initial_screen = Screen::Flight;
                 smoke_test = true;
+            }
+            "--controls-menu" => {
+                controls_menu = true;
+                flight_menu = true;
+                initial_screen = Screen::Flight;
             }
             "--flight-menu" => {
                 flight_menu = true;
@@ -943,6 +1362,9 @@ fn main() -> AppResult<()> {
             "--import-only" => import_only = true,
             "--help" | "-h" => {
                 println!(
+                    "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
+                );
+                println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D and Rafale C assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--researched-flight enables the hybrid flight/contact model (not native parity).\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
@@ -960,6 +1382,40 @@ fn main() -> AppResult<()> {
     if snapshot.is_none() && snapshot_state != "normal" {
         return Err("--snapshot-state requires --snapshot".into());
     }
+    if let Some(seconds) = input_seconds {
+        return input::diagnostics(
+            seconds,
+            write_input_profile.as_deref(),
+            test_rumble.as_deref(),
+        );
+    }
+    if record_input.is_some()
+        && (headless_ticks.is_some()
+            || import_only
+            || snapshot.is_some()
+            || initial_screen != Screen::Flight
+            || capture_terrain.is_some()
+            || flight_probe_ticks.is_some()
+            || flight_devices.is_some()
+            || flight_controls.is_some())
+    {
+        return Err("--record-input requires direct --free-flight without headless/capture/probe/pose overrides".into());
+    }
+    let replay_frames = if let Some(path) = replay_input {
+        let frames =
+            tore_input::recording::read(std::io::BufReader::new(std::fs::File::open(path)?))?;
+        if frames.is_empty()
+            || headless_ticks.is_some()
+            || record_input.is_some()
+            || maneuver != "level"
+        {
+            return Err("--replay-input requires a nonempty tape, default maneuver, and no --headless-flight/--record-input".into());
+        }
+        headless_ticks = Some(frames.len());
+        Some(frames)
+    } else {
+        None
+    };
     let data = assets::data_directory()?;
     let assets = if let Some(source) = import {
         Assets::import(&source, &data)?
@@ -994,10 +1450,10 @@ fn main() -> AppResult<()> {
         return Ok(());
     }
     let setup_maneuver = |state: &mut flight::State| {
-        let mut keys = std::collections::BTreeSet::new();
+        let mut keys = flight::PilotInput::default();
         match maneuver.as_str() {
             "pull" | "loop" => {
-                keys.insert("ArrowDown".to_string());
+                keys.pitch = 1.;
                 if maneuver == "loop" {
                     state.throttle = 1.;
                     state.burner = true;
@@ -1012,10 +1468,10 @@ fn main() -> AppResult<()> {
                 .to_radians();
                 state.throttle = 1.;
                 state.burner = true;
-                keys.insert("ArrowDown".to_string());
+                keys.pitch = 1.;
             }
             "roll" => {
-                keys.insert("ArrowRight".to_string());
+                keys.roll = 1.;
             }
             "stall" => {
                 state.engine = false;
@@ -1032,7 +1488,15 @@ fn main() -> AppResult<()> {
         if ticks > 120 * 3600 {
             return Err("headless flight limited to one hour".into());
         }
-        let mut state = flight::State::new(&hornet.profile, [0., 5000., 0.])?;
+        let replay_world = replay_frames
+            .as_ref()
+            .map(|_| terrain::World::for_theater(&assets.theater_resources, &theater_code))
+            .transpose()?;
+        let mut state = if let Some(world) = &replay_world {
+            hornet.start(world)
+        } else {
+            flight::State::new(&hornet.profile, [0., 5000., 0.])?
+        };
         if researched_flight {
             state.enable_research(1)?;
         }
@@ -1047,8 +1511,15 @@ fn main() -> AppResult<()> {
         let keys = setup_maneuver(&mut state);
         let initial_forward = attitude::Basis::new(state.yaw, state.pitch, state.bank).forward;
         let (mut vertical, mut inverted, mut completed) = (false, false, false);
-        for _ in 0..ticks {
-            state.step(&keys, |_, _| 0.);
+        for tick in 0..ticks {
+            let keys = replay_frames.as_ref().map_or(&keys, |frames| &frames[tick]);
+            state.step(keys, |x, z| {
+                if let Some(world) = &replay_world {
+                    world.height(x as f32, z as f32) as f64
+                } else {
+                    0.
+                }
+            });
             let basis = attitude::Basis::new(state.yaw, state.pitch, state.bank);
             vertical |= basis.forward[1] > 0.999;
             inverted |= basis.up[1] < -0.9;
@@ -1188,7 +1659,47 @@ fn main() -> AppResult<()> {
         flight.rudder = v[2];
     }
 
+    if input_profile.is_none() {
+        let default = assets::data_directory()?.join("input-v1.conf");
+        if default.exists() {
+            input_profile = Some(default);
+        }
+    }
+    if record_input.is_some()
+        && (initial_screen != Screen::Flight || animation_capture || flight_probe_ticks.is_some())
+    {
+        return Err(
+            "--record-input requires direct --free-flight without a capture or flight probe".into(),
+        );
+    }
+    let input_recording = if let Some(path) = record_input {
+        use std::io::Write;
+        let mut file = std::io::BufWriter::new(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)?,
+        );
+        writeln!(file, "{}", tore_input::recording::HEADER)?;
+        Some(file)
+    } else {
+        None
+    };
+    let preferences_enabled = !smoke_test
+        && capture_terrain.is_none()
+        && !animation_capture
+        && std::env::var_os("TORE_PERF_FRAMES").is_none();
     let mut app = App {
+        preference_path: if preferences_enabled {
+            Some(assets::data_directory()?.join("preferences-v1.conf"))
+        } else {
+            None
+        },
+        preference_saved: String::new(),
+        input_recording,
+        recorded_ticks: 0,
+        input: input::Input::new(input_profile.as_deref(), native_input)?,
+        focused: true,
         performance: performance::Performance::from_env()?,
         hornet,
         researched_flight,
@@ -1228,6 +1739,52 @@ fn main() -> AppResult<()> {
         next_frame: None,
         error: None,
     };
+    if let Some(path) = app.preference_path.clone() {
+        match preferences::read(&path) {
+            Ok(text) => match preferences::Preferences::parse(&text) {
+                Ok(saved) => {
+                    saved.apply(
+                        &mut app.flight_ui,
+                        &mut app.instruments,
+                        &mut app.menu.state,
+                    );
+                    if std::env::args().any(|a| a == "--instrument-layout")
+                        && app.instruments.layout != instrument_layout
+                    {
+                        app.instruments.toggle_layout();
+                    }
+                    if let Some(page) = instrument_page {
+                        app.instruments.pages = vec![page];
+                        app.instruments.selected = 0;
+                    }
+                    if std::env::args().any(|a| a == "--flight-zoom") {
+                        app.flight_ui.zoom = flight_zoom;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Preferences not loaded: {e}; preserving original file");
+                    app.preference_path = None;
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                eprintln!("Preferences not loaded: {e}; preserving original file");
+                app.preference_path = None;
+            }
+        }
+    }
+    app.preference_saved =
+        preferences::Preferences::capture(&app.flight_ui, &app.instruments, &app.menu.state).text();
+    if let Some(audio) = &app.audio {
+        audio.preferences(app.menu.state.music, app.menu.state.effects);
+    }
+    if controls_menu {
+        app.flight_command(flight_ui::Command::ControlsOpen);
+    }
+    app.input.context(
+        app.screen != Screen::Flight || app.flight_ui.frozen(),
+        app.focused,
+    );
     EventLoop::new()?.run_app(&mut app)?;
     match app.error {
         Some(error) => Err(error),

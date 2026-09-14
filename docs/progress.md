@@ -498,3 +498,44 @@ Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
   view cycling and measured mirror render counts. [Evidence](baselines/mirrors.md).
 - Remaining parity: native mirror optics/eye location, curved reflection and
   complete interior geometry. No contacts or targets are fabricated.
+
+### Shared controller input — 2026-09-14
+
+- [x] Add safe, dependency-free `tore-input` physical binding policy and typed pilot frames; remove keyboard-name interpretation from `tore-sim` and migrate both aircraft's headless suites.
+- [x] Apply ordered equipment/throttle commands at 120 Hz tick entry, with existing model-owned response and actual-state actuator audio. Preserve modifier/release and pause behavior.
+- [x] Add calibrated axes, shared button/trigger contributions, explicit priorities, stable axis ownership, throttle pickup, maintained-switch policies and bounded input/profile/tape handling.
+- [x] Isolate native calls in `tore-input-native`: Linux evdev/FF_RUMBLE, Windows RawGameController/Gamepad vibration and macOS HID queues. Keep unsafe forbidden elsewhere; cross-check both non-host modules.
+- [x] Add media-free device diagnostics, create-new persistent profile generation, custom keyboard/controller bindings, standard Linux gamepad defaults and keyboard-only operation.
+- [x] Detect the user's powered-on Ultimate 2, inspect its axes/buttons/rumble capability, derive serial/interface identity and load its generated profile in a real window.
+- [x] Add instrument focus/direct button actions through existing stock scope controls; no MFD screen manipulation, new raster content or fabricated systems.
+- [x] Add opt-in bounded authored crash rumble, explicit rumble diagnostic, per-device expiry and pause/focus/overflow/shutdown cancellation.
+- [x] Validate 149 Rust / 11 Python tests, all 26 F18/Rafale flight-suite cases, six real window smoke tests, live camera readback, input-tape replay, asset guards and short matched frame-time evidence. See [input acceptance](baselines/input.md) and [setup/design](INPUT.md).
+- [ ] User physical Ultimate 2 flight handling and unplug/reconnect acceptance; real HOTAS/pedals/button boxes and Windows/macOS runtime checks.
+- [ ] Generic macOS HID rumble and hardware-tested directional flight-stick forces; further device defaults, radial calibration and reviewed multi-contact switch composition.
+- [ ] Retail controller dispatch parity, long-stall wall-clock sampling guarantees and whole-mission replay remain separate gates. Further menu screens remain deferred.
+
+### Controller rumble follow-up — 2026-09-14
+
+- [x] Record user-confirmed Linux Ultimate 2 tactile pulse acceptance.
+- [x] Stop Windows Gamepad vibration on endpoint removal/read failure, in addition to context/expiry/shutdown stops.
+- [x] Add macOS 11+ GameController/CoreHaptics using exact retained input/haptic endpoints, explicit two-handle/default-locality routing and finite/cancellable effects; keep generic equipment on HID.
+- [x] Document Apple gamepad session identity/shared-binding limits; add `--test-rumble only` with ambiguity rejection and native completion wait.
+- [x] Revalidate workspace and both native cross-targets; see [input evidence](baselines/input.md).
+- [ ] Windows/macOS linked app and hardware acceptance, Apple multi-controller/disconnect/haptic recovery and a persistent per-player assignment flow. Generic HID feedback and directional stick forces remain separate work.
+
+### Event-driven rumble impulses — 2026-09-14
+
+- [x] Add typed gun, missile, bomb, rocket, turbulence, afterburner, damage and crash cues with a fixed-slot, 120 Hz mixer; cap overlapping amplitudes, repeat rates and native submissions.
+- [x] Wire actual afterburner activation and crash transitions; route to assigned capable devices even at rest, respecting opt-in/context and clearing pending effects on interruption.
+- [x] Cover repeated fire, overlap/expiry, invalid turbulence severity, pause clearing and idle-device eligibility with synthetic tests. See [feedback contract](INPUT.md).
+- [ ] Connect weapon/turbulence/damage producers when those systems exist. Space remains unavailable; no effects imply a successful shot or invented weather response.
+- [ ] User afterburner tactile tuning and Windows/macOS hardware validation of overlapping/repeated effects.
+
+### In-game settings and sustained afterburner feedback — 2026-09-14
+
+- [x] Replace the in-flight Control device-selection stub with a paused binding editor: rumble, actions, device/control selection, key/button/axis capture, compatible behaviors, calibration, inversion, priority, add/remove and Save & apply.
+- [x] Validate/canonically serialize profiles and replace files through a synced temporary file plus rename; leave invalid edits/live profiles unchanged. Preserve automatic mappings for newly connected gamepads when desired.
+- [x] Persist normal-session instrument page sets for both layouts, selection/ranges/mode, cockpit/HUD/ladder/brightness/zoom and music/effects; retain them across aircraft changes and flight restarts. Keep visual diagnostics independent of user preferences.
+- [x] Add a low continuous afterburner rumble beneath the ignition impulse, with finite renewable leases and explicit disengagement/context cancellation.
+- [x] Validate synthetic capture/cancellation, profile save/reload/failure, preference round-trips/layout restoration and sustained-effect expiry; inspect wide/tall editor captures and creator/viewer/menu smoke checks. [Evidence](baselines/input.md).
+- [ ] User tactile tuning and full Windows/macOS app/hardware tests; persistent per-player Apple assignment, radial/wizard calibration and physical HOTAS/MFD/button-box validation remain open.

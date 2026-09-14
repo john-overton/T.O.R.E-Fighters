@@ -2,6 +2,7 @@
 use crate::{hud::Paint, menu::Canvas};
 use std::time::{Duration, Instant};
 use tore_formats::{font::Font, ui::MenuNode};
+use tore_input::Switch;
 #[derive(Debug, PartialEq)]
 pub enum Command {
     None,
@@ -9,7 +10,7 @@ pub enum Command {
     End,
     Exit,
     Restart,
-    Toggle(&'static str),
+    Toggle(Switch),
     View(u8),
     CenterLook,
     Panel(u8),
@@ -18,6 +19,11 @@ pub enum Command {
     Range(i32),
     Mode,
     Effects(bool),
+    ControlsOpen,
+    ControlsSave,
+    InstrumentSelect(usize),
+    InstrumentCycle(i32),
+    InstrumentControl(usize),
 }
 type Control = (usize, (i32, i32, i32, i32), String);
 pub struct FlightUi {
@@ -33,6 +39,7 @@ pub struct FlightUi {
     pub effects: bool,
     pub notice: Option<(String, Instant)>,
     pub help: bool,
+    pub controls_editor: Option<crate::controls_editor::Editor>,
     root: usize,
     path: Vec<usize>,
     focus: usize,
@@ -54,6 +61,7 @@ impl Default for FlightUi {
             effects: true,
             notice: None,
             help: false,
+            controls_editor: None,
             root: 0,
             path: vec![],
             focus: 0,
@@ -77,6 +85,9 @@ impl FlightUi {
     }
     pub fn cancel_press(&mut self) {
         self.pressed = None;
+        if let Some(editor) = &mut self.controls_editor {
+            editor.cancel_capture();
+        }
     }
     pub fn message(&mut self, text: impl Into<String>) {
         self.notice = Some((text.into(), Instant::now()));
@@ -100,10 +111,7 @@ impl FlightUi {
                 Command::Click
             }
             "Restart free flight" => Command::Restart,
-            "Keyboard" => {
-                self.message("Keyboard controls selected");
-                Command::Click
-            }
+            "Keyboard" | "Controls..." | "Controls" => Command::ControlsOpen,
             "End mission" => Command::End,
             "Exit to Windows" => Command::Exit,
             "Keyboard shortcuts" => {
@@ -177,6 +185,9 @@ impl FlightUi {
             return Command::None;
         }
         let node = &rows[index];
+        if node.label == "Controls" || node.label == "Controls..." {
+            return Command::ControlsOpen;
+        }
         if !node.children.is_empty() {
             self.path.push(index);
             self.focus = 0;
@@ -193,6 +204,10 @@ impl FlightUi {
         alt: bool,
         tree: &[MenuNode],
     ) -> Command {
+        if let Some(editor) = &mut self.controls_editor {
+            let result = editor.key(key, shift, ctrl, alt);
+            return self.editor_result(result);
+        }
         if key == "Escape" {
             self.pressed = None;
             if self.help {
@@ -232,12 +247,18 @@ impl FlightUi {
                     self.root = (self.root + 1) % tree.len();
                     self.path.clear();
                     self.focus = 0;
+                    if tree[self.root].label == "Control" {
+                        return Command::ControlsOpen;
+                    }
                 }
                 "ArrowLeft" => {
                     if self.path.pop().is_none() {
                         self.root = (self.root + tree.len() - 1) % tree.len();
                     }
                     self.focus = 0;
+                    if self.path.is_empty() && tree[self.root].label == "Control" {
+                        return Command::ControlsOpen;
+                    }
                 }
                 "Enter" | "Space" => return self.select(tree, self.focus),
                 _ => {}
@@ -270,6 +291,19 @@ impl FlightUi {
                     | "d"
             ) {
                 return self.unavailable("Wingman command (no wingman)");
+            }
+        }
+        if ctrl && !alt {
+            if key == "Tab" {
+                return Command::InstrumentCycle(if shift { -1 } else { 1 });
+            }
+            if let Ok(n) = key.parse::<usize>() {
+                if shift && (1..=4).contains(&n) {
+                    return Command::InstrumentControl(n - 1);
+                }
+                if !shift && (1..=6).contains(&n) {
+                    return Command::InstrumentSelect(n - 1);
+                }
             }
         }
         if ctrl && key.starts_with('F') {
@@ -314,7 +348,7 @@ impl FlightUi {
         if shift {
             return match key {
                 "/" => Command::CenterLook,
-                "b" => Command::Toggle("t"),
+                "b" => Command::Toggle(Switch::Burner),
                 "u" => {
                     self.hud = !self.hud;
                     Command::Click
@@ -326,13 +360,13 @@ impl FlightUi {
             };
         }
         match key {
-            "g" => Command::Toggle("g"),
-            "f" => Command::Toggle("f"),
-            "b" => Command::Toggle("b"),
-            "h" => Command::Toggle("h"),
-            "e" => Command::Toggle("e"),
-            "r" => Command::Toggle("r"),
-            "j" => Command::Toggle("j"),
+            "g" => Command::Toggle(Switch::Gear),
+            "f" => Command::Toggle(Switch::Flaps),
+            "b" => Command::Toggle(Switch::Airbrake),
+            "h" => Command::Toggle(Switch::Hook),
+            "e" => Command::Toggle(Switch::Engine),
+            "r" => Command::Toggle(Switch::Radar),
+            "j" => Command::Toggle(Switch::Jammer),
             "0" => Command::Throttle(1.),
             n if n.len() == 1 && n.as_bytes()[0].is_ascii_digit() => {
                 Command::Throttle((n.as_bytes()[0] - b'0') as f64 / 10.)
@@ -364,6 +398,21 @@ impl FlightUi {
             "Space" => self.unavailable("Fire weapon"),
             "v" => self.unavailable("Store Other View camera"),
             _ => Command::None,
+        }
+    }
+    fn editor_result(&mut self, result: crate::controls_editor::ResultAction) -> Command {
+        use crate::controls_editor::ResultAction;
+        match result {
+            ResultAction::None => Command::None,
+            ResultAction::Changed => Command::Click,
+            ResultAction::Save => Command::ControlsSave,
+            ResultAction::Close => {
+                self.controls_editor = None;
+                self.root = 0;
+                self.path.clear();
+                self.focus = 0;
+                Command::Click
+            }
         }
     }
     // Top buttons, source rows and development session actions share hit/render geometry.
@@ -411,6 +460,10 @@ impl FlightUi {
         out
     }
     pub fn pointer(&mut self, tree: &[MenuNode], point: Option<(f64, f64)>, down: bool) -> Command {
+        if let Some(editor) = &mut self.controls_editor {
+            let result = editor.pointer(point, down);
+            return self.editor_result(result);
+        }
         let hit = point.and_then(|(x, y)| {
             self.controls(tree)
                 .into_iter()
@@ -442,6 +495,9 @@ impl FlightUi {
                 "",
             ),
             Some(id) if id >= 100 => {
+                if tree[id - 100].label == "Control" {
+                    return Command::ControlsOpen;
+                }
                 self.root = id - 100;
                 self.path.clear();
                 self.focus = 0;
@@ -452,6 +508,12 @@ impl FlightUi {
         }
     }
     pub fn draw(&self, pixels: &mut [u8], font: &Font, tree: &[MenuNode]) {
+        if self.menu
+            && let Some(editor) = &self.controls_editor
+        {
+            editor.draw(pixels, font);
+            return;
+        }
         if self.menu {
             Canvas(pixels).rect((0, 0, 640, 26), [200, 207, 219, 255]);
             if self.help {
@@ -463,6 +525,8 @@ impl FlightUi {
                     "G: gear | F: flaps | B: brake | H: hook | J: jammer".into(),
                     "Shift/Ctrl-arrows: look/orbit | Shift-/: center | F1: cockpit".into(),
                     "Comma/period: scope range | O: radar mode | Shift-U: HUD".into(),
+                    "Ctrl-Tab/Ctrl-Shift-Tab: instrument | Ctrl-1..6: slot".into(),
+                    "Ctrl-Shift-1..4: stock instrument buttons (T.O.R.E)".into(),
                     "T/Shift-T: target | Enter/apostrophe: designate | Space: fire".into(),
                     "A: autopilot | W/Shift-W: waypoint | N: nav/weapons".into(),
                     "I: IR | M: HARM | Y: history | V: store Other View".into(),
@@ -569,6 +633,35 @@ mod tests {
         }]
     }
     #[test]
+    fn control_root_opens_editor_without_changing_imported_tree() {
+        let mut t = tree();
+        t.push(MenuNode {
+            label: "Control".into(),
+            shortcut: String::new(),
+            children: vec![MenuNode {
+                label: "Keyboard".into(),
+                shortcut: String::new(),
+                children: vec![],
+            }],
+        });
+        let mut u = FlightUi {
+            menu: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            u.key("ArrowRight", false, false, false, &t),
+            Command::ControlsOpen
+        );
+        u.controls_editor = Some(crate::controls_editor::Editor::new(
+            tore_input::Profile::default(),
+            vec![],
+        ));
+        assert_eq!(u.key("Escape", false, false, false, &t), Command::Click);
+        assert!(u.menu && u.controls_editor.is_none());
+        assert_eq!(u.root, 0);
+        assert_eq!(t[1].children[0].label, "Keyboard");
+    }
+    #[test]
     fn escape_pauses_without_ending_and_modifiers_do_not_toggle_devices() {
         let mut u = FlightUi::default();
         let t = tree();
@@ -578,7 +671,10 @@ mod tests {
         u.key("Escape", false, false, false, &t);
         assert!(!u.frozen());
         assert_eq!(u.key("g", false, true, false, &t), Command::None);
-        assert_eq!(u.key("g", false, false, false, &t), Command::Toggle("g"));
+        assert_eq!(
+            u.key("g", false, false, false, &t),
+            Command::Toggle(Switch::Gear)
+        );
         assert_eq!(u.key("q", false, true, false, &t), Command::End);
     }
     #[test]

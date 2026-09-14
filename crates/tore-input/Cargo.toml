@@ -1,13 +1,9 @@
 [package]
-name = "tore-sim"
+name = "tore-input"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-
-[dependencies]
-tore-input = { path = "../tore-input" }
-tore-formats = { path = "../tore-formats" }
 
 [lints]
 workspace = true

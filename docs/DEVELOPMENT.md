@@ -107,7 +107,7 @@ cargo run --locked -p tore-app -- --smoke-test
 
 This uses the imported menu, a real window and GPU, prints the renderer, presents one frame without audio, and exits. It is not a headless simulation test. Normal mode waits while idle and schedules frames for short hover transitions and placeholder messages.
 
-`--no-audio` silences a session. Normal playback uses the system's default output device, original PCM effects, and a quiet looping `AIR003.11K` preview when available. Device initialization failure is reported and the menu continues silently. M toggles music; `Pref` exposes music/effect toggles. Preferences are session-only.
+`--no-audio` silences a session. Normal playback uses the system's default output device, original PCM effects, and a quiet looping `AIR003.11K` preview when available. Device initialization failure is reported and the menu continues silently. M toggles music; `Pref` exposes music/effect toggles. Music/effects and flight display preferences are restored from `preferences-v1.conf` in the application data directory.
 
 ## Explore media and capture previews
 
@@ -302,3 +302,50 @@ flat fills remain. Omit it for normal live mirrors. Combine with
 `TORE_PERF_FRAMES=6030 TORE_PERF_ACTIVE=1` and the same aircraft/window size.
 The report includes rear-render counts. Instrument camera pages retain their
 separate asynchronous readback cadence; that does not pace cockpit mirrors.
+
+## Controller development
+
+See [INPUT.md](INPUT.md) for the standard Linux gamepad mapping, custom profile
+syntax, instrument focus, input tapes, disconnect semantics and feedback limits.
+
+```sh
+cargo run --locked -p tore-app -- --list-inputs
+cargo run --locked -p tore-app -- --monitor-inputs 30
+cargo run --locked -p tore-app -- --write-input-profile my-input.conf
+cargo run --locked -p tore-app -- --input-profile my-input.conf --free-flight
+```
+
+Device diagnostics require neither retail media nor a display. Generated profiles
+are create-new. Store a selected profile as `input-v1.conf` in the application data
+directory for automatic loading. No desktop/udev permissions or drivers are
+modified. `--no-controllers` disables native device access. Windows/macOS raw
+controller mappings require an explicit profile; their backend cross-checks are
+not hardware/runtime acceptance. macOS 11+ supported gamepads use GameController
+and CoreHaptics; generic HID feedback and directional flight-stick forces remain
+open. Apple gamepad IDs are session-only; see INPUT.md for shared profiles. Test
+a single capable controller with `cargo run --locked -p tore-app -- --test-rumble only`.
+
+`tore-input` owns safe, dependency-free binding policy and typed pilot input;
+`tore-input-native` isolates the native platform boundary. Continue the everyday
+workspace checks above. On a Linux development host with rustup targets installed:
+
+```sh
+cargo clippy -p tore-input-native --all-targets --locked --target x86_64-pc-windows-gnu -- -D warnings
+cargo clippy -p tore-input-native --all-targets --locked --target aarch64-apple-darwin -- -D warnings
+```
+
+These check native backend Rust/FFI declarations but do not link or run the complete
+app on those operating systems. [Current evidence](baselines/input.md).
+
+### In-game controls and preferences
+
+**Escape → Control** opens the binding/rumble editor; use **Save & apply** to persist
+changes. Normal sessions automatically save instrument layouts/pages and scope
+settings, cockpit/HUD/zoom and sound choices. Aircraft changes and restarts retain
+these choices. [Editing, file behavior and platform limits](INPUT.md).
+
+`--controls-menu` opens the paused editor directly for inspection. Reproducible
+wide/tall captures use `--controls-menu --window-size 1280x720|720x1000
+--capture-flight PATH` with one literal size. Diagnostic windows are non-resizable
+to preserve requested dimensions on tiling compositors; normal windows remain
+resizable. Smoke/capture/performance diagnostics ignore saved display preferences.

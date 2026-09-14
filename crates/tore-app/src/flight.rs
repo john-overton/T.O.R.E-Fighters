@@ -198,7 +198,7 @@ mod animation_tests {
         a.name = "RAFALE".into();
         a.shape = "RAF.SH".into();
         let mut s = State::new(&a, [0., 5000., 0.]).unwrap();
-        s.toggle("h");
+        s.command(PilotCommand::Toggle(Switch::Hook));
         assert!(!s.hook_available() && !s.hook_down);
         s.gear = 1.;
         s.brake = 1.;

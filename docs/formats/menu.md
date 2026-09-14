@@ -130,3 +130,12 @@ the screenshot. Matching press/release and click-only audio remain enforced.
 
 Both selectors support mouse and keyboard, commit only on selection, and close
 on Escape before leaving the creator. [Acceptance evidence](../baselines/rafale-quick-mission.md).
+
+### Authored controls editor and saved preferences
+
+The in-flight `Control` root now opens the T.O.R.E binding/rumble editor. Its rows,
+capture workflow, calibration fields and Save/Back actions are authored, not
+recovered FMENUD callbacks. The bounded reader and imported source tree are
+unchanged. Other source roots and the keyboard-help reference remain available.
+Normal-session music/effects and flight display/instrument preferences persist;
+the earlier session-only behavior is superseded. See [input settings](../INPUT.md).

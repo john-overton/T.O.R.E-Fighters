@@ -1,8 +1,8 @@
 //! Deterministic 120 Hz free-flight adapter. PT facts are recovered; integration is authored.
 use crate::attitude::{Basis, cross, dot, unit};
 use crate::models::{Conditions, FlightModel};
-use std::collections::BTreeSet;
 use tore_formats::aircraft::Aircraft;
+pub use tore_input::{PilotCommand, PilotInput, Switch};
 pub const DT: f64 = 1.0 / 120.0;
 #[derive(Clone, Debug, PartialEq)]
 pub struct State {
@@ -129,21 +129,42 @@ impl State {
     pub fn hook_available(&self) -> bool {
         matches!(self.model, crate::models::AircraftModel::F18(_))
     }
-    pub fn toggle(&mut self, key: &str) {
-        match key {
-            "g" => self.gear_down = !self.gear_down,
-            "f" => self.flaps_down = !self.flaps_down,
-            "b" => self.brake_out = !self.brake_out,
-            "h" if self.hook_available() => self.hook_down = !self.hook_down,
-            "e" => self.engine = !self.engine,
-            "t" => self.burner = !self.burner,
-            "r" => self.radar = !self.radar,
-            "j" => self.jammer = !self.jammer,
-            _ => {}
+    pub fn command(&mut self, command: PilotCommand) {
+        let (switch, setting) = match command {
+            PilotCommand::Throttle(value) => {
+                if value.is_finite() {
+                    self.throttle = value.clamp(0., 1.);
+                }
+                return;
+            }
+            PilotCommand::AdjustThrottle(value) => {
+                if value.is_finite() {
+                    self.throttle = (self.throttle + value).clamp(0., 1.);
+                }
+                return;
+            }
+            PilotCommand::Toggle(switch) => (switch, None),
+            PilotCommand::Set(switch, value) => (switch, Some(value)),
+        };
+        if switch == Switch::Hook && !self.hook_available() {
+            return;
         }
+        let target = match switch {
+            Switch::Gear => &mut self.gear_down,
+            Switch::Flaps => &mut self.flaps_down,
+            Switch::Airbrake => &mut self.brake_out,
+            Switch::Hook => &mut self.hook_down,
+            Switch::Engine => &mut self.engine,
+            Switch::Burner => &mut self.burner,
+            Switch::Radar => &mut self.radar,
+            Switch::Jammer => &mut self.jammer,
+        };
+        *target = setting.unwrap_or(!*target);
     }
-    pub fn step(&mut self, keys: &BTreeSet<String>, ground: impl Fn(f64, f64) -> f64) {
-        self.step_surface(keys, |x, z| crate::research::Surface::terrain(ground(x, z)));
+    pub fn step(&mut self, input: &PilotInput, ground: impl Fn(f64, f64) -> f64) {
+        self.step_surface(input, |x, z| {
+            crate::research::Surface::terrain(ground(x, z))
+        });
     }
     /// Mass-only payload API until loadout/weapon release is integrated.
     pub fn set_payload(&mut self, pounds: f64) -> tore_formats::Result<()> {
@@ -165,9 +186,16 @@ impl State {
     }
     pub fn step_surface(
         &mut self,
-        keys: &BTreeSet<String>,
+        input: &PilotInput,
         ground: impl Fn(f64, f64) -> crate::research::Surface,
     ) {
+        let input = input.bounded();
+        if let Some(value) = input.throttle {
+            self.command(PilotCommand::Throttle(value));
+        }
+        for command in &input.commands {
+            self.command(*command);
+        }
         let model = self.model.clone();
         let c = model.configuration();
         if self.crashed {
@@ -182,9 +210,8 @@ impl State {
             *v -= w;
         }
         self.ticks += 1;
-        let k = |s: &str| f64::from(keys.contains(s));
         self.throttle = (self.throttle
-            + (k("PageUp") - k("PageDown")) * DT * c.equipment.throttle_rate_per_second)
+            + input.throttle_rate * DT * c.equipment.throttle_rate_per_second)
             .clamp(0., 1.);
         for (v, on) in [
             (&mut self.gear, self.gear_down),
@@ -207,11 +234,9 @@ impl State {
                 DT / c.equipment.exhaust_seconds,
             ))
         .clamp(0., 1.);
-        self.rudder += ((k("x") - k("z")) - self.rudder) * (DT / c.equipment.control_seconds);
-        self.elevator +=
-            ((k("ArrowDown") - k("ArrowUp")) - self.elevator) * (DT / c.equipment.control_seconds);
-        self.aileron += ((k("ArrowRight") - k("ArrowLeft")) - self.aileron)
-            * (DT / c.equipment.control_seconds);
+        self.rudder += (input.yaw - self.rudder) * (DT / c.equipment.control_seconds);
+        self.elevator += (input.pitch - self.elevator) * (DT / c.equipment.control_seconds);
+        self.aileron += (input.roll - self.aileron) * (DT / c.equipment.control_seconds);
         let rate = if ab {
             c.propulsion.afterburner_fuel_lbs_per_second
         } else {
@@ -236,14 +261,8 @@ impl State {
         let loading = (self.fuel + self.payload_lbs) / c.mass.empty_lbs;
         hi /= 1. + loading * c.aerodynamics.loaded_elevator_percent / 100.;
         lo /= 1. + loading * c.aerodynamics.loaded_elevator_percent / 100.;
-        let mut command = (1.
-            + (k("ArrowDown") - k("ArrowUp"))
-                * if keys.contains("ArrowDown") {
-                    hi - 1.
-                } else {
-                    1. - lo
-                })
-        .clamp(lo, hi)
+        let mut command = (1. + input.pitch * if input.pitch > 0. { hi - 1. } else { 1. - lo })
+            .clamp(lo, hi)
             * authority;
         if let Some(r) = &mut self.research {
             r.advance(
@@ -268,7 +287,7 @@ impl State {
             c.tuning.legacy_roll_limit_rad_per_second
         };
         let tuning = model.tuning();
-        let roll_command = (k("ArrowRight") - k("ArrowLeft")) * roll_limit * authority;
+        let roll_command = input.roll * roll_limit * authority;
         self.roll_rate += (roll_command - self.roll_rate) * (DT / tuning.roll_response_seconds);
         let pitch_command = (command - basis.up[1]) * 32.174 / self.speed.max(60.);
         self.pitch_rate += (pitch_command - self.pitch_rate) * (DT / tuning.pitch_response_seconds);
@@ -291,7 +310,7 @@ impl State {
         let turn_yaw = -basis.right[1] * 32.174 / self.speed.max(60.);
         let mut rotation = std::array::from_fn(|i| {
             DT * (-basis.right[i] * self.pitch_rate - basis.forward[i] * self.roll_rate
-                + basis.up[i] * (turn_yaw + (k("x") - k("z")) * tuning.rudder_rate * authority)
+                + basis.up[i] * (turn_yaw + input.yaw * tuning.rudder_rate * authority)
                 + alignment[i] * tuning.alignment_rate * authority)
         });
         if let Some(r) = &self.research {
@@ -659,7 +678,11 @@ pub(crate) mod integration_tests {
     fn momentum_and_roll_response_survive_control_release() {
         let a = profile();
         let mut s = State::new(&a, [0., 15000., 0.]).unwrap();
-        let keys = BTreeSet::from(["ArrowDown".into(), "ArrowRight".into()]);
+        let keys = PilotInput {
+            pitch: 1.,
+            roll: 1.,
+            ..Default::default()
+        };
         for _ in 0..60 {
             s.step(&keys, |_, _| 0.);
         }
@@ -678,7 +701,10 @@ pub(crate) mod integration_tests {
         s.throttle = 1.;
         s.burner = true;
         let start = Basis::new(s.yaw, s.pitch, s.bank).forward;
-        let keys = BTreeSet::from(["ArrowDown".into()]);
+        let keys = PilotInput {
+            pitch: 1.,
+            ..Default::default()
+        };
         let (mut vertical, mut inverted, mut completed) = (false, false, false);
         for _ in 0..120 * 90 {
             s.step(&keys, |_, _| 0.);
@@ -704,6 +730,48 @@ pub(crate) mod integration_tests {
         assert!(s.velocity[1] < 0. && s.position[1] < 5000.);
     }
     #[test]
+    fn recorded_fractional_controls_and_commands_replay_across_render_rates() {
+        use tore_input::recording;
+        let mut bytes = format!("{}\n", recording::HEADER).into_bytes();
+        for tick in 1..=360 {
+            let mut input = PilotInput {
+                pitch: (tick as f64 * 0.01).sin() * 0.4,
+                roll: if tick < 180 { 0.25 } else { -0.25 },
+                yaw: 0.13,
+                ..Default::default()
+            };
+            if tick == 30 {
+                input.commands.push(PilotCommand::Throttle(0.9));
+            }
+            if tick == 45 {
+                input.commands.push(PilotCommand::Set(Switch::Gear, true));
+            }
+            if tick == 80 {
+                input.commands.push(PilotCommand::Toggle(Switch::Gear));
+            }
+            recording::write_frame(&mut bytes, tick, &input).unwrap();
+        }
+        let tape = recording::read(bytes.as_slice()).unwrap();
+        let start = State::new(&profile(), [0., 5000., 0.]).unwrap();
+        let mut results = Vec::new();
+        for hz in [30, 60, 144] {
+            let mut state = start.clone();
+            let mut clock = Clock { remainder: 0. };
+            let mut tick = 0;
+            for _ in 0..hz * 3 {
+                for _ in 0..clock.steps(1. / hz as f64) {
+                    state.step(&tape[tick], |_, _| 0.);
+                    tick += 1;
+                }
+            }
+            assert_eq!(tick, 360);
+            assert!(!state.gear_down);
+            results.push(state);
+        }
+        assert_eq!(results[0], results[1]);
+        assert_eq!(results[1], results[2]);
+    }
+    #[test]
     fn simulation_is_identical_at_different_render_rates() {
         let a = profile();
         let start = State::new(&a, [0., 5000., 0.]).unwrap();
@@ -711,7 +779,11 @@ pub(crate) mod integration_tests {
         for hz in [30, 60, 144] {
             let mut s = start.clone();
             let mut c = Clock { remainder: 0. };
-            let keys = ["ArrowDown".to_string(), "ArrowRight".into()].into();
+            let keys = PilotInput {
+                pitch: 1.,
+                roll: 1.,
+                ..Default::default()
+            };
             for _ in 0..hz * 3 {
                 for _ in 0..c.steps(1. / hz as f64) {
                     s.step(&keys, |_, _| 0.);
@@ -791,7 +863,12 @@ pub(crate) mod integration_tests {
         let mut s = State::new(&a, [0., 5000., 0.]).unwrap();
         s.throttle = 1.;
         s.burner = true;
-        let keys = ["ArrowDown", "ArrowRight", "x"].map(String::from).into();
+        let keys = PilotInput {
+            pitch: 1.,
+            roll: 1.,
+            yaw: 1.,
+            ..Default::default()
+        };
         for _ in 0..30 {
             s.step(&keys, |_, _| 0.);
         }
@@ -819,7 +896,10 @@ pub(crate) mod integration_tests {
         for bank in [-45f64, 45.] {
             let mut s = State::new(&a, [0., 15000., 0.]).unwrap();
             s.bank = bank.to_radians();
-            let keys = ["ArrowDown".to_string()].into();
+            let keys = PilotInput {
+                pitch: 1.,
+                ..Default::default()
+            };
             for _ in 0..360 {
                 s.step(&keys, |_, _| 0.);
             }
@@ -845,9 +925,13 @@ pub(crate) mod integration_tests {
     fn roll_in_and_pull_preserve_lateral_flight_path_lag() {
         let a = profile();
         let mut sides = Vec::new();
-        for roll in ["ArrowLeft", "ArrowRight"] {
+        for roll in [-1., 1.] {
             let mut s = State::new(&a, [0., 15000., 0.]).unwrap();
-            let keys = [roll.to_string(), "ArrowDown".to_string()].into();
+            let keys = PilotInput {
+                pitch: 1.,
+                roll,
+                ..Default::default()
+            };
             for _ in 0..90 {
                 s.step(&keys, |_, _| 0.);
             }

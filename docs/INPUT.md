@@ -1,0 +1,384 @@
+# Controllers and pilot input
+
+This is an authored T.O.R.E input layer, not recovered retail controller dispatch.
+Keyboard, gamepad, stick, throttle, pedals and button-box controls share typed
+pilot actions. The original instruments and their existing scope operations are
+retained. No external screen export, rearrangement, new sensor behavior or
+fabricated readings are added.
+
+## Quick start
+
+On Linux a controller exposing the standard two-stick gamepad controls receives
+the following default mapping. The 8BitDo Ultimate 2 wireless controller's input
+capabilities have been inspected on the development host, and the user confirmed
+the Linux rumble test pulse works. Flight handling and disconnect checks remain open.
+
+```sh
+cargo run --locked -p tore-app -- --free-flight
+cargo run --locked -p tore-app -- --list-inputs
+cargo run --locked -p tore-app -- --monitor-inputs 30
+```
+
+| Standard Linux control | Default flight action |
+| --- | --- |
+| Left stick | Roll / pitch; pulling the stick back pulls the aircraft up |
+| Right stick | Head-look / exterior orbit |
+| Left / right trigger | Left / right rudder; equal pulls cancel |
+| Left / right shoulder | Decrease / increase throttle while held |
+| South / east face button (A/B on Xbox layout) | Gear / airbrake toggle |
+| West / north face button (X/Y on Xbox layout) | Flaps / afterburner toggle |
+| Select / left-stick click | External / forward cockpit view |
+| Start | Pause/resume |
+| Guide | Escape flight menu, if not intercepted by the desktop |
+| Right-stick click | Recenter look |
+| D-pad left/right | Previous/next instrument selection |
+| D-pad up/down | Selected instrument's first/second stock button |
+| D-pad and south/east buttons in menus | Navigate and accept/back |
+
+Keyboard assignments continue working. Standard keyboard axes have priority over
+controller axes while pressed. These gamepad defaults are convenience mappings,
+not a claim about FA's original joystick layout. Back/paddle/extra buttons are
+available only if firmware/driver exposes them as independent inputs. Devices
+with different descriptors, including Windows/macOS raw controller numbering,
+need a custom profile; no universal button-index layout is assumed.
+
+`--no-controllers` disables native device discovery and feedback while retaining
+keyboard controls and any custom keyboard bindings. It also allows deterministic
+bridge tests without touching hardware.
+
+## In-game controls and saved preferences
+
+Open **Escape → Control** during flight. This authored replacement for the old
+input-device submenu uses the existing raster font and paused menu canvas.
+
+- Set **Rumble: On**, then select **Save & apply**. No text editor is required.
+- Choose a binding with Left/Right on **Binding**, or use **Add binding**. Select
+  its action, then **Capture key / button / axis** and operate the desired control.
+  Escape cancels capture; it does not become a binding. Keyboard modifiers are
+  retained. Controller menu actions are suppressed while the editor is open.
+- Device/Input rows also let you select an exposed control without capture.
+  Behavior, dead zone, curve, inversion, priority and normalized min/center/max
+  are editable. Behavior choices are filtered to those the selected action supports.
+- Use Up/Down to select a row, Left/Right to change values, Enter to activate;
+  mouse clicks on the left arrow decrement and elsewhere increment/activate.
+- **Save & apply** validates and saves before replacing live bindings. Escape or
+  **Back** discards changes since the last save. Removing a custom keyboard binding
+  restores the stock shortcut; it does not disable the stock keyboard table.
+  Shared assignments remain explicit; assigning an input does not delete another
+  action assigned to it. Actions remain subject to current aircraft capabilities.
+
+The editor saves the explicitly loaded `--input-profile` file, or `input-v1.conf`
+in the [application data directory](DEVELOPMENT.md). It writes a canonical profile
+(comments/formatting are not retained), using a temporary file and rename so a
+failed write does not truncate the current file. Save errors appear in the editor;
+invalid drafts do not replace either the file or live bindings.
+
+**Default mappings for new gamepads** preserves automatic standard Linux mappings
+when enabling rumble before connecting a pad. Turn it off for entirely explicit
+profiles. The version-1 directive is `gamepad-defaults on|off`; absent means off
+for existing custom profiles. Known device mappings already in the profile are
+retained instead of appending another default set. With defaults on, removing all
+bindings for a device lets it receive defaults again when reconnected.
+
+macOS GameController capture explicitly uses shared `*` bindings because its
+public identity is session-only. The editor reports this sharing. Native generic
+HID identities and Windows/Linux identities keep their normal matching rules.
+The editor covers the current binding model, not a calibration wizard, persistent
+Apple player assignment, device firmware remapping or unsupported aircraft systems.
+
+Normal sessions also save `preferences-v1.conf`: large/small instrument page sets,
+active layout/selection, scope ranges/mode, cockpit/HUD/ladder visibility, HUD
+brightness, zoom and music/effects. These persist across launches, aircraft changes
+and flight restarts. Pause, head-look and aircraft state are not restored as user
+preferences. Preference loading is silent; a malformed file is reported and
+preserved. Smoke/capture/performance diagnostics ignore these display preferences
+and do not write them, keeping existing visual probes reproducible. Explicit
+instrument layout/page and zoom flags override saved values for normal launches.
+
+## Profiles and calibration
+
+Generate an editable profile without importing media or opening a window:
+
+```sh
+cargo run --locked -p tore-app -- --write-input-profile my-input.conf
+cargo run --locked -p tore-app -- --input-profile my-input.conf --free-flight
+```
+
+The generator refuses to overwrite an existing file. It writes active standard
+Linux gamepad bindings when the required capabilities are present and commented
+suggestions for other controls. It does not infer unknown equipment functions.
+Copy an edited profile to `input-v1.conf` in the application's data directory for
+automatic loading; see [platform paths](DEVELOPMENT.md). `--input-profile` chooses
+an explicit file. A custom profile replaces automatic controller defaults unless it enables
+`gamepad-defaults on`;
+existing keyboard flight/navigation shortcuts remain unless explicitly rebound.
+Settings load at startup and can be edited through Escape → Control.
+
+Profiles use UTF-8 text, `#` comments and whitespace-separated tokens. The first
+non-comment line must be `tore-input 1`. Limits: 256 KiB, 1,024 bindings and 64
+aliases. Unknown actions, incompatible modes, invalid calibration and duplicate
+aliases fail with a line number. Identity/control tokens contain no whitespace.
+
+Example (replace the identity with the monitor's exact device ID):
+
+```text
+tore-input 1
+rumble off
+alias stick DEVICE_ID_FROM_MONITOR
+bind stick axis:0 roll axis -1 0 1 0.08 1.5 1 10
+bind stick axis:1 pitch axis -1 0 1 0.08 1.5 1 10
+bind stick button:304 gear press
+bind keyboard Ctrl-g gear press
+```
+
+A binding is:
+
+```text
+bind DEVICE CONTROL ACTION MODE [MIN CENTER MAX DEADZONE CURVE SCALE PRIORITY]
+```
+
+`DEVICE` is an exact device identity, an alias, `keyboard`, or `*` for every
+native device. Prefer aliases/exact identities when different equipment shares
+axis numbers. Never use enumeration order for persistent assignments. USB serials
+are preferred; serial-less devices fall back to physical connection identity and
+may require rebinding when moved. Devices with no serial or physical identity use
+a session node identity; those bindings may need updating after reconnection. Some
+composite peripherals expose generic button-only interfaces, which remain
+unassigned until explicitly bound. Windows IDs are local to that machine. The
+macOS raw HID fallback uses location identity. Apple GameController endpoints use
+`macos-gc-session-…` identities: the public API does not expose the HID serial used
+by our raw backend. These IDs deliberately change between processes/reconnections;
+never use device names or enumeration order as persistent physical identities.
+Generated Apple-gamepad suggestions use `bind * …`, commented by default, to share
+named controls across gamepads. Such bindings can persist across sessions but cannot
+distinguish two identical gamepads; per-device persistent Apple-gamepad assignment
+needs a later explicit player-assignment flow. Profiles are platform-local.
+
+The monitor shows **raw native values**. Absolute axes are normalized using the
+reported range to `-1..1` before profile calibration. Thus the default calibration
+is `-1 0 1 0.08 1 1 10`, even when the monitor reports `0..65535`. Independent
+negative/positive spans, inversion (`SCALE=-1`), dead zone and exponent curves are
+supported. Unit throttle axes map the calibrated endpoints to `0..1`; their
+center/deadzone/curve are not applied. Trigger modes map to a signed unipolar
+contribution and do apply dead zone/curve. No extra temporal input filter is added
+on top of the aircraft's existing model-owned response. Radial stick dead zones
+and automatic calibration wizards are not implemented.
+
+| Mode | Meaning / compatible actions |
+| --- | --- |
+| `axis` | Centered pitch, roll, yaw, throttle-rate, look-x or look-y |
+| `unit` | Absolute throttle position with pickup |
+| `positive` / `negative` | Button-held signed contribution to a centered action |
+| `trigger-positive` / `trigger-negative` | Signed unipolar analog contribution; pairs add within a device/priority |
+| `press` / `release` | One command on the selected edge; repeated reports do not retrigger |
+| `hold` | Hold an equipment switch on while any assigned, armed source holds it |
+| `switch` | Explicit equipment on/off when the physical contact changes; initial state does not actuate |
+| `follow` | Continuously request the physical equipment setting, including at initialization/resume |
+| `position=N` | One command on entering a discrete position; initial position does not actuate |
+| `delta` | Encoder steps; throttle-rate means 1% per step; UI actions repeat for matching direction |
+
+For a counterclockwise encoder UI binding use `SCALE=-1`; clockwise uses `1`.
+Deltas are limited to 32 steps per event. Native discrete hats/selectors can use
+`position=N`; multiple contacts are separate physical controls and are not
+silently guessed to be one three-position selector. Device-specific neutral
+combinations need explicit bindings or future reviewed composition support.
+
+Equipment actions: `gear`, `flaps`, `airbrake`, `hook`, `engine`, `burner`, `radar`,
+`jammer`. `press` toggles; `switch`/`follow` request a setting. These request the
+existing system behavior and never force animation fractions or bypass aircraft
+capabilities. Rafale's unavailable hook stays unavailable. `throttle=0.75`
+requests a preset. Axes are `pitch`, `roll`, `yaw`, `throttle`, `throttle-rate`,
+`look-x`, `look-y`.
+
+UI actions: `pause`, `menu`, `end-flight`, `restart`, `view-front`, `view-back`,
+`view-up`, `view-external`, `center-look`, `cockpit`, `hud`, `zoom-in`, `zoom-out`,
+`range-down`, `range-up`, `radar-mode`, `page-0` through `page-9`, instrument
+commands below, and `menu-up/down/left/right/accept/back`. `key:Shift-0` or
+`key:Ctrl-t` dispatches a stock flight shortcut through the same menu/availability
+handler; it is a one-shot command, not a synthetic held keyboard key. Unsupported
+systems still report unavailable. Bind continuous flight actions directly.
+Custom keyboard controls use physical names such as `g`, `ArrowDown`, or
+`Ctrl-Shift-g`; modifier order is Ctrl, Alt, Shift, Super. OS exit shortcuts should
+remain on the keyboard.
+
+## Shared assignments and interruption
+
+Every binding tracks its own physical baseline and contribution. Releasing or
+disconnecting one source never releases another source's held contribution.
+Equipment `hold` combines sources with OR; `switch` emits on/off only on a real
+change. A `follow` binding keeps physical authority over that equipment, including
+a keyboard toggle; disconnecting it relinquishes authority and retains the last
+setting. Use `switch` when keyboard/cockpit overrides should persist.
+
+Centered analog actions choose the highest-priority active source. Equal-priority
+ownership stays with the current source until it becomes neutral; ties on initial
+acquisition use stable binding/device order. Signed button/trigger contributions
+combine within a device and priority, then participate in the same arbitration.
+This avoids jitter-driven last-event ownership. Independent axes can have different
+owners. Opposing contributions cancel. Throttle uses pickup: after a preset,
+rate adjustment, reconnect or resume, the physical lever must reach/cross the
+current setting (4% tolerance) before taking over. It never snaps to zero on
+unplug. When multiple absolute throttles are assigned, priorities determine the
+eligible owner rather than averaging positions.
+
+Menus and explicit/focus pause clear pending gameplay commands and held output.
+Physical state remains tracked. Neutral buttons/axes rearm on resume; controls
+still held must return to neutral/release first. Custom keyboard chords retain
+the original release owner even after modifiers change. Menu buttons cannot leak
+into flight as a new press. An actively contributing primary controller's
+removal pauses flight; reconnecting does not resume it. A switch-only box removal
+does not change latched equipment settings. Nonfinite samples and native/core queue overflow drop stale
+commands and pauses rather than silently leaving controls stuck.
+
+## Instrument selection without screen changes
+
+`Ctrl-Tab` / `Ctrl-Shift-Tab` selects the next/previous existing instrument slot.
+`Ctrl-1..6` selects a slot directly. `Ctrl-Shift-1..4` operates its four existing
+button positions. These are authored shortcuts, not decoded retail bindings.
+
+Controller actions are `instrument-next`, `instrument-previous`, `instrument-1`
+through `instrument-6`, `control-1` through `control-4`, and direct actions such as
+`instrument-2-control-1`. `page-N` toggles the existing instrument page. A brief
+existing-style notice identifies focus; there is no raster alteration, window
+movement or new screen content. Layout/page changes reset focus to the first
+slot. Absent slots and unimplemented controls report unavailable. Current scope
+buttons are instantaneous commands, so there is no invented held sensor action.
+RWR buttons 1/2 change its range; radar buttons 1/2 change range and button 3 cycles
+its existing display mode. Button 4 and unsupported pages remain unavailable.
+
+## Fixed ticks and input tapes
+
+`tore-sim` receives a typed `PilotInput` for each 120 Hz tick: continuous demand
+plus ordered one-shot commands. Device/key strings and calibration stay outside
+simulation. Equipment commands and throttle presets now apply at tick entry;
+actuator audio follows actual state changes. Existing aircraft response and
+configuration remain separate. Camera look resolution cannot acquire flight-axis
+or throttle ownership.
+
+Native discovery/polling runs on a dedicated worker (4 ms service interval), with
+bounded messages to the app (8 ms wake deadline when idle). Linux delivers ordered
+evdev transitions at report boundaries; macOS generic devices use HID queues.
+Windows raw controllers and Apple GameController profiles sample native current
+state, so a complete pulse between samples can be missed. Once captured, short command press/release pairs survive until their
+next simulation tick. Live input is admitted to the next available tick; this is
+not a claim of identical wall-clock input sampling under arbitrary renderer
+stalls. Paused gameplay edges are discarded, not played back at resume.
+
+```sh
+cargo run --locked -p tore-app -- --free-flight --record-input flight-input.txt
+cargo run --locked -p tore-app -- --replay-input flight-input.txt
+```
+
+Recording requires a direct free-flight start without a capture, probe or initial control/device-pose override and stops when that flight ends/restarts. Files are create-new and flushed
+on exit. Tapes contain **pilot inputs only**, not mission saves, UI/camera commands,
+assets or initial state. Replay uses a fresh flight in the chosen theater; supply
+the same aircraft, theater, model flag, assets and configuration as the recording.
+The format is bounded to one hour/64 MiB with ordered ticks and finite values.
+Fractional axes and ordered commands round-trip and reproduce identical states
+under 30/60/144 Hz render schedules in synthetic tests. Cross-CPU bitwise flight
+parity and whole-mission replay remain separate acceptance work.
+
+## Feedback and native backends
+
+`rumble off` is the default. `rumble on` enables authored event feedback on
+connected rumble-capable devices with actual pilot/equipment bindings. Devices at
+rest still receive feedback (including when the keyboard engages afterburner);
+unassigned and UI-only devices do not. Targets are captured when an event is
+accepted, so connection/reconnection alone never replays an effect.
+
+| Confirmed event | Strong / weak | Nominal duration | Live producer |
+| --- | --- | --- | --- |
+| Gun fired | 8% / 16% | 67 ms | Hook only; gun simulation unavailable |
+| Missile launched | 18% / 10% | 150 ms | Hook only; weapon release unavailable |
+| Bomb released | 12% / 7% | 100 ms | Hook only; weapon release unavailable |
+| Rocket launched | 10% / 16% | 83 ms | Hook only; weapon release unavailable |
+| Turbulence | Up to 10% / 6%, scaled by severity | 125 ms | Hook only; no turbulence producer yet |
+| Afterburner engaged | 6% / 10% | 150 ms | Actual inactive-to-active transition |
+| Afterburner running | 3.5% / 1% | Continuous quiet bed | Actual active state; bounded renewable native leases |
+| Damage | 25% / 18% | 167 ms | Hook only; combat damage unavailable |
+| Crash | 35% / 20% | 183 ms | Actual transition into crashed state |
+
+These are provisional tactile designs, not recovered native effects or directional
+flight-stick forces. The dependency-free `tore_input::feedback` mixer has eight
+fixed slots and combines motor strengths by maximum, capped by these designs,
+rather than adding overlapping effects. Gun/rocket repeats are admitted at most
+20 Hz, turbulence/missile/bomb/damage at 10 Hz, afterburner at 2 Hz and crash at 1 Hz.
+Mixer updates are limited to 20 per simulated second and catch-up ticks are
+coalesced before native submission; small cues may be delayed up to 50 ms
+behind another update. Each native pulse has a finite duration; stopping event
+production lets the effect expire. No rumble alters authoritative simulation or RNG.
+
+The app queues events after the 120 Hz flight tick, then advances the mixer once.
+Afterburner feedback requires actual activation: merely setting its switch below
+the model's throttle threshold, with no fuel, or with the engine off does not
+produce a pulse. Raising throttle through that threshold with the switch armed
+can activate it. While active, a quiet low-frequency bed continues beneath other
+impulses, using 750 ms native leases renewed every 500 ms of simulated flight.
+The engagement impulse is not retriggered by renewal. Disengaging afterburner
+cancels its bed and remaining engagement pulse; unrelated effects may finish.
+A stalled/exited producer cannot leave an infinite native effect. Pause/focus
+loss and flight teardown clear pending impulses/cooldowns as well as native effects.
+
+Future weapon systems must call `Input::feedback` with the typed event after a
+successful shot/release, never for dry fire, an unavailable control or a held fire
+key alone. A future turbulence producer must supply finite normalized severity;
+steady wind, turns, G-load and stall are not substituted for turbulence. These
+hooks do not implement weapons, loadouts, damage or turbulent flight dynamics.
+
+```sh
+cargo run --locked -p tore-app -- --test-rumble only
+# Or select an exact persistent ID from --list-inputs (Linux/Windows):
+cargo run --locked -p tore-app -- --test-rumble DEVICE_ID_FROM_LIST_INPUTS
+```
+
+`only` completes discovery, then requires exactly one rumble-capable controller;
+it fails instead of picking the first when several are present. Use it for Apple
+gamepads whose session ID changes between CLI runs. The test does not require
+`rumble on`, retail media, or a display. It requests a 200 ms pulse at 20% strength.
+Native API acceptance and
+physical response are distinct; the latter needs a human check. Feedback requests
+are bounded to 1–2,000 ms and per-device deadlines; stop requests cannot be blocked
+by a full effect queue. Pause, focus loss, overflow, shutdown and worker drop
+stop effects and discard pending stale requests. Reconnect never replays them.
+
+| Platform | Implementation / limits |
+| --- | --- |
+| Linux | evdev capabilities and report boundaries, nonblocking reads, SYN_DROPPED state recovery, FF_RUMBLE. USB serial plus interface identity when available. No exclusive grabs or system permission changes. |
+| Windows | Built-in Windows.Gaming.Input RawGameController and Gamepad vibration through `windows` 0.58 bindings. Dedicated WinRT worker initialization/teardown; device removal and read failure stop vibration before releasing the endpoint. Current-reading polling; custom mappings required. |
+| macOS | On macOS 11+, supported gamepads use GameController profiles and controller-created CoreHaptics engines. Apple's `supportsHIDDevice:` suppresses duplicate HID input. Other joystick/multi-axis/button-box devices retain IOKit HID queues, with no generic HID rumble. Custom mappings required. |
+
+Apple gamepad controls are `gc-axis:HEX_NAME`, `gc-button:HEX_NAME` (native
+pressed state) and `gc-pressure:HEX_NAME` (0..1 raw pressure, normalized as an axis).
+Names are UTF-8 bytes encoded as hex so spaces cannot break a profile. Pressure
+controls support analog triggers independently of digital button edges. Copy the
+control token from the monitor/generated profile; do not bind both a pressure
+control and its digital counterpart to the same one-shot action.
+
+macOS uses separate left/right handle localities when both are advertised, with
+strong/weak mapped to intensity and low/high sharpness respectively. Otherwise
+the default locality receives `max(strong, weak)` at medium sharpness. This is an
+authored haptic approximation, not identical motor frequencies across hardware.
+Effects have finite native duration as well as the worker deadline. Replacement,
+interruption and teardown stop retained players/engines; errors discard the engine
+and never automatically replay a pulse. Engines are created only when feedback is
+requested. Native cold starts can delay the input worker; no haptic call blocks
+the renderer/simulation thread. macOS 11+ is the supported haptics configuration;
+older macOS linking/runtime is not validated.
+
+Only `tore-input-native` permits audited unsafe FFI. Linux adds the already-used
+`libc` platform bindings; Windows adds features to the already-locked `windows`
+0.58 dependency. macOS adds narrowly enabled `objc2-game-controller` and
+`objc2-core-haptics` 0.3.2 bindings and `block2` 0.6.2, reusing already-locked
+Objective-C/Foundation/dispatch bindings. Input policy remains hand-rolled;
+`tore-input` is dependency-free and safe Rust. All other workspace crates retain
+`unsafe_code = forbid`. No SDL, third-party controller runtime, USB driver,
+retail executable, or device-specific output protocol is embedded or executed.
+
+Native API references: [Linux event protocol](https://docs.kernel.org/input/event-codes.html),
+[Windows raw controller reading](https://learn.microsoft.com/en-us/uwp/api/windows.gaming.input.rawgamecontroller.getcurrentreading),
+[Apple HID elements](https://developer.apple.com/documentation/iokit/1588671-iohiddevicecopymatchingelements),
+[Apple controller haptics](https://developer.apple.com/documentation/gamecontroller/gccontroller/haptics),
+[haptic localities](https://developer.apple.com/documentation/gamecontroller/gcdevicehaptics/createengine(withlocality:)),
+[HID support query](https://developer.apple.com/documentation/gamecontroller/gccontroller/supportshiddevice(_:)),
+[Windows vibration](https://learn.microsoft.com/en-us/uwp/api/windows.gaming.input.gamepad.vibration).
+See [acceptance and open hardware checks](baselines/input.md).

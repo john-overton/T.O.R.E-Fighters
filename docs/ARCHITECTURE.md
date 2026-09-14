@@ -75,3 +75,29 @@ validated configuration covering mass, propulsion, envelopes, native departure/c
 `tore-sim::telemetry` exposes gauge-independent air/ground/altitude channels with
 explicit units and unavailable sensor readings; analog gauge presentation must
 remain downstream of this interface. See [model extension guide](FLIGHT-MODEL.md).
+
+## Shared physical input
+
+`tore-input` is a dependency-free safe Rust crate for physical control bindings,
+calibration, per-source contribution/ownership, context release rules, typed pilot
+frames and bounded input tapes. `tore-sim` consumes those frames at 120 Hz and no
+longer interprets keyboard names. Aircraft configuration and control response stay
+in the respective model modules. The app translates keyboard/menu actions and
+routes instrument focus to the existing stock controls.
+
+`tore-input-native` owns a dedicated bounded device worker: Linux evdev/rumble,
+Windows raw-controller readings/Gamepad vibration, and macOS GameController/
+CoreHaptics plus generic HID queues. Apple gamepad input and haptics share the same
+retained controller; public HID support queries suppress duplicate raw endpoints. It alone
+permits unsafe platform FFI; `libc` and `windows` are thin platform bindings,
+not a third-party input policy engine. Main-loop discovery never blocks a flight
+frame. Presentation-only look resolution cannot change pilot-axis ownership.
+See [contracts, platform limits and profile syntax](INPUT.md).
+
+The paused flight controls editor owns a draft `tore-input::Profile`; native
+capture is isolated from menu/gameplay dispatch. Canonical serialization validates
+before file replacement and live rebaselining. General display/instrument/sound
+preferences use a separate bounded versioned file and persist independently of
+flight/aircraft state. Smoke/capture/performance diagnostics bypass those preferences.
+Afterburner feedback combines a renewable finite low rumble with the engagement
+impulse; context loss cancels both, without changing authoritative flight state.

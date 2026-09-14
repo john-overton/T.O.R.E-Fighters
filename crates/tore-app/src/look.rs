@@ -53,10 +53,15 @@ fn wrap(angle: f32) -> f32 {
     (angle + PI).rem_euclid(TAU) - PI
 }
 
+#[cfg(test)]
 pub fn step(look: &mut [f32; 2], keys: &BTreeSet<String>, elapsed: f64, external: bool) {
     let held = |key: &str| f32::from(keys.contains(key));
     let yaw = held("LookArrowRight") - held("LookArrowLeft");
     let pitch = held("LookArrowUp") - held("LookArrowDown");
+    step_axes(look, [yaw, pitch], elapsed, external);
+}
+pub fn step_axes(look: &mut [f32; 2], axes: [f32; 2], elapsed: f64, external: bool) {
+    let [yaw, pitch] = axes;
     let delta = elapsed.clamp(0., 0.25) as f32; // One radian per second, independent of repeats.
     if yaw != 0. {
         look[0] = wrap(look[0] + yaw * delta);

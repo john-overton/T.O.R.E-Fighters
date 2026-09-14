@@ -55,3 +55,10 @@ Follow-up: [flight response, sky and retained cockpit](flight-response-sky.md) s
 The 2026-09-14 [live-mirror pass](mirrors.md) supersedes AutoVsync pacing with
 Immediate/Mailbox where supported, retaining FIFO fallback. It removes Wayland
 frame-callback pacing in uncapped modes and records current Linux measurements.
+
+The 2026-09-14 [shared-input pass](input.md#short-frame-time-evidence) records a
+short matched Linux comparison with the Ultimate 2 connected: mean interval
+1.27 → 1.29 ms, p95 1.28 → 1.58 ms, zero paused frames. These remain CPU frame
+intervals; the small mean difference does not establish unchanged input latency
+or sustained performance. The camera-panel run still completes asynchronous
+readbacks; no post-render sleep or blocking live readback was introduced.
