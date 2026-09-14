@@ -2,7 +2,7 @@
 
 Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.md), covering menus, original flight environments and aircraft. Checked items describe work in this Rust repository, not work completed in USNF-ATF. An unchecked item remains open even when a reference decoder or prototype exists. Keep format status in [coverage](formats/coverage.md) and acceptance evidence in [baselines](baselines/).
 
-**Current scope:** Choose Activity now leads to a Quick Mission Creator mock and a Ukraine free-camera viewer. Original T2 heights, texture placements, briefing map and a fixed weather-palette/sky preview are implemented in Rust. The remaining menu system, full environment fidelity, aircraft and flight simulation remain open. See [theater recovery](formats/theater.md) and [viewer baseline](baselines/ukraine-viewer.md).
+**Current scope:** Original Choose Activity and Quick Mission briefing lead to all-theater previews and F/A-18D/Rafale C free flight. The explicit manual range now connects the ten PT-default weapon slots, sensors, damage, stores and combat-service replay. Full native environment/flight/combat parity and the remaining menu screens stay open. AI is deferred until manual acceptance. See [manual weapons evidence](baselines/manual-weapons.md) and the dated checklists below.
 
 ## Two-aircraft live-fire pass — 2026-09-14
 
@@ -20,7 +20,7 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   14 Python tests, full lint/build/asset checks and Linux GPU/capture validation.
 - [x] Fix expanded-cache reload bounds; record short active CPU frame-time evidence.
 - [ ] Recover full native guidance, collision, damage, effects and scheduler contracts;
-  add carried-store/rack rendering, source-specific drag, countermeasures and hostile AI.
+  finish store textures/racks, source-specific drag and countermeasures. AI is deferred.
 - [ ] Obtain matched original-game evidence before claiming W3–W5 or 1:1 parity.
 
 [Capabilities, exact loadouts, captures, approximations and validation](baselines/live-fire.md).
@@ -602,3 +602,28 @@ Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
 - [ ] Finish hook/flap cue-polarity audit and native wheel-brake behavior; verify actual sound output/listening parity on Windows and macOS.
 
 Validation and material limits: [audio baseline](baselines/audio.md). Further menu screens remain deferred. No retail/generated audio is committed.
+
+## Two-aircraft manual weapons integration — 2026-09-14
+
+- [x] Retain F18.PT / F/A-18D and RAFALE.PT / Rafale C only; exercise all ten
+  default JT stations and all five source damage entries.
+- [x] Separate master-arm/station/ammo/capacity readiness from actual sensor lock,
+  with source range/FOV gates, imported visual/radar cycling, terrain visibility
+  approximation and distinct launcher-dependent versus autonomous tracking.
+- [x] Translate the native object-category damage switch; record bounded nominal,
+  applied and cumulative hit results; keep automatic subsystem/RNG contracts open.
+- [x] Wire source failed-station high bit, explicit fault fixtures, external-group
+  jettison and mass/geometry updates; preserve internal guns and auxiliary mass.
+- [x] Retire replacement targets atomically with fresh IDs; connect track-loss
+  feedback and preserve original successful-fire/hit/destruction effects/audio.
+- [x] Add bounded optional combat-service recording and matching-asset headless
+  replay, including release and reset; preserve pause and modifier isolation.
+- [x] Extend repeatable static extraction with damage category/amount/station
+  spans, and validate both aircraft through source-cache runtime and GPU checks.
+- [ ] Full alternative compatible loadouts/PTS presets, non-default bombs/rockets
+  and special seeker branches; native sensor/RNG/subsystem/collision/effect parity,
+  weapon textures/racks/drag, auxiliary fuel handling and player combat damage.
+- [ ] Original-game differential acceptance and Windows/macOS runtime/hardware
+  checks. Combat AI remains explicitly deferred until full manual acceptance.
+
+Exact validation, captures, limitations and commands: [manual weapons baseline](baselines/manual-weapons.md).

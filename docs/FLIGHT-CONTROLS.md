@@ -187,3 +187,19 @@ The flight **Control** tab now opens the authored binding editor rather than the
 retail device-selection stub. Instrument page sets/layout, scope controls, zoom,
 cockpit/HUD options and sound preferences save automatically between normal
 sessions and survive aircraft changes/restarts. [Full settings contract](INPUT.md).
+
+## Manual weapons follow-up
+
+The explicit live range adds **U** arm/safe, **L** clear designation, **K** jettison
+selected external weapon group, **]** cycle damage-class fixture and **[** fail
+selected station. Restart repairs/reloads. These are development bindings;
+Shift/Ctrl/Alt combinations retain their prior meanings. Firing stops on weapon,
+arm, jettison and fixture transitions and requires release before another press.
+T/Enter cycles actual living contacts within the imported visual/radar coverage.
+SAFE/EMPTY/STATION FAILED and sensor/range/terrain inhibits are shown separately
+from lock. No automatic subsystem failures or combat AI are implied.
+
+`--record-combat NEW_PATH` records explicit combat-service inputs and commands;
+`--replay-combat PATH` replays headlessly with the same aircraft/theater/assets.
+This is separate from pilot-input recording and does not re-simulate flight.
+[Controls, evidence and remaining gaps](baselines/manual-weapons.md).

@@ -8,6 +8,12 @@ Track concrete steps, substeps and acceptance gates in [progress.md](progress.md
 
 This is the sequencing document for the ground-up rebuild in Rust.  The existing TypeScript repo /USNF-ATF is the guide, not the gospel: its format docs, decoders, recovered geometry, audio recovery, and baselines are the reference material.  Its engine is not being ported.
 
+Current execution order (2026-09-14): finish manual weapons, sensors and damage
+acceptance for F/A-18D and Rafale C before AI work. The only AI authorized for the
+later weapon-testing phase is a basic fly-forward target. The broader future AI
+milestone below is not authorization to implement combat AI now. See
+[manual integration and remaining gates](baselines/manual-weapons.md).
+
 ## Principles
 
 1. **Faithful first, opinionated second.**  Milestone 1 and 2 reproduce the retail game.  Every expansion, remaster, and quality-of-life change lands as a layer on top that can be switched off, so a "classic" mode always exists and always matches retail.

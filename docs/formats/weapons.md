@@ -338,3 +338,18 @@ and carried-store rendering are not recovered.
 See [live-fire validation](../baselines/live-fire.md) for controls, screenshots,
 end-to-end results and presentation approximations. This is a working test range,
 not a completed W3–W5 vanilla acceptance gate.
+
+## Manual weapons integration follow-up
+
+[Manual acceptance](../baselines/manual-weapons.md) supersedes the live adapter's
+previous all-radar illumination rule, class-0-only fixture path, absent carried
+geometry and combat-recording gap. The source category switch at 0x411470 is
+translated; both PT categories are 0x8000 -> damage index 0. Five-class fixtures,
+bounded nominal/applied hit history, failed-station high-bit semantics, shared
+visual/radar acquisition, sampled terrain masking and manual jettison are wired.
+R530 retains launcher radar during tracking; AIM120/MICA do not. Native activation,
+lead/PN, ECM, damage RNG and automatic subsystem selection remain unaccepted.
+Static extraction now emits 22 reviewed regions, including category, amount and
+station-failure spans; a reviewed span is not a complete native translation.
+All 135 catalog JT files remain preserved; live acceptance covers the ten default
+PT stations of the two ported identities, not alternative compatible loadouts.

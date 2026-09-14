@@ -10,6 +10,10 @@ same reader and simulator; Rafale visual/cockpit animation acceptance remains
 separate. The original flight description below describes the legacy adapter;
 [FLIGHT-MODEL](../FLIGHT-MODEL.md) documents the selectable hybrid model.
 
+Current combat behavior is documented in [manual weapons integration](../baselines/manual-weapons.md).
+It supersedes the first-pass unimplemented weapon/instrument states below;
+ordinary free flight stays externally clean while the explicit range loads PT defaults.
+
 ## Import contract
 
 `tools/extract_assets.py --aircraft f18` invokes the native extractor and shared dependency resolver. It starts from PT/HUD/shape and cockpit variants, includes instrument artwork/fonts, then follows available resource references through PT, JT, SEE, ECM, GAS, SH and HUD. PT's default weapon/sensor/tank references and their shape/texture/audio dependencies are included automatically. `--weapons` additionally starts from every available JT. Combining a theater with aircraft/weapons selects their **union**; `--include` subsequently narrows it. Directory discovery skips non-EALIB installer libraries; exclude the unrelated LHX archives as documented in EXTRACTION.
@@ -32,7 +36,7 @@ BRF is a bounded textual data language: byte/word/dword, caret-marked scaled int
 | Start/stop clips | `&POWERUP.5K`, `&POWERDN.5K` |
 | Hardpoints | 9, including equipment and gun |
 | Visual / radar / countermeasures | VIS340.SEE / F18R.SEE (APG-65) / F18.ECM |
-| Internal gun | M61.JT, 570 source rounds; firing is not implemented |
+| Internal gun | M61.JT, 570 source rounds; connected manual live fire |
 | Default external stores, preserved | F150.GAS, AIM120.JT, AGM65G.JT, AIM9M.JT |
 
 The retail ECM labels itself ALQ-161; the importer preserves that identity rather than replacing it with a real-world specification. Station compatibility masks, weight classes, coordinates, weapon timing and several sensor fields still have unresolved units/semantics. The clean free-flight configuration omits all external stores and their mass. The original default loadout remains available in extracted data for the later loadout page.

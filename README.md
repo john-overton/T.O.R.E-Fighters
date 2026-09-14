@@ -2,7 +2,7 @@
 
 Tasteful Opinionated Reverse Engineered: a native Rust rebuild of Fighters Anthology, following [the roadmap](docs/ROADMAP.md). The current slices are original menus, all 16 original theaters, and F/A-18D / Rafale C free flight with raster instrument windows.
 
-The app launches into the original **Choose Activity** menu using artwork, button pieces, proportional fonts, and sounds imported from your own Fighters Anthology files. Buttons animate; `?`, `Pref`, and `Multi` open dropdowns. **Create Quick Mission** opens the original-style briefing: click the aircraft name in Wing 1 or the theater name in “You are flying over…” to select, then **OK** to fly. F/A-18D and Rafale C are available. Enemy fields are ghosted and inert; loadout and combat are deferred. No retail game data ships in this repository.
+The app launches into the original **Choose Activity** menu using artwork, button pieces, proportional fonts, and sounds imported from your own Fighters Anthology files. Buttons animate; `?`, `Pref`, and `Multi` open dropdowns. **Create Quick Mission** opens the original-style briefing: click the aircraft name in Wing 1 or the theater name in “You are flying over…” to select, then **OK** to fly. F/A-18D and Rafale C are available. Enemy fields are ghosted and inert; mission/loadout screens remain deferred. The explicit `--live-fire` range supports manual weapon testing. No retail game data ships in this repository.
 
 Each launch randomly selects one of the five original menu backgrounds. Hovering is silent; sounds play on clicks/toggles.
 
@@ -136,3 +136,9 @@ Space fires, semicolon selects a weapon, backslash resets range, and T designate
 The range supports both source guns and PT-default missiles, with documented
 guidance/contact/damage approximations. Ordinary free flight remains externally
 clean. [Exact capabilities, screenshots and validation](docs/baselines/live-fire.md).
+
+The two-aircraft development range now supports manual arm/safe, sensor/range
+inhibits, five damage-class fixtures, station failure, external-group jettison,
+carried weapon bodies and optional combat-service recording/replay. See
+[manual weapon testing](docs/baselines/manual-weapons.md) for controls, all-slot
+checks and remaining native-parity gaps. Combat AI is deferred.

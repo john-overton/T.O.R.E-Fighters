@@ -98,3 +98,10 @@ trigger/ammo/spawn, source movement helpers, approximate guidance/contacts/damag
 live instrument readouts, static missile geometry and sampled original explosion
 art. The corresponding native lifecycle/SH VM/sensor parity cells remain partial.
 [Validation and limits](../baselines/live-fire.md).
+
+Manual weapons follow-up: ten PT-default JT stations pass all five damage-class
+fixtures. Runtime now consumes VIS340/F18R acquisition data, source category
+mapping and failed-station flags, with carried weapon body geometry and bounded
+combat-service tapes. Native sensor/SH/damage parity remains partial; alternative
+catalog loadouts and non-default ordnance are not enabled by this acceptance.
+[Evidence and non-AI gaps](../baselines/manual-weapons.md).

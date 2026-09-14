@@ -62,3 +62,10 @@ short matched Linux comparison with the Ultimate 2 connected: mean interval
 intervals; the small mean difference does not establish unchanged input latency
 or sustained performance. The camera-panel run still completes asynchronous
 readbacks; no post-render sleep or blocking live readback was introduced.
+
+The [manual weapons pass](manual-weapons.md#short-performance-sample) records
+Linux/Vulkan clean F18, loaded live F18 and Rafale missile/camera cases: mean
+CPU intervals 1.71 / 2.15 / 2.06 ms, p95 1.96 / 2.42 / 2.39 ms, zero paused
+frames, 330 mirrors each and seven camera readbacks in the Rafale case.
+These remain short CPU measurements with presentation backpressure; native
+parity, GPU timing and sustained maximum-load performance are not established.

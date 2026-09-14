@@ -363,3 +363,22 @@ app mode runs the development range. `--combat-smoke --aircraft f18|rafale` runs
 its imported end-to-end suite headlessly; use one literal identity per invocation.
 `--combat-probe-ticks N` with `--capture-flight PATH` captures a scripted live pass.
 [Live-fire controls and validation](baselines/live-fire.md). [Evidence and remaining gates](baselines/combat-components.md).
+
+### Manual weapon acceptance
+
+Both `--combat-smoke` identities now exercise each of five default JT slots
+against all five source damage entries (50 cases total), with negative launch
+checks and deterministic live-state comparison. Set `TORE_COMBAT_EVIDENCE` to a
+new ignored directory to additionally write and replay per-slot combat tapes,
+comparing complete state before and after manual commands/reset:
+
+```sh
+TORE_COMBAT_EVIDENCE=.local/manual-check TORE_DATA_DIR=.local/combat-implementation/app-profile cargo run --locked -p tore-app -- --combat-smoke --aircraft f18
+TORE_COMBAT_EVIDENCE=.local/manual-check TORE_DATA_DIR=.local/combat-implementation/app-profile cargo run --locked -p tore-app -- --combat-smoke --aircraft rafale
+```
+
+Files use create-new semantics; choose a fresh output directory on subsequent
+runs. The application-data override is optional and must point to an imported
+profile or permit import from local media. Runtime `--record-combat NEW_PATH`,
+headless `--replay-combat PATH`, and `--combat-command NAME` capture setup are
+specified in [manual weapons acceptance](baselines/manual-weapons.md).

@@ -1,5 +1,10 @@
 # Two-aircraft development live-fire baseline
 
+Follow-up: [manual weapons integration](manual-weapons.md) supersedes the earlier
+class-0-only fixtures, all-radar tracking dependency, missing carried geometry
+and combat-service recording gaps described below. This document preserves the
+first-pass acceptance evidence.
+
 2026-09-14, Linux / NVIDIA RTX 4070 / Vulkan, Rust 1.91.1. This implements the
 subsequent user request for a working live-fire pass with clearly documented
 approximations. It is not completion of vanilla combat acceptance.
