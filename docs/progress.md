@@ -4,7 +4,7 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 
 **Current scope:** Choose Activity now leads to a Quick Mission Creator mock and a Ukraine free-camera viewer. Original T2 heights, texture placements, briefing map and a fixed weather-palette/sky preview are implemented in Rust. The remaining menu system, full environment fidelity, aircraft and flight simulation remain open. See [theater recovery](formats/theater.md) and [viewer baseline](baselines/ukraine-viewer.md).
 
-## Aircraft weapons research and scheduled plan — 2026-09-14
+## Aircraft weapons research and initial implementation — 2026-09-14
 
 - [x] Audit FA archives, native EXE/SMS and the shared exporter against reference
   research; distinguish authored/reference behavior from FA evidence.
@@ -14,12 +14,21 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   inspect FA launch-speed arithmetic and ammunition-field offsets.
 - [x] Plan ordnance movement, sensor/guidance/ECM coupling, loadouts, graphics,
   damage and vanilla acceptance: [weapons plan](formats/weapons.md).
-- [ ] Complete native weapon/compatibility/effect-table contracts and shared
-  exporter dependency reporting; this pass does not implement exporter changes.
+- [x] Commit and push the plan (`457c85b`), then implement shared combat roots,
+  repeated aircraft selection, dependency/provider reports and cache invalidation.
+- [x] Parse all 135 JT, 51 SEE, 30 ECM and 4 GAS configurations; preserve rear
+  sensor values and unresolved compiled PTS icon references explicitly.
+- [x] Export both aircraft and full equipment twice: 561 resources, zero errors,
+  all unchanged on repeat. Add hash-gated static weapon research (19 regions).
+- [x] Implement diagnostic launch/motor/fall/speed/lifetime/trigger/ammunition,
+  loading-mask/capacity and partial sensor arithmetic in renderer-independent Rust.
+- [ ] Complete native weapon/compatibility/effect-table contracts, generated
+  dependency mappings and complete lifecycle/update producers.
 - [ ] Implement deterministic gun/rocket/bomb/missile lifecycles, sensor logic,
   original effects and matched retail acceptance before claiming 1:1 performance.
 
-Evidence and limitations: [weapons research](baselines/weapons-research.md).
+Evidence and limitations: [initial research](baselines/weapons-research.md) and
+[combat implementation](baselines/combat-components.md).
 Further menu screens remain deferred; clean external free flight is preserved.
 
 ## Fidelity and evidence rules

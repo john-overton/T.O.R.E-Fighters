@@ -80,6 +80,16 @@ impl Assets {
         if resources.get("TORE_MUSIC_V1").map(Vec::as_slice) != Some(b"PCM1") {
             return Err("cache predates recorded music profile; re-import media".into());
         }
+        if resources.get("TORE_COMBAT_V1").map(Vec::as_slice) != Some(b"RAW1") {
+            return Err("cache predates combat dependencies; re-import media".into());
+        }
+        for &name in tore_formats::aircraft::COMBAT_RESOURCES {
+            if !resources.contains_key(name) {
+                return Err(
+                    format!("cache missing combat resource {name}; re-import media").into(),
+                );
+            }
+        }
         let mut music_scores = BTreeMap::new();
         for name in tore_formats::music::SCORES {
             if let Some(bytes) = resources.get(*name) {
@@ -206,7 +216,7 @@ impl Assets {
         let aircraft_names = tore_formats::aircraft::dependencies(
             &aircraft_libs.iter().collect::<Vec<_>>(),
             &tore_formats::aircraft::AircraftId::ALL,
-            false,
+            true,
         )?;
         for (filename, names) in [("FA_1.LIB", ART), ("FA_2.LIB", DATA)] {
             let lib = archive(source, filename)?;
@@ -279,6 +289,7 @@ impl Assets {
             }
         }
         resources.insert("TORE_MUSIC_V1".into(), b"PCM1".to_vec());
+        resources.insert("TORE_COMBAT_V1".into(), b"RAW1".to_vec());
         let assets = Self::decode(&resources)?;
         fs::create_dir_all(destination)?;
         // Generation files keep the previous import usable until the new pack is complete.

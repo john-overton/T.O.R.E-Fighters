@@ -134,9 +134,11 @@ The runtime integration pass found the TVI texture alias for TVIET. All-theater 
 
 ## F/A-18D and weapons
 
-The [2026-09-14 weapons audit and plan](formats/weapons.md) confirms that
-`--weapons` preserves all 135 JT definitions but omits shared native combat-effect
-roots. It is not yet a complete combat export. See [measured evidence](baselines/weapons-research.md).
+`--weapons` selects the complete JT/SEE/ECM/GAS catalog and reviewed shared
+combat graphics/audio dependencies. Both reviewed aircraft can be exported in
+one invocation with `--aircraft f18 --aircraft rafale --weapons`. The supplied
+media yields 561 resources with zero errors; a repeat reuses all files.
+[Scope, unresolved dependencies and validation](baselines/combat-components.md).
 
 ```sh
 python3 tools/extract_assets.py --aircraft f18 --exclude-archive 'disc1/LHX/*' --out .local/f18-import
@@ -144,9 +146,9 @@ python3 tools/extract_assets.py --aircraft f18 --weapons --exclude-archive 'disc
 python3 tools/extract_assets.py --theater all --aircraft f18 --weapons --exclude-archive 'disc1/LHX/*' --out .local/flight-import
 ```
 
-The aircraft profile automatically includes its default weapons, sensors, tank, shapes, textures, cockpit variants, instrument fonts/chrome and available audio dependencies. `--weapons` expands to the whole JT library. Profiles combine as a union; optional `--include` globs filter that union. Native Rust readers and the dependency resolver are shared with app startup; no reference checkout, Bun or extra Python packages are needed. Dry-run/list performs dependency reads but writes nothing. Keep the report alongside the extracted files for source hashes and named fields, envelopes and hardpoint evidence.
+The aircraft profile automatically includes its default weapons, sensors, tank, shapes, textures, cockpit variants, instrument fonts/chrome and available audio dependencies. `--weapons` expands to all projectiles, sensors, ECM and tanks plus shared combat effects. Profiles combine as a union; optional `--include` globs filter that union. Native Rust readers and the dependency resolver are shared with app startup; no reference checkout, Bun or extra Python packages are needed. Dry-run/list performs dependency reads but writes nothing. Keep the report alongside the extracted files for source hashes and named fields, envelopes and hardpoint evidence.
 
-This preserves/imports data; it does not establish full flight, radar, instrument or weapon behavior. See [aircraft format and runtime coverage](formats/aircraft.md). F/A-18C is a separate variant, not an alias for this F/A-18D profile. The app currently imports the selected Hornet dependencies from FA_1/FA_2 directly into its cache, rather than consuming the CLI output directory.
+This preserves/imports data; it does not establish full flight, radar, instrument or weapon behavior. See [aircraft format and runtime coverage](formats/aircraft.md). F/A-18C is a separate variant, not an alias for this F/A-18D profile. The app imports both reviewed aircraft and the armament catalog from FA_1/FA_2 directly into its versioned cache. It does not consume the CLI output directory or enable combat from the imported definitions.
 
 
 The cockpit/control follow-up adds mandatory `HUD11.FNT` and `FMENUD.MNU` to `--aircraft f18`, and preserves all available HUD mode fonts. Re-run the same extraction command to extend an existing output; unchanged files remain untouched. The runtime cache detects the newly required font and can refresh itself from the local media. The recovered menu tree is interpreted as data; no native module is executed.
@@ -225,3 +227,26 @@ unreachable byte count and `missing_pcm` against the non-excluded source catalog
 A successful extraction is not a promise that every score reference exists or a
 narrowed `--include` selection is playable. All WAVs and source resources remain
 local and ignored. [Music evidence and runtime scope](formats/music.md).
+
+## Static weapon research and component probes
+
+```sh
+python3 tools/extract_assets.py --native-weapons --out .local/native-weapons/repro
+python3 tools/extract_assets.py --aircraft f18 --aircraft rafale --weapons --exclude-archive 'disc1/LHX/*' --out .local/combat-import
+cargo run --locked -p tore-sim --example weapon_probe -- .local/combat-import/FA_2.LIB/M61.JT .local/combat-import/FA_2.LIB/DEFA.JT
+```
+
+Native weapon research is separate from archive selection and `--native-flight`.
+It uses LLVM objdump without executing retail code. Fixed-address artifacts require
+both reviewed EXE/SMS hashes; other builds receive inventory/disassembly only.
+Choose a fresh output directory after expanding the reviewed regions.
+
+Profile extraction reports contain `dependencies.edges` and `providers`: each
+edge records its source, target, reason, availability and inclusion in this run;
+providers record all candidate archives and the last archive used to read a
+resource for discovery. Extraction still retains archive boundaries for all
+matches. `complete` means the requested writes succeeded, **not** full combat
+coverage. `dependencies.filtered` identifies a closure reduced by `--include`;
+`native_parity` is always false. Unknown callback/art/module edges remain explicit.
+PTS modules are inert and their absent icon candidates are unresolved; required
+reviewed shape/texture/audio dependencies still fail with a source reason chain.

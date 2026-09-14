@@ -26,15 +26,15 @@ Status is for this **Rust rebuild**, not the reference project's decoders. The a
 
 No M1a completion or all-title format validation is implied. See [theater recovery](theater.md), [menu extraction](menu.md) and [baseline](../baselines/main-menu.md).
 
-Weapons audit (2026-09-14): 135 JT and 170 dependencies extract, but shared
-native effect roots are missing from selection. All 70 literal JT references
+Initial weapons audit (before implementation, 2026-09-14): 135 JT and 170
+dependencies extracted, but shared native effect roots were missing. All 70 literal JT references
 across 145 PTs are present; PTS/compatibility and ordnance/sensor behavior remain
 open. No format status is promoted by this research. [Plan](weapons.md) and
 [evidence](../baselines/weapons-research.md).
 
 ### F/A-18D slice
 
-FA PT: typed bounded reader for the reviewed F18/660 layout, all source G rows and hardpoints exported; runtime physics is an authored adapter. FA JT/SEE/ECM: named schema decoding and raw data extraction, including transitive shape/texture/audio dependencies; weapon/sensor execution remains partial/unimplemented. GAS: raw preservation and BRF validation. SH: nearest-detail static Hornet geometry and observed device endpoint branches, not a general native VM. FNT: bounded bitmap-writing glyph grammar, WIN11 used in instrument windows. HUD: associated source artwork/data preserved, general native HUD composition not decoded. [Detailed scope](aircraft.md).
+FA PT: typed bounded reader for the reviewed F18/660 layout, all source G rows and hardpoints exported; runtime physics is an authored adapter. FA JT/SEE/ECM: named schema decoding and raw data extraction, including transitive shape/texture/audio dependencies; weapon/sensor execution remains partial/unimplemented. GAS: checked tank configuration and raw preservation. SH: nearest-detail static Hornet geometry and observed device endpoint branches, not a general native VM. FNT: bounded bitmap-writing glyph grammar, WIN11 used in instrument windows. HUD: associated source artwork/data preserved, general native HUD composition not decoded. [Detailed scope](aircraft.md).
 
 ## Native flight research
 
@@ -80,3 +80,13 @@ four-connected runtime silhouettes per aircraft. Bounded exact-color extraction
 preserves the source rims and rejects empty/overlapping/oversized regions. Live
 GPU rear views are fitted presentation, not decoded native mirror optics.
 [Validation](../baselines/mirrors.md).
+
+## Combat import and diagnostic components — 2026-09-14
+
+All 135 JT, 51 SEE, 30 ECM and 4 GAS configurations now have bounded typed reads.
+The shared app/CLI resolver retains reviewed shared effect roots, both aircraft's
+PTS modules and explicit dependency/provider evidence. PTS module semantics,
+generated effects and native callbacks remain open; preservation is not decoding.
+The headless combat module implements isolated native movement, trigger/ammunition,
+loading and sensor gates. Complete firing/guidance/damage/rendering remain open.
+[Implementation and acceptance evidence](../baselines/combat-components.md).

@@ -10,6 +10,7 @@ mod pic;
 pub mod shape;
 pub mod theater;
 pub mod ui;
+pub mod weapons;
 pub use pic::Pic;
 use std::{
     collections::BTreeMap,

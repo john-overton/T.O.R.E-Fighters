@@ -30,6 +30,24 @@ def pe():
 
 
 class NativeResearchTests(unittest.TestCase):
+    def test_weapons_unknown_build_keeps_reviewed_addresses_disabled(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root/'media'
+            source.mkdir()
+            (source/'FA.EXE').write_bytes(pe())
+            (source/'FA.SMS').write_bytes(struct.pack('<III', 1, 0, 0x401000) + b'_PROJFire\0')
+            with patch.object(native.subprocess, 'run') as run, \
+                 patch.object(native.shutil, 'which', return_value='/tool/objdump'), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                run.return_value.stdout = '  401000: 00  synthetic instruction\n'
+                native.extract(source, root/'out', domain='weapons')
+            report = json.loads((root/'out/inventory.json').read_text())
+            self.assertEqual(report['domain'], 'weapons')
+            self.assertFalse(report['reviewed_fa_build'])
+            self.assertFalse((root/'out/jt-field-references.json').exists())
+            self.assertFalse((root/'out/reviewed-components.json').exists())
+
     def test_metadata_bounds(self):
         self.assertEqual(native.symbols(sms())[0]['va'], 0x401000)
         self.assertTrue(native.sections(pe())[0]['executable'])

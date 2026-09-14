@@ -276,6 +276,15 @@ fn analyze(
         .any(|ext| name.ends_with(ext))
     {
         let e = tore_formats::aircraft::Equipment::parse(name, bytes)?;
+        if name.ends_with(".JT") {
+            tore_formats::weapons::Weapon::parse(name, bytes)?;
+        }
+        if name.ends_with(".SEE") {
+            tore_formats::weapons::Seeker::parse(name, bytes)?;
+        }
+        if name.ends_with(".ECM") {
+            tore_formats::weapons::Countermeasures::parse(name, bytes)?;
+        }
         return Ok(format!(
             "{{\"format\":\"BRF equipment\",\"name\":{},\"object_fields\":{},\"equipment_fields\":{}}}",
             quote(&e.name),
@@ -291,7 +300,14 @@ fn analyze(
             sh.state_words.iter().collect::<Vec<_>>()
         ));
     }
-    if [".JT", ".SEE", ".ECM", ".GAS"]
+    if name.ends_with(".GAS") {
+        let tank = tore_formats::weapons::Tank::parse(bytes)?;
+        return Ok(format!(
+            "{{\"format\":\"BRF tank\",\"empty_weight_lb\":{},\"fuel_weight_lb\":{},\"flags\":{},\"runtime_parity\":false}}",
+            tank.empty_weight, tank.fuel_weight, tank.flags
+        ));
+    }
+    if [".JT", ".SEE", ".ECM"]
         .iter()
         .any(|ext| name.ends_with(ext))
     {
@@ -390,6 +406,7 @@ fn extract(options: Options) -> Result<bool> {
         return Err("output directory must be outside the source media tree".into());
     }
     let mut profile_archives = Vec::new();
+    let mut profile_paths = Vec::new();
     if !options.aircraft.is_empty() || options.weapons || options.music {
         for path in &archives {
             let relative = path
@@ -402,6 +419,7 @@ fn extract(options: Options) -> Result<bool> {
                 .any(|p| wildcard(p, &relative))
             {
                 profile_archives.push(Archive::open(path)?);
+                profile_paths.push(path.clone());
             }
         }
     }
@@ -409,11 +427,12 @@ fn extract(options: Options) -> Result<bool> {
         .iter()
         .flat_map(|a| a.entries.keys().cloned())
         .collect();
-    let aircraft_names = tore_formats::aircraft::dependencies(
+    let dependency_report = tore_formats::aircraft::dependency_report(
         &profile_archives.iter().collect::<Vec<_>>(),
         &options.aircraft,
         options.weapons,
     )?;
+    let aircraft_names = &dependency_report.resources;
     let mut records = Vec::new();
     let mut errors = Vec::new();
     let mut selected = 0;
@@ -539,8 +558,49 @@ fn extract(options: Options) -> Result<bool> {
     }
     if !planning {
         let entries=records.iter().map(|r|format!("{{\"archive\":{},\"name\":{},\"output\":{},\"offset\":{},\"stored_bytes\":{},\"decoded_bytes\":{},\"status\":{},\"error\":{},\"analysis\":{},\"preview_output\":{}}}",quote(&r.archive),quote(&r.name),quote(&r.output),r.offset,r.stored,r.decoded,quote(r.status),quote(&r.error),r.analysis,r.preview.as_ref().map_or("null".into(), |p| quote(p)))).collect::<Vec<_>>().join(",\n");
+        let edges = dependency_report
+            .edges
+            .iter()
+            .map(|e| {
+                format!(
+                    "{{\"source\":{},\"target\":{},\"kind\":{},\"available\":{},\"included\":{}}}",
+                    quote(&e.source),
+                    quote(&e.target),
+                    quote(e.kind),
+                    e.available,
+                    records.iter().any(|r| r.name == e.target
+                        && matches!(r.status, "written" | "unchanged" | "replaced"))
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let providers = dependency_report
+            .providers
+            .iter()
+            .map(|(name, indices)| {
+                format!(
+                    "{{\"name\":{},\"archives\":[{}],\"selected_archive\":{}}}",
+                    quote(name),
+                    indices
+                        .iter()
+                        .map(|&i| quote(&profile_paths[i].to_string_lossy()))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    indices.last().map_or("null".into(), |&i| quote(
+                        &profile_paths[i].to_string_lossy()
+                    ))
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let dependency_json = format!(
+            "{{\"method\":\"reviewed roots and literal candidates; not complete native coverage\",\"filtered\":{},\"native_parity\":false,\"edges\":[{}],\"providers\":[{}]}}",
+            !options.patterns.is_empty(),
+            edges,
+            providers
+        );
         let report = format!(
-            "{{\"schema_version\":1,\"source\":{},\"output_root\":{},\"complete\":{},\"selected\":{},\"errors\":[{}],\"entries\":[{}]}}\n",
+            "{{\"schema_version\":1,\"source\":{},\"output_root\":{},\"complete\":{},\"selected\":{},\"errors\":[{}],\"entries\":[{}],\"dependencies\":{}}}\n",
             quote(&source.to_string_lossy()),
             quote(&out.to_string_lossy()),
             failed == 0,
@@ -550,7 +610,8 @@ fn extract(options: Options) -> Result<bool> {
                 .map(|e| quote(e))
                 .collect::<Vec<_>>()
                 .join(","),
-            entries
+            entries,
+            dependency_json
         );
         write_resource(&out.join("extraction-report.json"), report.as_bytes(), true)?;
         println!("Report: {}", out.join("extraction-report.json").display());

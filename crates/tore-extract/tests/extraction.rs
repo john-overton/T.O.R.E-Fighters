@@ -253,10 +253,17 @@ fn all_theaters_include_aliases_and_skip_unrelated_disc_libraries() {
 }
 #[test]
 fn aircraft_dependency_plan_follows_resources_across_formats() {
-    let f=Fixture::new(vec![
+    let mut entries = vec![
  ("F18.PT",0,b"[brent's_relocatable_format]\n:shape\nstring \"F18.SH\"\n:store\nstring \"TEST.JT\"\nend".to_vec()),
  ("F18.SH",0,b"_SKIN.PIC\0".to_vec()),("F18.HUD",0,b"~F18H\0".to_vec()),("~F18H.PIC",0,vec![]),("WIN11.FNT",0,vec![]),("HUD11.FNT",0,vec![]),("FMENUD.MNU",0,vec![]),("PANEL.PIC",0,vec![]),("_SKIN.PIC",0,vec![]),("PALETTE.PAL",0,vec![0;768]),
- ("TEST.JT",0,b"[brent's_relocatable_format]\n:sound\nstring \"TEST.5K\"\nend".to_vec()),("TEST.5K",0,vec![128]),("OTHER.PIC",0,vec![])]);
+ ("TEST.JT",0,b"[brent's_relocatable_format]\n:sound\nstring \"TEST.5K\"\nend".to_vec()),("TEST.5K",0,vec![128]),("OTHER.PIC",0,vec![])];
+    entries.extend(
+        tore_formats::aircraft::COMBAT_RESOURCES
+            .iter()
+            .map(|&n| (n, 0, vec![0])),
+    );
+    entries.push(("F18.PTS", 0, vec![0]));
+    let f = Fixture::new(entries);
     let result = f.run(&["--aircraft", "f18", "--list"]);
     assert!(
         result.status.success(),
@@ -267,4 +274,14 @@ fn aircraft_dependency_plan_follows_resources_across_formats() {
     assert!(out.contains("_SKIN.PIC") && out.contains("TEST.5K") && out.contains("~F18H.PIC"));
     assert!(!out.contains(" / OTHER.PIC"));
     assert!(!f.out.exists());
+    let filtered = f.run(&["--aircraft", "f18", "--include", "TEST.5K"]);
+    assert!(
+        filtered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&filtered.stderr)
+    );
+    let report = fs::read_to_string(f.out.join("extraction-report.json")).unwrap();
+    assert!(report.contains("\"filtered\":true"));
+    assert!(report.contains("\"native_parity\":false"));
+    assert!(report.contains("\"available\":true,\"included\":false"));
 }

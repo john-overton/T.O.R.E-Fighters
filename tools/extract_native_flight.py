@@ -195,12 +195,12 @@ def sections(data):
     return rows
 
 
-def field_addresses(repo, base):
+def field_addresses(repo, base, layouts=('OBJECT', 'NPC', 'PLANE')):
     """Derive packed PT offsets from the same Rust schema used by extraction."""
     schema = (repo/'crates/tore-formats/src/aircraft_schema.rs').read_text()
     result, offset = [], 0
     sizes = {'byte': 1, 'word': 2, 'dword': 4, 'ptr': 4, 'symbol': 4}
-    for section in ('OBJECT', 'NPC', 'PLANE'):
+    for section in layouts:
         block = schema.split('pub const '+section+':', 1)[1].split('];', 1)[0]
         fields = re.findall(r'\("(\w+)", "([^"]+)"\)', block)
         if not fields:
@@ -212,7 +212,9 @@ def field_addresses(repo, base):
     return result
 
 
-def extract(source, output, *, overwrite=False, preview=False):
+def extract(source, output, *, overwrite=False, preview=False, domain='flight'):
+    if domain not in ('flight', 'weapons'):
+        raise ValueError('unknown native research domain')
     repo = Path(__file__).resolve().parents[1]
     source, output = source.resolve(), output.resolve()
     if not source.is_dir() or output.is_relative_to(source):
@@ -229,10 +231,14 @@ def extract(source, output, *, overwrite=False, preview=False):
     code = sorted({s['va'] for s in names if executable(s['va'])})
     selected = [s for s in names if executable(s['va']) and any(t in s['name'].lower() for t in
         ('fm', 'plane', 'envelope', 'stickinput', 'gtoturn', 'matchf24', 'turntoward', 'ground', 'fuel', 'cobv', 'cobrv', 'cothrust', 'codrag', 'copull', 'cospeed', 'timeupdate', 'instaltimer', 'installtimer', 'stall', 'landing'))]
+    if domain == 'weapons':
+        from native_weapons import KEYWORDS
+        selected = [s for s in names if executable(s['va']) and any(t in s['name'].lower() for t in KEYWORDS)]
     report = {'schema_version': 1, 'method': 'static disassembly only; no retail execution',
               'exe_sha256': hashlib.sha256(exe).hexdigest(), 'sms_sha256': hashlib.sha256(sms).hexdigest(),
               'symbol_count': len(names), 'sections': rows, 'selected_symbol_count': len(selected)}
     report['reviewed_fa_build'] = (report['exe_sha256'] == REVIEWED_FA and report['sms_sha256'] == REVIEWED_SMS)
+    report['domain'] = domain
     if preview:
         print(json.dumps(report, indent=2))
         return
@@ -266,7 +272,10 @@ def extract(source, output, *, overwrite=False, preview=False):
         artifacts[f'spans/{va:08x}.txt'] = '\n'.join(line for _,line in lines)+'\n'
     report['spans'] = spans
     # These addresses are only identified for the hash-reviewed FA build.
-    if report['reviewed_fa_build']:
+    if report['reviewed_fa_build'] and domain == 'weapons':
+        from native_weapons import artifacts as weapon_artifacts
+        artifacts.update(weapon_artifacts(exe, rows, instructions, repo))
+    if report['reviewed_fa_build'] and domain == 'flight':
         cpt = next(s['va'] for s in names if s['name']=='_cpt')
         fields = field_addresses(repo,cpt)
         references = {}
@@ -305,7 +314,7 @@ def extract(source, output, *, overwrite=False, preview=False):
     for name, content in artifacts.items():
         path=output/name;path.parent.mkdir(parents=True,exist_ok=True)
         path.write_bytes(content)
-    print(f"Native flight research: {len(selected)} symbol spans, {len(names)} symbols; {output}")
+    print(f"Native {domain} research: {len(selected)} symbol spans, {len(names)} symbols; {output}")
 
 
 def main():

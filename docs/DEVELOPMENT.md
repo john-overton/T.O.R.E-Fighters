@@ -349,3 +349,13 @@ wide/tall captures use `--controls-menu --window-size 1280x720|720x1000
 --capture-flight PATH` with one literal size. Diagnostic windows are non-resizable
 to preserve requested dimensions on tiling compositors; normal windows remain
 resizable. Smoke/capture/performance diagnostics ignore saved display preferences.
+
+## Combat component research
+
+`tools/extract_assets.py --aircraft f18 --aircraft rafale --weapons` selects both
+reviewed aircraft and the armament catalog. Exclude unrelated demo archives as
+shown in [extraction instructions](EXTRACTION.md#fa-18d-and-weapons).
+`--native-weapons` performs the separate hash-gated static code pass.
+`cargo run --locked -p tore-sim --example weapon_probe -- PATH.JT` exercises
+recovered scalar components from an extracted definition. These commands do not
+enable combat or prove native lifecycle parity. [Evidence and remaining gates](baselines/combat-components.md).

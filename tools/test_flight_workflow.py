@@ -3,11 +3,30 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+import extract_assets
 
 SCRIPT = Path(__file__).with_name('extract_assets.py')
 
 
 class FlightWorkflowTests(unittest.TestCase):
+    def test_both_aircraft_and_weapons_are_forwarded_without_shell(self):
+        with patch.object(sys, 'argv', [str(SCRIPT), '--aircraft', 'f18', '--aircraft', 'rafale', '--weapons', '--dry-run']), \
+             patch.object(extract_assets.subprocess, 'run') as run:
+            run.return_value.returncode = 0
+            self.assertEqual(extract_assets.main(), 0)
+            command = run.call_args.args[0]
+            choices = [command[i+1] for i, value in enumerate(command) if value == '--aircraft']
+            self.assertEqual(choices, ['f18', 'rafale'])
+            self.assertIn('--weapons', command)
+            self.assertNotIn('shell', run.call_args.kwargs)
+
+    def test_native_domains_are_separate_from_archive_profiles(self):
+        for options in [['--native-flight'], ['--weapons'], ['--aircraft', 'f18']]:
+            result = subprocess.run([sys.executable, str(SCRIPT), '--native-weapons', *options],
+                                    capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 2)
+
     def test_validation_requires_complete_aircraft_extraction(self):
         for options in [[], ['--aircraft', 'rafale', '--list'],
                         ['--aircraft', 'f18', '--dry-run'],

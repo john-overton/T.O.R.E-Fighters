@@ -127,3 +127,9 @@ In flight, **Escape → Control** now edits bindings and enables rumble through
 **Save & apply**. Instrument layouts/pages, scope settings, cockpit/HUD/zoom and
 sound preferences persist between normal sessions. Afterburner provides a quiet
 continuous rumble beneath its engagement pulse while active. [Settings guide](docs/INPUT.md).
+
+Aircraft armament import now includes all 135 FA weapon definitions, sensors,
+ECM, tanks and reviewed shared effects. Export both supported aircraft with
+`--aircraft f18 --aircraft rafale --weapons`. Combat arithmetic is currently
+headless research; live firing, guidance and damage remain open.
+See [combat progress and validation](docs/baselines/combat-components.md).

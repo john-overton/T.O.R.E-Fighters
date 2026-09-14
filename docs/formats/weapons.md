@@ -48,7 +48,7 @@ machine code and compiled asset modules. The reference gun exporter contains
 authored ballistics/mounts alongside USNF-derived native fields; neither can be
 copied wholesale as the FA specification.
 
-## Exporter audit
+## Initial exporter audit (before implementation)
 
 | Area | Current result/code | Completion needed |
 | --- | --- | --- |
@@ -92,6 +92,56 @@ gameBurstT=1 and removeT=40. Hornet capacity is 570; Rafale C is 250. FA
 The older USNF note uses +0xec. Trace FA player dispatch, burst/reload scheduling
 and unlimited-ammo gates before assigning rounds/second or seconds to those
 raw timing fields. Do not transplant USNF offsets or cadence claims.
+
+## Implementation status — 2026-09-14
+
+The plan was committed and pushed as `457c85b` before implementation. W0/W1
+have substantial completed substeps; W2 has diagnostic arithmetic components.
+W0–W5 acceptance gates remain open. See [implementation evidence](../baselines/combat-components.md).
+
+- The shared resolver now selects all JT/SEE/ECM/GAS definitions with
+  `--weapons`, plus 19 reviewed shared graphics/audio roots. Aircraft profiles
+  also retain their PTS modules. CLI and app use the same closure; the wrapper
+  accepts repeated aircraft flags. The app cache imports both aircraft and the
+  armament catalog, with a version marker to reject older incomplete caches.
+- Reports now expose dependency edges, unresolved native symbols/module/art
+  candidates, archive providers and the archive chosen for dependency reads.
+  `filtered` and edge `included` distinguish successful writes from a complete
+  selected closure. `native_parity` remains false.
+- Typed JT/SEE/ECM/GAS readers preserve source configuration without missing
+  numeric fields defaulting to zero. All 220 equipment definitions parse on the
+  supplied FA installation. The source-labeled rear-facing SU35R.SEE retains
+  negative zone headings; its native coordinate/configuration handling is open.
+- PTS must **not** be treated as a decoded loadout/preset format. The reviewed
+  F18/RAFALE PTS resources are compiled PL modules containing icon strings and
+  small data arrays. ICONF18.PIC and ICONRAF.PIC are absent from this catalog.
+  Preserve the modules and unresolved edges rather than substituting artwork.
+- `--native-weapons` reuses bounded PE/SMS readers and disassembly, with both
+  reviewed hashes required for fixed-address artifacts. It emits 119 selected
+  symbol spans, 19 reviewed regions and packed JT field-reference evidence.
+  Extracted spans include untranslated branches; they are not runnable engines.
+- `tore-sim::combat` implements launch-speed selection, motor phases, lifetime,
+  quantized altitude performance, axial speed approach, positive-distance
+  position arithmetic using imported native trigonometry, gravity fall, trigger
+  deadline/rising-edge decisions and ammunition debit. `combat::loading` has
+  store-weight and station capacity/mask decisions. Sensors have radar-emission
+  deadline and partial range/FOV gates with explicit caller inputs.
+
+These are isolated translations, not a combined native update. Native currentT
+is assigned from currentTicks shifted right six at 0x486bd7–0x486be6. With the
+reviewed 256-unit tick domain this gives quarter-second units; scheduler/service
+ordering and host-clock equivalence remain open. fuelT is a launch-relative
+cutoff in PROJEngineState, not an additional duration after ignition. HARDUnload
+accepts a partial final debit and preserves the high count flag. Player repeat
+uses flag 0x800 and an unsigned deadline; bay/target/fire rejection occurs later.
+None of these facts alone establishes end-to-end gun cadence.
+
+The `weapon_probe` example exercises scalar components for imported JT files;
+all 135 definitions pass 540 launch-condition rows and lifetime/ignition checks.
+No live firing, target detection, guidance, collision/damage, release/mass updates
+or combat rendering is enabled. Source mounts, full dispatch/order, native target
+producers, effect tables and original-game engagement observations are still
+required before those hooks can meet the vanilla fidelity gate.
 
 ## Ordered implementation plan
 

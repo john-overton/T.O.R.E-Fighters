@@ -2,7 +2,7 @@
 use crate::{Archive, Result, invalid};
 use std::collections::{BTreeMap, BTreeSet};
 #[path = "aircraft_schema.rs"]
-mod schema;
+pub(crate) mod schema;
 #[derive(Clone, Debug)]
 pub struct Token {
     pub kind: String,
@@ -394,6 +394,55 @@ pub fn dependencies(
     aircraft: &[AircraftId],
     weapons: bool,
 ) -> Result<BTreeSet<String>> {
+    Ok(dependency_report(archives, aircraft, weapons)?.resources)
+}
+
+/// FA GRAPHICInit (0x442c00) and shared effect audio references.
+/// Filenames only: all bytes are read from the user's media at runtime.
+pub const COMBAT_RESOURCES: &[&str] = &[
+    "CRATER.SH",
+    "SMOKE.SH",
+    "FIRE.SH",
+    "EXP.SH",
+    "DEBRIS.SH",
+    "CHAFF.SH",
+    "FLARE.SH",
+    "SPD.SH",
+    "MPD.SH",
+    "LPD.SH",
+    "&EXPL3.5K",
+    "&EXPL7.5K",
+    "&EXPL9.5K",
+    "&EXPL10.5K",
+    "&EXPL12.5K",
+    "&SPLASH3.11K",
+    "&FIRE.5K",
+    "&CHAFF.5K",
+    "&FLARE.5K",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DependencyEdge {
+    pub source: String,
+    pub target: String,
+    pub kind: &'static str,
+    pub available: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct DependencyReport {
+    pub resources: BTreeSet<String>,
+    pub edges: BTreeSet<DependencyEdge>,
+    /// Resource -> archive indices in caller order; last supplies dependency reads.
+    pub providers: BTreeMap<String, Vec<usize>>,
+}
+
+/// A report of discoverable edges, not proof of complete native dependencies.
+pub fn dependency_report(
+    archives: &[&Archive],
+    aircraft: &[AircraftId],
+    weapons: bool,
+) -> Result<DependencyReport> {
     let catalog: BTreeSet<String> = archives
         .iter()
         .flat_map(|a| a.entries.keys().cloned())
@@ -402,6 +451,7 @@ pub fn dependencies(
     for &id in aircraft {
         for n in [
             id.pt(),
+            &id.pt().replace(".PT", ".PTS"),
             id.hud(),
             &format!("{}.SH", id.stem()),
             "PALETTE.PAL",
@@ -434,12 +484,46 @@ pub fn dependencies(
         }
     }
     if weapons {
-        selected.extend(catalog.iter().filter(|n| n.ends_with(".JT")).cloned());
+        if !catalog.contains("PALETTE.PAL") {
+            return Err(invalid("combat profile missing PALETTE.PAL"));
+        }
+        selected.extend(
+            catalog
+                .iter()
+                .filter(|n| {
+                    [".JT", ".SEE", ".ECM", ".GAS"]
+                        .iter()
+                        .any(|ext| n.ends_with(ext))
+                })
+                .cloned(),
+        );
         selected.insert("PALETTE.PAL".into());
+    }
+    if weapons || !aircraft.is_empty() {
+        for &name in COMBAT_RESOURCES {
+            if !catalog.contains(name) {
+                return Err(invalid(&format!("FA combat profile missing {name}")));
+            }
+            selected.insert(name.into());
+        }
+    }
+    let mut edges = BTreeSet::new();
+    for name in &selected {
+        edges.insert(DependencyEdge {
+            source: if COMBAT_RESOURCES.contains(&name.as_str()) {
+                "@FA-combat-effects"
+            } else {
+                "@selected-profile"
+            }
+            .into(),
+            target: name.clone(),
+            kind: "profile-root",
+            available: true,
+        });
     }
     let mut pending: Vec<_> = selected.iter().cloned().collect();
     while let Some(name) = pending.pop() {
-        if ![".PT", ".JT", ".SEE", ".ECM", ".GAS", ".SH", ".HUD"]
+        if ![".PT", ".PTS", ".JT", ".SEE", ".ECM", ".GAS", ".SH", ".HUD"]
             .iter()
             .any(|e| name.ends_with(e))
         {
@@ -452,32 +536,113 @@ pub fn dependencies(
             .ok_or_else(|| invalid("missing dependency"))?;
         let bytes = a.read(&name)?;
         let refs = references(&bytes);
-        // BRF names represent actual files; report missing dependent data instead of silently dropping it.
+        // BRF strings and symbols are typed edges. Never execute a symbol.
         if bytes.starts_with(b"[brent's_relocatable_format]") {
             let brf = Brf::parse(&bytes)?;
-            for t in brf.blocks.values().flatten().filter(|t| t.kind == "string") {
+            for t in brf
+                .blocks
+                .values()
+                .flatten()
+                .filter(|t| t.kind == "string" || t.kind == "symbol")
+            {
                 let n = t.value.to_ascii_uppercase();
-                if [".JT", ".SH", ".SEE", ".ECM", ".GAS", ".11K", ".5K"]
+                if t.kind == "symbol" {
+                    edges.insert(DependencyEdge {
+                        source: name.clone(),
+                        target: t.value.clone(),
+                        kind: "native-symbol-unimplemented",
+                        available: false,
+                    });
+                    continue;
+                }
+                if [".JT", ".SH", ".SEE", ".ECM", ".GAS", ".11K", ".5K", ".PIC"]
                     .iter()
                     .any(|e| n.ends_with(e))
-                    && !catalog.contains(&n)
                 {
-                    return Err(invalid(&format!("{name} missing dependency {n}")));
+                    if !catalog.contains(&n) {
+                        return Err(invalid(&format!(
+                            "{name} -> BRF string -> missing dependency {n}"
+                        )));
+                    }
+                    edges.insert(DependencyEdge {
+                        source: name.clone(),
+                        target: n,
+                        kind: "brf-string",
+                        available: true,
+                    });
                 }
             }
         }
         for r in refs {
+            // Explicit module resource names are required even when absent from the catalog.
+            if [".SH", ".PIC", ".11K", ".5K"]
+                .iter()
+                .any(|e| r.ends_with(e))
+                && !catalog.contains(&r)
+            {
+                // PTS is an unreviewed compiled module, not a BRF loadout.
+                // Its literal icon names can be absent in the retail catalog.
+                if name.ends_with(".PTS") {
+                    edges.insert(DependencyEdge {
+                        source: name.clone(),
+                        target: r,
+                        kind: "unresolved-module-candidate",
+                        available: false,
+                    });
+                    continue;
+                }
+                return Err(invalid(&format!(
+                    "{name} -> literal resource -> missing dependency {r}"
+                )));
+            }
             for candidate in [r.clone(), format!("{r}.PIC")] {
-                if catalog.contains(&candidate) && selected.insert(candidate.clone()) {
-                    pending.push(candidate);
+                if catalog.contains(&candidate) {
+                    edges.insert(DependencyEdge {
+                        source: name.clone(),
+                        target: candidate.clone(),
+                        kind: "literal-candidate",
+                        available: true,
+                    });
+                    if selected.insert(candidate.clone()) {
+                        pending.push(candidate);
+                    }
                 }
             }
+            if r.starts_with('~')
+                && !r.contains('.')
+                && !catalog.contains(&r)
+                && !catalog.contains(&format!("{r}.PIC"))
+            {
+                edges.insert(DependencyEdge {
+                    source: name.clone(),
+                    target: r,
+                    kind: "unresolved-art-candidate",
+                    available: false,
+                });
+            }
         }
-        if selected.len() > 4096 {
+        if selected.len() > 4096 || edges.len() > 32768 {
             return Err(invalid("aircraft dependency limit exceeded"));
         }
     }
-    Ok(selected)
+    let providers = selected
+        .iter()
+        .map(|name| {
+            (
+                name.clone(),
+                archives
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, a)| a.entries.contains_key(name).then_some(i))
+                    .collect(),
+            )
+        })
+        .collect();
+    Ok(DependencyReport {
+        resources: selected,
+        edges,
+        providers,
+    })
 }
 #[cfg(test)]
 mod tests {
@@ -656,6 +821,9 @@ mod dependency_tests {
     }
     fn resources() -> BTreeMap<String, Vec<u8>> {
         let mut resources = BTreeMap::new();
+        for &name in COMBAT_RESOURCES {
+            resources.insert(name.into(), vec![0]);
+        }
         for name in [
             "PALETTE.PAL",
             "WIN11.FNT",
@@ -672,6 +840,7 @@ mod dependency_tests {
                 format!("[brent's_relocatable_format]\nstring \"{sound}\"\nend\n").into_bytes(),
             );
             resources.insert(id.hud().into(), vec![0]);
+            resources.insert(id.pt().replace(".PT", ".PTS"), vec![0]);
             resources.insert(id.cockpit().into(), vec![0]);
             resources.insert(
                 format!("{}.SH", id.stem()),
@@ -709,5 +878,69 @@ mod dependency_tests {
         let a = archive(resources(), Some("RAF.SH"));
         assert!(dependencies(&[&a], &[AircraftId::Rafale], false).is_err());
         assert!(dependencies(&[&a], &[AircraftId::F18], false).is_ok());
+    }
+
+    #[test]
+    fn combat_roots_follow_textures_and_missing_art_fails() {
+        let mut r = resources();
+        r.insert("FIRE.SH".into(), b"FIREA.PIC\0".to_vec());
+        let missing = archive(r.clone(), None);
+        assert!(
+            dependency_report(&[&missing], &[], true)
+                .unwrap_err()
+                .to_string()
+                .contains("FIREA.PIC")
+        );
+        r.insert("FIREA.PIC".into(), vec![0]);
+        let a = archive(r, None);
+        let report = dependency_report(&[&a], &[], true).unwrap();
+        assert!(report.resources.contains("FIREA.PIC"));
+        assert!(
+            report
+                .edges
+                .iter()
+                .any(|e| e.source == "FIRE.SH" && e.target == "FIREA.PIC")
+        );
+    }
+
+    #[test]
+    fn cycles_and_override_dependencies_are_explicit() {
+        let mut r = resources();
+        r.insert(
+            "A.JT".into(),
+            b"[brent's_relocatable_format]\nstring \"B.JT\"\nsymbol _PROJProc\nend".to_vec(),
+        );
+        r.insert(
+            "B.JT".into(),
+            b"[brent's_relocatable_format]\nstring \"A.JT\"\nend".to_vec(),
+        );
+        let first = archive(r, None);
+        let second = archive(
+            BTreeMap::from([
+                ("FIRE.SH".into(), b"ALT.PIC\0".to_vec()),
+                ("ALT.PIC".into(), vec![0]),
+            ]),
+            None,
+        );
+        let report = dependency_report(&[&first, &second], &[], true).unwrap();
+        assert_eq!(report.providers["FIRE.SH"], vec![0, 1]);
+        assert!(report.resources.contains("ALT.PIC"));
+        assert!(
+            report
+                .edges
+                .iter()
+                .any(|e| e.kind == "native-symbol-unimplemented" && !e.available)
+        );
+    }
+    #[test]
+    fn compiled_pts_candidates_remain_explicit_without_inventing_missing_icons() {
+        let mut r = resources();
+        r.insert("F18.PTS".into(), b"MISSING.PIC\0".to_vec());
+        let a = archive(r, None);
+        let report = dependency_report(&[&a], &[AircraftId::F18], false).unwrap();
+        assert!(report.resources.contains("F18.PTS"));
+        assert!(report.edges.iter().any(|e| e.target == "MISSING.PIC"
+            && e.kind == "unresolved-module-candidate"
+            && !e.available));
     }
 }

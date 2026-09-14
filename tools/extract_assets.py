@@ -23,12 +23,13 @@ def main():
     parser.add_argument('--source', type=Path, default=repo / 'gameassets/fighters-anthology',
                         help='An archive or directory; default: local Fighters Anthology media')
     parser.add_argument('--out', type=Path, default=repo / '.local/extracted', help='Output directory outside source media')
-    parser.add_argument('--aircraft', choices=['f18', 'rafale'], help='Reviewed F/A-18D or Rafale C and its transitive aircraft, cockpit, sensor, store and audio dependencies')
+    parser.add_argument('--aircraft', action='append', choices=['f18', 'rafale'], help='Reviewed F/A-18D or Rafale C and its transitive aircraft, cockpit, sensor, store and audio dependencies')
     parser.add_argument('--validate-flight', action='store_true', help='After aircraft extraction, run the shared headless hybrid-flight acceptance suite')
     parser.add_argument('--native-flight', action='store_true', help='Static FA.EXE/FA.SMS research instead of archive extraction; no retail code execution')
+    parser.add_argument('--native-weapons', action='store_true', help='Static FA weapon, sensor, loading and effect code research; no retail execution')
     parser.add_argument('--music', action='store_true', help='Original PCM music and bounded FA situation scripts; no MIDI/synth')
     parser.add_argument('--wav-previews', action='store_true', help='With --music, also wrap recorded tracks as lossless local WAV previews')
-    parser.add_argument('--weapons', action='store_true', help='All projectile definitions and their available dependencies')
+    parser.add_argument('--weapons', action='store_true', help='All projectile, sensor, ECM and tank definitions plus reviewed shared combat dependencies')
     parser.add_argument('--theater', help='Defined theater code (e.g. UKR, TVIET), or all; includes shared sky/weather dependencies')
     parser.add_argument('--exclude-archive', action='append', default=[], help='Skip source-relative archive path glob; repeatable (e.g. disc1/LHX/*)')
     parser.add_argument('--include', action='append', default=[], help='Case-insensitive resource glob (* and ?); repeatable')
@@ -39,14 +40,17 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.max_entry_mib <= 1024:
         parser.error('--max-entry-mib must be 1..1024')
-    if args.validate_flight and (not args.aircraft or args.native_flight or args.list or args.dry_run or args.include):
+    if args.validate_flight and (not args.aircraft or args.native_flight or args.native_weapons or args.list or args.dry_run or args.include):
         parser.error('--validate-flight requires --aircraft and full extraction (no preview/include/native-flight)')
-    if args.native_flight:
+    if args.native_flight and args.native_weapons:
+        parser.error('select one native research domain')
+    if args.native_flight or args.native_weapons:
         if args.aircraft or args.weapons or args.music or args.wav_previews or args.theater or args.include or args.exclude_archive:
-            parser.error('--native-flight is a separate executable-research pass; omit archive selection flags')
+            parser.error('native research is a separate executable-research pass; omit archive selection flags')
         from extract_native_flight import extract
         try:
-            extract(args.source, args.out, overwrite=args.overwrite, preview=args.list or args.dry_run)
+            extract(args.source, args.out, overwrite=args.overwrite, preview=args.list or args.dry_run,
+                    domain='weapons' if args.native_weapons else 'flight')
         except (ValueError, OSError, subprocess.SubprocessError) as error:
             parser.exit(1, f'{error}\n')
         return 0
@@ -60,8 +64,8 @@ def main():
         parser.error('Output must be outside the source media directory')
     command = [cargo, 'run', '--release', '--locked', '-p', 'tore-extract', '--',
                '--source', str(source), '--out', str(output), '--max-entry-mib', str(args.max_entry_mib)]
-    if args.aircraft:
-        command.extend(['--aircraft', args.aircraft])
+    for aircraft in args.aircraft or []:
+        command.extend(['--aircraft', aircraft])
     if args.wav_previews and not args.music:
         parser.error('--wav-previews requires --music')
     if args.music:
@@ -100,12 +104,12 @@ def main():
         print(f'SHA-256 provenance added: {report_path}')
     if result.returncode == 0 and args.validate_flight:
         report = json.loads(report_path.read_text())
-        identity = {'f18': 'F18.PT', 'rafale': 'RAFALE.PT'}[args.aircraft]
+        identities = {{'f18': 'F18.PT', 'rafale': 'RAFALE.PT'}[aircraft] for aircraft in args.aircraft}
         profiles = []
         hashes = set()
         for entry in report['entries']:
             path = (output / entry['output']).resolve()
-            if path.name.upper() != identity or entry['status'] not in ('written', 'replaced', 'unchanged'):
+            if path.name.upper() not in identities or entry['status'] not in ('written', 'replaced', 'unchanged'):
                 continue
             if not path.is_relative_to(output):
                 parser.error('flight profile escapes extraction output')
