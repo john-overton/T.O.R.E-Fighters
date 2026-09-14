@@ -470,3 +470,73 @@ query producers (`0x4abab0`, `0x4ba8e0`), touchdown event dispatch, complete loa
 field/damage/equipment producers, scheduler and RNG call ordering, matrix overflow
 edge semantics, and full-trajectory acceptance. These helpers close arithmetic
 contracts; they do not establish complete contact-system or full-flight parity.
+
+## Fifth pass: query producers, reseeding and object dispatch
+
+This pass corrects the interpretation of the landing surface query. At
+`0x4ba8e0`, the engine scans a reverse-order inventory of 0x134-byte records,
+resolves each object's id at +0xe6, and requires type flag 0x8000. With the
+landing caller's null object and disabled optional filters, it first considers
+active objects passing `0x4747c0`; only if none exist does it retry without that
+preference. It temporarily sets query Y to the candidate's Y before measuring
+against candidate position +0xc8, then restores query Y. Thus `0x465000` in the
+landing classifier is an **approximate horizontal distance of 18,000 fixed8
+feet**, not a material id, friction coefficient or squared distance.
+
+`queries::landing_surface` translates selection with explicit resolved candidates.
+Strictly smaller distance wins; equal distance preserves the first candidate in
+reverse inventory order. `approximate_distance` follows `0x4c66cc`: unsigned
+absolute wrapped differences, largest + (other >> 2) + (other >> 2). It does not
+substitute Euclidean distance. Candidate production and `0x4747c0` are still
+external; these records must not be invented from theater map colors.
+
+Ground height `0x4abab0` has two paths:
+
+- In mode word 0x520a50 == 16, an object with deadline +0x27 strictly greater
+  than current ticks supplies cached height +0x2f, two angle words +0x2b/+0x2d
+  and a water result from byte +0x33 == 1. Unless request bit 2 is set, subtract
+  the signed type-derived word at +8 (resolved via `0x42e0c0`) shifted by 8.
+  The cache's producer/lifetime remains to be traced; mode 16 is not assumed
+  to mean carrier mode.
+- Otherwise it constructs a vertical segment at query X/Z from 30,000 to −100
+  fixed8 feet and calls collision dispatcher `0x42b800`. Base mask is 3, request
+  bit 2 adds 0x200, request bit 4 clears mask bit 2. An object with type flag
+  0x8000 or without instance flag 0x4000 also clears mask bit 2.
+  `queries::ground_query_mask` translates these gates. Terrain triangle tests,
+  object geometry and cache writes below the dispatcher remain unported.
+
+The touchdown `(4, 0x40)` call has a separate gate at `0x412a60`: global flag
+0x08000000, byte 0x4eb64a mask 0x01, a nonzero id at 0x520a1c, and equality with
+0x4eb64c. The downstream `0x499240` compares the requested code with current
+code 0x501538; a positive current state rejects a larger code, the same code
+ORs state with 0x10, otherwise it stores the new code and signed argument / 4.
+Do not describe this small event-state helper as carrier dynamics. Its consumer
+and the meaning of these global gates still require decoding.
+
+RNG and scheduling refinements:
+
+- `0x4561c0` reseeds with **negative absolute signed 16-bit input**, including
+  zero and −32768. Zero becomes seed one on the next draw. It does not eagerly
+  clear the shuffle array; the next draw rebuilds it. `NativeRng::reseed_word`
+  preserves this contract.
+- `0x4561a0` always takes a bound-100 draw and compares it against the signed
+  percentage. Even impossible/certain outcomes consume state. `chance` tests
+  enforce this distinction from the nonpositive-bound early return.
+- Four direct reseed calls exist in this build: 0x42084b, 0x42f2fd, 0x44d96b
+  and 0x48078b. The first three XOR a prior bound-65536 draw, the low word of
+  `0x4869a0`, and word 0x4ece3c. The fourth uses word 0x54e490. The latter's
+  upstream initialization and global RNG consumption order remain open.
+- Object service age is calculated during object load, then aircraft type 4
+  refreshes loaded fields via `0x452140`. Dispatcher `0x462a88` compares a due
+  **unsigned word** at cp+0x68 against the low word of current ticks >> 6.
+  This is not a wrapping-age comparison. It removes the queue head, clears
+  instance bit 2, calls `0x462e70` only when active bit 1 is set, and writes
+  last-service timestamp cp+0x66 after that call. `object_due` translates the
+  due predicate; the queue and its dispatcher are not replaced by a new runtime.
+
+Extraction now includes 52 reviewed regions and schema-2 per-region
+`entry_references` (direct calls/jumps to the entry only). Indirect calls and
+jumps into a region's interior are not a complete call graph. New components
+remain diagnostic. Next gates are collision dispatcher geometry/cache producers,
+object rescheduling and RNG seed producers, event consumers, loaded field
+semantics, then a complete state/update harness with native trajectory evidence.

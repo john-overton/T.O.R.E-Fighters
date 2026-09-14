@@ -167,3 +167,24 @@ terrain/carrier query production, touchdown event effects, remaining loaded
 field producers/semantics, seed and RNG consumption order, native scheduling,
 overflow edges and full-trajectory validation. Contact arithmetic is more complete;
 the complete contact system is not yet ported.
+
+## Fifth pass validation — 2026-09-13
+
+- macOS arm64: 110 Rust tests and 9 Python tests passed. Formatting, all-target
+  Clippy with warnings denied, workspace build and asset guards passed.
+- Static extraction to `.local/native-flight/queries-final` ran twice with
+  identical output accepted: 52 reviewed regions, 107 selected spans and 3,829
+  symbols. The reseed entry-reference index reports the four reviewed callers.
+- Synthetic tests cover preferred/fallback object lookup, horizontal approximate
+  distance, reverse-order ties, empty inventories, request/object query flags,
+  signed reseed extremes including zero and −32768, unconditional chance draw
+  consumption, and unsigned due-time comparisons across word wrap.
+- Python fixture verifies incoming entry references separately from outgoing
+  edges. Source media remains hash-gated; no imported code was executed.
+- Evidence: `.local/native-flight/queries-tests.log` and
+  `queries-final/reviewed-components.json`. Playable flight/rendering unchanged;
+  no GPU smoke repeated and no Linux/Windows host validation performed.
+
+This establishes additional helper contracts, not a complete terrain collision
+engine or native scheduled replay. Remaining work is listed in the fifth-pass
+format notes and progress checklist.

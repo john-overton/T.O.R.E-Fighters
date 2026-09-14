@@ -392,3 +392,15 @@ Evidence and component boundaries: [format research](formats/native-flight.md#se
 - [ ] Establish original scheduling, RNG seed/consumption order and full-tick trajectories before enabling a native flight adapter.
 
 Details and limitations: [native format research](formats/native-flight.md).
+
+### Native flight fifth research pass
+
+- [x] Decode landing surface lookup as preferred/fallback nearest eligible object selection, including reverse-order ties and approximate horizontal distance.
+- [x] Translate ground query-mask construction; identify cached-height and vertical collision-query branches.
+- [x] Trace touchdown event gate/state helper without claiming carrier dynamics parity.
+- [x] Translate signed-word RNG reseeding, unconditional percentage draws, and unsigned object-due comparisons.
+- [x] Add incoming entry references and nine reviewed routines to repeatable extraction (52 total).
+- [ ] Decode collision dispatcher geometry/cache production, remaining seed sources and queue rescheduling, and event consumers.
+- [ ] Connect remaining loaded-state producers and verify whole-tick trajectories before enabling native flight.
+
+See [fifth-pass findings](formats/native-flight.md) and [validation](baselines/native-flight.md).

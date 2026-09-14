@@ -54,11 +54,12 @@ class NativeResearchTests(unittest.TestCase):
             native.static_table(data, rows, 100, 2)
 
     def test_reviewed_regions_edges_and_bounds(self):
-        instructions = [(0x401000, '401000: call 0x402000')]
+        instructions = [(0x400fff, '400fff: call 0x401000'), (0x401000, '401000: call 0x402000')]
         regions = [('synthetic', 0x401000, 0x401001, 'test')]
         artifacts = native.reviewed_regions(pe(), native.sections(pe()), instructions, regions)
         manifest = json.loads(artifacts['reviewed-components.json'])
         self.assertFalse(manifest['complete_model'])
+        self.assertEqual(manifest['regions'][0]['entry_references'], [{'at': 0x400fff, 'kind': 'call'}])
         self.assertEqual(manifest['regions'][0]['edges'], [
             {'at': 0x401000, 'kind': 'call', 'target': 0x402000, 'outside_region': True}])
         with self.assertRaises(ValueError):

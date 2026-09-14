@@ -167,3 +167,8 @@ controls/equipment resolution, and RNG/frame/counter clocks. Reuse identical
 outputs safely; choose a fresh output directory when extending the research
 inventory, or explicitly request `--overwrite`. See the headless composition
 example in [DEVELOPMENT.md](DEVELOPMENT.md).
+
+Fifth-pass native output uses schema 2 in `reviewed-components.json`: each of
+52 regions includes `entry_references` listing direct incoming calls/jumps.
+This is a static reference index, not execution order or an indirect call graph.
+For reproducibility, use a new directory such as `.local/native-flight/queries-final`.

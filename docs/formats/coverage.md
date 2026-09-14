@@ -46,3 +46,8 @@ Native-flight fourth pass adds bounded 514-word atan table extraction and
 resolved equipment mass, loaded control bounds and clock/RNG helpers are diagnostic
 translations. Terrain/carrier query producers and whole-tick ordering remain open;
 see [native-flight.md](native-flight.md).
+
+Fifth-pass native research: 52 reviewed regions with incoming entry references;
+translated landing nearest-object selection/distance, ground query flags,
+signed-word RNG reseeding/chance and object-due comparison. Collision geometry,
+queue rescheduling, remaining state producers and whole-tick parity stay open.

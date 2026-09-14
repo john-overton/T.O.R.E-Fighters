@@ -16,6 +16,15 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('rng_chance', 0x4561a0, 0x4561b8, 'clock'),
+    ('rng_reseed', 0x4561c0, 0x4561d0, 'clock'),
+    ('object_service_age', 0x462930, 0x46295f, 'clock'),
+    ('object_due_dispatch', 0x462a7c, 0x462acc, 'clock'),
+    ('ground_query', 0x4abab0, 0x4abbe2, 'ground'),
+    ('nearest_surface', 0x4ba8e0, 0x4baa06, 'ground'),
+    ('approximate_distance', 0x4c66cc, 0x4c670e, 'ground'),
+    ('touchdown_event_gate', 0x412a60, 0x412a8f, 'ground'),
+    ('touchdown_event_state', 0x499240, 0x49927e, 'ground'),
     ('contact_predicate', 0x411910, 0x411942, 'ground'),
     ('contact_latch', 0x49fd40, 0x49fd61, 'ground'),
     ('contact_approach', 0x4119a0, 0x4119e8, 'ground'),
@@ -81,6 +90,12 @@ def reviewed_regions(exe, rows, instructions, regions=REVIEWED_REGIONS):
     """Explicit bounded slices. Caller must gate on BOTH reviewed source hashes."""
     addresses = [a for a, _ in instructions]
     artifacts, manifest = {}, []
+    incoming = {}
+    for address, line in instructions:
+        match = re.search(r'\b(call|j[a-z]+)\s+0x([0-9a-fA-F]+)', line)
+        if match:
+            incoming.setdefault(int(match[2], 16), []).append(
+                {'at': address, 'kind': match[1]})
     for name, start, end, component in regions:
         section = next((r for r in rows if r['executable'] and
                         r['va'] <= start < end <= r['va']+r['size']), None)
@@ -97,10 +112,10 @@ def reviewed_regions(exe, rows, instructions, regions=REVIEWED_REGIONS):
                               'outside_region': not start <= target < end})
         manifest.append({'name': name, 'component': component, 'va': start, 'end': end,
                          'sha256': hashlib.sha256(exe[raw:raw+end-start]).hexdigest(),
-                         'edges': edges})
+                         'edges': edges, 'entry_references': incoming.get(start, [])})
         artifacts[f'reviewed/{start:08x}-{name}.txt'] = '\n'.join(l for _, l in lines)+'\n'
     artifacts['reviewed-components.json'] = json.dumps({
-        'schema_version': 1, 'complete_model': False,
+        'schema_version': 2, 'complete_model': False,
         'method': 'manual static boundaries; direct edges only, no native execution',
         'regions': manifest,
         'instance_state': [{'name': n, 'va': va, 'cp_offset': va-0x50ce80, 'width': w}

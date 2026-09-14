@@ -158,3 +158,39 @@ mod tests {
         assert_eq!(total, 256);
     }
 }
+
+impl NativeRng {
+    /// FA 0x4561c0: signed WORD -> negative absolute seed. Zero is legal here;
+    /// the next draw initializes it as one. Shuffle state is rebuilt on demand.
+    pub fn reseed_word(&mut self, seed: i16) {
+        self.seed = -(seed as i32).abs();
+    }
+    /// FA 0x4561a0 always consumes a bound-100 draw, even at 0 or 100 percent.
+    pub fn chance(&mut self, percent: i16) -> Result<bool> {
+        Ok((self.below(100)? as i16) < percent)
+    }
+}
+/// FA 0x462a88: unsigned WORD due-time comparison, not wrapping age comparison.
+pub fn object_due(due_quarter: u16, current_ticks: i32) -> bool {
+    due_quarter <= ((current_ticks >> 6) as u16)
+}
+#[cfg(test)]
+mod wrapper_tests {
+    use super::*;
+    #[test]
+    fn reseed_word_extremes_and_unconditional_chance_draw() {
+        let mut r = NativeRng::seeded(1).unwrap();
+        let mut expected = r.clone();
+        assert!(!r.chance(0).unwrap());
+        expected.below(100).unwrap();
+        assert_eq!(r, expected);
+        for seed in [0, 1, -1, i16::MIN, i16::MAX] {
+            r.reseed_word(seed);
+            let mut reference = NativeRng::seeded((seed as i32).abs().max(1)).unwrap();
+            assert_eq!(r.below(65536).unwrap(), reference.below(65536).unwrap());
+        }
+        assert!(object_due(10, 640));
+        assert!(!object_due(11, 640));
+        assert!(!object_due(65535, 1 << 22));
+    }
+}

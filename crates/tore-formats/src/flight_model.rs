@@ -7,6 +7,7 @@ pub mod ground;
 pub mod integration;
 pub mod loading;
 pub mod profile;
+pub mod queries;
 pub mod rotation;
 use crate::{Result, aircraft::Envelope, invalid};
 fn divide(n: i64, d: i32) -> Result<i32> {
