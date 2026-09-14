@@ -4,6 +4,28 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 
 **Current scope:** Choose Activity now leads to a Quick Mission Creator mock and a Ukraine free-camera viewer. Original T2 heights, texture placements, briefing map and a fixed weather-palette/sky preview are implemented in Rust. The remaining menu system, full environment fidelity, aircraft and flight simulation remain open. See [theater recovery](formats/theater.md) and [viewer baseline](baselines/ukraine-viewer.md).
 
+## Two-aircraft live-fire pass — 2026-09-14
+
+- [x] Resolve exact ported identities from registry, models and assets: F/A-18D
+  (F18.PT) and Rafale C (RAFALE.PT), with their own PT weapon slots.
+- [x] Preserve/commit the preceding exporter/components work; implement a separate
+  connected development combat adapter using source values and documented approximations.
+- [x] Wire held trigger/release, source ammo debit, gun/missile spawning, partial
+  sensor acquisition/guidance, swept contacts, source HP/damage and destruction.
+- [x] Add explicit PT-default range targets, payload release, live ammo/target/radar
+  readouts, original target/missile geometry, explosion-sheet art and PCM events.
+- [x] Keep ordinary free flight externally clean; cancel firing across pause/menu,
+  focus, resize, selection/restart and release. Do not add unported aircraft.
+- [x] Pass both imported end-to-end suites (all 10 weapon slots), 198 Rust tests,
+  14 Python tests, full lint/build/asset checks and Linux GPU/capture validation.
+- [x] Fix expanded-cache reload bounds; record short active CPU frame-time evidence.
+- [ ] Recover full native guidance, collision, damage, effects and scheduler contracts;
+  add carried-store/rack rendering, source-specific drag, countermeasures and hostile AI.
+- [ ] Obtain matched original-game evidence before claiming W3–W5 or 1:1 parity.
+
+[Capabilities, exact loadouts, captures, approximations and validation](baselines/live-fire.md).
+Remaining menu screens are still deferred.
+
 ## Aircraft weapons research and initial implementation — 2026-09-14
 
 - [x] Audit FA archives, native EXE/SMS and the shared exporter against reference

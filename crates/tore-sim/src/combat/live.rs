@@ -30,6 +30,30 @@ pub struct Configuration {
     pub radar: tore_formats::weapons::Seeker,
 }
 impl Configuration {
+    fn validate(&self) -> Result<()> {
+        if self.stations.is_empty()
+            || self.stations.len() > 32
+            || self.hit_points <= 0
+            || self.external_equipment_lbs < 0
+        {
+            return Err(super::invalid("invalid live configuration bounds"));
+        }
+        for s in &self.stations {
+            let m = &s.weapon.movement;
+            if s.count == 0
+                || s.count >= 32767
+                || s.mount.iter().any(|v| !v.is_finite())
+                || m.minimum_speed < 0
+                || m.maximum_speed < m.minimum_speed
+                || !(0..=i32::MAX / 256).contains(&m.acceleration)
+                || !(0..=i32::MAX / 256).contains(&m.deceleration)
+                || s.weapon.burst.actual_rounds_per_game == 0
+            {
+                return Err(super::invalid("invalid live station bounds"));
+            }
+        }
+        Ok(())
+    }
     pub fn from_source(
         a: &Aircraft,
         mut read: impl FnMut(&str) -> Result<Vec<u8>>,
@@ -162,7 +186,7 @@ pub enum Event {
 }
 #[derive(Clone, Debug)]
 pub struct State {
-    pub config: Configuration,
+    config: Configuration,
     pub ammo: Vec<u16>,
     pub selected: usize,
     pub designated: Option<u32>,
@@ -186,14 +210,18 @@ pub struct Launcher {
     pub alive: bool,
 }
 impl State {
-    pub fn new(config: Configuration, external: bool) -> Self {
+    pub fn configuration(&self) -> &Configuration {
+        &self.config
+    }
+    pub fn new(config: Configuration, external: bool) -> Result<Self> {
+        config.validate()?;
         let ammo = config
             .stations
             .iter()
             .map(|s| if s.internal || external { s.count } else { 0 })
             .collect();
         let triggers = vec![PlayerTrigger::default(); config.stations.len()];
-        Self {
+        Ok(Self {
             external,
             config,
             ammo,
@@ -208,7 +236,7 @@ impl State {
             tick: 0,
             service_remainder: 0,
             triggers,
-        }
+        })
     }
     pub fn release(&mut self) {
         for t in &mut self.triggers {
@@ -274,6 +302,9 @@ impl State {
     }
     pub fn can_lock(&self, launcher: Launcher) -> bool {
         let w = &self.config.stations[self.selected].weapon;
+        if w.seeker.signature == 0 {
+            return false;
+        }
         self.designated
             .and_then(|id| self.targets.iter().find(|t| t.id == id && t.hp > 0))
             .is_some_and(|t| {
@@ -668,6 +699,7 @@ mod tests {
             },
             true,
         )
+        .unwrap()
     }
     fn launcher() -> Launcher {
         Launcher {

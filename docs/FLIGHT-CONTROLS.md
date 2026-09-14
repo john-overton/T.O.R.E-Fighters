@@ -14,7 +14,7 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | 1…9 / 0 | 10…90% / full throttle | Development mapping |
 | Shift-B / E | Afterburner / engine toggle | Development mapping; afterburner requires engine and >95% throttle |
 | G / F / B / H | Gear / flaps / airbrake / hook | Adapter controls; full FA keyboard table still needs verification |
-| R / J | Radar / jammer | Existing system toggles; no radar detection or ECM threat simulation |
+| R / J | Radar / jammer | Radar now gates live-range contacts/locks; ECM threat simulation remains open |
 | F1 | Forward cockpit view; reset pan/zoom | FA `FMENUD.MNU` |
 | F2 / F3 | Look back / up | FA menu; authored angles, forward artwork projects out of view naturally |
 | F10 | External chase view | FA menu; authored camera placement |
@@ -57,7 +57,7 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized. This is
 | F5 / F6 / F7 / F8 | Player-to-missile / wingman / target; target-to-player cameras |
 | F9 / F12 | Fly-by / missile camera |
 | Ctrl + view key / Alt + view key | Missile-relative / target-relative camera |
-| T / Shift-T, Enter / apostrophe | Target cycling and designation |
+| Shift-T | Reverse target cycling (T / Enter now designate in live range) |
 | W / Shift-W, N, A | Waypoint selection, navigation/weapons mode, autopilot |
 | I / M / Y | IR sensor, HARM seeker, radar history |
 | V | Set Other View camera |
@@ -66,7 +66,12 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized. This is
 | Alt-1…9 | Wingman straight/level, break and approach directions |
 | Alt-B/C/T/H/V/E/W/R/P/D | Wingman return, scope/formation/spacing, engagement, protection and disengagement |
 
-Space is the development fire binding and currently reports unavailable; actual weapon release and the complete FA weapon/countermeasure key table remain future work. Imported weapons/ECM inventory is not an implemented combat simulation. USNF manual bindings are reference evidence pending FA-specific verification; FA menu labels take precedence.
+Space now holds the selected player trigger. Semicolon selects the next PT weapon
+slot; T or Enter designates an actual range target. `--live-fire` enables the
+explicit PT-default test range; backslash resets its target at a suitable range
+for the selected weapon. Ordinary free flight loads only the internal gun.
+The complete native weapon/countermeasure dispatch remains unverified.
+[Live-fire scope and approximations](baselines/live-fire.md). USNF manual bindings are reference evidence pending FA-specific verification; FA menu labels take precedence.
 
 ## In-flight menu
 
@@ -176,7 +181,7 @@ Enable rumble through **Escape → Control → Rumble: On → Save & apply**. Ac
 afterburner engagement produces a subtle impulse followed by a quiet continuous
 low-frequency rumble while it remains active. The switch alone below the model's activation
 threshold does not. Event feedback designs and future weapon/turbulence hooks
-are listed in [INPUT.md](INPUT.md); unavailable fire controls remain unavailable.
+are listed in [INPUT.md](INPUT.md); successful gun/missile events now drive the corresponding rumble cues in the live-fire adapter.
 
 The flight **Control** tab now opens the authored binding editor rather than the
 retail device-selection stub. Instrument page sets/layout, scope controls, zoom,

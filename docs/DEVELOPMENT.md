@@ -357,5 +357,9 @@ reviewed aircraft and the armament catalog. Exclude unrelated demo archives as
 shown in [extraction instructions](EXTRACTION.md#fa-18d-and-weapons).
 `--native-weapons` performs the separate hash-gated static code pass.
 `cargo run --locked -p tore-sim --example weapon_probe -- PATH.JT` exercises
-recovered scalar components from an extracted definition. These commands do not
-enable combat or prove native lifecycle parity. [Evidence and remaining gates](baselines/combat-components.md).
+recovered scalar components from an extracted definition. These research commands do not
+prove native lifecycle parity. The separate `--live-fire --aircraft f18|rafale`
+app mode runs the development range. `--combat-smoke --aircraft f18|rafale` runs
+its imported end-to-end suite headlessly; use one literal identity per invocation.
+`--combat-probe-ticks N` with `--capture-flight PATH` captures a scripted live pass.
+[Live-fire controls and validation](baselines/live-fire.md). [Evidence and remaining gates](baselines/combat-components.md).

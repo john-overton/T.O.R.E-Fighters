@@ -5,6 +5,7 @@ fn bytes(values: &[f32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 pub struct SimRenderer {
+    battle: Option<(wgpu::Buffer, u32)>,
     pipeline: wgpu::RenderPipeline,
     aircraft: Option<(wgpu::BindGroup, wgpu::Buffer, u32)>,
     bind: wgpu::BindGroup,
@@ -172,6 +173,7 @@ impl SimRenderer {
             usage: wgpu::BufferUsages::VERTEX,
         });
         Self {
+            battle: None,
             pipeline,
             aircraft: None,
             sky_pipeline,
@@ -182,6 +184,26 @@ impl SimRenderer {
             spare_depth: None,
             depth: Self::depth(device, width, height),
             size: [width, height],
+        }
+    }
+    pub fn combat(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
+        if self.battle.is_none() {
+            self.battle = Some((
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Bounded combat geometry"),
+                    size: 8 * 1024 * 1024,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                0,
+            ));
+        }
+        if let Some((buffer, count)) = &mut self.battle {
+            let length = vertices.len().min((8 * 1024 * 1024 / 4 / 27) * 27);
+            if length > 0 {
+                queue.write_buffer(buffer, 0, &bytes(&vertices[..length]));
+            }
+            *count = (length / 9) as u32;
         }
     }
     pub fn clear_aircraft(&mut self) {
@@ -384,6 +406,10 @@ impl SimRenderer {
             pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, vertices.slice(..));
             pass.draw(0..*count, 0..1);
+            if let Some((buffer, count)) = &self.battle {
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..*count, 0..1);
+            }
         }
     }
 }

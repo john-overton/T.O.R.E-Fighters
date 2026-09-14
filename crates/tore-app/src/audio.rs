@@ -135,6 +135,23 @@ impl Audio {
             clips,
         })
     }
+    pub fn combat(&self, names: &[&str]) {
+        if let Ok(mut mixer) = self.mixer.lock()
+            && mixer.effects_on
+            && !mixer.flight_paused
+        {
+            for name in names {
+                if mixer.voices.len() < 8
+                    && let Some(clip) = self.clips.get(*name)
+                {
+                    mixer.voices.push(Voice {
+                        clip: clip.clone(),
+                        position: 0.,
+                    });
+                }
+            }
+        }
+    }
     pub fn controls(&self, before: &crate::flight::State, after: &crate::flight::State) {
         if let Ok(mut m) = self.mixer.lock()
             && m.effects_on

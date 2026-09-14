@@ -90,3 +90,11 @@ generated effects and native callbacks remain open; preservation is not decoding
 The headless combat module implements isolated native movement, trigger/ammunition,
 loading and sensor gates. Complete firing/guidance/damage/rendering remain open.
 [Implementation and acceptance evidence](../baselines/combat-components.md).
+
+## Connected development combat
+
+The two reviewed aircraft now use their actual PT/JT stations in `--live-fire`:
+trigger/ammo/spawn, source movement helpers, approximate guidance/contacts/damage,
+live instrument readouts, static missile geometry and sampled original explosion
+art. The corresponding native lifecycle/SH VM/sensor parity cells remain partial.
+[Validation and limits](../baselines/live-fire.md).

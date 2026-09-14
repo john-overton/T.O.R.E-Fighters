@@ -6,6 +6,9 @@ use tore_input::Switch;
 #[derive(Debug, PartialEq)]
 pub enum Command {
     None,
+    NextWeapon,
+    Target,
+    RangeReset,
     Click,
     End,
     Exit,
@@ -388,14 +391,16 @@ impl FlightUi {
                 Command::None
             }
             "a" => self.unavailable("Autopilot"),
-            "t" => self.unavailable("Next target"),
+            "t" => Command::Target,
+            ";" => Command::NextWeapon,
+            "\\" => Command::RangeReset,
             "w" => self.unavailable("Next waypoint"),
             "n" => self.unavailable("Navigation / weapons mode"),
             "i" => self.unavailable("IR sensor"),
             "m" => self.unavailable("HARM seeker"),
             "y" => self.unavailable("Radar history"),
-            "Enter" | "'" => self.unavailable("Designate target"),
-            "Space" => self.unavailable("Fire weapon"),
+            "Enter" | "'" => Command::Target,
+            "Space" => Command::None,
             "v" => self.unavailable("Store Other View camera"),
             _ => Command::None,
         }

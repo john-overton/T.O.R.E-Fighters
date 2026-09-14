@@ -1,6 +1,7 @@
 # Combat exporter and component baseline
 
-Date: 2026-09-14. Plan commit `457c85b` was pushed to `origin/main` before this
+Date: 2026-09-14. Subsequent [live-fire work](live-fire.md) supersedes the
+no-live-weapons status below and fixes the expanded-cache reload cap. Plan commit `457c85b` was pushed to `origin/main` before this
 implementation. This records partial W0/W1/W2 work, not completion of the
 [weapons plan](../formats/weapons.md) or vanilla combat acceptance.
 

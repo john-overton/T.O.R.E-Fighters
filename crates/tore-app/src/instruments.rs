@@ -118,7 +118,17 @@ impl Layout {
         }
     }
 }
+#[derive(Default)]
+pub struct CombatReadout {
+    pub weapon: String,
+    pub guided: bool,
+    pub ammo: u16,
+    pub loaded: bool,
+    pub target: Option<(u32, i32, bool)>,
+    pub contacts: Vec<(f64, f64)>,
+}
 pub struct Instruments {
+    pub combat: Option<CombatReadout>,
     pub pages: Vec<u8>,
     pub selected: usize,
     pub layout: Layout,
@@ -132,6 +142,7 @@ pub struct Instruments {
 impl Default for Instruments {
     fn default() -> Self {
         Self {
+            combat: None,
             pages: vec![7, 5, 9, 4],
             selected: 0,
             layout: Layout::Large,
@@ -331,8 +342,8 @@ impl Instruments {
                 r.line((20, 91), (138, 91), GREEN);
                 text(&mut r, "FUEL", 20, 101);
                 text(&mut r, &format!("{:.0} LBS", s.fuel), 76, 101);
-                text(&mut r, "(+ EXT", 20, 115);
-                text(&mut r, "0 LBS)", 94, 115);
+                text(&mut r, "STORES", 20, 115);
+                text(&mut r, &format!("{:.0} LBS", s.payload_lbs), 76, 115);
             }
             5 => {
                 r.line((13, 76), (147, 76), DIM);
@@ -377,34 +388,24 @@ impl Instruments {
                 }
             }
             8 => {
-                text(&mut r, h.profile.id.gun().trim_end_matches(".JT"), 20, 35);
-                text(
-                    &mut r,
-                    &format!(
-                        "{} RDS",
-                        h.profile
-                            .hardpoints
-                            .iter()
-                            .find(|p| p.store.as_deref() == Some(h.profile.id.gun()))
-                            .map_or(0, |p| p.count)
-                    ),
-                    94,
-                    35,
-                );
-                text(&mut r, "EXTERNAL: CLEAN", 20, 56);
-                text(&mut r, "WEAPONS SAFE", 20, 77);
-                text(
-                    &mut r,
-                    &format!("{:.0} CHAFF", h.equipment["F18.ECM"].number("chaffLoaded")),
-                    20,
-                    101,
-                );
-                text(
-                    &mut r,
-                    &format!("{:.0} FLARE", h.equipment["F18.ECM"].number("flaresLoaded")),
-                    20,
-                    117,
-                );
+                if let Some(c) = &self.combat {
+                    text(&mut r, &c.weapon, 20, 35);
+                    text(&mut r, &format!("{} RDS", c.ammo), 94, 35);
+                    text(
+                        &mut r,
+                        if c.loaded {
+                            "PT STORES LOADED"
+                        } else {
+                            "EXTERNAL: CLEAN"
+                        },
+                        20,
+                        56,
+                    );
+                    text(&mut r, "PLAYER LIVE FIRE", 20, 77);
+                    text(&mut r, "CM NOT ACTIVE", 20, 110);
+                } else {
+                    text(&mut r, "WEAPONS SAFE", 20, 35);
+                }
             }
             6 => {
                 text(&mut r, "HDG", 20, 35);
@@ -438,7 +439,26 @@ impl Instruments {
                 text(&mut r, "FT / FT/SEC", 20, 25);
             }
             4 => {
-                text(&mut r, "NO TARGET", 48, 73);
+                if let Some((id, hp, locked)) = self.combat.as_ref().and_then(|c| c.target) {
+                    text(&mut r, &format!("TARGET {id}"), 30, 42);
+                    text(&mut r, &format!("HP {hp}"), 30, 62);
+                    text(
+                        &mut r,
+                        if hp == 0 {
+                            "DESTROYED"
+                        } else if self.combat.as_ref().is_some_and(|c| !c.guided) {
+                            "VISUAL"
+                        } else if locked {
+                            "LOCK"
+                        } else {
+                            "NO LOCK"
+                        },
+                        30,
+                        82,
+                    );
+                } else {
+                    text(&mut r, "NO TARGET", 48, 73);
+                }
             }
             2 | 3 => {
                 if let Some(pixels) = self.cameras.get(&id) {
@@ -459,6 +479,19 @@ impl Instruments {
                 }
             }
             _ => {}
+        }
+        if id == 9
+            && s.radar
+            && let Some(c) = &self.combat
+        {
+            let range = [10., 20., 40., 80., 160.][self.radar_range] * 6076.;
+            for &(bearing, distance) in &c.contacts {
+                if distance <= range && bearing.abs() <= std::f64::consts::FRAC_PI_2 {
+                    let x = 80 + (bearing.sin() * 55.) as i32;
+                    let y = 130 - (distance / range * 90.) as i32;
+                    r.rect(x - 2, y - 2, 5, 5, GREEN);
+                }
+            }
         }
         r
     }

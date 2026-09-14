@@ -4,6 +4,7 @@ mod assets;
 mod attitude;
 mod audio;
 mod cockpit_renderer;
+mod combat;
 mod controls_editor;
 mod flight;
 mod flight_canvas;
@@ -55,6 +56,7 @@ struct App {
     input_recording: Option<std::io::BufWriter<std::fs::File>>,
     recorded_ticks: u64,
     performance: performance::Performance,
+    combat: combat::Combat,
     hornet: aircraft::Airframe,
     flight: flight::State,
     researched_flight: bool,
@@ -244,11 +246,35 @@ impl App {
             Command::End => Action::Back,
             Command::Exit => Action::Exit,
             Command::Restart => Action::FreeFlight,
+            Command::NextWeapon => {
+                self.combat.cancel();
+                self.combat.state.select_next();
+                self.flight_ui.message(self.combat.status(&self.flight));
+                Action::None
+            }
+            Command::Target => {
+                self.combat.state.designate_next();
+                self.flight_ui.message(self.combat.status(&self.flight));
+                Action::None
+            }
+            Command::RangeReset => {
+                if self.combat.range {
+                    self.combat
+                        .state
+                        .range_target(combat::launcher(&self.flight));
+                    self.flight_ui.message("Range target reset; T designates");
+                } else {
+                    self.flight_ui
+                        .message("Target reset is available only with --live-fire");
+                }
+                Action::None
+            }
             Command::Effects(on) => Action::Effects(on),
             Command::ControlsOpen => {
                 self.flight_ui.menu = true;
                 self.input.context(true, self.focused);
                 self.camera.keys.clear();
+                self.combat.cancel();
                 self.flight_clock.remainder = 0.;
                 self.flight_ui.controls_editor = Some(controls_editor::Editor::new(
                     self.input.settings_profile(),
@@ -385,6 +411,22 @@ impl App {
                             }
                             self.hornet = aircraft;
                             self.flight = self.hornet.start(&self.world);
+                            match combat::Combat::new(
+                                &self.hornet,
+                                &self.theater_resources,
+                                self.combat.range,
+                            )
+                            .and_then(|mut c| {
+                                c.reset(&mut self.flight)?;
+                                Ok(c)
+                            }) {
+                                Ok(c) => self.combat = c,
+                                Err(e) => {
+                                    self.error = Some(e);
+                                    event_loop.exit();
+                                    return;
+                                }
+                            }
                             self.previous_flight = self.flight.clone();
                             self.instruments.cameras.clear();
                             self.instruments.pressed = None;
@@ -417,6 +459,11 @@ impl App {
                     event_loop.exit();
                     return;
                 }
+                if let Err(e) = self.combat.reset(&mut self.flight) {
+                    self.error = Some(e);
+                    event_loop.exit();
+                    return;
+                }
                 self.previous_flight = self.flight.clone();
                 self.flight_clock.remainder = 0.;
                 self.flight_view = 0;
@@ -434,10 +481,14 @@ impl App {
                 self.flight_ui.effects = self.menu.state.effects;
                 self.screen = Screen::Flight;
                 self.camera.keys.clear();
+                self.combat.cancel();
                 self.quick.cancel();
                 self.frame_time = Instant::now();
             }
             Action::Back => {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.combat(&[]);
+                }
                 if self.recorded_ticks > 0 {
                     self.finish_recording();
                 }
@@ -448,6 +499,7 @@ impl App {
                     Screen::Main
                 };
                 self.camera.keys.clear();
+                self.combat.cancel();
                 self.quick.cancel();
             }
             _ => {}
@@ -551,6 +603,7 @@ impl ApplicationHandler for App {
                 self.flight_ui.cancel_press();
                 self.pointer = None;
                 self.camera.keys.clear();
+                self.combat.cancel();
                 self.modifiers = ModifiersState::empty();
                 Action::None
             }
@@ -587,6 +640,7 @@ impl ApplicationHandler for App {
                 self.flight_ui.cancel_press();
                 self.pointer = None;
                 self.camera.keys.clear();
+                self.combat.cancel();
                 self.modifiers = ModifiersState::empty();
                 Action::None
             }
@@ -603,6 +657,7 @@ impl ApplicationHandler for App {
                         state == ElementState::Pressed,
                     );
                     self.camera.keys.clear();
+                    self.combat.cancel();
                     self.frame_time = Instant::now();
                     self.flight_command(command)
                 } else if self.screen == Screen::Flight {
@@ -635,6 +690,9 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::ModifiersChanged(modifiers) => {
+                if !modifiers.state().is_empty() {
+                    self.combat.cancel();
+                }
                 if self.screen == Screen::Flight {
                     look::modifiers_changed(&mut self.camera.keys, modifiers.state());
                 }
@@ -674,6 +732,18 @@ impl ApplicationHandler for App {
                 {
                     return;
                 }
+                if self.screen == Screen::Flight && name == "Space" {
+                    let blocked =
+                        self.flight_ui.frozen() || !self.focused || !self.modifiers.is_empty();
+                    self.combat.input.space(
+                        event.state == ElementState::Pressed,
+                        event.repeat,
+                        blocked,
+                    );
+                    if !self.flight_ui.menu {
+                        return;
+                    }
+                }
                 if matches!(self.screen, Screen::Viewer | Screen::Flight)
                     && event.state == ElementState::Released
                 {
@@ -703,6 +773,7 @@ impl ApplicationHandler for App {
                     };
                     if self.flight_ui.frozen() || before != self.flight_ui.frozen() {
                         self.camera.keys.clear();
+                        self.combat.cancel();
                         self.instruments.pressed = None;
                         self.flight_clock.remainder = 0.;
                         self.previous_flight.clone_from(&self.flight);
@@ -783,6 +854,49 @@ impl ApplicationHandler for App {
                             if let Some(audio) = &self.audio {
                                 audio.controls(&self.previous_flight, &self.flight);
                             }
+                            let events = match self.combat.step(&mut self.flight, &self.world) {
+                                Ok(events) => events,
+                                Err(e) => {
+                                    self.error = Some(e);
+                                    event_loop.exit();
+                                    return;
+                                }
+                            };
+                            let mut sounds = std::collections::BTreeSet::new();
+                            for event in &events {
+                                use tore_sim::combat::live::Event;
+                                match event {
+                                    Event::Fired(i) => {
+                                        if let Some(name) =
+                                            self.combat.state.configuration().stations[*i]
+                                                .weapon
+                                                .fire_sound
+                                                .as_deref()
+                                        {
+                                            sounds.insert(name);
+                                        }
+                                        self.input.feedback(
+                                            if self.combat.state.configuration().stations[*i]
+                                                .internal
+                                            {
+                                                tore_input::FeedbackEvent::GunFired
+                                            } else {
+                                                tore_input::FeedbackEvent::MissileLaunched
+                                            },
+                                        );
+                                    }
+                                    Event::Hit(_) | Event::Ground => {
+                                        sounds.insert("&EXPL3.5K");
+                                    }
+                                    Event::Destroyed(_) => {
+                                        sounds.insert("&EXPL12.5K");
+                                    }
+                                }
+                            }
+                            if let Some(audio) = &self.audio {
+                                audio.combat(&sounds.into_iter().collect::<Vec<_>>());
+                            }
+
                             if self.flight.crashed && !self.previous_flight.crashed {
                                 self.input.feedback(tore_input::FeedbackEvent::Crash);
                             }
@@ -839,6 +953,11 @@ impl ApplicationHandler for App {
                                 return;
                             }
                         }
+                        renderer.combat(&self.combat.vertices(
+                            &self.hornet,
+                            &presented,
+                            &self.camera,
+                        ));
                         if now.duration_since(self.instrument_time).as_millis() >= 100
                             || self.smoke_test
                         {
@@ -885,6 +1004,7 @@ impl ApplicationHandler for App {
                             &self.camera,
                         );
                         simulation_ms = frame_start.elapsed().as_secs_f64() * 1000.;
+                        self.instruments.combat = Some(self.combat.readout(&self.flight));
                         self.flight_canvas.begin(
                             renderer.flight_size(),
                             &self.hornet,
@@ -914,6 +1034,27 @@ impl ApplicationHandler for App {
                             &self.menu.pixels,
                         );
                         self.menu.pixels.fill(0);
+                        if !self.flight_ui.menu {
+                            let mut paint = hud::Paint {
+                                pixels: &mut self.menu.pixels,
+                                clip: (0, 0, 640, 480),
+                                color: [80, 255, 100, 255],
+                            };
+                            paint.text(
+                                &self.hornet.font,
+                                &self.combat.status(&self.flight),
+                                175,
+                                370,
+                            );
+                            if self.combat.range {
+                                paint.text(
+                                    &self.hornet.font,
+                                    "LIVE RANGE  SPACE FIRE  ; WEAPON  T TARGET",
+                                    175,
+                                    385,
+                                );
+                            }
+                        }
                         self.flight_ui.draw(
                             &mut self.menu.pixels,
                             &self.hornet.font,
@@ -1066,6 +1207,7 @@ impl ApplicationHandler for App {
                 self.flight_ui
                     .message("Active controller disconnected; resume explicitly");
                 self.camera.keys.clear();
+                self.combat.cancel();
                 self.input.context(true, self.focused);
                 self.flight_clock.remainder = 0.;
                 self.frame_time = Instant::now();
@@ -1079,6 +1221,7 @@ impl ApplicationHandler for App {
                     self.action(event_loop, result);
                     if was_frozen != self.flight_ui.frozen() {
                         self.camera.keys.clear();
+                        self.combat.cancel();
                         self.flight_clock.remainder = 0.;
                         self.previous_flight.clone_from(&self.flight);
                         self.frame_time = Instant::now();
@@ -1105,6 +1248,10 @@ impl ApplicationHandler for App {
 }
 fn main() -> AppResult<()> {
     let mut args = std::env::args().skip(1);
+    let mut live_fire = false;
+    let mut combat_smoke = false;
+    let mut combat_probe = None;
+    let mut weapon_slot = 1usize;
     let mut input_profile = None;
     let mut native_input = true;
     let mut record_input = None;
@@ -1149,6 +1296,31 @@ fn main() -> AppResult<()> {
                 replay_input = Some(PathBuf::from(
                     args.next().ok_or("--replay-input needs a tape path")?,
                 ))
+            }
+            "--live-fire" => {
+                live_fire = true;
+                initial_screen = Screen::Flight;
+            }
+            "--combat-smoke" => {
+                combat_smoke = true;
+            }
+            "--weapon-slot" => {
+                weapon_slot = args
+                    .next()
+                    .ok_or("--weapon-slot requires a 1-based PT weapon slot")?
+                    .parse()?;
+            }
+            "--combat-probe-ticks" => {
+                let ticks: usize = args
+                    .next()
+                    .ok_or("--combat-probe-ticks requires 1..7200")?
+                    .parse()?;
+                if !(1..=7200).contains(&ticks) {
+                    return Err("combat probe tick limit exceeded".into());
+                }
+                combat_probe = Some(ticks);
+                live_fire = true;
+                initial_screen = Screen::Flight;
             }
             "--input-profile" => {
                 input_profile = Some(PathBuf::from(
@@ -1362,6 +1534,9 @@ fn main() -> AppResult<()> {
             "--import-only" => import_only = true,
             "--help" | "-h" => {
                 println!(
+                    "Combat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-smoke runs the imported end-to-end suite headlessly. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight. Guidance/contact/damage coupling is a development approximation, not native parity."
+                );
+                println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
                 );
                 println!(
@@ -1436,6 +1611,12 @@ fn main() -> AppResult<()> {
         return Ok(());
     }
     let hornet = aircraft::Airframe::load(&assets.theater_resources, aircraft_id)?;
+    if combat_smoke {
+        return combat::smoke(&hornet, &assets.theater_resources);
+    }
+    if live_fire && record_input.is_some() {
+        return Err("combat recording is not in the flight-only tape format".into());
+    }
     if native_flight_report {
         flight::native_report(&hornet.profile)?;
         if let Some(path) = native_flight_trig {
@@ -1659,6 +1840,35 @@ fn main() -> AppResult<()> {
         flight.rudder = v[2];
     }
 
+    let mut combat = combat::Combat::new(&hornet, &theater_resources, live_fire)?;
+    combat.reset(&mut flight)?;
+    if weapon_slot == 0 || weapon_slot > combat.state.ammo.len() {
+        return Err("weapon slot outside this aircraft's PT loadout".into());
+    }
+    combat.state.selected = weapon_slot - 1;
+    if live_fire {
+        combat.state.range_target(combat::launcher(&flight));
+    }
+    if let Some(ticks) = combat_probe {
+        combat.state.designate_next();
+        combat.input.space(true, false, false);
+        for _ in 0..ticks {
+            flight.step(&flight::PilotInput::default(), |x, z| {
+                f64::from(world.height(x as f32, z as f32))
+            });
+            combat.step(&mut flight, &world)?;
+        }
+        combat.cancel();
+        println!(
+            "Combat probe: {} shots={} hits={} kills={} active={} ammo={:?}",
+            hornet.profile.name,
+            combat.state.shots,
+            combat.state.hits,
+            combat.state.kills,
+            combat.state.projectiles.len(),
+            combat.state.ammo
+        );
+    }
     if input_profile.is_none() {
         let default = assets::data_directory()?.join("input-v1.conf");
         if default.exists() {
@@ -1701,6 +1911,7 @@ fn main() -> AppResult<()> {
         input: input::Input::new(input_profile.as_deref(), native_input)?,
         focused: true,
         performance: performance::Performance::from_env()?,
+        combat,
         hornet,
         researched_flight,
         previous_flight: flight.clone(),
@@ -1712,7 +1923,7 @@ fn main() -> AppResult<()> {
         flight_ui: {
             let mut ui = flight_ui::FlightUi::default();
             ui.menu = flight_menu;
-            ui.paused = animation_capture;
+            ui.paused = animation_capture || combat_probe.is_some();
             ui.look = flight_look.map(f32::to_radians);
             ui.zoom = flight_zoom;
             if !matches!(flight_view, 1 | 2) {
@@ -1814,6 +2025,8 @@ fn flight_key(physical: winit::keyboard::PhysicalKey, fallback: &str) -> String 
             KeyCode::Minus => "-",
             KeyCode::Comma => ",",
             KeyCode::Period => ".",
+            KeyCode::Semicolon => ";",
+            KeyCode::Backslash => "\\",
             KeyCode::Quote => "'",
             KeyCode::Slash => "/",
             _ => fallback,

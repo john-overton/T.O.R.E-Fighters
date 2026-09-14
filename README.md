@@ -130,6 +130,9 @@ continuous rumble beneath its engagement pulse while active. [Settings guide](do
 
 Aircraft armament import now includes all 135 FA weapon definitions, sensors,
 ECM, tanks and reviewed shared effects. Export both supported aircraft with
-`--aircraft f18 --aircraft rafale --weapons`. Combat arithmetic is currently
-headless research; live firing, guidance and damage remain open.
-See [combat progress and validation](docs/baselines/combat-components.md).
+`--aircraft f18 --aircraft rafale --weapons`. A connected development range is now available:
+`cargo run --locked -p tore-app -- --live-fire --aircraft f18` (or `rafale`).
+Space fires, semicolon selects a weapon, backslash resets range, and T designates.
+The range supports both source guns and PT-default missiles, with documented
+guidance/contact/damage approximations. Ordinary free flight remains externally
+clean. [Exact capabilities, screenshots and validation](docs/baselines/live-fire.md).

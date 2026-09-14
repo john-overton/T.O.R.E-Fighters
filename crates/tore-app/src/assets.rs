@@ -38,6 +38,7 @@ const DATA: &[&str] = &[
     "&BUTTON.11K",
     "&TOGGLE1.5K",
 ];
+const MAX_PACK_BYTES: u64 = 256 * 1024 * 1024;
 pub struct Assets {
     pub theater_resources: BTreeMap<String, Vec<u8>>,
     pub pics: BTreeMap<String, Pic>,
@@ -296,6 +297,14 @@ impl Assets {
         let generation = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_nanos();
+        let encoded_size = 16u64
+            + resources
+                .iter()
+                .map(|(name, bytes)| 6 + name.len() as u64 + bytes.len() as u64)
+                .sum::<u64>();
+        if encoded_size > MAX_PACK_BYTES || resources.len() > 2048 {
+            return Err("import exceeds cache bounds".into());
+        }
         let path = destination.join(format!("menu-{generation}.pack"));
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -343,11 +352,11 @@ impl Assets {
     }
     fn load_pack(path: &Path) -> AppResult<Self> {
         let file = fs::File::open(path)?;
-        if file.metadata()?.len() > 128 * 1024 * 1024 {
-            return Err("asset pack exceeds 128 MiB".into());
+        if file.metadata()?.len() > MAX_PACK_BYTES {
+            return Err("asset pack exceeds 256 MiB".into());
         }
         let mut data = Vec::new();
-        file.take(128 * 1024 * 1024 + 1).read_to_end(&mut data)?;
+        file.take(MAX_PACK_BYTES + 1).read_to_end(&mut data)?;
         let mut cursor = std::io::Cursor::new(data);
         let mut header = [0; 12];
         cursor.read_exact(&mut header)?;
