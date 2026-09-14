@@ -9,3 +9,7 @@ publish = false
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# Keep symbols and debug assertions while optimizing per-pixel flight/UI loops.
+[profile.dev.package.tore-app]
+opt-level = 2

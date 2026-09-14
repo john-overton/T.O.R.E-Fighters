@@ -39,7 +39,34 @@ impl Viewport {
         ))
     }
 }
+struct Readback {
+    buffer: wgpu::Buffer,
+    receiver: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    width: u32,
+    height: u32,
+    stride: u32,
+    bgra: bool,
+}
+impl Readback {
+    fn pixels(self) -> Vec<u8> {
+        let data = self.buffer.slice(..).get_mapped_range();
+        let mut pixels = Vec::with_capacity((self.width * self.height * 4) as usize);
+        for row in data.chunks_exact(self.stride as usize) {
+            for pixel in row[..self.width as usize * 4].chunks_exact(4) {
+                pixels.extend_from_slice(&if self.bgra {
+                    [pixel[2], pixel[1], pixel[0], 255]
+                } else {
+                    [pixel[0], pixel[1], pixel[2], 255]
+                });
+            }
+        }
+        drop(data);
+        self.buffer.unmap();
+        pixels
+    }
+}
 pub struct Renderer {
+    previews: std::collections::BTreeMap<u8, Readback>,
     pub window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -49,8 +76,32 @@ pub struct Renderer {
     bind_group: wgpu::BindGroup,
     pipeline: wgpu::RenderPipeline,
     sim: crate::sim_renderer::SimRenderer,
+    cockpit: crate::cockpit_renderer::CockpitRenderer,
 }
 impl Renderer {
+    pub fn prepare_aircraft(&mut self, hornet: &crate::aircraft::Hornet) {
+        self.sim.aircraft(&self.device, &self.queue, hornet, &[]);
+        self.cockpit
+            .prepare(&self.device, &self.queue, &hornet.sprites["~F18H.PIC"]);
+    }
+    pub fn cockpit(
+        &mut self,
+        state: &crate::flight::State,
+        camera: &crate::terrain::Camera,
+        art: bool,
+        hud: bool,
+        pixels: &[u8],
+    ) {
+        self.cockpit.update(
+            &self.queue,
+            self.flight_size(),
+            state,
+            camera,
+            art,
+            hud,
+            pixels,
+        );
+    }
     pub fn aircraft(
         &mut self,
         hornet: &crate::aircraft::Hornet,
@@ -99,9 +150,15 @@ impl Renderer {
             .request_device(&wgpu::DeviceDescriptor::default())
             .await?;
         let size = window.inner_size();
-        let config = surface
+        let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .ok_or("surface has no configuration")?;
+        config.present_mode = wgpu::PresentMode::AutoVsync;
+        config.desired_maximum_frame_latency = 1;
+        println!(
+            "Presentation: {:?}, maximum queued frames: {}",
+            config.present_mode, config.desired_maximum_frame_latency
+        );
         surface.configure(&device, &config);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Retail menu canvas"),
@@ -174,7 +231,10 @@ impl Renderer {
             config.width,
             config.height,
         );
+        let cockpit = crate::cockpit_renderer::CockpitRenderer::new(&device, config.format);
         Ok(Self {
+            cockpit,
+            previews: Default::default(),
             sim,
             window,
             surface,
@@ -216,6 +276,56 @@ impl Renderer {
         height: u32,
         overlay: bool,
     ) -> AppResult<Vec<u8>> {
+        let pending = self.submit_readback(camera, world, width, height, overlay)?;
+        self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(30)),
+        })?;
+        pending.receiver.recv()??;
+        Ok(pending.pixels())
+    }
+    /// Live panels consume a previous completed frame; never wait for GPU completion.
+    pub fn poll_previews(&mut self) -> AppResult<Vec<(u8, Vec<u8>)>> {
+        self.device.poll(wgpu::PollType::Poll)?;
+        let mut ready = Vec::new();
+        for (&page, pending) in &self.previews {
+            match pending.receiver.try_recv() {
+                Ok(result) => {
+                    result?;
+                    ready.push(page);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(ready
+            .into_iter()
+            .map(|page| (page, self.previews.remove(&page).unwrap().pixels()))
+            .collect())
+    }
+    pub fn request_preview(
+        &mut self,
+        page: u8,
+        camera: &crate::terrain::Camera,
+        world: &crate::terrain::World,
+    ) -> AppResult<()> {
+        if !matches!(page, 2 | 3) {
+            return Err("invalid camera instrument".into());
+        }
+        if !self.previews.contains_key(&page) {
+            let pending = self.submit_readback(camera, world, 138, 114, false)?;
+            self.previews.insert(page, pending);
+        }
+        Ok(())
+    }
+    fn submit_readback(
+        &mut self,
+        camera: &crate::terrain::Camera,
+        world: &crate::terrain::World,
+        width: u32,
+        height: u32,
+        overlay: bool,
+    ) -> AppResult<Readback> {
         if width == 0 || height == 0 || width > 1920 || height > 1080 {
             return Err("capture dimensions outside bounds".into());
         }
@@ -246,6 +356,7 @@ impl Renderer {
             world,
         );
         if overlay {
+            self.cockpit.draw(&mut encoder, &view);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Flight UI capture"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -296,29 +407,17 @@ impl Renderer {
         buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });
-        self.device.poll(wgpu::PollType::Wait {
-            submission_index: None,
-            timeout: Some(std::time::Duration::from_secs(30)),
-        })?;
-        rx.recv()??;
-        let data = buffer.slice(..).get_mapped_range();
-        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-        let bgra = matches!(
-            self.config.format,
-            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
-        );
-        for row in data.chunks_exact(stride as usize) {
-            for pixel in row[..width as usize * 4].chunks_exact(4) {
-                pixels.extend_from_slice(&if bgra {
-                    [pixel[2], pixel[1], pixel[0], 255]
-                } else {
-                    [pixel[0], pixel[1], pixel[2], 255]
-                });
-            }
-        }
-        drop(data);
-        buffer.unmap();
-        Ok(pixels)
+        Ok(Readback {
+            buffer,
+            receiver: rx,
+            width,
+            height,
+            stride,
+            bgra: matches!(
+                self.config.format,
+                wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+            ),
+        })
     }
     pub fn flight_size(&self) -> [u32; 2] {
         let s = self.window.inner_size();
@@ -437,6 +536,9 @@ impl Renderer {
                 camera,
                 world,
             );
+        }
+        if flight_size.is_some() {
+            self.cockpit.draw(&mut encoder, &view);
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

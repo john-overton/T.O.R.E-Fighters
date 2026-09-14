@@ -16,9 +16,10 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | G / F / B / H | Gear / flaps / airbrake / hook | Adapter controls; full FA keyboard table still needs verification |
 | R / J | Radar / jammer | Existing system toggles; no radar detection or ECM threat simulation |
 | F1 | Forward cockpit view; reset pan/zoom | FA `FMENUD.MNU` |
-| F2 / F3 | Look back / up | FA menu; authored camera angles, no rear/up cockpit artwork |
+| F2 / F3 | Look back / up | FA menu; authored angles, forward frame reused until rear/up artwork is mapped |
 | F10 | External chase view | FA menu; authored camera placement |
-| Ctrl + arrows | Pan view | USNF manual; authored motion, cockpit/HUD hidden while panned |
+| Shift + arrows / Ctrl + arrows | Cockpit look-around; exterior orbit | Shift is a convenience alias; Ctrl has USNF manual evidence; FA-specific dispatch unverified |
+| Shift + / | Recenter look/orbit without changing view or zoom | Development shortcut |
 | + / - | Zoom view | USNF manual; authored 0.5–4× projection |
 | Backspace | Toggle cockpit art, retain HUD/windows | FA menu (`BS`) |
 | Shift-U | Toggle HUD | Development shortcut |
@@ -79,11 +80,33 @@ Working menu actions include views, instrument windows, time/pause, cockpit, pit
 
 The HUD uses imported `HUD11.FNT`; instrument/menu text uses `WIN11.FNT`. It shows wrapped heading, true airspeed in knots, MSL altitude, terrain-relative AGL, vertical speed in ft/min, G, throttle, afterburner and actual gear/flap/brake/hook state. The pitch ladder uses five-degree steps, dashed below zero, and the renderer's perspective/bank convention. The flight-path marker comes from current kinematic vertical speed and airspeed. No target, weapon solution or navigation waypoint is invented.
 
-Layout, line symbology, frame scaling, pan, zoom and camera placement are authored. `~F18H.PIC` is uniformly scaled to cover the actual flight aspect ratio, showing more side artwork on wider screens and cropping only what is required to avoid stretching. Mirrors remain source flat fills. Native F18 HUD callers, HUDSYM glyph meanings, full cockpit composition, corner-speed/ILS/weapon modes and native pixel parity remain open. The HUD is forward-view only; it is hidden for external or panned views to avoid presenting aircraft attitude as camera-conformal symbology.
+Layout, line symbology, frame scaling, pan, zoom and camera placement are authored. `~F18H.PIC` is uniformly scaled to cover the actual flight aspect ratio, showing more side artwork on wider screens and cropping only what is required to avoid stretching. Mirrors remain source flat fills. Native F18 HUD callers, HUDSYM glyph meanings, full cockpit composition, corner-speed/ILS/weapon modes and native pixel parity remain open. The HUD stays on its aircraft-forward combiner plane during head-look and leaves the view naturally with that plane. External views omit it.
 
 See [recovery details](formats/aircraft.md), [progress](progress.md), and [validation](baselines/cockpit-controls.md).
 
 
-The flight overlay is independent of the fixed menu canvas and tracks the window aspect. It is composed at the physical drawable size, proportionally capped at 1920×1080 for bounded CPU/GPU work. Cockpit art fills that entire overlay; menus remain centered at their original proportions. The HUD is 15% smaller, with projection compensation keeping the pitch ladder aligned with the camera. TAS and MSL primary numbers have transparent backgrounds; nearby tape labels are suppressed instead of drawing dark backing rectangles. Static cockpit artwork and unchanged instrument rasters are cached.
+The flight overlay is independent of the fixed menu canvas and tracks the window aspect. It is composed at the physical drawable size, proportionally capped at 1920×1080 for bounded CPU/GPU work. At centered forward view, cockpit art covers that entire overlay; menus remain centered at their original proportions. The HUD is 15% smaller, with projection compensation keeping the pitch ladder aligned with the camera. TAS and MSL primary numbers have transparent backgrounds; nearby tape labels are suppressed instead of drawing dark backing rectangles. Static cockpit artwork and unchanged instrument rasters are cached.
 
 `--window-size 1280x720` selects an initial logical window size for inspection (minimum 640×480). Flight captures now preserve that window's aspect and the capped overlay resolution; terrain-only captures remain 960×720. See [responsive validation](baselines/responsive-flight-ui.md).
+
+## View and smoothness clarification
+
+F2/F3 replaced the early prototype exterior bindings when the native menu controls were recovered. They look back/up from ownship and omit the exterior mesh. The forward cockpit/HUD plane projects according to head direction; back/up views do not duplicate the forward frame behind or above the pilot. **F10 shows the aircraft from outside**; F1 restores the cockpit. The oblique developer camera remains available through `--flight-view 2` and instrument 3.
+
+The performance pass removes the extra post-render wait, interpolates camera/aircraft/HUD poses between fixed 120 Hz ticks, and keeps live instrument GPU readbacks asynchronous. Controls still drive the same authored flight adapter; this is not a new native flight-model claim. [Measurements and diagnostics](baselines/flight-performance.md).
+
+## Look-around and exterior orbit
+
+Hold **Shift + arrows** (or **Ctrl + arrows**) to turn the camera at one radian/second. In the cockpit, Left/Right turn around horizontally; Up looks upward as far as overhead. Down returns toward the forward eye line and **cannot look below it**. This limit is relative to the aircraft's forward pitch, not an altitude or world-horizon constraint. In F10 exterior view, arrows orbit around the aircraft in both axes, including below it and over the poles; the aircraft stays centered at a constant distance. Vertical orbit can make the view inverted as it crosses overhead. No ground-collision constraint is added to this inspection orbit.
+
+Release the arrow to stop moving the view; its orientation stays where you left it. **Shift + /** recenters the current camera without changing view or zoom. **F1** returns to the forward cockpit and resets look/zoom. A look arrow remains claimed until physical release even if Shift/Ctrl is released first, so a repeated key cannot unexpectedly pitch or roll the aircraft. Pause/focus loss clears held input. Shift-/ uses the physical slash key, so US keyboards may label the resulting character `?`.
+
+Head-look rotates about the aircraft’s axes, including during banked flight. The cockpit and HUD share a body-fixed GPU projection: they stay still relative to one another, move together as the pilot turns, and preserve the centered forward layout. Instruments remain screen-anchored. The original wide artwork exposes more side frame as the head turns, but it is a finite flat plane, not recovered 3D side/rear/overhead geometry. Mirrors remain flat source fills. See [directional cockpit evidence](baselines/directional-cockpit.md).
+
+The local USNF manual's “View Panning & Zooming” section specifies Ctrl+arrows when keyboard flight control is used, and Right Shift plus joystick for joystick panning. The reference app chose Shift+arrows. The supplied FA readme did not resolve the Anthology-specific binding, so Shift remains an explicitly documented convenience alias rather than claimed recovered FA behavior. [Validation](baselines/look-around.md).
+
+## Flight response and vertical flight
+
+The development adapter now carries an independent world-space velocity vector. Thrust, drag, lift and gravity accelerate that vector rather than setting it to the nose direction each tick. Pitch/roll controls have finite response, and the HUD flight-path marker uses both lateral and vertical velocity. The nose and actual travel direction can differ. These response constants are authored, not recovered native FA control laws.
+
+Attitude rotates as an orthonormal basis and is interpolated in that basis. The old ±1.5-radian flight pitch clamp is removed; flight can pass through vertical/inverted attitudes and complete loops with sufficient energy. Cockpit head-look still cannot look below its forward eye line—this separate viewing restriction does not limit aircraft pitch. [Evidence and limitations](baselines/flight-response-sky.md).

@@ -268,3 +268,48 @@ Exact native placement and independent high-resolution instrument typography rem
 - [x] Add repeatable `--window-size WIDTHxHEIGHT` captures and aspect/alpha/pointer regression coverage.
 
 See [responsive-flight validation](baselines/responsive-flight-ui.md). Native HUD symbol mapping, mirror rendering, dynamic native instrument typography and cross-platform acceptance remain open.
+
+## 2026-09-13: In-game performance follow-up
+
+- [x] Measure desktop frame intervals and simulation/camera, UI, presentation wall times with an opt-in bounded diagnostic.
+- [x] Remove the extra 16 ms post-render wait; use display-paced simulation presentation.
+- [x] Optimize app dev-build pixel loops while retaining debugging support.
+- [x] Preserve cockpit cache across view changes and prepare aircraft GPU resources before the first external view.
+- [x] Interpolate render-only poses between deterministic 120 Hz ticks, including wrapped headings/bank.
+- [x] Make live camera instrument readbacks asynchronous and retain display/preview depth targets.
+- [x] Confirm exterior aircraft renders in chase/oblique views; explain F2/F3 native look-back/up versus F10 exterior bindings.
+- [x] Record local Metal comparisons and regression evidence in [flight-performance baseline](baselines/flight-performance.md).
+- [ ] Sustained thermal/battery and high-refresh-display profiling; Windows/Linux runtime measurements.
+- [ ] Full GPU UI/instrument composition, terrain LOD/streaming, native flight-response acceptance and input-latency measurement.
+
+## 2026-09-13: Look-around controls
+
+- [x] Support Shift+arrows alongside existing Ctrl+arrows; prevent look-arrow repeats from becoming pitch/bank after modifier release.
+- [x] Limit cockpit elevation to forward/upward; Down returns to the forward eye line.
+- [x] Implement constant-radius, aircraft-centered exterior orbit through horizontal/vertical revolutions.
+- [x] Add Shift-/ recenter and retain F1 forward/reset; document evidence and add repeatable look-angle captures.
+- [ ] Recover FA-specific non-menu pan bindings and map side/rear/up cockpit artwork; full 3D cockpit remains deferred.
+
+Evidence and validation: [look-around baseline](baselines/look-around.md).
+
+## 2026-09-13: Flight response, vertical sky and retained cockpit
+
+- [x] Confirm the ±1.5-radian flight clamp and nose-derived velocity existed before the performance pass.
+- [x] Remove the attitude clamp; integrate/interpolate body bases through vertical and inverted flight.
+- [x] Separate world velocity from attitude, add finite pitch/roll response and project actual velocity on the HUD.
+- [x] Complete a headless loop with the imported F/A-18 profile and retain fixed-rate determinism checks.
+- [x] Replace sky pole-pinching with a finite hemisphere texture projection.
+- [x] Retain the cockpit frame during head-look; rotate look in aircraft coordinates.
+- [ ] Native force/control law, stall/spin recovery, full 3D cockpit geometry and native weather projection remain open.
+
+See [flight-response and sky evidence](baselines/flight-response-sky.md). That fixed-screen cockpit placeholder is superseded by the directional projection below; rear/up geometry is still not recovered.
+
+## 2026-09-13: Directional forward cockpit and HUD
+
+- [x] Inspect the wide F18 frame and side/center mirror masks; distinguish available artwork from missing interior geometry.
+- [x] Project the full forward frame and HUD together in aircraft coordinates; retain centered layout and screen-anchored instruments.
+- [x] Remove abrupt off-axis HUD hiding and repeated front-frame rear/up placeholders.
+- [x] Check centered, small-turn, side, up, rear and tall-window captures on Metal; verify live camera panels and frame timing.
+- [ ] Recover full side/rear/overhead geometry, native view mapping and working mirrors; compare against retail flight.
+
+See [directional cockpit evidence](baselines/directional-cockpit.md). This completes the authored directional projection of available forward art, not native 360-degree cockpit parity.

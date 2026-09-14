@@ -11,6 +11,7 @@ pub enum Command {
     Restart,
     Toggle(&'static str),
     View(u8),
+    CenterLook,
     Panel(u8),
     WindowLayout,
     Throttle(f64),
@@ -312,6 +313,7 @@ impl FlightUi {
         }
         if shift {
             return match key {
+                "/" => Command::CenterLook,
                 "b" => Command::Toggle("t"),
                 "u" => {
                     self.hud = !self.hud;
@@ -459,7 +461,7 @@ impl FlightUi {
                     "Arrows: pitch/bank | Z/X: rudder | PageUp/Down: throttle".into(),
                     "1..9: 10..90%, 0: full | Shift-B: burner | E: engine".into(),
                     "G: gear | F: flaps | B: brake | H: hook | J: jammer".into(),
-                    "Ctrl-arrows: pan | +/-: zoom | F1: reset forward view".into(),
+                    "Shift/Ctrl-arrows: look/orbit | Shift-/: center | F1: cockpit".into(),
                     "Comma/period: scope range | O: radar mode | Shift-U: HUD".into(),
                     "T/Shift-T: target | Enter/apostrophe: designate | Space: fire".into(),
                     "A: autopilot | W/Shift-W: waypoint | N: nav/weapons".into(),
@@ -625,6 +627,8 @@ mod tests {
         );
         assert_eq!(u.activate("Back", "F2"), Command::View(3));
         assert_eq!(u.activate("External", "F10"), Command::View(1));
+        assert_eq!(u.key("/", true, false, false, &tree), Command::CenterLook);
+        assert_eq!(u.key("/", true, true, false, &tree), Command::None);
     }
     #[test]
     fn mouse_requires_same_press_release() {

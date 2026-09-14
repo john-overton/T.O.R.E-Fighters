@@ -1,12 +1,16 @@
 mod aircraft;
 mod assets;
+mod attitude;
 mod audio;
+mod cockpit_renderer;
 mod flight;
 mod flight_canvas;
 mod flight_ui;
 mod hud;
 mod instruments;
+mod look;
 mod menu;
+mod performance;
 mod quick_mission;
 mod renderer;
 mod sim_renderer;
@@ -38,8 +42,10 @@ enum Screen {
     Flight,
 }
 struct App {
+    performance: performance::Performance,
     hornet: aircraft::Hornet,
     flight: flight::State,
+    previous_flight: flight::State,
     flight_clock: flight::Clock,
     flight_view: u8,
     flight_canvas: flight_canvas::FlightCanvas,
@@ -79,6 +85,10 @@ impl App {
                 if let Some(audio) = &self.audio {
                     audio.control(key, &self.flight);
                 }
+                Action::None
+            }
+            Command::CenterLook => {
+                self.flight_ui.look = [0.; 2];
                 Action::None
             }
             Command::View(view) => {
@@ -139,6 +149,7 @@ impl App {
                         Ok(world) => {
                             if let Some(renderer) = &mut self.renderer {
                                 renderer.set_world(&world);
+                                renderer.prepare_aircraft(&self.hornet);
                             }
                             self.camera = terrain::Camera::for_world(&world);
                             self.world = world;
@@ -156,6 +167,7 @@ impl App {
             }
             Action::FreeFlight => {
                 self.flight = self.hornet.start(&self.world);
+                self.previous_flight = self.flight.clone();
                 self.flight_clock.remainder = 0.;
                 self.flight_view = 0;
                 self.flight_ui = flight_ui::FlightUi::default();
@@ -229,7 +241,8 @@ impl ApplicationHandler for App {
             pollster::block_on(Renderer::new(window, &self.world))
         })();
         match result {
-            Ok(renderer) => {
+            Ok(mut renderer) => {
+                renderer.prepare_aircraft(&self.hornet);
                 renderer.window.request_redraw();
                 self.renderer = Some(renderer);
             }
@@ -338,7 +351,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 if self.screen == Screen::Flight {
-                    self.camera.keys.clear();
+                    look::modifiers_changed(&mut self.camera.keys, modifiers.state());
                 }
                 self.modifiers = modifiers.state();
                 Action::None
@@ -383,28 +396,10 @@ impl ApplicationHandler for App {
                         self.camera.keys.clear();
                         self.instruments.pressed = None;
                         self.flight_clock.remainder = 0.;
+                        self.previous_flight.clone_from(&self.flight);
                         self.frame_time = Instant::now();
-                    } else if self.modifiers.control_key()
-                        && !self.modifiers.alt_key()
-                        && name.starts_with("Arrow")
-                    {
-                        self.camera.keys.insert(format!("Look{name}"));
-                    } else if !self.modifiers.control_key()
-                        && !self.modifiers.alt_key()
-                        && !self.modifiers.super_key()
-                        && matches!(
-                            name.as_str(),
-                            "ArrowUp"
-                                | "ArrowDown"
-                                | "ArrowLeft"
-                                | "ArrowRight"
-                                | "z"
-                                | "x"
-                                | "PageUp"
-                                | "PageDown"
-                        )
-                    {
-                        self.camera.keys.insert(name);
+                    } else {
+                        look::press(&mut self.camera.keys, &name, self.modifiers);
                     }
                     self.flight_command(command)
                 } else if self.screen == Screen::Viewer {
@@ -429,7 +424,18 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                let animating = match self.screen {
+                let frame_start = Instant::now();
+                let mut simulation_ms = 0.;
+                if self.screen == Screen::Flight
+                    && let Some(view) = self.performance.view()
+                {
+                    self.flight_view = view;
+                }
+                if self.screen == Screen::Flight && self.performance.active() {
+                    // Explicit bounded benchmark only: desktop automation may steal focus.
+                    self.flight_ui.paused = false;
+                }
+                let mut animating = match self.screen {
                     Screen::Main => self.menu.render(),
                     Screen::Quick => {
                         self.quick.render(
@@ -445,27 +451,53 @@ impl ApplicationHandler for App {
                         let steps = self.flight_ui.steps(&mut self.flight_clock, elapsed);
                         self.frame_time = now;
                         for _ in 0..steps {
+                            self.previous_flight.clone_from(&self.flight);
                             self.flight
                                 .step(&self.hornet.profile, &self.camera.keys, |x, z| {
                                     self.world.height(x as f32, z as f32) as f64
                                 });
                         }
                         if !self.flight_ui.frozen() {
-                            let held = |key: &str| f32::from(self.camera.keys.contains(key));
-                            self.flight_ui.look[0] +=
-                                (held("LookArrowRight") - held("LookArrowLeft")) * elapsed as f32;
-                            self.flight_ui.look[1] = (self.flight_ui.look[1]
-                                + (held("LookArrowUp") - held("LookArrowDown")) * elapsed as f32)
-                                .clamp(-1.2, 1.2);
+                            look::step(
+                                &mut self.flight_ui.look,
+                                &self.camera.keys,
+                                elapsed,
+                                matches!(self.flight_view, 1 | 2),
+                            );
                         }
+                        let presented = if self.flight_ui.frozen() {
+                            self.flight.clone()
+                        } else {
+                            self.flight.presented(
+                                &self.previous_flight,
+                                self.flight_clock.remainder / flight::DT,
+                            )
+                        };
                         self.camera = self.hornet.camera(
-                            &self.flight,
+                            &presented,
                             self.flight_view,
                             std::mem::take(&mut self.camera.keys),
                         );
-                        self.camera.yaw += self.flight_ui.look[0];
-                        self.camera.pitch += self.flight_ui.look[1];
+                        look::apply(
+                            &mut self.camera,
+                            presented.position.map(|v| v as f32),
+                            self.flight_ui.look,
+                            matches!(self.flight_view, 1 | 2),
+                        );
                         self.camera.zoom = self.flight_ui.zoom;
+                        match renderer.poll_previews() {
+                            Ok(previews) => {
+                                self.performance.completed_previews += previews.len();
+                                for (page, pixels) in previews {
+                                    self.instruments.cameras.insert(page, pixels);
+                                }
+                            }
+                            Err(e) => {
+                                self.error = Some(e);
+                                event_loop.exit();
+                                return;
+                            }
+                        }
                         if now.duration_since(self.instrument_time).as_millis() >= 100
                             || self.smoke_test
                         {
@@ -473,80 +505,73 @@ impl ApplicationHandler for App {
                             for page in [2, 3] {
                                 if self.instruments.pages.contains(&page) {
                                     let mut camera = self.hornet.camera(
-                                        &self.flight,
+                                        &presented,
                                         if page == 2 { 0 } else { 2 },
                                         Default::default(),
                                     );
                                     camera.view_fraction = 1.;
                                     if page == 3 {
                                         for i in 0..3 {
-                                            camera.position[i] = self.flight.position[i] as f32
+                                            camera.position[i] = presented.position[i] as f32
                                                 + (camera.position[i]
-                                                    - self.flight.position[i] as f32)
+                                                    - presented.position[i] as f32)
                                                     * 0.5;
                                         }
                                         camera.pitch = -(30f32 / 65.).atan();
                                     }
-                                    renderer.aircraft(
-                                        &self.hornet,
-                                        &self.flight,
-                                        page == 3,
-                                        &camera,
-                                    );
-                                    match renderer.scene_pixels(
-                                        &camera,
-                                        &self.world,
-                                        138,
-                                        114,
-                                        false,
-                                    ) {
-                                        Ok(p) => {
-                                            self.instruments.cameras.insert(page, p);
-                                        }
-                                        Err(e) => {
-                                            self.error = Some(e);
-                                            event_loop.exit();
-                                            return;
-                                        }
+                                    renderer.aircraft(&self.hornet, &presented, page == 3, &camera);
+                                    let result = if self.smoke_test {
+                                        renderer
+                                            .scene_pixels(&camera, &self.world, 138, 114, false)
+                                            .map(|p| {
+                                                self.instruments.cameras.insert(page, p);
+                                            })
+                                    } else {
+                                        renderer.request_preview(page, &camera, &self.world)
+                                    };
+                                    if let Err(e) = result {
+                                        self.error = Some(e);
+                                        event_loop.exit();
+                                        return;
                                     }
                                 }
                             }
                         }
                         renderer.aircraft(
                             &self.hornet,
-                            &self.flight,
+                            &presented,
                             matches!(self.flight_view, 1 | 2),
                             &self.camera,
                         );
+                        simulation_ms = frame_start.elapsed().as_secs_f64() * 1000.;
                         self.flight_canvas.begin(
                             renderer.flight_size(),
                             &self.hornet,
-                            &self.flight,
-                            self.flight_ui.cockpit
-                                && self.flight_view == 0
-                                && self.flight_ui.look == [0.; 2],
+                            &presented,
                             &self.instruments,
                         );
                         self.menu.pixels.fill(0);
-                        if self.flight_ui.hud
-                            && self.flight_view == 0
-                            && self.flight_ui.look == [0.; 2]
-                        {
+                        if self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4) {
                             hud::draw(
                                 &mut self.menu.pixels,
-                                &self.flight,
+                                &presented,
                                 &self.hornet.hud_font,
                                 self.world.height(
-                                    self.flight.position[0] as f32,
-                                    self.flight.position[2] as f32,
+                                    presented.position[0] as f32,
+                                    presented.position[2] as f32,
                                 ) as f64,
                                 self.flight_ui.ladder,
                                 self.flight_ui.brightness,
                                 self.flight_canvas.hud_zoom(self.flight_ui.zoom),
                             );
                         }
-                        self.flight_canvas
-                            .legacy_layer(&self.menu.pixels, flight_canvas::HUD_SCALE);
+                        renderer.cockpit(
+                            &presented,
+                            &self.camera,
+                            self.flight_ui.cockpit && matches!(self.flight_view, 0 | 3 | 4),
+                            self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4),
+                            &self.menu.pixels,
+                        );
                         self.menu.pixels.fill(0);
                         self.flight_ui.draw(
                             &mut self.menu.pixels,
@@ -584,6 +609,8 @@ impl ApplicationHandler for App {
                         audio.flight(None);
                     }
                 }
+                let compose_ms = frame_start.elapsed().as_secs_f64() * 1000. - simulation_ms;
+                let present_start = Instant::now();
                 match renderer.draw(
                     if self.screen == Screen::Flight {
                         &self.flight_canvas.pixels
@@ -610,13 +637,34 @@ impl ApplicationHandler for App {
                         self.finished = true;
                         event_loop.exit();
                     }
-                    Ok(_) => {}
+                    Ok(presented) => {
+                        animating &= presented;
+                    }
                     Err(error) => {
                         self.error = Some(error);
                         event_loop.exit();
                     }
                 }
-                self.next_frame = animating.then(|| Instant::now() + Duration::from_millis(16));
+                if self.screen == Screen::Flight
+                    && self.performance.record(
+                        frame_start,
+                        simulation_ms,
+                        compose_ms,
+                        present_start.elapsed().as_secs_f64() * 1000.,
+                        self.flight_ui.frozen(),
+                    )
+                {
+                    self.finished = true;
+                    event_loop.exit();
+                }
+                // Simulation views are paced by presentation, not an extra post-render sleep.
+                self.next_frame = animating.then(|| {
+                    if matches!(self.screen, Screen::Flight | Screen::Viewer) {
+                        Instant::now()
+                    } else {
+                        Instant::now() + Duration::from_millis(16)
+                    }
+                });
                 return;
             }
             _ => return,
@@ -647,6 +695,7 @@ fn main() -> AppResult<()> {
     let mut theater_code = String::from("UKR");
     let mut initial_screen = Screen::Main;
     let mut flight_view = 0;
+    let mut flight_look = [0f32; 2];
     let mut flight_menu = false;
     let mut window_size = [960, 720];
     let mut instrument_page = None;
@@ -700,6 +749,20 @@ fn main() -> AppResult<()> {
                 }
                 instrument_page = Some(page);
             }
+            "--flight-look" => {
+                let value = args
+                    .next()
+                    .ok_or("--flight-look needs YAW,PITCH in degrees")?;
+                let (yaw, pitch) = value
+                    .split_once(',')
+                    .ok_or("--flight-look needs YAW,PITCH in degrees")?;
+                flight_look = [yaw.parse()?, pitch.parse()?];
+                if flight_look.iter().any(|v| !v.is_finite() || v.abs() > 360.) {
+                    return Err(
+                        "flight look angles must be finite and within -360..360 degrees".into(),
+                    );
+                }
+            }
             "--flight-view" => {
                 flight_view = args
                     .next()
@@ -724,8 +787,8 @@ fn main() -> AppResult<()> {
             "--maneuver" => {
                 maneuver = args
                     .next()
-                    .ok_or("--maneuver needs level, pull, roll or stall")?;
-                if !["level", "pull", "roll", "stall"].contains(&maneuver.as_str()) {
+                    .ok_or("--maneuver needs level, pull, loop, roll or stall")?;
+                if !["level", "pull", "loop", "roll", "stall"].contains(&maneuver.as_str()) {
                     return Err("unsupported maneuver".into());
                 }
             }
@@ -762,7 +825,7 @@ fn main() -> AppResult<()> {
             "--import-only" => import_only = true,
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and F/A-18D assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--free-flight launches the Hornet; --headless-flight TICKS runs without a display.\nFlight: arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--headless-flight TICKS supports --maneuver level/pull/roll/stall.\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and F/A-18D assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--free-flight launches the Hornet; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall.\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
             }
@@ -806,8 +869,12 @@ fn main() -> AppResult<()> {
         let mut state = flight::State::new(&hornet.profile, [0., 5000., 0.]);
         let mut keys = std::collections::BTreeSet::new();
         match maneuver.as_str() {
-            "pull" => {
+            "pull" | "loop" => {
                 keys.insert("ArrowDown".to_string());
+                if maneuver == "loop" {
+                    state.throttle = 1.;
+                    state.burner = true;
+                }
             }
             "roll" => {
                 keys.insert("ArrowRight".to_string());
@@ -815,12 +882,27 @@ fn main() -> AppResult<()> {
             "stall" => {
                 state.engine = false;
                 state.pitch = 0.2;
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
             }
             _ => {}
         }
+        let initial_forward = attitude::Basis::new(state.yaw, state.pitch, state.bank).forward;
+        let (mut vertical, mut inverted, mut completed) = (false, false, false);
         for _ in 0..ticks {
             state.step(&hornet.profile, &keys, |_, _| 0.);
+            let basis = attitude::Basis::new(state.yaw, state.pitch, state.bank);
+            vertical |= basis.forward[1] > 0.999;
+            inverted |= basis.up[1] < -0.9;
+            completed |= inverted
+                && basis.up[1] > 0.9
+                && attitude::dot(basis.forward, initial_forward) > 0.98;
+            if maneuver == "loop" && completed {
+                break;
+            }
         }
+        println!("vertical={vertical} inverted={inverted} loop_completed={completed}");
 
         println!(
             "ticks={} speed_kt={:.3} altitude_ft={:.3} fuel_lb={:.3} crashed={}",
@@ -899,7 +981,9 @@ fn main() -> AppResult<()> {
     quick.selection = selection;
     let flight = hornet.start(&world);
     let mut app = App {
+        performance: performance::Performance::from_env()?,
         hornet,
+        previous_flight: flight.clone(),
         flight,
         flight_clock: flight::Clock { remainder: 0. },
         flight_view,
@@ -908,6 +992,10 @@ fn main() -> AppResult<()> {
         flight_ui: {
             let mut ui = flight_ui::FlightUi::default();
             ui.menu = flight_menu;
+            ui.look = flight_look.map(f32::to_radians);
+            if !matches!(flight_view, 1 | 2) {
+                ui.look[1] = ui.look[1].clamp(0., std::f32::consts::FRAC_PI_2);
+            }
             ui
         },
         instruments: instruments::Instruments::new(instrument_layout, instrument_page),
@@ -954,6 +1042,7 @@ fn flight_key(physical: winit::keyboard::PhysicalKey, fallback: &str) -> String 
             KeyCode::Comma => ",",
             KeyCode::Period => ".",
             KeyCode::Quote => "'",
+            KeyCode::Slash => "/",
             _ => fallback,
         }
         .into();
@@ -974,5 +1063,6 @@ mod input_tests {
         );
         assert_eq!(flight_key(PhysicalKey::Code(KeyCode::KeyE), "é"), "e");
         assert_eq!(flight_key(PhysicalKey::Code(KeyCode::Equal), "+"), "=");
+        assert_eq!(flight_key(PhysicalKey::Code(KeyCode::Slash), "?"), "/");
     }
 }

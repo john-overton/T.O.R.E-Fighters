@@ -146,8 +146,9 @@ pub fn draw(
     p.line((313., 240.), (320., 243.));
     p.line((320., 243.), (327., 240.));
     if s.speed > 10. {
-        let gamma = (s.vertical_speed / s.speed).clamp(-1., 1.).asin();
-        if let Some((x, y)) = project(s.pitch, s.bank, 0., gamma, zoom as f64)
+        let gamma = s.velocity[1].atan2(s.velocity[0].hypot(s.velocity[2]));
+        let bearing = s.velocity[0].atan2(s.velocity[2]) - s.yaw;
+        if let Some((x, y)) = project(s.pitch, s.bank, bearing, gamma, zoom as f64)
             && (235. ..405.).contains(&x)
             && (155. ..285.).contains(&y)
         {

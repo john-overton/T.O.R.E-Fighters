@@ -1,4 +1,5 @@
 //! Deterministic 120 Hz free-flight adapter. PT facts are recovered; integration is authored.
+use crate::attitude::{Basis, cross, dot, unit};
 use std::collections::BTreeSet;
 use tore_formats::aircraft::Aircraft;
 pub const DT: f64 = 1.0 / 120.0;
@@ -9,6 +10,9 @@ pub struct State {
     pub pitch: f64,
     pub bank: f64,
     pub speed: f64,
+    pub velocity: [f64; 3],
+    pub roll_rate: f64,
+    pub pitch_rate: f64,
     pub vertical_speed: f64,
     pub g: f64,
     pub throttle: f64,
@@ -36,6 +40,9 @@ impl State {
             pitch: 0.,
             bank: 0.,
             speed: 450. * 1.68781,
+            velocity: Basis::new(0.3, 0., 0.).forward.map(|v| v * 450. * 1.68781),
+            roll_rate: 0.,
+            pitch_rate: 0.,
             vertical_speed: 0.,
             g: 1.,
             throttle: 0.7,
@@ -55,6 +62,27 @@ impl State {
             crashed: false,
             ticks: 0,
         }
+    }
+    /// Interpolate presentation only, leaving fixed-tick state and discrete controls untouched.
+    pub fn presented(&self, previous: &Self, alpha: f64) -> Self {
+        if self.crashed {
+            return self.clone();
+        }
+        let alpha = alpha.clamp(0., 1.);
+        let lerp = |a: f64, b: f64| a + (b - a) * alpha;
+        let mut result = self.clone();
+        for i in 0..3 {
+            result.position[i] = lerp(previous.position[i], self.position[i]);
+        }
+        [result.yaw, result.pitch, result.bank] =
+            Basis::new(previous.yaw, previous.pitch, previous.bank)
+                .blended(Basis::new(self.yaw, self.pitch, self.bank), alpha)
+                .angles();
+        result.velocity = std::array::from_fn(|i| lerp(previous.velocity[i], self.velocity[i]));
+        result.speed = lerp(previous.speed, self.speed);
+        result.vertical_speed = lerp(previous.vertical_speed, self.vertical_speed);
+        result.g = lerp(previous.g, self.g);
+        result
     }
     pub fn toggle(&mut self, key: &str) {
         match key {
@@ -105,11 +133,6 @@ impl State {
         let env = a.envelopes.iter().find(|e| e.g == 1).unwrap();
         let (stall, vmax) = env.speeds(self.position[1]).unwrap_or((900., 1000.));
         let authority = (self.speed / stall.max(1.)).powi(2).clamp(0., 1.);
-        self.bank = (self.bank + (k("ArrowRight") - k("ArrowLeft")) * DT * 1.8 * authority)
-            .rem_euclid(std::f64::consts::TAU);
-        if self.bank > std::f64::consts::PI {
-            self.bank -= std::f64::consts::TAU;
-        }
         let (mut lo, mut hi) = (-1., 1.);
         for e in &a.envelopes {
             if let Some((low, high)) = e.speeds(self.position[1])
@@ -133,14 +156,20 @@ impl State {
         .clamp(lo, hi)
             * authority;
         self.g += (command - self.g) * (DT * 4.).min(1.);
-        self.pitch +=
-            (self.g * self.bank.cos() - self.pitch.cos()) * 32.174 / self.speed.max(60.) * DT;
-        self.pitch = self.pitch.clamp(-1.5, 1.5);
-        self.yaw = (self.yaw
-            + (self.g * self.bank.sin() * 32.174 / self.speed.max(60.)
-                + (k("x") - k("z")) * 0.12 * authority)
-                * DT)
-            .rem_euclid(std::f64::consts::TAU);
+        let basis = Basis::new(self.yaw, self.pitch, self.bank);
+        let roll_command = (k("ArrowRight") - k("ArrowLeft")) * 1.8 * authority;
+        self.roll_rate += (roll_command - self.roll_rate) * (DT / 0.2);
+        let pitch_command = (command - basis.up[1]) * 32.174 / self.speed.max(60.);
+        self.pitch_rate += (pitch_command - self.pitch_rate) * (DT / 0.1);
+        // Authored aerodynamic alignment: the nose responds before the flight path settles.
+        let alignment = cross(basis.forward, unit(self.velocity));
+        let rotation = std::array::from_fn(|i| {
+            DT * (-basis.right[i] * self.pitch_rate - basis.forward[i] * self.roll_rate
+                + basis.up[i] * (k("x") - k("z")) * 0.12 * authority
+                + alignment[i] * 0.7 * authority)
+        });
+        let basis = basis.rotated(rotation);
+        [self.yaw, self.pitch, self.bank] = basis.angles();
         let max_thrust = a.number("aftThrust").max(a.number("thrust"));
         let lapse = (-self.position[1].max(0.) / 70000.).exp();
         let thrust = if self.engine {
@@ -164,18 +193,32 @@ impl State {
                     + a.number("flapsDrag") * self.flaps
                     + a.number("airBrakesDrag") * self.brake)
                 / 256.;
-        self.speed = (self.speed
-            + ((thrust - drag) / weight * 32.174 - 32.174 * self.pitch.sin()) * DT)
-            .clamp(0., 6000.);
-        self.vertical_speed = self.speed * self.pitch.sin();
-        self.position[0] += self.speed * self.pitch.cos() * self.yaw.sin() * DT;
-        self.position[2] += self.speed * self.pitch.cos() * self.yaw.cos() * DT;
-        self.position[1] += self.vertical_speed * DT;
+        let direction = unit(self.velocity);
+        let along = dot(basis.up, direction);
+        let lift = unit(std::array::from_fn(|i| basis.up[i] - along * direction[i]));
+        for i in 0..3 {
+            self.velocity[i] += (basis.forward[i] * thrust / weight * 32.174
+                - direction[i] * drag / weight * 32.174
+                + lift[i] * self.g * 32.174
+                - if i == 1 { 32.174 } else { 0. })
+                * DT;
+        }
+        self.speed = dot(self.velocity, self.velocity).sqrt();
+        if self.speed > 6000. {
+            self.velocity = self.velocity.map(|v| v * 6000. / self.speed);
+            self.speed = 6000.;
+        }
+        self.vertical_speed = self.velocity[1];
+        for i in 0..3 {
+            self.position[i] += self.velocity[i] * DT;
+        }
         let floor = ground(self.position[0], self.position[2]) + 8.;
         if self.position[1] <= floor {
             self.position[1] = floor;
             self.crashed = true;
             self.speed = 0.;
+            self.velocity = [0.; 3];
+            self.vertical_speed = 0.;
             self.engine = false;
             self.burner = false;
         }
@@ -199,6 +242,27 @@ impl Clock {
 mod tests {
     use super::*;
     #[test]
+    fn presentation_wraps_angles_without_changing_simulation() {
+        let a = super::integration_tests::profile();
+        let mut previous = State::new(&a, [0.; 3]);
+        previous.yaw = 359f64.to_radians();
+        previous.bank = 179f64.to_radians();
+        let mut current = previous.clone();
+        current.yaw = 1f64.to_radians();
+        current.bank = -179f64.to_radians();
+        current.position[0] = 10.;
+        current.gear_down = true;
+        let before = current.clone();
+        let rendered = current.presented(&previous, 0.5);
+        assert!((rendered.yaw.sin()).abs() < 1e-9);
+        assert!((rendered.bank.abs() - std::f64::consts::PI).abs() < 1e-9);
+        assert_eq!(rendered.position[0], 5.);
+        assert!(rendered.gear_down);
+        assert_eq!(current, before);
+        current.crashed = true;
+        assert_eq!(current.presented(&previous, 0.), current);
+    }
+    #[test]
     fn fixed_clock_independent_of_render_rate() {
         for hz in [24, 30, 60, 144] {
             let mut c = Clock { remainder: 0. };
@@ -212,7 +276,7 @@ mod integration_tests {
     use super::*;
     use std::collections::BTreeMap;
     use tore_formats::aircraft::{Envelope, Token};
-    fn profile() -> Aircraft {
+    pub(super) fn profile() -> Aircraft {
         let fields = [
             ("weight", 10000),
             ("internalFuel", 1000),
@@ -254,12 +318,52 @@ mod integration_tests {
         }
     }
     #[test]
+    fn momentum_and_roll_response_survive_control_release() {
+        let a = profile();
+        let mut s = State::new(&a, [0., 15000., 0.]);
+        let keys = BTreeSet::from(["ArrowDown".into(), "ArrowRight".into()]);
+        for _ in 0..60 {
+            s.step(&a, &keys, |_, _| 0.);
+        }
+        let nose = Basis::new(s.yaw, s.pitch, s.bank).forward;
+        assert!(dot(nose, unit(s.velocity)) < 0.99999);
+        let rate = s.roll_rate;
+        s.step(&a, &Default::default(), |_, _| 0.);
+        assert!(s.roll_rate > 0. && s.roll_rate < rate);
+        assert_eq!(s.vertical_speed, s.velocity[1]);
+        assert!(s.velocity.iter().all(|v| v.is_finite()));
+    }
+    #[test]
+    fn sustained_pull_can_complete_a_loop() {
+        let a = profile();
+        let mut s = State::new(&a, [0., 15000., 0.]);
+        s.throttle = 1.;
+        s.burner = true;
+        let start = Basis::new(s.yaw, s.pitch, s.bank).forward;
+        let keys = BTreeSet::from(["ArrowDown".into()]);
+        let (mut vertical, mut inverted, mut completed) = (false, false, false);
+        for _ in 0..120 * 90 {
+            s.step(&a, &keys, |_, _| 0.);
+            let b = Basis::new(s.yaw, s.pitch, s.bank);
+            vertical |= b.forward[1] > 0.999;
+            inverted |= b.up[1] < -0.9;
+            if inverted && b.up[1] > 0.9 && dot(b.forward, start) > 0.98 {
+                completed = true;
+                break;
+            }
+        }
+        assert!(
+            vertical && inverted && completed && !s.crashed,
+            "vertical={vertical} inverted={inverted} completed={completed} state={s:?}"
+        );
+    }
+    #[test]
     fn banked_lift_does_not_create_a_climb_without_a_pull() {
         let a = profile();
         let mut s = State::new(&a, [0., 5000., 0.]);
         s.bank = std::f64::consts::FRAC_PI_2;
         s.step(&a, &Default::default(), |_, _| 0.);
-        assert!(s.pitch < 0. && s.position[1] < 5000.);
+        assert!(s.velocity[1] < 0. && s.position[1] < 5000.);
     }
     #[test]
     fn simulation_is_identical_at_different_render_rates() {

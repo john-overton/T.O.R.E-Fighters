@@ -10,43 +10,15 @@ struct PanelCache {
 pub struct FlightCanvas {
     pub pixels: Vec<u8>,
     pub size: [u32; 2],
-    background: Vec<u8>,
     panels: std::collections::BTreeMap<u8, PanelCache>,
-    background_key: Option<([u32; 2], bool)>,
 }
 impl FlightCanvas {
-    pub fn begin(
-        &mut self,
-        size: [u32; 2],
-        h: &Hornet,
-        s: &State,
-        cockpit: bool,
-        panels: &Instruments,
-    ) {
+    pub fn begin(&mut self, size: [u32; 2], h: &Hornet, s: &State, panels: &Instruments) {
         self.size = size;
         self.pixels
             .resize(size[0] as usize * size[1] as usize * 4, 0);
         let (w, height) = (size[0] as f64, size[1] as f64);
-        if self.background_key != Some((size, cockpit)) {
-            self.pixels.fill(0);
-            if cockpit {
-                let image = &h.sprites["~F18H.PIC"];
-                let scale = (w / image.width as f64).max(height / image.height as f64);
-                self.blit(
-                    image,
-                    (
-                        (w - image.width as f64 * scale) / 2.,
-                        0.,
-                        image.width as f64 * scale,
-                        image.height as f64 * scale,
-                    ),
-                );
-            }
-            self.background.clone_from(&self.pixels);
-            self.background_key = Some((size, cockpit));
-        } else {
-            self.pixels.copy_from_slice(&self.background);
-        }
+        self.pixels.fill(0);
         for (i, page) in panels.pages.iter().enumerate() {
             let raster = panels.page(*page, h, s);
             let rect = panels.layout.rect_on(i, [w, height]);

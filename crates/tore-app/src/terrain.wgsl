@@ -33,7 +33,9 @@ struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32>
 }
 @fragment fn sky_fragment(in:SkyOut)->@location(0) vec4<f32>{
  let ray=normalize(scene.forward.xyz+scene.right.xyz*in.screen.x*scene.eye.w/(1.7320508*scene.up.w)+scene.up.xyz*in.screen.y/(1.7320508*scene.up.w));
- let uv=vec2<f32>(fract(atan2(ray.x,ray.z)/6.2831853+0.5),clamp(0.5-asin(ray.y)/3.14159265,0.0,1.0));
+ // Authored projection of square SKY0 artwork: a finite upper-hemisphere
+ // disk avoids collapsing an entire source row at zenith. Native mapping is pending.
+ let uv=vec2<f32>(0.5)+0.45*ray.xz/(1.0+max(ray.y,0.0));
  let tex=textureSample(tiles,tile_sampler,uv,i32(scene.right.w)).rgb;
  return vec4<f32>(mix(linear(scene.sky.rgb),tex,smoothstep(0.0,0.4,ray.y)),1.0);
 }

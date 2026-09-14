@@ -12,6 +12,7 @@ pub struct SimRenderer {
     uniform: wgpu::Buffer,
     vertices: wgpu::Buffer,
     count: u32,
+    spare_depth: Option<([u32; 2], wgpu::TextureView)>,
     depth: wgpu::TextureView,
     size: [u32; 2],
 }
@@ -178,6 +179,7 @@ impl SimRenderer {
             uniform,
             vertices,
             count: (world.vertices.len() / 9) as u32,
+            spare_depth: None,
             depth: Self::depth(device, width, height),
             size: [width, height],
         }
@@ -268,7 +270,9 @@ impl SimRenderer {
         }
         if let Some((_, buffer, count)) = &mut self.aircraft {
             assert!(vertices.len() * 4 <= 2 * 1024 * 1024);
-            queue.write_buffer(buffer, 0, &bytes(vertices));
+            if !vertices.is_empty() {
+                queue.write_buffer(buffer, 0, &bytes(vertices));
+            }
             *count = (vertices.len() / 9) as u32;
         }
     }
@@ -307,7 +311,11 @@ impl SimRenderer {
         world: &World,
     ) {
         if self.size != size {
-            self.depth = Self::depth(device, size[0], size[1]);
+            let next = match self.spare_depth.take() {
+                Some((old_size, depth)) if old_size == size => depth,
+                _ => Self::depth(device, size[0], size[1]),
+            };
+            self.spare_depth = Some((self.size, std::mem::replace(&mut self.depth, next)));
             self.size = size;
         }
         let sky = world.palette[235];
