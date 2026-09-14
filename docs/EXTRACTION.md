@@ -154,3 +154,16 @@ performs static PE/SMS inventory and disassembly, independently of archive extra
 Add `--dry-run` to inspect metadata first. It requires LLVM `objdump`; it never runs
 retail code. Hash-gated PT references, bounds, overwrite rules, limitations and the
 Rust helper probe are documented in [native flight research](formats/native-flight.md).
+
+The reviewed native-flight research mode also emits `reviewed-components.json` and explicit `reviewed/*.txt` slices for departure, contact and integration routines. These include direct outgoing branches/calls and partial instance offsets; they do not extract a runnable engine. Both reviewed EXE/SMS hashes are required. Use a new output directory for expanded research versions, then repeat the same command to check unchanged output. [Details](formats/native-flight.md#second-pass-departure-ground-and-integration-components).
+
+The reviewed native-flight pass now also extracts `tables/sine-q15.bin` (321 signed little-endian words) and its source/table hashes. Probe it with `cargo run --locked -p tore-app -- --native-flight-trig PATH`. This is inert lookup data, not executable code; table extraction is unavailable for unreviewed builds. [Third-pass notes](formats/native-flight.md#third-pass-extracted-trigonometry-forces-and-loading).
+
+Native-flight fourth pass also exports `tables/atan-pa.bin` (514 unsigned words)
+alongside `sine-q15.bin`. Both are bounded data reads gated by the reviewed FA
+executable hash, with provenance/hashes in `tables/inventory.json`. Reviewed
+regions now include matrix/cockpit composition, contact predicates/latch, loaded
+controls/equipment resolution, and RNG/frame/counter clocks. Reuse identical
+outputs safely; choose a fresh output directory when extending the research
+inventory, or explicitly request `--overwrite`. See the headless composition
+example in [DEVELOPMENT.md](DEVELOPMENT.md).

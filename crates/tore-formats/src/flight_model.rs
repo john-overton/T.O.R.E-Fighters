@@ -1,5 +1,13 @@
 //! Arithmetic translated from the hash-reviewed FA.EXE; not a complete flight tick.
 //! See docs/formats/native-flight.md for addresses, domains and integration limits.
+pub mod clock_rng;
+pub mod departure;
+pub mod forces;
+pub mod ground;
+pub mod integration;
+pub mod loading;
+pub mod profile;
+pub mod rotation;
 use crate::{Result, aircraft::Envelope, invalid};
 fn divide(n: i64, d: i32) -> Result<i32> {
     if d == 0 {

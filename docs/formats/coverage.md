@@ -36,3 +36,13 @@ FA.SMS statically. It writes local symbol spans, hashes and reviewed-build PT
 references. Pure Rust flight helper translations have synthetic checks and an
 imported-Hornet report; they are not a complete native simulation. See
 [native flight coverage](native-flight.md) and [validation](../baselines/native-flight.md).
+
+Native flight second pass: 18 reviewed static regions, partial instance-state map, typed PT component profiles, departure timers/severity and spin branch, drag assembly, landing classifier, scalar velocity and movement-angle stages. Static-only and diagnostic-only; complete force/movement/contact/clock integration remains open. See [native flight coverage](native-flight.md).
+
+Native flight third pass: 28 reviewed regions plus the inert 321-word trig table; angle conversion/body-rate transform, lift/gravity/vector thrust, weight/drag loading and position/wind now have diagnostic Rust translations. Matrix/display composition, complete contacts and whole-tick scheduling remain open.
+
+Native-flight fourth pass adds bounded 514-word atan table extraction and
+43 reviewed static regions. Matrix/cockpit composition, contact arithmetic/latch,
+resolved equipment mass, loaded control bounds and clock/RNG helpers are diagnostic
+translations. Terrain/carrier query producers and whole-tick ordering remain open;
+see [native-flight.md](native-flight.md).

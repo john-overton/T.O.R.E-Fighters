@@ -642,7 +642,7 @@ pub fn native_report(a: &Aircraft) -> tore_formats::Result<()> {
     };
     let coefficient = word("gpullAOA")?;
     println!(
-        "native_helpers_v1 aircraft={} method=static_translation complete_model=false",
+        "native_helpers_v2 aircraft={} method=static_translation complete_model=false",
         a.name
     );
     println!(
@@ -691,6 +691,131 @@ pub fn native_report(a: &Aircraft) -> tore_formats::Result<()> {
                 word("aftFuelConsumption")?,
                 throttle
             )
+        );
+    }
+    let profile = n::profile::FlightProfile::from_fields(&a.fields)?;
+    println!("native_profile={profile:?}");
+    let mut stall = n::departure::StallState::default();
+    // A supplied below-envelope condition, not a complete simulated trajectory.
+    for sample in 0..5 {
+        stall.advance(
+            &profile.departure,
+            true,
+            true,
+            profile.extended_warning,
+            false,
+            256,
+        )?;
+        println!(
+            "departure_condition_sample={sample} mode={:?} elapsed={} severity={}",
+            stall.mode,
+            stall.elapsed,
+            n::departure::stall_severity(&profile.departure, stall.elapsed, 150, 200)?
+        );
+    }
+    for direction in [-1, 1] {
+        let mut state = n::departure::SpinState::entered(direction, false)?;
+        let mut motion = n::departure::SpinMotion {
+            speed_f8: 350 * 256,
+            ..Default::default()
+        };
+        let input = n::departure::SpinInput {
+            pitch_stick: 256,
+            rudder: direction as i32 * 256,
+            throttle_f8: 100 * 256,
+            speed_f8: 350 * 256,
+            clean_stall_fps: 200,
+            thrust_vector_f8: 0,
+            inhibited: false,
+        };
+        for _ in 0..128 {
+            state.advance(&mut motion, &profile.departure, input, 2)?;
+        }
+        println!("spin_component_direction={direction} state={state:?} motion={motion:?}");
+    }
+    // FA 0x452482..0x4524d6 writes the 1G envelope maximum into cp+0x245.
+    let upper = n::envelope_limits(
+        envelope,
+        5000 * 256,
+        false,
+        [word("structure[0]")?, word("structure[1]")?],
+    )?
+    .maximum;
+    let velocity_limits =
+        profile.loaded_velocity(i16::try_from(upper).map_err(std::io::Error::other)?)?;
+    println!("velocity_probe_forward_limit={upper} source=reviewed_1G_envelope_update_at_5000ft");
+    let velocity = n::integration::Velocity {
+        forward: 100 * 256,
+        side: 5 * 256,
+        down: 0,
+    };
+    let forces = n::integration::Forces {
+        drag: 100_000,
+        forward: 500_000,
+        side: 0,
+        down: 0,
+    };
+    for ground in [false, true] {
+        println!(
+            "velocity_component_ground={ground} result={:?}",
+            n::integration::velocity_step(
+                velocity,
+                forces,
+                30_000,
+                velocity_limits,
+                ground,
+                ground,
+                2
+            )?
+        );
+    }
+    Ok(())
+}
+
+/// Imported-table probes; no executable loader or emulation involved.
+pub fn native_rotation_report(
+    a: &Aircraft,
+    table: &tore_formats::flight_model::rotation::TrigTable,
+) -> tore_formats::Result<()> {
+    use tore_formats::flight_model::{forces as f, rotation as r};
+    println!(
+        "native_rotation_v1 table=caller_supplied_data provenance=see_extractor_manifest complete_model=false"
+    );
+    for pitch in [0, 45, 80, 90, -90] {
+        let angle = r::degrees_to_pa(pitch * 256)?;
+        let trig = table.sin_cos(angle);
+        let rates = r::body_rates(table, [0, 5 * 256, 0], r::degrees_to_pa(45 * 256)?, angle)?;
+        println!("pitch_deg={pitch} pa={angle} trig={trig:?} rates_f8={rates:?}");
+    }
+    let word = |key: &str| -> tore_formats::Result<i16> {
+        a.fields
+            .get(key)
+            .ok_or_else(|| std::io::Error::other(format!("missing {key}")))?
+            .number()
+            .and_then(|v| i16::try_from(v).map_err(std::io::Error::other))
+    };
+    for bank in [-45, 0, 45, 180] {
+        let gravity = f::gravity_force(
+            30000,
+            table.sin_cos(0),
+            table.sin_cos(r::degrees_to_pa(-bank * 256)?),
+        )?;
+        let lift = f::lift_force(
+            f::LiftInput {
+                speed_f8: 750 * 256,
+                first_envelope_speed: 200,
+                stall_fps: 213,
+                lift_scale_f8: 256,
+                flaps_lift: word("flapsLift")?,
+                drag_percent: 62,
+                weight: 30000,
+            },
+            f::DragDevices::default(),
+        )?;
+        let force = f::assemble(0, [0, 0], lift, gravity);
+        println!(
+            "force_probe_bank={bank} supplied_weight=30000 gravity={gravity:?} lift={lift} forward={} side={} down={}",
+            force.forward, force.side, force.down
         );
     }
     Ok(())

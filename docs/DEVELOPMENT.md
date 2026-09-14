@@ -219,3 +219,19 @@ Use `--flight-devices G,F,B,H,AB` for initial fractions (0..1) and `--flight-con
 static-translated helper probes using the imported Hornet profile, without a
 window. This does not select a different playable flight model. Recreate the local
 executable/symbol inventory with the commands in [native flight research](formats/native-flight.md).
+
+The native flight report now prints a typed PT profile, supplied-condition stall/spin probes and ordered velocity-step probes. Its forward limit uses the reviewed 1G-envelope update at a supplied 5,000-ft altitude. It is not a native flight trajectory. No display is required; the normal free-flight adapter remains unchanged.
+
+Use `--native-flight-trig .local/native-flight/rotations-final/tables/sine-q15.bin` after static extraction to include imported-table rotation and force probes. The flag enables the headless native report. It validates exactly 642 bytes and does not alter free-flight behavior.
+
+Fourth-pass static composition probe (no window, audio or retail-code execution):
+
+```sh
+python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-flight/composition-final
+cargo run --locked -p tore-formats --example native_composition -- .local/native-flight/composition-final/tables/sine-q15.bin .local/native-flight/composition-final/tables/atan-pa.bin
+```
+
+The example validates table lengths, prints supplied world/cockpit angle probes,
+and checks that 120 authored fixed-clock steps account for 256 native time units.
+Its seeded RNG draws and sample inputs are diagnostics, not recorded native
+trajectories. It does not change the app's flight model.

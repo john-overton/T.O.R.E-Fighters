@@ -13,6 +13,118 @@ REVIEWED_SMS = 'e550a67e2dca36c583a5e7963db96da7a833e79a2b5cd13e5da4c2d966168de0
 REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 
 
+# Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
+# These are static research slices, not executable modules or a complete call graph.
+REVIEWED_REGIONS = (
+    ('contact_predicate', 0x411910, 0x411942, 'ground'),
+    ('contact_latch', 0x49fd40, 0x49fd61, 'ground'),
+    ('contact_approach', 0x4119a0, 0x4119e8, 'ground'),
+    ('word_vector_transform', 0x4cf328, 0x4cf40e, 'rotation'),
+    ('equipment_resolution', 0x452770, 0x4527e1, 'loading'),
+    ('loaded_control_limits', 0x477ed0, 0x478089, 'loading'),
+    ('movement_display_conversion', 0x451820, 0x451891, 'rotation'),
+    ('cockpit_offset', 0x417f00, 0x418065, 'rotation'),
+    ('cockpit_composition', 0x476cba, 0x476d67, 'rotation'),
+    ('matrix_builder', 0x4d5e58, 0x4d60d6, 'rotation'),
+    ('matrix_compose', 0x4cf2d0, 0x4cf325, 'rotation'),
+    ('atan_interpolation', 0x4ccb88, 0x4ccc3e, 'rotation'),
+    ('shuffled_rng', 0x4561d0, 0x4562ce, 'clock'),
+    ('frame_clock', 0x486aa0, 0x486bea, 'clock'),
+    ('counter_clock', 0x486bf0, 0x486c53, 'clock'),
+    ('weight_update', 0x4516b0, 0x451815, 'loading'),
+    ('pull_drag_loading', 0x4784a0, 0x4784ea, 'loading'),
+    ('thrust_selection', 0x478190, 0x4781c6, 'loading'),
+    ('position_wind_step', 0x476ed2, 0x476f98, 'movement'),
+    ('world_velocity_builder', 0x476fb0, 0x47700a, 'movement'),
+    ('trig_interpolation', 0x4cd588, 0x4cd5c6, 'rotation'),
+    ('body_rate_transform', 0x477010, 0x477139, 'rotation'),
+    ('rotate_xz', 0x4c6654, 0x4c66cb, 'rotation'),
+    ('angle_conversions', 0x4c6620, 0x4c6652, 'rotation'),
+    ('vector_thrust', 0x47a860, 0x47a961, 'integration'),
+    ('departure_dispatch', 0x47b250, 0x47ba8c, 'departure'),
+    ('stall_predicate', 0x47cc70, 0x47cca4, 'departure'),
+    ('spin_entry', 0x47ccb0, 0x47cd64, 'departure'),
+    ('spin_direction', 0x47cd70, 0x47cdad, 'departure'),
+    ('spin_recovery', 0x47cdb0, 0x47ce61, 'departure'),
+    ('spin_interpolation', 0x47ce70, 0x47cea5, 'departure'),
+    ('landing_limits', 0x477140, 0x47723b, 'ground'),
+    ('ground_contact', 0x477240, 0x4774e4, 'ground'),
+    ('landing_surface', 0x4774f0, 0x477581, 'ground'),
+    ('loaded_speed_limits', 0x452482, 0x4524d6, 'profile'),
+    ('drag_force', 0x47a970, 0x47ab54, 'integration'),
+    ('live_velocity', 0x47c860, 0x47c97b, 'integration'),
+    ('lift_force', 0x47c980, 0x47ca61, 'integration'),
+    ('gravity_force', 0x47ca70, 0x47cb74, 'integration'),
+    ('transverse_decay', 0x47cb80, 0x47cbdb, 'integration'),
+    ('axis_integration', 0x47cbe0, 0x47cc67, 'integration'),
+    ('service_multiply', 0x4c65ec, 0x4c65f8, 'clock'),
+    ('movement_angle_step', 0x476ae0, 0x476bb0, 'movement'),
+)
+
+# Partial reviewed instance layout; deliberately independent of guessed reference structs.
+REVIEWED_STATE = (
+    ('speed_f8', 0x50ceb4, 4), ('side_velocity_f8', 0x50cff7, 4),
+    ('down_velocity_f8', 0x50cffb, 4), ('roll_rate_f8', 0x50cfff, 4),
+    ('pitch_rate_f8', 0x50d003, 4), ('yaw_rate_f8', 0x50d007, 4),
+    ('movement_roll_f8', 0x50d00f, 4), ('movement_pitch_f8', 0x50d013, 4),
+    ('movement_heading_f8', 0x50d017, 4), ('g_f8', 0x50d01b, 4),
+    ('bank_offset_f8', 0x50d023, 4), ('aoa_offset_f8', 0x50d027, 4),
+    ('slip_offset_f8', 0x50d02b, 4), ('low_speed_pitch_f8', 0x50d02f, 4),
+    ('spin_intensity_f8', 0x50d03f, 4), ('spin_direction', 0x50d043, 1),
+    ('spin_recovery_ticks', 0x50d044, 2), ('departure_mode', 0x50d08c, 1),
+    ('departure_ticks', 0x50d08d, 2), ('touchdown_hold_ticks', 0x50d091, 2),
+    ('vertical_speed_word', 0x50d0aa, 2),
+)
+
+
+def reviewed_regions(exe, rows, instructions, regions=REVIEWED_REGIONS):
+    """Explicit bounded slices. Caller must gate on BOTH reviewed source hashes."""
+    addresses = [a for a, _ in instructions]
+    artifacts, manifest = {}, []
+    for name, start, end, component in regions:
+        section = next((r for r in rows if r['executable'] and
+                        r['va'] <= start < end <= r['va']+r['size']), None)
+        if section is None or start not in addresses:
+            raise ValueError(f'reviewed region outside decoded executable: {name}')
+        raw = section['raw'] + start-section['va']
+        lines = instructions[bisect.bisect_left(addresses, start):bisect.bisect_left(addresses, end)]
+        edges = []
+        for address, line in lines:
+            match = re.search(r'\b(call|j[a-z]+)\s+0x([0-9a-fA-F]+)', line)
+            if match:
+                target = int(match[2], 16)
+                edges.append({'at': address, 'kind': match[1], 'target': target,
+                              'outside_region': not start <= target < end})
+        manifest.append({'name': name, 'component': component, 'va': start, 'end': end,
+                         'sha256': hashlib.sha256(exe[raw:raw+end-start]).hexdigest(),
+                         'edges': edges})
+        artifacts[f'reviewed/{start:08x}-{name}.txt'] = '\n'.join(l for _, l in lines)+'\n'
+    artifacts['reviewed-components.json'] = json.dumps({
+        'schema_version': 1, 'complete_model': False,
+        'method': 'manual static boundaries; direct edges only, no native execution',
+        'regions': manifest,
+        'instance_state': [{'name': n, 'va': va, 'cp_offset': va-0x50ce80, 'width': w}
+                           for n, va, w in REVIEWED_STATE],
+        'open_contracts': ['timer scheduling', 'loaded force assembly', 'body/world rotations',
+                           'terrain and carrier contacts', 'damage', 'RNG and turbulence'],
+    }, indent=2)+'\n'
+    return artifacts
+
+
+def static_table(exe, rows, va, count):
+    """Read bounded inert signed-word data from one file-backed non-code section."""
+    if not 0 < count <= 4096:
+        raise ValueError('native table count outside bound')
+    section = next((r for r in rows if not r['executable'] and
+                    r['va'] <= va and va+count*2 <= r['va']+r['size']), None)
+    if section is None:
+        raise ValueError('native table outside file-backed data section')
+    raw = section['raw']+va-section['va']
+    if raw < 0 or raw+count*2 > len(exe):
+        raise ValueError('truncated native table')
+    return exe[raw:raw+count*2]
+
+
 def unpack(data, fmt, offset):
     size = struct.calcsize(fmt)
     if offset < 0 or offset + size > len(data):
@@ -149,18 +261,35 @@ def extract(source, output, *, overwrite=False, preview=False):
         for field in fields:
             field['direct_references'] = references.get(field['va'], [])
         artifacts['pt-field-references.json'] = json.dumps(fields,indent=2)
+        artifacts.update(reviewed_regions(exe, rows, instructions))
+        table = static_table(exe, rows, 0x515a48, 321)
+        artifacts['tables/sine-q15.bin'] = table
+        artifacts['tables/atan-pa.bin'] = static_table(exe, rows, 0x515644, 514)
+        artifacts['tables/inventory.json'] = json.dumps({
+            'schema_version': 1, 'source_exe_sha256': report['exe_sha256'],
+            'tables': [{'path': 'sine-q15.bin', 'va': 0x515a48, 'count': 321,
+                        'format': 'little-endian signed 16-bit',
+                        'sha256': hashlib.sha256(table).hexdigest(),
+                        'consumer': '0x4cd588; sine[index] and cosine[index+64]'},
+                       {'path': 'atan-pa.bin', 'va': 0x515644, 'count': 514,
+                        'format': 'little-endian unsigned 16-bit',
+                        'sha256': hashlib.sha256(static_table(exe, rows, 0x515644, 514)).hexdigest(),
+                        'consumer': '0x4ccb88; octant interpolation'}],
+        }, indent=2)+'\n'
     artifacts['inventory.json'] = json.dumps(report,indent=2)+'\n'
+    artifacts = {name: content.encode() if isinstance(content, str) else content
+                 for name, content in artifacts.items()}
     # Preflight every output before changing anything. Never overwrite differing
     # research output unless explicitly requested; filenames never contain symbols.
     for name, content in artifacts.items():
         path = output/name
         if not path.resolve().is_relative_to(output):
             raise ValueError('output symlink escapes research directory')
-        if path.exists() and path.read_text()!=content and not overwrite:
+        if path.exists() and path.read_bytes()!=content and not overwrite:
             raise ValueError(f'differing output {path}; choose a new --out or --overwrite')
     for name, content in artifacts.items():
         path=output/name;path.parent.mkdir(parents=True,exist_ok=True)
-        path.write_text(content)
+        path.write_bytes(content)
     print(f"Native flight research: {len(selected)} symbol spans, {len(names)} symbols; {output}")
 
 

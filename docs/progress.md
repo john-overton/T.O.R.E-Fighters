@@ -352,3 +352,43 @@ See [measurements, source fields and limitations](baselines/banked-pull-aoa.md).
 See [addresses, lessons and coverage](formats/native-flight.md) and
 [validation record](baselines/native-flight.md). Pure-helper tests are not proof
 of full native flight parity.
+
+### Native flight follow-up: reusable components
+
+- [x] Extract explicitly reviewed unnamed departure/contact/integrator regions, hashes, direct edges and partial instance offsets through the universal script.
+- [x] Map reviewed PT fields once into lightweight departure/drag/landing/velocity profiles; require an explicit loaded forward-speed maximum.
+- [x] Translate warning/stall timer transitions, severity and control/lift attenuation; spin entry, directional state, motion targets, recovery timer and lock.
+- [x] Translate drag assembly including native device flags and wheel drag, ordered scalar velocity updates and the movement angle stage through vertical crossings.
+- [x] Translate landing-limit classification and ground pitch settling independently of terrain/carrier callbacks.
+- [x] Add synthetic boundary, mirrored-spin, wide-arithmetic, drag-order and profile validation tests; extend imported Hornet diagnostics.
+- [ ] Finish native stall tumble/pitch fall, initial envelope/difficulty predicates and complete dispatch/events.
+- [ ] Recover loaded cp limits, complete lift/gravity/thrust assembly, native rotations and wind/position.
+- [ ] Decode touchdown/contact state, terrain/carrier/catapult/hook callbacks and damage decisions.
+- [ ] Audit timer scheduling and RNG ownership; implement deterministic whole-tick probes before enabling native dynamics in free flight.
+- [ ] Compare original-game trajectories and approve any explicitly fitted substitutes per aircraft.
+
+Evidence and component boundaries: [format research](formats/native-flight.md#second-pass-departure-ground-and-integration-components), [baseline](baselines/native-flight.md#component-follow-up).
+
+### Native flight: table, force and movement follow-up
+
+- [x] Extract the native sine/cosine interpolation table with reviewed-build gating and hashes.
+- [x] Translate angle conversions, body-rate transform and Rotate2 with native integer ordering.
+- [x] Translate lift/gravity/vector-thrust assembly and loading arithmetic.
+- [x] Translate world-position/wind stage; identify world vertical speed feeding landing checks.
+- [x] Add imported-table headless probes and synthetic rotation/force/loading/position checks.
+- [ ] Complete world matrix and cockpit-angle composition, loaded control/equipment state, contact and clock/RNG contracts before enabling native dynamics.
+
+[Research](formats/native-flight.md#third-pass-extracted-trigonometry-forces-and-loading) and [validation](baselines/native-flight.md#trigonometry-and-force-follow-up).
+
+### Native flight fourth research pass
+
+- [x] Translate world matrix and cockpit basis/angle composition with extracted sine and arctangent tables.
+- [x] Translate contact retention, surface classification, touchdown settling and landing latch with explicit query inputs.
+- [x] Translate resolved equipment mass and loaded control-limit arithmetic.
+- [x] Isolate seeded shuffled RNG, native counter/frame arithmetic and an authored fractional 120 Hz time bridge.
+- [x] Add repeatable table extraction and a headless imported-table composition probe.
+- [ ] Decode terrain/carrier query producers and touchdown event effects; complete contact-system parity remains open.
+- [ ] Resolve remaining loaded field semantics/producers and equipment pointer-to-profile mapping.
+- [ ] Establish original scheduling, RNG seed/consumption order and full-tick trajectories before enabling a native flight adapter.
+
+Details and limitations: [native format research](formats/native-flight.md).

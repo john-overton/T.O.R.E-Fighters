@@ -83,3 +83,11 @@ Native flight reverse-engineering now has a [repeatable static extraction pass a
 coverage notes](docs/formats/native-flight.md). Use `cargo run --locked -p tore-app -- --native-flight-report`
 for imported-Hornet helper probes. Full native dynamics remain in progress; normal
 free flight still uses the authored adapter.
+
+Native flight research now includes reusable PT profiles, stall/spin components, force/loading calculations, landing checks, extracted trigonometry, and velocity/angle/wind stages. These are diagnostic components; free flight still uses the authored adapter. See [decode coverage and component boundaries](docs/formats/native-flight.md#second-pass-departure-ground-and-integration-components).
+
+Native flight research includes an imported-table world/cockpit composition probe
+and isolated contact, equipment/control and clock/RNG components. See
+[development commands](docs/DEVELOPMENT.md) and
+[extraction status and limits](docs/formats/native-flight.md). These diagnostic
+translations are not yet the playable flight adapter.
