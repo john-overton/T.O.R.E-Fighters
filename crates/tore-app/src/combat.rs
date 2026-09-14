@@ -38,6 +38,8 @@ pub struct Combat {
     pub state: live::State,
     pub input: FireInput,
     pub range: bool,
+    pub recorder: Option<crate::combat_tape::Recorder>,
+    last_launcher: Option<Launcher>,
     shapes: Vec<Option<Shape>>,
     explosions: Vec<Vec<([f32; 2], [f32; 3])>>,
 }
@@ -95,15 +97,38 @@ impl Combat {
             state: live::State::new(config, range)?,
             input: FireInput::default(),
             range,
+            recorder: None,
+            last_launcher: None,
             shapes,
             explosions,
         })
     }
+    pub fn command(&mut self, command: live::Command, l: Launcher) {
+        if let Some(r) = &mut self.recorder {
+            r.record(crate::combat_tape::command_name(command), l);
+        }
+        self.state.command(command, l);
+        self.last_launcher = Some(l);
+    }
+    pub fn finish_recording(&mut self) -> AppResult<()> {
+        if let Some(mut r) = self.recorder.take() {
+            r.flush()?;
+        }
+        Ok(())
+    }
     pub fn cancel(&mut self) {
+        if let (Some(r), Some(l)) = (&mut self.recorder, self.last_launcher) {
+            r.record("release", l);
+        }
         self.input.cancel();
         self.state.release();
     }
     pub fn reset(&mut self, s: &mut flight::State) -> AppResult<()> {
+        let l = launcher(s);
+        if let Some(r) = &mut self.recorder {
+            r.record("reset", l);
+        }
+        self.last_launcher = Some(l);
         self.state = live::State::new(self.state.configuration().clone(), self.range)?;
         self.input = FireInput::default();
         s.set_payload(self.state.payload_lbs())?;
@@ -113,7 +138,12 @@ impl Combat {
         Ok(())
     }
     pub fn step(&mut self, s: &mut flight::State, world: &World) -> AppResult<Vec<Event>> {
-        let events = self.state.step(self.input.held, launcher(s), |x, z| {
+        let l = launcher(s);
+        self.last_launcher = Some(l);
+        if let Some(r) = &mut self.recorder {
+            r.record(if self.input.held { "fire" } else { "tick" }, l);
+        }
+        let events = self.state.step(self.input.held, l, |x, z| {
             f64::from(world.height(x as f32, z as f32))
         });
         s.set_payload(self.state.payload_lbs())?;
@@ -128,7 +158,13 @@ impl Combat {
                 .seeker
                 .signature
                 != 0,
-            ammo: self.state.ammo[i],
+            ammo: self.state.rounds(i),
+            readiness: self.state.readiness(launcher(s)).label(),
+            damage: self
+                .state
+                .history
+                .last()
+                .map(|hit| format!("C{} HIT {} HP {}", hit.class, hit.applied, hit.hp_after)),
             loaded: self.range,
             target: self
                 .state
@@ -183,11 +219,13 @@ impl Combat {
                 })
         });
         format!(
-            "{} {}  {}  HITS {}",
+            "{} {} {}  {} C{} HIT {}",
             self.state.configuration().stations[i].weapon.name,
-            self.state.ammo[i],
+            self.state.rounds(i),
+            self.state.readiness(launcher(s)).label(),
             target,
-            self.state.hits
+            live::damage_class(self.state.range_category),
+            self.state.history.last().map_or(0, |hit| hit.applied)
         )
     }
     pub fn vertices(&self, h: &Airframe, s: &flight::State, camera: &Camera) -> Vec<f32> {
@@ -204,32 +242,47 @@ impl Combat {
             pose.elevator = 0.;
             pose.aileron = 0.;
             pose.rudder = 0.;
+            pose.brake = 0.;
+            pose.hook = 0.;
             v.extend(h.vertices(&pose, camera));
+        }
+        // One original model per surviving source station group. Pair/rack
+        // offsets are not decoded; never fabricate positions for each round.
+        let own = launcher(s);
+        for (i, station) in self.state.configuration().stations.iter().enumerate() {
+            if !station.internal
+                && self.state.rounds(i) > 0
+                && let Some(shape) = &self.shapes[i]
+            {
+                let position = std::array::from_fn(|k| {
+                    own.position[k]
+                        + own.basis.right[k] * station.mount[0]
+                        + own.basis.up[k] * station.mount[1]
+                        + own.basis.forward[k] * station.mount[2]
+                });
+                mesh(
+                    &mut v,
+                    shape,
+                    position,
+                    own.basis.right,
+                    own.basis.up,
+                    own.basis.forward,
+                    &h.palette,
+                );
+            }
         }
         for p in &self.state.projectiles {
             if let Some(shape) = &self.shapes[p.station] {
-                let forward = p.direction;
-                let right = unit([forward[2], 0., -forward[0]]);
-                let up = tore_sim::attitude::cross(forward, right);
-                for face in &shape.faces {
-                    for i in 1..face.positions.len() - 1 {
-                        for j in [0, i, i + 1] {
-                            let q = face.positions[j];
-                            let pos: Vector = std::array::from_fn(|k| {
-                                p.position[k]
-                                    + (right[k] * f64::from(q[0])
-                                        + up[k] * f64::from(q[2])
-                                        + forward[k] * f64::from(q[1]))
-                                        / 3.
-                            });
-                            vertex(
-                                &mut v,
-                                pos,
-                                h.palette[face.colors[j] as usize].map(|c| f32::from(c) / 255.),
-                            );
-                        }
-                    }
-                }
+                let right = unit([p.direction[2], 0., -p.direction[0]]);
+                mesh(
+                    &mut v,
+                    shape,
+                    p.position,
+                    right,
+                    tore_sim::attitude::cross(p.direction, right),
+                    p.direction,
+                    &h.palette,
+                );
             }
             // A visible thin strip marks the actual swept projectile segment.
             let right = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.).right;
@@ -280,6 +333,41 @@ impl Combat {
         v
     }
 }
+fn mesh(
+    out: &mut Vec<f32>,
+    shape: &Shape,
+    position: Vector,
+    right: Vector,
+    up: Vector,
+    forward: Vector,
+    palette: &[[u8; 3]; 256],
+) {
+    for face in &shape.faces {
+        // These are texture-only SH faces (including the missile exhaust
+        // sheets). Palette index zero is not an opaque substitute for them.
+        // Keep them omitted until the weapon texture/animation path is decoded.
+        if matches!(face.subtype, 0x4c | 0x5c | 0x6c | 0x7c) {
+            continue;
+        }
+        for i in 1..face.positions.len() - 1 {
+            for j in [0, i, i + 1] {
+                let q = face.positions[j];
+                let pos = std::array::from_fn(|k| {
+                    position[k]
+                        + (right[k] * f64::from(q[0])
+                            + up[k] * f64::from(q[2])
+                            + forward[k] * f64::from(q[1]))
+                            / 3.
+                });
+                vertex(
+                    out,
+                    pos,
+                    palette[face.colors[j] as usize].map(|c| f32::from(c) / 255.),
+                );
+            }
+        }
+    }
+}
 fn vertex(out: &mut Vec<f32>, pos: Vector, color: [f32; 3]) {
     out.extend([
         pos[0] as f32,
@@ -300,88 +388,237 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let world = World::for_theater(data, "UKR")?;
     let mut combat = Combat::new(h, data, true)?;
     for index in 0..combat.state.ammo.len() {
-        let mut flight = h.start(&world);
-        combat.reset(&mut flight)?;
-        combat.state.selected = index;
-        combat.state.range_target(launcher(&flight));
-        combat.state.designate_next();
-        let initial = combat.state.ammo[index];
-        if let Some(name) = combat.state.configuration().stations[index]
-            .weapon
-            .fire_sound
-            .as_deref()
+        for (class, category) in [
+            combat.state.configuration().target_category,
+            0x2000,
+            0x100,
+            0x400,
+            0x40,
+        ]
+        .into_iter()
+        .enumerate()
         {
-            let pcm =
-                tore_formats::pcm::Pcm::parse(name, data.get(name).ok_or("missing firing PCM")?)?;
-            if !pcm.samples.windows(2).any(|s| s[0] != s[1]) {
-                return Err("firing PCM contains no signal".into());
+            let mut flight = h.start(&world);
+            let tape = std::env::var_os("TORE_COMBAT_EVIDENCE")
+                .filter(|_| class == 0)
+                .map(|root| {
+                    std::path::PathBuf::from(root).join(format!(
+                        "{:?}-slot-{}.tape",
+                        h.profile.id,
+                        index + 1
+                    ))
+                });
+            if let Some(path) = &tape {
+                std::fs::create_dir_all(path.parent().ok_or("tape directory missing")?)?;
+                combat.recorder = Some(crate::combat_tape::Recorder::new(
+                    path,
+                    data,
+                    combat.state.configuration(),
+                    "UKR",
+                )?);
             }
-        }
-        for name in ["&EXPL3.5K", "&EXPL12.5K"] {
-            tore_formats::pcm::Pcm::parse(name, data.get(name).ok_or("missing impact PCM")?)?;
-        }
-
-        let mut fired = 0;
-        let mut impacts = 0;
-        let mut destroyed = 0;
-        // Pulse for missiles, hold for gun. Two shots are available in the
-        // smallest source station; damage remains source class-0 per hit.
-        for tick in 0..6000 {
-            if tick % 240 == 0 {
-                combat.input.space(true, false, false);
+            combat.reset(&mut flight)?;
+            for _ in 0..index {
+                combat.command(live::Command::NextWeapon, launcher(&flight));
             }
-            if index != 0 && tick % 240 == 1 {
-                combat.input.space(false, false, false);
+            combat.state.range_category = category;
+            combat.command(live::Command::ReplaceTarget, launcher(&flight));
+            combat.command(live::Command::Designate, launcher(&flight));
+            let initial = combat.state.ammo[index];
+            let mut negative = combat.state.clone();
+            let l = launcher(&flight);
+            negative.command(live::Command::ToggleArm, l);
+            negative.step(true, l, |_, _| 0.);
+            if negative.ammo[index] != initial || negative.readiness(l) != live::Readiness::Safe {
+                return Err("safe inhibited shot consumed ammunition".into());
             }
-            flight.step(&flight::PilotInput::default(), |x, z| {
-                f64::from(world.height(x as f32, z as f32))
-            });
-            let events = combat.step(&mut flight, &world)?;
-            for event in events {
-                match event {
-                    Event::Fired(_) => fired += 1,
-                    Event::Hit(_) => impacts += 1,
-                    Event::Destroyed(_) => destroyed += 1,
-                    _ => {}
+            negative.command(live::Command::ToggleArm, l);
+            negative.command(live::Command::FailStation, l);
+            let mass = negative.payload_lbs();
+            negative.step(true, l, |_, _| 0.);
+            if negative.rounds(index) != initial || negative.payload_lbs() != mass {
+                return Err("station failure changed ammunition/mass".into());
+            }
+            if index != 0 {
+                let mut no_target = combat.state.clone();
+                no_target.command(live::Command::ClearDesignation, l);
+                no_target.step(true, l, |_, _| 0.);
+                if no_target.ammo[index] != initial {
+                    return Err("undesignated launch consumed ammo".into());
+                }
+                if combat.state.configuration().stations[index]
+                    .weapon
+                    .seeker
+                    .signature
+                    == 3
+                {
+                    let mut radar_off = combat.state.clone();
+                    let off = Launcher { radar: false, ..l };
+                    radar_off.step(true, off, |_, _| 0.);
+                    if radar_off.ammo[index] != initial
+                        || radar_off.readiness(off) != live::Readiness::RadarOff
+                    {
+                        return Err("radar-off launch was not inhibited".into());
+                    }
                 }
             }
-            if destroyed > 0 {
-                break;
+            // Replay the same authoritative host tick inputs in a second state.
+            // Presentation/pause never calls this path and cannot advance either copy.
+            let mut replay = combat.state.clone();
+            if let Some(name) = combat.state.configuration().stations[index]
+                .weapon
+                .fire_sound
+                .as_deref()
+            {
+                let pcm = tore_formats::pcm::Pcm::parse(
+                    name,
+                    data.get(name).ok_or("missing firing PCM")?,
+                )?;
+                if !pcm.samples.windows(2).any(|s| s[0] != s[1]) {
+                    return Err("firing PCM contains no signal".into());
+                }
             }
-        }
-        if fired == 0
-            || impacts == 0
-            || destroyed != 1
-            || combat.state.ammo[index] >= initial
-            || !combat
-                .state
-                .effects
-                .iter()
-                .any(|e| e.kind == EffectKind::Destroyed)
-        {
-            return Err(format!(
-                "combat smoke {} {} failed: fired={fired} hits={impacts} destroyed={destroyed}",
+            for name in ["&EXPL3.5K", "&EXPL12.5K"] {
+                tore_formats::pcm::Pcm::parse(name, data.get(name).ok_or("missing impact PCM")?)?;
+            }
+
+            let mut fired = 0;
+            let mut impacts = 0;
+            let mut destroyed = 0;
+            // Pulse for missiles, hold for gun. Two shots are available in the
+            // smallest source station; damage remains source class-0 per hit.
+            for tick in 0..6000 {
+                if tick % 240 == 0 {
+                    combat.input.space(true, false, false);
+                }
+                if index != 0 && tick % 240 == 1 {
+                    combat.input.space(false, false, false);
+                }
+                flight.step(&flight::PilotInput::default(), |x, z| {
+                    f64::from(world.height(x as f32, z as f32))
+                });
+                let replay_events = replay.step(combat.input.held, launcher(&flight), |x, z| {
+                    f64::from(world.height(x as f32, z as f32))
+                });
+                let events = combat.step(&mut flight, &world)?;
+                if events != replay_events
+                    || combat.state.ammo != replay.ammo
+                    || combat.state.projectiles != replay.projectiles
+                    || combat.state.targets != replay.targets
+                    || combat.state.history != replay.history
+                    || combat.state.effects != replay.effects
+                {
+                    return Err("combat host replay diverged".into());
+                }
+                for event in events {
+                    match event {
+                        Event::Fired(_) => fired += 1,
+                        Event::Hit(_) => impacts += 1,
+                        Event::Destroyed(_) => destroyed += 1,
+                        _ => {}
+                    }
+                }
+                if destroyed > 0 || (class != 0 && impacts > 0) {
+                    break;
+                }
+            }
+            if fired == 0
+                || impacts == 0
+                || (class == 0 && destroyed != 1)
+                || combat.state.ammo[index] >= initial
+                || combat.state.history.iter().any(|hit| {
+                    hit.class != class
+                        || hit.nominal
+                            != i32::from(
+                                combat.state.configuration().stations[index]
+                                    .weapon
+                                    .damage
+                                    .by_class[class],
+                            )
+                            .max(0)
+                })
+                || combat
+                    .state
+                    .history
+                    .iter()
+                    .map(|hit| hit.applied)
+                    .sum::<i32>()
+                    != combat.state.configuration().hit_points - combat.state.targets[0].hp
+                || (class == 0
+                    && !combat
+                        .state
+                        .effects
+                        .iter()
+                        .any(|e| e.kind == EffectKind::Destroyed))
+            {
+                return Err(format!(
+                    "combat smoke {} {} failed: fired={fired} hits={impacts} destroyed={destroyed}",
+                    h.profile.name,
+                    combat.state.configuration().stations[index].weapon.source
+                )
+                .into());
+            }
+            println!(
+                "combat smoke {} slot={} {} class={class}: shots={fired} hits={impacts} destroyed={destroyed} ammo={}->{} effects={} PASS",
                 h.profile.name,
-                combat.state.configuration().stations[index].weapon.source
-            )
-            .into());
-        }
-        println!(
-            "combat smoke {} slot={} {}: shots={fired} hits={impacts} destroyed={destroyed} ammo={}->{} effects={} PASS",
-            h.profile.name,
-            index + 1,
-            combat.state.configuration().stations[index].weapon.source,
-            initial,
-            combat.state.ammo[index],
-            combat.state.effects.len()
-        );
-        combat.cancel();
-        let ammo = combat.state.ammo.clone();
-        for _ in 0..120 {
-            combat.step(&mut flight, &world)?;
-        }
-        if combat.state.ammo != ammo {
-            return Err("firing continued after release".into());
+                index + 1,
+                combat.state.configuration().stations[index].weapon.source,
+                initial,
+                combat.state.ammo[index],
+                combat.state.effects.len()
+            );
+            combat.cancel();
+            let ammo = combat.state.ammo.clone();
+            for _ in 0..120 {
+                combat.step(&mut flight, &world)?;
+            }
+            if combat.state.ammo != ammo {
+                return Err("firing continued after release".into());
+            }
+            if let Some(path) = &tape {
+                combat
+                    .recorder
+                    .as_mut()
+                    .ok_or("missing smoke recorder")?
+                    .flush()?;
+                let decoded = crate::combat_tape::replay(
+                    path,
+                    data,
+                    combat.state.configuration().clone(),
+                    "UKR",
+                    &world,
+                )?;
+                if format!("{decoded:?}") != format!("{:?}", combat.state) {
+                    return Err("serialized live-fire replay diverged before reset".into());
+                }
+                // Also replay manual state transitions, including a full reset.
+                for command in [
+                    live::Command::ToggleArm,
+                    live::Command::ClearDesignation,
+                    live::Command::FailStation,
+                    live::Command::Jettison,
+                    live::Command::NextWeapon,
+                    live::Command::CycleClass,
+                ] {
+                    combat.cancel();
+                    combat.command(command, launcher(&flight));
+                    combat.step(&mut flight, &world)?;
+                }
+                combat.reset(&mut flight)?;
+                combat.step(&mut flight, &world)?;
+                combat.finish_recording()?;
+                let decoded = crate::combat_tape::replay(
+                    path,
+                    data,
+                    combat.state.configuration().clone(),
+                    "UKR",
+                    &world,
+                )?;
+                if format!("{decoded:?}") != format!("{:?}", combat.state) {
+                    return Err("serialized combat replay diverged after commands/reset".into());
+                }
+                println!("serialized combat replay {} PASS", path.display());
+            }
         }
     }
     Ok(())
@@ -407,5 +644,34 @@ mod tests {
         f.space(false, false, true);
         f.space(true, false, false);
         assert!(f.held);
+    }
+    #[test]
+    fn palette_mesh_does_not_turn_texture_only_exhaust_into_solid_faces() {
+        let face = tore_formats::shape::Face {
+            positions: vec![[0., 0., 0.], [3., 0., 0.], [0., 3., 0.]],
+            colors: vec![1; 3],
+            uv: vec![],
+            texture: "SYNTHETIC.PIC".into(),
+            subtype: 0x61,
+            normal: None,
+            address: 0,
+        };
+        let mut exhaust = face.clone();
+        exhaust.subtype = 0x4c;
+        let shape = Shape {
+            faces: vec![face, exhaust],
+            state_words: Default::default(),
+        };
+        let mut out = vec![];
+        mesh(
+            &mut out,
+            &shape,
+            [0.; 3],
+            [1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.],
+            &[[255; 3]; 256],
+        );
+        assert_eq!(out.len(), 27);
     }
 }

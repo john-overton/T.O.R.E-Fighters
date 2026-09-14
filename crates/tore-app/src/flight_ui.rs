@@ -9,6 +9,7 @@ pub enum Command {
     NextWeapon,
     Target,
     RangeReset,
+    Combat(tore_sim::combat::live::Command),
     Click,
     End,
     Exit,
@@ -390,6 +391,11 @@ impl FlightUi {
                 self.help = true;
                 Command::None
             }
+            "u" => Command::Combat(tore_sim::combat::live::Command::ToggleArm),
+            "k" => Command::Combat(tore_sim::combat::live::Command::Jettison),
+            "l" => Command::Combat(tore_sim::combat::live::Command::ClearDesignation),
+            "]" => Command::Combat(tore_sim::combat::live::Command::CycleClass),
+            "[" => Command::Combat(tore_sim::combat::live::Command::FailStation),
             "a" => self.unavailable("Autopilot"),
             "t" => Command::Target,
             ";" => Command::NextWeapon,
@@ -743,5 +749,40 @@ mod tests {
         assert_eq!(u.pointer(&t, Some((160., 55.)), false), Command::None);
         u.pointer(&t, Some((160., 55.)), true);
         assert_eq!(u.pointer(&t, Some((160., 55.)), false), Command::End);
+    }
+    #[test]
+    fn manual_combat_commands_preserve_modifier_and_menu_isolation() {
+        use tore_sim::combat::live::Command as C;
+        let tree = tree();
+        for (key, command) in [
+            ("u", C::ToggleArm),
+            ("k", C::Jettison),
+            ("l", C::ClearDesignation),
+            ("]", C::CycleClass),
+            ("[", C::FailStation),
+        ] {
+            let mut ui = FlightUi::default();
+            assert_eq!(
+                ui.key(key, false, false, false, &tree),
+                Command::Combat(command)
+            );
+            assert!(!matches!(
+                ui.key(key, true, false, false, &tree),
+                Command::Combat(_)
+            ));
+            assert!(!matches!(
+                ui.key(key, false, true, false, &tree),
+                Command::Combat(_)
+            ));
+            assert!(!matches!(
+                ui.key(key, false, false, true, &tree),
+                Command::Combat(_)
+            ));
+            ui.menu = true;
+            assert!(!matches!(
+                ui.key(key, false, false, false, &tree),
+                Command::Combat(_)
+            ));
+        }
     }
 }

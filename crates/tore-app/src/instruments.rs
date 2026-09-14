@@ -122,6 +122,8 @@ impl Layout {
 pub struct CombatReadout {
     pub weapon: String,
     pub guided: bool,
+    pub readiness: &'static str,
+    pub damage: Option<String>,
     pub ammo: u16,
     pub loaded: bool,
     pub target: Option<(u32, i32, bool)>,
@@ -401,7 +403,10 @@ impl Instruments {
                         20,
                         56,
                     );
-                    text(&mut r, "PLAYER LIVE FIRE", 20, 77);
+                    text(&mut r, c.readiness, 20, 77);
+                    if let Some(damage) = &c.damage {
+                        text(&mut r, damage, 20, 94);
+                    }
                     text(&mut r, "CM NOT ACTIVE", 20, 110);
                 } else {
                     text(&mut r, "WEAPONS SAFE", 20, 35);

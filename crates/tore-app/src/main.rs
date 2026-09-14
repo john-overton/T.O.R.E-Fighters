@@ -5,6 +5,7 @@ mod attitude;
 mod audio;
 mod cockpit_renderer;
 mod combat;
+mod combat_tape;
 mod controls_editor;
 mod flight;
 mod flight_canvas;
@@ -246,22 +247,51 @@ impl App {
             Command::End => Action::Back,
             Command::Exit => Action::Exit,
             Command::Restart => Action::FreeFlight,
+            Command::Combat(command) => {
+                if self.combat.range
+                    || matches!(
+                        command,
+                        tore_sim::combat::live::Command::ToggleArm
+                            | tore_sim::combat::live::Command::ClearDesignation
+                    )
+                {
+                    self.combat.cancel();
+                    self.combat.command(command, combat::launcher(&self.flight));
+                    if let Err(error) = self.flight.set_payload(self.combat.state.payload_lbs()) {
+                        self.flight_ui.message(error.to_string());
+                    } else {
+                        self.flight_ui.message(self.combat.status(&self.flight));
+                    }
+                } else {
+                    self.flight_ui
+                        .message("Manual range command requires --live-fire");
+                }
+                Action::None
+            }
             Command::NextWeapon => {
                 self.combat.cancel();
-                self.combat.state.select_next();
+                self.combat.command(
+                    tore_sim::combat::live::Command::NextWeapon,
+                    combat::launcher(&self.flight),
+                );
                 self.flight_ui.message(self.combat.status(&self.flight));
                 Action::None
             }
             Command::Target => {
-                self.combat.state.designate_next();
+                self.combat.command(
+                    tore_sim::combat::live::Command::Designate,
+                    combat::launcher(&self.flight),
+                );
                 self.flight_ui.message(self.combat.status(&self.flight));
                 Action::None
             }
             Command::RangeReset => {
                 if self.combat.range {
-                    self.combat
-                        .state
-                        .range_target(combat::launcher(&self.flight));
+                    self.combat.cancel();
+                    self.combat.command(
+                        tore_sim::combat::live::Command::ReplaceTarget,
+                        combat::launcher(&self.flight),
+                    );
                     self.flight_ui.message("Range target reset; T designates");
                 } else {
                     self.flight_ui
@@ -385,6 +415,11 @@ impl App {
                 self.flight_ui.effects = on;
             }
             Action::Theater(index) => {
+                if let Err(e) = self.combat.finish_recording() {
+                    self.error = Some(e);
+                    event_loop.exit();
+                    return;
+                }
                 if let Some((code, _)) = self.world.catalog.get(index) {
                     match terrain::World::for_theater(&self.theater_resources, code) {
                         Ok(world) => {
@@ -403,6 +438,11 @@ impl App {
                 }
             }
             Action::Aircraft(index) => {
+                if let Err(e) = self.combat.finish_recording() {
+                    self.error = Some(e);
+                    event_loop.exit();
+                    return;
+                }
                 if let Some(&id) = tore_formats::aircraft::AircraftId::ALL.get(index) {
                     match aircraft::Airframe::load(&self.theater_resources, id) {
                         Ok(aircraft) => {
@@ -486,6 +526,11 @@ impl App {
                 self.frame_time = Instant::now();
             }
             Action::Back => {
+                if let Err(e) = self.combat.finish_recording() {
+                    self.error = Some(e);
+                    event_loop.exit();
+                    return;
+                }
                 if let Some(renderer) = &mut self.renderer {
                     renderer.combat(&[]);
                 }
@@ -866,6 +911,10 @@ impl ApplicationHandler for App {
                             for event in &events {
                                 use tore_sim::combat::live::Event;
                                 match event {
+                                    Event::TrackLost(id) => {
+                                        self.flight_ui
+                                            .message(format!("Missile track lost: T{id}"));
+                                    }
                                     Event::Fired(i) => {
                                         if let Some(name) =
                                             self.combat.state.configuration().stations[*i]
@@ -1171,6 +1220,9 @@ impl ApplicationHandler for App {
                 self.error = Some(error.into());
             }
         }
+        if let Err(e) = self.combat.finish_recording() {
+            self.error = Some(e);
+        }
         self.renderer = None;
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
@@ -1250,7 +1302,10 @@ fn main() -> AppResult<()> {
     let mut args = std::env::args().skip(1);
     let mut live_fire = false;
     let mut combat_smoke = false;
+    let mut record_combat = None;
+    let mut replay_combat = None;
     let mut combat_probe = None;
+    let mut combat_commands = Vec::new();
     let mut weapon_slot = 1usize;
     let mut input_profile = None;
     let mut native_input = true;
@@ -1296,6 +1351,30 @@ fn main() -> AppResult<()> {
                 replay_input = Some(PathBuf::from(
                     args.next().ok_or("--replay-input needs a tape path")?,
                 ))
+            }
+            "--combat-command" => {
+                let name = args.next().ok_or(
+                    "--combat-command needs arm/jettison/clear/class/fail/next/target/designate",
+                )?;
+                if combat_commands.len() >= 32 {
+                    return Err("too many combat setup commands".into());
+                }
+                combat_commands
+                    .push(combat_tape::command(&name).ok_or("unknown combat setup command")?);
+                live_fire = true;
+                initial_screen = Screen::Flight;
+            }
+            "--record-combat" => {
+                record_combat = Some(PathBuf::from(
+                    args.next().ok_or("--record-combat requires a new path")?,
+                ));
+                live_fire = true;
+                initial_screen = Screen::Flight;
+            }
+            "--replay-combat" => {
+                replay_combat = Some(PathBuf::from(
+                    args.next().ok_or("--replay-combat requires a path")?,
+                ));
             }
             "--live-fire" => {
                 live_fire = true;
@@ -1534,7 +1613,7 @@ fn main() -> AppResult<()> {
             "--import-only" => import_only = true,
             "--help" | "-h" => {
                 println!(
-                    "Combat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-smoke runs the imported end-to-end suite headlessly. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Combat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). --record-combat NEW_PATH writes explicit combat-service inputs; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -1611,6 +1690,21 @@ fn main() -> AppResult<()> {
         return Ok(());
     }
     let hornet = aircraft::Airframe::load(&assets.theater_resources, aircraft_id)?;
+    if let Some(path) = replay_combat {
+        if record_combat.is_some() {
+            return Err("combat record and replay are mutually exclusive".into());
+        }
+        let c = combat::Combat::new(&hornet, &assets.theater_resources, true)?;
+        let w = terrain::World::for_theater(&assets.theater_resources, &theater_code)?;
+        combat_tape::replay(
+            &path,
+            &assets.theater_resources,
+            c.state.configuration().clone(),
+            &theater_code,
+            &w,
+        )?;
+        return Ok(());
+    }
     if combat_smoke {
         return combat::smoke(&hornet, &assets.theater_resources);
     }
@@ -1841,16 +1935,38 @@ fn main() -> AppResult<()> {
     }
 
     let mut combat = combat::Combat::new(&hornet, &theater_resources, live_fire)?;
+    if let Some(path) = record_combat {
+        combat.recorder = Some(combat_tape::Recorder::new(
+            &path,
+            &theater_resources,
+            combat.state.configuration(),
+            &theater_code,
+        )?);
+    }
     combat.reset(&mut flight)?;
     if weapon_slot == 0 || weapon_slot > combat.state.ammo.len() {
         return Err("weapon slot outside this aircraft's PT loadout".into());
     }
-    combat.state.selected = weapon_slot - 1;
+    for _ in 1..weapon_slot {
+        combat.command(
+            tore_sim::combat::live::Command::NextWeapon,
+            combat::launcher(&flight),
+        );
+    }
     if live_fire {
-        combat.state.range_target(combat::launcher(&flight));
+        combat.command(
+            tore_sim::combat::live::Command::ReplaceTarget,
+            combat::launcher(&flight),
+        );
+    }
+    for command in combat_commands {
+        combat.command(command, combat::launcher(&flight));
     }
     if let Some(ticks) = combat_probe {
-        combat.state.designate_next();
+        combat.command(
+            tore_sim::combat::live::Command::Designate,
+            combat::launcher(&flight),
+        );
         combat.input.space(true, false, false);
         for _ in 0..ticks {
             flight.step(&flight::PilotInput::default(), |x, z| {
