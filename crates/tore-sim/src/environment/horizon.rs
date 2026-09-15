@@ -25,9 +25,36 @@ impl Horizon {
     }
 }
 
+/// FA 0x4aad7e: integer degrees classify inversion; native clip dimensions
+/// choose the solid lower horizon offset. Units are added to the Q15 view
+/// plane's half-sized constant, not feet or an Earth-curvature horizon dip.
+pub fn lower_solid_offset(size: [u32; 2], roll: i16) -> i16 {
+    let inverted = !(-90..=90).contains(&(roll / 182));
+    if size[0] >= 300 && size[1] >= 190 {
+        if inverted { 90 } else { 20 }
+    } else if size[0] >= 200 && size[1] >= 100 {
+        if inverted { 200 } else { 0 }
+    } else if inverted {
+        300
+    } else {
+        0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn solid_horizon_uses_clip_size_and_integer_roll_thresholds() {
+        assert_eq!(lower_solid_offset([640, 480], 0), 20);
+        assert_eq!(lower_solid_offset([640, 480], 16561), 20);
+        assert_eq!(lower_solid_offset([640, 480], 16562), 90);
+        assert_eq!(lower_solid_offset([640, 480], -16562), 90);
+        assert_eq!(lower_solid_offset([299, 190], 20000), 200);
+        assert_eq!(lower_solid_offset([300, 189], 20000), 200);
+        assert_eq!(lower_solid_offset([200, 100], 0), 0);
+        assert_eq!(lower_solid_offset([199, 100], 20000), 300);
+    }
     #[test]
     fn deck_crossings_and_band_extent_follow_source_boundaries() {
         let mut layer =

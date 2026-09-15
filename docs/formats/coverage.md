@@ -166,3 +166,8 @@ Cloud placement now covers detail 0/1 versus 2, source heading-sector relocation
 SH bounds and signed coordinate-range rejection. Native generic frustum work
 rejection uses GPU clipping; CLOUDS.SH placement remains unverified after the
 resource/producer audit recorded in weather.md.
+
+SH static projection now preserves opcode CA fog control, including conditional
+weather flag 0x40 suppression. Horizon coverage includes original indexed
+deck/ground transitions and lower solid size/inversion gates; analytic GPU
+projection remains distinct from native integer scanline acceptance.

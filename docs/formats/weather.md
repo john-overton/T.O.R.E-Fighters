@@ -717,3 +717,36 @@ selected across the altitude plane, and depth resolves world/cloud occlusion.
 The host's filtered alpha cutoff is an adaptation, not source pixel acceptance.
 `TORE_CLOUD_DETAIL=0|1|2` exposes cloud preference behavior (default 2) without
 claiming the deferred graphics menu or lower-detail terrain raster is complete.
+
+### Horizon transition and shape fog continuation — 2026-09-15
+
+Recovered `0x447f2f` / `0x4481a0` / `0x448585`: the texture boundary uses deck
+height at two million feet along the unrolled view direction, while the other
+transition boundary uses ground height at eight million feet. Original indexed
+endpoints F3/F4 (F1 in the single-deck cases) interpolate to F0. The GPU now
+projects these boundaries and interpolates palette indices; the old radial cap
+and flat fallback strip did not represent this geometry. Native 16-iteration
+scanline searches, integer trigonometry and one/two-pixel padding are replaced
+by analytic float projection and remain pixel-parity qualifications.
+
+The above-sky empty-name mode-1 call at `0x4ab00c` draws only a transition, then
+the upper Gouraud and celestial primitives, then the lower solid horizon and
+actual sky underside. The port now represents that virtual transition, lower
+solid selection and actual underside. The unusual virtual altitude argument is
+25,600,000 **feet**: `0x447ac9` compares the passed value to view Y shifted down
+by eight. It is not a 100,000-foot fixed-point altitude.
+
+`0x4aad7e` selects the lower solid Q15-plane offset using clip dimensions and
+integer roll/182. Large views use 20 normally and 90 inverted; medium views
+0/200; small 0/300. The pure helper preserves these gates. Shader plane scaling
+is a float-camera adaptation. Celestial clipping follows the lower solid/deck
+or Gouraud consumer instead of imposing zero elevation everywhere. The lower
+Gouraud also overlays sky texels through Y=5, matching native draw order.
+
+SH opcode CA at `0x4d4288` modifies fog bit 0x10: zero disables, two disables
+when weather flag 0x40 is set, other nonzero values enable. `0x4b3541` publishes
+that flag. The static reader now retains a typed fog mode per face, and aircraft
+vertices carry it through indexed color and texture remapping. Ordinary terrain
+and cloud vertices retain their existing enabled mode. Source per-normal light
+remaps and other display-mode effect masks remain separate work; this does not
+claim complete native shape execution or authored HUD parity.

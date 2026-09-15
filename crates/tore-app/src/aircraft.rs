@@ -347,7 +347,11 @@ impl Airframe {
                         color[2] as f32 / 255.,
                         // Preserve source indices for native weather remapping.
                         // The cold-nozzle material remains an authored exception.
-                        if cold_nozzle { -1. } else { f.colors[j] as f32 },
+                        if cold_nozzle {
+                            -1.
+                        } else {
+                            f.colors[j] as f32 + 256. * f.fog as u8 as f32
+                        },
                     ]);
                 }
             }

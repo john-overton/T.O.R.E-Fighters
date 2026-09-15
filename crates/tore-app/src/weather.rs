@@ -53,6 +53,17 @@ pub fn validate_sources(
         return Err("no weather modules were imported".into());
     }
 
+    for name in ["F18.SH", "RAF.SH", "CLOUD1.SH"] {
+        if let Some(bytes) = resources.get(name) {
+            let shape = tore_formats::shape::Shape::parse(bytes)?;
+            let mut modes = [0usize; 3];
+            for face in &shape.faces {
+                modes[face.fog as usize] += 1;
+            }
+            println!("{name}: fog-enabled/disabled/conditional faces {modes:?}");
+        }
+    }
+
     for name in ["SUN.SH", "MOON.SH", "STARS.SH", "CLOUD1.SH", "CLOUDS.SH"] {
         let bytes = resources
             .get(name)

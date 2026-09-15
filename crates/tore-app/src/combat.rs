@@ -933,6 +933,7 @@ mod tests {
     #[test]
     fn palette_mesh_does_not_turn_texture_only_exhaust_into_solid_faces() {
         let face = tore_formats::shape::Face {
+            fog: tore_formats::shape::FogMode::Enabled,
             positions: vec![[0., 0., 0.], [3., 0., 0.], [0., 3., 0.]],
             colors: vec![1; 3],
             uv: vec![],

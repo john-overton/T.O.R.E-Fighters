@@ -841,3 +841,13 @@ Special horizon branches and matched retail acceptance remain open.
 - [x] 276 Rust and 24 Python tests, locked build, warnings-denied Clippy, formatting
   and asset guards. Creator/viewer, low/high cloud view, crossing and both
   aircraft wide/tall Linux GPU paths pass. Matched retail/platform acceptance open.
+
+### Weather horizon and shape fog continuation (2026-09-15)
+
+- [x] Replace radial horizon cap/flat fallback with recovered deck-to-ground
+  indexed transition geometry; preserve lower Gouraud draw order.
+- [x] Above-sky virtual transition, actual underside and lower solid view gates;
+  use their celestial occlusion instead of a universal zero-elevation cutoff.
+- [x] Carry original SH CA fog modes through indexed aircraft shading.
+- [ ] Per-normal light remaps and special display modes remain under review.
+- [ ] Native scanline/filtering and matched retail/platform visual acceptance.

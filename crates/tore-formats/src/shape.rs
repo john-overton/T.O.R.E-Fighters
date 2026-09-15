@@ -1,10 +1,33 @@
 //! Bounded nearest-detail static SH projection, not a complete native shape VM.
 use crate::{Result, invalid, module, slice, u16_at, u32_at};
 use std::collections::{BTreeMap, BTreeSet};
+/// SH opcode 0xca (FA 0x4d4288). Conditional fog is disabled when the
+/// sampled weather layer carries flag 0x40; all other nonzero words enable it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FogMode {
+    #[default]
+    Enabled = 0,
+    Disabled = 1,
+    Conditional = 2,
+}
+impl FogMode {
+    fn from_word(value: usize) -> Self {
+        match value {
+            0 => Self::Disabled,
+            2 => Self::Conditional,
+            _ => Self::Enabled,
+        }
+    }
+    pub fn enabled(self, weather_flags: u16) -> bool {
+        self == Self::Enabled || (self == Self::Conditional && weather_flags & 0x40 == 0)
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Face {
     pub positions: Vec<[f32; 3]>,
     pub colors: Vec<u8>,
+    pub fog: FogMode,
     pub uv: Vec<[f32; 2]>,
     pub texture: String,
     pub subtype: u8,
@@ -108,6 +131,7 @@ impl Shape {
         let mut slots = BTreeMap::<usize, [f32; 3]>::new();
         let mut colors = BTreeMap::new();
         let mut faces = Vec::new();
+        let mut fog = FogMode::Enabled;
         let mut seen = BTreeSet::new();
         let mut state_words = BTreeSet::new();
         let (mut p, mut end, mut texture, mut transform) = (0, None, String::new(), [0.; 3]);
@@ -206,6 +230,10 @@ impl Shape {
                     slice(c, p, 6 + count * 6)?;
                     p += 6 + count * 6;
                 }
+                0xca => {
+                    fog = FogMode::from_word(u16_at(c, p + 2)?);
+                    p += 4;
+                }
                 0xf6 => {
                     colors.insert(u16_at(c, p + 1)?, slice(c, p + 3, 1)?[0]);
                     p += 7;
@@ -280,12 +308,13 @@ impl Shape {
                             }
                         }
                     }
-                    if seen.insert((addr, transform.map(f32::to_bits)))
+                    if seen.insert((addr, transform.map(f32::to_bits), fog as u8))
                         && !(sub & 4 != 0 && texture.is_empty())
                     {
                         faces.push(Face {
                             positions,
                             colors: cs,
+                            fog,
                             uv,
                             texture: texture.clone(),
                             subtype: sub,
@@ -316,8 +345,8 @@ impl Shape {
                     p += match op {
                         0x1e => 1,
                         0x46 | 0xb2 | 0x4e | 0xee => 2,
-                        0xf2 | 0xb8 | 0x4d | 0xd0 | 0xca | 0xda | 0x05 | 0x14 | 0x18 | 0x4a
-                        | 0x48 | 0xac => 4,
+                        0xf2 | 0xb8 | 0x4d | 0xd0 | 0xda | 0x05 | 0x14 | 0x18 | 0x4a | 0x48
+                        | 0xac => 4,
                         0xa6 => 6,
                         0x2e | 0x50 | 0x68 | 0xea | 0xc8 => 8,
                         0x7a | 0x0c | 0x0e | 0x10 | 0x66 | 0xe6 | 0x76 | 0x08 | 0x6c => 10,
@@ -344,6 +373,25 @@ impl Shape {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fog_opcode_survives_static_shape_projection() {
+        for (word, mode) in [
+            (0, FogMode::Disabled),
+            (1, FogMode::Enabled),
+            (2, FogMode::Conditional),
+            (65535, FogMode::Enabled),
+        ] {
+            let mut code = vec![0xca, 0];
+            code.extend((word as u16).to_le_bytes());
+            code.extend(program());
+            let shape = Shape::parse(&module::fixture(&code)).unwrap();
+            assert!(shape.faces.iter().all(|f| f.fog == mode));
+        }
+        assert!(FogMode::Conditional.enabled(0));
+        assert!(!FogMode::Conditional.enabled(0x40));
+        assert!(FogMode::Enabled.enabled(0x40));
+        assert!(!FogMode::Disabled.enabled(0));
+    }
     #[test]
     fn streamer_mirroring_rejects_unrepresentable_coordinates() {
         let mut code = vec![0; 0x0e + 40];

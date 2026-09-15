@@ -132,6 +132,7 @@ pub(crate) mod animation_tests {
         s.exhaust = 1.;
         for address in [0x5059, 0x4a03, 0x4bfa, 0x4d33, 0x4f64, 0x5310] {
             let f = Face {
+                fog: tore_formats::shape::FogMode::Enabled,
                 address,
                 positions: vec![[1., 2., 3.], [5., 2., 3.], [1., 6., 3.]],
                 colors: vec![20; 3],
@@ -163,6 +164,7 @@ pub(crate) mod animation_tests {
     fn rudder_split_preserves_texture_attributes_and_fixed_fin() {
         use tore_formats::shape::Face;
         let f = Face {
+            fog: tore_formats::shape::FogMode::Enabled,
             address: 0x5467,
             positions: vec![
                 [8., -40., 4.],
@@ -208,6 +210,7 @@ pub(crate) mod animation_tests {
             0x3c50, 0x3be5, 0x3cbb, 0x3b2f, 0x3ad4, 0x3b8a, 0x3e1e, 0x3ebb, 0x4265,
         ] {
             let f = Face {
+                fog: tore_formats::shape::FogMode::Enabled,
                 address,
                 positions: vec![[1., 2., 3.], [5., 2., 3.], [1., 6., 3.]],
                 colors: vec![20; 3],
@@ -247,6 +250,7 @@ pub(crate) mod animation_tests {
         let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
         for address in [0x4190, 0x40a9, 0x3d81, 0x3d26, 0x3f08] {
             let f = Face {
+                fog: tore_formats::shape::FogMode::Enabled,
                 address,
                 positions: vec![[1., 2., 3.], [5., 2., 3.], [1., 6., 3.]],
                 colors: vec![20; 3],

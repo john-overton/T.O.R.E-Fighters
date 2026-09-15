@@ -16,7 +16,7 @@ fn haze(distance:f32)->f32{
 }
 struct VertexOut {
  @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
- @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>
+ @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>, @location(7) @interpolate(flat) fog_enabled:u32
 }
 fn linear(c:vec3<f32>)->vec3<f32>{return pow((c+vec3<f32>(0.055))/1.055,vec3<f32>(2.4));}
 // Index 255 is the native water/cutout test at 0x4aa739 and stays transparent.
@@ -109,16 +109,20 @@ fn tile(uv:vec2<f32>,layer:i32,row:i32)->vec4<f32>{return sample_tile(uv,layer,r
  let near=1.0;let far=2200000.0;let f=1.7320508*scene.up.w;
  var out:VertexOut;
  out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
+ let fog_mode=u32(max(index,0.0))/256u;
+ let fog_enabled=fog_mode==0u || (fog_mode==2u && (i32(scene.ray.w)&4)==0);
+ out.fog_enabled=select(0u,1u,fog_enabled);
  out.direction=p;out.altitude=position.y;out.uv=uv;out.layer=layer;out.own_color=select(0.0,1.0,index<0.0);
  // A negative index means the vertex carries its own color; terrain carries a
  // source palette index instead, resolved per frame and then Gouraud blended.
- if index>=0.0 { out.color=shade(ray_index(u32(index),ray_rows(length(p),position.y)),0).rgb; } else { out.color=linear(color); }
+ if index>=0.0 { var source_index=u32(index)%256u; if fog_enabled {source_index=ray_index(source_index,ray_rows(length(p),position.y));} out.color=shade(source_index,0).rgb; } else { out.color=linear(color); }
  out.distance=length(p);return out;
 }
 @fragment fn fragment(in:VertexOut)->@location(0) vec4<f32>{
  var color=in.color;
  if in.layer>=0.0 || in.layer == -2.0 {
-  let tex=sample_tile(in.uv,i32(max(in.layer,0.0)),0,-1,-1,ray_rows(in.distance,in.altitude));
+  var remaps=vec2<i32>(-1);if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
+  let tex=sample_tile(in.uv,i32(max(in.layer,0.0)),0,-1,-1,remaps);
   if in.layer == -2.0 && tex.a < 0.5 { discard; }
   color=mix(color,tex.rgb,tex.a);
  }
@@ -145,12 +149,56 @@ fn horizon_index(ray:vec3<f32>)->u32 {
  if (flags&1)!=0 && y>=0.0 {return u32(mix(236.0,229.0,clamp(y/130.0,0.0,1.0)));}
  return 240u;
 }
+// FA 0x447f2f / 0x4481a0 finds two unrolled scanline boundaries:
+// deck intersection at 2,000,000 ft, ground intersection at 8,000,000 ft.
+// 0x448585 interpolates source indices between their projected screen edges.
+// Analytic projection replaces the native 16-step integer search and its 1/2
+// pixel edge padding. These are geometry limits, not a fitted haze ramp.
+fn deck_transition(ray:vec3<f32>,altitude:f32,endpoint:f32)->i32 {
+ let horizontal=length(scene.forward.xz);
+ if horizontal<0.0001 {return -1;}
+ let depth=dot(ray.xz,scene.forward.xz/horizontal);
+ if depth<=0.0 {return -1;}
+ let near_slope=(altitude-scene.eye.y)/2000000.0;
+ let far_slope=-scene.eye.y/8000000.0;
+ let slope=ray.y/depth;
+ if slope<min(near_slope,far_slope) || slope>max(near_slope,far_slope) {return -1;}
+ let denominators=vec3<f32>(horizontal)+scene.forward.y*vec3<f32>(near_slope,far_slope,slope);
+ if any(denominators<=vec3<f32>(0.0001)) {return -1;}
+ let projected=(vec3<f32>(near_slope,far_slope,slope)*horizontal-vec3<f32>(scene.forward.y))/denominators;
+ if abs(projected.x-projected.y)<0.000001 {return -1;}
+ let t=clamp((projected.z-projected.y)/(projected.x-projected.y),0.0,1.0);
+ return i32(mix(240.0,endpoint,t));
+}
+fn sun_index(original:u32,passes:i32,core:i32)->u32 {
+ var index=original;
+ for(var n=0;n<passes;n++){index=textureLoad(tiles,vec2<i32>(i32(index),0),i32(scene.deck_a.w),0).r;}
+ if core>=0 {index=u32(core);}
+ return index;
+}
+// Celestial primitives precede the lower horizon/deck draw in 0x4aacf0.
+// Clip against those consumers rather than an invented zero-elevation cutoff.
+fn celestial_occluded(ray:vec3<f32>)->bool {
+ if (i32(scene.ray.w)&2)!=0 {return horizon_height(ray)<=5.0;}
+ if scene.deck_a.z>=0.0 && scene.eye.y>=scene.deck_a.x {
+  // SolidHorizon adds the size/inversion offset to its half-Q15 plane.
+  // Float camera projection here retains the source rule, not pixel rounding.
+  return ray.y+scene.sky.w*dot(ray,scene.forward.xyz)<=0.0;
+ }
+ if scene.deck_b.z>=0.0 && scene.eye.y>scene.deck_b.x {
+  var head=scene.forward.xz;
+  if length(head)<0.0001 {head=scene.up.xz;}
+  let depth=dot(ray.xz,normalize(head));
+  return ray.y<=-scene.eye.y/8000000.0*max(depth,0.0);
+ }
+ return ray.y<0.0;
+}
 @fragment fn sky_fragment(in:SkyOut)->@location(0) vec4<f32>{
  let ray=normalize(scene.forward.xyz+scene.right.xyz*in.screen.x*scene.eye.w/(1.7320508*scene.up.w)+scene.up.xyz*in.screen.y/(1.7320508*scene.up.w));
  // Source deck planes: world feet, power-of-two tiling, reversed north axis.
  // The GPU ray/plane intersection replaces the source scanline rasterizer.
  var passes=0;var core=-1;
- if scene.sun.w>0.0 && ray.y>=0.0 && !((i32(scene.ray.w)&2)!=0 && horizon_height(ray)<=5.0) {
+ if scene.sun.w>0.0 && !celestial_occluded(ray) {
   let cosine=dot(ray,scene.sun.xyz);
   if cosine>0.0 {
    let tangent=sqrt(max(0.0,1.0-cosine*cosine))/cosine;
@@ -162,22 +210,41 @@ fn horizon_index(ray:vec3<f32>)->u32 {
   }
  }
  var background=horizon_index(ray);
- for(var n=0;n<passes;n++){background=textureLoad(tiles,vec2<i32>(i32(background),0),i32(scene.deck_a.w),0).r;}
- if core>=0 {background=u32(core);}
- var color=shade(background,0).rgb;
+ if scene.deck_a.z>=0.0 && scene.eye.y>=scene.deck_a.x {
+  // Empty-name, mode-1 above-sky call at 0x4ab00c writes only a transition.
+  let virtual_index=deck_transition(ray,25600000.0,243.0);
+  if virtual_index>=0 && horizon_height(ray)<0.0 {background=u32(virtual_index);}
+  if celestial_occluded(ray) {background=229u;}
+ }
+ let transitions=array<vec4<f32>,2>(scene.deck_a,scene.deck_b);
+ for(var i=0;i<2;i++){
+  let deck=transitions[i];
+  if deck.z<0.0 || (i==1 && scene.eye.y<=deck.x) {continue;}
+  let upper=select(243.0,241.0,scene.deck_a.z<0.0);
+  let lower=select(244.0,241.0,scene.deck_b.z<0.0);
+  let index=deck_transition(ray,deck.x,select(upper,lower,scene.eye.y>deck.x));
+  if index>=0 {background=u32(index);}
+ }
+ var color=shade(sun_index(background,passes,core),0).rgb;
  let decks=array<vec4<f32>,2>(scene.deck_a,scene.deck_b);
  var nearest=1e30;
  for(var i=0;i<2;i++){
   let deck=decks[i];
-  if deck.z<0.0 || abs(ray.y)<0.000001 { continue; }
+  if deck.z<0.0 || abs(ray.y)<0.000001 || (i==1 && scene.eye.y<=deck.x) { continue; }
   let distance=(deck.x-scene.eye.y)/ray.y;
-  if distance<=0.0 || distance>=nearest || distance>=2000000.0 { continue; }
+  var head=scene.forward.xz;
+  if length(head)<0.0001 {head=scene.up.xz;}
+  let scanline_distance=distance*dot(ray.xz,normalize(head));
+  if distance<=0.0 || distance>=nearest || scanline_distance>=2000000.0 { continue; }
   let hit=scene.eye.xyz+ray*distance;
   let uv=fract(vec2<f32>(hit.x,-hit.z)/deck.y);
   let tex=sample_tile(uv,i32(deck.z),fog_row(distance),passes,core,vec2<i32>(-1));
   color=mix(color,tex.rgb,tex.a);
   nearest=distance;
  }
+ // Source lower Gouraud is drawn after the sky and celestial primitives when
+ // there is no visible ocean plane. Its upper edge may cover sky texture too.
+ if (i32(scene.ray.w)&2)!=0 && horizon_height(ray)<=5.0 {color=shade(horizon_index(ray),0).rgb;}
  return vec4<f32>(color,1.0);
 }
 struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32>, @location(1) distance:f32 }
@@ -198,10 +265,10 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
  let z=dot(position,scene.forward.xyz);let f=1.7320508*scene.up.w;
  var out:VertexOut;
  out.clip=vec4<f32>(dot(position,scene.right.xyz)*f/scene.eye.w,dot(position,scene.up.xyz)*f,z,z);
- out.uv=uv;out.layer=layer;out.color=shade(u32(index),0).rgb;out.distance=position.y;out.own_color=0.;out.altitude=position.y;out.direction=position;return out;
+ out.fog_enabled=0u;out.uv=uv;out.layer=layer;out.color=shade(u32(index),0).rgb;out.distance=position.y;out.own_color=0.;out.altitude=position.y;out.direction=position;return out;
 }
 @fragment fn celestial_fragment(in:VertexOut)->@location(0) vec4<f32>{
- if in.distance<0.0 || ((i32(scene.ray.w)&2)!=0 && horizon_height(normalize(in.direction))<=5.0) {discard;}
+ if celestial_occluded(normalize(in.direction)) {discard;}
  if in.layer>=0.0 {let tex=tile(in.uv,i32(in.layer),0);if tex.a<0.01 {discard;}return tex;}
  return vec4<f32>(in.color,1.0);
 }

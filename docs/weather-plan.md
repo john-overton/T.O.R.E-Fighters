@@ -61,8 +61,10 @@ all sensors are blocked by visible fog.
   and a later palette pass smooths and applies it to selected palette ranges.
 - [x] Translate reviewed palette/remap operations, including indexed aircraft
   and selective cockpit tint; render normal full-detail horizon bands.
-- [ ] Finish textured horizon transition polygons, special preference/terrain
-  branches and source effect masks; compare above-sky projection/filtering.
+- [x] Recover deck/ground transition boundaries, above-sky transition/underside,
+  lower solid size/inversion gates and per-shape fog control.
+- [ ] Finish per-normal light remaps and assess special display-mode effects;
+  compare native scanline rounding and horizon filtering with retail.
 - [ ] Add synthetic boundary/state tests, imported-module diagnostics and matched
   fog/transition captures; run creator/viewer/flight checks after rendering edits.
 

@@ -523,18 +523,6 @@ impl SimRenderer {
             if let Some(layer) = world.weather.sample(camera.position[1] as f64) {
                 let shade = world.weather.configuration().shade_remap(layer.shade);
                 uniform[31] = celestial.shade_rows[&shade.color] as f32;
-                uniform[19] = world
-                    .palette
-                    .iter()
-                    .enumerate()
-                    .min_by_key(|(_, rgb)| {
-                        rgb.iter()
-                            .zip(world.haze)
-                            .map(|(a, b)| (*a as i32 - b as i32).abs())
-                            .sum::<i32>()
-                    })
-                    .unwrap()
-                    .0 as f32;
             }
             uniform.extend(celestial.sun_uniform(world, camera.position[1]));
         } else {
@@ -563,7 +551,14 @@ impl SimRenderer {
             let horizon =
                 tore_sim::environment::horizon::Horizon::new(&layer, camera.position[1] as f64);
             uniform[70] = horizon.lower_extent as f32;
-            uniform[71] = horizon.flags() as f32;
+            uniform[71] = (u16::from(horizon.flags()) | ((layer.flags & 0x40) >> 4)) as f32;
+            let roll = (camera.roll.rem_euclid(std::f32::consts::TAU) * 65536.
+                / std::f32::consts::TAU)
+                .round() as i32 as i16;
+            uniform[19] =
+                2. * f32::from(tore_sim::environment::horizon::lower_solid_offset(
+                    size, roll,
+                )) / 32767.;
         }
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         let mut entries = Vec::with_capacity(11 * 1024);
