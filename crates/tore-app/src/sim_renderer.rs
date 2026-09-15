@@ -14,6 +14,8 @@ pub struct SimRenderer {
     aircraft: Option<(wgpu::BindGroup, wgpu::Buffer, u32)>,
     bind: wgpu::BindGroup,
     sky_pipeline: wgpu::RenderPipeline,
+    celestial_pipeline: wgpu::RenderPipeline,
+    celestial_vertices: wgpu::Buffer,
     uniform: wgpu::Buffer,
     vertices: wgpu::Buffer,
     count: u32,
@@ -105,6 +107,19 @@ impl SimRenderer {
             multiview: None,
             cache: None,
         });
+        let celestial_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Original celestial primitives"), layout: Some(&sky_layout),
+            vertex: wgpu::VertexState { module:&shader,entry_point:Some("celestial_vertex"),compilation_options:Default::default(),
+                buffers:&[wgpu::VertexBufferLayout {array_stride:40,step_mode:wgpu::VertexStepMode::Vertex,attributes:&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3,4=>Float32]}]},
+            fragment:Some(wgpu::FragmentState {module:&shader,entry_point:Some("celestial_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState {format,blend:Some(wgpu::BlendState::ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})]}),
+            primitive:Default::default(),depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:false,depth_compare:wgpu::CompareFunction::Always,stencil:Default::default(),bias:Default::default()}),multisample:Default::default(),multiview:None,cache:None,
+        });
+        let celestial_vertices = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Celestial vertices"),
+            size: 256 * 1024,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         // Wing vapor is five one-pixel line segments per side, exactly as
         // `_DrawStreamer@12` draws them, so it needs its own blended pipeline.
         let vapor_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -148,7 +163,7 @@ impl SimRenderer {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera and atmosphere"),
-            size: 128,
+            size: 272,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -252,6 +267,8 @@ impl SimRenderer {
             pipeline,
             aircraft: None,
             sky_pipeline,
+            celestial_pipeline,
+            celestial_vertices,
             bind,
             uniform,
             vertices,
@@ -503,6 +520,35 @@ impl SimRenderer {
         uniform[7] = (world.texture_indices.len() / (256 * 256)) as f32;
         uniform[15] = world.fog_palette.len() as f32;
         uniform.extend(world.decks.into_iter().flatten());
+        let mut celestial_count = 0;
+        if let Some(celestial) = &world.celestial {
+            let data = celestial.vertices(world, camera, size[1]);
+            assert!(data.len() * 4 <= 256 * 1024);
+            celestial_count = (data.len() / 10) as u32;
+            if !data.is_empty() {
+                queue.write_buffer(&self.celestial_vertices, 0, &bytes(&data));
+            }
+            uniform[27] = celestial.sun_remap as f32;
+            if let Some(layer) = world.weather.sample(camera.position[1] as f64) {
+                let shade = world.weather.configuration().shade_remap(layer.shade);
+                uniform[31] = celestial.shade_rows[&shade.color] as f32;
+                uniform[19] = world
+                    .palette
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, rgb)| {
+                        rgb.iter()
+                            .zip(world.haze)
+                            .map(|(a, b)| (*a as i32 - b as i32).abs())
+                            .sum::<i32>()
+                    })
+                    .unwrap()
+                    .0 as f32;
+            }
+            uniform.extend(celestial.sun_uniform(world, camera.position[1]));
+        } else {
+            uniform.extend([0.; 36]);
+        }
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         let mut entries = Vec::with_capacity(11 * 1024);
         for row in std::iter::once(&world.palette).chain(world.fog_palette.iter()) {
@@ -568,6 +614,11 @@ impl SimRenderer {
         pass.set_pipeline(&self.sky_pipeline);
         pass.set_bind_group(0, &self.bind, &[]);
         pass.draw(0..3, 0..1);
+        if celestial_count > 0 {
+            pass.set_pipeline(&self.celestial_pipeline);
+            pass.set_vertex_buffer(0, self.celestial_vertices.slice(..));
+            pass.draw(0..celestial_count, 0..1);
+        }
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));

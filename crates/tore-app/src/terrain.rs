@@ -14,6 +14,7 @@ pub struct World {
     /// entirely weather-palette indexed, so the artwork is uploaded unresolved
     /// and the live palette is applied on the GPU. 255 is the water cutout.
     pub sky_indices: Vec<u8>,
+    pub celestial: Option<crate::celestial::Celestial>,
     pub deck_textures: BTreeMap<String, usize>,
     pub decks: [[f32; 4]; 2],
     pub vertices: Vec<f32>,
@@ -146,11 +147,19 @@ impl World {
         if sky_indices.is_empty() {
             sky_indices.resize(256 * 256, 255);
         }
+        let celestial = Some(crate::celestial::Celestial::load(
+            resources,
+            &mut sky_indices,
+            texture_indices.len() / 65536,
+            weather.configuration().sun_fill(),
+            weather.configuration().shades(),
+        )?);
         let mut out = Self {
             theater,
             environment,
             catalog,
             sky_indices,
+            celestial,
             deck_textures,
             decks: [[0., 1., -1., 0.]; 2],
             vertices: Vec::new(),
@@ -393,6 +402,7 @@ mod tests {
             vertices: vec![],
             texture_indices: vec![],
             sky_indices: vec![],
+            celestial: None,
             deck_textures: BTreeMap::new(),
             decks: [[0., 1., -1., 0.]; 2],
             fog: [0., 1., 0., 0.],

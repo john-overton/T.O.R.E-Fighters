@@ -1,4 +1,4 @@
-struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32> }
+struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8> }
 @group(0) @binding(0) var<uniform> scene:Scene;
 // Retail terrain and sky artwork is stored as weather-palette indices, so it is
 // uploaded unresolved and the live palette is applied here every frame.
@@ -29,7 +29,7 @@ fn shade(index:u32,row:i32)->vec4<f32>{
 }
 // Manual bilinear: indices cannot be filtered, so each of the four texels is
 // resolved through the palette first and the colors are blended premultiplied.
-fn tile(uv:vec2<f32>,layer:i32,row:i32)->vec4<f32>{
+fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32)->vec4<f32>{
  let size=vec2<i32>(textureDimensions(tiles));
  let p=uv*vec2<f32>(size)-vec2<f32>(0.5);
  let base=floor(p);
@@ -38,7 +38,15 @@ fn tile(uv:vec2<f32>,layer:i32,row:i32)->vec4<f32>{
  for(var j=0;j<2;j++){
   for(var i=0;i<2;i++){
    let at=clamp(vec2<i32>(base)+vec2<i32>(i,j),vec2<i32>(0),size-vec2<i32>(1));
-   let c=shade(textureLoad(tiles,at,layer,0).r,row);
+   var index=textureLoad(tiles,at,layer,0).r;
+   var palette_row=row;
+   if sun_passes>=0 {
+    index=textureLoad(tiles,vec2<i32>(i32(index),i32(scene.deck_b.w)+row-1),i32(scene.deck_a.w),0).r;
+    for(var n=0;n<sun_passes;n++){ index=textureLoad(tiles,vec2<i32>(i32(index),0),i32(scene.deck_a.w),0).r; }
+    if core>=0 {index=u32(core);}
+    palette_row=0;
+   }
+   let c=shade(index,palette_row);
    let w=select(1.0-f.x,f.x,i==1)*select(1.0-f.y,f.y,j==1);
    sum+=vec4<f32>(c.rgb*c.a,c.a)*w;
   }
@@ -46,6 +54,7 @@ fn tile(uv:vec2<f32>,layer:i32,row:i32)->vec4<f32>{
  if sum.a<=0.0 { return vec4<f32>(0.0); }
  return vec4<f32>(sum.rgb/sum.a,sum.a);
 }
+fn tile(uv:vec2<f32>,layer:i32,row:i32)->vec4<f32>{return sample_tile(uv,layer,row,-1,-1);}
 @vertex fn vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
  let p=position-scene.eye.xyz;
  let z=dot(p,scene.forward.xyz);
@@ -77,7 +86,22 @@ struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32>
  let ray=normalize(scene.forward.xyz+scene.right.xyz*in.screen.x*scene.eye.w/(1.7320508*scene.up.w)+scene.up.xyz*in.screen.y/(1.7320508*scene.up.w));
  // Source deck planes: world feet, power-of-two tiling, reversed north axis.
  // The GPU ray/plane intersection replaces the source scanline rasterizer.
- var color=linear(scene.sky.rgb);
+ var passes=0;var core=-1;
+ if scene.sun.w>0.0 && ray.y>=0.0 {
+  let cosine=dot(ray,scene.sun.xyz);
+  if cosine>0.0 {
+   let tangent=sqrt(max(0.0,1.0-cosine*cosine))/cosine;
+   for(var n=0;n<i32(scene.sun.w);n++){
+    if tangent<=scene.circles[n].x {
+     if scene.circles[n].y==267.0 { passes++; } else {core=i32(scene.circles[n].y);passes=0;}
+    }
+   }
+  }
+ }
+ var background=u32(scene.sky.w);
+ for(var n=0;n<passes;n++){background=textureLoad(tiles,vec2<i32>(i32(background),0),i32(scene.deck_a.w),0).r;}
+ if core>=0 {background=u32(core);}
+ var color=shade(background,0).rgb;
  let decks=array<vec4<f32>,2>(scene.deck_a,scene.deck_b);
  var nearest=1e30;
  for(var i=0;i<2;i++){
@@ -87,7 +111,7 @@ struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32>
   if distance<=0.0 || distance>=nearest { continue; }
   let hit=scene.eye.xyz+ray*distance;
   let uv=fract(vec2<f32>(hit.x,-hit.z)/deck.y);
-  let tex=tile(uv,i32(deck.z),fog_row(distance));
+  let tex=sample_tile(uv,i32(deck.z),fog_row(distance),passes,core);
   color=mix(color,tex.rgb,tex.a);
   nearest=distance;
  }
@@ -105,4 +129,16 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
 @fragment fn vapor_fragment(in:VaporOut)->@location(0) vec4<f32>{
  // Vapor sits in the same atmosphere as everything else, so haze thins it too.
  return vec4<f32>(linear(in.color.rgb),in.color.a*(1.0-haze(in.distance)));
+}
+
+@vertex fn celestial_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
+ let z=dot(position,scene.forward.xyz);let f=1.7320508*scene.up.w;
+ var out:VertexOut;
+ out.clip=vec4<f32>(dot(position,scene.right.xyz)*f/scene.eye.w,dot(position,scene.up.xyz)*f,z,z);
+ out.uv=uv;out.layer=layer;out.color=shade(u32(index),0).rgb;out.distance=position.y;out.own_color=0.;return out;
+}
+@fragment fn celestial_fragment(in:VertexOut)->@location(0) vec4<f32>{
+ if in.distance<0.0 {discard;}
+ if in.layer>=0.0 {let tex=tile(in.uv,i32(in.layer),0);if tex.a<0.01 {discard;}return tex;}
+ return vec4<f32>(in.color,1.0);
 }

@@ -104,3 +104,30 @@ in this pass. None of the numbered weather parity gates is marked complete.
   fog sample: 330 frames, 300 measured, zero paused frames; mean 1.35 ms, p95
   1.53 ms, simulation/cameras 0.13 ms. CPU intervals include presentation;
   this is not a matched before/after performance claim. Artifact guards passed.
+
+## Celestial slice — 2026-09-15
+
+- Separate bounded, straight-line weather SH reader: source vertex slots/axes,
+  fill changes, circles, point stars, UVs and textured billboards. It rejects
+  executable opcodes; the sun's projected-point publication is recorded without
+  writing imported pointers. The aircraft shape reader is unchanged.
+- Import validation now requires successful weather primitive decoding: SUN
+  seven concentric circles, MOON one billboard, STARS 94 points, CLOUDS sixteen
+  billboards. CLOUD1 retains two polygon faces. The moon uses `_MOON.PIC` (41²).
+- Sun placement translates the source inclusive time/flag gate, integer arc and
+  signed-WORD reflection. Moon uses LAY angles; stars retain source directions.
+  Rendering is independent of camera translation. The GPU uses floating-point
+  projection, one-pixel star quads and horizontal horizon clipping; native
+  screen rounding/horizon dip remain comparison work.
+- Sun fill 267 resolves through LAY root `+0x50`. Its six outer circles repeatedly
+  remap the background index (native `0x497836`); the solid inner source fill
+  remains indexed. No replacement sun texture or fitted glow color is used.
+  Glare through the separately published `_sunPoint` remains unimplemented.
+- Linux captures: `celestial-sun.png`, `celestial-night.png`, `moon-viewer.png`
+  inspected under `.local/weather-foundation/`. The first moon cockpit poses
+  placed it behind the canopy frame; the unobstructed viewer confirms the
+  original textured disc and stars. This is not a retail side-by-side gate.
+- Celestial checkpoint checks: 265 Rust tests, Clippy with warnings denied,
+  locked build, 24 Python tests, creator/viewer/flight GPU checks and asset
+  guards passed. Night active sample: 330 frames/300 measured, zero paused;
+  mean 1.38 ms, p95 1.57 ms. No matched retail or Windows/macOS runtime check.

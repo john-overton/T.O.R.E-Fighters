@@ -6,6 +6,7 @@ mod callbacks;
 pub use callbacks::Callback;
 pub mod palette;
 mod remap;
+pub mod shape;
 pub use remap::ShadeRemap;
 
 /// Native record stride. Every layer scan advances by this (0x4b31b1, 0x4b3c76).
@@ -416,6 +417,7 @@ pub struct Module {
     pub base: [[u8; 3]; 256],
     pub layers: Vec<Layer>,
     pub shades: Vec<ShadeRemap>,
+    pub sun_fill: [u8; 256],
 }
 
 impl Module {
@@ -439,6 +441,15 @@ impl Module {
             return Err(invalid("invalid weather palette component"));
         }
         let table = u32_at(code, 0x74)?;
+        let sun_fill: [u8; 256] = slice(
+            code,
+            u32_at(code, 0x50)?
+                .checked_sub(base_rva)
+                .ok_or_else(|| invalid("sun fill RVA before CODE"))?,
+            256,
+        )?
+        .try_into()
+        .unwrap();
         let shades = remap::parse(code, base_rva, u32_at(code, 0x6c)?)?;
         let mut layers = Vec::new();
         for index in 0..MAX_RECORDS {
@@ -451,6 +462,7 @@ impl Module {
                     base,
                     layers,
                     shades,
+                    sun_fill,
                 });
             }
             let callback = callbacks::resolve(data, code, base_rva, u32_at(record, 0x136)?)?;
@@ -534,6 +546,7 @@ pub fn synthetic_module(records: usize) -> Vec<u8> {
     let mut code = vec![0; table + (records + 1) * RECORD];
     code[0x70..0x74].copy_from_slice(&0x100u32.to_le_bytes());
     code[0x74..0x78].copy_from_slice(&(0x100 + table as u32).to_le_bytes());
+    code[0x50..0x54].copy_from_slice(&0x600u32.to_le_bytes());
     code[0x6c..0x70].copy_from_slice(&0x500u32.to_le_bytes());
     code[0x404..0x408].copy_from_slice(&10u32.to_le_bytes());
     for i in 0..10 {

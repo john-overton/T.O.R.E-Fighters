@@ -781,3 +781,9 @@ Live smoothed fog tint, bounded original shade remaps and world-anchored sky/oce
 decks implemented. Shared importer includes ocean art. Source/host distinctions,
 263-test evidence and remaining cross-layer/horizon acceptance are recorded in
 [weather foundation](baselines/weather-foundation.md). Celestial/cloud work follows.
+
+### Original celestial rendering — 2026-09-15
+
+Bounded weather SH primitives, sun arc/glow remap, original moon texture and
+94 source stars integrated. Linux captures visually inspected; retail clipping,
+glare and platform parity remain open. See [weather foundation](baselines/weather-foundation.md).

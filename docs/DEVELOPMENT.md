@@ -422,3 +422,13 @@ indices remain `0..5` (clear, cloudy, foggy, dawn, sunset, night).
 `tools/inspect_shape_effects.py EXTRACTED.SH` emits a static import/re-entry
 candidate inventory; optional `--disassembly NEW_LOCAL_FILE` requires GNU
 objdump. It never executes imported shape code and does not prove effect absence.
+
+### Weather inspection cameras
+
+`TORE_WEATHER_VIEW=x,y,z,yaw,pitch` sets the terrain viewer pose in feet and
+absolute degrees for reproducible sky/deck captures. It does not change the
+flight camera. For example:
+
+```sh
+TORE_WEATHER_VIEW=1070000,5000,590000,45,20 cargo run --locked -p tore-app -- --viewer --weather-condition 5 --capture-terrain .local/moon.ppm --no-audio
+```

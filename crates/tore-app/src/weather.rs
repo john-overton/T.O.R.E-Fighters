@@ -57,15 +57,35 @@ pub fn validate_sources(
         let bytes = resources
             .get(name)
             .ok_or_else(|| format!("weather dependency {name} missing"))?;
-        match tore_formats::shape::Shape::parse(bytes) {
-            Ok(shape) => println!(
-                "{name}: {} static faces; native placement/material acceptance still pending",
-                shape.faces.len()
-            ),
-            Err(error) => println!("{name}: static shape coverage gap: {error}"),
+        if name == "CLOUD1.SH" {
+            let shape = tore_formats::shape::Shape::parse(bytes)?;
+            println!("{name}: {} source faces", shape.faces.len());
+        } else {
+            let shape = tore_formats::weather::shape::WeatherShape::parse(bytes)?;
+            println!(
+                "{name}: {} reviewed primitives, exponent {}, projected-point consumer {}",
+                shape.primitives.len(),
+                shape.scale_exponent,
+                shape.publishes_point
+            );
         }
     }
 
+    for name in ["_MOON.PIC", "_CLOUD1.PIC"] {
+        let pic = tore_formats::Pic::parse(resources.get(name).ok_or("weather texture missing")?)?;
+        println!(
+            "{name}: {}x{}, {} opaque pixels, index range {:?}",
+            pic.width,
+            pic.height,
+            pic.mask.iter().filter(|v| **v).count(),
+            pic.pixels
+                .iter()
+                .zip(&pic.mask)
+                .filter(|(_, m)| **m)
+                .map(|(p, _)| *p)
+                .fold((255, 0), |(lo, hi), v| (lo.min(v), hi.max(v)))
+        );
+    }
     let layer = &environment.layer;
     let bytes = resources
         .get(layer)

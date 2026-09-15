@@ -80,7 +80,7 @@ adaptations. [Evidence](baselines/weather-foundation.md).
 | Mission inputs | `layer` name and choice index, `clouds` altitude, `wind` degrees and feet per second, and time all recovered and consumed | Campaign mission sources; the `clouds` deck is read but not drawn |
 | Weather records | Reviewed fields of the 352-byte record in `tore-formats::weather`, all 24 supplied modules parsing | Fill-pattern tables and cross-layer ray composition |
 | Environment state | `tore-sim::environment` advances a 120 Hz to 256-unit clock, selects and blends records by time and altitude, and answers pure queries | Pause, compression and long-session audit against the original |
-| Terrain and sky | Artwork uploads as source palette indices; the live palette resolves on the GPU each frame | Celestial shapes, cloud geometry and special horizon branches |
+| Terrain and sky | Artwork uploads as source palette indices; the live palette resolves on the GPU each frame | Cloud geometry, special horizon branches and celestial comparison/glare |
 | Visibility | Recovered per-record ramp and haze color, plus the altitude haze pass | Cross-layer ray remap composition; sensor consumers |
 | Creator | Six source weather choices launch; duplicate overcast removed | Label mapping remains inferred; serialized weather replay |
 | Wind | Resolved to world feet per second and applied by both adapters | Missing-wind native defaults; wind audio |
@@ -297,3 +297,10 @@ defaults, per-camera altitude sampling and native visibility/remap behavior.
 Wind defaults, turbulence coupling and serialized replay have their own later
 delivery checkpoints; all remain required for whole-system acceptance.
 Corrected helper tests and source-art screenshots alone do not close these gates.
+
+### Step 2 implementation checkpoint
+
+Original sun circles/glow remap, moon texture and 94 stars now render with source
+time/flag/angle selection. Weather SH decoding is bounded and independent of
+aircraft animation. Glare, exact raster/horizon clipping and matched retail
+acceptance remain open. Continue with cloud placement and geometry.

@@ -163,6 +163,14 @@ impl Configuration {
         &self.module.base
     }
 
+    pub fn shades(&self) -> &[tore_formats::weather::ShadeRemap] {
+        &self.module.shades
+    }
+
+    pub fn sun_fill(&self) -> &[u8; 256] {
+        &self.module.sun_fill
+    }
+
     pub fn shade_remap(&self, color: [u8; 3]) -> &tore_formats::weather::ShadeRemap {
         self.module.shade_remap(color)
     }
@@ -665,5 +673,53 @@ mod tests {
             assert!(Configuration::new(module.clone(), 12, 0, 0, Some(wind)).is_err());
         }
         assert!(Configuration::new(module, 23, 59, 255, None).is_ok());
+    }
+}
+
+/// FA 0x4b354f/0x4ab205: inclusive time gate and reflected binary-angle arc.
+/// Returns source azimuth/elevation; no host astronomy or latitude model.
+pub fn sun_angles(layer: &Layer, seconds: i32) -> Option<[i16; 2]> {
+    if layer.flags & 8 == 0
+        || seconds < layer.sunrise_seconds
+        || seconds > layer.sunset_seconds
+        || layer.sunset_seconds <= layer.sunrise_seconds
+    {
+        return None;
+    }
+    let delta = i64::from(seconds) - i64::from(layer.sunrise_seconds);
+    let span = i64::from(layer.sunset_seconds) - i64::from(layer.sunrise_seconds);
+    let mut elevation = (delta * 34580 / span) as i16;
+    elevation = elevation.wrapping_sub(910);
+    let azimuth = if elevation <= 16380 {
+        layer.sun_azimuth_morning
+    } else {
+        elevation = 32760i16.wrapping_sub(elevation);
+        layer.sun_azimuth_evening
+    };
+    (elevation >= -1820).then_some([azimuth, elevation])
+}
+
+#[cfg(test)]
+mod celestial_tests {
+    use super::*;
+    #[test]
+    fn source_sun_boundaries_and_midday_reflection() {
+        let mut l = Module::parse(&tore_formats::weather::synthetic_module(1))
+            .unwrap()
+            .layers[0]
+            .clone();
+        l.flags = 8;
+        l.sunrise_seconds = 21600;
+        l.sunset_seconds = 64800;
+        l.sun_azimuth_morning = 16384;
+        l.sun_azimuth_evening = -16384;
+        assert_eq!(sun_angles(&l, 21599), None);
+        assert_eq!(sun_angles(&l, 21600), Some([16384, -910]));
+        assert_eq!(sun_angles(&l, 43200), Some([16384, 16380]));
+        assert!(sun_angles(&l, 43202).unwrap()[0] < 0);
+        // Signed WORD conversion occurs before reflection in the source.
+        assert_eq!(sun_angles(&l, 64800), None);
+        l.flags = 0;
+        assert_eq!(sun_angles(&l, 43200), None);
     }
 }

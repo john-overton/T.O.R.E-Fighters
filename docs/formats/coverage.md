@@ -143,3 +143,6 @@ creator options are retained; the editor omits the duplicate overcast label.
 Weather LAY: bounded root `+0x6c` shade headers/index remaps and tint reduction
 fields decoded; named sky/ocean deck resources shared by CLI/app. See
 [weather](weather.md) for remaining ray composition and horizon gaps.
+
+Weather SH: bounded straight-line point/circle/billboard grammar added separately
+from aircraft projection. LAY sun background remap decoded at root `+0x50`.

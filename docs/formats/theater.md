@@ -84,7 +84,7 @@ The shared extraction profile includes all of the following, preserving archive 
 
 SUN/MOON/STARS resource-name references occur in FA.EXE at `0x50c42c`, `0x50c434`, `0x50c43c`. Sun and stars appear to use shape commands rather than separately named PICs; this is an inference from literal references, not complete SH interpretation.
 
-The viewer draws SKY0 with an authored finite upper-hemisphere disk projection (replacing the pole-pinching latitude/longitude mapping) and applies authored distance fog using the recovered palette. It does **not** yet draw celestial SH geometry, volumetric/layered clouds, or simulate sun/moon movement, cloud cover, wind, time transitions or weather effects on flight. The cloud artwork visible in SKY0 is part of that source image. Extracted weather assets are not equivalent to a complete weather engine.
+The renderer now selects source sky/ocean decks and uses world-anchored plane projection. Original sun circles/glow remap, moon billboard and point stars render with live weather palettes and source clock/angle gates. Cloud geometry and special horizon/ray-fog behavior remain under implementation; see [weather foundation](../baselines/weather-foundation.md) for current evidence and limitations.
 
 ## Next recovery steps
 

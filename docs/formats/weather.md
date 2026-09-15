@@ -546,3 +546,18 @@ dead.
 - Validation: 263 Rust tests, Clippy, build and 24 Python tests passed. Linux
   viewer and F18 capture passed; `.local/weather-foundation/planes.png` was
   visually inspected. These establish a working GPU path, not retail equality.
+
+### Celestial primitive consumer
+
+The weather-only straight-line SH grammar decodes `7a` single vertices and `82`
+arrays in X/forward/up source order, `2e` word fills, `bc` byte fills, `3a`
+projected-diameter circles, `08` points, `e2` texture names, `e4/e6` UV setup and
+`ea` billboards. `d2` point publication is metadata only. Unsupported control
+flow is rejected. See [celestial evidence](../baselines/weather-foundation.md).
+`SUN.SH` has seven circles: six use fill 267 and the inner circle uses 175.
+Fill 267 is the 256-entry background-index remap at LAY root `+0x50`, initialized
+through `0x4b4532` and consumed by the mode-one fill at `0x497836`.
+The sun arc is `WORD(34580*(seconds-rise)/(set-rise))-910`, with signed compare
+against 16380, then `32760-angle` on the evening branch. Dispatch requires flag
+8, inclusive time bounds and signed elevation >= -1820. Signed-WORD overflow
+near the end of the arc is retained. Flag 16 dispatches original stars and moon.

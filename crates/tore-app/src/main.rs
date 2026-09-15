@@ -3,6 +3,7 @@ mod aircraft_animation;
 mod assets;
 mod attitude;
 mod audio;
+mod celestial;
 mod cockpit_renderer;
 mod combat;
 mod combat_tape;
@@ -2239,7 +2240,24 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         println!("Menu preview: {}", path.display());
         return Ok(());
     }
-    let camera = terrain::Camera::for_world(&world);
+    let mut camera = terrain::Camera::for_world(&world);
+    if let Ok(pose) = std::env::var("TORE_WEATHER_VIEW") {
+        let values = pose
+            .split(',')
+            .map(str::parse::<f32>)
+            .collect::<Result<Vec<_>, _>>()?;
+        if values.len() != 5
+            || values.iter().any(|v| !v.is_finite())
+            || values[..3].iter().any(|v| v.abs() > 2_000_000.)
+            || values[3].abs() > 360.
+            || values[4].abs() > 90.
+        {
+            return Err("TORE_WEATHER_VIEW needs x,y,z,yaw,pitch in feet/degrees".into());
+        }
+        camera.position.copy_from_slice(&values[..3]);
+        camera.yaw = values[3].to_radians();
+        camera.pitch = values[4].to_radians();
+    }
     let selection = world
         .catalog
         .iter()
