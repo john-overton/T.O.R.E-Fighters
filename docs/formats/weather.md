@@ -200,6 +200,36 @@ indirect coupling is not excluded. A renderer-independent service should take
 explicit terrain, neighbor geometry, time and aircraft coefficient, with
 per-aircraft mutable disturbance state rather than an invented global gust field.
 
+## The turbulence generator and the wind line are fully recovered
+
+The mission `wind` line is a compass heading in whole degrees and a speed in
+feet per second. `0x481e70` multiplies the heading by 182 into a binary angle
+and stores the speed unscaled; `0x476f3d` then advances position by
+`speed * ticks` rotated by that angle, and `_Rotate2@8` turns `(0, d)` into
+`(d sin h, d cos h)`, so zero is north and ninety is east. A mission without a
+wind line gets `heading = Rand(0xfff0)` and `speed = Rand(0x16) + 7`, that is
+7 to 28 feet per second, about 4 to 17 knots. Whether the heading names the
+direction the wind blows towards or comes from is UNRESOLVED; the arithmetic
+drifts the aircraft towards the stated heading.
+
+`_FMTurbulence`'s event generator translates completely:
+
+| Source | Behavior |
+| --- | --- |
+| `0x477a3a` | with no strength, reconsider in 1,280 ticks; `0x477ce9` suppresses and reconsiders in 512 |
+| `0x477a57` | outside 07:00 to 19:00 the aircraft's `turbulencePercent` is quartered; inside, a ground-query flag takes two thirds |
+| `0x477a90` | an event lasts `Rand(0x1e00) % 100 + 89` ticks, and the sine phase spans twice that |
+| `0x477ab7` | the gap to the next event is `Rand(2 * 15360 / (0.6 p + 15))`, where `p` combines speed, strength and percent, so stronger turbulence is also more frequent |
+| `0x477b20` | a speed shape rising to full at 146 fps, flat to 293, then falling away to nothing at 586 |
+| `0x477b73` | yaw, pitch and roll amplitudes are `Rand` over 1.82, 7.28 and 12.74 units per point of strength, each negated on a coin flip: at full strength about 1, 4 and 7 degrees per second |
+| `0x477c3f` | the vertical rate uses its own speed factor peaking at 733 fps, and a rate at or past `0xc00` also shakes the view |
+| `0x4775b5` | while active, the vertical rate moves height directly and the three amplitudes drive a sine over the doubled period, reaching movement heading, pitch and roll as well as the display angles |
+
+The draw order is length, gap, three amplitudes, three sign flips, vertical
+rate, one more sign flip. Reproducing that order with the already-translated
+native generator gives replayable events from a shared seed. The nearby-aircraft
+strength term at `0x477826` needs contact geometry and is not applied.
+
 ## Maneuver effects and sound are separate
 
 A different function named `Turbulence`, at `0x434550`, belongs to the sound

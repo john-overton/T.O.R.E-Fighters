@@ -12,16 +12,24 @@ pub const SECONDS_PER_DAY: i64 = 86_400;
 pub const VISIBILITY: usize = 0;
 
 /// Validated launch environment. Construction resolves every source field once.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Configuration {
     module: Module,
     start_seconds: i32,
     parameter: i32,
+    wind: [f64; 3],
 }
 
 impl Configuration {
-    /// `hour`/`minute` come from the mission `time` line; `parameter` from `layer`.
-    pub fn new(module: Module, hour: i32, minute: i32, parameter: i32) -> Result<Self> {
+    /// `hour`/`minute` come from the mission `time` line; `parameter` from
+    /// `layer`; `wind` from the `wind` line, unresolved and in source units.
+    pub fn new(
+        module: Module,
+        hour: i32,
+        minute: i32,
+        parameter: i32,
+        wind: Option<[i32; 2]>,
+    ) -> Result<Self> {
         if !(0..24).contains(&hour) || !(0..60).contains(&minute) {
             return Err(std::io::Error::other("mission time outside one day"));
         }
@@ -33,6 +41,7 @@ impl Configuration {
             module,
             start_seconds: (hour * 60 + minute) * 60,
             parameter,
+            wind: resolve_wind(wind)?,
         })
     }
 
@@ -57,6 +66,11 @@ impl Configuration {
     pub fn base_palette(&self) -> &[[u8; 3]; 256] {
         &self.module.base
     }
+
+    /// Steady horizontal wind in world feet per second, X east and Z north.
+    pub fn wind_world_fps(&self) -> [f64; 3] {
+        self.wind
+    }
 }
 
 /// One resolved environment instant at one altitude: a record blended across
@@ -64,7 +78,7 @@ impl Configuration {
 pub type Sample = Layer;
 
 /// Authoritative weather state. Advanced only by the host fixed-tick service.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Environment {
     configuration: Configuration,
     clock: FixedClock,
@@ -196,6 +210,29 @@ impl Environment {
     }
 }
 
+/// The mission `wind` line is a compass heading in whole degrees and a speed in
+/// feet per second: `0x481e70` multiplies the heading by 182 into a binary angle
+/// and stores the speed unscaled, and `0x476f3d` then advances position by
+/// `speed * ticks` rotated by that angle. `_Rotate2@8` turns (0, d) into
+/// `(d sin h, d cos h)`, so heading zero is north and ninety is east.
+///
+/// Whether the value names the direction the wind blows towards or comes from
+/// is UNRESOLVED; this reproduces the arithmetic, which drifts an aircraft
+/// towards the stated heading.
+fn resolve_wind(wind: Option<[i32; 2]>) -> Result<[f64; 3]> {
+    let Some([heading, speed]) = wind else {
+        return Ok([0.; 3]);
+    };
+    if !(0..=360).contains(&heading) || !(0..=200).contains(&speed) {
+        return Err(std::io::Error::other("mission wind outside source range"));
+    }
+    // The native conversion truncates into a 16-bit binary angle; keep that.
+    let binary = f64::from((heading * 182) as i16);
+    let radians = binary * std::f64::consts::TAU / 65536.;
+    let speed = f64::from(speed);
+    Ok([speed * radians.sin(), 0., speed * radians.cos()])
+}
+
 /// `sar ecx, 8` then a negative clamp at 0x4b3195. Non-finite altitudes clamp low.
 fn clamp_altitude(feet: f64) -> i32 {
     if !feet.is_finite() {
@@ -210,7 +247,35 @@ mod tests {
 
     fn configuration(records: usize) -> Configuration {
         let module = Module::parse(&tore_formats::weather::synthetic_module(records)).unwrap();
-        Configuration::new(module, 0, 0, 0).unwrap()
+        Configuration::new(module, 0, 0, 0, None).unwrap()
+    }
+
+    #[test]
+    fn mission_wind_resolves_to_world_feet_per_second() {
+        let module = Module::parse(&tore_formats::weather::synthetic_module(1)).unwrap();
+        let of = |h, s| {
+            Configuration::new(module.clone(), 12, 0, 0, Some([h, s]))
+                .unwrap()
+                .wind_world_fps()
+        };
+        // Heading zero is north and ninety is east, at the stated speed.
+        let north = of(0, 10);
+        assert!(north[2] > 9.99 && north[0].abs() < 1e-9 && north[1] == 0.);
+        let east = of(90, 10);
+        assert!(east[0] > 9.98 && east[2].abs() < 0.02, "{east:?}");
+        // The documented Ukraine mission value.
+        let ukraine = of(160, 7);
+        assert!((ukraine[0] * ukraine[0] + ukraine[2] * ukraine[2]).sqrt() - 7. < 1e-6);
+        assert!(
+            ukraine[0] > 0. && ukraine[2] < 0.,
+            "from the north-east: {ukraine:?}"
+        );
+        assert_eq!(
+            Configuration::new(module, 12, 0, 0, None)
+                .unwrap()
+                .wind_world_fps(),
+            [0.; 3]
+        );
     }
 
     #[test]
@@ -222,7 +287,7 @@ mod tests {
         assert_eq!(e.ticks(), 256);
         assert_eq!(e.seconds_of_day(), 1);
         let module = Module::parse(&tore_formats::weather::synthetic_module(1)).unwrap();
-        let mut e = Environment::new(Configuration::new(module, 23, 59, 0).unwrap());
+        let mut e = Environment::new(Configuration::new(module, 23, 59, 0, None).unwrap());
         for _ in 0..120 * 61 {
             e.step();
         }
@@ -280,8 +345,11 @@ mod tests {
     fn invalid_launch_times_and_parameters_are_rejected() {
         let module = Module::parse(&tore_formats::weather::synthetic_module(1)).unwrap();
         for (hour, minute, parameter) in [(24, 0, 0), (-1, 0, 0), (0, 60, 0), (0, 0, 256)] {
-            assert!(Configuration::new(module.clone(), hour, minute, parameter).is_err());
+            assert!(Configuration::new(module.clone(), hour, minute, parameter, None).is_err());
         }
-        assert!(Configuration::new(module, 23, 59, 255).is_ok());
+        for wind in [[-1, 7], [361, 7], [160, -1], [160, 201]] {
+            assert!(Configuration::new(module.clone(), 12, 0, 0, Some(wind)).is_err());
+        }
+        assert!(Configuration::new(module, 23, 59, 255, None).is_ok());
     }
 }

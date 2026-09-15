@@ -45,7 +45,13 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   definition, the position-history rings, the load-factor trigger, roll-rate
   shortening and night suppression, drawn as the native five line segments.
   Colour and fade are fitted; the native patterned fills remain undecoded.
-- [ ] W5: connect verified wind/turbulence, air data and environment feedback.
+- [x] W5 wind: resolve the mission wind line into world feet per second and feed
+  it through both flight adapters as pure advection.
+- [x] W5 turbulence: translate the complete event generator, including the
+  low-altitude strength curve, daylight scaling, speed shapes, per-axis
+  amplitudes and the native draw order, and drive haptics from its real output.
+- [ ] W5 remainder: nearby-aircraft wake strength, the daytime ground-query
+  flag, wind audio and the air-data integration.
 - [ ] W6: connect creator/restart/replay and complete theater/platform acceptance.
 
 The follow-up adds static research tooling and evidence; runtime weather remains

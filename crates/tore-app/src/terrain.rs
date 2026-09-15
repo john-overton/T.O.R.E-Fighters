@@ -61,6 +61,7 @@ impl World {
                 hour,
                 minute,
                 environment.layer_parameter.unwrap_or(0),
+                environment.wind,
             )?);
         if weather.sample(0.).is_none() {
             return Err("mission weather layer covers no altitude at its launch time".into());
@@ -159,6 +160,19 @@ impl World {
             }
         }
     }
+    /// The mission's steady wind in world feet per second.
+    pub fn wind(&self) -> [f64; 3] {
+        self.weather.configuration().wind_world_fps()
+    }
+
+    /// The terrain surface plus the environment's wind, for one fixed step.
+    pub fn surface(&self, x: f64, z: f64) -> tore_sim::research::Surface {
+        let mut surface =
+            tore_sim::research::Surface::terrain(f64::from(self.height(x as f32, z as f32)));
+        surface.wind = self.wind();
+        surface
+    }
+
     /// Exactly one 120 Hz tick of environment time. Pausing means not calling it.
     pub fn step_weather(&mut self) {
         self.weather.step();
@@ -316,6 +330,7 @@ mod tests {
                     12,
                     0,
                     0,
+                    None,
                 )
                 .unwrap(),
             ),

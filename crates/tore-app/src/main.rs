@@ -66,6 +66,9 @@ struct App {
     previous_flight: flight::State,
     flight_clock: flight::Clock,
     vapor: tore_sim::vapor::Vapor,
+    turbulence: tore_sim::turbulence::Turbulence,
+    turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng,
+    turbulence_percent: i16,
     flight_view: u8,
     flight_canvas: flight_canvas::FlightCanvas,
     window_size: [u32; 2],
@@ -129,6 +132,43 @@ fn vapor_vertices(
         }
     }
     out
+}
+
+/// One tick of physical turbulence, applied to attitude and height only.
+/// Velocity is untouched: the recovered routine is an angular and vertical
+/// perturbation, not a three-dimensional wind field.
+fn step_turbulence(
+    turbulence: &mut tore_sim::turbulence::Turbulence,
+    rng: &mut tore_formats::flight_model::clock_rng::NativeRng,
+    flight: &mut flight::State,
+    world: &terrain::World,
+    percent: i16,
+) -> Option<tore_input::FeedbackEvent> {
+    let ground = f64::from(world.height(flight.position[0] as f32, flight.position[2] as f32));
+    let agl = flight.position[1] - ground;
+    let conditions = tore_sim::turbulence::Conditions {
+        agl_feet: agl,
+        on_ground: agl <= 1.,
+        speed_fps: flight.speed,
+        seconds_of_day: world.weather.seconds_of_day(),
+        percent,
+        // The daytime ground-query flag's surface meaning is unresolved.
+        daytime_ground: false,
+        enabled: true,
+    };
+    let d = turbulence
+        .step(world.weather.ticks(), 2, conditions, rng)
+        .ok()?;
+    if d == tore_sim::turbulence::Disturbance::default() {
+        return None;
+    }
+    flight.position[1] += d.vertical_fps * flight::DT;
+    flight.yaw += d.yaw * flight::DT;
+    flight.pitch += d.pitch * flight::DT;
+    flight.bank += d.roll * flight::DT;
+    d.shake.then(|| tore_input::FeedbackEvent::Turbulence {
+        intensity: d.severity(),
+    })
 }
 
 impl App {
@@ -1082,12 +1122,22 @@ impl ApplicationHandler for App {
                                 }
                             }
                             self.flight
-                                .step(&pilot, |x, z| self.world.height(x as f32, z as f32) as f64);
+                                .step_surface(&pilot, |x, z| self.world.surface(x, z));
                             // Weather shares the authoritative tick; pausing simply
                             // stops calling it, with no elapsed-time catch-up.
                             self.world.step_weather();
                             if let Some(points) = self.hornet.streamer_points(&self.flight) {
                                 self.vapor.step(self.world.weather.ticks(), points);
+                            }
+                            let turbulence_cue = step_turbulence(
+                                &mut self.turbulence,
+                                &mut self.turbulence_rng,
+                                &mut self.flight,
+                                &self.world,
+                                self.turbulence_percent,
+                            );
+                            if let Some(cue) = turbulence_cue {
+                                self.input.feedback(cue);
                             }
                             if let Some(audio) = &self.audio {
                                 audio.controls(&self.previous_flight, &self.flight);
@@ -2176,7 +2226,7 @@ fn main() -> AppResult<()> {
     if let Some(ticks) = flight_probe_ticks {
         let keys = setup_maneuver(&mut flight);
         for _ in 0..ticks {
-            flight.step(&keys, |x, z| world.height(x as f32, z as f32) as f64);
+            flight.step_surface(&keys, |x, z| world.surface(x, z));
             world.step_weather();
             if let Some(points) = hornet.streamer_points(&flight) {
                 probe_vapor.step(world.weather.ticks(), points);
@@ -2328,6 +2378,14 @@ fn main() -> AppResult<()> {
         && !animation_capture
         && std::env::var_os("TORE_PERF_FRAMES").is_none();
     // Seed the vapor history before the airframe and state move into App.
+    // Read before the airframe moves into App.
+    let turbulence_percent = hornet
+        .profile
+        .fields
+        .get("turbulencePercent")
+        .and_then(|t| t.number().ok())
+        .and_then(|v| i16::try_from(v).ok())
+        .unwrap_or(0);
     let mut app = App {
         mission: None,
         preference_path: if preferences_enabled {
@@ -2348,6 +2406,9 @@ fn main() -> AppResult<()> {
         flight,
         flight_clock: flight::Clock { remainder: 0. },
         vapor: probe_vapor,
+        turbulence: tore_sim::turbulence::Turbulence::default(),
+        turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?,
+        turbulence_percent,
         flight_view,
         flight_canvas: Default::default(),
         window_size,

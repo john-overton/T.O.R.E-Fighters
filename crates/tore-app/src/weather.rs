@@ -62,7 +62,13 @@ pub fn validate_sources(
         .ok_or_else(|| format!("mission layer {layer} is not imported"))?;
     let [hour, minute] = environment.time.unwrap_or([12, 0]);
     let parameter = environment.layer_parameter.unwrap_or(0);
-    let configuration = Configuration::new(Module::parse(bytes)?, hour, minute, parameter)?;
+    let configuration = Configuration::new(
+        Module::parse(bytes)?,
+        hour,
+        minute,
+        parameter,
+        environment.wind,
+    )?;
     let records = configuration.layers().len();
     let mut state = Environment::new(configuration);
 
@@ -97,7 +103,13 @@ pub fn validate_sources(
     let mut interpolated = 0;
     let mut previous = None;
     for minute in 0..24 * 60 {
-        let probe = Configuration::new(Module::parse(bytes)?, minute / 60, minute % 60, parameter)?;
+        let probe = Configuration::new(
+            Module::parse(bytes)?,
+            minute / 60,
+            minute % 60,
+            parameter,
+            environment.wind,
+        )?;
         let Some(sample) = Environment::new(probe).sample(0.) else {
             return Err(format!("{layer}: {minute:02} has no active record").into());
         };

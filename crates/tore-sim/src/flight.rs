@@ -201,11 +201,9 @@ impl State {
         if self.crashed {
             return;
         }
-        let wind = if self.research.is_some() {
-            ground(self.position[0], self.position[2]).wind
-        } else {
-            [0.; 3]
-        };
+        // Wind is pure advection in both adapters: it displaces the aircraft
+        // and never changes airspeed, so the legacy path honors it too.
+        let wind = ground(self.position[0], self.position[2]).wind;
         for (v, w) in self.velocity.iter_mut().zip(wind) {
             *v -= w;
         }
