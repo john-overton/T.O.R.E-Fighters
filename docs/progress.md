@@ -1,8 +1,37 @@
 # Parity progress
 
-Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.md), covering menus, original flight environments and aircraft. Checked items describe work in this Rust repository, not work completed in USNF-ATF. An unchecked item remains open even when a reference decoder or prototype exists. Keep format status in [coverage](formats/coverage.md) and acceptance evidence in [baselines](baselines/).
+Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.md), covering menus, original flight environments and aircraft. Checked items describe work in this Rust repository, not work completed in USNF-ATF. An unchecked item remains open even when a reference decoder or prototype exists. Keep format status in [coverage](formats/coverage.md) and acceptance evidence in [baselines](baselines/).
 
 **Current scope:** Original Choose Activity and Quick Mission briefing lead to all-theater previews and F/A-18D/Rafale C free flight. The explicit manual range now connects the ten PT-default weapon slots, sensors, damage, stores and combat-service replay. Full native environment/flight/combat parity and the remaining menu screens stay open. AI is deferred until manual acceptance. See [current systems evidence](baselines/weapons-systems.md), [earlier manual weapons evidence](baselines/manual-weapons.md) and the dated checklists below.
+
+## Weather review — 2026-09-15
+
+- [x] Number the remaining work by dependency in the
+  [weather plan](weather-plan.md#numbered-dependency-sequence--2026-09-15).
+  First batch: fog/palette/sky foundation → celestial rendering → cloud geometry.
+- [ ] Step 1: callback state, tint consumer, shade/remap and sky/horizon recovery.
+  - [x] Typed bounded callback imports, persistent source-record fog state,
+    validated seed and one/ten-second selection cadence independent of cameras.
+  - [x] Correct altitude-haze RGB source; test selective six-bit palette tint and
+    smoothing helpers (diagnostic only, not yet applied to rendered pixels).
+  - [ ] View-dependent tint reduction, complete palette/remaps and native horizon.
+  - [x] Extend static extraction and imported shape coverage diagnostics.
+    [Foundation slice evidence](baselines/weather-foundation.md).
+- [ ] Steps 2–3: sun/moon/stars and cloud geometry.
+- [ ] Step 4: consistent weather in main, mirror and instrument cameras.
+- [ ] Steps 5–7: wind/air data/audio, turbulence, then finish wingtip vapor and
+  investigate broader wing-induced vapor.
+- [ ] Step 8: serialized environment replay and full retail/platform acceptance.
+  Engine contrails remain future step 9 unless retail behavior is established.
+
+- [x] Audit all 11 local weather commits; correct atlas sampling, turbulence
+  duration/priority/AGL rounding, vapor history/reset, typed aircraft coefficient,
+  condition metadata/diagnostics and scalar bounds.
+- [x] Remove the duplicate overcast editor row, retaining the imported inventory.
+- [ ] Close remaining callback/tint, default-wind/scattered-cloud, per-camera,
+  coupling/rounding and serialized replay gaps before parity acceptance.
+
+[Findings, aircraft-file evidence and validation](baselines/weather-review.md).
 
 ## Weather parity planning — 2026-09-14
 
@@ -17,15 +46,16 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   [Evidence](baselines/weather-research.md), [contracts](formats/weather.md).
 - [ ] Recover contrails, wingtip vapor and broader wing-induced vapor contracts;
   all are included in the weather plan following the user's clarification.
-- [x] Decode the complete LAY record layout and confirm it against all 24 imported
+- [x] Decode the reviewed LAY record fields and confirm it against all 24 imported
   retail modules; recover the day/night windows, altitude bands and effect
   selectors. [Contracts](formats/weather.md).
 - [x] Recover the wing vapor streamer subsystem: shape opcodes, attachment
   geometry, position-history sampling, G trigger and night suppression.
-- [x] Settle engine contrails and broader wing-induced vapor: both are absent
-  from the reviewed executable. Exactly two wingtip streamers exist per aircraft.
-  The afterburner plume is real but drawn by shape-embedded code we never execute,
-  so per-aircraft vapor beyond the wingtips is unavailable, not proven absent.
+- [x] Statically inspect both aircrafts’ embedded device/afterburner code and
+  streamer draw sites. The previous whole-game contrail/vapor absence claim is
+  withdrawn: no additional trigger found within this bounded scope.
+  [Full commit/code review](baselines/weather-review.md).
+- [ ] Future optional engine contrails, per [W7](weather-plan.md#w7--optional-engine-contrails-after-retail-weather).
 - [x] W2: bounded `tore-formats::weather` records and deterministic
   `tore-sim::environment` clock, selection and queries, with `--validate-weather`
   exercising every imported module over a full simulated day.
@@ -34,7 +64,8 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   dawn and dusk from `DAY2.LAY`.
 - [x] W3 palette: upload retail terrain, sky and aircraft art as source palette
   indices and resolve the live weather palette on the GPU. Night, dawn and dusk
-  now render, including the original city lighting, with no authored colors.
+  now render with source colors; sky mapping, fog blending and other rendering
+  behavior remain authored. Aircraft retain their own atlas palette.
 - [ ] W3 remainder: celestial shapes, sun/moon direction and the recovered
   sunrise/sunset fields.
 - [x] W4 visibility: replace the authored exponential fog with the recovered
@@ -47,15 +78,14 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   Colour and fade are fitted; the native patterned fills remain undecoded.
 - [x] W5 wind: resolve the mission wind line into world feet per second and feed
   it through both flight adapters as pure advection.
-- [x] W5 turbulence: translate the complete event generator, including the
+- [x] W5 turbulence: implement the reviewed event generator, including the
   low-altitude strength curve, daylight scaling, speed shapes, per-axis
   amplitudes and the native draw order, and drive haptics from its real output.
 - [ ] W5 remainder: nearby-aircraft wake strength, the daytime ground-query
   flag, wind audio and the air-data integration.
 - [x] W6 creator: recover the six-entry source weather table, the per-theater
   module suffix, and the meaning of the `layer` parameter, `clouds` altitude and
-  `wind` line. Six of the seven creator conditions now launch; only overcast,
-  which matches no source choice, stays gated.
+  `wind` line. The editor exposes six conditions; duplicate overcast is removed.
 - [ ] W6 remainder: restart and replay identity, the remaining theaters and
   platform acceptance.
 

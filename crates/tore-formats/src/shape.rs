@@ -46,7 +46,13 @@ impl StreamerDef {
             pivot: [long(0)?, long(4)?, long(8)?],
             hinge_scale: word(c, at + 0x0c)? as i16,
             points: [
-                [-long(0x0e)?, long(0x12)?, long(0x16)?],
+                [
+                    long(0x0e)?
+                        .checked_neg()
+                        .ok_or_else(|| invalid("streamer coordinate cannot be mirrored"))?,
+                    long(0x12)?,
+                    long(0x16)?,
+                ],
                 [long(0x1a)?, long(0x1e)?, long(0x22)?],
             ],
         }))
@@ -338,6 +344,18 @@ impl Shape {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn streamer_mirroring_rejects_unrepresentable_coordinates() {
+        let mut code = vec![0; 0x0e + 40];
+        code[0x0e..0x10].copy_from_slice(&0xceu16.to_le_bytes());
+        code[0x1e..0x22].copy_from_slice(&i32::MIN.to_le_bytes());
+        assert!(StreamerDef::parse(&module::fixture(&code)).is_err());
+        code[0x1e..0x22].copy_from_slice(&256i32.to_le_bytes());
+        let def = StreamerDef::parse(&module::fixture(&code))
+            .unwrap()
+            .unwrap();
+        assert_eq!(def.attachment(0, 0).unwrap(), [1., 0., 0.]);
+    }
     fn program() -> Vec<u8> {
         let mut c = vec![0x82, 0, 3, 0, 0, 0];
         for v in [0i16, 0, 0, 10, 0, 0, 0, 10, 0] {

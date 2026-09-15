@@ -13,7 +13,7 @@ Status is for this **Rust rebuild**, not the reference project's decoders. The a
 | 5K / 11K | Partial | 99 recorded music tracks, lossless WAV previews, PT-selected engine/AB/start/stop and actuator samples including speed brakes; bounded PCM8 mono reader, authored mixer gains |
 | FNT | Partial | Bounded bitmap-writing grammar; WIN11 instrument/menu and HUD11 flight fonts rendered |
 | ESA | Not started | Loose LIB installation used |
-| LAY / PL weather | Partial | Bounded CODE/RVA palette reader and native ramp mapping; fixed DAY2 keyframe, no runtime interpolation |
+| LAY / PL weather | Partial | Bounded records across 24 supplied modules; typed callback imports and persistent seeded fog updates; corrected altitude-haze tint. Selective palette tint/smoothing helpers tested, not yet rendered; native remaps, horizon, celestial/cloud geometry remain open. [Evidence](../baselines/weather-foundation.md) |
 | MUS | Partial | All nine FA score grammars parsed; NORMAL drives recorded free-flight phrases, native host events/priority deferred; four missing PCM references reported |
 | XMI / instrument banks | Excluded from current playback scope | User selected original recordings without MIDI/synthesis; general raw extraction remains available |
 | PT / PTS / SH / HUD | Partial | FA F18 PT fields, Hornet static SH/device geometry and cockpit artwork; PTS and complete native HUD/shape VM remain unimplemented |
@@ -130,3 +130,12 @@ store catalogs and other executable builds remain open.
 `tore-sim::combat::loadout` validates supported station compatibility, ammunition,
 fuel and weight before constructing live combat state. See
 [implementation evidence](../baselines/creator-ordnance.md).
+
+## Weather and aircraft-effect review — 2026-09-15
+
+The [weather audit](../baselines/weather-review.md) corrects the earlier static-midday
+coverage description and reviews the 11 local weather commits. SH streamer
+definitions are read for both aircraft; a separate static import/re-entry inspector
+checks aircraft-embedded device code without executing it. General SH control flow
+and game-wide absence of contrails/broader vapor are not established. Raw source
+creator options are retained; the editor omits the duplicate overcast label.

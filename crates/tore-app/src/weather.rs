@@ -18,7 +18,7 @@ pub fn validate_sources(
             .iter()
             .map(|l| {
                 format!(
-                    "{}-{}s/{}-{}ft/flags={:#x}/effects={:?}/fog={}..{}ft {}..{}/see={}ft/shade={:?}/decks={:?}",
+                    "{}-{}s/{}-{}ft/flags={:#x}/effects={:?}/fog={}..{}ft {}..{}/see={}ft/shade={:?}/decks={:?}/callback={:?}/tint={:?}:{}",
                     l.start_seconds,
                     l.end_seconds,
                     l.low_feet,
@@ -31,7 +31,10 @@ pub fn validate_sources(
                     l.fog_far_density,
                     f64::from(l.see_distance) * tore_formats::weather::DISTANCE_FEET,
                     l.shade,
-                    l.decks
+                    l.decks,
+                    l.callback,
+                    l.tint,
+                    l.tint_scalar
                 )
             })
             .collect();
@@ -48,6 +51,19 @@ pub fn validate_sources(
     }
     if modules == 0 {
         return Err("no weather modules were imported".into());
+    }
+
+    for name in ["SUN.SH", "MOON.SH", "STARS.SH", "CLOUD1.SH", "CLOUDS.SH"] {
+        let bytes = resources
+            .get(name)
+            .ok_or_else(|| format!("weather dependency {name} missing"))?;
+        match tore_formats::shape::Shape::parse(bytes) {
+            Ok(shape) => println!(
+                "{name}: {} static faces; native placement/material acceptance still pending",
+                shape.faces.len()
+            ),
+            Err(error) => println!("{name}: static shape coverage gap: {error}"),
+        }
     }
 
     let layer = &environment.layer;
@@ -131,7 +147,12 @@ pub fn validate_sources(
         }
         previous = Some(sample.shade);
     }
-    if records > 1 && interpolated == 0 {
+    let has_time_overlap = stored.windows(2).any(|pair| {
+        pair[0].low_feet == pair[1].low_feet
+            && pair[0].end_seconds > pair[1].start_seconds
+            && pair[0].start_seconds != pair[1].start_seconds
+    });
+    if has_time_overlap && interpolated == 0 {
         return Err("no minute of the day fell inside a recovered transition window".into());
     }
     println!("  {interpolated} of 1440 minutes are inside a recovered transition");

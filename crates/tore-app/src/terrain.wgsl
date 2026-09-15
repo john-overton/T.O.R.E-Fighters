@@ -25,13 +25,14 @@ fn shade(index:u32)->vec4<f32>{
 // Manual bilinear: indices cannot be filtered, so each of the four texels is
 // resolved through the palette first and the colors are blended premultiplied.
 fn tile(uv:vec2<f32>,layer:i32)->vec4<f32>{
- let p=uv*256.0-vec2<f32>(0.5);
+ let size=vec2<i32>(textureDimensions(tiles));
+ let p=uv*vec2<f32>(size)-vec2<f32>(0.5);
  let base=floor(p);
  let f=p-base;
  var sum=vec4<f32>(0.0);
  for(var j=0;j<2;j++){
   for(var i=0;i<2;i++){
-   let at=clamp(vec2<i32>(base)+vec2<i32>(i,j),vec2<i32>(0),vec2<i32>(255));
+   let at=clamp(vec2<i32>(base)+vec2<i32>(i,j),vec2<i32>(0),size-vec2<i32>(1));
    let c=shade(textureLoad(tiles,at,layer,0).r);
    let w=select(1.0-f.x,f.x,i==1)*select(1.0-f.y,f.y,j==1);
    sum+=vec4<f32>(c.rgb*c.a,c.a)*w;

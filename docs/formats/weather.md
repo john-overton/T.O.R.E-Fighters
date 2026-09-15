@@ -44,7 +44,79 @@ at `0x4b4170` and celestial draw gating around `0x4ab205` also consume current
 time and active-layer fields. This establishes environment evolution beyond an
 advancing clock UI. Native callbacks must be translated, never loaded.
 
-## The LAY record layout is decoded and confirmed against retail data
+### Fog tint consumer follow-up — 2026-09-15
+
+Source tracing for [dependency step 1](../weather-plan.md#numbered-dependency-sequence--2026-09-15)
+rechecked the reviewed executable/symbol hashes and followed the existing static
+disassembly. The implementation checkpoint below distinguishes live callback state
+from the diagnostic palette helpers.
+
+- `_WRFogLayerUpdate` at `0x4b4320` changes record `+0xfe` by
+  `Rand(51) - 25`, then clamps it to `217..235`. Selection invokes the callback
+  on the loaded record before copying it; the mutation persists between calls.
+- View update at `0x4b3674..0x4b36a7` copies the selected record's `+0xfb` RGB
+  to `0x5843d0`, publishes the low word of `+0xfe` to `0x583aa4`, and sets the
+  smoothing increment at `0x50c8d4` to 16.
+- The later palette pass at `0x4b3f28..0x4b3f74` forms a nonnegative target
+  from signed-word `[0x583aa4] - [0x580da0]`. Mutable word `0x583930` moves
+  toward that target by the increment, clamping overshoot. The producer of the
+  subtracted adjustment and complete update cadence still need review.
+- Calls at `0x4b4017` and `0x4b403c` pass the tint RGB and smoothed strength to
+  helper `0x4c8f10`. Relative to palette base `0x583aa8`, their destinations are
+  index 64 with count 191 and index 47 with count 14, respectively. The second
+  call caps strength at 92. This is not a uniform full-palette tint.
+- Helper `0x4c8f10` uses byte arithmetic, a halved strength and signed multiply,
+  with a separate strength-256 path. Preserve those details when translating;
+  generic floating-point RGB interpolation is not established as equivalent.
+
+Follow-up source trace: `0x4b36ae..0x4b373f` produces the subtracted adjustment.
+It requires the layer-query overlap flag and a positive record dword `+0x12e`,
+then draws every three elapsed seconds. The bound is `+0x12e` times a clamped
+signed word obtained from the selected object's `+0x34 >> 8`, divided by
+record `+0x132`. Supplied low CLOUD1/FOG1 records store 102 and 733 in those
+fields. The object's field producer/units and complete view-update semantics
+remain unverified; the implementation does not guess them.
+
+The Rust reader now resolves a nonzero callback only through its six-byte
+`ff 25` alias and bounded `.idata` entries. Only the reviewed `main.dll`
+`_WRFogLayerUpdate` and `_T_HorizonProc` contracts are supported; unknown symbols,
+ordinals, malformed aliases and unsupported image bases fail explicitly.
+All six supplied FOG variants reference the fog callback on their low record;
+the other supplied records have null callbacks. An unused horizon import in a
+module does not make its records invoke that callback.
+
+`Environment` owns mutable record copies and a dedicated seeded RNG outside
+immutable configuration. It invokes matching callbacks before copying/blending,
+then schedules selection in one second if any callback ran, ten otherwise;
+leaving the first active interval also forces selection. The host 120 Hz clock,
+dedicated RNG stream/default seed 1 and omission of retail elapsed-word wrap
+remain authored adapters. Camera queries do not advance either state.
+
+`weather::palette` translates selective tint and smoothing in the reviewed
+0..255 strength domain. It retains six-bit colors, odd-strength truncation,
+signed-product rounding and the index-47..60 strength cap of 92. The helper's
+separate strength-256 wrapping branch is outside this API. These helpers remain
+diagnostic pending view-state integration, palette-pass scheduling and the
+other ordered palette effects. Existing rendered palette expansion still
+ignores the tint scalar, so the callback alone does not finish visible fog.
+
+### Celestial dispatch trace — 2026-09-15
+
+Static region `0x4aaca0..0x4aacdd` loads STARS, MOON and SUN into pointers
+`0x580ba8`, `0x580bb0` and `0x57cd08`. The draw-list builder at
+`0x4ab0af..0x4ab309` emits stars at zero rotation and moon at record
+`+0x13e/+0x140` when flag `0x10` is set. Sun dispatch requires flag `0x08`,
+inclusive sunrise/sunset time bounds and elevation at least signed `0xf8e4`
+(-1820 binary-angle units). These are dispatch gates, not complete clipping or
+material contracts. The bounded static extraction now includes both spans.
+
+Imported shape diagnostics currently report: SUN reaches unsupported opcode
+`0x13` at module VA `0x1034`; MOON, STARS and CLOUDS produce no accepted static
+geometry; CLOUD1 yields two faces. Existing static SH projection skips commands,
+so that result does not establish complete cloud materials or behavior. Shapes
+remain imported dependencies and are not yet celestial/cloud render commands.
+
+## Reviewed LAY fields are confirmed against retail data
 
 `0x4b3750–0x4b3816` walks the loaded table at `[0x580e24]`, compares
 `_currentTimeOfDay` against two signed dwords and copies 0x58 dwords (352 bytes)
@@ -129,8 +201,8 @@ is what SKY0 through SKY8 are for.
 
 ### Altitude haze
 
-`0x4b3cb0`, gated on flag `0x02`, blends a record's own ramps toward its haze
-color before that record takes part in any altitude blend. The weight comes from
+`0x4b3cb0`, gated on flag `0x02`, blends a record's own ramps toward its tint
+RGB at `+0xfb` (not the remap shade at `+0x36`) before that record takes part in any altitude blend. The weight comes from
 the `+0x26`..`+0x32` ramp, measured in 256-foot steps above the band floor. The
 terrain ramp takes the full weight; the sky ramp fades it out linearly from
 index 30 down to index 16 and leaves 0 through 15 untouched.
@@ -205,8 +277,10 @@ That is exactly why the archive ships six variants of each.
 
 The creator offers **seven** labels — dawn, clear, cloudy, overcast, foggy,
 sunset and night — against these six choices, and no table joining the two lists
-was found. Matching by label leaves overcast with no source module; treat that
-mapping as an inference and overcast as unavailable.
+was found. The editor now omits overcast per the user’s clarification that it
+duplicates cloudy; cloudy selects `CLOUD1`. Imported source lists remain intact.
+The six editor rows map by label, not by assuming their indices equal the native
+weather table indices.
 
 ## Physical turbulence exists beyond hard-stick maneuvering
 
@@ -234,7 +308,7 @@ indirect coupling is not excluded. A renderer-independent service should take
 explicit terrain, neighbor geometry, time and aircraft coefficient, with
 per-aircraft mutable disturbance state rather than an invented global gust field.
 
-## The turbulence generator and the wind line are fully recovered
+## Turbulence generator and wind-line contracts
 
 The mission `wind` line is a compass heading in whole degrees and a speed in
 feet per second. `0x481e70` multiplies the heading by 182 into a binary angle
@@ -246,18 +320,25 @@ wind line gets `heading = Rand(0xfff0)` and `speed = Rand(0x16) + 7`, that is
 direction the wind blows towards or comes from is UNRESOLVED; the arithmetic
 drifts the aircraft towards the stated heading.
 
-`_FMTurbulence`'s event generator translates completely:
+`_FMTurbulence`'s event generator is recovered at the following boundaries
+(the implementation corrections and remaining adapter differences are recorded
+in [the review](../baselines/weather-review.md)):
 
 | Source | Behavior |
 | --- | --- |
 | `0x477a3a` | with no strength, reconsider in 1,280 ticks; `0x477ce9` suppresses and reconsiders in 512 |
 | `0x477a57` | outside 07:00 to 19:00 the aircraft's `turbulencePercent` is quartered; inside, a ground-query flag takes two thirds |
-| `0x477a90` | an event lasts `Rand(0x1e00) % 100 + 89` ticks, and the sine phase spans twice that |
+| `0x477a90` | an event lasts `Rand(0x1e00) / 100 + 89` ticks, and the sine phase spans twice that |
 | `0x477ab7` | the gap to the next event is `Rand(2 * 15360 / (0.6 p + 15))`, where `p` combines speed, strength and percent, so stronger turbulence is also more frequent |
 | `0x477b20` | a speed shape rising to full at 146 fps, flat to 293, then falling away to nothing at 586 |
 | `0x477b73` | yaw, pitch and roll amplitudes are `Rand` over 1.82, 7.28 and 12.74 units per point of strength, each negated on a coin flip: at full strength about 1, 4 and 7 degrees per second |
 | `0x477c3f` | the vertical rate uses its own speed factor peaking at 733 fps, and a rate at or past `0xc00` also shakes the view |
 | `0x4775b5` | while active, the vertical rate moves height directly and the three amplitudes drive a sine over the doubled period, reaching movement heading, pitch and roll as well as the display angles |
+
+At `0x477a9e`, AX is the quotient of division by 100, giving 89–165 ticks;
+the previous modulo interpretation was incorrect. Active events take priority
+over the next-update timer (`0x4775b5`), and generation returns without applying
+the new event on that call.
 
 The draw order is length, gap, three amplitudes, three sign flips, vertical
 rate, one more sign flip. Reproducing that order with the already-translated
@@ -323,7 +404,8 @@ and interpolation mode 2 (`0x4a006f–0x4a00a1`). `@SampleInit@8` `0x4124e0`
 allocates `capacity * 16` bytes and fills every 16-byte `{tick, x, y, z}` slot
 with the current tick and point. `@SampleUpdate@8` `0x412570` always overwrites
 entry 0 with the live point, and only shifts the ring down when at least 25
-ticks have passed since the previous commit. At 256 clock units per second the
+ticks have passed since the previous commit. It writes the live point **before**
+shifting, so entries 0 and 1 coincide on a commit. At 256 clock units per second the
 retained history is `9 * 25` ticks, about 0.88 seconds.
 
 `_SampleGet@12` `0x4125c0` clamps negative ticks to zero, walks back to the
@@ -333,7 +415,7 @@ blend the streamers use.
 
 ### Trigger, intensity and fade
 
-`_DrawStreamer@12` is the complete visual contract:
+`_DrawStreamer@12` establishes the following visual behavior:
 
 | Source | Behavior |
 | --- | --- |
@@ -367,8 +449,8 @@ fixed-wing aircraft — and the attachment points are plain wingtips:
 | Rafale C | `(-54, -1, -30)` | `(54, -1, -30)` |
 
 Those are source units; a third of a foot each, in the shape's right, forward
-and up order. They put the emitters 18 feet outboard, which matches both
-aircraft's half spans.
+and up order. The app’s existing one-third-foot scale puts them about 18 feet outboard;
+that scale remains provisional, not independent retail size acceptance.
 
 ### The trail colors are patterned fills, not palette entries
 
@@ -382,41 +464,50 @@ fill-pattern table `n`, and the streamer's `0x109` through `0x10d` are tables 9
 through 13.
 
 So wing vapor is drawn as five patterned, partly transparent fills rather than
-five solid lines. The tables are located but not decoded, so a reimplementation
-can reproduce the geometry exactly and must mark the color and fade as fitted.
+five solid lines. The tables are located but not decoded, so the current implementation
+marks color/fade as fitted. Its host sampling, float interpolation, shape scale
+and unresolved roll-rate gate also prevent a claim of exact geometry/timing.
 
-### Engine contrails and broader wing vapor are absent from the engine
+### Contrails and broader wing vapor: bounded negative findings
 
-An exhaustive second pass settles the remaining scope questions. These are
-verified-absent **in the reviewed executable**, not merely unfound:
+The previous claim of an exhaustive, verified absence was too strong. Effect
+filenames, direct smoke callers and neighboring opcode slots cannot rule out
+procedural geometry, indirect dispatch or aircraft-embedded drawing programs.
+The streamer subsystem's two attachments describe that subsystem, not a global
+limit on all aircraft effects. No dedicated engine contrail producer has been
+confirmed in the inspected FA paths. This is **unconfirmed**, not proof that the
+whole game lacks contrails.
 
-- Every `.SH` and `.PIC` resource name in the data section was enumerated. The
-  complete effect art set is `crater`, `debris`, `smoke`, `chaff`, `flare`,
-  `fire`, `exp`, `spd`, `mpd`, `lpd`, plus scenery, `cloud1`, `sun`, `moon`,
-  `stars` and `eject`. There is no contrail, vapor or plume artwork.
-- Every caller of every `GRAPHICAdd*` entry point resolves to damage, crash, an
-  engine/fuel event, carrier takeoff, missile motor smoke, the burning-wreck
-  fire adder or network replay. None is gated on altitude, temperature or lift.
-- `_DrawStreamer@12` has exactly one call site, and the position-history API has
-  exactly two clients: the HUD and the wingtip streamers.
-- The full 128-entry opcode table was decoded. The opcodes adjacent to the
-  streamer pair — `0xcc`, `0xd4`, `0xd8` — all point at the bare dispatch stub.
-- `_effects` / `_effectsAllowed` are renderer feature bits set by the graphics
-  preferences dialog, not a contrail toggle.
+#### Aircraft-embedded code inspected statically — 2026-09-15
 
-So exactly **two** vapor emitters exist per aircraft, both wingtip streamers,
-selected by a one-word side operand. There is no third attachment point, no flap
-or over-wing point, and no altitude trigger anywhere.
+Not executing imported modules does **not** prohibit disassembling their code or
+translating reviewed contracts. `tools/inspect_shape_effects.py` now inventories
+imports, local aliases and bounded `0xf0` re-entry candidates independently of
+the app's neutral-pose decoder. Full outputs remain local; source hashes and
+reproduction are in [the review evidence](../baselines/weather-review.md).
 
-One caveat keeps this short of proving the *game* shows no such effect. Shape
-opcode `0xf0` `do_start_asm` at `0x4d4254` is `push esi; ret`: it jumps into the
-shape byte stream as native code. The 44 `_PL*` animation variables, including
-`_PLafterBurner` at `0x57cd34`, are written by `@ShapeSetup@4` `0x4ab450` and
-read by **nobody in the executable** — their consumers are those embedded
-routines. The afterburner plume is therefore real but entirely data-driven, and
-any further aircraft-specific vapor would live there too. We never execute
-imported modules, so that path stays out of scope; treat per-aircraft vapor
-beyond the wingtip streamers as unavailable rather than proven absent.
+| Shape | Inspected re-entry blocks | Afterburner guards (CODE offsets) | Streamer draws (CODE offsets, side) |
+| --- | ---: | --- | --- |
+| `F18.SH` | 36 | `0x3087`, `0x5b64`, test alias `0x7900` against 1 | `0x32df`/0, `0x36d2`/1, `0x5990`/0, `0x5a92`/1 |
+| `RAF.SH` | 44 | `0x20b6`, `0x3f4c`, test alias `0x5b50` against 1 | `0x2103`/1, `0x23e8`/0, `0x3d10`/0, `0x41cd`/1 |
+
+The aliases resolve through each module's import table to `_PLafterBurner`, not
+to a guessed state-word name. F18 additionally imports bay, brake, gear, hook and
+left/right flap state. Rafale imports brake, canard, gear, flaps and rudder state.
+Both import `do_start_interp` to return to the shape interpreter. The inspected
+blocks only test these device words or write device-angle operands before
+re-entry. They reveal no additional altitude/G/temperature-gated vapor branch.
+The repeated streamer draws belong to different shape/detail paths, not four
+independent emitters. The attachment record still supplies the two wingtips.
+
+Rafale also has an unmatched `f0 00` byte-pattern candidate at CODE `0xe9f`;
+raw byte matches are not automatically native instructions. The tool explicitly
+retains unmatched candidates rather than declaring a complete control-flow graph.
+This pass covers these two supplied aircraft shapes and their named imports;
+other aircraft, all indirect paths and retail visual comparison remain open.
+Broader wing-induced vapor is **not found in these inspected blocks**, not
+proven absent throughout the game. Future optional contrails are planned in
+[W7](../weather-plan.md#w7--optional-engine-contrails-after-retail-weather).
 
 ### Corrections and remaining gaps
 
@@ -431,4 +522,3 @@ table. Object flag `+0x10 & 0x80`, which gates the roll-rate shortening, and
 which axis of the body-rate triple `+0x17f` selects, both remain UNRESOLVED.
 `?wasAfterburn@@3DA` has no reference anywhere in the image and appears to be
 dead.
-

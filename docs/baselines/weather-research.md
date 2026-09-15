@@ -28,10 +28,12 @@ Physical low-altitude and nearby-aircraft turbulence exists, with daylight
 scaling and per-aircraft randomized event state. A separate sound intensity
 function responds to maneuver state. See the [source specification](../formats/weather.md).
 
-Follow-up passes recovered the complete LAY record layout, the blend kernel, the
+Follow-up passes recovered the reviewed LAY record fields, the blend kernel, the
 visibility ramp, the wind line, the turbulence event generator and the wing
-vapor streamer subsystem, and found engine contrails and broader wing-induced
-vapor absent from the reviewed executable. Those contracts and their limits are
+vapor streamer subsystem, and found no confirmed dedicated engine contrail producer in the inspected
+paths. The earlier claim of exhaustive absence is withdrawn; the subsequent
+[aircraft-shape and commit review](weather-review.md) inspects the embedded code
+and records the exact scope and implementation corrections. Those contracts and their limits are
 in the [source specification](../formats/weather.md), and the implementation
 evidence is in [weather implementation evidence](weather.md). No complete
 physical buffet model, retail trajectory or visual comparison is claimed.

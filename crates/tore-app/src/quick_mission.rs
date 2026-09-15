@@ -60,21 +60,25 @@ pub struct QuickMission {
 /// Maps a creator condition onto the six recovered source weather choices.
 /// The two lists are both recovered but the engine holds no table joining
 /// them, so this match is by label: dawn, clear, cloudy, foggy, sunset and
-/// night each name one choice, and overcast names none.
+/// night each name one choice. The editor omits the duplicate overcast label.
 pub fn condition(value: usize) -> Option<usize> {
     Some(match value {
         0 => 3,
         1 => 0,
         2 => 1,
-        4 => 2,
-        5 => 4,
-        6 => 5,
+        3 => 2,
+        4 => 4,
+        5 => 5,
         _ => return None,
     })
 }
 
 impl QuickMission {
-    pub fn new(id: AircraftId, options: Options, data: &BTreeMap<String, Vec<u8>>) -> Self {
+    pub fn new(id: AircraftId, mut options: Options, data: &BTreeMap<String, Vec<u8>>) -> Self {
+        // Keep the imported option inventory intact; only the editor list drops
+        // the duplicate. Draft indices below refer to this six-row list.
+        options.fields[15]
+            .retain(|label| !label.trim_end_matches('.').eq_ignore_ascii_case("overcast"));
         let mut catalog: Vec<(String, String)> = data
             .iter()
             .filter(|(n, _)| n.ends_with(".PT") && !n.starts_with('~'))
@@ -175,7 +179,7 @@ impl QuickMission {
             );
         }
         if condition(v[15]).is_none() {
-            return Some("Overcast has no recovered source weather module yet.".into());
+            return Some("Choose one of the six available weather conditions.".into());
         }
         None
     }
@@ -618,6 +622,17 @@ mod tests {
             fields: vec![vec!["value".into(); 60]; 33],
             targets: vec![vec!["none".into(), "target".into()]; 16],
         };
+        options.fields[15] = [
+            "dawn",
+            "clear",
+            "cloudy",
+            "overcast.",
+            "foggy",
+            "sunset",
+            "night",
+        ]
+        .map(String::from)
+        .to_vec();
         options.fields[4] = (0..6).map(|i| i.to_string()).collect();
         let mut q = QuickMission::new(AircraftId::F18, options, &BTreeMap::new());
         q.aircraft_names = vec!["Hornet".into(), "Rafale".into(), "Other".into()];
@@ -671,13 +686,18 @@ mod tests {
         q.apply(6, 2);
         assert!(q.unsupported().unwrap().contains("setup only"));
         q.apply(6, 0);
-        // Six of the seven conditions now map onto a recovered source module.
-        for value in [0, 1, 2, 4, 5, 6] {
+        // Every editor row maps to its intended source weather, including night.
+        assert_eq!(
+            q.values(15),
+            ["dawn", "clear", "cloudy", "foggy", "sunset", "night"]
+        );
+        for (value, source) in [3, 0, 1, 2, 4, 5].into_iter().enumerate() {
+            assert_eq!(condition(value), Some(source));
             q.apply(15, value);
             assert!(q.unsupported().is_none(), "condition {value}");
         }
-        q.apply(15, 3);
-        assert!(q.unsupported().unwrap().contains("Overcast"));
+        q.apply(15, 6);
+        assert!(q.unsupported().unwrap().contains("six available"));
         q.apply(15, 1);
         q.apply(30, 1);
         assert!(q.unsupported().unwrap().contains("Ground"));

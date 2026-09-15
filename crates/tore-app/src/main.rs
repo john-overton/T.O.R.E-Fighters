@@ -35,6 +35,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use tore_sim::models::FlightModel;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -68,7 +69,6 @@ struct App {
     vapor: tore_sim::vapor::Vapor,
     turbulence: tore_sim::turbulence::Turbulence,
     turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng,
-    turbulence_percent: i16,
     flight_view: u8,
     flight_canvas: flight_canvas::FlightCanvas,
     window_size: [u32; 2],
@@ -115,10 +115,8 @@ fn vapor_vertices(
             continue;
         };
         for (i, pair) in trail.windows(2).enumerate() {
-            let along = i as f32 / vapor.segments() as f32;
             for (end, point) in pair.iter().enumerate() {
                 let step = (i + end) as f32 / vapor.segments() as f32;
-                let _ = along;
                 out.extend([
                     point[0] as f32,
                     point[1] as f32,
@@ -142,16 +140,15 @@ fn step_turbulence(
     rng: &mut tore_formats::flight_model::clock_rng::NativeRng,
     flight: &mut flight::State,
     world: &terrain::World,
-    percent: i16,
 ) -> Option<tore_input::FeedbackEvent> {
     let ground = f64::from(world.height(flight.position[0] as f32, flight.position[2] as f32));
     let agl = flight.position[1] - ground;
     let conditions = tore_sim::turbulence::Conditions {
         agl_feet: agl,
-        on_ground: agl <= 1.,
+        on_ground: flight.crashed || flight.research.as_ref().is_some_and(|r| r.on_ground),
         speed_fps: flight.speed,
         seconds_of_day: world.weather.seconds_of_day(),
-        percent,
+        percent: flight.model().configuration().turbulence_percent,
         // The daytime ground-query flag's surface meaning is unresolved.
         daytime_ground: false,
         enabled: true,
@@ -189,8 +186,15 @@ impl App {
         Ok(())
     }
 
-    /// A restart or aircraft change teleports the aircraft, so the position
-    /// history must be reseeded rather than drawn across the jump.
+    /// Restart the resolved launch environment and its authored RNG policy.
+    fn reset_weather(&mut self) {
+        self.world.weather =
+            tore_sim::environment::Environment::new(self.world.weather.configuration().clone());
+        self.turbulence = Default::default();
+        self.turbulence_rng.reseed_word(1);
+    }
+
+    /// Seed after the final launch position is set, so no trail crosses a teleport.
     fn reset_vapor(&mut self) {
         self.vapor = tore_sim::vapor::Vapor::seeded(
             self.hornet
@@ -575,8 +579,8 @@ impl App {
                                 renderer.prepare_aircraft(&aircraft);
                             }
                             self.hornet = aircraft;
+                            self.reset_weather();
                             self.flight = self.hornet.start(&self.world);
-                            self.reset_vapor();
                             self.reset_vapor();
                             match combat::Combat::new(
                                 &self.hornet,
@@ -728,8 +732,8 @@ impl App {
                     self.finish_recording();
                 }
                 self.input.context(true, self.focused);
+                self.reset_weather();
                 self.flight = self.hornet.start(&self.world);
-                self.reset_vapor();
                 if let Some((altitude, fuel)) = self.mission {
                     self.flight.position[1] = altitude;
                     self.flight.fuel = fuel;
@@ -746,6 +750,7 @@ impl App {
                     event_loop.exit();
                     return;
                 }
+                self.reset_vapor();
                 self.previous_flight = self.flight.clone();
                 self.flight_clock.remainder = 0.;
                 self.flight_view = 0;
@@ -1152,16 +1157,15 @@ impl ApplicationHandler for App {
                             // Weather shares the authoritative tick; pausing simply
                             // stops calling it, with no elapsed-time catch-up.
                             self.world.step_weather();
-                            if let Some(points) = self.hornet.streamer_points(&self.flight) {
-                                self.vapor.step(self.world.weather.ticks(), points);
-                            }
                             let turbulence_cue = step_turbulence(
                                 &mut self.turbulence,
                                 &mut self.turbulence_rng,
                                 &mut self.flight,
                                 &self.world,
-                                self.turbulence_percent,
                             );
+                            if let Some(points) = self.hornet.streamer_points(&self.flight) {
+                                self.vapor.step(self.world.weather.ticks(), points);
+                            }
                             if let Some(cue) = turbulence_cue {
                                 self.input.feedback(cue);
                             }
@@ -2262,11 +2266,19 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     // after it show the same environment and trail history a live run would.
     let mut probe_vapor =
         tore_sim::vapor::Vapor::seeded(hornet.streamer_points(&flight).unwrap_or([[0.; 3]; 2]));
+    let mut probe_turbulence = tore_sim::turbulence::Turbulence::default();
+    let mut probe_turbulence_rng = tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?;
     if let Some(ticks) = flight_probe_ticks {
         let keys = setup_maneuver(&mut flight);
         for _ in 0..ticks {
             flight.step_surface(&keys, |x, z| world.surface(x, z));
             world.step_weather();
+            step_turbulence(
+                &mut probe_turbulence,
+                &mut probe_turbulence_rng,
+                &mut flight,
+                &world,
+            );
             if let Some(points) = hornet.streamer_points(&flight) {
                 probe_vapor.step(world.weather.ticks(), points);
             }
@@ -2281,7 +2293,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             flight.position.map(|v| v.round())
         );
         for side in 0..2 {
-            match probe_vapor.trail(side, flight.g, flight.roll_rate.to_degrees(), false) {
+            let hazing = world
+                .weather
+                .sample(flight.position[1])
+                .is_some_and(|l| l.night_hazing());
+            match probe_vapor.trail(side, flight.g, flight.roll_rate.to_degrees(), hazing) {
                 Some(trail) => {
                     for (i, p) in trail.iter().enumerate() {
                         println!("  side {side} point {i}: {:?}", p.map(|v| v.round()));
@@ -2416,15 +2432,6 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && capture_terrain.is_none()
         && !animation_capture
         && std::env::var_os("TORE_PERF_FRAMES").is_none();
-    // Seed the vapor history before the airframe and state move into App.
-    // Read before the airframe moves into App.
-    let turbulence_percent = hornet
-        .profile
-        .fields
-        .get("turbulencePercent")
-        .and_then(|t| t.number().ok())
-        .and_then(|v| i16::try_from(v).ok())
-        .unwrap_or(0);
     let mut app = App {
         mission: None,
         preference_path: if preferences_enabled {
@@ -2445,9 +2452,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         flight,
         flight_clock: flight::Clock { remainder: 0. },
         vapor: probe_vapor,
-        turbulence: tore_sim::turbulence::Turbulence::default(),
-        turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?,
-        turbulence_percent,
+        turbulence: probe_turbulence,
+        turbulence_rng: probe_turbulence_rng,
         flight_view,
         flight_canvas: Default::default(),
         window_size,

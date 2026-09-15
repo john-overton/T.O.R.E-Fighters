@@ -1,6 +1,10 @@
-//! Bounded reviewed LAY weather records. Data only; the native per-record
-//! callback pointer at +0x136 is never resolved and never executed.
+//! Bounded reviewed LAY weather records. Imported callbacks resolve to typed
+//! contracts through inert import data; native code is never executed.
 use crate::{Result, invalid, slice, u32_at};
+
+mod callbacks;
+pub use callbacks::Callback;
+pub mod palette;
 
 /// Native record stride. Every layer scan advances by this (0x4b31b1, 0x4b3c76).
 pub const RECORD: usize = 352;
@@ -71,6 +75,8 @@ pub struct Layer {
     /// A second interpolated color and scalar at +0xfb and +0xfe.
     pub tint: [u8; 3],
     pub tint_scalar: i32,
+    /// Reviewed import at +0x136, translated by the simulation service.
+    pub callback: Callback,
     /// Two texture decks at +0x102 and +0x118. 0x4b3a19 and 0x4b3a6c copy them
     /// whole instead of interpolating, and only when the source name is set.
     pub decks: [Deck; 2],
@@ -92,6 +98,15 @@ pub struct Layer {
 impl Layer {
     /// Reads one record. Rejects the sentinel; callers detect it with `is_sentinel`.
     pub fn parse(data: &[u8]) -> Result<Self> {
+        if u32_at(data, 0x136)? != 0 {
+            return Err(invalid(
+                "weather callback requires module import resolution",
+            ));
+        }
+        Self::with_callback(data, Callback::None)
+    }
+
+    fn with_callback(data: &[u8], callback: Callback) -> Result<Self> {
         let raw = slice(data, 0, RECORD)?;
         if Self::is_sentinel(raw)? {
             return Err(invalid("weather record is the table sentinel"));
@@ -111,8 +126,11 @@ impl Layer {
         if sky.iter().chain(&terrain).flatten().any(|c| *c > 63) {
             return Err(invalid("invalid weather palette component"));
         }
-        let shade = slice(raw, 0x36, 3)?.try_into().unwrap();
-        let tint = slice(raw, 0xfb, 3)?.try_into().unwrap();
+        let shade: [u8; 3] = slice(raw, 0x36, 3)?.try_into().unwrap();
+        let tint: [u8; 3] = slice(raw, 0xfb, 3)?.try_into().unwrap();
+        if shade.iter().chain(&tint).any(|c| *c > 63) {
+            return Err(invalid("invalid weather shade/tint component"));
+        }
         let tint_scalar = i32_at(raw, 0xfe)?;
         let decks = [Deck::parse(raw, 0x102)?, Deck::parse(raw, 0x118)?];
         let word = |at: usize| -> Result<i16> {
@@ -145,6 +163,7 @@ impl Layer {
             terrain,
             tint,
             tint_scalar,
+            callback,
             decks,
             moon_azimuth: word(0x13e)?,
             moon_elevation: word(0x140)?,
@@ -236,7 +255,9 @@ impl Deck {
 
 /// `0x4b3b60`: `*dest += ((src - *dest) * factor) >> 8`.
 fn lerp(dest: i32, src: i32, factor: i32) -> i32 {
-    dest + (((src - dest) * factor) >> 8)
+    // Widen intermediate arithmetic so bounded but extreme input cannot panic.
+    (i64::from(dest) + (((i64::from(src) - i64::from(dest)) * i64::from(factor)) >> 8))
+        .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
 /// `0x4b3b80` applies the same step to each component of one color.
@@ -273,7 +294,7 @@ impl Layer {
             self.clone_from(source);
             return;
         }
-        let factor = (position << 8) / span;
+        let factor = ((i64::from(position) << 8) / i64::from(span)) as i32;
         self.low_feet = self.low_feet.min(source.low_feet);
         self.high_feet = self.high_feet.max(source.high_feet);
         // 0x4b3892 onward: the visibility and altitude-haze ramps interpolate.
@@ -330,14 +351,16 @@ impl Layer {
         } else if above >= self.haze_high {
             self.haze_high_blend
         } else {
-            let span = self.haze_high - self.haze_low;
-            let factor = ((above - self.haze_low) << 8) / span;
+            let span = i64::from(self.haze_high) - i64::from(self.haze_low);
+            let factor = (((i64::from(above) - i64::from(self.haze_low)) << 8) / span) as i32;
             lerp(self.haze_low_blend, self.haze_high_blend, factor).min(0x100)
         };
+        let blend = blend.clamp(0, 256);
         if blend <= 0 {
             return;
         }
-        let haze = self.shade;
+        // 0x4b3d2b passes +0xfb, not the remap shade at +0x36.
+        let haze = self.tint;
         for entry in &mut self.terrain {
             lerp_color(entry, haze, blend);
         }
@@ -359,9 +382,12 @@ impl Layer {
         } else if distance >= self.fog_far {
             self.fog_far_density
         } else {
-            let span = self.fog_far - self.fog_near;
-            self.fog_near_density
-                + (self.fog_far_density - self.fog_near_density) * (distance - self.fog_near) / span
+            let span = i128::from(self.fog_far) - i128::from(self.fog_near);
+            (i128::from(self.fog_near_density)
+                + (i128::from(self.fog_far_density) - i128::from(self.fog_near_density))
+                    * (i128::from(distance) - i128::from(self.fog_near))
+                    / span)
+                .clamp(0, 256) as i32
         };
         (density.clamp(0, 0x100), self.see_distance >= distance)
     }
@@ -405,7 +431,8 @@ impl Module {
                 }
                 return Ok(Self { base, layers });
             }
-            layers.push(Layer::parse(record)?);
+            let callback = callbacks::resolve(data, code, base_rva, u32_at(record, 0x136)?)?;
+            layers.push(Layer::with_callback(record, callback)?);
         }
         Err(invalid("weather record table has no sentinel"))
     }
@@ -497,6 +524,44 @@ pub fn synthetic_module(records: usize) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn altitude_haze_uses_tint_not_remap_shade() {
+        let mut layer = Module::parse(&synthetic_module(1))
+            .unwrap()
+            .layers
+            .remove(0);
+        layer.flags = ALTITUDE_HAZE;
+        layer.shade = [1, 2, 3];
+        layer.tint = [40, 45, 50];
+        layer.haze_low = 0;
+        layer.haze_high = 10;
+        layer.haze_low_blend = 0;
+        layer.haze_high_blend = 256;
+        let original_sky = layer.sky;
+        layer.apply_altitude_haze(2560);
+        assert!(layer.terrain.iter().all(|rgb| *rgb == [40, 45, 50]));
+        assert_eq!(layer.sky[30], [40, 45, 50]);
+        assert_eq!(layer.sky[..16], original_sky[..16]);
+        assert_eq!(layer.shade, [1, 2, 3]);
+    }
+    #[test]
+    fn extreme_scalar_interpolation_is_bounded() {
+        let mut a = Module::parse(&synthetic_module(1))
+            .unwrap()
+            .layers
+            .remove(0);
+        let mut b = a.clone();
+        a.fog_near = i32::MIN;
+        b.fog_near = i32::MAX;
+        a.blend(&b, i32::MAX / 2, i32::MAX);
+        assert!(a.fog_near < 0 && a.fog_near > i32::MIN);
+        a.fog_near = i32::MIN;
+        a.fog_far = i32::MAX;
+        a.fog_near_density = i32::MIN;
+        a.fog_far_density = i32::MAX;
+        assert_eq!(a.visibility(0.).0, 0);
+        assert_eq!(a.visibility(256_000.).0, 256);
+    }
 
     #[test]
     fn reads_every_record_up_to_the_sentinel() {

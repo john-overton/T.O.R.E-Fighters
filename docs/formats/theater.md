@@ -47,7 +47,9 @@ Not yet recovered in the renderer: native adaptive subdivision/LOD, class-depend
 ## Mission environment and weather modules
 
 Follow-up: [native clock and turbulence research](weather.md) confirms continuous
-time and LAY time-window selection. The static midday runtime remains unchanged.
+time and LAY time-window selection. The dynamic palette implementation and its
+remaining approximations are documented in [the full weather review](../baselines/weather-review.md);
+it supersedes the historical midday-only runtime descriptions below.
 
 The bounded `textFormat` reader exports top-level map, layer, layer parameter, clouds, wind, time and texture placements. It skips indented object fields. `UKR.MM` specifies `UKR.T2`, `DAY2.LAY 0`, clouds 0 and time 12:00; wind is absent and remains null. For example, `UKR01.M` specifies layer parameter 4, wind `160 7` and time 17:40. Wind units and the layer parameter's full semantics remain unverified.
 

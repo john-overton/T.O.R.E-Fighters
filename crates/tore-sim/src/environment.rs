@@ -2,8 +2,8 @@
 //! caller-owned clock state and pure spatial queries: sampling for a mirror, a
 //! camera panel or another aircraft never advances weather.
 use tore_formats::Result;
-use tore_formats::flight_model::clock_rng::FixedClock;
-use tore_formats::weather::{Layer, Module};
+use tore_formats::flight_model::clock_rng::{FixedClock, NativeRng};
+use tore_formats::weather::{Callback, Layer, Module};
 
 /// Native simulation clock resolution (0x486bf0 scales elapsed time by 256).
 pub const TICKS_PER_SECOND: i64 = 256;
@@ -87,6 +87,7 @@ pub struct Configuration {
     start_seconds: i32,
     parameter: i32,
     wind: [f64; 3],
+    weather_seed: i32,
 }
 
 impl Configuration {
@@ -111,11 +112,20 @@ impl Configuration {
             start_seconds: (hour * 60 + minute) * 60,
             parameter,
             wind: resolve_wind(wind)?,
+            weather_seed: 1,
         })
     }
 
     pub fn layers(&self) -> &[Layer] {
         &self.module.layers
+    }
+
+    /// Dedicated deterministic weather stream. Its separation from retail's
+    /// shared RNG is authored; the seed is part of launch/restart identity.
+    pub fn with_weather_seed(mut self, seed: i32) -> Result<Self> {
+        NativeRng::seeded(seed)?;
+        self.weather_seed = seed;
+        Ok(self)
     }
 
     pub fn start_seconds(&self) -> i32 {
@@ -154,11 +164,17 @@ pub struct Environment {
     ticks: i64,
     active: Vec<Layer>,
     active_seconds: i32,
+    records: Vec<Layer>,
+    rng: NativeRng,
+    next_selection: i64,
 }
 
 impl Environment {
     pub fn new(configuration: Configuration) -> Self {
         let mut environment = Self {
+            records: configuration.layers().to_vec(),
+            rng: NativeRng::seeded(configuration.weather_seed).expect("validated weather seed"),
+            next_selection: 0,
             configuration,
             clock: FixedClock::default(),
             ticks: 0,
@@ -251,19 +267,30 @@ impl Environment {
         Ok(strength)
     }
 
-    /// Rescans the record table whenever the whole second changed. Adjacent
+    /// FA 0x4b34af reschedules after one second when a callback ran, ten otherwise;
+    /// leaving the first active time range also forces selection. Adjacent
     /// records sharing a floor collapse into one blended record, exactly as
     /// 0x4b37ab does, which is how dawn and dusk cross over.
     fn select(&mut self) {
         let seconds = self.seconds_of_day();
-        if seconds == self.active_seconds {
+        if self.ticks < self.next_selection
+            && self.active.first().is_some_and(|l| l.covers_time(seconds))
+        {
             return;
         }
         self.active_seconds = seconds;
         self.active.clear();
-        for layer in self.configuration.layers() {
+        let mut callback_ran = false;
+        for layer in &mut self.records {
             if !layer.covers_time(seconds) {
                 continue;
+            }
+            callback_ran |= layer.callback != Callback::None;
+            if layer.callback == Callback::Fog {
+                // 0x4b4320 mutates the source BEFORE copying/blending it.
+                let draw = self.rng.below(51).expect("valid weather RNG state");
+                layer.tint_scalar =
+                    (i64::from(layer.tint_scalar) + i64::from(draw) - 25).clamp(217, 235) as i32;
             }
             if let Some(previous) = self.active.last_mut()
                 && previous.low_feet == layer.low_feet
@@ -276,6 +303,7 @@ impl Environment {
             }
             self.active.push(layer.clone());
         }
+        self.next_selection = self.ticks + if callback_ran { 256 } else { 2560 };
     }
 }
 
@@ -313,6 +341,80 @@ fn clamp_altitude(feet: f64) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fog_mutates_source_before_blending_and_queries_do_not_consume_rng() {
+        let mut config = configuration(2).with_weather_seed(7).unwrap();
+        for layer in &mut config.module.layers {
+            layer.start_seconds = 0;
+            layer.end_seconds = 3600;
+            layer.callback = Callback::Fog;
+            layer.tint_scalar = 225;
+        }
+        // Separate altitude floors keep both records active in source order.
+        config.module.layers[1].low_feet = 500;
+        let mut reference = NativeRng::seeded(7).unwrap();
+        let mut expected = [225i32; 2];
+        let mut environment = Environment::new(config.clone());
+        for second in 0..20 {
+            for value in &mut expected {
+                *value = (*value + reference.below(51).unwrap() - 25).clamp(217, 235);
+            }
+            assert_eq!(
+                environment
+                    .active
+                    .iter()
+                    .map(|l| l.tint_scalar)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(environment.rng, reference);
+            assert_eq!(
+                environment.configuration(),
+                &config,
+                "source configuration is immutable"
+            );
+            let saved = environment.clone();
+            for altitude in [0., 1000., 500., 50_000.] {
+                environment.sample(altitude);
+                environment.palette(altitude);
+            }
+            assert_eq!(environment, saved);
+            for _ in 0..119 {
+                environment.step();
+            }
+            assert_eq!(
+                environment.rng,
+                reference,
+                "no draw before second {}",
+                second + 1
+            );
+            environment.step();
+        }
+        assert_eq!(Environment::new(config.clone()), Environment::new(config));
+    }
+
+    #[test]
+    fn no_callback_waits_ten_seconds_but_time_range_exit_forces_selection() {
+        let mut environment = Environment::new(configuration(2));
+        for _ in 0..120 * 9 {
+            environment.step();
+        }
+        assert_eq!(environment.active_seconds, 0);
+        for _ in 0..120 {
+            environment.step();
+        }
+        assert_eq!(environment.active_seconds, 10);
+        let mut config = configuration(2);
+        config.module.layers[0].end_seconds = 2;
+        config.module.layers[1].start_seconds = 3;
+        let mut environment = Environment::new(config);
+        for _ in 0..120 * 3 {
+            environment.step();
+        }
+        assert_eq!(environment.active_seconds, 3);
+        assert_eq!(environment.active()[0].start_seconds, 3);
+    }
 
     fn configuration(records: usize) -> Configuration {
         let module = Module::parse(&tore_formats::weather::synthetic_module(records)).unwrap();

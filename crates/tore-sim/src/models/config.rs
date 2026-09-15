@@ -49,6 +49,8 @@ pub struct Configuration {
     pub native: FlightProfile,
     pub equipment: Equipment,
     pub tuning: Tuning,
+    /// Required PT turbulence coefficient; mutable event state lives outside configuration.
+    pub turbulence_percent: i16,
 }
 impl Configuration {
     pub(super) fn from_aircraft(
@@ -83,6 +85,13 @@ impl Configuration {
                 g_pull_drag_f8: number("_gpullDrag")?,
                 roll_limit_rad_per_second: number("_brv.x.max")?.to_radians(),
             },
+            turbulence_percent: i16::try_from(
+                a.fields
+                    .get("turbulencePercent")
+                    .ok_or_else(|| std::io::Error::other("missing turbulencePercent"))?
+                    .number()?,
+            )
+            .map_err(|_| std::io::Error::other("turbulencePercent outside signed word"))?,
             native: FlightProfile::from_fields(&a.fields)?,
             equipment,
             tuning,
@@ -112,6 +121,9 @@ impl Configuration {
             e.throttle_rate_per_second,
             e.ground_clearance_ft,
         ];
+        if self.turbulence_percent < 0 {
+            return Err(std::io::Error::other("negative turbulencePercent"));
+        }
         if positive.iter().any(|v| !v.is_finite() || *v <= 0.)
             || nonnegative.iter().any(|v| !v.is_finite() || *v < 0.)
             || m.empty_lbs + m.internal_fuel_lbs > m.max_takeoff_lbs

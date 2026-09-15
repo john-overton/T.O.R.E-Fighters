@@ -71,7 +71,9 @@ pub fn low_altitude_strength(agl_feet: f64) -> i32 {
     if !agl_feet.is_finite() || agl_feet >= CEILING_FEET {
         return 0;
     }
-    (100. - 100. * agl_feet.max(0.) / CEILING_FEET) as i32
+    // Retail divides the negative height term first, truncating towards zero.
+    let height_f8 = (agl_feet.max(0.) * 256.) as i64;
+    100 - (100 * height_f8 / 256_000) as i32
 }
 
 /// 0x477b20: nothing at rest, full between 146 and 293 feet per second, and
@@ -103,10 +105,15 @@ impl Turbulence {
             self.end = 0;
             return Ok(Disturbance::default());
         }
+        // 0x4775b5 tests the active interval before the recurrence timer.
+        if self.start <= tick && tick < self.end {
+            return Ok(self.apply(tick, service_ticks));
+        }
         if tick >= self.next_update {
             self.generate(tick, c, rng)?;
         }
-        Ok(self.apply(tick, service_ticks))
+        // Generation returns without applying the newly created event.
+        Ok(Disturbance::default())
     }
 
     fn generate(&mut self, tick: i64, c: Conditions, rng: &mut NativeRng) -> Result<()> {
@@ -130,8 +137,8 @@ impl Turbulence {
         } else {
             0
         };
-        // 0x477a90: an event lasts 89 to 188 ticks, and the sine spans twice that.
-        let length = i64::from(rng.below(0x1e00)? % 100 + 0x59);
+        // 0x477a9e reads AX (quotient), not DX (remainder): 89..165 ticks.
+        let length = i64::from(rng.below(0x1e00)? / 100 + 0x59);
         self.start = tick;
         self.end = tick + length;
         self.cycle = length * 2;
@@ -209,7 +216,9 @@ mod tests {
     fn strength_falls_to_nothing_by_the_recovered_ceiling() {
         assert_eq!(low_altitude_strength(0.), 100);
         assert_eq!(low_altitude_strength(500.), 50);
-        assert_eq!(low_altitude_strength(999.), 0);
+        assert_eq!(low_altitude_strength(999.), 1);
+        assert_eq!(low_altitude_strength(0.5), 100);
+        assert_eq!(low_altitude_strength(10.5), 99);
         assert_eq!(low_altitude_strength(CEILING_FEET), 0);
         assert_eq!(low_altitude_strength(40_000.), 0);
         assert_eq!(low_altitude_strength(f64::NAN), 0);
@@ -241,6 +250,29 @@ mod tests {
             let (_, out) = run(c, 4000);
             assert!(out.iter().all(|d| *d == Disturbance::default()));
         }
+    }
+
+    #[test]
+    fn generation_uses_quotient_and_active_events_finish_before_recurrence() {
+        let mut rng = NativeRng::seeded(1).unwrap();
+        let mut draws = rng.clone();
+        let first_draw = draws.below(0x1e00).unwrap();
+        let mut state = Turbulence::default();
+        assert_eq!(
+            state.step(100, 2, conditions(0.), &mut rng).unwrap(),
+            Disturbance::default()
+        );
+        assert_eq!(state.end - state.start, i64::from(first_draw / 100 + 89));
+        assert!((89..=165).contains(&(state.end - state.start)));
+        state.next_update = 101;
+        let before = state;
+        let rng_before = rng.clone();
+        state.step(101, 2, conditions(0.), &mut rng).unwrap();
+        assert_eq!(
+            state, before,
+            "an active interval wins over a due recurrence"
+        );
+        assert_eq!(rng, rng_before, "active events consume no new draws");
     }
 
     #[test]

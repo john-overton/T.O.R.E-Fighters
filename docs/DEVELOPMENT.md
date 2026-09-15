@@ -412,3 +412,13 @@ In Load Ordnance click a catalog weapon then a compatible station, or drag betwe
 them. Tab changes selected station; +/- changes ammunition; right-click decrements.
 Fuel rocker edits 500 lb at a time. Select Plane preserves the custom draft.
 [Evidence, hands-on steps and material limits](baselines/creator-ordnance.md).
+
+### Weather implementation audit
+
+The [2026-09-15 review](baselines/weather-review.md) records corrections to the
+initial weather implementation and remaining parity gaps. The creator exposes
+six weather rows; overcast is omitted as a duplicate of cloudy. CLI source
+indices remain `0..5` (clear, cloudy, foggy, dawn, sunset, night).
+`tools/inspect_shape_effects.py EXTRACTED.SH` emits a static import/re-entry
+candidate inventory; optional `--disassembly NEW_LOCAL_FILE` requires GNU
+objdump. It never executes imported shape code and does not prove effect absence.

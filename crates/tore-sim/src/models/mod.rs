@@ -127,16 +127,20 @@ mod tests {
         let mut source = crate::flight::integration_tests::profile();
         source.fields.remove("thrust");
         assert!(AircraftModel::for_aircraft(&source).is_err());
+        let mut source = crate::flight::integration_tests::profile();
+        source.fields.remove("turbulencePercent");
+        assert!(AircraftModel::for_aircraft(&source).is_err());
         let mut model = model();
         let original = model.clone();
-        for change in 0..5 {
+        for change in 0..6 {
             let mut c = model.configuration().clone();
             match change {
                 0 => c.mass.empty_lbs = f64::NAN,
                 1 => c.mass.max_takeoff_lbs = c.mass.empty_lbs,
                 2 => c.aerodynamics.envelopes.retain(|e| e.g != 1),
                 3 => c.equipment.control_seconds = 0.,
-                _ => c.native.landing.descent_fps = -1,
+                4 => c.native.landing.descent_fps = -1,
+                _ => c.turbulence_percent = -1,
             }
             assert!(model.set_configuration(c).is_err());
             assert_eq!(model, original);

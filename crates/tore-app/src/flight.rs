@@ -54,6 +54,7 @@ pub(crate) mod animation_tests {
     pub(crate) fn profile() -> Aircraft {
         let mut a = base_profile();
         for key in [
+            "turbulencePercent",
             "rudderDrag",
             "bayDrag",
             "wheelBrakesDrag",

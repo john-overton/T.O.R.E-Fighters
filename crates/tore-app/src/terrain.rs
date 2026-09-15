@@ -44,7 +44,7 @@ impl World {
                 .ok_or_else(|| format!("Missing {n}; re-import media with --import"))
         };
         let theater = Theater::parse(required(&format!("{code}.T2"))?)?;
-        let environment = Environment::parse(required(&format!("{code}.MM"))?)?;
+        let mut environment = Environment::parse(required(&format!("{code}.MM"))?)?;
         if theater.cols < 2 || theater.rows < 2 || environment.map != format!("{code}.T2") {
             return Err("unsupported theater map/dimensions".into());
         }
@@ -57,7 +57,9 @@ impl World {
         }
         let (layer, launch) = match condition {
             Some(index) => {
-                let choice = tore_sim::environment::CONDITIONS[index];
+                let choice = tore_sim::environment::CONDITIONS
+                    .get(index)
+                    .ok_or("weather condition outside source table")?;
                 (
                     tore_sim::environment::layer_resource(index, &environment.map)?,
                     Some([
@@ -89,6 +91,10 @@ impl World {
         if weather.sample(0.).is_none() {
             return Err("mission weather layer covers no altitude at its launch time".into());
         }
+        // Preserve the resolved launch identity for validation and restart.
+        environment.layer = layer;
+        environment.layer_parameter = Some(weather.configuration().parameter());
+        environment.time = Some([hour, minute]);
         let mut texture_indices = Vec::new();
         let count = environment
             .textures
@@ -213,8 +219,8 @@ impl World {
         self.fog = [
             feet(layer.fog_near),
             feet(layer.fog_far),
-            layer.fog_near_density as f32 / 256.,
-            layer.fog_far_density as f32 / 256.,
+            layer.fog_near_density.clamp(0, 256) as f32 / 256.,
+            layer.fog_far_density.clamp(0, 256) as f32 / 256.,
         ];
         // Six-bit source components, the same expansion the palette ramps use.
         self.haze = layer.shade.map(|c| ((u16::from(c) * 255 + 31) / 63) as u8);

@@ -35,10 +35,10 @@ impl Trail {
 
     /// `@SampleUpdate@8`: overwrite the live entry, and shift only on interval.
     pub fn update(&mut self, tick: i64, point: [f64; 3]) {
+        self.entries[0] = (tick, point);
         if self.entries[1].0 + COMMIT_TICKS <= tick {
             self.entries.copy_within(..CAPACITY - 1, 1);
         }
-        self.entries[0] = (tick, point);
     }
 
     /// `_SampleGet@12`: clamp below zero, walk from the oldest entry toward the
@@ -142,6 +142,22 @@ mod tests {
         assert_eq!(trail.at(COMMIT_TICKS)[0], COMMIT_TICKS as f64);
         let mid = trail.at(COMMIT_TICKS / 2)[0];
         assert!(mid > 0. && mid < COMMIT_TICKS as f64, "interpolated {mid}");
+    }
+
+    #[test]
+    fn commit_copies_the_current_sample_before_the_next_interval() {
+        let mut trail = Trail::seeded(0, [0.; 3]);
+        trail.update(24, [24.; 3]);
+        trail.update(25, [100.; 3]);
+        // Retail writes entry zero before memmove, so both newest slots hold 25.
+        assert_eq!(trail.entries[0], (25, [100.; 3]));
+        assert_eq!(trail.entries[1], (25, [100.; 3]));
+        trail.update(49, [200.; 3]);
+        assert_eq!(trail.entries[1], (25, [100.; 3]));
+        assert_eq!(trail.at(37), [150.; 3]);
+        trail.update(50, [300.; 3]);
+        assert_eq!(trail.entries[1], (50, [300.; 3]));
+        assert_eq!(trail.entries[2], (25, [100.; 3]));
     }
 
     #[test]
