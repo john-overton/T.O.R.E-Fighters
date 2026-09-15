@@ -150,3 +150,9 @@ from aircraft projection. LAY sun background remap decoded at root `+0x50`.
 Weather clouds: hash-gated FA EXE descriptor/call reader, bounded inert cache,
 shared sky/ocean/cloud extraction fixtures and CLOUD1 sheet consumer. Imported
 code is never executed. CLOUDS primitives decode without a global placement claim.
+
+Weather continuation: normal full-detail horizon bands and above-sky selection,
+shared indexed aircraft fog/palette and indexed cockpit selective tint now render.
+Cockpit prefix and exterior no-palette contracts are validated at import. Special
+horizon branches, HUD source indices and retail comparisons remain open; see
+[weather contract](weather.md#horizon-and-shared-aircraft-palettes--continuation-2026-09-15).

@@ -200,3 +200,25 @@ in this pass. None of the numbered weather parity gates is marked complete.
 - Special horizon/above-sky branches, celestial glare/native clipping, low-detail
   cloud dispatch and unresolved CLOUDS placement remain open. Windows/macOS and
   matched retail acceptance were not exercised; steps 1–3 are not marked 1:1.
+
+## Continuation: horizon bands and aircraft/cockpit palettes
+
+The merged starting head was `a43db12`, with a clean tree and no unpushed commits.
+Normal full-detail background bands and above-sky selection now use the recovered
+Gouraud contract. Exterior indices share live weather/fog; cockpit indices retain
+their 64-color prefix and receive the selective native tint. Original art remains
+runtime imported. See [contract and limits](../formats/weather.md#horizon-and-shared-aircraft-palettes--continuation-2026-09-15).
+
+The user confirmed that the retail Windows comparison machine is still being
+built. Matched retail captures are unavailable; local GPU captures cannot close
+that gate. Required retail cases are listed in the continuation acceptance section.
+
+Continuation foundation checks: **270 Rust tests**, **24 Python tests**, fmt,
+warnings-denied Clippy, locked build and repository/binary asset guards passed.
+Creator/viewer Vulkan smoke and inspected above-sky, F18 dusk wide and Rafale
+dawn tall captures passed on RTX 4070. Artifacts: `.local/weather-continuation/`.
+Active clear/cloud benchmark (same command as the preceding checkpoint): 330
+frames, 300 measured, no paused frames/readbacks, 330 rear renders; mean **2.26
+ms**, p95 **2.57 ms**. The earlier recorded 1.54 ms was not rerun as a paired
+measurement; no unchanged-frame-time or regression-isolation claim is made.
+Windows/macOS runtime and matched retail acceptance remain unavailable.

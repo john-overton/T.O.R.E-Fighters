@@ -13,6 +13,7 @@ pub struct Airframe {
     pub profile: Aircraft,
     pub atlas: Pic,
     pub palette: [[u8; 3]; 256],
+    pub cockpit_pic: Pic,
     pub sprites: BTreeMap<String, Sprite>,
     pub font: Font,
     pub hud_font: Font,
@@ -46,6 +47,9 @@ impl Airframe {
             return Err("unreviewed F18.SH device layout; preserve raw import and review its rig before flying".into());
         }
         let atlas = Pic::parse(get(&format!("_{}.PIC", id.stem()))?)?;
+        if !atlas.palette.is_empty() {
+            return Err("unreviewed aircraft atlas palette override".into());
+        }
         let raw = get("PALETTE.PAL")?;
         if raw.len() != 768 || raw.iter().any(|v| *v > 63) {
             return Err("invalid aircraft palette".into());
@@ -54,6 +58,9 @@ impl Airframe {
             std::array::from_fn(|j| ((raw[i * 3 + j] as u16 * 255 + 31) / 63) as u8)
         });
         let frame = Pic::parse(get(id.cockpit())?)?;
+        if frame.palette.len() != 64 {
+            return Err("unreviewed cockpit palette prefix".into());
+        }
         let mut cockpit_palette = palette;
         cockpit_palette[..frame.palette.len()].copy_from_slice(&frame.palette);
         let mut sprites = BTreeMap::new();
@@ -185,6 +192,7 @@ impl Airframe {
             profile,
             atlas,
             palette,
+            cockpit_pic: frame,
             sprites,
             font,
             hud_font: Font::parse(get("HUD11.FNT")?)?,
@@ -337,9 +345,9 @@ impl Airframe {
                         color[0] as f32 / 255.,
                         color[1] as f32 / 255.,
                         color[2] as f32 / 255.,
-                        // Aircraft art resolves against its own atlas palette,
-                        // not the weather palette.
-                        -1.,
+                        // Preserve source indices for native weather remapping.
+                        // The cold-nozzle material remains an authored exception.
+                        if cold_nozzle { -1. } else { f.colors[j] as f32 },
                     ]);
                 }
             }

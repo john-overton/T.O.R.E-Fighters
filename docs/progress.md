@@ -69,12 +69,13 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
   indices and resolve the live weather palette on the GPU. Night, dawn and dusk
   now render with source colors; sky mapping, fog blending and other rendering
   behavior remain authored. Aircraft retain their own atlas palette.
-- [ ] W3 remainder: celestial shapes, sun/moon direction and the recovered
-  sunrise/sunset fields.
+- [x] W3 celestial primitives, time/angle dispatch and sunrise/sunset fields.
+- [ ] W3 remainder: glare, clipping/projection and retail acceptance.
 - [x] W4 visibility: replace the authored exponential fog with the recovered
   per-record ramp and haze color, and apply the altitude haze pass.
-- [ ] W4 remainder: cloud and ocean decks, horizon geometry and inside-cloud
-  rendering; the ten-step native remap quantization is approximated by the ramp.
+- [x] W4 original cloud/ocean decks, whiteout bands and indexed remap levels.
+- [ ] W4 remainder: special horizon branches, cloud detail/visibility dispatch
+  and matched retail crossings.
 - [x] Implement wing vapor trails end to end: the shape's own streamer
   definition, the position-history rings, the load-factor trigger, roll-rate
   shortening and night suppression, drawn as the native five line segments.
@@ -94,8 +95,9 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
 
 Weather now runs in the engine: the day and night cycle, visibility, mission
 wind, physical turbulence and wing vapor all come from recovered source data.
-[Implementation evidence](baselines/weather.md). Celestial and cloud geometry,
-retail side-by-side comparison and the remaining acceptance matrix stay open, as
+[Implementation evidence](baselines/weather-foundation.md). Original celestial
+and cloud geometry render; retail comparison and the remaining acceptance matrix
+stay open, as
 do existing manual systems acceptance and unrelated menu deferrals.
 
 ## Quick Mission Creator and Load Ordnance — scheduled 2026-09-14
@@ -806,3 +808,12 @@ target remap before the view remap, including adjacent-band distance splitting
 and overlap restrictions. Synthetic order/rounding/state checks and Linux
 crossing captures are recorded in [weather foundation](baselines/weather-foundation.md).
 Special horizon branches and matched retail acceptance remain open.
+
+### Horizon and indexed aircraft continuation — 2026-09-15
+
+- [x] Recover normal full-detail Gouraud bands and above-sky branch selection.
+- [x] Connect aircraft face/atlas indices to the live palette and fog remaps.
+- [x] Keep cockpit art indexed and apply selective palette tint with its original prefix.
+- [ ] Textured horizon transition polygons, special flags/light masks, source HUD
+  color mapping, filtering comparison and matched retail acceptance remain open.
+[Current evidence](baselines/weather-foundation.md).

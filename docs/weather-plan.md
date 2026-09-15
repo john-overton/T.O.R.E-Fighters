@@ -59,8 +59,10 @@ all sensors are blocked by visible fog.
 - [x] Finish the tint consumer contract before applying the scalar to rendered
   pixels. The callback alone is insufficient: native view update publishes tint,
   and a later palette pass smooths and applies it to selected palette ranges.
-- [ ] Translate the reviewed palette/remap operations and recover sky/horizon
-  geometry; leave unknown fields and fitted paths clearly identified.
+- [x] Translate reviewed palette/remap operations, including indexed aircraft
+  and selective cockpit tint; render normal full-detail horizon bands.
+- [ ] Finish textured horizon transition polygons, special preference/terrain
+  branches and source effect masks; compare above-sky projection/filtering.
 - [ ] Add synthetic boundary/state tests, imported-module diagnostics and matched
   fog/transition captures; run creator/viewer/flight checks after rendering edits.
 
@@ -68,8 +70,8 @@ Status: callbacks, live six-bit tint/smoothing and imported indexed haze remaps
 are implemented. Named sky/ocean decks now use world-anchored ray/plane
 projection, source altitude/tile scale and deterministic load-time wildcard
 selection. The GPU now composes target-layer then view-layer indexed remaps, with
-integer distance splitting and overlap restrictions. Special horizon/above-sky
-branches remain open; these are recorded acceptance
+integer distance splitting and overlap restrictions. Normal full-detail Gouraud horizon bands and above-sky selection now render.
+Textured transition polygons and special horizon branches remain open; these are recorded acceptance
 gaps, not prerequisites for decoding the celestial and cloud primitives next.
 The 60 ms palette cadence and separate RNG streams are deterministic host
 adaptations. [Evidence](baselines/weather-foundation.md).

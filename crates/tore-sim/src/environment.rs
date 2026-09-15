@@ -1,6 +1,7 @@
 //! Renderer-independent environment evolution. Immutable validated configuration,
 //! caller-owned clock state and pure spatial queries: sampling for a mirror, a
 //! camera panel or another aircraft never advances weather.
+pub mod horizon;
 pub mod ray;
 use tore_formats::Result;
 use tore_formats::flight_model::clock_rng::{FixedClock, NativeRng};

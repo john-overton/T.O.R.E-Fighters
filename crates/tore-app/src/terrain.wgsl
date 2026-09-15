@@ -5,6 +5,7 @@ struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, 
 // uploaded unresolved and the live palette is applied here every frame.
 @group(0) @binding(1) var tiles:texture_2d_array<u32>;
 @group(0) @binding(2) var palette:texture_2d<f32>;
+@group(0) @binding(3) var weather_tiles:texture_2d_array<u32>;
 // 0x4b3410: haze density is a piecewise-linear ramp between two recovered
 // distances, flat outside them. Imported shade tables supply discrete index
 // remaps before color lookup for terrain; authored-color effects remain separate.
@@ -66,8 +67,8 @@ fn ray_rows(distance:f32,altitude:f32)->vec2<i32>{
 }
 fn ray_index(index:u32,rows:vec2<i32>)->u32 {
  var result=index;
- if rows.y>=0 {result=textureLoad(tiles,vec2<i32>(i32(result),rows.y),i32(scene.deck_a.w),0).r;}
- if rows.x>=0 {result=textureLoad(tiles,vec2<i32>(i32(result),rows.x),i32(scene.deck_a.w),0).r;}
+ if rows.y>=0 {result=textureLoad(weather_tiles,vec2<i32>(i32(result),rows.y),i32(scene.deck_a.w),0).r;}
+ if rows.x>=0 {result=textureLoad(weather_tiles,vec2<i32>(i32(result),rows.x),i32(scene.deck_a.w),0).r;}
  return result;
 }
 // Manual bilinear: indices cannot be filtered, so each of the four texels is
@@ -129,6 +130,21 @@ struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32>
  let p=array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0),vec2<f32>(3.0,-1.0),vec2<f32>(-1.0,3.0));
  var out:SkyOut;out.clip=vec4<f32>(p[i],1.0,1.0);out.screen=p[i];return out;
 }
+// GouraudHorizon has camera-relative horizontal depth 32767/32,
+// upper Y=130..0 and lower Y=5..-clamp(130*alt/15000,10,130).
+// Interpolate palette indices, as the native indexed Gouraud program does.
+fn horizon_height(ray:vec3<f32>)->f32 {
+ var head=scene.forward.xz;
+ if length(head)<0.0001 {head=scene.up.xz;}
+ return ray.y*1024.0/max(0.0001,dot(ray.xz,normalize(head)));
+}
+fn horizon_index(ray:vec3<f32>)->u32 {
+ let y=horizon_height(ray);
+ let flags=i32(scene.ray.w);
+ if (flags&2)!=0 && y<=5.0 {return u32(clamp(mix(237.0,252.0,clamp((5.0-y)/(5.0+scene.ray.z),0.0,1.0)),0.0,254.0));}
+ if (flags&1)!=0 && y>=0.0 {return u32(mix(236.0,229.0,clamp(y/130.0,0.0,1.0)));}
+ return 240u;
+}
 @fragment fn sky_fragment(in:SkyOut)->@location(0) vec4<f32>{
  let ray=normalize(scene.forward.xyz+scene.right.xyz*in.screen.x*scene.eye.w/(1.7320508*scene.up.w)+scene.up.xyz*in.screen.y/(1.7320508*scene.up.w));
  // Source deck planes: world feet, power-of-two tiling, reversed north axis.
@@ -145,7 +161,7 @@ struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32>
    }
   }
  }
- var background=u32(scene.sky.w);
+ var background=horizon_index(ray);
  for(var n=0;n<passes;n++){background=textureLoad(tiles,vec2<i32>(i32(background),0),i32(scene.deck_a.w),0).r;}
  if core>=0 {background=u32(core);}
  var color=shade(background,0).rgb;
@@ -155,7 +171,7 @@ struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32>
   let deck=decks[i];
   if deck.z<0.0 || abs(ray.y)<0.000001 { continue; }
   let distance=(deck.x-scene.eye.y)/ray.y;
-  if distance<=0.0 || distance>=nearest { continue; }
+  if distance<=0.0 || distance>=nearest || distance>=2000000.0 { continue; }
   let hit=scene.eye.xyz+ray*distance;
   let uv=fract(vec2<f32>(hit.x,-hit.z)/deck.y);
   let tex=sample_tile(uv,i32(deck.z),fog_row(distance),passes,core,vec2<i32>(-1));

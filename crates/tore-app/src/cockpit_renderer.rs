@@ -10,6 +10,8 @@ pub struct CockpitRenderer {
     pipeline: wgpu::RenderPipeline,
     bind: Option<wgpu::BindGroup>,
     hud: wgpu::Texture,
+    palette: wgpu::Texture,
+    prefix: [[u8; 3]; 64],
     uniform: wgpu::Buffer,
     art_size: [u32; 2],
     enabled: bool,
@@ -138,6 +140,8 @@ impl CockpitRenderer {
             pipeline,
             bind: None,
             hud,
+            palette: texture(device, 256, 1),
+            prefix: [[0; 3]; 64],
             uniform,
             art_size: [1, 1],
             enabled: false,
@@ -148,21 +152,45 @@ impl CockpitRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         source: &Sprite,
+        indexed: &tore_formats::Pic,
         id: tore_formats::aircraft::AircraftId,
     ) {
         // Called when an aircraft is prepared, including selection changes.
         // A previous binding belongs to the previous aircraft's cockpit.
         self.art_size = [source.width as u32, source.height as u32];
-        let art = texture(device, self.art_size[0], self.art_size[1]);
-        // Native PIC and current HUD rasters have binary alpha. Zero invisible RGB
-        // so hardware filtering produces premultiplied samples without black fringes.
-        let mut pixels = source.rgba.clone();
-        for pixel in pixels.chunks_exact_mut(4) {
-            if pixel[3] == 0 {
-                pixel.fill(0);
-            }
-        }
-        upload(queue, &art, &pixels);
+        let art = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Indexed original cockpit"),
+            size: wgpu::Extent3d {
+                width: self.art_size[0],
+                height: self.art_size[1],
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rg8Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let pixels: Vec<u8> = indexed
+            .pixels
+            .iter()
+            .zip(&indexed.mask)
+            .flat_map(|(&index, &visible)| [index, u8::from(visible)])
+            .collect();
+        queue.write_texture(
+            art.as_image_copy(),
+            &pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(self.art_size[0] * 2),
+                rows_per_image: Some(self.art_size[1]),
+            },
+            art.size(),
+        );
+        self.prefix = std::array::from_fn(|i| {
+            indexed.palette[i].map(|c| ((u16::from(c) * 63 + 127) / 255) as u8)
+        });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
@@ -206,6 +234,12 @@ impl CockpitRenderer {
             layout: &self.pipeline.get_bind_group_layout(0),
             entries: &[
                 wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(
+                        &self.palette.create_view(&Default::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(
                         &art.create_view(&Default::default()),
@@ -239,6 +273,29 @@ impl CockpitRenderer {
                 },
             ],
         }));
+    }
+    /// Preserve the cockpit's private first 64 colors, then run the native
+    /// palette tint ranges; higher indices already use the resolved world palette.
+    pub fn weather(&self, queue: &wgpu::Queue, world: &crate::terrain::World, altitude: f64) {
+        let mut colors = world.palette;
+        if let Some(layer) = world.weather.sample(altitude) {
+            let mut prefix = [[0; 3]; 256];
+            prefix[..64].copy_from_slice(&self.prefix);
+            tore_formats::weather::palette::apply_tint(
+                &mut prefix,
+                layer.tint,
+                world.weather_presentation.tint,
+            )
+            .expect("validated cockpit palette");
+            for i in 0..64 {
+                colors[i] = prefix[i].map(|c| ((u16::from(c) * 255 + 31) / 63) as u8);
+            }
+        }
+        let pixels: Vec<u8> = colors
+            .iter()
+            .flat_map(|c| [c[0], c[1], c[2], 255])
+            .collect();
+        upload(queue, &self.palette, &pixels);
     }
     #[allow(clippy::too_many_arguments)]
     pub fn update(

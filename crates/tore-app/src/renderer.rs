@@ -93,9 +93,11 @@ impl Renderer {
             &self.device,
             &self.queue,
             &hornet.sprites[hornet.profile.id.cockpit()],
+            &hornet.cockpit_pic,
             hornet.profile.id,
         );
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn cockpit(
         &mut self,
         state: &crate::flight::State,
@@ -103,7 +105,10 @@ impl Renderer {
         art: bool,
         hud: bool,
         pixels: &[u8],
+        world: &crate::terrain::World,
     ) {
+        self.cockpit
+            .weather(&self.queue, world, camera.position[1] as f64);
         self.cockpit.update(
             &self.queue,
             self.flight_size(),

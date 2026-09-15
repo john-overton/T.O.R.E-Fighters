@@ -1383,6 +1383,7 @@ impl ApplicationHandler for App {
                             self.flight_ui.cockpit && matches!(self.flight_view, 0 | 3 | 4),
                             self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4),
                             &self.menu.pixels,
+                            &self.world,
                         );
                         self.menu.pixels.fill(0);
                         if !self.flight_ui.menu {

@@ -2,12 +2,24 @@
 struct Cockpit {
  placement:vec4<f32>, size:vec4<f32>, art:vec4<f32>, hud:vec4<f32>, mirrors:array<vec4<f32>,3>
 }
-@group(0) @binding(0) var frame:texture_2d<f32>;
+@group(0) @binding(0) var frame:texture_2d<u32>;
 @group(0) @binding(1) var symbols:texture_2d<f32>;
 @group(0) @binding(2) var filtering:sampler;
 @group(0) @binding(3) var<uniform> cockpit:Cockpit;
 @group(0) @binding(4) var mirror_mask:texture_2d<u32>;
 @group(0) @binding(5) var rear:texture_2d<f32>;
+@group(0) @binding(6) var art_palette:texture_2d<f32>;
+fn frame_sample(uv:vec2<f32>)->vec4<f32> {
+ let size=vec2<i32>(textureDimensions(frame));
+ let p=uv*vec2<f32>(size)-vec2(0.5);let base=floor(p);let f=p-base;
+ var color=vec4(0.0);
+ for(var y=0;y<2;y++){for(var x=0;x<2;x++){
+  let source=textureLoad(frame,clamp(vec2<i32>(base)+vec2(x,y),vec2(0),size-vec2(1)),0).rg;
+  let c=textureLoad(art_palette,vec2(i32(source.r),0),0);
+  color+=c*f32(source.g)*select(1.-f.x,f.x,x==1)*select(1.-f.y,f.y,y==1);
+ }}
+ return color;
+}
 struct Output { @builtin(position) position:vec4<f32>, @location(0) screen:vec2<f32> }
 @vertex fn vertex(@builtin(vertex_index) index:u32)->Output {
  let p=array<vec2<f32>,3>(vec2(-1.,-1.),vec2(3.,-1.),vec2(-1.,3.));
@@ -25,7 +37,7 @@ struct Output { @builtin(position) position:vec4<f32>, @location(0) screen:vec2<
  let hud_uv=vec2(.5)+(pixel-hud_center)/cockpit.hud.xy;
  var color=vec4(0.);
  if cockpit.art.z>0. && all(art_uv>=vec2(0.)) && all(art_uv<=vec2(1.)) {
-     color=textureSampleLevel(frame,filtering,art_uv,0.);
+     color=frame_sample(art_uv);
      let source=art_uv*cockpit.art.xy;
      let id=textureLoad(mirror_mask,vec2<i32>(source),0).r;
      if id>0u && id<=3u {

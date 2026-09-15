@@ -608,3 +608,38 @@ and branch-selected F1/F3/F4 through remap pointer `0x583da8`; these are not
 Layer RGB fields. `0x4c942c` writes a background geometry program around
 `0x50fda2`, temporarily zeroing camera translation. The program's complete
 geometry contract and above-sky dispatch are not yet translated.
+
+## Horizon and shared aircraft palettes — continuation 2026-09-15
+
+`0x4c942c` writes two indexed Gouraud quads: upper colors E5/EC at
+Y=130/0; lower colors ED/FC at Y=5/-extent in normal full-detail rendering.
+`extent = clamp(130 * altitude / 15000, 10, 130)`. The heading vector is
+normalized at `0x4cdf48/0x4cdf91`; the quad spans one quarter of its Q15
+components sideways and one thirty-second forward (approximately 1024).
+The GPU evaluates the same bands analytically and interpolates indices before
+palette lookup. Float projection replaces source screen clipping/rounding.
+
+The upper fallback runs with no sky deck or at/above its altitude. Above a sky
+deck, `0x4ab00c` passes an **empty name**, altitude 25,600,000 and mode 1;
+`0x44890e` draws the color transition and returns before requesting a texture.
+The existing deck's underside subsequently renders. The lower fallback runs
+without an ocean deck, except above the sky where the underside replaces it.
+The full-detail ED/FC path is implemented; low-detail DF/D4 and the special
+terrain-query/monochrome override paths are separate. The deck raster's
+2,000,000-foot bound is now applied in GPU ray distance; radial versus native
+scanline distance and the textured transition polygon still need comparison.
+It bounds horizon minification; bilinear filtering remains a GPU adaptation.
+
+Both reviewed exterior atlases embed **zero palette entries**. Original face
+and texel indices now use the live LAY palette and target/view remaps, sharing
+`Remap` (`0x4cc44c`) semantics with world geometry. The previous static aircraft
+palette and fitted RGB fog are removed for indexed faces. The authored cold
+nozzle retains its explicitly authored color. Per-face light-vector and effect
+mask selection are not established by this change.
+
+Both cockpit pictures embed the first 64 entries. The GPU now keeps cockpit
+indices/masks, resolves that private prefix and the live world entries, and
+applies the verified fog tint to 47..60 with the cap of 92. It filters resolved
+colors with premultiplied coverage; mirror feeds remain independently composed.
+The HUD is still an authored RGBA raster with no verified source index mapping;
+no invented fog response is applied to its green text.

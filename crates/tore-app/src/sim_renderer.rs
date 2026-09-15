@@ -10,6 +10,7 @@ pub struct SimRenderer {
     vapor_pipeline: wgpu::RenderPipeline,
     vapor_bind: wgpu::BindGroup,
     palette: wgpu::Texture,
+    weather_tiles: wgpu::TextureView,
     pipeline: wgpu::RenderPipeline,
     aircraft: Option<(wgpu::BindGroup, wgpu::Buffer, u32)>,
     bind: wgpu::BindGroup,
@@ -255,6 +256,10 @@ impl SimRenderer {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(&palette_view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
             ],
         });
         // The vapor pipeline only reads the camera uniform, so its derived
@@ -278,6 +283,7 @@ impl SimRenderer {
             vapor_pipeline,
             vapor_bind,
             palette,
+            weather_tiles: view,
             pipeline,
             aircraft: None,
             sky_pipeline,
@@ -400,47 +406,10 @@ impl SimRenderer {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()
             });
-            // The atlas overrides the airframe palette with its own prefix.
-            let mut resolved = hornet.palette;
-            resolved[..pic.palette.len()].copy_from_slice(&pic.palette);
-            let palette = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("Airframe palette"),
-                size: wgpu::Extent3d {
-                    width: 256,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            let mut entries = Vec::with_capacity(1024);
-            for rgb in &resolved {
-                entries.extend([rgb[0], rgb[1], rgb[2], 255]);
-            }
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &palette,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &entries,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(1024),
-                    rows_per_image: Some(1),
-                },
-                wgpu::Extent3d {
-                    width: 256,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-            );
-            let palette_view = palette.create_view(&wgpu::TextureViewDescriptor::default());
+            // Both reviewed exterior atlases have no embedded palette. Native
+            // Remap and the palette worker share the world's indexed palette.
+            assert!(pic.palette.is_empty(), "unreviewed aircraft atlas palette");
+            let palette_view = self.palette.create_view(&Default::default());
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Aircraft textures"),
                 layout: &self.pipeline.get_bind_group_layout(0),
@@ -456,6 +425,10 @@ impl SimRenderer {
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: wgpu::BindingResource::TextureView(&palette_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&self.weather_tiles),
                     },
                 ],
             });
@@ -584,6 +557,12 @@ impl SimRenderer {
             }
         }
         uniform.resize(328, 0.);
+        if let Some(layer) = world.weather.sample(camera.position[1] as f64) {
+            let horizon =
+                tore_sim::environment::horizon::Horizon::new(&layer, camera.position[1] as f64);
+            uniform[70] = horizon.lower_extent as f32;
+            uniform[71] = horizon.flags() as f32;
+        }
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         let mut entries = Vec::with_capacity(11 * 1024);
         for row in std::iter::once(&world.palette).chain(world.fog_palette.iter()) {
