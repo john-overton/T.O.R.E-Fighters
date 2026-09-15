@@ -393,8 +393,6 @@ impl App {
                     self.combat.command(command, combat::launcher(&self.flight));
                     if let Err(error) = self.flight.set_payload(self.combat.state.payload_lbs()) {
                         self.flight_ui.message(error.to_string());
-                    } else {
-                        self.flight_ui.message(self.combat.status(&self.flight));
                     }
                 } else {
                     self.flight_ui
@@ -408,7 +406,6 @@ impl App {
                     tore_sim::combat::live::Command::NextWeapon,
                     combat::launcher(&self.flight),
                 );
-                self.flight_ui.message(self.combat.status(&self.flight));
                 Action::None
             }
             Command::Target => {
@@ -416,7 +413,6 @@ impl App {
                     tore_sim::combat::live::Command::Designate,
                     combat::launcher(&self.flight),
                 );
-                self.flight_ui.message(self.combat.status(&self.flight));
                 Action::None
             }
             Command::RangeReset => {
@@ -426,7 +422,6 @@ impl App {
                         tore_sim::combat::live::Command::ReplaceTarget,
                         combat::launcher(&self.flight),
                     );
-                    self.flight_ui.message("Range target reset; T designates");
                 } else {
                     self.flight_ui
                         .message("Target reset is available only with --live-fire");
@@ -1205,7 +1200,6 @@ impl ApplicationHandler for App {
                                     return;
                                 }
                             };
-                            self.flight_ui.combat_tick();
                             let mut sounds = std::collections::BTreeSet::new();
                             for event in &events {
                                 use tore_sim::combat::live::Event;
@@ -1215,26 +1209,15 @@ impl ApplicationHandler for App {
                                     self.input.feedback(cue);
                                 }
                                 match event {
-                                    Event::PlayerDamaged(amount) => {
+                                    Event::PlayerDamaged(_) => {
                                         sounds.insert("&EXPL3.5K");
-                                        self.flight_ui.combat_message(format!(
-                                            "Player hit: {amount}; HP {}",
-                                            self.combat.state.player_hp
-                                        ));
                                     }
-                                    Event::SubsystemDamaged(i) => self
-                                        .flight_ui
-                                        .combat_message(format!("Source subsystem {i} damaged")),
+                                    Event::SubsystemDamaged(_)
+                                    | Event::Defeated(_)
+                                    | Event::TrackLost(_) => {}
                                     Event::PlayerDestroyed => {
                                         sounds.insert("&EXPL12.5K");
                                         self.flight.crashed = true;
-                                    }
-                                    Event::Defeated(id) => self
-                                        .flight_ui
-                                        .combat_message(format!("ECM defeated contact T{id}")),
-                                    Event::TrackLost(id) => {
-                                        self.flight_ui
-                                            .combat_message(format!("Missile track lost: T{id}"));
                                     }
                                     Event::Fired(i) => {
                                         if let Some(name) =
@@ -1414,27 +1397,6 @@ impl ApplicationHandler for App {
                             &cockpit_palette,
                         );
                         self.menu.pixels.fill(0);
-                        if !self.flight_ui.menu {
-                            let mut paint = hud::Paint {
-                                pixels: &mut self.menu.pixels,
-                                clip: (0, 0, 640, 480),
-                                color: [80, 255, 100, 255],
-                            };
-                            paint.text(
-                                &self.hornet.font,
-                                &self.combat.status(&self.flight),
-                                175,
-                                370,
-                            );
-                            if self.combat.range {
-                                paint.text(
-                                    &self.hornet.font,
-                                    self.flight_ui.combat_text(),
-                                    175,
-                                    385,
-                                );
-                            }
-                        }
                         self.flight_ui.draw(
                             &mut self.menu.pixels,
                             &self.hornet.font,

@@ -205,3 +205,27 @@ locked build and source/app/extractor asset guards passed. Linux creator/viewer
 smokes and loaded F18/Rafale exterior captures at 1280×720 and 720×960 passed;
 the captured aircraft were visually checked without attached weapons. Evidence
 is ignored under `.local/ordnance-hidden/`. Windows/macOS were not exercised.
+
+## Combat debug overlay removed — 2026-09-15
+
+The user requested only the main HUD in flight. The persistent weapon/target/HP/
+ECM diagnostic line and range hints are removed, along with timed damage/tracking
+notices and full debug-status messages after weapon/target commands. The main
+HUD, instrument windows, pause/menu controls, sound, haptics and combat state are
+unchanged. Headless diagnostic status remains available. The unused debug-notice
+timer and its expiry test were removed with the overlay.
+
+The same HUD pass adds transparent rectangular outlines around the current speed
+and altitude values, following the user-supplied retail cockpit screenshot, and
+an authored centered `BANK ±N DEG` readout on the bottom HUD line. Bank is aircraft
+attitude normalized to a signed angle, independent of head-look; the existing
+crash/engine-off alert takes priority on that line. Source font/color and cockpit
+projection are retained, including wide/tall resizing. TAS/MSL labels retain
+existing measurement semantics; this does not introduce IAS or pressure altitude.
+
+Validation: 286 Rust tests, 24 Python tests, formatting, warnings-denied Clippy,
+locked build and source/app/extractor asset guards passed. Linux creator/viewer
+smokes, both aircraft's wide/tall cockpit and exterior captures, and a banked
+F18 capture passed. Visual review confirmed outlined readouts, a +47-degree bank
+cue in the banked probe, and no combat debug overlay. Evidence is ignored under
+`.local/hud-clean/`; Windows/macOS were not exercised.

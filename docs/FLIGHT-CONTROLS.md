@@ -236,3 +236,8 @@ neutral zero, applied to the original palette entry before sunlight whitening.
 The primary ink comes from each aircraft's HUD module; layout remains authored.
 Version-1 preferences migrate the old setting relative to its neutral value 7;
 version 2 persists the new signed amount. Other saved display choices are retained.
+
+The main HUD shows outlined current TAS/MSL values and a signed bank angle in
+degrees on its bottom line (crash/engine-off alerts take priority). The outlines
+are transparent. Combat debug status and range hints are no longer overlaid on
+flight; normal HUD and instrument windows remain available.

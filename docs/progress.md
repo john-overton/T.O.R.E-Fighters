@@ -903,3 +903,14 @@ Special horizon branches and matched retail acceptance remain open.
   Loadouts, ammunition, mass, firing and launched-projectile rendering remain.
 - [ ] Restore attached ordnance during the dedicated ordnance pass after mount,
   rack/pair placement, scale and materials are reviewed.
+
+## Main HUD without combat diagnostics — 2026-09-15
+
+- [x] Remove the persistent combat status/range hint overlay and transient
+  combat debug notices, including status text after weapon/target commands.
+  Keep the primary HUD, instruments, combat behavior, sound and haptics.
+- [x] Remove the unused debug-notice timer and its obsolete expiry test;
+  headless combat status output remains available for research.
+- [x] Add transparent outlines around the main HUD's current TAS/MSL values,
+  following the supplied retail reference, and a centered signed bank-angle
+  readout at the bottom. Layout remains authored; bank uses aircraft attitude.

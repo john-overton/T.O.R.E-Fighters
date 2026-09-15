@@ -37,6 +37,24 @@ impl Paint<'_> {
             );
         }
     }
+    fn readout_box(&mut self, font: &Font, text: &str, x: i32, y: i32) {
+        let width = text
+            .bytes()
+            .map(|c| font.glyphs[c as usize].advance)
+            .sum::<usize>() as i32;
+        let (left, top, right, bottom) = (
+            x - 4,
+            y - 3,
+            x + width.max(24) + 3,
+            y + font.height as i32 + 2,
+        );
+        // Outline only: retain the world behind the original HUD glyphs.
+        self.line((left as f64, top as f64), (right as f64, top as f64));
+        self.line((right as f64, top as f64), (right as f64, bottom as f64));
+        self.line((right as f64, bottom as f64), (left as f64, bottom as f64));
+        self.line((left as f64, bottom as f64), (left as f64, top as f64));
+        self.text(font, text, x, y);
+    }
     pub fn text(&mut self, font: &Font, text: &str, mut x: i32, y: i32) {
         for ch in text.bytes() {
             let g = &font.glyphs[ch as usize];
@@ -177,8 +195,8 @@ pub fn draw(
     }
     p.text(font, "TAS", 211, 190);
     p.text(font, "MSL", 402, 190);
-    p.text(font, &format!("{speed:.0}"), 211, 223);
-    p.text(font, &format!("{:.0}", s.position[1]), 402, 223);
+    p.readout_box(font, &format!("{speed:.0}"), 211, 223);
+    p.readout_box(font, &format!("{:.0}", s.position[1]), 402, 223);
     p.text(font, &format!("{:.1}G", s.g), 235, 164);
     p.text(font, &format!("{:.0}%", s.throttle * 100.), 235, 178);
     if s.afterburner_active() {
@@ -213,6 +231,15 @@ pub fn draw(
         p.text(font, "CRASHED - ESC", 277, 306);
     } else if !s.engine {
         p.text(font, "ENGINE OFF", 283, 306);
+    } else {
+        // User-requested numeric cue; aircraft attitude, never camera roll.
+        let bank = ((s.bank.to_degrees() + 180.).rem_euclid(360.) - 180.).round() as i32;
+        let text = format!("BANK {bank:+} DEG");
+        let width = text
+            .bytes()
+            .map(|c| font.glyphs[c as usize].advance)
+            .sum::<usize>() as i32;
+        p.text(font, &text, 320 - width / 2, 306);
     }
 }
 #[cfg(test)]
