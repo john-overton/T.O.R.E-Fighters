@@ -16,6 +16,14 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('terrain_traversal', 0x42bdc0, 0x42bfb9, 'ground'),
+    ('terrain_cell', 0x42bfc0, 0x42c1a0, 'ground'),
+    ('terrain_plane', 0x42c1a0, 0x42c413, 'ground'),
+    ('horizontal_plane', 0x42dda0, 0x42de5d, 'ground'),
+    ('shape_contact_record', 0x42e0c0, 0x42e0f4, 'ground'),
+    ('terrain_normal', 0x4a8d30, 0x4a8e4a, 'ground'),
+    ('terrain_cell_lookup', 0x4c6040, 0x4c60e8, 'ground'),
+    ('integer_square_root', 0x4d65c4, 0x4d663d, 'ground'),
     ('ground_entry_queries', 0x47af20, 0x47af70, 'ground'),
     ('collision_dispatch_cache', 0x42b800, 0x42bd2e, 'ground'),
     ('ground_slope_projection', 0x42bd30, 0x42bdb1, 'ground'),
@@ -161,18 +169,18 @@ def reviewed_regions(exe, rows, instructions, regions=REVIEWED_REGIONS):
     return artifacts
 
 
-def static_table(exe, rows, va, count):
-    """Read bounded inert signed-word data from one file-backed non-code section."""
-    if not 0 < count <= 4096:
+def static_table(exe, rows, va, count, width=2):
+    """Read bounded inert word/dword data from one file-backed non-code section."""
+    if not 0 < count <= 4096 or width not in (2, 4):
         raise ValueError('native table count outside bound')
     section = next((r for r in rows if not r['executable'] and
-                    r['va'] <= va and va+count*2 <= r['va']+r['size']), None)
+                    r['va'] <= va and va+count*width <= r['va']+r['size']), None)
     if section is None:
         raise ValueError('native table outside file-backed data section')
     raw = section['raw']+va-section['va']
-    if raw < 0 or raw+count*2 > len(exe):
+    if raw < 0 or raw+count*width > len(exe):
         raise ValueError('truncated native table')
-    return exe[raw:raw+count*2]
+    return exe[raw:raw+count*width]
 
 
 def unpack(data, fmt, offset):
@@ -350,6 +358,8 @@ def extract(source, output, *, overwrite=False, preview=False, domain='flight'):
         table = static_table(exe, rows, 0x515a48, 321)
         artifacts['tables/sine-q15.bin'] = table
         artifacts['tables/atan-pa.bin'] = static_table(exe, rows, 0x515644, 514)
+        root_table = static_table(exe, rows, 0x51d624, 1024, 4)
+        artifacts['tables/sqrt-seed.bin'] = root_table
         artifacts['tables/inventory.json'] = json.dumps({
             'schema_version': 1, 'source_exe_sha256': report['exe_sha256'],
             'tables': [{'path': 'sine-q15.bin', 'va': 0x515a48, 'count': 321,
@@ -359,7 +369,11 @@ def extract(source, output, *, overwrite=False, preview=False, domain='flight'):
                        {'path': 'atan-pa.bin', 'va': 0x515644, 'count': 514,
                         'format': 'little-endian unsigned 16-bit',
                         'sha256': hashlib.sha256(static_table(exe, rows, 0x515644, 514)).hexdigest(),
-                        'consumer': '0x4ccb88; octant interpolation'}],
+                        'consumer': '0x4ccb88; octant interpolation'},
+                       {'path': 'sqrt-seed.bin', 'va': 0x51d624, 'count': 1024,
+                        'format': 'little-endian unsigned 32-bit',
+                        'sha256': hashlib.sha256(root_table).hexdigest(),
+                        'consumer': '0x4d65c4; seed plus one integer Newton step'}],
         }, indent=2)+'\n'
     artifacts['inventory.json'] = json.dumps(report,indent=2)+'\n'
     artifacts = {name: content.encode() if isinstance(content, str) else content

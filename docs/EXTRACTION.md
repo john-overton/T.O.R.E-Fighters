@@ -332,3 +332,11 @@ The [aircraft import and acceptance guide](aircraft-import.md) joins extraction,
 existing flight/presentation/systems coverage and all per-aircraft acceptance
 gates. F-14, A-4E and X-31 are scheduled after the flight-response slice; they
 are not supported identities yet.
+
+### Native geometry research data — 2026-09-15
+
+The hash-gated `extract_native_flight.py` pass also emits `tables/sqrt-seed.bin`
+(1024 little-endian unsigned dwords) and its hash/consumer in the table inventory.
+It is diagnostic input for terrain normals, not a new requirement for the existing
+airborne option. Use a fresh `--out` directory when earlier research manifests
+differ. [Geometry command and evidence](baselines/native-land-geometry.md).

@@ -115,6 +115,12 @@ class NativeResearchTests(unittest.TestCase):
         data = bytes(range(16))
         rows = [{'va': 100, 'size': 16, 'raw': 0, 'executable': False}]
         self.assertEqual(native.static_table(data, rows, 102, 2), data[2:6])
+        self.assertEqual(native.static_table(data, rows, 100, 2, 4), data[:8])
+        for width in (0, 1, 3, 8):
+            with self.assertRaises(ValueError):
+                native.static_table(data, rows, 100, 1, width)
+        with self.assertRaises(ValueError):
+            native.static_table(data, rows, 110, 2, 4)
         for va, count in [(99, 1), (114, 2), (100, 0), (100, 4097)]:
             with self.assertRaises(ValueError):
                 native.static_table(data, rows, va, count)

@@ -17,8 +17,9 @@ The [living native environment/systems plan](native-environment-systems-plan.md)
 now governs the next contact/handling, ground/sea asset, lifecycle/event,
 decoy/guidance and environmental dependency pass. Implementation is now authorized, beginning with the land-contact source and
 query foundation; no AI scope is included. The first
-[cache/preference checkpoint](baselines/native-land-foundation.md) is diagnostic
-only and does not remove the live contact stop. Maneuver audio/rumble and final
+[cache/preference checkpoint](baselines/native-land-foundation.md) and
+[vertical geometry checkpoint](baselines/native-land-geometry.md) are diagnostic
+only and do not remove the live contact stop. Maneuver audio/rumble and final
 [flight-response acceptance](flight-response-plan.md) follow that continuation.
 [Provenance policy](behavior-provenance.md) keeps native contracts, fitted choices
 and user-directed changes distinct; airborne acceptance does not close the

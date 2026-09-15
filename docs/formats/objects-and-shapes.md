@@ -264,3 +264,11 @@ vertex matches for all four attachments, with the existing one-third-foot scale.
 Heading hinges rotate the right/forward plane, preserving up. This fixes vapor
 placement; exterior-store placement remains a separate open investigation.
 [Evidence](../baselines/wind-turbulence-vapor.md).
+
+### Contact-offset reader — 2026-09-15
+
+The bounded `shape::contact_offset` reader follows the F2 relative link used by
+FA 0x42e0c0 and reads only its signed word +8. Absent F2 and malformed links
+remain distinct. This does not decode full collision bounds or establish a
+contact surface from mesh faces. [Source contract](native-land-contact.md#shape-relative-contact-offset--e007),
+[validation](../baselines/native-land-geometry.md).

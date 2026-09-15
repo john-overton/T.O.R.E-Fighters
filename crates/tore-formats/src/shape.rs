@@ -38,6 +38,25 @@ pub struct Shape {
     pub faces: Vec<Face>,
     pub state_words: BTreeSet<usize>,
 }
+/// FA 0x42e0c0 resolves the type's shape at +0x0f, then the F2 link at
+/// CODE+0x0e. The contact consumer reads signed word +8 of that record.
+/// `None` means no F2 record (native zero-record fallback), not malformed data.
+/// This reads only the offset field; it does not validate full collision geometry.
+pub fn contact_offset(data: &[u8]) -> Result<Option<i16>> {
+    let (code, _) = module::code(data)?;
+    contact_offset_code(code)
+}
+
+fn contact_offset_code(code: &[u8]) -> Result<Option<i16>> {
+    if u16_at(code, 0x0e)? != 0xf2 {
+        return Ok(None);
+    }
+    let record = 0x12 + u16_at(code, 0x10)?;
+    // Bound every byte through the consumed word, without inventing meanings
+    // for the other fields or accepting truncated offsets as default zero.
+    slice(code, record, 10)?;
+    Ok(Some(u16_at(code, record + 8)? as i16))
+}
 /// Wing vapor attachment, from shape opcode 0xce. `?FindStreamerDef@@` at
 /// 0x49fd70 looks at shape offset 0x0e, skips an optional 0xf2 collision record
 /// and its four bytes, then requires the 0xce opcode word.
@@ -373,6 +392,20 @@ impl Shape {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn contact_offset_link_is_unsigned_relative_and_bounded() {
+        assert!(contact_offset_code(&[0; 15]).is_err());
+        assert_eq!(contact_offset_code(&[0; 16]).unwrap(), None);
+        let mut code = vec![0; 40];
+        code[14..16].copy_from_slice(&0xf2u16.to_le_bytes());
+        code[16..18].copy_from_slice(&12u16.to_le_bytes());
+        code[38..40].copy_from_slice(&(-7i16).to_le_bytes());
+        assert_eq!(contact_offset_code(&code).unwrap(), Some(-7));
+        assert_eq!(contact_offset(&module::fixture(&code)).unwrap(), Some(-7));
+        assert!(contact_offset_code(&code[..39]).is_err());
+        code[16..18].copy_from_slice(&0xffffu16.to_le_bytes());
+        assert!(contact_offset_code(&code).is_err());
+    }
     #[test]
     fn ce_heading_hinge_preserves_up_coordinate() {
         let d = StreamerDef {

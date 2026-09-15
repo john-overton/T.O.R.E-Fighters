@@ -1,6 +1,6 @@
 # Native land-contact foundation
 
-2026-09-15, NE-00.1a under the [living plan](../native-environment-systems-plan.md).
+2026-09-15, NE-00.1a/b under the [living plan](../native-environment-systems-plan.md).
 **Native static source**, with diagnostic translations only where identified.
 Uses the exact reviewed FA EXE/SMS hashes in [native flight](native-flight.md).
 No imported code executes. [Validation](../baselines/native-land-foundation.md).
@@ -27,8 +27,8 @@ On marked refresh the dispatcher writes **terrain-channel** height plus the
 resolved type offset back to object+0x2f, two angle words to +0x2b/+0x2d and class
 byte to +0x33. Those writes use the terrain channel even if the returned result
 selected the other collision channel. The type offset comes from signed word
-+8 of `0x42e0c0`'s resolved record, shifted by eight; its complete type mapping
-is still unknown. It must not be replaced with the adapter's eight-foot clearance.
++8 of `0x42e0c0`'s resolved record, shifted by eight; its shape-relative mapping is established below; type/instance loading
+remains unconnected. It must not be replaced with the adapter's eight-foot clearance.
 
 Deadline precedence at `0x42bc5c..0x42bd24`:
 
@@ -50,8 +50,8 @@ live connection; a late failure must discard them together with flight state.
 
 Dispatcher order is terrain/cache, optional mask-4 branch, then mask-0x0a branch.
 Terrain includes grid traversal `0x42bdc0`, cell construction `0x42bfc0`, plane
-intersection `0x42c1a0` and the zero-height fallback `0x42dda0`. These are research
-leads, **not translated geometry**. Terrain class comes from T2 byte +1; class 1
+intersection `0x42c1a0` and the zero-height fallback `0x42dda0`. The vertical cell arithmetic is now translated below; full dispatcher
+assembly remains unconnected. Terrain class comes from T2 byte +1; class 1
 sets the water output. Fixed renderer triangles are not a substitute.
 
 `0x42de60` keeps separate nearest terrain and object candidates using signed
@@ -87,6 +87,84 @@ contracts require review. No complete bounded OT schema or runway instance
 producer is claimed. The SH import/re-entry byte-pattern inspection reports no
 candidates; it does not prove the absence of visual/dynamic dependencies.
 
-Next: recover the vertical land-query geometry and type offset, trace STRIP
-initialization/placement and drawing dependencies, then integrate staged query
-state with source-order traces and late-failure rollback. Carrier stays gated.
+## Vertical terrain arithmetic — NE-00.1b
+
+Aligned static ranges: `0x42bdc0..0x42bfb9` traversal,
+`0x42bfc0..0x42c1a0` cell, `0x42c1a0..0x42c413` plane,
+`0x42dda0..0x42de5d` horizontal intersection, `0x4a8d30..0x4a8e4a`
+normal, `0x4d65c4..0x4d663d` square root, and
+`0x4c6040..0x4c60e8` T2 lookup. No `0x42bd00` mid-instruction range is used.
+
+Traversal rejects either endpoint outside `[0,cols<<21)` / `[0,rows<<21)`.
+It clips into cells, exits on the first terrain-channel candidate, or after at
+most 20 cells. The vertical query visits one cell; the clipper's both-inside
+branch (`0x42c420..0x42c545`) leaves endpoints unchanged. General multi-cell
+segment clipping is **not translated** by this slice.
+
+Fine lookup with step zero returns the three-byte cell at `(row*cols+col)*3`.
+Out-of-grid corners return the static fallback at `0x50ce4c`: color 255, class 1,
+elevation zero. They do not clamp to the last sample like the preview's `cell()`.
+The native negative-coordinate coarse division behavior is outside this fine
+lookup slice. A full contact producer must preserve the explicit fallback.
+
+Cell construction uses signed-word positions in 256-foot units: horizontal
+coordinates `col<<5`, `row<<5`, with wrapping word additions for neighbors;
+heights are unsigned T2 elevation bytes. Let A/B/C/D be `(x,z)`, `(x+1,z)`,
+`(x,z+1)`, `(x+1,z+1)`. The normals are computed in order `(C,D,A)`, `(A,D,B)`.
+Origin A is shifted 16 into fixed8 feet; class comes from A. Both endpoints
+strictly above the maximum corner height (using signed low-word `Y>>16`) skip
+the cell. Equal normal words merge the two planes. Otherwise local Z >= local X
+belongs to the first triangle, and local Z < local X to the second. Cell maxima
+are exclusive; minima inclusive. Candidate ties preserve the earlier plane.
+
+Normal generation computes `(third-second) cross (first-second)` with wrapping
+32-bit products, then arithmetic-right-shifts all components until each native
+signed absolute value is <=20,000. It sums wrapping squares and calls the native
+square-root helper. The final components truncate `component*32767 / (root&65535)`
+and narrow to signed words. Degenerate division faults are explicit Rust errors.
+
+The square-root helper reads **1024 unsigned dwords at VA 0x51d624**. It chooses
+index shift / seed shift `(22,13)`, `(16,16)`, `(10,19)`, `(4,22)`, or `(0,24)`
+from the highest nonzero mask `fc000000`, `03f00000`, `000fc000`, `00003c00`.
+A zero seed returns zero; otherwise it performs exactly `(n/seed + seed)>>1`,
+with unsigned dword addition. It is not an exact host square root. The seed table
+is extracted to ignored local data, never regenerated or embedded as retail bytes.
+
+Horizontal intersection subtracts the type offset from the plane height. If the
+start is below, it returns start X/Z with Y clamped up to the plane. Otherwise
+an endpoint on or above the plane is no hit. For crossing, it halves numerator
+and denominator arithmetically until both <=200 and uses wrapping **32-bit**
+horizontal products. A zero denominator falls back to the clamped start.
+
+Sloped intersection computes signed integer-foot plane distances, including
+`offset>>8`; multiplications wrap before signed division by normal Y. Two
+nonnegative distances are no hit; two negative distances return the unchanged
+start. A crossing ratio is halved until both values are <10,000. Interpolation
+uses **64-bit** products, truncates toward zero, then clamps interpolated Y to
+zero. Bounds/diagonal tests follow all intersection paths. These distinct rounding
+and below-plane rules must not be unified into a floating-point ray cast.
+
+`terrain_contact` translates these pure helpers and vertical cell construction.
+It returns a point and normal, **not** a complete ground sample. The downstream
+candidate reducer converts normals through `0x411a40` (which calls `0x4c6c30`,
+square root and atan) and subtracts PA `0x3ffc`. That angle producer still needs
+complete review/translation before the existing slope projection can be joined.
+
+## Shape-relative contact offset — E007
+
+`0x42e0c0..0x42e0f4` takes the resolved type pointer. It reads the shape pointer
+at type+0x0f. A null shape or a non-F2 word at shape+0x0e returns the zero fallback
+record at `0x4f1690`. With F2, an **unsigned** word at shape+0x10 locates the
+record at `shape+0x12+link`. The ground offset is its signed word +8, shifted
+8 by the dispatcher. This is a shape contact field, not PT gear height or fitted
+CG clearance. The selected RUNWAY.SH has a record at CODE offset 3460 and offset 0.
+
+`shape::contact_offset` uses the bounded PL/PE CODE reader and bounds all bytes
+through the consumed word. It returns `None` for absent F2; a truncated/out-of-range
+link errors instead of becoming the native zero fallback. A missing shape pointer
+is handled by the future type resolver, not by passing an empty byte buffer.
+The remaining record fields and collision subrecords are not decoded here.
+
+Next: finish candidate-normal angle conversion, trace STRIP initialization,
+placement and drawing dependencies, then integrate staged query state with
+source-order traces and late-failure rollback. Carrier stays gated.

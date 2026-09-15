@@ -1095,3 +1095,18 @@ Special horizon branches and matched retail acceptance remain open.
   [Source and validation checkpoint](baselines/native-land-foundation.md).
 - This continuation includes no AI. Live contact/carrier activation remains gated;
   full asset coverage and Windows/macOS/retail acceptance remain open.
+
+
+## Native environment geometry precursor — 2026-09-15
+
+- [x] NE-00.1b: source-backed vertical cell/normal/intersection arithmetic,
+  external square-root table extraction and bounded shape contact-offset field.
+- [x] Synthetic seam, diagonal, rounding, degenerate and malformed-input tests;
+  166,400 imported UKR cell cases repeated identically in the diagnostic.
+- [ ] E008 candidate angle conversion, E003/E005 placement/callback closure,
+  full visual resources and collision record semantics.
+- [ ] E001/E002 staged query/cache/RNG and late-failure rollback, then reviewed
+  both-aircraft live contact. Carrier remains gated; no AI or default changes.
+
+[Validation and limitations](baselines/native-land-geometry.md). This completes
+only the diagnostic precursor; the parent first slice remains researching.
