@@ -346,31 +346,9 @@ impl Combat {
             pose.hook = 0.;
             v.extend(h.vertices(&pose, camera, world));
         }
-        // One original model per surviving source station group. Pair/rack
-        // offsets are not decoded; never fabricate positions for each round.
-        let own = launcher(s);
-        for (i, station) in self.state.configuration().stations.iter().enumerate() {
-            if !station.internal
-                && self.state.rounds(i) > 0
-                && let Some(shape) = &self.shapes[i]
-            {
-                let position = std::array::from_fn(|k| {
-                    own.position[k]
-                        + own.basis.right[k] * station.mount[0]
-                        + own.basis.up[k] * station.mount[1]
-                        + own.basis.forward[k] * station.mount[2]
-                });
-                mesh(
-                    &mut v,
-                    shape,
-                    position,
-                    own.basis.right,
-                    own.basis.up,
-                    own.basis.forward,
-                    &h.palette,
-                );
-            }
-        }
+        // Attached external stores are hidden until the dedicated ordnance
+        // rendering pass. Loadout/flight state and launched projectiles remain
+        // independent of this presentation decision in every camera.
         for p in &self.state.projectiles {
             if let Some(shape) = &self.shapes[p.station] {
                 let right = unit([p.direction[2], 0., -p.direction[0]]);

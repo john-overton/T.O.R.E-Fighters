@@ -192,3 +192,16 @@ All runs rendered 330 rear-mirror frames. These are CPU intervals including
 presentation backpressure, not GPU time or verified displayed FPS. No blocking
 live readback or post-render sleep was introduced. Logs are
 `.local/live-fire/{clean-f18,live-f18,live-rafale}-performance.log`.
+
+## Attached ordnance hidden — 2026-09-15
+
+At the user's request, the shared combat render path no longer emits attached
+external store meshes. Loadout/ammunition/mass state and launched projectiles
+are unchanged. Restore aircraft-mounted ordnance in the later dedicated pass
+once mounting, racks/pairs, scale and materials have been reviewed.
+
+Validation: 287 Rust tests, 24 Python tests, formatting, warnings-denied Clippy,
+locked build and source/app/extractor asset guards passed. Linux creator/viewer
+smokes and loaded F18/Rafale exterior captures at 1280×720 and 720×960 passed;
+the captured aircraft were visually checked without attached weapons. Evidence
+is ignored under `.local/ordnance-hidden/`. Windows/macOS were not exercised.

@@ -895,3 +895,11 @@ Special horizon branches and matched retail acceptance remain open.
   retail CLOUDS.SH producer scenario; Windows/macOS runtime checks.
 - [ ] Alternate camera/display integration stays with step 4 or its scheduled
   screen. Native integer raster identity is outside the roadmap fidelity gate.
+
+## External ordnance rendering deferred — 2026-09-15
+
+- [x] Hide attached external weapon models in the shared combat render path,
+  including exterior and mirror/camera views, at the user's request.
+  Loadouts, ammunition, mass, firing and launched-projectile rendering remain.
+- [ ] Restore attached ordnance during the dedicated ordnance pass after mount,
+  rack/pair placement, scale and materials are reviewed.
