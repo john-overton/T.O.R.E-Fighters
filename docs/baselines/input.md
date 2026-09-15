@@ -209,3 +209,14 @@ capture frame can precede native enumeration, so saved device bindings appear as
 disconnected in those images; captures validate geometry, not device handling.
 Windows/macOS linked runtime, tactile tuning and physical capture still require
 user/hardware acceptance.
+
+## Manual combat systems continuation — 2026-09-14
+
+The [systems baseline](weapons-systems.md) supersedes the earlier weapon-hook
+and test-count status above: 14 isolated standard controller chords, independent
+held fire, confirmed-event haptics and feedback-error handling are integrated.
+The full workspace now passes 220 Rust and 14 Python tests. Current wide/tall
+controls captures and native device diagnostics are under `.local/systems-pass/`.
+Those captures use a synthetic profile; no readable evdev gamepad was available
+for this pass, so physical buttons and tactile strength remain unverified. Earlier
+hardware results above remain historical evidence, not acceptance of these changes.

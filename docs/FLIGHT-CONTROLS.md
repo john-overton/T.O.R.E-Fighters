@@ -14,7 +14,7 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | 1…9 / 0 | 10…90% / full throttle | Development mapping |
 | Shift-B / E | Afterburner / engine toggle | Development mapping; afterburner requires engine and >95% throttle |
 | G / F / B / H | Gear / flaps / airbrake / hook | Adapter controls; full FA keyboard table still needs verification |
-| R / J | Radar / jammer | Radar now gates live-range contacts/locks; ECM threat simulation remains open |
+| R / J | Radar / jammer | Radar gates live-range contacts/locks; powered ECM applies recovered contact-probability terms; decoy behavior remains open |
 | F1 | Forward cockpit view; reset pan/zoom | FA `FMENUD.MNU` |
 | F2 / F3 | Look back / up | FA menu; authored angles, forward artwork projects out of view naturally |
 | F10 | External chase view | FA menu; authored camera placement |
@@ -59,7 +59,8 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized. This is
 | Ctrl + view key / Alt + view key | Missile-relative / target-relative camera |
 | Shift-T | Reverse target cycling (T / Enter now designate in live range) |
 | W / Shift-W, N, A | Waypoint selection, navigation/weapons mode, autopilot |
-| I / M / Y | IR sensor, HARM seeker, radar history |
+| M | HARM seeker |
+| I / Y | Original IR sensor / radar history remain unavailable; these keys invoke incoming weapon / target ECM development fixtures in `--live-fire` |
 | V | Set Other View camera |
 | Shift-J / Shift-K | Jettison fuel / air-to-ground stores |
 | Ctrl-T / Alt-S | Target information / radio silence |
@@ -142,9 +143,8 @@ Select Rafale C by clicking the Wing 1 aircraft name in Quick Mission, or use
 bindings apply to the selected aircraft. Its PT values, cockpit artwork, DEFA
 250-round inventory and engine clips come from its own retail profile. This is
 the existing fixed-tick adapter using Rafale data, not a complete native flight
-model. The Rafale exterior remains in its decoded neutral pose: device/control
-visual animations have not been mapped to its SH state words. The Hornet retains
-its separately reviewed fitted rig. See [scope and evidence](baselines/rafale-quick-mission.md).
+model. The Rafale and Hornet retain separate fitted animation rigs, as described
+below. See [initial scope and evidence](baselines/rafale-quick-mission.md).
 
 Rafale C: H reports unavailable because the recovered RAF.SH model has no hook
 animation import. G/F/B and pitch/roll/rudder animate its own gear, elevons,
@@ -197,7 +197,8 @@ Shift/Ctrl/Alt combinations retain their prior meanings. Firing stops on weapon,
 arm, jettison and fixture transitions and requires release before another press.
 T/Enter cycles actual living contacts within the imported visual/radar coverage.
 SAFE/EMPTY/STATION FAILED and sensor/range/terrain inhibits are shown separately
-from lock. No automatic subsystem failures or combat AI are implied.
+from lock. The systems continuation below adds automatic source-weighted failures
+for supported equipment; combat AI remains deferred.
 
 `--record-combat NEW_PATH` records explicit combat-service inputs and commands;
 `--replay-combat PATH` replays headlessly with the same aircraft/theater/assets.

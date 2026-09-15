@@ -12,7 +12,10 @@ Current execution order (2026-09-14): finish manual weapons, sensors and damage
 acceptance for F/A-18D and Rafale C before AI work. The only AI authorized for the
 later weapon-testing phase is a basic fly-forward target. The broader future AI
 milestone below is not authorization to implement combat AI now. See
-[manual integration and remaining gates](baselines/manual-weapons.md).
+[current systems evidence and remaining gates](baselines/weapons-systems.md).
+The manual range covers both aircraft’s ten PT-default weapon slots, partial
+ECM/player-damage integration and controller feedback. This does not close the
+M1d/M1f native acceptance gates or authorize additional aircraft/loadouts.
 
 ## Principles
 

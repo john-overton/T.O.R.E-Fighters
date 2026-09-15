@@ -348,8 +348,10 @@ translated; both PT categories are 0x8000 -> damage index 0. Five-class fixtures
 bounded nominal/applied hit history, failed-station high-bit semantics, shared
 visual/radar acquisition, sampled terrain masking and manual jettison are wired.
 R530 retains launcher radar during tracking; AIM120/MICA do not. Native activation,
-lead/PN, ECM, damage RNG and automatic subsystem selection remain unaccepted.
-Static extraction now emits 22 reviewed regions, including category, amount and
+lead/PN and whole-tick native parity remain unaccepted. The systems continuation
+below supersedes this checkpoint’s open ECM/automatic-selection work with partial
+translations; native RNG and complete subsystem effects remain open.
+At this checkpoint static extraction emitted 22 reviewed regions, including category, amount and
 station-failure spans; a reviewed span is not a complete native translation.
 All 135 catalog JT files remain preserved; live acceptance covers the ten default
 PT stations of the two ported identities, not alternative compatible loadouts.

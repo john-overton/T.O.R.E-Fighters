@@ -34,7 +34,7 @@ open. No format status is promoted by this research. [Plan](weapons.md) and
 
 ### F/A-18D slice
 
-FA PT: typed bounded reader for the reviewed F18/660 layout, all source G rows and hardpoints exported; runtime physics is an authored adapter. FA JT/SEE/ECM: named schema decoding and raw data extraction, including transitive shape/texture/audio dependencies; weapon/sensor execution remains partial/unimplemented. GAS: checked tank configuration and raw preservation. SH: nearest-detail static Hornet geometry and observed device endpoint branches, not a general native VM. FNT: bounded bitmap-writing glyph grammar, WIN11 used in instrument windows. HUD: associated source artwork/data preserved, general native HUD composition not decoded. [Detailed scope](aircraft.md).
+FA PT: typed bounded reader for the reviewed F18/660 layout, all source G rows and hardpoints exported; runtime physics is an authored adapter. FA JT/SEE/ECM: named schema decoding and raw data extraction, including transitive shape/texture/audio dependencies; weapon/sensor execution is partial for the ten F18/Rafale default slots, including contact ECM and supported automatic equipment faults. GAS: checked tank configuration and raw preservation. SH: nearest-detail static Hornet geometry and observed device endpoint branches, not a general native VM. FNT: bounded bitmap-writing glyph grammar, WIN11 used in instrument windows. HUD: associated source artwork/data preserved, general native HUD composition not decoded. [Detailed scope](aircraft.md).
 
 ## Native flight research
 

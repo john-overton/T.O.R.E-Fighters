@@ -101,3 +101,26 @@ preferences use a separate bounded versioned file and persist independently of
 flight/aircraft state. Smoke/capture/performance diagnostics bypass those preferences.
 Afterburner feedback combines a renewable finite low rumble with the engagement
 impulse; context loss cancels both, without changing authoritative flight state.
+
+## Manual combat and systems
+
+`tore-sim::combat::live` owns the deterministic manual range at 120 Hz. Typed
+configuration resolves each supported PT’s loadout, SEE/ECM equipment and damage
+table once; mutable ammo, contacts, projectiles, player HP, subsystem counts and
+adapter RNG remain in state. `combat::systems` contains bounded translations of
+reviewed ECM probability and damage-selection helpers. Unknown native subsystem
+side effects remain explicit gaps; this is not a complete native combat tick.
+
+The app merges independent keyboard/controller trigger holds, dispatches explicit
+commands and consumes confirmed events for instruments, graphics, audio and the
+bounded feedback mixer. Two-control modifier bindings consume their base controls
+and require neutral release across layer/context changes. Native feedback errors
+disable that device’s feedback until reconnect; finite leases and context stops
+bound rumble. Combat notices reuse the existing HUD line and expire in simulation
+ticks, so pause does not age them or expand overlay composition work.
+
+Version-2 combat tapes record service inputs including jammer state and explicit
+fixture commands. Replays validate identity/assets and reproduce combat state,
+including adapter RNG and subsystem failures; version 1 rejects explicitly. This
+is combat-service determinism, not native scheduler or full application replay
+parity. See [contracts, validation and limitations](baselines/weapons-systems.md).

@@ -10,7 +10,8 @@ same reader and simulator; Rafale visual/cockpit animation acceptance remains
 separate. The original flight description below describes the legacy adapter;
 [FLIGHT-MODEL](../FLIGHT-MODEL.md) documents the selectable hybrid model.
 
-Current combat behavior is documented in [manual weapons integration](../baselines/manual-weapons.md).
+Current combat behavior is documented in [weapons/systems integration](../baselines/weapons-systems.md)
+and the preceding [manual weapons pass](../baselines/manual-weapons.md).
 It supersedes the first-pass unimplemented weapon/instrument states below;
 ordinary free flight stays externally clean while the explicit range loads PT defaults.
 
@@ -79,7 +80,7 @@ The supplied `rwr-50nm.png`, `systems.png` and `target-view.png` are the current
 | 5 RWR | Range buttons, axes/rings, ownship, powered JAM state | Threat receiver, native RCS outline, detection/history |
 | 6 Nav | Heading, MSL altitude; no waypoint in free flight | Mission waypoints, ETA and native navigation |
 | 7 Systems | Live throttle and remaining internal fuel; external zero | TEMP/OIL/HYD intentionally `---` until model/threshold recovery |
-| 8 Weapons | Imported M61 count, ECM inventory, clean external fit, SAFE | Selection, firing, loadout, expenditure, damage |
+| 8 Weapons | Selected source weapon, ammo/readiness, range payload, player HP and visual/radar/ECM fault state; ordinary flight remains externally clean | Alternate loadouts, full subsystem dispatch and native display parity |
 | 9 Radar | Power, range capped by APG-65 source search range, mode/grid | Search/track/seeker physics, contacts, authentic mode logic |
 
 No fake targets, threat diamonds or healthy-system percentages are inserted to resemble the screenshots. Scope symbology, colors, layout and controls are presently a visual adapter; original engine/native system behavior is not claimed. Four large or six small windows can be open, with Shift-0..9 toggles; page 0 is an explicit RCS placeholder. Camera windows request updates at 10 Hz using bounded asynchronous GPU readback; the last completed raster remains visible while pending. Offline captures wait explicitly. Direct GPU panel composition remains future optimization work. Hover remains silent and button activation requires matching press/release.
