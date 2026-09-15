@@ -15,6 +15,7 @@ pub struct World {
     /// and the live palette is applied on the GPU. 255 is the water cutout.
     pub sky_indices: Vec<u8>,
     pub celestial: Option<crate::celestial::Celestial>,
+    pub clouds: Option<crate::clouds::Clouds>,
     pub deck_textures: BTreeMap<String, usize>,
     pub decks: [[f32; 4]; 2],
     pub vertices: Vec<f32>,
@@ -100,6 +101,24 @@ impl World {
         environment.layer = layer;
         environment.layer_parameter = Some(weather.configuration().parameter());
         environment.time = Some([hour, minute]);
+        let cloud_altitude = if let Ok(value) = std::env::var("TORE_CLOUD_ALTITUDE") {
+            let value = value.parse::<i32>()?;
+            if !(0..=400_000).contains(&value) {
+                return Err("cloud altitude outside 0..400000 feet".into());
+            }
+            value
+        } else if let Some(choice) = condition {
+            tore_sim::clouds::generated_altitude(
+                choice,
+                &mut tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?,
+            )?
+        } else {
+            environment.clouds.unwrap_or(0)
+        };
+        if !(0..=400_000).contains(&cloud_altitude) {
+            return Err("mission cloud altitude outside supported range".into());
+        }
+        environment.clouds = Some(cloud_altitude);
         let mut texture_indices = Vec::new();
         let count = environment
             .textures
@@ -154,12 +173,19 @@ impl World {
             weather.configuration().sun_fill(),
             weather.configuration().shades(),
         )?);
+        let clouds = Some(crate::clouds::Clouds::load(
+            resources,
+            &mut sky_indices,
+            texture_indices.len() / 65536,
+            cloud_altitude,
+        )?);
         let mut out = Self {
             theater,
             environment,
             catalog,
             sky_indices,
             celestial,
+            clouds,
             deck_textures,
             decks: [[0., 1., -1., 0.]; 2],
             vertices: Vec::new(),
@@ -403,6 +429,7 @@ mod tests {
             texture_indices: vec![],
             sky_indices: vec![],
             celestial: None,
+            clouds: None,
             deck_textures: BTreeMap::new(),
             decks: [[0., 1., -1., 0.]; 2],
             fog: [0., 1., 0., 0.],

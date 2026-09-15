@@ -77,10 +77,10 @@ adaptations. [Evidence](baselines/weather-foundation.md).
 
 | Area | Implemented | Gap |
 | --- | --- | --- |
-| Mission inputs | `layer` name and choice index, `clouds` altitude, `wind` degrees and feet per second, and time all recovered and consumed | Campaign mission sources; the `clouds` deck is read but not drawn |
+| Mission inputs | `layer` name and choice index, `clouds` altitude, `wind` degrees and feet per second, and time all recovered and consumed | Campaign mission sources; generated and explicit cloud altitudes now draw; campaign sources remain open |
 | Weather records | Reviewed fields of the 352-byte record in `tore-formats::weather`, all 24 supplied modules parsing | Fill-pattern tables and cross-layer ray composition |
 | Environment state | `tore-sim::environment` advances a 120 Hz to 256-unit clock, selects and blends records by time and altitude, and answers pure queries | Pause, compression and long-session audit against the original |
-| Terrain and sky | Artwork uploads as source palette indices; the live palette resolves on the GPU each frame | Cloud geometry, special horizon branches and celestial comparison/glare |
+| Terrain and sky | Artwork uploads as source palette indices; the live palette resolves on the GPU each frame | Special horizon/ray branches, low-detail cloud gates and celestial comparison/glare |
 | Visibility | Recovered per-record ramp and haze color, plus the altitude haze pass | Cross-layer ray remap composition; sensor consumers |
 | Creator | Six source weather choices launch; duplicate overcast removed | Label mapping remains inferred; serialized weather replay |
 | Wind | Resolved to world feet per second and applied by both adapters | Missing-wind native defaults; wind audio |
@@ -304,3 +304,12 @@ Original sun circles/glow remap, moon texture and 94 stars now render with sourc
 time/flag/angle selection. Weather SH decoding is bounded and independent of
 aircraft animation. Glare, exact raster/horizon clipping and matched retail
 acceptance remain open. Continue with cloud placement and geometry.
+
+### Step 3 implementation checkpoint
+
+Original CLOUD1 top/bottom geometry, cutout texture, runtime-imported nine-entry
+layout, high-detail 4×4 repeats, generated altitude defaults and explicit mission
+altitude now render. Crossings and a second theater were captured. The sixteen
+CLOUDS billboards are decoded but have no established active producer; native
+low-detail/frustum branches and matched retail comparisons remain open. Cloud
+bands are source fog records, not evidence for an authored volumetric deck.

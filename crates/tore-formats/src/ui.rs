@@ -1,7 +1,7 @@
 use crate::{Result, invalid, slice, u16_at, u32_at};
 pub mod creator;
 pub mod dialog;
-mod fingerprint;
+pub(crate) mod fingerprint;
 #[derive(Clone, Debug)]
 pub struct Button {
     pub x: i32,

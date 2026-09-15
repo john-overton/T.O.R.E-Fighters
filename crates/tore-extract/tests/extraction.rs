@@ -217,6 +217,9 @@ fn all_theaters_include_aliases_and_skip_unrelated_disc_libraries() {
         ),
         ("IFMFRA.PIC", 0, b"map".to_vec()),
         ("SKY0.PIC", 0, b"sky".to_vec()),
+        ("OCEAN0.PIC", 0, b"ocean".to_vec()),
+        ("CLOUD1.SH", 0, b"cloud".to_vec()),
+        ("_CLOUD1.PIC", 0, b"cloud image".to_vec()),
         ("OTHER.PIC", 0, b"unrelated".to_vec()),
     ]);
     fs::write(f.source.join("INSTALL.LIB"), b"not EALIB").unwrap();
@@ -233,6 +236,9 @@ fn all_theaters_include_aliases_and_skip_unrelated_disc_libraries() {
         "~BAL0.MM",
         "IFMFRA.PIC",
         "SKY0.PIC",
+        "OCEAN0.PIC",
+        "CLOUD1.SH",
+        "_CLOUD1.PIC",
     ] {
         assert!(f.out.join("OTHER.DAT").join(name).exists());
     }

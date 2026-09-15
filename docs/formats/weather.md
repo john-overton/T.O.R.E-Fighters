@@ -561,3 +561,23 @@ The sun arc is `WORD(34580*(seconds-rise)/(set-rise))-910`, with signed compare
 against 16380, then `32760-angle` on the evening branch. Dispatch requires flag
 8, inclusive time bounds and signed elevation >= -1820. Signed-WORD overflow
 near the end of the arc is retained. Flag 16 dispatches original stars and moon.
+
+### Scattered cloud producer
+
+The reviewed `T_InitCloudProc` loads nine descriptors at `0x50c298` using 26-byte
+stride: mask dword +0, source-name pointer +4, runtime shape pointer +8, X/Y/Z
+signed 24.8 coordinates +12/+16/+20, yaw word +24. Zero mask terminates. The
+name is `cloud1.SH`. `T_CloudProc` sets Y to mission `cloudAlt << 8` and skips
+all draws when altitude is zero. At detail >=2 it calls `0x4a8090` with period
+`0x2000000` and subdivision exponent 2; `0x4a8130` chooses nearest periodic
+representatives, with strict half-period comparisons. The native view-specific
+frustum adjustment branches are not translated. The source coordinates and call
+constants are imported at runtime from the hash-gated EXE into a bounded inert
+cache, rather than compiled into the engine.
+
+CLOUD1's header exponent 10 scales coordinates by four; its two flat faces use
+opposite winding and reversed source UVs into `_CLOUD1.PIC`. Index 255 is cut out;
+GPU filtering uses a half-coverage cutout threshold and opaque depth writes. A continuous volumetric
+cloud deck is not established by these primitives. The LAY whiteout bands are
+separate. `CLOUDS.SH` decodes but remains unplaced pending a verified producer.
+See [cloud evidence](../baselines/weather-foundation.md).

@@ -92,12 +92,12 @@ impl Options {
         Ok(Self { fields, targets })
     }
 }
-struct Image<'a> {
+pub(crate) struct Image<'a> {
     data: &'a [u8],
     sections: Vec<(usize, usize, usize, bool)>,
 }
 impl<'a> Image<'a> {
-    fn parse(data: &'a [u8]) -> Result<Self> {
+    pub(crate) fn parse(data: &'a [u8]) -> Result<Self> {
         if slice(data, 0, 2)? != b"MZ" {
             return Err(invalid("missing MZ"));
         }
@@ -124,7 +124,7 @@ impl<'a> Image<'a> {
         }
         Ok(Self { data, sections })
     }
-    fn read(&self, va: usize, size: usize, code: bool) -> Result<&'a [u8]> {
+    pub(crate) fn read(&self, va: usize, size: usize, code: bool) -> Result<&'a [u8]> {
         if size == 0 || size > 16384 {
             return Err(invalid("table size exceeds bound"));
         }

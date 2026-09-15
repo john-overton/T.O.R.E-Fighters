@@ -8,3 +8,5 @@ pub mod research;
 pub mod telemetry;
 pub mod turbulence;
 pub mod vapor;
+
+pub mod clouds;

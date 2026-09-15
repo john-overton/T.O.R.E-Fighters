@@ -86,6 +86,22 @@ pub fn validate_sources(
                 .fold((255, 0), |(lo, hi), v| (lo.min(v), hi.max(v)))
         );
     }
+    let clouds = tore_formats::weather::clouds::Layout::decode(
+        resources
+            .get("TORE_CLOUDS_V1")
+            .ok_or("cloud layout missing")?,
+    )?;
+    let centers = tore_sim::clouds::centers(&clouds, [0.; 3], 10000);
+    if centers.len() != clouds.patches.len() * (1usize << (2 * clouds.subdivisions)) {
+        return Err("cloud repeat count mismatch".into());
+    }
+    println!(
+        "Cloud layout: {} source descriptors, {} instances, base period {} feet; mission altitude {:?}",
+        clouds.patches.len(),
+        centers.len(),
+        clouds.period_f8 / 256,
+        environment.clouds
+    );
     let layer = &environment.layer;
     let bytes = resources
         .get(layer)
@@ -212,7 +228,7 @@ pub fn validate_sources(
     }
     println!(
         "Weather sources validated: {modules} modules; clock, record selection and palette \
-         expansion accepted. Celestial and cloud rendering remain open."
+         expansion accepted. Celestial/cloud readers and placement accepted; matched retail rendering acceptance remains open."
     );
     Ok(())
 }

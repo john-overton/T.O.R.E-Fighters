@@ -142,3 +142,9 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
  if in.layer>=0.0 {let tex=tile(in.uv,i32(in.layer),0);if tex.a<0.01 {discard;}return tex;}
  return vec4<f32>(in.color,1.0);
 }
+
+@fragment fn cloud_fragment(in:VertexOut)->@location(0) vec4<f32>{
+ let tex=tile(in.uv,i32(in.layer),fog_row(in.distance));
+ if tex.a<0.5 {discard;}
+ return vec4<f32>(tex.rgb,1.0);
+}

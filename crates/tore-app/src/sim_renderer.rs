@@ -16,6 +16,8 @@ pub struct SimRenderer {
     sky_pipeline: wgpu::RenderPipeline,
     celestial_pipeline: wgpu::RenderPipeline,
     celestial_vertices: wgpu::Buffer,
+    cloud_pipeline: wgpu::RenderPipeline,
+    cloud_vertices: wgpu::Buffer,
     uniform: wgpu::Buffer,
     vertices: wgpu::Buffer,
     count: u32,
@@ -116,6 +118,18 @@ impl SimRenderer {
         });
         let celestial_vertices = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Celestial vertices"),
+            size: 256 * 1024,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let cloud_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label:Some("Original cloud sheets"),layout:Some(&sky_layout),
+            vertex:wgpu::VertexState {module:&shader,entry_point:Some("vertex"),compilation_options:Default::default(),buffers:&[wgpu::VertexBufferLayout {array_stride:40,step_mode:wgpu::VertexStepMode::Vertex,attributes:&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3,4=>Float32]}]},
+            fragment:Some(wgpu::FragmentState {module:&shader,entry_point:Some("cloud_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState {format,blend:None,write_mask:wgpu::ColorWrites::ALL})]}),
+            primitive:wgpu::PrimitiveState {cull_mode:None,..Default::default()},depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:true,depth_compare:wgpu::CompareFunction::Less,stencil:Default::default(),bias:Default::default()}),multisample:Default::default(),multiview:None,cache:None,
+        });
+        let cloud_vertices = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Cloud vertices"),
             size: 256 * 1024,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
@@ -269,6 +283,8 @@ impl SimRenderer {
             sky_pipeline,
             celestial_pipeline,
             celestial_vertices,
+            cloud_pipeline,
+            cloud_vertices,
             bind,
             uniform,
             vertices,
@@ -576,6 +592,15 @@ impl SimRenderer {
                 depth_or_array_layers: 1,
             },
         );
+        let cloud_data = world
+            .clouds
+            .as_ref()
+            .map_or_else(Vec::new, |clouds| clouds.vertices(camera));
+        assert!(cloud_data.len() * 4 <= 256 * 1024);
+        let cloud_count = (cloud_data.len() / 10) as u32;
+        if cloud_count > 0 {
+            queue.write_buffer(&self.cloud_vertices, 0, &bytes(&cloud_data));
+        }
         let linear = |v: u8| ((v as f64 / 255.0 + 0.055) / 1.055).powf(2.4);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Simulation world"),
@@ -631,6 +656,12 @@ impl SimRenderer {
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..*count, 0..1);
             }
+        }
+        if cloud_count > 0 {
+            pass.set_pipeline(&self.cloud_pipeline);
+            pass.set_bind_group(0, &self.bind, &[]);
+            pass.set_vertex_buffer(0, self.cloud_vertices.slice(..));
+            pass.draw(0..cloud_count, 0..1);
         }
         // Blended and depth-tested but not depth-writing, so trails read behind
         // terrain and aircraft without occluding each other.

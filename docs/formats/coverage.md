@@ -146,3 +146,7 @@ fields decoded; named sky/ocean deck resources shared by CLI/app. See
 
 Weather SH: bounded straight-line point/circle/billboard grammar added separately
 from aircraft projection. LAY sun background remap decoded at root `+0x50`.
+
+Weather clouds: hash-gated FA EXE descriptor/call reader, bounded inert cache,
+shared sky/ocean/cloud extraction fixtures and CLOUD1 sheet consumer. Imported
+code is never executed. CLOUDS primitives decode without a global placement claim.

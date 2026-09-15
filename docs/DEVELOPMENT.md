@@ -432,3 +432,8 @@ flight camera. For example:
 ```sh
 TORE_WEATHER_VIEW=1070000,5000,590000,45,20 cargo run --locked -p tore-app -- --viewer --weather-condition 5 --capture-terrain .local/moon.ppm --no-audio
 ```
+
+`TORE_CLOUD_ALTITUDE=0..400000` overrides the cloud-sheet altitude in feet for
+crossing captures. Generated weather choices use the recovered scattered-cloud
+chance; normal MM launches preserve their `clouds` field. Caches predating the
+inert cloud layout automatically re-import when local reviewed media is present.

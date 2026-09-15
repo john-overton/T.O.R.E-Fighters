@@ -787,3 +787,11 @@ decks implemented. Shared importer includes ocean art. Source/host distinctions,
 Bounded weather SH primitives, sun arc/glow remap, original moon texture and
 94 source stars integrated. Linux captures visually inspected; retail clipping,
 glare and platform parity remain open. See [weather foundation](baselines/weather-foundation.md).
+
+### Cloud geometry and source placement — 2026-09-15
+
+Runtime-imported cloud descriptors, pure periodic placement, native generated
+altitude choice and original two-sided CLOUD1 sheets now render. Explicit MM
+altitude zero remains clear of scattered sheets. Linux Ukraine/Egypt and
+wide F18/tall Rafale captures passed. Source, renderer adaptations and remaining
+low-detail/CLOUDS-producer/parity work: [weather foundation](baselines/weather-foundation.md).

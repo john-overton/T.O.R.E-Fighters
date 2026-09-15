@@ -4,6 +4,7 @@ mod assets;
 mod attitude;
 mod audio;
 mod celestial;
+mod clouds;
 mod cockpit_renderer;
 mod combat;
 mod combat_tape;

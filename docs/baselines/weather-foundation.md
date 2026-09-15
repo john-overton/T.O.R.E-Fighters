@@ -131,3 +131,44 @@ in this pass. None of the numbered weather parity gates is marked complete.
   locked build, 24 Python tests, creator/viewer/flight GPU checks and asset
   guards passed. Night active sample: 330 frames/300 measured, zero paused;
   mean 1.38 ms, p95 1.57 ms. No matched retail or Windows/macOS runtime check.
+
+## Cloud geometry slice — 2026-09-15
+
+- Reviewed EXE hash-gated reader imports nine 26-byte cloud descriptors from
+  `0x50c298`; only inert placement/rotation/mask fields enter `TORE_CLOUDS_V1`.
+  The original executable and shape modules are never loaded as code.
+- `0x4a8b90/0x4a8ba0` load `CLOUD1.SH`, replace descriptor Y with mission cloud
+  altitude in 24.8 feet, then call the repeat helper. High detail uses a 4×4
+  supercell: 144 placements, base period 131,072 feet. The renderer translates
+  nearest-period wrapping and replaces native frustum optimizations with GPU
+  clipping. Low-detail preference dispatch remains an integration gap.
+- Source CLOUD1 header exponent 10 gives `2^(10-8)` geometry scale. Its two
+  coincident horizontal faces supply opposite winding/UVs. Select the visible
+  side and use `_CLOUD1.PIC` (256×79), palette indices and index-255 cutout.
+  GPU bilinear half-coverage cutout is an adaptation; no volumetric density is invented.
+  The shape's bounded native reentry was statically reviewed: it ORs bit 2 into
+  `_effectsAllowed` before returning to shape data. No imported code executes.
+- Native generated choices 0/3/4 make a 50% draw, then choose 7,000–19,999 feet.
+  Generated launches now use that rule with a dedicated seed-one host stream.
+  Ordinary MM launches preserve explicit cloud altitude, including zero; omitted
+  MM cloud altitude defaults to zero. `TORE_CLOUD_ALTITUDE` is a bounded diagnostic
+  override. Resolved altitude stays in mission identity across weather resets.
+- `CLOUD1.LAY` has no named texture decks. Its fog/whiteout bands remain distinct
+  from the scattered-cloud producer. `CLOUDS.SH`'s 16 billboards decode, but an
+  active global producer has not been established; they are not placed arbitrarily.
+- Linux captures below/above and one foot either side of a 10,000-foot sheet
+  passed. Ukraine and Egypt use the original asset over their respective terrain.
+  F18 wide and Rafale dusk tall composition captures passed. `cloud-below.png`,
+  `cloud-above.png`, `cloud-egy.png` and `cloud-flight-tall.png` were inspected.
+  All are under ignored `.local/weather-foundation/`; these are host evidence,
+  not matched retail acceptance.
+- Synthetic checks cover cache truncation/values/provenance rejection, periodic
+  placement, half-period ties, zero altitude, query purity and generated defaults.
+  Shared CLI extraction fixtures now exercise sky/ocean/cloud dependencies.
+- Cloud checkpoint: 267 Rust tests, Clippy, locked build, 24 Python tests,
+  hash-gated static extraction, creator smoke, 24-module validation and asset
+  guards passed. Active clear/cloud sample: 330 frames, 300 measured, zero
+  paused; mean 1.83 ms, p95 2.02 ms. This differs in scene from the earlier fog
+  sample, so it is not a matched regression measurement. The final cloud pass
+  writes opaque depth after a half-coverage cutout test, preventing farther
+  vapor from drawing through cloud pixels; its GPU smoke passed.

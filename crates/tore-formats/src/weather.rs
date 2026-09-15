@@ -4,6 +4,7 @@ use crate::{Result, invalid, slice, u32_at};
 
 mod callbacks;
 pub use callbacks::Callback;
+pub mod clouds;
 pub mod palette;
 mod remap;
 pub mod shape;

@@ -304,3 +304,9 @@ cargo run --locked -p tore-formats --example creator_options -- gameassets/fight
 The output is create-new and must remain ignored. `--creator` itself extracts archive
 resources; it does not implicitly read executable tables. Unknown executable builds
 are rejected until independently reviewed. Old app caches re-import when media is available.
+
+The app's reviewed-EXE import also preserves the inert cloud placement table as
+`TORE_CLOUDS_V1`; its shared bounded reader lives in `tore-formats::weather::clouds`.
+The standalone archive extractor includes original cloud SH/PIC and ocean PIC
+resources through the same theater dependency predicate. It does not generate
+app cache records from executables.
