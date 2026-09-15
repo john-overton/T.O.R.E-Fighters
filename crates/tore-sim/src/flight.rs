@@ -17,7 +17,10 @@ pub struct State {
     pub roll_rate: f64,
     pub pitch_rate: f64,
     pub vertical_speed: f64,
+    /// Achieved aerodynamic normal load along aircraft up, excluding gravity/contact.
     pub g: f64,
+    pub maneuver: crate::telemetry::Maneuver,
+    lift_g: f64,
     pub throttle: f64,
     pub fuel: f64,
     pub payload_lbs: f64,
@@ -66,6 +69,8 @@ impl State {
             pitch_rate: 0.,
             vertical_speed: 0.,
             g: 1.,
+            lift_g: 1.,
+            maneuver: crate::telemetry::Maneuver::default(),
             throttle: 0.7,
             fuel,
             payload_lbs: 0.,
@@ -277,13 +282,14 @@ impl State {
         let mut command = (1. + input.pitch * if input.pitch > 0. { hi - 1. } else { 1. - lo })
             .clamp(lo, hi)
             * authority;
+        let requested_g = command;
         if let Some(r) = &mut self.research {
             r.advance(
                 c,
                 self.speed,
                 stall,
-                self.elevator,
-                self.rudder,
+                input.pitch,
+                input.yaw,
                 self.throttle,
                 self.bank,
                 self.roll_rate,
@@ -292,7 +298,16 @@ impl State {
                 command *= 0.15;
             }
         }
-        self.g += (command - self.g) * (DT * 4.).min(1.);
+        let severity = self.research.as_ref().map_or(0, |r| r.severity_f8);
+        let stalled = self.research.as_ref().is_some_and(|r| r.stall_active);
+        let (control_scale, lift_scale) = if stalled {
+            let (controls, lift) =
+                tore_formats::flight_model::departure::stall_authority(severity, [1024; 3], 256);
+            (controls.map(|v| v as f64 / 1024.), lift as f64 / 256.)
+        } else {
+            ([1.; 3], 1.)
+        };
+        self.lift_g += (command - self.lift_g) * (DT * 4.).min(1.);
         let basis = Basis::new(self.yaw, self.pitch, self.bank);
         let roll_limit = if self.research.is_some() {
             c.aerodynamics.roll_limit_rad_per_second.clamp(0.1, 6.)
@@ -300,9 +315,10 @@ impl State {
             c.tuning.legacy_roll_limit_rad_per_second
         };
         let tuning = model.tuning();
-        let roll_command = input.roll * roll_limit * authority;
+        let roll_command = input.roll * roll_limit * authority * control_scale[0];
         self.roll_rate += (roll_command - self.roll_rate) * (DT / tuning.roll_response_seconds);
-        let pitch_command = (command - basis.up[1]) * 32.174 / self.speed.max(60.);
+        let pitch_command =
+            (command - basis.up[1]) * control_scale[1] * 32.174 / self.speed.max(60.);
         self.pitch_rate += (pitch_command - self.pitch_rate) * (DT / tuning.pitch_response_seconds);
         // Authored trim target, not decoded gpullAOA units. Preserve a positive
         // nose/flight-path separation under load rather than aligning to zero AoA.
@@ -312,7 +328,7 @@ impl State {
         let response = model.response(Conditions {
             altitude_msl_ft: self.position[1],
             tas_fps: self.speed,
-            load_factor: self.g,
+            load_factor: self.lift_g,
         });
         let alpha = response.trim_aoa_rad;
         let desired_nose =
@@ -323,7 +339,8 @@ impl State {
         let turn_yaw = -basis.right[1] * 32.174 / self.speed.max(60.);
         let mut rotation = std::array::from_fn(|i| {
             DT * (-basis.right[i] * self.pitch_rate - basis.forward[i] * self.roll_rate
-                + basis.up[i] * (turn_yaw + input.yaw * tuning.rudder_rate * authority)
+                + basis.up[i]
+                    * (turn_yaw + self.rudder * control_scale[2] * tuning.rudder_rate * authority)
                 + alignment[i] * tuning.alignment_rate * authority)
         });
         if let Some(r) = &self.research {
@@ -339,6 +356,22 @@ impl State {
                 }
             }
         }
+        self.maneuver = crate::telemetry::Maneuver {
+            tick: self.ticks,
+            commanded_g: requested_g,
+            lift_g: self.lift_g * lift_scale,
+            body_rates_rad_per_second: [
+                -dot(rotation, basis.forward) / DT,
+                -dot(rotation, basis.right) / DT,
+                dot(rotation, basis.up) / DT,
+            ],
+            rudder_command: input.yaw,
+            rudder_deflection: self.rudder,
+            effective_rudder: self.rudder * control_scale[2],
+            departure: self.research.as_ref().map(|r| r.departure.mode),
+            stall_severity_f8: severity,
+            ..Default::default()
+        };
         let basis = basis.rotated(rotation);
         [self.yaw, self.pitch, self.bank] = basis.angles();
         let max_thrust = c
@@ -357,12 +390,17 @@ impl State {
         } * lapse;
         let weight = c.mass.empty_lbs + self.fuel + self.payload_lbs;
         // Drag normalized against the source 1G upper envelope. This is not the native force law.
-        let drag = max_thrust
-            * lapse
-            * (self.speed / vmax.max(100.)).powi(2)
-            * (1. + loading * c.aerodynamics.loaded_drag_percent / 100.)
+        // Fitted symmetric slip loss, based on air-relative motion rather than
+        // rudder command or the native display-slip offset. Aircraft-owned tuning.
+        let slip_fraction = dot(unit(self.velocity), basis.right);
+        let slip_drag = weight * tuning.sideslip_drag * slip_fraction.powi(2) * authority;
+        let drag = slip_drag
+            + max_thrust
+                * lapse
+                * (self.speed / vmax.max(100.)).powi(2)
+                * (1. + loading * c.aerodynamics.loaded_drag_percent / 100.)
             + weight
-                * (c.aerodynamics.g_pull_drag_f8 * (self.g.abs() - 1.).max(0.)
+                * (c.aerodynamics.g_pull_drag_f8 * (self.lift_g.abs() - 1.).max(0.)
                     + c.native.drag.gear as f64 * self.gear
                     + c.native.drag.flaps as f64 * self.flaps
                     + c.native.drag.airbrake as f64 * self.brake)
@@ -375,10 +413,15 @@ impl State {
         let direction = unit(self.velocity);
         let along = dot(basis.up, direction);
         let lift = unit(std::array::from_fn(|i| basis.up[i] - along * direction[i]));
+        // Specific force along body-up. Thrust is body-forward; drag can have
+        // a normal component when attitude differs from the air-relative path.
+        self.g = dot(lift, basis.up) * self.lift_g * lift_scale
+            - dot(direction, basis.up) * drag / weight;
+        self.maneuver.achieved_g = self.g;
         for i in 0..3 {
             self.velocity[i] += (basis.forward[i] * thrust / weight * 32.174
                 - direction[i] * drag / weight * 32.174
-                + lift[i] * self.g * 32.174
+                + lift[i] * self.lift_g * lift_scale * 32.174
                 - if i == 1 { 32.174 } else { 0. })
                 * DT;
         }
@@ -430,6 +473,105 @@ impl Clock {
 mod tests {
     use super::integration_tests::profile;
     use super::*;
+    fn response_models() -> [crate::models::AircraftModel; 2] {
+        use crate::models::{AircraftModel, f18::F18FlightModel, rafale_c::RafaleCFlightModel};
+        [
+            AircraftModel::F18(F18FlightModel::from_aircraft(&profile()).unwrap()),
+            AircraftModel::RafaleC(RafaleCFlightModel::from_aircraft(&profile()).unwrap()),
+        ]
+    }
+    #[test]
+    fn achieved_load_and_body_rates_match_applied_motion_in_both_models_and_adapters() {
+        for model in response_models() {
+            for hybrid in [false, true] {
+                for pitch in [-1.57, 0., 1.57, 2.5] {
+                    let mut s = State::from_model(model.clone(), [0., 15000., 0.]);
+                    if hybrid {
+                        s.enable_research(1).unwrap();
+                    }
+                    s.pitch = pitch;
+                    let before = Basis::new(s.yaw, s.pitch, s.bank);
+                    let velocity = s.velocity;
+                    s.step(
+                        &PilotInput {
+                            pitch: 1.,
+                            roll: 0.7,
+                            yaw: -0.6,
+                            ..Default::default()
+                        },
+                        |_, _| 0.,
+                    );
+                    let after = Basis::new(s.yaw, s.pitch, s.bank);
+                    let specific_force = std::array::from_fn(|i| {
+                        (s.velocity[i] - velocity[i]) / DT / 32.174 + if i == 1 { 1. } else { 0. }
+                    });
+                    assert!((dot(specific_force, after.up) - s.g).abs() < 1e-10);
+                    assert_eq!(s.maneuver.achieved_g, s.g);
+                    assert_eq!(s.maneuver.tick, s.ticks);
+                    let [roll, pitch, yaw] = s.maneuver.body_rates_rad_per_second;
+                    let reconstructed = before.rotated(std::array::from_fn(|i| {
+                        DT * (-roll * before.forward[i] - pitch * before.right[i]
+                            + yaw * before.up[i])
+                    }));
+                    assert!(dot(reconstructed.forward, after.forward) > 1. - 1e-12);
+                    assert!(dot(reconstructed.up, after.up) > 1. - 1e-12);
+                    assert!((s.maneuver.commanded_g - s.g).abs() > 0.1);
+                }
+            }
+        }
+    }
+    #[test]
+    fn rudder_is_symmetric_releases_and_slip_dissipates_energy() {
+        for model in response_models() {
+            for hybrid in [false, true] {
+                let mut left = State::from_model(model.clone(), [0., 15000., 0.]);
+                left.yaw = 0.;
+                left.velocity = [0., 0., left.speed];
+                if hybrid {
+                    left.enable_research(1).unwrap();
+                }
+                let mut right = left.clone();
+                for tick in 0..1200 {
+                    let yaw = if tick < 600 { 1. } else { 0. };
+                    left.step(
+                        &PilotInput {
+                            yaw: -yaw,
+                            ..Default::default()
+                        },
+                        |_, _| 0.,
+                    );
+                    right.step(
+                        &PilotInput {
+                            yaw,
+                            ..Default::default()
+                        },
+                        |_, _| 0.,
+                    );
+                    assert!((left.speed - right.speed).abs() < 1e-8);
+                    assert!((left.position[0] + right.position[0]).abs() < 1e-8);
+                    assert!(
+                        (left.maneuver.body_rates_rad_per_second[2]
+                            + right.maneuver.body_rates_rad_per_second[2])
+                            .abs()
+                            < 1e-8
+                    );
+                }
+                assert!(right.rudder.abs() < 1e-12);
+                let mut config = model.configuration().clone();
+                config.tuning.sideslip_drag = 0.;
+                let mut no_drag_model = model.clone();
+                no_drag_model.set_configuration(config).unwrap();
+                let mut drag = State::from_model(model.clone(), [0., 15000., 0.]);
+                let mut no_drag = State::from_model(no_drag_model, drag.position);
+                drag.velocity[0] += 100.;
+                no_drag.velocity = drag.velocity;
+                drag.step(&Default::default(), |_, _| 0.);
+                no_drag.step(&Default::default(), |_, _| 0.);
+                assert!(drag.speed < no_drag.speed);
+            }
+        }
+    }
+
     #[test]
     fn disturbance_rotation_completes_loop_without_rotating_velocity() {
         let mut state = State::new(&profile(), [0., 5000., 0.]).unwrap();

@@ -371,6 +371,42 @@ mod tests {
         assert_eq!(spin_direction(0, 0, true), -1);
     }
     #[test]
+    fn recovery_boundaries_both_directions_and_supported_entry_profiles() {
+        for direction in [-1, 1] {
+            for entry in [0, 1] {
+                let p = DepartureProfile {
+                    spin_entry: entry,
+                    spin_exit: -2,
+                    ..P
+                };
+                let threshold = if entry == 1 { 240 } else { 120 };
+                let pitch_threshold = if entry == 1 { 128 } else { 0 };
+                let mut i = input();
+                i.rudder = threshold * direction as i32;
+                i.pitch_stick = pitch_threshold;
+                assert!(!spin_entry(&p, DepartureMode::Warning, i, direction));
+                i.pitch_stick += 1;
+                assert!(spin_entry(&p, DepartureMode::Warning, i, direction));
+                i.rudder -= direction as i32;
+                assert!(!spin_entry(&p, DepartureMode::Warning, i, direction));
+                for (rudder, pitch, speed, expected) in [
+                    (-199, -1, 211, false),
+                    (-200, 0, 211, false),
+                    (-200, -1, 210, false),
+                    (-200, -1, 211, true),
+                    (0, -256, 400, false),
+                ] {
+                    i.rudder = rudder * direction as i32;
+                    i.pitch_stick = pitch;
+                    i.speed_f8 = speed * 256;
+                    i.throttle_f8 = 0;
+                    assert_eq!(spin_recovery(&p, i, direction, false), expected);
+                    assert!(!spin_recovery(&p, i, direction, true));
+                }
+            }
+        }
+    }
+    #[test]
     fn mirrored_spin_recovery_timer_and_latched_lock() {
         let mut outcomes = vec![];
         for direction in [-1, 1] {

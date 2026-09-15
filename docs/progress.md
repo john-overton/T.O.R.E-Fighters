@@ -8,14 +8,18 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
 
 - [x] Review existing flight-model/native-research coverage and write the
   [ordered implementation plan](flight-response-plan.md).
-- [ ] 1. Trace G, body rates, rudder and departure producers/consumers; record baselines.
-- [ ] 2. Finish verified G/roll/rudder response and typed telemetry contracts.
-- [ ] 3. Complete supported departure/warning/spin/recovery behavior.
+- [x] 1. Trace G, body rates, rudder and departure producers/consumers; record baselines.
+- [x] 2. Finish verified G/roll/rudder response and typed telemetry contracts.
+- [x] 3. Complete supported departure/warning/spin/recovery behavior.
 - [ ] 4. Connect sustained intensity-based maneuver rumble and verified original audio.
 - [ ] 5. Validate both aircraft/adapters, record evidence and hand off to aircraft imports.
 
 Further weather work follows this slice and the scheduled aircraft additions below. Existing weather work is retained.
-The plan adds no runtime behavior and does not claim native flight parity.
+Steps 1–3 now have [response/departure evidence](baselines/flight-response.md).
+Achieved G and applied body rates are separate from demand; hybrid consumes
+stall attenuation and corrected spin dispatch/recovery. Legacy remains the
+default without native warning/spin support. Initial native envelope/difficulty,
+tumble and complete movement/display coupling remain open; step 4 is next.
 
 ## Scheduled aircraft additions — 2026-09-15
 

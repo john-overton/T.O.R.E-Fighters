@@ -489,3 +489,18 @@ It differs from the isolated `--headless-flight` dynamics probe. AirData uses
 a declared standard atmosphere; unavailable IAS/CAS/indicated altitude remain
 unavailable. The vapor probe includes each raw CE point and nearest neutral
 mesh vertex. [Acceptance](baselines/wind-turbulence-vapor.md).
+
+### Flight-response diagnostics
+
+The renderer-independent `response_probe` example covers both adapters for each
+provided extracted PT, including applied G/rates, roll/rudder release, stall/spin
+and recovery, low/high speed, devices, payload and full loops:
+
+```sh
+cargo run --locked -p tore-sim --example response_probe -- .local/aircraft/f18/FA_2.LIB/F18.PT .local/aircraft/rafale/FA_2.LIB/RAFALE.PT
+```
+
+Set `TORE_RESPONSE_TRACE=.local/response-traces` to record per-tick state. Traces
+are source-derived local artifacts; do not commit them. See [conditions/results
+and remaining gates](baselines/flight-response.md). This complements the hybrid
+`--validate-flight` extraction suite; it is not a retail trajectory oracle.

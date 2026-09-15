@@ -45,6 +45,9 @@ pub struct Research {
     pub recovery_ticks: i32,
     pub spin_intensity_f8: i32,
     pub on_ground: bool,
+    /// Applied this tick, before the native stall timer is advanced.
+    pub severity_f8: i32,
+    pub stall_active: bool,
     pub clock: FixedClock,
     pub rng: NativeRng,
     pub elapsed: i32,
@@ -57,6 +60,8 @@ impl Research {
             recovery_ticks: 0,
             spin_intensity_f8: 0,
             on_ground: false,
+            severity_f8: 0,
+            stall_active: false,
             clock: FixedClock::default(),
             rng: NativeRng::seeded(seed)?,
             elapsed: 0,
@@ -86,6 +91,34 @@ impl Research {
             thrust_vector_f8: 0,
             inhibited: self.on_ground,
         };
+        self.severity_f8 = 0;
+        self.stall_active = false;
+        if self.on_ground {
+            self.departure = StallState::default();
+            self.spinning = 0;
+            self.recovery_ticks = 0;
+            self.spin_intensity_f8 = 0;
+            return;
+        }
+        // Native spin entry precedes mode dispatch, using quantized native inputs.
+        if self.spinning == 0
+            && c.native.departure.spin_entry != 2
+            && matches!(
+                self.departure.mode,
+                DepartureMode::Warning | DepartureMode::Stalled
+            )
+        {
+            let rate = (roll_rate.to_degrees() * 256.) as i32;
+            let bank = (bank.to_degrees() * 65536. / 360.) as i16;
+            let random = rate == 0 && bank == 0 && self.rng.chance(50).expect("bounded generator");
+            let direction = departure::spin_direction(rate, bank, random);
+            if departure::spin_entry(&c.native.departure, self.departure.mode, input, direction) {
+                self.spinning = direction;
+                self.spin_intensity_f8 = 0;
+                self.recovery_ticks = 0;
+                self.departure.mode = DepartureMode::Spinning;
+            }
+        }
         if self.spinning != 0 {
             let command = input.rudder * self.spinning as i32;
             if command.abs() >= 200 {
@@ -112,36 +145,29 @@ impl Research {
                 self.recovery_ticks = 0;
             }
         } else {
-            // All inputs are bounded and ticks is positive by construction.
+            if self.departure.mode == DepartureMode::Stalled {
+                self.stall_active = true;
+                self.severity_f8 = departure::stall_severity(
+                    &c.native.departure,
+                    self.departure.elapsed,
+                    speed as i32,
+                    (stall as i32).max(1),
+                )
+                .expect("positive stall speed")
+                .clamp(0, 256);
+            }
+            // Fitted clean-envelope gate; difficulty/VTOL/current-G native setup
+            // is not reproduced by this continuous adapter.
             self.departure
                 .advance(
                     &c.native.departure,
                     speed < stall,
-                    speed < stall && !self.on_ground,
+                    speed < stall,
                     c.native.extended_warning,
-                    self.on_ground,
+                    false,
                     ticks,
                 )
                 .expect("positive fixed time");
-            if matches!(
-                self.departure.mode,
-                DepartureMode::Warning | DepartureMode::Stalled
-            ) {
-                // Source tie draw occurs only for exactly zero bank and roll rate.
-                let random = bank == 0.
-                    && roll_rate == 0.
-                    && self.rng.chance(50).expect("bounded generator");
-                let direction = departure::spin_direction(
-                    (roll_rate.to_degrees() * 256.) as i32,
-                    (bank.to_degrees() * 65536. / 360.) as i16,
-                    random,
-                );
-                if departure::spin_entry(&c.native.departure, self.departure.mode, input, direction)
-                {
-                    self.spinning = direction;
-                    self.departure.mode = DepartureMode::Spinning;
-                }
-            }
         }
     }
     pub fn spin_yaw_rate(&self, c: &crate::models::config::Configuration) -> f64 {
@@ -213,5 +239,67 @@ impl Research {
         }
         s.position[1] = s.position[1].max(floor);
         s.vertical_speed = s.velocity[1];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{flight::integration_tests::profile, models::FlightModel};
+    fn config() -> crate::models::config::Configuration {
+        crate::models::AircraftModel::for_aircraft(&profile())
+            .unwrap()
+            .configuration()
+            .clone()
+    }
+    #[test]
+    fn entry_precedes_dispatch_resets_each_spin_and_recovery_is_continuous() {
+        for entry in [0, 1] {
+            for direction in [-1., 1.] {
+                let mut c = config();
+                c.native.departure.spin_entry = entry;
+                c.native.departure.spin_exit = -2;
+                let mut r = Research::new(1).unwrap();
+                r.spin_intensity_f8 = 25000;
+                // Normal -> warning cannot also enter a spin in the same tick.
+                r.advance(&c, 180., 200., 1., direction, 0., -direction * 0.01, 0.);
+                assert_eq!(r.departure.mode, DepartureMode::Warning);
+                assert_eq!(r.spinning, 0);
+                r.advance(&c, 180., 200., 1., direction, 0., -direction * 0.01, 0.);
+                assert_eq!(r.spinning, direction as i8);
+                assert!(r.spin_intensity_f8 < 100);
+                for _ in 0..100 {
+                    r.advance(&c, 250., 200., -1., -direction, 0., 0., 0.);
+                }
+                assert!(r.recovery_ticks > 0);
+                r.advance(&c, 250., 200., -1., 0., 0., 0., 0.);
+                assert_eq!(r.recovery_ticks, 0);
+                for _ in 0..119 {
+                    r.advance(&c, 250., 200., -1., -direction, 0., 0., 0.);
+                }
+                assert_ne!(r.spinning, 0);
+                r.advance(&c, 250., 200., -1., -direction, 0., 0., 0.);
+                assert_eq!(r.spinning, 0);
+                assert_eq!(r.departure.mode, DepartureMode::Normal);
+            }
+        }
+    }
+    #[test]
+    fn severity_uses_preincrement_timer_and_ground_clears_departure() {
+        let mut c = config();
+        c.native.departure.severity = 256;
+        let mut r = Research::new(1).unwrap();
+        r.departure = StallState {
+            mode: DepartureMode::Stalled,
+            elapsed: 1024,
+        };
+        r.advance(&c, 100., 200., 0., 0., 0., 0.1, 0.);
+        assert!(r.stall_active && r.severity_f8 > 0);
+        assert!(r.departure.elapsed > 1024);
+        r.on_ground = true;
+        r.advance(&c, 100., 200., 1., 1., 1., 0., 0.);
+        assert_eq!(r.departure, StallState::default());
+        assert!(!r.stall_active);
+        assert_eq!(r.severity_f8, 0);
     }
 }

@@ -129,7 +129,10 @@ and extracted Rafale C data. Run the Hornet with `cargo run --locked -p tore-app
 --free-flight --researched-flight`; add `--aircraft rafale` for the Rafale C
 with its own cockpit and animation rig. Use `tools/extract_assets.py
 --aircraft rafale --validate-flight` with your media options to reproduce the
-second-aircraft workflow. See [flight-model commands and scope](docs/FLIGHT-MODEL.md).
+second-aircraft workflow. Supported G/rate telemetry, rudder response and hybrid
+stall/spin recovery now have [both-adapter evidence](docs/baselines/flight-response.md);
+maneuver audio/rumble and full native parity remain open. See
+[flight-model commands and scope](docs/FLIGHT-MODEL.md).
 
 F/A-18D and Rafale C now own separate flight-law modules and independently editable
 typed configurations for mass, thrust/fuel, aerodynamics, departure/contact, equipment

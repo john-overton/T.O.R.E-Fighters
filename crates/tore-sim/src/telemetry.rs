@@ -135,3 +135,21 @@ impl AirData {
         })
     }
 }
+
+/// Authoritative last fixed-step response. Rates are projections of the applied
+/// rotation vector on the pre-step body axes, never wrapped Euler differences.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Maneuver {
+    pub tick: u64,
+    pub commanded_g: f64,
+    pub lift_g: f64,
+    pub achieved_g: f64,
+    /// Positive right wing down / nose up / nose right, radians per second.
+    pub body_rates_rad_per_second: [f64; 3],
+    pub rudder_command: f64,
+    pub rudder_deflection: f64,
+    pub effective_rudder: f64,
+    /// None: legacy adapter does not implement the native departure state machine.
+    pub departure: Option<tore_formats::flight_model::departure::DepartureMode>,
+    pub stall_severity_f8: i32,
+}

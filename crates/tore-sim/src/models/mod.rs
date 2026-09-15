@@ -10,6 +10,8 @@ pub struct Tuning {
     pub pitch_response_seconds: f64,
     pub alignment_rate: f64,
     pub rudder_rate: f64,
+    /// Fitted drag/weight per squared lateral airspeed fraction.
+    pub sideslip_drag: f64,
     pub trim_degrees: f64,
     pub pull_aoa_degrees_per_g: f64,
     pub thrust_lapse_feet: f64,
@@ -28,6 +30,7 @@ impl Tuning {
         let nonnegative = [
             self.alignment_rate,
             self.rudder_rate,
+            self.sideslip_drag,
             self.trim_degrees,
             self.pull_aoa_degrees_per_g,
             self.tire_scrub_rate,

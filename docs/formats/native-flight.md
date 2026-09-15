@@ -199,7 +199,8 @@ The spin branch (`0x47b780..0x47b998`) is substantially translated:
 
 The imported F/A-18D has `spinEntry=0`, `spinExit=-2`, yaw endpoints 120/180,
 AoA 30/70 and bank offsets 15/5 degrees. These are **game model parameters**, not
-real-world aircraft limits. The adapter currently does not use them.
+real-world aircraft limits. The hybrid uses yaw endpoints with fitted coupling;
+movement/display offsets remain diagnostic (see the response ledger below).
 
 ### Scalar forces and movement
 
@@ -562,3 +563,45 @@ controlled takeoff must transition from rotation to a climb command rather than
 hold a loop-producing high-G pull. Wind must be subtracted for air-relative
 forces and added back for position, not change TAS merely through advection.
 These are fitted integration decisions, not newly decoded native instructions.
+
+## Response producer/consumer ledger — 2026-09-15
+
+The repeatable flight extraction now includes bounded setup (`0x47b020..0x47b250`),
+control (`0x47ba8c..0x47c682`), finish (`0x47c682..0x47c860`) and maneuver-sound
+input/caller slices. Build/resource hashes and measurements are in the
+[response baseline](../baselines/flight-response.md). The fixed-address pass is
+still restricted to the reviewed FA EXE/SMS pair; SMS symbols do not prove that
+another source build has these contracts.
+
+| Channel | Native producer and units | Consumers and boundary |
+| --- | --- | --- |
+| G, cp+0x19b (`0x50d01b`) | Signed fixed8 G; `0x47c0ea..0x47c10b` sends pitch command, loaded limits, neutral 256 and source rates to `StickInput` | AoA/G-to-turn, drag, stall selection, sound `0x434555`. This is a controlled G state, not a measured accelerometer. Runtime achieved normal-force G is a separately defined adapter channel. |
+| Roll rate, cp+0x17f (`0x50cfff`) | Signed fixed8 degrees/time, source `_brv.x` limits and `StickInput` around `0x47c246..0x47c2aa` | Body/movement transform, spin direction, sound absolute value divided by 37 plus 384. Native scheduling remains separate from host seconds. |
+| Rudder (`0x545200`) | Signed pilot/control domain −256..256, read at setup `0x47b048`; stalled branch modifies it at `0x47b3b0..0x47b3c4` | Spin entry/recovery, normal yaw `StickInput` at `0x47c529..0x47c578`, sound absolute command ×4 unless flag 0x1000. It is not measured sideslip or a physical pedal angle. |
+| Slip offset, cp+0x1ab (`0x50d02b`) | Normal control computes offset after yaw response; spin slews it toward zero | Display-angle composition and native drag. It is distinct from world-velocity-derived sideslip used by AirData. Full normal loaded/damage control producers remain incomplete. |
+| Departure, cp+0x20c / timer +0x20d | Byte mode / signed word time; entry before dispatch at `0x47b250`; warning/stall transitions in that slice | Control/lift attenuation, movement fall, spin, sound. Modes/transition helper are translated; native current-G classification, difficulty, device and tumble producers are not all runtime-connected. |
+| AoA offset, cp+0x1a7 (`0x50d027`) | Controlled fixed8 degree display offset, from normal G/speed and spin endpoints | Display composition; not interchangeable with geometric AoA from body/velocity. |
+
+`0x47ccb0` tests global inhibition, departure mode, PT spinEntry and vector-thrust
+inhibition **before** requesting direction. Direction uses the signed native
+quantized rate and bank. On entry, `0x47cd49..0x47cd62` writes mode/direction and
+zeros recovery time/intensity. The adapter now follows this ordering and resets,
+with caller-owned clock/RNG. Native global RNG stream/lifecycle remains unverified.
+The reviewed Rafale has spinEntry 1; Hornet has 0; both have spinExit −2.
+
+Stalled severity samples the timer before the increment at `0x47b3ed`.
+The source selects the current-G envelope's stall speed for severity; initial
+warning classification additionally branches through `0x49d230` at `0x47b9ee`.
+The hybrid's clean-envelope reference/classification remains explicitly fitted.
+Its connected attenuation uses the already translated scalar helper; this does
+not establish native control/force update parity.
+
+Pitch fall depends on movement pitch, trig factors and the deadline at cp+0x1ca;
+roll fall uses movement roll and an additional exact-zero random branch
+(`0x47b2e2..0x47b36f`). These are not body Euler-angle targets. Tumble/deadline
+producers and complete later composition remain unconnected. They must not be
+filled in by adding noise or applying sound intensity to aerodynamic forces.
+
+Hybrid uses native yaw endpoints with fitted continuous coupling;
+movement pitch/roll, speed slew and display AoA/bank offsets remain diagnostic.
+See [current runtime contracts](../FLIGHT-MODEL.md#flight-response-contracts--2026-09-15).

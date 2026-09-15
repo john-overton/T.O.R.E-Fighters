@@ -25,6 +25,7 @@ impl RafaleCFlightModel {
             pitch_response_seconds: 0.1,
             alignment_rate: 0.7,
             rudder_rate: 0.12,
+            sideslip_drag: 0.5,
             trim_degrees: 2.,
             pull_aoa_degrees_per_g: 1.25,
             thrust_lapse_feet: 70000.,

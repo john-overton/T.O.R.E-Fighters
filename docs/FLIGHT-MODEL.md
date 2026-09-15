@@ -9,8 +9,8 @@ trajectory parity or a real-aircraft engineering model.
 ## Next scheduled work
 
 The [flight response and maneuver buffet plan](flight-response-plan.md) orders
-remaining G-load, roll-rate, rudder and departure work, followed by sustained
-maneuver rumble and verified original audio. This slice precedes further weather
+completed supported G-load, roll-rate, rudder and departure contracts, followed by
+next scheduled sustained maneuver rumble and verified original audio. This slice precedes further weather
 work. Existing implementations below remain partial/fitted as documented.
 
 ## Run and reproduce
@@ -59,7 +59,7 @@ rate independence, wind, mass validation and ground behavior without retail data
 | Envelopes and mass | Original G polygons, empty weight, internal fuel, military/AB thrust, consumption and drag/loading fields. Scalars resolve once when creating state; envelope intersection no longer allocates per update. |
 | Attitude and momentum | Shared orthonormal basis, independent velocity and nose direction, full vertical/inverted flight. Float integration, aerodynamic alignment, trim AoA, atmosphere lapse, response and drag normalization are fitted. |
 | Controls | Original roll-rate maximum in the hybrid path; G authority from aircraft envelopes/loading. Response filtering, pitch/yaw coupling and actuator travel are fitted. |
-| Departure | Native warning/stall transitions and spin entry/recovery predicates with explicit clock/RNG. Initial stall classification uses a fitted below-clean-envelope gate. Spin yaw range/intensity comes from PT/native rate arithmetic; continuous spin force/attitude coupling is fitted. The two reviewed aircraft use spinExit −2. |
+| Departure | Native warning/stall transitions, connected severity/control/lift attenuation and spin entry/recovery predicates with explicit clock/RNG. Initial stall classification uses a fitted below-clean-envelope gate. Spin yaw range/intensity comes from PT/native rate arithmetic; continuous spin force/attitude coupling is fitted. The two reviewed aircraft use spinExit −2. |
 | Propulsion/fuel/devices | Per-aircraft military/AB thrust and fuel consumption; engine/fuel/throttle gates; gear, flaps, brake, hook and burner state. Lapse, exhaust ramp and three-second actuator travel remain fitted. |
 | Ground contact | Native landing limits classify touchdown. Hybrid accepts only caller-declared landable ground with gear deployed and within limits; water and unsafe touchdowns crash. Eight-foot CG clearance, flat-runway tire scrub, rolling/brake friction, pitch support and crash severity policy are fitted. |
 | Wind | Explicit world wind in ft/s via `research::Surface`; aerodynamic forces use air-relative velocity, position uses ground velocity. Synthetic advection test holds airspeed unchanged and checks 400-foot drift over ten seconds at 40 ft/s. |
@@ -198,3 +198,44 @@ The [aircraft import and acceptance guide](aircraft-import.md) joins extraction,
 existing flight/presentation/systems coverage and all per-aircraft acceptance
 gates. F-14, A-4E and X-31 are scheduled after the flight-response slice; they
 are not supported identities yet.
+
+## Flight response contracts — 2026-09-15
+
+Steps 1–3 of the response plan now have [acceptance evidence](baselines/flight-response.md).
+`State::g` / `AirData::load_factor_g` report aerodynamic specific force projected
+on body-up, excluding gravity/contact. Internal filtered lift remains separate.
+`State::maneuver` is the last authoritative fixed-tick snapshot: commanded G,
+attenuated lift G, achieved G, applied body roll/pitch/yaw rates in rad/s, rudder
+command/filtered deflection/effective control, optional departure mode and severity.
+It is not interpolated by presentation; consumers must not combine it with a
+render-interpolated AirData sample as if both represented the same tick.
+The existing `roll_rate`/`pitch_rate` fields are control-response state; use the
+snapshot for actual rotation, including alignment, ground and spin overrides.
+
+Rudder yaw now consumes the fitted filtered deflection, preserving a smooth
+release. Each aircraft's own tuning includes `sideslip_drag=0.5`: drag/weight is
+that coefficient times squared lateral airspeed fraction times low-speed authority.
+This symmetric continuous loss is authored, not the native display-slip drag law.
+Roll retains its single response filter and existing source/hybrid versus fitted/
+legacy cap. No new native rudder-to-roll law is asserted.
+
+Hybrid spin predicates consume bounded pilot commands in the native ±256 domain,
+not filtered artwork deflections. Entry precedes departure dispatch and clears
+intensity/recovery progress on each entry. Quantized native bank/rate values
+control tie RNG draws. Ground clears departure. The translated severity ramp
+and distinct roll/rudder versus pitch attenuation now reduce control authority
+and lift; severity samples the timer before advancement. The clean-envelope gate
+and reference speed remain fitted. Supported spinExit −2 recovery requires
+negative pitch, opposite rudder at least 200/256 and speed above clean stall+10
+whole fps for 256 continuous clock units; neutral rudder interrupts the timer.
+Throttle is not a requirement for either supported profile.
+
+Native pitch/roll fall, tumble, full current-G/difficulty/device classification,
+spin movement/display composition and original scheduling remain open. Legacy
+still has fitted low-speed lift loss with no native warning/spin state machine;
+its maneuver departure channel is `None`. This does not change adapter selection.
+
+Run `cargo run --locked -p tore-sim --example response_probe -- PATH/F18.PT
+PATH/RAFALE.PT` for both-adapter response/loop checks; set `TORE_RESPONSE_TRACE`
+to an ignored local directory for per-tick evidence. The existing extraction
+`--validate-flight` suite continues to cover both identities in hybrid mode.

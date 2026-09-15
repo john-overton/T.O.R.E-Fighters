@@ -5,7 +5,14 @@ This is an implementation and acceptance plan; unchecked items claim no new
 native behavior. Scope is the reviewed F/A-18D (`F18.PT`) and Rafale C
 (`RAFALE.PT`), preserving the legacy default and explicit hybrid selection.
 
-## Existing work and the gap
+Steps 1–3 are complete for the **supported adapter contracts**, with
+[measurements and remaining native gates](baselines/flight-response.md).
+Legacy remains the default with fitted low-speed behavior; warning/stall/spin
+state-machine support belongs to hybrid. Unrecovered difficulty, tumble and
+movement/display coupling remain explicit limits, not completed native parity.
+Step 4 is next; step 5 retains retail, hardware and platform acceptance.
+
+## Current coverage and remaining gates
 
 [FLIGHT-MODEL](FLIGHT-MODEL.md) describes the working adapters and their fitted
 parts. [Native flight research](formats/native-flight.md) records translated
@@ -14,10 +21,10 @@ this plan orders the next flight-response slice.
 
 | Area | Already present | Work to finish in this slice |
 | --- | --- | --- |
-| G-load / AoA | Source envelopes/loading, fitted pitch/trim response and load-factor/AoA telemetry | Verify commanded versus achieved G, sign/units and native producers; finish supported response and feedback consumers |
-| Roll rate | Body response; source roll maximum in hybrid, configured fitted cap in legacy | Verify actual body-rate units, limiting, release and departure coupling; avoid deriving rates from camera or wrapped Euler angles |
-| Rudder / slip | Fitted yaw/slip response; native spin-entry/recovery predicates | Trace control scaling, authority and drag/coupling, then verify symmetric response and recovery |
-| Departure / spin | Translated warning/stall predicates and timers; hybrid spin entry/recovery with fitted continuous coupling | Resolve missing producers and warning/stall/tumble/control effects incrementally; preserve explicit clock/RNG inputs |
+| G-load / AoA | Source ledger, separate demand/lift/achieved G and geometric AoA telemetry; acceleration checks | Full native loaded/damage force ordering and feedback consumers |
+| Roll rate | Applied body-rate snapshot, verified release and full-loop probes; source hybrid/fitted legacy caps | Full native control/load/damage producers and retail comparison |
+| Rudder / slip | Distinct command/deflection/effective controls, fitted symmetric slip drag and yaw release; tested native spin predicates | Native display-slip/force coupling and retail calibration |
+| Departure / spin | Translated warning/stall predicates and timers, connected severity/control/lift attenuation; corrected hybrid spin entry/recovery with fitted continuous coupling | Native initial difficulty/device classification, movement fall/tumble and full coupling remain open |
 | Maneuver feedback | Native sound-side `Turbulence` routine traced at `0x434550`, caller at `0x434d76` | Recover full input-to-intensity and sound dispatch contracts; integrate a distinct maneuver-feedback signal |
 | Controller rumble | Environmental turbulence supplies severity only when its shake flag is set; overlapping pulses support sustained strong events | Add sustained maneuver feedback with intensity tracking, release and lifecycle checks; audit the mild environmental threshold separately |
 
@@ -29,16 +36,16 @@ intensity into forces. Do not trigger feedback merely from stick deflection.
 
 ## 1. Trace producers and establish a baseline
 
-- [ ] Extend the repeatable static extraction pass for the relevant flight and
+- [x] Extend the repeatable static extraction pass for the relevant flight and
   sound callers. Record executable/resource hashes, source-build distinctions,
   offsets, units, signedness, clamps, update order and unresolved branches.
-- [ ] Map G, actual roll rate, rudder command/deflection, AoA/slip and departure
+- [x] Map G, actual roll rate, rudder command/deflection, AoA/slip and departure
   state from source producers through force/control, display and sound consumers.
   Establish whether a channel is a demand, measured response or display offset.
-- [ ] Record the current behavior of both adapters and aircraft before edits:
+- [x] Record the current behavior of both adapters and aircraft before edits:
   level flight, hard pull and push, sustained turn, roll/release, rudder/release,
   low-speed warning/stall, spin entry and recovery.
-- [ ] Capture per-tick inputs, configuration identity, wind/atmosphere/contact,
+- [x] Capture per-tick inputs, configuration identity, wind/atmosphere/contact,
   G/AoA/slip, body rates, velocity, attitude, departure state/timers and RNG state.
   Put local source-derived traces in `.local/`, committed methodology and results
   in `docs/baselines/flight-response.md` when that evidence exists.
@@ -49,17 +56,17 @@ remain inert data. A missing native branch stays explicitly unresolved.
 
 ## 2. Finish G, roll and rudder response contracts
 
-- [ ] Correct verified input/output units and state ownership before tuning.
+- [x] Correct verified input/output units and state ownership before tuning.
   Resolve reviewed PT fields once into each model's typed configuration; validate
   configuration replacement. Keep F18 and Rafale laws in their own modules.
-- [ ] Complete supported G-envelope/loading and pitch-response consumers, checking
+- [x] Complete supported G-envelope/loading and pitch-response consumers, checking
   positive/negative load, low/high speed and relevant device/loading changes.
   Do not equate requested G or raw stick position with achieved load factor.
-- [ ] Complete verified roll authority, acceleration/limiting and release behavior;
+- [x] Complete verified roll authority, acceleration/limiting and release behavior;
   preserve actual body rates through vertical/inverted flight.
-- [ ] Complete verified rudder authority, sideslip/drag and roll/yaw coupling.
+- [x] Complete verified rudder authority, sideslip/drag and roll/yaw coupling.
   Document any remaining fitted law per aircraft instead of borrowing calibration.
-- [ ] Expose typed maneuver telemetry only where existing `AirData`/state channels
+- [x] Expose typed maneuver telemetry only where existing `AirData`/state channels
   are insufficient; consumers must use one authoritative fixed-tick snapshot.
 
 **Gate:** symmetric left/right probes where supported by the model; finite
@@ -69,15 +76,15 @@ velocity. Do not silently switch the default adapter or claim whole-tick parity.
 
 ## 3. Complete supported departure and recovery behavior
 
-- [ ] Trace remaining envelope/difficulty/device predicates and warning timers.
+- [x] Trace remaining envelope/difficulty/device predicates and warning timers.
   Separate the existing fitted stall-entry gate from verified native predicates.
-- [ ] Verify control/lift attenuation and implement newly recovered departure
+- [x] Verify control/lift attenuation and implement newly recovered departure
   consumers, including pitch/roll fall or tumble only when their contracts are
   established. Keep random choices and mutable timers outside configuration.
-- [ ] Verify spin direction, entry/recovery thresholds, interrupted recovery,
+- [x] Verify spin direction, entry/recovery thresholds, interrupted recovery,
   neutral/opposite rudder, throttle/pitch requirements and source state flags for
   each aircraft. Preserve movement/display-angle distinctions.
-- [ ] Make warning/departure state available to feedback without feeding a
+- [x] Make warning/departure state available to feedback without feeding a
   presentation effect back into aerodynamic state.
 
 **Gate:** deterministic warning → stall/spin → recovery traces, threshold-boundary

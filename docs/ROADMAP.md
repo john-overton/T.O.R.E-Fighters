@@ -9,7 +9,8 @@ Track concrete steps, substeps and acceptance gates in [progress.md](progress.md
 This is the sequencing document for the ground-up rebuild in Rust.  The existing TypeScript repo /USNF-ATF is the guide, not the gospel: its format docs, decoders, recovered geometry, audio recovery, and baselines are the reference material.  Its engine is not being ported.
 
 Next scheduled slice (2026-09-15): [flight response and maneuver buffet](flight-response-plan.md),
-covering G-load, roll rate, rudder, departure and sustained feedback. Then add
+with supported G-load, roll rate, rudder and departure steps completed; sustained
+feedback and final acceptance remain next. See [response evidence](baselines/flight-response.md). Then add
 F-14, A-4E and X-31 through the [aircraft import gates](aircraft-import.md),
 before resuming remaining weather work. This does not schedule broader AI or menus.
 
