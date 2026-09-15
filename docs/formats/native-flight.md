@@ -112,7 +112,7 @@ by a weight term scaled by the speed-dependent drag percentage.
 | Rudder | Normal branch `0x47c419–0x47c682` relates turn rate, authority, slip and bank | Translate all scaling/caller ranges and coupled turn acceptance |
 | Stall/spin | PT fields and `_FMFlight` state branches identified | Translated branch-local timers/severity and spin entry/motion/recovery; full dispatch, tumble and events remain |
 | Ground | `_GetGround` `0x47af20`, collision helper `0x477240` located | Landing classifier, wheel drag and pitch settling translated; complete contact/crash/carrier behavior remains |
-| Turbulence | `_FMTurbulence` `0x477590` located | RNG/state contract, weather coupling and replay determinism |
+| Turbulence | `_FMTurbulence` `0x477590`: low-altitude/nearby-aircraft branches, daylight scaling and timed state traced; [follow-up](weather.md) | Complete geometry/surface semantics, RNG/scheduler acceptance, maneuver buffet and replay determinism |
 | Devices | Gear/flap/brake/vector/fuel update symbols inventoried | Native actuator schedules and drag/lift coupling; visual fitted hinges remain separate |
 | Integration | Reviewed pure helpers exposed through headless report | Partial typed state/profiles and angle/velocity stages; clock, full rotations/contact and gameplay integration remain |
 | Acceptance | Synthetic arithmetic and imported-data probes | Captured original-game trajectories; level, banked pull, negative G, stall/recovery, device transients, full loops |

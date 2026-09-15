@@ -213,7 +213,7 @@ def field_addresses(repo, base, layouts=('OBJECT', 'NPC', 'PLANE')):
 
 
 def extract(source, output, *, overwrite=False, preview=False, domain='flight'):
-    if domain not in ('flight', 'weapons', 'menus'):
+    if domain not in ('flight', 'weapons', 'menus', 'weather'):
         raise ValueError('unknown native research domain')
     repo = Path(__file__).resolve().parents[1]
     source, output = source.resolve(), output.resolve()
@@ -236,6 +236,9 @@ def extract(source, output, *, overwrite=False, preview=False, domain='flight'):
         selected = [s for s in names if executable(s['va']) and any(t in s['name'].lower() for t in KEYWORDS)]
     if domain == 'menus':
         from native_menus import KEYWORDS
+        selected = [s for s in names if executable(s['va']) and any(t in s['name'].lower() for t in KEYWORDS)]
+    if domain == 'weather':
+        from native_weather import KEYWORDS
         selected = [s for s in names if executable(s['va']) and any(t in s['name'].lower() for t in KEYWORDS)]
     report = {'schema_version': 1, 'method': 'static disassembly only; no retail execution',
               'exe_sha256': hashlib.sha256(exe).hexdigest(), 'sms_sha256': hashlib.sha256(sms).hexdigest(),
@@ -278,6 +281,9 @@ def extract(source, output, *, overwrite=False, preview=False, domain='flight'):
     if report['reviewed_fa_build'] and domain == 'weapons':
         from native_weapons import artifacts as weapon_artifacts
         artifacts.update(weapon_artifacts(exe, rows, instructions, repo))
+    if report['reviewed_fa_build'] and domain == 'weather':
+        from native_weather import artifacts as weather_artifacts
+        artifacts.update(weather_artifacts(exe, rows, instructions))
     if report['reviewed_fa_build'] and domain == 'menus':
         from native_menus import artifacts as menu_artifacts
         from native_menu_tables import ALIGNED_REGIONS, read_va
@@ -343,9 +349,10 @@ def main():
     parser.add_argument('--out',type=Path,required=True)
     parser.add_argument('--overwrite',action='store_true')
     parser.add_argument('--dry-run',action='store_true')
+    parser.add_argument('--domain', choices=('flight', 'weather'), default='flight')
     args=parser.parse_args()
     try:
-        extract(args.source,args.out,overwrite=args.overwrite,preview=args.dry_run)
+        extract(args.source,args.out,overwrite=args.overwrite,preview=args.dry_run,domain=args.domain)
     except (ValueError,OSError,subprocess.SubprocessError) as error:
         parser.exit(1,f'{error}\n')
 

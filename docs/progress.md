@@ -4,6 +4,29 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 
 **Current scope:** Original Choose Activity and Quick Mission briefing lead to all-theater previews and F/A-18D/Rafale C free flight. The explicit manual range now connects the ten PT-default weapon slots, sensors, damage, stores and combat-service replay. Full native environment/flight/combat parity and the remaining menu screens stay open. AI is deferred until manual acceptance. See [current systems evidence](baselines/weapons-systems.md), [earlier manual weapons evidence](baselines/manual-weapons.md) and the dated checklists below.
 
+## Weather parity planning — 2026-09-14
+
+- [x] Review existing environment readers, static renderer, creator launch gate,
+  wind/telemetry paths and native turbulence research leads.
+- [x] Record the [weather parity plan](weather-plan.md), including source recovery,
+  deterministic state, visual weather, aircraft coupling and retail acceptance.
+- [ ] W1: recover complete weather contracts and collect matched retail baselines.
+- [x] Confirm continuous native time, weather-record time selection, physical
+  turbulence branches and separate maneuver sound through static disassembly.
+  Add repeatable weather research with hash-gated regions.
+  [Evidence](baselines/weather-research.md), [contracts](formats/weather.md).
+- [ ] Recover contrails, wingtip vapor and broader wing-induced vapor contracts;
+  all are included in the weather plan following the user's clarification.
+- [ ] W2: implement bounded records and independent deterministic environment state.
+- [ ] W3: implement accepted time/palette/sky/celestial behavior.
+- [ ] W4: implement accepted clouds, fog and visibility behavior.
+- [ ] W5: connect verified wind/turbulence, air data and environment feedback.
+- [ ] W6: connect creator/restart/replay and complete theater/platform acceptance.
+
+The follow-up adds static research tooling and evidence; runtime weather remains
+unchanged and native environment parity stays open. Existing manual systems
+acceptance and unrelated menu deferrals remain.
+
 ## Quick Mission Creator and Load Ordnance — scheduled 2026-09-14
 
 - [x] Review creator state/launch code, supplied retail photo and extracted

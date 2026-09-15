@@ -31,6 +31,25 @@ def pe():
 
 
 class NativeResearchTests(unittest.TestCase):
+    def test_weather_unknown_build_has_no_fixed_address_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root/'media'
+            source.mkdir()
+            (source/'FA.EXE').write_bytes(pe())
+            (source/'FA.SMS').write_bytes(
+                struct.pack('<III', 1, 0, 0x401000) + b'_TIMEUpdate@0\0')
+            with patch.object(native.subprocess, 'run') as run, \
+                 patch.object(native.shutil, 'which', return_value='/tool/objdump'), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                run.return_value.stdout = '  401000: 00  synthetic instruction\n'
+                native.extract(source, root/'out', domain='weather')
+            report = json.loads((root/'out/inventory.json').read_text())
+            self.assertEqual(report['domain'], 'weather')
+            self.assertEqual(report['selected_symbol_count'], 1)
+            self.assertFalse(report['reviewed_fa_build'])
+            self.assertFalse((root/'out/reviewed-components.json').exists())
+
     def test_menu_unknown_build_has_no_fixed_address_artifacts(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -46,6 +46,9 @@ Not yet recovered in the renderer: native adaptive subdivision/LOD, class-depend
 
 ## Mission environment and weather modules
 
+Follow-up: [native clock and turbulence research](weather.md) confirms continuous
+time and LAY time-window selection. The static midday runtime remains unchanged.
+
 The bounded `textFormat` reader exports top-level map, layer, layer parameter, clouds, wind, time and texture placements. It skips indented object fields. `UKR.MM` specifies `UKR.T2`, `DAY2.LAY 0`, clouds 0 and time 12:00; wind is absent and remains null. For example, `UKR01.M` specifies layer parameter 4, wind `160 7` and time 17:40. Wind units and the layer parameter's full semantics remain unverified.
 
 Campaign missions reference names such as `~UKR6.T2`. Preserve these names; do not silently redirect them to `UKR.T2`. The parser accepts `~` and `$` resource-name characters. Resolving generated campaign terrain aliases is future work.
