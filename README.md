@@ -10,6 +10,7 @@
   <a href="https://github.com/john-overton/T.O.R.E-Fighters/actions/workflows/ci.yml"><img alt="Rust baseline build" src="https://github.com/john-overton/T.O.R.E-Fighters/actions/workflows/ci.yml/badge.svg"></a>
   <a href="rust-toolchain.toml"><img alt="Rust 1.91.1 pinned" src="https://img.shields.io/badge/rust-1.91.1-b7410e?logo=rust&logoColor=white"></a>
   <a href="docs/DEVELOPMENT.md"><img alt="Linux, Windows and macOS" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-2f6f9f"></a>
+  <a href="LICENSE"><img alt="GNU General Public License v3.0" src="https://img.shields.io/badge/license-GPL--3.0-1f6feb"></a>
   <a href="docs/ROADMAP.md"><img alt="Milestone M1 in progress" src="https://img.shields.io/badge/milestone-M1%20in%20progress-orange"></a>
 </p>
 
@@ -18,6 +19,7 @@
   <a href="docs/FLIGHT-MODEL.md"><img alt="F/A-18D and Rafale C" src="https://img.shields.io/badge/aircraft-F%2FA--18D%20%7C%20Rafale%20C-3c7a57"></a>
   <a href="docs/baselines/weapons-systems.md"><img alt="135 weapon definitions" src="https://img.shields.io/badge/weapon%20definitions-135-3c7a57"></a>
   <a href="AGENTS.md"><img alt="No retail game data in this repository" src="https://img.shields.io/badge/retail%20game%20data-none%20shipped-6b4fbb"></a>
+  <a href="MODS.md"><img alt="Mods keep their own license" src="https://img.shields.io/badge/mods-your%20own%20license-6b4fbb"></a>
 </p>
 
 T.O.R.E-Fighters follows [the roadmap](docs/ROADMAP.md). The current slices are original menus, all 16 original theaters, and F/A-18D / Rafale C free flight with raster instrument windows.
@@ -84,6 +86,8 @@ This discovers and unpacks all supported archives into ignored `.local/extracted
 - [Menu baseline](docs/baselines/main-menu.md): validation, screenshots, archive census, and remaining work.
 - [Baseline evidence](docs/baselines/environment.md): what has actually been verified.
 - [Agent instructions](AGENTS.md): automated contributor conventions.
+- [Mods](MODS.md): what the license means for mission, theater, art and sound content.
+- [Third-party notices](THIRD_PARTY_NOTICES.md): upstream attributions for engine code.
 
 `crates/tore-app/` contains the native shell, `crates/tore-formats/` the shared readers, and `crates/tore-extract/` the headless extractor. `tools/` contains portable extraction/research scripts and the asset guard. GitHub Actions is configured to build and check macOS, Linux, and Windows.
 
@@ -162,3 +166,12 @@ inhibits, five damage-class fixtures, station failure, external-group jettison,
 carried weapon bodies and optional combat-service recording/replay. See
 [manual weapon testing](docs/baselines/manual-weapons.md) for controls, all-slot
 checks and remaining native-parity gaps. Combat AI is deferred.
+
+## License
+
+The engine, tools and documentation are licensed under the
+[GNU General Public License v3.0](LICENSE). Mods are data the engine loads, not
+derivative works of it, so your content stays under whatever license you choose;
+[MODS.md](MODS.md) draws that line and explains the retail-asset rule. Playing
+requires a legally owned copy of Jane's Fighters Anthology; no retail game data
+ships in this repository.

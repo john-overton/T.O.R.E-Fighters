@@ -44,7 +44,7 @@ Mods that redistribute retail content will not be listed, linked, or hosted by t
 
 ## Attribution
 
-Please credit the source of any third-party content in your mod, including terrain and imagery data, sound libraries, and models you did not make.  The engine's own attributions are in [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+Please credit the source of any third-party content in your mod, including terrain and imagery data, sound libraries, and models you did not make.  The engine's own attributions are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Mods may say they are made for TORE Fighters.  Mods may not claim to be endorsed by, affiliated with, or an official part of TORE Fighters, Jane's, or Electronic Arts.
 
