@@ -13,8 +13,12 @@ resolution and pixel-identical rasterization are not acceptance requirements.
 
 ## Current implementation
 
-Updated 2026-09-15 after the [full implementation review](baselines/weather-review.md).
-[Evidence](baselines/weather.md).
+Updated 2026-09-15 after the continuation through steps 1–3. The ordinary
+flight weather path now includes recovered horizon branches, glare, aircraft
+lighting, HUD palette handling and cloud preferences/visibility. Matched retail
+acceptance remains pending the user's Windows setup; it is not implied by host
+captures. [Current evidence](baselines/weather-foundation.md#final-weather-sampling-and-batch-checkpoint--2026-09-15),
+[earlier review](baselines/weather-review.md).
 
 ## Numbered dependency sequence — 2026-09-15
 
@@ -49,7 +53,7 @@ explicit supplied aircraft geometry without scheduling combat AI. Sensor
 visibility consumers remain a separate source audit, not an inferred rule that
 all sensors are blocked by visible fog.
 
-### Step 1: next implementation slice
+### Step 1 implementation checkpoint
 
 - [x] Resolve reviewed LAY callback imports to typed behavior with bounds checks;
   preserve the no-op horizon callback and reject unsupported behavior explicitly.
@@ -67,20 +71,23 @@ all sensors are blocked by visible fog.
   source day/night light selection and light-before-fog ordering.
 - [x] Original HUD primary index, shared cockpit palette and source brightness
   ordering; versioned migration preserves existing preferences.
-- [ ] Assess special display-mode effects; compare native scanline rounding and
-  horizon filtering with retail.
-- [ ] Add synthetic boundary/state tests, imported-module diagnostics and matched
-  fog/transition captures; run creator/viewer/flight checks after rendering edits.
+- [x] Trace single-index weather sampling and remove added bilinear color mixing
+  from sky/ocean, moon and cloud textures; preserve source cutout indices.
+- [x] Audit special display maps: ordinary map is identity in all 24 LAYs;
+  INFO2 solid override and alternate CP view maps require their display consumers.
+- [x] Synthetic boundary/state tests, imported diagnostics, Linux creator/viewer,
+  both aircraft flight checks and fog/transition host captures.
+- [ ] Matched retail comparison of coverage, transitions and visible aliasing;
+  Windows/macOS runtime acceptance. Pixel identity is not a roadmap requirement.
 
-Status: callbacks, live six-bit tint/smoothing and imported indexed haze remaps
-are implemented. Named sky/ocean decks now use world-anchored ray/plane
-projection, source altitude/tile scale and deterministic load-time wildcard
-selection. The GPU now composes target-layer then view-layer indexed remaps, with
-integer distance splitting and overlap restrictions. Normal full-detail Gouraud horizon bands and above-sky selection now render.
-Textured transition polygons and special horizon branches remain open; these are recorded acceptance
-gaps, not prerequisites for decoding the celestial and cloud primitives next.
-The 60 ms palette cadence and separate RNG streams are deterministic host
-adaptations. [Evidence](baselines/weather-foundation.md).
+Status: callbacks, live six-bit tint/smoothing, ordered target/view haze maps,
+world-anchored sky/ocean planes, Gouraud and textured horizon transitions,
+above-sky underside/solid clipping, original aircraft lighting and primary HUD
+palette handling are implemented for ordinary full-detail views. Indexed point
+sampling preserves original weather texels; sky projection uses GPU rays instead
+of the native intermediate raster. The 60 ms palette cadence, separate RNG
+streams, float orientation and GPU rasterization remain explicit adaptations.
+[Evidence](baselines/weather-foundation.md).
 
 ## Existing implementation coverage
 
@@ -89,7 +96,10 @@ adaptations. [Evidence](baselines/weather-foundation.md).
 | Mission inputs | `layer` name and choice index, `clouds` altitude, `wind` degrees and feet per second, and time all recovered and consumed | Campaign mission sources; generated and explicit cloud altitudes now draw; campaign sources remain open |
 | Weather records | Reviewed fields of the 352-byte record in `tore-formats::weather`, all 24 supplied modules parsing | Vapor fill-pattern tables and native comparison |
 | Environment state | `tore-sim::environment` advances a 120 Hz to 256-unit clock, selects and blends records by time and altitude, and answers pure queries | Pause, compression and long-session audit against the original |
-| Terrain and sky | Artwork uploads as source palette indices; the live palette resolves on the GPU each frame | Special horizon branches, low-detail cloud gates and celestial comparison/glare |
+| Terrain and sky | Live indexed palette, original horizon bands/transitions, above-sky branches and world-anchored planes | Alternate display/terrain-detail consumers; matched visible coverage and aliasing |
+| Aircraft/cockpit/HUD | Source light-before-fog remaps, shape fog flags, private cockpit palette and HUD index/brightness | Other display effects and authored HUD/instrument geometry |
+| Celestial | Original sun, moon and 94 stars, light/visibility selection, glare and world-fixed moon basis | Matched placement, size and horizon visibility |
+| Clouds | Original CLOUD1 sheets, generated/explicit altitude, detail counts, sectors, range gates and point-sampled cutouts | Unestablished CLOUDS.SH producer; matched coverage and clipping |
 | Visibility | Recovered ramps, altitude haze and ordered cross-layer indexed remaps | Retail crossing comparison; sensor consumers |
 | Creator | Six source weather choices launch; duplicate overcast removed | Label mapping remains inferred; serialized weather replay |
 | Wind | Resolved to world feet per second and applied by both adapters | Missing-wind native defaults; wind audio |
@@ -301,8 +311,8 @@ it as an explicitly authored optional feature, off in classic mode.
    replay and both aircraft. Compare enabled/disabled captures and performance;
    confirm classic mode keeps its accepted retail behavior.
 
-Before visual acceptance, close callback/tint application, scattered-cloud
-defaults, per-camera altitude sampling and native visibility/remap behavior.
+Before whole-system acceptance, close per-camera palette/visibility behavior
+and matched retail comparisons; callback/tint and scattered-cloud defaults now work.
 Wind defaults, turbulence coupling and serialized replay have their own later
 delivery checkpoints; all remain required for whole-system acceptance.
 Corrected helper tests and source-art screenshots alone do not close these gates.
@@ -312,9 +322,12 @@ Corrected helper tests and source-art screenshots alone do not close these gates
 Original sun circles/glow remap, moon texture and 94 stars now render with source
 time/flag/angle selection. Weather SH decoding is bounded and independent of
 aircraft animation. The continuation implements sun-view whitening, nine original
-lens-flare circles/remaps and the moon bank fix. Lower Gouraud horizon masking
-is applied. Exact textured horizon clipping, pixel rounding and matched retail
-acceptance remain open. See the continuation evidence in weather-foundation.md.
+lens-flare circles/remaps and the moon bank fix. Gouraud, solid and textured
+deck horizon visibility are represented. All 24 reviewed LAYs use the same
+celestial angles/rise/set values; the traced placement consumes LAY/time rather
+than theater latitude or calendar date. Matched placement, scale, visibility
+and transition acceptance remain open. Native integer projection is an explicit
+adaptation, not a requirement for pixel identity.
 
 ### Step 3 implementation checkpoint
 
@@ -324,6 +337,20 @@ altitude now render. Crossings and a second theater were captured. The sixteen
 CLOUDS billboards are decoded but have no established active producer; native
 low-detail, forward-sector relocation and SH coordinate-range rejection now
 work. GPU triangle clipping replaces native sphere/frustum work rejection;
-integer edge rounding and matched retail comparisons remain open. The static
+edge coverage still needs matched retail comparison. The static
 resource/producer audit still establishes no active CLOUDS.SH placement. Cloud
 bands are source fog records, not evidence for an authored volumetric deck.
+
+
+### Remaining dependencies after this batch
+
+| Item | What remains and how to unblock it |
+| --- | --- |
+| Retail behavior/visual acceptance for 1–3 | Run matched retail scenes once the Windows box is ready: Ukraine dawn/dusk boundaries; 4,500/5,000 and 9,000/9,500-foot fog overlaps; below/on/above a cloud patch; sun toward/away and moon bank; above-sky/horizon/zenith; repeat a distinct LAY family. Record build, mission, time, pose and detail/glare settings. Compare art, coverage, scale and transitions, not identical pixels. |
+| CLOUDS.SH's 16 billboards | No active placement established after the cloud queue/frustum trace, nine-descriptor audit, all LAY shape fields and 1,654 FA_2 resource audit. A retail mission/view showing these billboards, or a resource-load trace identifying the caller, is the missing discriminator. Do not spawn them speculatively or call them absent. |
+| Alternate display consumers | INFO2 sets a temporary solid horizon override; CP view paths select alternate color maps. Integrate with their actual display/camera paths in step 4 or the separately scheduled INFO2 screen, along with low-detail terrain/sky preference and ground-surface inputs. The cloud-only detail diagnostic does not select those terrain modes. |
+| Other platforms | Windows and macOS builds/runtime/captures remain unexercised here. Linux checks cannot accept those rows. |
+
+The implementation supported by the recovered ordinary-view contracts in this
+batch has landed. The open rows above prevent whole-batch retail acceptance;
+steps 4–9 retain their existing scope and were not implemented by this pass.

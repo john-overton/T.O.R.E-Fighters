@@ -99,38 +99,39 @@ engine contrails are now explicitly scheduled in [W7](../weather-plan.md#w7--opt
 
 ## Remaining findings and acceptance limits
 
-- The day/night **palette** cycle exists. Source indices and LAY colors do not
-  make the entire renderer native: SKY0's hemisphere projection, bilinear color
-  filtering, continuous RGB haze and vapor alpha are authored approximations.
-  Aircraft use their own atlas palette; they do not receive the live weather
-  palette merely because their textures now use index lookup.
-- Clear DAY2 weather still hazes at distance. Cloud overlap bands are transitions:
-  4,500–5,000 and 9,000–9,500 ft are blends, not simultaneously fully clear and
-  fully opaque. “Complete whiteout inside the deck” is too broad: density depends
-  on range, and the independently drawn sky/cloud geometry remains incomplete.
-- Missing mission wind currently resolves to calm, despite the recovered native
-  randomized default. Scattered-cloud probability/altitude selection is not
-  implemented, and the `clouds` deck is not drawn. Existing MM files alone do
-  not exercise a live nonzero-wind mission in the app.
-- Per-record callbacks are ignored by the runtime; fog jitter and global
-  `tint`/`tint_scalar` are not applied. Finding their imported native handlers is
-  not implementing them. Header shade/fill tables remain incomplete.
-- Turbulence still uses floating-point sine/rates and authored Euler/height
-  coupling, not retail integer display/movement arithmetic or a complete force
-  model. Nearby-aircraft strength, the ground-query flag and native preference
-  mapping remain unresolved. Haptic intensity/presentation is authored.
-- Vapor still uses float load factor, float position interpolation, rounded
-  lookback samples, provisional shape scale and unconditional roll shortening
-  where retail tests an unresolved object flag. Its night gate uses ownship
-  altitude; retail's current view layer and per-camera behavior need acceptance.
-- Rendering shares one resolved palette/haze between camera views; cameras at
-  different altitudes need their own pure queries. Fog maximum-see-distance
-  clipping, sensor visibility, wind audio, atmosphere/air-data integration,
-  sun/moon/stars and cloud/ocean geometry remain open.
-- Restart state cleanup does not implement serialized weather replay or reproduce
-  retail shared RNG/cadence. The 120 Hz-to-256-unit adapter is still authored.
-- No matched retail execution/captures, Windows or macOS validation in this review.
-  Historical 1.46/1.48 ms summaries are not a new matched performance result.
+**Reconciled after the 2026-09-15 continuation.** The commit audit above and
+validation below describe the earlier review. Current implementation/evidence is
+in [weather-foundation.md](weather-foundation.md#final-weather-sampling-and-batch-checkpoint--2026-09-15).
+
+- Callbacks, mutable fog state, tint smoothing/application and ordered indexed
+  fog now run. Sky/ocean use source world planes and horizon branches. Aircraft
+  use the live palette and original per-normal light maps; cockpit/HUD share
+  the private palette with recovered HUD brightness. Earlier statements that
+  these consumers were absent are superseded.
+- Original sun/moon/stars, glare/whitening and cloud sheets now render. Cloud
+  defaults, explicit altitude, low-detail placement and source range/sector gates
+  work. The moon uses a world-fixed basis. CLOUDS.SH's 16 billboards still lack
+  an established active producer; no absence claim or invented placement.
+- Clear weather still hazes at distance. Cloud overlaps (4,500–5,000 and
+  9,000–9,500 ft) blend; complete whiteout at every distance is not established.
+  Camera queries remain pure, but simultaneous per-camera palette/visibility
+  acceptance and alternate display maps belong to step 4.
+- Weather texels now use original single-index samples and cutouts. GPU ray
+  projection, float orientation, triangle clipping, flare RGB-to-index recovery
+  and non-weather bilinear paths remain adaptations. Native resolution and pixel
+  identity are not roadmap requirements; visible coverage/behavior need retail
+  comparison before acceptance.
+- Missing-wind defaults, wind audio and live atmosphere/air-data integration
+  remain step 5. Turbulence coupling, wakes/surface inputs, preference mapping
+  and rounding remain step 6; haptics are authored presentation.
+- Wing vapor patterned fills, roll gate, sample/scale rounding and per-camera
+  night behavior remain step 7. Broader wing vapor/engine contrails are not
+  proven absent. Serialized environment state and shared retail RNG/cadence
+  remain step 8; the fixed-tick clock adapter is authored.
+- The user's retail Windows box is not ready. No matched retail execution or
+  Windows/macOS acceptance has been added. Current Linux measurements are
+  reported in the foundation baseline; historical 1.46/1.48 ms summaries do not
+  describe this batch's measured performance.
 
 ## Validation
 

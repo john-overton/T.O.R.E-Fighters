@@ -99,6 +99,12 @@ Flight performance: ordinary debug runs now optimize the app's rendering loops a
 
 Look around with **Shift + arrows** (Ctrl + arrows also works). Cockpit Down stops at the forward eye line; F10 exterior view orbits freely around the aircraft. **Shift + /** recenters the current view; **F1** returns to the cockpit. [Control details](docs/FLIGHT-CONTROLS.md#look-around-and-exterior-orbit).
 
+Weather now uses the original day/night palettes, horizon and sky/ocean planes,
+sun/moon/stars, cloud sheets, aircraft light/fog maps and cockpit/HUD palette.
+The moon's world orientation stays independent of aircraft bank. Retail visual
+acceptance and the remaining wind/turbulence/vapor work are tracked in the
+[weather plan](docs/weather-plan.md); Linux captures alone do not establish 1:1 parity.
+
 Flight now carries momentum independently of nose direction and can rotate through vertical for loops. The cockpit and HUD stay anchored together to the aircraft’s forward position during look-around, and the sky projection no longer pinches at straight up. Directional viewing projects the original flat cockpit artwork; full rear/overhead interior geometry remains unavailable. See [directional cockpit validation](docs/baselines/directional-cockpit.md). [Flight-response and sky validation](docs/baselines/flight-response-sky.md).
 
 F/A-18 exterior devices now animate continuously: **G/F/B/H** for gear/flaps/airbrake/hook, arrows and **Z/X** for fitted control surfaces. Press **0 then Shift+B** for afterburner; use **F10** to inspect. [Animation coverage and inspection commands](docs/baselines/f18-animations.md).

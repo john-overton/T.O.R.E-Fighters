@@ -447,3 +447,12 @@ Levels 0/1 use the base period; level 2 uses the 4x4 repeat. Native coordinate
 range and view-sector gates can make the visible results identical in forward
 views. Use a downward view to inspect copies around the aircraft. This override
 is cloud-specific; the lower-detail terrain/sky raster is not selected by it.
+
+
+Weather captures use `--capture-terrain` for the viewer and `--capture-flight`
+for flight with overlays. `--capture-terrain` selects the viewer even when
+`--free-flight` occurs earlier; use the flight flag for aircraft/cockpit evidence.
+The latest ignored `.local/weather-continuation/final/manifest.json` records
+commands, explicit weather poses and result codes for the continuation captures.
+Weather sky/ocean, moon and cloud textures now use source point-index samples;
+float GPU projection remains qualified against native coverage/behavior.

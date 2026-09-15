@@ -795,3 +795,35 @@ default without claiming equivalent fitted colors. Other preferences survive.
 Tests cover bounded module extraction, brightness endpoints, order/tint exclusion,
 control saturation and preference migration. The complete ordered native palette
 pipeline still includes non-weather effects beyond this slice.
+
+
+### Weather sampling and special display audit — 2026-09-15
+
+Sky scanline 0x449cea..0x449e68 takes integer texture coordinates and copies
+one source index per output pixel (e.g. 0x449de5); 0x449f2d..0x44a04d applies
+indexed remaps to the temporary bitmap. Its final G_AcTexture call at 0x44a064
+reaches the indexed byte-copy raster (0x4ca028; pixel span 0x4ca49d..0x4ca513).
+The ordinary software path does not mix neighboring RGB texels. Weather GPU
+sampling now reads one source index for sky/ocean, moon and cloud texels, applies
+reviewed remaps and tests the original cutout index before resolving RGB. The
+previous bilinear weather blending was an added filter. Other world/cockpit
+filtered paths remain explicit adaptations. Correct piecewise sRGB conversion
+preserves source black; the previous power-only approximation lifted black.
+
+Native sky uses a bounded intermediate raster and fixed-point scanlines; the
+host projects rays directly at the output resolution. Native pixel padding,
+integer matrix rounding and perspective spans are not reproduced. They remain
+comparison qualifications for visible coverage/aliasing, not a demand for
+pixel-identical rendering (excluded by the roadmap).
+
+All 24 reviewed LAY root map-0 rows are identity. CPDraw selects map 3 at
+0x43ad59 for its alternate-view branch, may restore map 0 at 0x43ad90, and resets
+map 0 at 0x43af01. Selection is view-specific, not an ordinary weather state.
+The solid override at 0x50a6b0 is set to C6 inside INFO2Draw (0x460589), with
+companion C1/C7 colors, and cleared at 0x4608c7. These display consumers require
+their actual views; they are not an unexplained ordinary-flight horizon mode.
+At 0x4aae43 lower-horizon ED/FC selection depends on detail>=1 plus view bit
+0x4000, or the separate ground query flag; the alternative uses DF/D4. The
+current ordinary full-detail view takes ED/FC. Lower-detail terrain/sky and
+INFO2/alternate-map integration are separate display work; cloud-only detail
+selection does not pretend to implement them.

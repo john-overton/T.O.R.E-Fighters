@@ -153,8 +153,8 @@ code is never executed. CLOUDS primitives decode without a global placement clai
 
 Weather continuation: normal full-detail horizon bands and above-sky selection,
 shared indexed aircraft fog/palette and indexed cockpit selective tint now render.
-Cockpit prefix and exterior no-palette contracts are validated at import. Special
-horizon branches, HUD source indices and retail comparisons remain open; see
+Cockpit prefix and exterior no-palette contracts are validated at import. Later continuation entries below supersede its horizon/HUD gaps;
+retail comparisons remain open. See
 [weather contract](weather.md#horizon-and-shared-aircraft-palettes--continuation-2026-09-15).
 
 Weather continuation: bounded `TORE_FLARE_V1` import recovers the nine reviewed
@@ -181,3 +181,9 @@ tested; float animated orientation remains an adaptation. See weather.md.
 HUD CODE+0x72 primary color is bounded by the native copied root; both supported
 aircraft select cockpit index 40. Source brightness applies before sun whitening
 and outside fog tint ranges. Remaining HUD geometry is authored; see weather.md.
+
+
+Weather textures now retain single indexed texel/cutout sampling; native sky
+intermediate resolution/scanlines are adapted to GPU rays. Ordinary map-0 rows
+are identity in all reviewed LAYs. INFO2 override and alternate CP maps are
+identified display consumers, deferred with their actual views. See weather.md.

@@ -9,18 +9,17 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
 - [x] Number the remaining work by dependency in the
   [weather plan](weather-plan.md#numbered-dependency-sequence--2026-09-15).
   First batch: fog/palette/sky foundation → celestial rendering → cloud geometry.
-- [ ] Step 1: callback state, tint consumer, shade/remap and sky/horizon recovery.
-  - [x] Typed bounded callback imports, persistent source-record fog state,
-    validated seed and one/ten-second selection cadence independent of cameras.
-  - [x] Correct altitude-haze RGB source; test selective six-bit palette tint and
-    smoothing in the live renderer.
-  - [x] View-dependent tint reduction and ordered target/view indexed haze remaps.
-  - [ ] Native special horizon/above-sky branches and matched retail acceptance.
-  - [x] Extend static extraction and imported shape coverage diagnostics.
-    [Foundation slice evidence](baselines/weather-foundation.md).
-- [x] Steps 2–3 implementation slices: original sun/moon/stars and imported cloud sheets.
-- [ ] Steps 2–3 parity: glare/clipping, low-detail clouds, unresolved CLOUDS producer
-  and matched retail/platform comparisons.
+- [x] Step 1 ordinary-view implementation: persistent callbacks/tint, ordered
+  indexed fog, horizon transitions/above-sky branches, aircraft light maps and
+  shared cockpit/HUD palette with original brightness.
+- [x] Step 2 implementation: original celestial art/placement, glare/whitening,
+  horizon visibility and moon orientation independent of aircraft bank.
+- [x] Step 3 reviewed CLOUD1 implementation: original sheets/placement, source
+  detail and sector/range gates, cutout sampling and altitude crossings.
+- [ ] Steps 1–3 retail acceptance and CLOUDS.SH active-producer identification;
+  alternate display/terrain-detail consumers and Windows/macOS checks remain.
+  [Current batch evidence](baselines/weather-foundation.md#final-weather-sampling-and-batch-checkpoint--2026-09-15)
+  supersedes older unchecked implementation substeps in this chronological log.
 - [ ] Step 4: consistent weather in main, mirror and instrument cameras.
 - [ ] Steps 5–7: wind/air data/audio, turbulence, then finish wingtip vapor and
   investigate broader wing-induced vapor.
@@ -31,8 +30,8 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
   duration/priority/AGL rounding, vapor history/reset, typed aircraft coefficient,
   condition metadata/diagnostics and scalar bounds.
 - [x] Remove the duplicate overcast editor row, retaining the imported inventory.
-- [ ] Close remaining horizon/glare, default-wind/low-detail-cloud, per-camera,
-  coupling/rounding and serialized replay gaps before parity acceptance.
+- [ ] Close matched horizon/glare/cloud acceptance, default wind, per-camera
+  behavior, aircraft coupling and serialized replay before whole-system acceptance.
 
 [Findings, aircraft-file evidence and validation](baselines/weather-review.md).
 
@@ -872,3 +871,16 @@ Special horizon branches and matched retail acceptance remain open.
 - [x] 284 Rust/24 Python tests and required checks; creator/viewer and both
   aircraft wide/tall cockpit GPU captures, plus active performance sample.
 - [ ] Final horizon sampling/acceptance audit and matched retail/platform checks.
+
+
+### Weather batch 1–3 checkpoint (2026-09-15)
+
+- [x] Original point-index weather texture reads and source cutout behavior;
+  correct dark sRGB conversion so original palette black stays black.
+- [x] Audit ordinary/alternate display remaps and identify INFO2 override owner.
+- [x] Boundary/crossing, moon-bank, horizon/zenith and second-theater host captures;
+  required Rust/Python/asset checks, both flight suites and active performance.
+- [ ] Matched retail behavior/visual acceptance after Windows setup; identify a
+  retail CLOUDS.SH producer scenario; Windows/macOS runtime checks.
+- [ ] Alternate camera/display integration stays with step 4 or its scheduled
+  screen. Native integer raster identity is outside the roadmap fidelity gate.

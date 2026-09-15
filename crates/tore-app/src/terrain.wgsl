@@ -18,7 +18,8 @@ struct VertexOut {
  @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
  @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>, @location(7) @interpolate(flat) fog_enabled:u32, @location(8) @interpolate(flat) light_row:i32
 }
-fn linear(c:vec3<f32>)->vec3<f32>{return pow((c+vec3<f32>(0.055))/1.055,vec3<f32>(2.4));}
+// Exact sRGB decoding includes the dark linear segment; source black stays zero.
+fn linear(c:vec3<f32>)->vec3<f32>{return select(pow((c+vec3<f32>(0.055))/1.055,vec3<f32>(2.4)),c/12.92,c<=vec3<f32>(0.04045));}
 // Index 255 is the native water/cutout test at 0x4aa739 and stays transparent.
 fn fog_row(distance:f32)->i32{
  if textureDimensions(palette).y<=1u { return 0; }
@@ -71,17 +72,8 @@ fn ray_index(index:u32,rows:vec2<i32>)->u32 {
  if rows.x>=0 {result=textureLoad(weather_tiles,vec2<i32>(i32(result),rows.x),i32(scene.deck_a.w),0).r;}
  return result;
 }
-// Manual bilinear: indices cannot be filtered, so each of the four texels is
-// resolved through the palette first and the colors are blended premultiplied.
-fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec2<i32>)->vec4<f32>{
- let size=vec2<i32>(textureDimensions(tiles));
- let p=uv*vec2<f32>(size)-vec2<f32>(0.5);
- let base=floor(p);
- let f=p-base;
- var sum=vec4<f32>(0.0);
- for(var j=0;j<2;j++){
-  for(var i=0;i<2;i++){
-   let at=clamp(vec2<i32>(base)+vec2<i32>(i,j),vec2<i32>(0),size-vec2<i32>(1));
+// Remap one original index before resolving RGB; transparency tests the source.
+fn texel(at:vec2<i32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec2<i32>)->vec4<f32>{
    let original=textureLoad(tiles,at,layer,0).r;
    var index=original;
    var palette_row=row;
@@ -96,6 +88,27 @@ fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec
    var c=shade(index,palette_row);
    // Cutout belongs to the original texel, before any shade remap.
    c.a=select(1.0,0.0,original==255u);
+   return c;
+}
+// Reviewed weather raster reads one texel, without mixing palette colors.
+// Float UV projection remains an adaptation of native fixed-point scanlines.
+fn weather_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec2<i32>)->vec4<f32>{
+ let size=vec2<i32>(textureDimensions(tiles));
+ let at=clamp(vec2<i32>(floor(uv*vec2<f32>(size))),vec2<i32>(0),size-vec2<i32>(1));
+ return texel(at,layer,row,sun_passes,core,remaps);
+}
+// Manual bilinear: indices cannot be filtered, so each of the four texels is
+// resolved through the palette first and the colors are blended premultiplied.
+fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec2<i32>)->vec4<f32>{
+ let size=vec2<i32>(textureDimensions(tiles));
+ let p=uv*vec2<f32>(size)-vec2<f32>(0.5);
+ let base=floor(p);
+ let f=p-base;
+ var sum=vec4<f32>(0.0);
+ for(var j=0;j<2;j++){
+  for(var i=0;i<2;i++){
+   let at=clamp(vec2<i32>(base)+vec2<i32>(i,j),vec2<i32>(0),size-vec2<i32>(1));
+   let c=texel(at,layer,row,sun_passes,core,remaps);
    let w=select(1.0-f.x,f.x,i==1)*select(1.0-f.y,f.y,j==1);
    sum+=vec4<f32>(c.rgb*c.a,c.a)*w;
   }
@@ -103,7 +116,6 @@ fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec
  if sum.a<=0.0 { return vec4<f32>(0.0); }
  return vec4<f32>(sum.rgb/sum.a,sum.a);
 }
-fn tile(uv:vec2<f32>,layer:i32,row:i32)->vec4<f32>{return sample_tile(uv,layer,row,-1,-1,vec2<i32>(-1));}
 @vertex fn vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
  let p=position-scene.eye.xyz;
  let z=dot(p,scene.forward.xyz);
@@ -240,7 +252,7 @@ fn celestial_occluded(ray:vec3<f32>)->bool {
   if distance<=0.0 || distance>=nearest || scanline_distance>=2000000.0 { continue; }
   let hit=scene.eye.xyz+ray*distance;
   let uv=fract(vec2<f32>(hit.x,-hit.z)/deck.y);
-  let tex=sample_tile(uv,i32(deck.z),fog_row(distance),passes,core,vec2<i32>(-1));
+  let tex=weather_tile(uv,i32(deck.z),fog_row(distance),passes,core,vec2<i32>(-1));
   color=mix(color,tex.rgb,tex.a);
   nearest=distance;
  }
@@ -271,12 +283,12 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
 }
 @fragment fn celestial_fragment(in:VertexOut)->@location(0) vec4<f32>{
  if celestial_occluded(normalize(in.direction)) {discard;}
- if in.layer>=0.0 {let tex=tile(in.uv,i32(in.layer),0);if tex.a<0.01 {discard;}return tex;}
+ if in.layer>=0.0 {let tex=weather_tile(in.uv,i32(in.layer),0,-1,-1,vec2<i32>(-1));if tex.a<0.01 {discard;}return tex;}
  return vec4<f32>(in.color,1.0);
 }
 
 @fragment fn cloud_fragment(in:VertexOut)->@location(0) vec4<f32>{
- let tex=sample_tile(in.uv,i32(in.layer),0,-1,-1,ray_rows(in.distance,in.altitude));
+ let tex=weather_tile(in.uv,i32(in.layer),0,-1,-1,ray_rows(in.distance,in.altitude));
  if tex.a<0.5 {discard;}
  return vec4<f32>(tex.rgb,1.0);
 }

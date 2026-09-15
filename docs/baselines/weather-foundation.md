@@ -428,3 +428,87 @@ dawn tall cockpit captures pass and were inspected (`hud-*.ppm` in ignored
 `.local/weather-continuation/`). A 630-frame active F18 run measured 1.63 ms mean,
 1.76 p95, max 5.98, with 630 mirrors and no paused/readback frames. This short
 CPU interval sample does not establish a causal performance improvement.
+
+### Final weather sampling and batch checkpoint — 2026-09-15
+
+The reviewed ordinary flight/viewer implementation for batch 1–3 has landed.
+This is **implementation evidence, not retail or all-platform acceptance**.
+The user's Windows retail setup is not ready; no imported native module was run.
+
+Source scanline 0x449cea..0x449e68 copies one original sky index at each integer
+texture position, then 0x449f2d..0x44a04d remaps the temporary bitmap. Final
+G_AcTexture dispatch at 0x44a064 reaches the indexed byte-copy raster. Sky/ocean,
+moon and cloud GPU textures now use single-index samples and original cutout
+indices, removing the added bilinear weather filter. The shared dark sRGB
+conversion now includes its linear segment so palette black stays black.
+The native intermediate sky bitmap, fixed-point scanlines, edge padding and
+matrix rounding are still adapted to direct GPU projection. Terrain/aircraft
+and cockpit filtering outside these weather textures remains qualified.
+The roadmap excludes pixel identity/original resolution: compare visible art,
+coverage and behavior, not exact scanline bytes.
+
+Special display audit: all 24 LAY ordinary map-0 rows are identity. CPDraw's
+alternate map selection is view-specific. INFO2Draw sets the solid C6/C1/C7
+horizon override and clears it after its draw. Low-detail terrain horizon DF/D4
+selection also depends on a ground-query flag; ordinary full-detail uses ED/FC.
+These are identified display consumers, not missing ordinary weather defaults.
+Their integration stays with step 4 or the separately scheduled INFO2 screen;
+cloud-only detail settings do not enable a lower-detail terrain renderer.
+
+Validation on Linux / RTX 4070 / Vulkan:
+
+- Formatting, warnings-denied all-targets Clippy, locked workspace tests/build:
+  **284 Rust tests** pass. **24 Python tests** pass; static extraction completes.
+  Source, debug app/extractor and newly built release-extractor asset guards pass.
+- Both imported aircraft pass the same **13-scenario flight suite** via
+  `tools/extract_assets.py --aircraft f18|rafale --validate-flight`, using the
+  documented LHX exclusion and separate ignored extraction directories.
+- **42 GPU capture cases** and a creator smoke pass. Commands, weather inputs,
+  poses and results are retained in ignored
+  `.local/weather-continuation/final/manifest.json`. Coverage includes ten
+  dawn/dusk times, eleven cloud-fog overlap altitudes, FOG1 weather, sky zenith,
+  above-sky bank, moon at -60/0/+60 degrees, sun glare off/on, original cloud
+  patch below/on/above the sheet at detail 0/2 and an overhead cutout overview.
+  Actual flight captures include F18 wide cockpit and Rafale tall exterior in
+  Egypt (EGY), with earlier final-code HUD captures covering both cockpits.
+- Inspected representative montages/captures confirm host day/night transitions,
+  lower and upper fog blends, original cloud cutouts, opposite cloud faces,
+  horizon/zenith coverage, visible sun flare circles and unwarped banked moon.
+  The initial generic sheet positions did not lie under a patch; the additional
+  crossing views use a recovered descriptor center at X=1,073,152/Z=614,400 ft.
+  Host screenshots alone cannot establish native equivalence.
+- Three sequential active 630-frame F18 runs, 1280x720, no audio, first 30
+  frames excluded, 630 mirror renders each, zero paused frames/live readbacks:
+
+  | Condition | Mean ms | p95 ms | Max ms |
+  | --- | ---: | ---: | ---: |
+  | Clear | 1.70 | 2.05 | 5.30 |
+  | Cloudy | 1.63 | 1.67 | 12.48 |
+  | Clear repeat | 1.65 | 1.75 | 3.85 |
+
+  These measure CPU frame intervals including presentation backpressure;
+  the cloudy maximum includes a submission/presentation stall. They are not
+  GPU timestamps, sustained maximum-load or verified displayed FPS evidence.
+
+#### Precise remaining dependencies
+
+1. Matched retail scenarios once runtime access exists: same build, mission,
+   theater, pose, time and preference values across dawn/dusk; fog overlap
+   boundaries; cloud crossings/cutouts; sun toward/away; moon bank; above-sky,
+   horizon and zenith. Repeat Ukraine with a distinct LAY family. Assess
+   coverage, scale, transitions and visible aliasing under the roadmap's scope.
+2. CLOUDS.SH contains 16 decoded billboards but has no established active
+   producer after the source queue/frustum trace, nine-descriptor audit, all
+   LAY shape fields and 1,654 FA_2 resource audit. A retail appearance scenario
+   or resource-load/caller trace is needed to discriminate additional paths.
+   No speculative placement or game-wide absence claim is warranted.
+3. Alternate camera/display maps, low-detail terrain/sky preferences and INFO2
+   override integration require their actual consumers. Step 4/its separately
+   scheduled screen owns this work; the standard full-detail path is covered.
+4. Windows and macOS runtime/build/capture acceptance is unavailable here.
+   Linux validation does not close those platform rows.
+
+The weather plan and top progress checklist now supersede stale earlier entries
+that still listed callbacks, glare, light maps, HUD ink or cloud detail as absent.
+Steps 4–9 remain scheduled; this batch does not claim serialized weather replay,
+wind/air-data/audio completion, turbulence or wing-vapor/contrail acceptance.
