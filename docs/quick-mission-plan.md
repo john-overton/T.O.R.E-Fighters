@@ -165,3 +165,5 @@ See the [defaults and input contract](formats/quick-mission.md) and
 [validation evidence](baselines/menu-behavior-mapping.md). Verified source rules
 are recorded separately from unresolved behavior. Implementation and original-game
 acceptance gates above remain open.
+
+Track remaining source questions in the [mapping ledger](menu-parity-matrix.md).

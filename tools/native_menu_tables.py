@@ -22,6 +22,13 @@ ALIGNED_REGIONS = (
     ('ordnance_catalog_eligibility', 0x419cfa, 0x419f4c),
     ('ordnance_card_draw', 0x41c610, 0x41c6f7),
     ('ordnance_catalog_sort', 0x41c700, 0x41c81d),
+    ('ordnance_mission_directive', 0x430d40, 0x430d57),
+    ('ordnance_directive_parser', 0x481daf, 0x481ded),
+    ('ordnance_exit_state', 0x41c2ff, 0x41c354),
+    ('ordnance_menu_availability', 0x419a26, 0x419aaa),
+    ('ordnance_pickup', 0x41b955, 0x41bbdd),
+    ('ordnance_key_quantity', 0x41aea7, 0x41af24),
+    ('menu_point_in_box', 0x412170, 0x4121c6),
 )
 
 

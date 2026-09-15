@@ -50,10 +50,10 @@ control area; see [static dialog geometry](quick-mission.md).
 | Station hit index | Two per 71-pixel row; column split is passed rectangle midpoint; reject index >= station count |
 | Station local pointer x | Subtract 354 left or 473 right |
 
-The station hit rectangle's initial x differs from its drawing anchors; do not
-silently fit it to the screenshot. Trace any caller mutation before using it as
-the final screen hit box. Rectangle-edge inclusion belongs to `0x40d790` and
-remains to be verified.
+The drop rectangle's x differs from the drawing anchors. A separate pickup
+rectangle starts at (349,115), size (235,213), and is passed by `0x41bb24`. The wider-left rectangle is used on release/drop at
+`0x41b368`. `MouseInBox` calls `0x412170`: left/top edges are inclusive and
+right/bottom edges are exclusive. Preserve pickup and drop regions separately.
 
 `0x41c610–0x41c6f6` is the shared card art/name helper. It uses an image area
 107×21 at x+1,y, conditionally draws selection treatment, and draws the name at
@@ -76,8 +76,8 @@ using those offsets; they are not one generic store record layout.
 
 The projectile year gate at `0x419df8–0x419eba` is conditional on Fly all and two
 mode flags (`0x4fb1b8`, `0x4fb264`) being clear. Era cutoffs compare projectile
-+0x37 to 1976, 1982 and 1996; the final era has no cutoff in this span. The mode
-flag producers still need names. A universal year or nationality restriction
++0x37 to 1976, 1982 and 1996; the final era has no cutoff in this span. SMS identifies these as the first byte of `campaignFile` and
+`freeFlightMission`: the cutoff applies outside a campaign and free flight. A universal year or nationality restriction
 would not reproduce this branch.
 
 With an airbase context, stock entries are 16 bytes starting at context +0x1c60;
@@ -101,8 +101,18 @@ selected a store/station:
 - A zero resulting quantity uses HARDUnLoad; nonzero uses HARDLoad with an
   explicit count. HARDLoad's count-zero auto-fill convention is not UI unload.
 
-The physical gestures producing those deltas, drag state, and hold/release
-repeat cadence remain open. Do not advertise a guessed drag-and-drop model.
+The input branch `0x41b955` starts a drag on shell-button bit 1. Catalog pickup
+sets an initial delta of 100, which subsequently clamps to capacity; station
+pickup starts a transfer with delta 1. The drag replaces the cursor with the
+store thumbnail, retaining the cursor's original state. Release enters the
+station drop resolver; a station drag released outside a valid drop uses a
+large negative delta to remove the source load. Bit 2 on a station routes to
+quantity decrement. The exact shell event/repeat cadence remains open.
+
+Keyboard `+`, `=`, keypad plus and `-`/keypad minus route to the same signed
+quantity-change path (`0x41aea7`). The strict capacity thresholds therefore
+apply to keyboard changes too. Physical mouse naming needs the shell/MOUSERead
+chain verified end to end before acceptance.
 
 The Cheat menu branch at `0x41be33` first calls the unload-all helper, toggles
 `0x4f6a04`, disconnects or restores the saved airbase context, and rebuilds the
@@ -121,11 +131,23 @@ projectile execution in the port.
 it returns state 13 or 18 from the incoming flag. After calling ArmPlane it sets
 that flag according to whether the returned state equals 18. The creator's
 nonzero custom-load choice emits an extra mission directive at `0x430d40`.
-Connecting that directive through its parser to this entry flag and naming all
-return states is still required before claiming standard/custom or cancel parity.
+The directive string at `0x4f3768` is `armplane`. The parser compares that exact
+string at `0x481daf` and sets `_doArmPlane` (`0x552820`) at `0x481de1`. This
+establishes the custom-load-to-ordnance link. Standard omits the directive;
+mission initialization clears `_doArmPlane` at `0x4808b5`.
+
+At `0x41c2ff`, action 5 returns state 18; other exit actions return 13. Fuel is
+serialized as the integer screen quantity shifted left eight bits at `0x41c278`,
+while initial screen fuel is shifted right eight at `0x41a0b4`. The station copy
+uses 17 bytes per station. These serialization facts do not establish complete
+cancel/restart semantics: the airbase context backup is copied back at exit.
+
+SMS names `0x5528bc` as `_fortMission`. `0x419a6b` disables Cheat for participant
+count >1, and `0x419a82` disables next/previous aircraft outside fort missions.
+The campaign root's hide-versus-disable behavior remains an outer-menu question.
 
 Remaining source work: mode/menu visibility, complete card text offsets and art
-closure, physical gestures/repeat timing, station rectangle mutation, stock
+closure, full event/repeat timing, stock
 rollback on cancel, accepted fuel/weight serialization, start/task generation,
 and original-game visual/interaction acceptance. Use this contract alongside
 [the implementation plan](../ordnance-plan.md), not as proof that its gates pass.

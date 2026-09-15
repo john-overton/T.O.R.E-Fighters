@@ -14,6 +14,7 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   ArmPlane/loading code references and existing weapons integration. Record the
   [ordnance plan](ordnance-plan.md) and [evidence](baselines/ordnance-research.md).
 - [ ] Recover complete active FA option/default/filter/geometry contracts.
+  [Full scope ledger](menu-parity-matrix.md) tracks each group and remaining source gaps.
 - [x] Recover 60 active option dispatch entries, 16 theater target lists and
   29 native briefing rectangles; decode static controls in 26 DLG resources.
   Initialization, theater nationalities, selector dependencies and input semantics

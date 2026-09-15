@@ -39,3 +39,13 @@ All passed: 224 Rust tests, 20 Python tests and all three asset guards. Extracti
 produced the five ordnance action mappings and retained all 60 creator dispatch
 entries and 16 theater target tables. Local catalogs/disassembly remain ignored.
 No rendering changes; no GPU or Windows/macOS runtime acceptance was performed.
+
+## Flow follow-up
+
+The repeatable `.local/menu-flow-mapping` extraction additionally covers the
+custom-load `armplane` directive/parser, ordnance exit codes, menu availability,
+pickup/keyboard input branches and half-open rectangle test. Static tracing
+confirms separate pickup/drop rectangles, source and catalog drag deltas,
+fixed-point fuel serialization, and multiplayer/fort menu restrictions.
+See the [complete scope ledger](../menu-parity-matrix.md) for mapped and open work.
+These findings extend static evidence; they do not close original-game acceptance.
