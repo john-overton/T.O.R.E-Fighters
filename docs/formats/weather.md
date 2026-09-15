@@ -522,3 +522,27 @@ table. Object flag `+0x10 & 0x80`, which gates the roll-rate shortening, and
 which axis of the body-rate triple `+0x17f` selects, both remain UNRESOLVED.
 `?wasAfterburn@@3DA` has no reference anywhere in the image and appears to be
 dead.
+
+## Palette remap and deck consumer contract — 2026-09-15
+
+- Bounded root `+0x6c` reader decodes 48-byte shade headers and up to ten
+  256-entry index remaps. FA `0x4b3ad0` chooses the first minimum Manhattan RGB
+  distance; `0x4b3410` quantizes density and saturates the final level.
+- Tint reduction at `0x4b36ae` is gated by layer overlap. The selected object's
+  `+0x34` is signed 24.8 speed, confirmed by the object/context copy into
+  `0x50ceb4`. Fields `+0x12e/+0x132` supply maximum reduction/speed cap.
+- The palette worker at `0x486e80` invokes the palette pass every fourth 15 ms
+  iteration. Host presentation owns smoothing/reduction/RNG and uses nominal
+  60 ms fixed-tick passes; pause behavior, startup phase and independent seeded
+  streams are authored scheduling, not native replay parity.
+- Imported terrain remaps run before palette lookup/filtering. Aircraft retain
+  their own palette and fitted RGB haze. Native cross-altitude ray composition
+  (`0x4b31f0`) remains open; GPU distance/filtering are not the integer rasterizer.
+- Named sky/ocean decks use the plane altitude, `2^exponent` feet tile size and
+  reversed Z texture coordinate verified in `0x447aa5` and `0x448400`. Wildcards
+  resolve once in record/deck order. CLI/app extraction now includes OCEAN PICs
+  and rejects old caches missing them. The native special horizon fill and
+  above-sky branches remain open; horizon minification is visibly aliased.
+- Validation: 263 Rust tests, Clippy, build and 24 Python tests passed. Linux
+  viewer and F18 capture passed; `.local/weather-foundation/planes.png` was
+  visually inspected. These establish a working GPU path, not retail equality.

@@ -243,7 +243,7 @@ pub fn theater_resource(name: &str, theater: &str) -> bool {
         || n.ends_with(".LAY")
         || n == "PALETTE.PAL"
         || named
-        || ["SKY", "CLOUD", "GRND"]
+        || ["SKY", "CLOUD", "GRND", "OCEAN"]
             .iter()
             .any(|p| n.starts_with(p) && n.ends_with(".PIC"))
         || matches!(

@@ -139,3 +139,7 @@ definitions are read for both aircraft; a separate static import/re-entry inspec
 checks aircraft-embedded device code without executing it. General SH control flow
 and game-wide absence of contrails/broader vapor are not established. Raw source
 creator options are retained; the editor omits the duplicate overcast label.
+
+Weather LAY: bounded root `+0x6c` shade headers/index remaps and tint reduction
+fields decoded; named sky/ocean deck resources shared by CLI/app. See
+[weather](weather.md) for remaining ray composition and horizon gaps.

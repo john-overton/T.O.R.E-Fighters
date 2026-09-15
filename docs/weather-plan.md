@@ -56,7 +56,7 @@ all sensors are blocked by visible fog.
 - [x] Keep mutable fog-record state and RNG outside immutable configuration.
   Translate the callback before time selection/blending, with reviewed cadence;
   sampling additional cameras must not invoke it.
-- [ ] Finish the tint consumer contract before applying the scalar to rendered
+- [x] Finish the tint consumer contract before applying the scalar to rendered
   pixels. The callback alone is insufficient: native view update publishes tint,
   and a later palette pass smooths and applies it to selected palette ranges.
 - [ ] Translate the reviewed palette/remap operations and recover sky/horizon
@@ -64,23 +64,24 @@ all sensors are blocked by visible fog.
 - [ ] Add synthetic boundary/state tests, imported-module diagnostics and matched
   fog/transition captures; run creator/viewer/flight checks after rendering edits.
 
-Status: first implementation slice landed in the working tree. Typed import
-resolution, persistent fog callbacks, seeded environment state and the reviewed
-one/ten-second selection intervals are implemented. Altitude haze now correctly
-uses the tint RGB at `+0xfb`. Pure six-bit tint/smoothing helpers are tested but
-remain diagnostic: the rendered palette still does not consume the scalar.
-Finish the view-dependent reduction, palette scheduling/remaps and horizon
-before advancing to celestial/cloud rendering. [Evidence](baselines/weather-foundation.md).
+Status: callbacks, live six-bit tint/smoothing and imported indexed haze remaps
+are implemented. Named sky/ocean decks now use world-anchored ray/plane
+projection, source altitude/tile scale and deterministic load-time wildcard
+selection. The GPU replacement still needs the native two-layer ray-remap
+composition and special horizon/above-sky branches; these are recorded acceptance
+gaps, not prerequisites for decoding the celestial and cloud primitives next.
+The 60 ms palette cadence and separate RNG streams are deterministic host
+adaptations. [Evidence](baselines/weather-foundation.md).
 
 ## Existing implementation coverage
 
 | Area | Implemented | Gap |
 | --- | --- | --- |
 | Mission inputs | `layer` name and choice index, `clouds` altitude, `wind` degrees and feet per second, and time all recovered and consumed | Campaign mission sources; the `clouds` deck is read but not drawn |
-| Weather records | Reviewed fields of the 352-byte record in `tore-formats::weather`, all 24 supplied modules parsing | Header shade and fill-pattern tables; visible tint pipeline (callbacks are translated) |
+| Weather records | Reviewed fields of the 352-byte record in `tore-formats::weather`, all 24 supplied modules parsing | Fill-pattern tables and cross-layer ray composition |
 | Environment state | `tore-sim::environment` advances a 120 Hz to 256-unit clock, selects and blends records by time and altitude, and answers pure queries | Pause, compression and long-session audit against the original |
-| Terrain and sky | Artwork uploads as source palette indices; the live palette resolves on the GPU each frame | Celestial shapes, cloud and ocean decks, native sky mapping |
-| Visibility | Recovered per-record ramp and haze color, plus the altitude haze pass | The engine's ten-step remap quantization; sensor consumers |
+| Terrain and sky | Artwork uploads as source palette indices; the live palette resolves on the GPU each frame | Celestial shapes, cloud geometry and special horizon branches |
+| Visibility | Recovered per-record ramp and haze color, plus the altitude haze pass | Cross-layer ray remap composition; sensor consumers |
 | Creator | Six source weather choices launch; duplicate overcast removed | Label mapping remains inferred; serialized weather replay |
 | Wind | Resolved to world feet per second and applied by both adapters | Missing-wind native defaults; wind audio |
 | Air data | `telemetry::EnvironmentReading` accepts wind and atmosphere | Still no live producer |

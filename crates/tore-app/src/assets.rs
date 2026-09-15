@@ -121,6 +121,7 @@ impl Assets {
             "SUN.SH",
             "MOON.SH",
             "STARS.SH",
+            "OCEAN0.PIC",
             "_MOON.PIC",
             "_CLOUD1.PIC",
         ] {

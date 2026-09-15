@@ -94,7 +94,7 @@ impl Configuration {
     /// `hour`/`minute` come from the mission `time` line; `parameter` from
     /// `layer`; `wind` from the `wind` line, unresolved and in source units.
     pub fn new(
-        module: Module,
+        mut module: Module,
         hour: i32,
         minute: i32,
         parameter: i32,
@@ -105,6 +105,23 @@ impl Configuration {
         }
         if !(0..=255).contains(&parameter) {
             return Err(std::io::Error::other("layer parameter outside byte range"));
+        }
+        // Source load-time choice order, with a dedicated authored stream.
+        let mut deck_rng = NativeRng::seeded(1)?;
+        for layer in &mut module.layers {
+            for deck in &mut layer.decks {
+                if !deck.name.is_empty() {
+                    if !(0..=20).contains(&deck.tile_exponent) {
+                        return Err(std::io::Error::other("unsupported deck tile exponent"));
+                    }
+                    if deck.name.contains('*') {
+                        let alternatives = deck.alternatives()?;
+                        deck.name = alternatives
+                            [deck_rng.below(alternatives.len() as i32)? as usize]
+                            .clone();
+                    }
+                }
+            }
         }
         // Native _TIMEInit at 0x486a34 computes (hour * 60 + minute) * 60.
         Ok(Self {
@@ -146,6 +163,10 @@ impl Configuration {
         &self.module.base
     }
 
+    pub fn shade_remap(&self, color: [u8; 3]) -> &tore_formats::weather::ShadeRemap {
+        self.module.shade_remap(color)
+    }
+
     /// Steady horizontal wind in world feet per second, X east and Z north.
     pub fn wind_world_fps(&self) -> [f64; 3] {
         self.wind
@@ -155,6 +176,75 @@ impl Configuration {
 /// One resolved environment instant at one altitude: a record blended across
 /// every overlap window that applies. Pure data; no renderer types.
 pub type Sample = Layer;
+
+/// View-dependent palette state, separate from shared weather and its RNG.
+/// The native palette thread services every fourth 15 ms iteration. This host
+/// adapter schedules nominal 60 ms passes on fixed 120 Hz ticks and pauses with
+/// simulation, rather than reproducing wall-thread scheduling artifacts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Presentation {
+    rng: NativeRng,
+    next_reduction: i64,
+    reduction: i16,
+    phase: u32,
+    pub tint: u8,
+}
+
+impl Presentation {
+    pub fn seeded(seed: i32) -> Result<Self> {
+        Ok(Self {
+            rng: NativeRng::seeded(seed)?,
+            next_reduction: 0,
+            reduction: 0,
+            phase: 0,
+            tint: 0,
+        })
+    }
+
+    /// One authoritative host tick; rendering and additional queries never call this.
+    pub fn step(&mut self, environment: &Environment, altitude: f64, speed_fps: f64) {
+        let feet = clamp_altitude(altitude);
+        let first = environment
+            .active
+            .iter()
+            .position(|l| l.covers_altitude(feet));
+        if let Some(i) = first {
+            let layer = &environment.active[i];
+            let overlap = environment
+                .active
+                .get(i + 1)
+                .is_some_and(|next| next.low_feet <= feet);
+            if overlap && layer.tint_reduction_max > 0 {
+                if environment.ticks >= self.next_reduction {
+                    self.next_reduction = environment.ticks + 3 * TICKS_PER_SECOND;
+                    // Native takes signed WORD(speed_f8 >> 8), then clamps to the cap.
+                    let speed =
+                        (speed_fps.floor() as i32 as i16 as i32).min(layer.tint_reduction_speed);
+                    let bound = layer.tint_reduction_max * speed / layer.tint_reduction_speed;
+                    self.reduction =
+                        self.rng.below(bound).expect("validated presentation RNG") as i16;
+                }
+            } else {
+                self.reduction = 0;
+            }
+        } else {
+            self.reduction = 0;
+        }
+        self.phase += 1000;
+        if self.phase >= 7200 {
+            self.phase -= 7200;
+            if let Some(layer) = environment.sample(altitude) {
+                self.tint = tore_formats::weather::palette::smooth_tint(
+                    self.tint,
+                    layer.tint_scalar as i16,
+                    self.reduction,
+                    16,
+                )
+                .expect("validated tint domain");
+            }
+        }
+    }
+}
 
 /// Authoritative weather state. Advanced only by the host fixed-tick service.
 #[derive(Clone, Debug, PartialEq)]
@@ -341,6 +431,41 @@ fn clamp_altitude(feet: f64) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presentation_smoothing_and_overlap_reduction_have_independent_state() {
+        let mut config = configuration(2);
+        config.module.layers[0].high_feet = 8000;
+        config.module.layers[0].tint_scalar = 230;
+        config.module.layers[0].tint_reduction_max = 102;
+        config.module.layers[0].tint_reduction_speed = 733;
+        config.module.layers[1].start_seconds = 0;
+        config.module.layers[1].low_feet = 7500;
+        let mut environment = Environment::new(config);
+        let mut view = Presentation::seeded(3).unwrap();
+        let rng = view.rng.clone();
+        for _ in 0..120 {
+            environment.step();
+            view.step(&environment, 7000., 733.);
+        }
+        assert_eq!(view.tint, 230);
+        assert_eq!(view.rng, rng, "outside overlap consumes no reduction draw");
+        let mut expected = rng.clone();
+        let reduction = expected.below(102).unwrap() as i16;
+        view.step(&environment, 7500., 733.);
+        assert_eq!(view.reduction, reduction);
+        assert_eq!(view.rng, expected);
+        let snapshot = (environment.clone(), view.clone());
+        for altitude in [7500., 8000., 0., 10000.] {
+            environment.sample(altitude);
+            environment.palette(altitude);
+        }
+        assert_eq!((environment.clone(), view.clone()), snapshot);
+        view.step(&environment, 9000., 733.);
+        assert_eq!(view.reduction, 0);
+        assert_eq!(view.rng, expected);
+        assert_eq!(Presentation::seeded(3).unwrap().tint, 0);
+    }
 
     #[test]
     fn fog_mutates_source_before_blending_and_queries_do_not_consume_rng() {

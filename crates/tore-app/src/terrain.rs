@@ -14,13 +14,17 @@ pub struct World {
     /// entirely weather-palette indexed, so the artwork is uploaded unresolved
     /// and the live palette is applied on the GPU. 255 is the water cutout.
     pub sky_indices: Vec<u8>,
+    pub deck_textures: BTreeMap<String, usize>,
+    pub decks: [[f32; 4]; 2],
     pub vertices: Vec<f32>,
     pub texture_indices: Vec<u8>,
     /// Authoritative environment. One instance per world, so every camera,
     /// mirror and panel resolves the same instant.
     pub weather: tore_sim::environment::Environment,
+    pub weather_presentation: tore_sim::environment::Presentation,
     /// The palette resolved for the presented camera altitude this frame.
     pub palette: [[u8; 3]; 256],
+    pub fog_palette: Vec<[[u8; 3]; 256]>,
     /// The resolved visibility ramp: near feet, far feet, and the 0..1 haze
     /// fractions at each, plus the haze color those distances blend toward.
     pub fog: [f32; 4],
@@ -120,23 +124,41 @@ impl World {
                     .map(|(index, visible)| if *visible { *index } else { 255 }),
             );
         }
-        let sky = Pic::parse(required("SKY0.PIC")?)?;
-        if sky.width != 256 || sky.height != 256 {
-            return Err("invalid sky texture dimensions".into());
+        let mut sky_indices = Vec::new();
+        let mut deck_textures = BTreeMap::new();
+        for layer in weather.configuration().layers() {
+            for deck in &layer.decks {
+                if deck.name.is_empty() || deck_textures.contains_key(&deck.name) {
+                    continue;
+                }
+                let pic = Pic::parse(required(&deck.name)?)?;
+                if pic.width != 256 || pic.height != 256 || !pic.palette.is_empty() {
+                    return Err(format!("{}: unsupported indexed deck image", deck.name).into());
+                }
+                deck_textures.insert(
+                    deck.name.clone(),
+                    (texture_indices.len() + sky_indices.len()) / (256 * 256),
+                );
+                sky_indices.extend_from_slice(&pic.pixels);
+            }
         }
-        if !sky.palette.is_empty() {
-            return Err("sky texture overrides the weather palette".into());
+        // Keep a valid texture array even for LAY families with no named decks.
+        if sky_indices.is_empty() {
+            sky_indices.resize(256 * 256, 255);
         }
-        let sky_indices = sky.pixels.clone();
         let mut out = Self {
             theater,
             environment,
             catalog,
             sky_indices,
+            deck_textures,
+            decks: [[0., 1., -1., 0.]; 2],
             vertices: Vec::new(),
             texture_indices,
             weather,
+            weather_presentation: tore_sim::environment::Presentation::seeded(1)?,
             palette: [[0; 3]; 256],
+            fog_palette: Vec::new(),
             fog: [0.; 4],
             haze: [0; 3],
         };
@@ -203,8 +225,10 @@ impl World {
     }
 
     /// Exactly one 120 Hz tick of environment time. Pausing means not calling it.
-    pub fn step_weather(&mut self) {
+    pub fn step_weather(&mut self, altitude_ft: f64, speed_fps: f64) {
         self.weather.step();
+        self.weather_presentation
+            .step(&self.weather, altitude_ft, speed_fps);
     }
 
     /// Presentation only: resolves the palette for one camera altitude without
@@ -213,8 +237,29 @@ impl World {
         let Some(layer) = self.weather.sample(altitude_ft) else {
             return;
         };
-        self.palette =
-            tore_formats::weather::expand(self.weather.configuration().base_palette(), &layer);
+        self.decks = layer.decks.clone().map(|deck| {
+            [
+                deck.altitude_feet as f32,
+                2_f32.powi(deck.tile_exponent),
+                self.deck_textures
+                    .get(&deck.name)
+                    .map_or(-1., |i| *i as f32),
+                0.,
+            ]
+        });
+        self.palette = tore_formats::weather::expand_tinted(
+            self.weather.configuration().base_palette(),
+            &layer,
+            self.weather_presentation.tint,
+        );
+        self.fog_palette = self
+            .weather
+            .configuration()
+            .shade_remap(layer.shade)
+            .levels
+            .iter()
+            .map(|indices| indices.map(|index| self.palette[usize::from(index)]))
+            .collect();
         let feet = |v: i32| (f64::from(v) * tore_formats::weather::DISTANCE_FEET) as f32;
         self.fog = [
             feet(layer.fog_near),
@@ -348,6 +393,8 @@ mod tests {
             vertices: vec![],
             texture_indices: vec![],
             sky_indices: vec![],
+            deck_textures: BTreeMap::new(),
+            decks: [[0., 1., -1., 0.]; 2],
             fog: [0., 1., 0., 0.],
             haze: [0; 3],
             weather: tore_sim::environment::Environment::new(
@@ -364,6 +411,8 @@ mod tests {
                 .unwrap(),
             ),
             palette: [[100; 3]; 256],
+            weather_presentation: tore_sim::environment::Presentation::seeded(1).unwrap(),
+            fog_palette: vec![[[100; 3]; 256]; 10],
         }
     }
     #[test]

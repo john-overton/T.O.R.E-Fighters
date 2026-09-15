@@ -774,3 +774,10 @@ Validation and material limits: [audio baseline](baselines/audio.md). Further me
   checks. Combat AI remains explicitly deferred until full manual acceptance.
 
 Exact validation, captures, limitations and commands: [manual weapons baseline](baselines/manual-weapons.md).
+
+### Weather foundation continuation — 2026-09-15
+
+Live smoothed fog tint, bounded original shade remaps and world-anchored sky/ocean
+decks implemented. Shared importer includes ocean art. Source/host distinctions,
+263-test evidence and remaining cross-layer/horizon acceptance are recorded in
+[weather foundation](baselines/weather-foundation.md). Celestial/cloud work follows.

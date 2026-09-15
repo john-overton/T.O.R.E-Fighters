@@ -1,5 +1,5 @@
 //! Reviewed fog palette helpers in the six-bit source domain. These are not the
-//! complete ordered native palette pipeline, and are not yet used by rendering.
+//! complete ordered native palette pipeline, and exclude non-weather brightness effects.
 use crate::{Result, invalid};
 
 /// FA 0x4b3f28..0x4b3f74, restricted to the reviewed 0..255 tint domain.

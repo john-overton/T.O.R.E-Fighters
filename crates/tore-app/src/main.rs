@@ -188,6 +188,8 @@ impl App {
 
     /// Restart the resolved launch environment and its authored RNG policy.
     fn reset_weather(&mut self) {
+        self.world.weather_presentation = tore_sim::environment::Presentation::seeded(1)
+            .expect("fixed valid weather presentation seed");
         self.world.weather =
             tore_sim::environment::Environment::new(self.world.weather.configuration().clone());
         self.turbulence = Default::default();
@@ -1156,7 +1158,8 @@ impl ApplicationHandler for App {
                                 .step_surface(&pilot, |x, z| self.world.surface(x, z));
                             // Weather shares the authoritative tick; pausing simply
                             // stops calling it, with no elapsed-time catch-up.
-                            self.world.step_weather();
+                            self.world
+                                .step_weather(self.flight.position[1], self.flight.speed);
                             let turbulence_cue = step_turbulence(
                                 &mut self.turbulence,
                                 &mut self.turbulence_rng,
@@ -1419,7 +1422,8 @@ impl ApplicationHandler for App {
                         self.camera
                             .step(elapsed as f32, self.modifiers.shift_key(), &self.world);
                         for _ in 0..self.flight_clock.steps(elapsed) {
-                            self.world.step_weather();
+                            self.world
+                                .step_weather(f64::from(self.camera.position[1]), 0.);
                         }
                         self.world
                             .resolve_palette(f64::from(self.camera.position[1]));
@@ -2272,7 +2276,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let keys = setup_maneuver(&mut flight);
         for _ in 0..ticks {
             flight.step_surface(&keys, |x, z| world.surface(x, z));
-            world.step_weather();
+            world.step_weather(flight.position[1], flight.speed);
             step_turbulence(
                 &mut probe_turbulence,
                 &mut probe_turbulence_rng,

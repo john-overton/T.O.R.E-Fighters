@@ -5,6 +5,8 @@ use crate::{Result, invalid, slice, u32_at};
 mod callbacks;
 pub use callbacks::Callback;
 pub mod palette;
+mod remap;
+pub use remap::ShadeRemap;
 
 /// Native record stride. Every layer scan advances by this (0x4b31b1, 0x4b3c76).
 pub const RECORD: usize = 352;
@@ -77,6 +79,9 @@ pub struct Layer {
     pub tint_scalar: i32,
     /// Reviewed import at +0x136, translated by the simulation service.
     pub callback: Callback,
+    /// Overlap-band tint reduction at +0x12e, scaled by speed up to +0x132 fps.
+    pub tint_reduction_max: i32,
+    pub tint_reduction_speed: i32,
     /// Two texture decks at +0x102 and +0x118. 0x4b3a19 and 0x4b3a6c copy them
     /// whole instead of interpolating, and only when the source name is set.
     pub decks: [Deck; 2],
@@ -132,6 +137,15 @@ impl Layer {
             return Err(invalid("invalid weather shade/tint component"));
         }
         let tint_scalar = i32_at(raw, 0xfe)?;
+        let tint_reduction_max = i32_at(raw, 0x12e)?;
+        let tint_reduction_speed = i32_at(raw, 0x132)?;
+        if !(0..=255).contains(&tint_scalar)
+            || !(0..=255).contains(&tint_reduction_max)
+            || tint_reduction_speed < 0
+            || (tint_reduction_max > 0 && tint_reduction_speed == 0)
+        {
+            return Err(invalid("weather tint parameters outside reviewed domain"));
+        }
         let decks = [Deck::parse(raw, 0x102)?, Deck::parse(raw, 0x118)?];
         let word = |at: usize| -> Result<i16> {
             Ok(i16::from_le_bytes(slice(raw, at, 2)?.try_into().unwrap()))
@@ -164,6 +178,8 @@ impl Layer {
             tint,
             tint_scalar,
             callback,
+            tint_reduction_max,
+            tint_reduction_speed,
             decks,
             moon_azimuth: word(0x13e)?,
             moon_elevation: word(0x140)?,
@@ -399,6 +415,7 @@ pub struct Module {
     /// The module's 256-entry base palette, still 6-bit as stored.
     pub base: [[u8; 3]; 256],
     pub layers: Vec<Layer>,
+    pub shades: Vec<ShadeRemap>,
 }
 
 impl Module {
@@ -422,6 +439,7 @@ impl Module {
             return Err(invalid("invalid weather palette component"));
         }
         let table = u32_at(code, 0x74)?;
+        let shades = remap::parse(code, base_rva, u32_at(code, 0x6c)?)?;
         let mut layers = Vec::new();
         for index in 0..MAX_RECORDS {
             let record = resolve(table + index * RECORD, RECORD)?;
@@ -429,7 +447,11 @@ impl Module {
                 if layers.is_empty() {
                     return Err(invalid("weather module has no records"));
                 }
-                return Ok(Self { base, layers });
+                return Ok(Self {
+                    base,
+                    layers,
+                    shades,
+                });
             }
             let callback = callbacks::resolve(data, code, base_rva, u32_at(record, 0x136)?)?;
             layers.push(Layer::with_callback(record, callback)?);
@@ -445,13 +467,34 @@ impl Module {
             .ok_or_else(|| invalid("weather record index outside module"))?;
         Ok(expand(&self.base, layer))
     }
+
+    /// FA 0x4b3ad0: minimum sum of absolute RGB differences; first wins ties.
+    pub fn shade_remap(&self, color: [u8; 3]) -> &ShadeRemap {
+        self.shades
+            .iter()
+            .min_by_key(|shade| {
+                shade
+                    .color
+                    .iter()
+                    .zip(color)
+                    .map(|(a, b)| u16::from(a.abs_diff(b)))
+                    .sum::<u16>()
+            })
+            .expect("validated nonempty shade table")
+    }
 }
 
 /// Six-bit source components expand to eight bits; the native copies are not contiguous.
 pub fn expand(base: &[[u8; 3]; 256], layer: &Layer) -> [[u8; 3]; 256] {
+    expand_tinted(base, layer, 0)
+}
+
+pub fn expand_tinted(base: &[[u8; 3]; 256], layer: &Layer, strength: u8) -> [[u8; 3]; 256] {
     let mut palette = *base;
     palette[224..255].copy_from_slice(&layer.sky);
     palette[192..224].copy_from_slice(&layer.terrain);
+    palette::apply_tint(&mut palette, layer.tint, strength)
+        .expect("validated six-bit weather colors");
     for rgb in &mut palette {
         for c in rgb {
             *c = ((u16::from(*c) * 255 + 31) / 63) as u8;
@@ -487,10 +530,19 @@ pub(crate) fn section(data: &[u8]) -> Result<(&[u8], usize)> {
 /// every value is generated here, and no original artwork or record is copied.
 pub fn synthetic_module(records: usize) -> Vec<u8> {
     // The base palette occupies the first 768 bytes; the table follows it.
-    let table = 0x400;
+    let table = 0x600;
     let mut code = vec![0; table + (records + 1) * RECORD];
     code[0x70..0x74].copy_from_slice(&0x100u32.to_le_bytes());
     code[0x74..0x78].copy_from_slice(&(0x100 + table as u32).to_le_bytes());
+    code[0x6c..0x70].copy_from_slice(&0x500u32.to_le_bytes());
+    code[0x404..0x408].copy_from_slice(&10u32.to_le_bytes());
+    for i in 0..10 {
+        code[0x408 + i * 4..0x40c + i * 4].copy_from_slice(&0x600u32.to_le_bytes());
+    }
+    code[0x430] = 1;
+    for i in 0..256 {
+        code[0x500 + i] = i as u8;
+    }
     for i in 0..records {
         let at = table + i * RECORD;
         code[at + 0x02..at + 0x06].copy_from_slice(&(i as i32 * 3600).to_le_bytes());

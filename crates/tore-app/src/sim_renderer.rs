@@ -148,7 +148,7 @@ impl SimRenderer {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera and atmosphere"),
-            size: 96,
+            size: 128,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -157,7 +157,8 @@ impl SimRenderer {
             size: wgpu::Extent3d {
                 width: 256,
                 height: 256,
-                depth_or_array_layers: (world.texture_indices.len() / (256 * 256) + 1) as u32,
+                depth_or_array_layers: ((world.texture_indices.len() + world.sky_indices.len())
+                    / (256 * 256)) as u32,
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -186,7 +187,8 @@ impl SimRenderer {
             wgpu::Extent3d {
                 width: 256,
                 height: 256,
-                depth_or_array_layers: (world.texture_indices.len() / (256 * 256) + 1) as u32,
+                depth_or_array_layers: ((world.texture_indices.len() + world.sky_indices.len())
+                    / (256 * 256)) as u32,
             },
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
@@ -197,7 +199,7 @@ impl SimRenderer {
             label: Some("Live weather palette"),
             size: wgpu::Extent3d {
                 width: 256,
-                height: 1,
+                height: 11,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -499,11 +501,16 @@ impl SimRenderer {
             sky,
         );
         uniform[7] = (world.texture_indices.len() / (256 * 256)) as f32;
+        uniform[15] = world.fog_palette.len() as f32;
+        uniform.extend(world.decks.into_iter().flatten());
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
-        let mut entries = Vec::with_capacity(1024);
-        for rgb in &world.palette {
-            entries.extend([rgb[0], rgb[1], rgb[2], 255]);
+        let mut entries = Vec::with_capacity(11 * 1024);
+        for row in std::iter::once(&world.palette).chain(world.fog_palette.iter()) {
+            for rgb in row {
+                entries.extend([rgb[0], rgb[1], rgb[2], 255]);
+            }
         }
+        entries.resize(11 * 1024, 0);
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.palette,
@@ -515,11 +522,11 @@ impl SimRenderer {
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(1024),
-                rows_per_image: Some(1),
+                rows_per_image: Some(11),
             },
             wgpu::Extent3d {
                 width: 256,
-                height: 1,
+                height: 11,
                 depth_or_array_layers: 1,
             },
         );
