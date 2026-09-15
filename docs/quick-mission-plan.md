@@ -158,3 +158,10 @@ AI is added by this creator pass; existing manual-acceptance gates remain.
 mission/loadout setup → both screens → armed airborne launch wiring → acceptance.
 Full creator setup does not close M1d's
 combat loop, M1e AI, or native mission-generation parity.
+
+## Mapping checkpoint — 2026-09-14
+
+See the [defaults and input contract](formats/quick-mission.md) and
+[validation evidence](baselines/menu-behavior-mapping.md). Verified source rules
+are recorded separately from unresolved behavior. Implementation and original-game
+acceptance gates above remain open.

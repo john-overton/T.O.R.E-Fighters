@@ -1,10 +1,21 @@
 """Synthetic selector dispatch and table bounds; no retail fixtures."""
 import struct
 import unittest
-from native_menu_tables import read_va, string_list, literal_list
+from native_menu_tables import read_va, string_list, literal_list, ordnance_controls
 
 
 class MenuTableTests(unittest.TestCase):
+    def test_ordnance_dispatch_rejects_unknown_duplicate_and_truncated_targets(self):
+        branches = [0x41b0d1, 0x41b139, 0x41b18d, 0x41b1e1, 0x41b2d6]
+        data = struct.pack('<5I', *branches)
+        rows = [{'va': 0x41b336, 'raw': 0, 'size': 20, 'executable': True}]
+        result = ordnance_controls(data, rows)
+        self.assertEqual([r['action_id'] for r in result['controls']], list(range(1, 6)))
+        for invalid in [data[:-1], struct.pack('<5I', 0, *branches[1:]),
+                        struct.pack('<5I', branches[1], *branches[1:])]:
+            with self.assertRaises(ValueError):
+                ordnance_controls(invalid, rows)
+
     def fixture(self):
         code = b'\xb8' + struct.pack('<I', 200) + b'\xc3'
         data = code + b'One\0Two\0\0'

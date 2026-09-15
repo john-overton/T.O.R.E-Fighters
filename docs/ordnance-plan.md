@@ -127,3 +127,10 @@ cancellation, fixed ticks, pause without catch-up, damage reset and cue ownershi
 Delivery gate: creator → supported Load Ordnance edits → Fly → correct armed
 airborne state → restart/return without losing the accepted setup. Unrelated
 menus, combat AI and complete native mission/projectile parity stay open.
+
+## Mapping checkpoint — 2026-09-14
+
+See the [controls, eligibility and geometry contract](formats/ordnance-menu.md) and
+[validation evidence](baselines/menu-behavior-mapping.md). Verified source rules
+are recorded separately from unresolved behavior. Implementation and original-game
+acceptance gates above remain open.

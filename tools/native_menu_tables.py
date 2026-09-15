@@ -6,8 +6,22 @@ import struct
 # Explicit code boundaries avoid linear-disassembler misalignment after jump tables.
 ALIGNED_REGIONS = (
     ('option_dispatch', 0x42e720, 0x42e86c),
-    ('selector_interaction', 0x430680, 0x43089a),
+    ('selector_interaction', 0x430680, 0x43089c),
     ('briefing_geometry', 0x42fde0, 0x4300d1),
+    ('creator_initialization', 0x42f2e0, 0x42f877),
+    ('creator_nationalities', 0x4308a0, 0x4309f9),
+    ('creator_field_updates', 0x4301a0, 0x4303d5),
+    ('catalog_filter', 0x41d209, 0x41d384),
+    ('ordnance_controls', 0x41b0d1, 0x41b316),
+    ('ordnance_quantity', 0x41b4d2, 0x41b686),
+    ('ordnance_cheat_toggle', 0x41be33, 0x41be90),
+    ('ordnance_capacity_wrapper', 0x41c3a9, 0x41c457),
+    ('ordnance_station_hit', 0x41c460, 0x41c4e1),
+    ('ordnance_catalog_hit', 0x41c4f0, 0x41c58a),
+    ('ordnance_entry_wrapper', 0x47fa50, 0x47fa97),
+    ('ordnance_catalog_eligibility', 0x419cfa, 0x419f4c),
+    ('ordnance_card_draw', 0x41c610, 0x41c6f7),
+    ('ordnance_catalog_sort', 0x41c700, 0x41c81d),
 )
 
 
@@ -53,6 +67,25 @@ def literal_list(data, sections, branch):
     return {'table_va': pointer, 'values': string_list(data, sections, pointer)}
 
 
+def ordnance_controls(data, sections):
+    """Read the reviewed five-entry action dispatch, without invoking handlers."""
+    raw = read_va(data, sections, 0x41b336, 20, executable=True)
+    meanings = {
+        0x41b0d1: 'page rocker',
+        0x41b139: 'category bank one',
+        0x41b18d: 'category bank two',
+        0x41b1e1: 'internal fuel rocker',
+        0x41b2d6: 'Fly weight check',
+    }
+    branches = struct.unpack('<5I', raw)
+    if set(branches) != set(meanings):
+        raise ValueError('unreviewed ordnance action dispatch')
+    return {'dispatch_va': 0x41b336, 'sha256': hashlib.sha256(raw).hexdigest(),
+            'controls': [{'action_id': i, 'branch_va': branch,
+                          'meaning': meanings[branch]}
+                         for i, branch in enumerate(branches, 1)]}
+
+
 def artifacts(data, sections):
     dispatch = read_va(data, sections, 0x42e86c, 60 * 4, executable=True)
     targets = read_va(data, sections, 0x42e95c, 16 * 4, executable=True)
@@ -91,4 +124,6 @@ def artifacts(data, sections):
                      'coordinates': 'relative to current dialog origin; text draw uses y minus one',
                      'lines': rectangles},
     }
-    return {'creator-options.json': json.dumps(report, indent=2) + '\n'}
+    return {'creator-options.json': json.dumps(report, indent=2) + '\n',
+            'ordnance-controls.json': json.dumps(ordnance_controls(data, sections),
+                                                indent=2) + '\n'}

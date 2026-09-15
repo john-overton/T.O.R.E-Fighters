@@ -16,7 +16,9 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 - [ ] Recover complete active FA option/default/filter/geometry contracts.
 - [x] Recover 60 active option dispatch entries, 16 theater target lists and
   29 native briefing rectangles; decode static controls in 26 DLG resources.
-  Defaults/dynamic filters and final text/art hit geometry remain open.
+  Initialization, theater nationalities, selector dependencies and input semantics
+  are mapped; dynamic catalog flag construction and final text/art hit geometry
+  remain open. See [behavior evidence](baselines/menu-behavior-mapping.md).
   [Source specification](formats/quick-mission.md), [validation](baselines/menu-options-geometry.md).
 - [x] Add repeatable `--native-menus` extraction with hash-gated regions/string
   references; validate QM_MENU/ARMPLANE trees through the shared bounded reader.

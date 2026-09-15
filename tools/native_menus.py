@@ -43,8 +43,8 @@ def artifacts(exe, rows, instructions):
     manifest = json.loads(result['reviewed-components.json'])
     manifest['instance_state'] = []
     manifest['open_contracts'] = [
-        'active creator options/defaults and runtime-populated dialog records',
-        'ordnance card art, geometry, sort/filter and input gestures',
+        'dynamic catalog flag construction and runtime-populated dialog records',
+        'complete ordnance art/text geometry and physical input/repeat gestures',
         'stock/year/airbase eligibility and full load initialization',
         'standard/custom mission flow and cancel/commit behavior',
         'original-game visual and interaction acceptance',
