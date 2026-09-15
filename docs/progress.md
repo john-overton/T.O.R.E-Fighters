@@ -27,7 +27,9 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 - [x] W2: bounded `tore-formats::weather` records and deterministic
   `tore-sim::environment` clock, selection and queries, with `--validate-weather`
   exercising every imported module over a full simulated day.
-- [ ] W2 remainder: altitude and time interpolation across the overlap windows.
+- [x] W2 remainder: translate the native blend kernel and apply it to both the
+  time and altitude overlap windows; `--validate-weather` now resolves a real
+  dawn and dusk from `DAY2.LAY`.
 - [ ] W3: implement accepted time/palette/sky/celestial behavior.
 - [ ] W4: implement accepted clouds, fog and visibility behavior.
 - [ ] W5: connect verified wind/turbulence, air data and environment feedback.

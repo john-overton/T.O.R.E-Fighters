@@ -20,9 +20,10 @@ fn name(data: &[u8]) -> Result<String> {
     let text = std::str::from_utf8(&data[..end])
         .map_err(|_| invalid("weather record name is not text"))?
         .to_ascii_uppercase();
+    // Retail records name animated sets such as `OCEAN*06.PIC`.
     if text
         .bytes()
-        .any(|c| !c.is_ascii_alphanumeric() && c != b'.' && c != b'_' && c != b'~' && c != b'$')
+        .any(|c| !c.is_ascii_alphanumeric() && !b"._~$*".contains(&c))
     {
         return Err(invalid("invalid weather record resource name"));
     }
@@ -48,8 +49,20 @@ pub struct Layer {
     pub high_feet: i32,
     /// 31 sky colors; native 0x4b364a copies them to palette indices 224..255.
     pub sky: [[u8; 3]; 31],
+    /// Nine scalars at +0x12..+0x36, all linearly interpolated by 0x4b3820.
+    /// Their individual meanings are UNRESOLVED.
+    pub scalars: [i32; 9],
+    /// Interpolated color at +0x36. 0x4b3ad0 resolves it against the shade table
+    /// at `[0x580e1c]` and caches the match in the runtime-only field at +0x3a.
+    pub shade: [u8; 3],
     /// 32 terrain colors; native 0x4b365c copies them to palette indices 192..224.
     pub terrain: [[u8; 3]; 32],
+    /// A second interpolated color and scalar at +0xfb and +0xfe.
+    pub tint: [u8; 3],
+    pub tint_scalar: i32,
+    /// Two named dependencies with two scalars each, at +0x102 and +0x118.
+    /// 0x4b3a19 and 0x4b3a6c copy them whole instead of interpolating.
+    pub shapes: [Dependency; 2],
     /// 0x4b4720 indexes this by an effect selector and takes the span minimum.
     /// Raw source values may exceed 100; only that consumer's ceiling clamps them.
     pub effects: [u8; EFFECTS],
@@ -79,6 +92,17 @@ impl Layer {
         if sky.iter().chain(&terrain).flatten().any(|c| *c > 63) {
             return Err(invalid("invalid weather palette component"));
         }
+        let mut scalars = [0; 9];
+        for (i, value) in scalars.iter_mut().enumerate() {
+            *value = i32_at(raw, 0x12 + i * 4)?;
+        }
+        let shade = slice(raw, 0x36, 3)?.try_into().unwrap();
+        let tint = slice(raw, 0xfb, 3)?.try_into().unwrap();
+        let tint_scalar = i32_at(raw, 0xfe)?;
+        let shapes = [
+            Dependency::parse(raw, 0x102)?,
+            Dependency::parse(raw, 0x118)?,
+        ];
         let mut effects = [0; EFFECTS];
         effects.copy_from_slice(slice(raw, 0x14e, EFFECTS)?);
         let shape = name(slice(raw, 0x153, RECORD - 0x153)?)?;
@@ -93,7 +117,12 @@ impl Layer {
             low_feet,
             high_feet,
             sky,
+            scalars,
+            shade,
             terrain,
+            tint,
+            tint_scalar,
+            shapes,
             effects,
             shape,
         })
@@ -127,6 +156,89 @@ impl Layer {
             .get(selector)
             .ok_or_else(|| invalid("weather effect selector outside record"))?;
         Ok(value.min(100))
+    }
+}
+
+/// A named record dependency: a NUL-terminated name and two scalars after it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Dependency {
+    pub name: String,
+    pub scalars: [i32; 2],
+}
+
+impl Dependency {
+    /// The name occupies 14 bytes; an empty name means the field is unused
+    /// and the native copy at 0x4b3a25 skips it entirely.
+    fn parse(record: &[u8], at: usize) -> Result<Self> {
+        Ok(Self {
+            name: name(slice(record, at, 14)?)?,
+            scalars: [i32_at(record, at + 14)?, i32_at(record, at + 18)?],
+        })
+    }
+}
+
+/// `0x4b3b60`: `*dest += ((src - *dest) * factor) >> 8`.
+fn lerp(dest: i32, src: i32, factor: i32) -> i32 {
+    dest + (((src - dest) * factor) >> 8)
+}
+
+/// `0x4b3b80` applies the same step to each component of one color.
+fn lerp_color(dest: &mut [u8; 3], src: [u8; 3], factor: i32) {
+    for (d, s) in dest.iter_mut().zip(src) {
+        *d = lerp(i32::from(*d), i32::from(s), factor) as u8;
+    }
+}
+
+/// `0x4b39a6` merges the flag byte rather than interpolating it.
+fn merge_flags(dest: u16, src: u16, factor: i32) -> u16 {
+    let mut merged = dest | src;
+    // Bit 0x10 follows whichever record the factor is nearer to.
+    let dominant = if factor < 0x80 { dest } else { src };
+    if dominant & 0x10 == 0 {
+        merged &= !0x10;
+    }
+    // With bit 0x80 present in the destination, bit 0x20 becomes an intersection.
+    if dest & 0x80 != 0 && (dest & src & 0x20) == 0 {
+        merged &= !0x20;
+    }
+    merged
+}
+
+impl Layer {
+    /// `0x4b3820`. Blends `source` into this record as `position` runs across
+    /// `span`, exactly as the native time and altitude overlap windows do.
+    /// Bounds take the union; named dependencies replace rather than blend.
+    pub fn blend(&mut self, source: &Layer, position: i32, span: i32) {
+        if position <= 0 {
+            return;
+        }
+        if position >= span {
+            self.clone_from(source);
+            return;
+        }
+        let factor = (position << 8) / span;
+        self.low_feet = self.low_feet.min(source.low_feet);
+        self.high_feet = self.high_feet.max(source.high_feet);
+        for (d, s) in self.scalars.iter_mut().zip(source.scalars) {
+            *d = lerp(*d, s, factor);
+        }
+        lerp_color(&mut self.shade, source.shade, factor);
+        lerp_color(&mut self.tint, source.tint, factor);
+        self.tint_scalar = lerp(self.tint_scalar, source.tint_scalar, factor);
+        for (d, s) in self.sky.iter_mut().zip(source.sky) {
+            lerp_color(d, s, factor);
+        }
+        for (d, s) in self.terrain.iter_mut().zip(source.terrain) {
+            lerp_color(d, s, factor);
+        }
+        self.flags = merge_flags(self.flags, source.flags, factor);
+        self.start_seconds = self.start_seconds.min(source.start_seconds);
+        self.end_seconds = self.end_seconds.max(source.end_seconds);
+        for (d, s) in self.shapes.iter_mut().zip(&source.shapes) {
+            if !s.name.is_empty() {
+                d.clone_from(s);
+            }
+        }
     }
 }
 

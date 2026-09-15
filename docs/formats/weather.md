@@ -84,6 +84,42 @@ feet between every cloud and fog band. Those overlaps are the interpolation
 windows: `0x4b37ab` only interpolates when two adjacent records agree on
 `+0x0a`, and passes quarter-scaled signed word time differences into `0x4b3820`.
 
+### The rest of the record, and how it is interpolated
+
+`0x4b3820` blends a source record into a destination as `position` runs across
+`span`. Below zero it keeps the destination; at or above `span` it copies all 352
+bytes. Otherwise `factor = (position << 8) / span` drives
+`*d += ((s - *d) * factor) >> 8` per dword (`0x4b3b60`) and per color component
+(`0x4b3b80`). That reveals the remaining fields:
+
+| Offset | Width | Treatment | Meaning |
+| --- | --- | --- | --- |
+| `+0x12` | 9 × dword | interpolated | scalars; individual meanings UNRESOLVED |
+| `+0x36` | RGB | interpolated | horizon/shade color; `0x4b3ad0` then resolves the nearest entry of the table at `[0x580e1c]` and caches it at `+0x3a` |
+| `+0xfb` | RGB | interpolated | a second color |
+| `+0xfe` | dword | interpolated | a scalar paired with it |
+| `+0x102` | 14 + 2 × dword | replaced when non-empty | named dependency |
+| `+0x118` | 14 + 2 × dword | replaced when non-empty | named dependency |
+
+Bounds take the union rather than blending: `+0x0a` takes the minimum, `+0x0e`,
+`+0x06` the maximum and `+0x02` the minimum. The flag byte is merged at
+`0x4b39a6`: bit `0x10` follows whichever record the factor is nearer to, bit
+`0x20` becomes an intersection when the destination carries `0x80`, and every
+other bit is the union.
+
+Both overlap windows call the same routine. Time uses
+`position = (now - source.start) >> 2` and `span = (destination.end -
+source.start) >> 2` (`0x4b37b8`), and only when the two records share `+0x0a`
+(`0x4b37b4`). Altitude uses `position = altitude - source.low` and
+`span = destination.high - source.low` (`0x4b3c37`), unconditionally.
+
+Retail `DAY2.LAY` resolved through this produces a real dawn and dusk. Scalar 0
+runs 0 at night, 82 at the transition midpoints and 165 by day; scalar 4 runs
+1,031 to 6,187; the horizon color runs `[2, 1, 3]` to `[38, 40, 51]`; and the
+night-hazing bit clears partway through. Twelve of the day's 1,440 minutes fall
+inside a transition. The day records also name `OCEAN*06.PIC` as a dependency
+and the night records do not.
+
 ### Effect selectors
 
 Selector 0 is visibility: `@WRCanSee@8` `0x4b4b30` and `0x48d98d` scale a

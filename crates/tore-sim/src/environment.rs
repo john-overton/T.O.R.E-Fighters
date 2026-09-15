@@ -53,26 +53,15 @@ impl Configuration {
     pub fn palette(&self, index: usize) -> Result<[[u8; 3]; 256]> {
         self.module.palette(index)
     }
-}
 
-/// One resolved environment instant at one altitude. Pure data; no renderer types.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Sample {
-    /// Index into `Configuration::layers`.
-    pub layer: usize,
-    /// Record flag bits reaching `_currentLayer` (0x4b3526). Bit 0x40 is night hazing.
-    pub flags: u16,
-    /// True when a further record also covers this altitude (`_WRGetLayer` out flag).
-    pub overlapped: bool,
-}
-
-impl Sample {
-    /// `_currentLayer & 0x40` sets `_nightHazing` at 0x4b353c and suppresses
-    /// wing vapor at 0x49fdad.
-    pub fn night_hazing(self) -> bool {
-        self.flags & tore_formats::weather::NIGHT_HAZING != 0
+    pub fn base_palette(&self) -> &[[u8; 3]; 256] {
+        &self.module.base
     }
 }
+
+/// One resolved environment instant at one altitude: a record blended across
+/// every overlap window that applies. Pure data; no renderer types.
+pub type Sample = Layer;
 
 /// Authoritative weather state. Advanced only by the host fixed-tick service.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,7 +69,7 @@ pub struct Environment {
     configuration: Configuration,
     clock: FixedClock,
     ticks: i64,
-    active: Vec<usize>,
+    active: Vec<Layer>,
     active_seconds: i32,
 }
 
@@ -122,32 +111,41 @@ impl Environment {
         ((i64::from(self.configuration.start_seconds) + elapsed).rem_euclid(SECONDS_PER_DAY)) as i32
     }
 
-    /// Records whose inclusive time window covers the current second, in table order.
-    pub fn active(&self) -> &[usize] {
+    /// The time-resolved active list, already collapsed across dawn and dusk
+    /// windows. This is the equivalent of native `curLayers`.
+    pub fn active(&self) -> &[Layer] {
         &self.active
     }
 
-    /// Pure query. `_WRGetLayer@8` truncates altitude toward zero and clamps at 0,
-    /// then takes the first active record whose inclusive altitude band contains it.
+    /// Pure query. `_WRGetLayer@8` truncates altitude and clamps it at zero;
+    /// `0x4b3be0` then blends every active record whose band contains it.
     pub fn sample(&self, altitude_feet: f64) -> Option<Sample> {
         let feet = clamp_altitude(altitude_feet);
-        let layers = self.configuration.layers();
-        let mut found = None;
-        for (position, index) in self.active.iter().enumerate() {
-            if layers[*index].covers_altitude(feet) {
-                found = Some((position, *index));
-                break;
+        let mut result: Option<Layer> = None;
+        for layer in &self.active {
+            if !layer.covers_altitude(feet) {
+                continue;
+            }
+            match &mut result {
+                // 0x4b3c37: position walks from this record's floor to the
+                // previous record's ceiling, so bands cross over their overlap.
+                Some(previous) => {
+                    let span = previous.high_feet.saturating_sub(layer.low_feet);
+                    previous.blend(layer, feet.saturating_sub(layer.low_feet), span);
+                }
+                None => result = Some(layer.clone()),
             }
         }
-        let (position, index) = found?;
-        let overlapped = self.active[position + 1..]
-            .iter()
-            .any(|i| layers[*i].covers_altitude(feet));
-        Some(Sample {
-            layer: index,
-            flags: layers[index].flags,
-            overlapped,
-        })
+        result
+    }
+
+    /// The 256-entry palette for one altitude, expanded over the module base.
+    pub fn palette(&self, altitude_feet: f64) -> Option<[[u8; 3]; 256]> {
+        let layer = self.sample(altitude_feet)?;
+        Some(tore_formats::weather::expand(
+            self.configuration.base_palette(),
+            &layer,
+        ))
     }
 
     /// Effect strength across an altitude span, matching `_WRWeatherEffects`
@@ -155,10 +153,8 @@ impl Environment {
     pub fn effect(&self, selector: usize, low_feet: f64, high_feet: f64) -> Result<u8> {
         let (low, high) = (clamp_altitude(low_feet), clamp_altitude(high_feet));
         let (low, high) = (low.min(high), low.max(high));
-        let layers = self.configuration.layers();
         let mut strength = 100;
-        for index in &self.active {
-            let layer = &layers[*index];
+        for layer in &self.active {
             if layer.high_feet >= low && layer.low_feet <= high {
                 strength = strength.min(layer.effect(selector)?);
             }
@@ -166,7 +162,9 @@ impl Environment {
         Ok(strength)
     }
 
-    /// Rescans the record table whenever the whole second changed.
+    /// Rescans the record table whenever the whole second changed. Adjacent
+    /// records sharing a floor collapse into one blended record, exactly as
+    /// 0x4b37ab does, which is how dawn and dusk cross over.
     fn select(&mut self) {
         let seconds = self.seconds_of_day();
         if seconds == self.active_seconds {
@@ -174,10 +172,20 @@ impl Environment {
         }
         self.active_seconds = seconds;
         self.active.clear();
-        for (index, layer) in self.configuration.layers().iter().enumerate() {
-            if layer.covers_time(seconds) {
-                self.active.push(index);
+        for layer in self.configuration.layers() {
+            if !layer.covers_time(seconds) {
+                continue;
             }
+            if let Some(previous) = self.active.last_mut()
+                && previous.low_feet == layer.low_feet
+            {
+                // Native word arithmetic scales both sides by four before blending.
+                let position = (seconds - layer.start_seconds) / 4;
+                let span = (previous.end_seconds.saturating_sub(layer.start_seconds)) / 4;
+                previous.blend(layer, position, span);
+                continue;
+            }
+            self.active.push(layer.clone());
         }
     }
 }
@@ -218,11 +226,13 @@ mod tests {
     #[test]
     fn selection_follows_the_clock_and_sampling_is_pure() {
         let mut e = Environment::new(configuration(4));
-        assert_eq!(e.active(), [0]);
+        assert_eq!(e.active().len(), 1);
+        assert_eq!(e.active()[0].start_seconds, 0);
         for _ in 0..120 * 3600 {
             e.step();
         }
-        assert_eq!(e.active(), [1]);
+        assert_eq!(e.active().len(), 1);
+        assert_eq!(e.active()[0].start_seconds, 3600);
         let before = e.clone();
         for altitude in [-5., 0., 1000., 99_999., f64::NAN] {
             let _ = e.sample(altitude);
@@ -250,8 +260,7 @@ mod tests {
     fn altitude_query_matches_the_native_band_and_effect_minimum() {
         let e = Environment::new(configuration(2));
         let sample = e.sample(500.).unwrap();
-        assert_eq!(sample.layer, 0);
-        assert!(!sample.overlapped);
+        assert_eq!(sample.start_seconds, 0);
         assert!(!sample.night_hazing());
         assert!(e.sample(100_001.).is_none());
         // Fixture record 0 stores 80 and 40 in the first two effect bytes.
