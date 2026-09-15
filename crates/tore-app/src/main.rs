@@ -65,6 +65,7 @@ struct App {
     researched_flight: bool,
     previous_flight: flight::State,
     flight_clock: flight::Clock,
+    vapor: tore_sim::vapor::Vapor,
     flight_view: u8,
     flight_canvas: flight_canvas::FlightCanvas,
     window_size: [u32; 2],
@@ -89,7 +90,58 @@ struct App {
     next_frame: Option<Instant>,
     error: Option<Box<dyn Error>>,
 }
+/// Wing vapor line segments: position then RGBA, two vertices per segment.
+/// The five native colors are patterned fill types resolved through LAY
+/// header remap tables we have located but not decoded, so the rendered
+/// color and fade are fitted: the brightest source sky entry, thinning
+/// along the trail.
+fn vapor_vertices(
+    vapor: &tore_sim::vapor::Vapor,
+    world: &terrain::World,
+    presented: &flight::State,
+) -> Vec<f32> {
+    let hazing = world
+        .weather
+        .sample(presented.position[1])
+        .is_some_and(|l| l.night_hazing());
+    let roll_rate = presented.roll_rate.to_degrees();
+    let color = world.palette[254].map(|c| f32::from(c) / 255.);
+    let mut out = Vec::new();
+    for side in 0..2 {
+        let Some(trail) = vapor.trail(side, presented.g, roll_rate, hazing) else {
+            continue;
+        };
+        for (i, pair) in trail.windows(2).enumerate() {
+            let along = i as f32 / vapor.segments() as f32;
+            for (end, point) in pair.iter().enumerate() {
+                let step = (i + end) as f32 / vapor.segments() as f32;
+                let _ = along;
+                out.extend([
+                    point[0] as f32,
+                    point[1] as f32,
+                    point[2] as f32,
+                    color[0],
+                    color[1],
+                    color[2],
+                    0.55 * (1. - step),
+                ]);
+            }
+        }
+    }
+    out
+}
+
 impl App {
+    /// A restart or aircraft change teleports the aircraft, so the position
+    /// history must be reseeded rather than drawn across the jump.
+    fn reset_vapor(&mut self) {
+        self.vapor = tore_sim::vapor::Vapor::seeded(
+            self.hornet
+                .streamer_points(&self.flight)
+                .unwrap_or([[0.; 3]; 2]),
+        );
+    }
+
     fn save_preferences(&mut self) {
         let Some(path) = &self.preference_path else {
             return;
@@ -467,6 +519,8 @@ impl App {
                             }
                             self.hornet = aircraft;
                             self.flight = self.hornet.start(&self.world);
+                            self.reset_vapor();
+                            self.reset_vapor();
                             match combat::Combat::new(
                                 &self.hornet,
                                 &self.theater_resources,
@@ -609,6 +663,7 @@ impl App {
                 }
                 self.input.context(true, self.focused);
                 self.flight = self.hornet.start(&self.world);
+                self.reset_vapor();
                 if let Some((altitude, fuel)) = self.mission {
                     self.flight.position[1] = altitude;
                     self.flight.fuel = fuel;
@@ -1031,6 +1086,9 @@ impl ApplicationHandler for App {
                             // Weather shares the authoritative tick; pausing simply
                             // stops calling it, with no elapsed-time catch-up.
                             self.world.step_weather();
+                            if let Some(points) = self.hornet.streamer_points(&self.flight) {
+                                self.vapor.step(self.world.weather.ticks(), points);
+                            }
                             if let Some(audio) = &self.audio {
                                 audio.controls(&self.previous_flight, &self.flight);
                             }
@@ -1146,6 +1204,8 @@ impl ApplicationHandler for App {
                         // One resolved instant per frame, shared by the main view,
                         // the mirrors and the camera panels.
                         self.world.resolve_palette(presented.position[1]);
+                        let vapor = vapor_vertices(&self.vapor, &self.world, &presented);
+                        renderer.vapor(&vapor);
                         match renderer.poll_previews() {
                             Ok(previews) => {
                                 self.performance.completed_previews += previews.len();
@@ -2025,7 +2085,7 @@ fn main() -> AppResult<()> {
     if snapshot.is_some() && background.is_none() {
         background = Some("CHOOSEV".into());
     }
-    let world = terrain::World::for_theater(&assets.theater_resources, &theater_code)?;
+    let mut world = terrain::World::for_theater(&assets.theater_resources, &theater_code)?;
     if validate_creator {
         return ordnance::validate_sources(&assets.theater_resources, &world);
     }
@@ -2109,10 +2169,37 @@ fn main() -> AppResult<()> {
     if researched_flight {
         flight.enable_research(1)?;
     }
+    // The probe advances weather and vapor with the flight so captures taken
+    // after it show the same environment and trail history a live run would.
+    let mut probe_vapor =
+        tore_sim::vapor::Vapor::seeded(hornet.streamer_points(&flight).unwrap_or([[0.; 3]; 2]));
     if let Some(ticks) = flight_probe_ticks {
         let keys = setup_maneuver(&mut flight);
         for _ in 0..ticks {
             flight.step(&keys, |x, z| world.height(x as f32, z as f32) as f64);
+            world.step_weather();
+            if let Some(points) = hornet.streamer_points(&flight) {
+                probe_vapor.step(world.weather.ticks(), points);
+            }
+        }
+    }
+    // Bounded wing-vapor probe: prints the resolved trail without a window.
+    if std::env::var_os("TORE_VAPOR_PROBE").is_some() {
+        println!(
+            "wing vapor: g={:.2} roll_rate_deg={:.1} position={:?}",
+            flight.g,
+            flight.roll_rate.to_degrees(),
+            flight.position.map(|v| v.round())
+        );
+        for side in 0..2 {
+            match probe_vapor.trail(side, flight.g, flight.roll_rate.to_degrees(), false) {
+                Some(trail) => {
+                    for (i, p) in trail.iter().enumerate() {
+                        println!("  side {side} point {i}: {:?}", p.map(|v| v.round()));
+                    }
+                }
+                None => println!("  side {side}: no trail"),
+            }
         }
     }
     if let Some(v) = flight_devices {
@@ -2240,6 +2327,7 @@ fn main() -> AppResult<()> {
         && capture_terrain.is_none()
         && !animation_capture
         && std::env::var_os("TORE_PERF_FRAMES").is_none();
+    // Seed the vapor history before the airframe and state move into App.
     let mut app = App {
         mission: None,
         preference_path: if preferences_enabled {
@@ -2259,6 +2347,7 @@ fn main() -> AppResult<()> {
         previous_flight: flight.clone(),
         flight,
         flight_clock: flight::Clock { remainder: 0. },
+        vapor: probe_vapor,
         flight_view,
         flight_canvas: Default::default(),
         window_size,

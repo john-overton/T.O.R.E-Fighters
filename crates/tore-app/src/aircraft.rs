@@ -7,6 +7,8 @@ use crate::{
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::{Pic, aircraft::Aircraft, font::Font, shape::Shape};
 pub struct Airframe {
+    /// Wing vapor attachment, from the shape's own streamer definition.
+    pub streamer: Option<tore_formats::shape::StreamerDef>,
     model: tore_sim::models::AircraftModel,
     pub profile: Aircraft,
     pub atlas: Pic,
@@ -34,6 +36,7 @@ impl Airframe {
             );
         }
         let shape = Shape::parse(get(&profile.shape)?)?;
+        let streamer = tore_formats::shape::StreamerDef::parse(get(&profile.shape)?)?;
         if id == tore_formats::aircraft::AircraftId::F18
             && (![0x7900, 0x790c, 0x7912, 0x791e]
                 .iter()
@@ -188,8 +191,26 @@ impl Airframe {
             flight_menu,
             equipment,
             poses,
+            streamer,
         })
     }
+    /// The two wingtip vapor attachments in world feet for one pose. Shape
+    /// geometry is right/forward/up in thirds of a foot, matching `combat::mesh`.
+    pub fn streamer_points(&self, s: &flight::State) -> Option<[[f64; 3]; 2]> {
+        let def = self.streamer.as_ref()?;
+        let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
+        let mut points = [[0.; 3]; 2];
+        for (side, out) in points.iter_mut().enumerate() {
+            // Neither reviewed aircraft has a swing wing, so the hinge is static.
+            let p = def.attachment(side, 0).ok()?;
+            let (x, forward, up) = (p[0] / 3., p[1] / 3., p[2] / 3.);
+            *out = std::array::from_fn(|k| {
+                s.position[k] + basis.right[k] * x + basis.up[k] * up + basis.forward[k] * forward
+            });
+        }
+        Some(points)
+    }
+
     pub fn start(&self, world: &World) -> flight::State {
         let c = Camera::for_world(world);
         let mut p = c.position.map(|v| v as f64);

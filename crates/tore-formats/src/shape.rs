@@ -15,6 +15,74 @@ pub struct Shape {
     pub faces: Vec<Face>,
     pub state_words: BTreeSet<usize>,
 }
+/// Wing vapor attachment, from shape opcode 0xce. `?FindStreamerDef@@` at
+/// 0x49fd70 looks at shape offset 0x0e, skips an optional 0xf2 collision record
+/// and its four bytes, then requires the 0xce opcode word.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StreamerDef {
+    /// Hinge pivot in 24.8 source units. All-zero disables the hinge (0x4a0181).
+    pub pivot: [i32; 3],
+    /// Scale applied to the aircraft's swing-wing position before the hinge.
+    pub hinge_scale: i16,
+    /// Side 0 then side 1, in 24.8 source units. Side 0's X is mirrored.
+    pub points: [[i32; 3]; 2],
+}
+
+impl StreamerDef {
+    pub fn parse(data: &[u8]) -> Result<Option<Self>> {
+        let (c, _) = module::code(data)?;
+        let mut at = 0x0e;
+        if u16_at(c, at)? == 0xf2 {
+            at += 4;
+        }
+        if u16_at(c, at)? != 0xce {
+            return Ok(None);
+        }
+        at += 2;
+        let long = |i: usize| -> Result<i32> {
+            Ok(i32::from_le_bytes(slice(c, at + i, 4)?.try_into().unwrap()))
+        };
+        Ok(Some(Self {
+            pivot: [long(0)?, long(4)?, long(8)?],
+            hinge_scale: word(c, at + 0x0c)? as i16,
+            points: [
+                [-long(0x0e)?, long(0x12)?, long(0x16)?],
+                [long(0x1a)?, long(0x1e)?, long(0x22)?],
+            ],
+        }))
+    }
+
+    /// The attachment point in source units for one side, before the object's
+    /// own rotation. `0x4a0110` mirrors side 0 back across X after the hinge.
+    pub fn attachment(&self, side: usize, swing_wing: i16) -> Result<[f64; 3]> {
+        let mut point = self
+            .points
+            .get(side)
+            .map(|p| p.map(f64::from))
+            .ok_or_else(|| invalid("streamer side outside definition"))?;
+        if self.pivot != [0; 3] {
+            // 0x4a0196: the hinge angle is 182 * sweep * scale / 32767 in binary
+            // angle units, which is degrees scaled by 65536 over 360.
+            let units = f64::from(i32::from(swing_wing) * i32::from(self.hinge_scale));
+            let radians = 182. * units / 32767. * std::f64::consts::TAU / 65536.;
+            let (s, c) = radians.sin_cos();
+            point = [
+                point[0] * c - point[1] * s,
+                point[0] * s + point[1] * c,
+                point[2],
+            ];
+            for (value, pivot) in point.iter_mut().zip(self.pivot) {
+                *value += f64::from(pivot);
+            }
+        }
+        if side == 0 {
+            point[0] = -point[0];
+        }
+        // Source geometry is 24.8 fixed point.
+        Ok(point.map(|v| v / 256.))
+    }
+}
+
 fn word(c: &[u8], p: usize) -> Result<i32> {
     Ok(u16_at(c, p)? as u16 as i16 as i32)
 }

@@ -139,6 +139,9 @@ impl Renderer {
     pub fn combat(&mut self, vertices: &[f32]) {
         self.sim.combat(&self.device, &self.queue, vertices);
     }
+    pub fn vapor(&mut self, vertices: &[f32]) {
+        self.sim.vapor(&self.device, &self.queue, vertices);
+    }
     pub fn set_world(&mut self, world: &crate::terrain::World) {
         self.sim = crate::sim_renderer::SimRenderer::new(
             &self.device,

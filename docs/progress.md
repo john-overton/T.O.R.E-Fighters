@@ -41,6 +41,10 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   per-record ramp and haze color, and apply the altitude haze pass.
 - [ ] W4 remainder: cloud and ocean decks, horizon geometry and inside-cloud
   rendering; the ten-step native remap quantization is approximated by the ramp.
+- [x] Implement wing vapor trails end to end: the shape's own streamer
+  definition, the position-history rings, the load-factor trigger, roll-rate
+  shortening and night suppression, drawn as the native five line segments.
+  Colour and fade are fitted; the native patterned fills remain undecoded.
 - [ ] W5: connect verified wind/turbulence, air data and environment feedback.
 - [ ] W6: connect creator/restart/replay and complete theater/platform acceptance.
 

@@ -6,3 +6,4 @@ pub mod flight;
 pub mod models;
 pub mod research;
 pub mod telemetry;
+pub mod vapor;

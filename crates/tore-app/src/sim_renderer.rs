@@ -6,6 +6,9 @@ fn bytes(values: &[f32]) -> Vec<u8> {
 }
 pub struct SimRenderer {
     battle: Option<(wgpu::Buffer, u32)>,
+    vapor: Option<(wgpu::Buffer, u32)>,
+    vapor_pipeline: wgpu::RenderPipeline,
+    vapor_bind: wgpu::BindGroup,
     palette: wgpu::Texture,
     pipeline: wgpu::RenderPipeline,
     aircraft: Option<(wgpu::BindGroup, wgpu::Buffer, u32)>,
@@ -102,6 +105,47 @@ impl SimRenderer {
             multiview: None,
             cache: None,
         });
+        // Wing vapor is five one-pixel line segments per side, exactly as
+        // `_DrawStreamer@12` draws them, so it needs its own blended pipeline.
+        let vapor_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Wing vapor"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vapor_vertex"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 28,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x4],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("vapor_fragment"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera and atmosphere"),
             size: 96,
@@ -182,6 +226,16 @@ impl SimRenderer {
                 },
             ],
         });
+        // The vapor pipeline only reads the camera uniform, so its derived
+        // layout differs from the terrain pipeline's and needs its own group.
+        let vapor_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Wing vapor bindings"),
+            layout: &vapor_pipeline.get_bind_group_layout(0),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            }],
+        });
         let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Retail T2 terrain mesh"),
             contents: &bytes(&world.vertices),
@@ -189,6 +243,9 @@ impl SimRenderer {
         });
         Self {
             battle: None,
+            vapor: None,
+            vapor_pipeline,
+            vapor_bind,
             palette,
             pipeline,
             aircraft: None,
@@ -222,6 +279,28 @@ impl SimRenderer {
             *count = (length / 10) as u32;
         }
     }
+    /// Seven floats per vertex: position then premultiplied-free RGBA.
+    pub fn vapor(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
+        if self.vapor.is_none() {
+            self.vapor = Some((
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Wing vapor"),
+                    size: 64 * 1024,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                0,
+            ));
+        }
+        if let Some((buffer, count)) = &mut self.vapor {
+            let length = vertices.len().min((64 * 1024 / 4 / 14) * 14);
+            if length > 0 {
+                queue.write_buffer(buffer, 0, &bytes(&vertices[..length]));
+            }
+            *count = (length / 7) as u32;
+        }
+    }
+
     pub fn clear_aircraft(&mut self) {
         self.aircraft = None;
     }
@@ -494,6 +573,16 @@ impl SimRenderer {
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..*count, 0..1);
             }
+        }
+        // Blended and depth-tested but not depth-writing, so trails read behind
+        // terrain and aircraft without occluding each other.
+        if let Some((buffer, count)) = &self.vapor
+            && *count > 0
+        {
+            pass.set_pipeline(&self.vapor_pipeline);
+            pass.set_bind_group(0, &self.vapor_bind, &[]);
+            pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.draw(0..*count, 0..1);
         }
     }
 }

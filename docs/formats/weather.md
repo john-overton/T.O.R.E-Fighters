@@ -289,6 +289,38 @@ color indices are the only fade; there is no particle lifetime, no growth and no
 drift. The trail is recomputed every frame from the shared position history, so
 it is attached to the aircraft's recent path rather than emitted into the world.
 
+### Both reviewed aircraft carry the definition
+
+`F18.SH` and `RAF.SH` both match `FindStreamerDef` exactly: the word at shape
+offset `+0x0e` is `0xf2`, so it skips four bytes, and the word at `+0x12` is
+`0xce`. The 38-byte record therefore starts at shape offset `0x14`. Neither has
+a hinge — the pivot is all zero and the scale is zero, which is right for two
+fixed-wing aircraft — and the attachment points are plain wingtips:
+
+| Aircraft | Side 0 | Side 1 |
+| --- | --- | --- |
+| F/A-18D | `(-54, 1, -17)` | `(55, 0, -16)` |
+| Rafale C | `(-54, -1, -30)` | `(54, -1, -30)` |
+
+Those are source units; a third of a foot each, in the shape's right, forward
+and up order. They put the emitters 18 feet outboard, which matches both
+aircraft's half spans.
+
+### The trail colors are patterned fills, not palette entries
+
+`@G_SetColor@4` at `0x497689` treats any color at or above `0x100` differently:
+it takes the low byte of a named-color word at `0x55b9e0`, a **fill type** from
+`0x560d98`, and a **remap table** from `0x55ba28`. `_WRInit` seeds the named
+colors `0x100..0x12c` as an identity, so `Remap` at `0x4cc4a1` passes them
+straight through, and `0x55be28` onward is filled from the LAY header's
+fill-pattern pointers. Logical color `0x100 + n` therefore selects header
+fill-pattern table `n`, and the streamer's `0x109` through `0x10d` are tables 9
+through 13.
+
+So wing vapor is drawn as five patterned, partly transparent fills rather than
+five solid lines. The tables are located but not decoded, so a reimplementation
+can reproduce the geometry exactly and must mark the color and fade as fitted.
+
 ### Engine contrails and broader wing vapor are absent from the engine
 
 An exhaustive second pass settles the remaining scope questions. These are

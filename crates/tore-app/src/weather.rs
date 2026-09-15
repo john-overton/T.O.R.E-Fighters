@@ -50,6 +50,12 @@ pub fn validate_sources(
         return Err("no weather modules were imported".into());
     }
 
+    for name in ["F18.SH", "RAF.SH"] {
+        if let Some(bytes) = resources.get(name) {
+            let (code, _) = tore_formats::module::code(bytes)?;
+            println!("PROBE {name} head: {:02x?}", &code[..0x40.min(code.len())]);
+        }
+    }
     let layer = &environment.layer;
     let bytes = resources
         .get(layer)

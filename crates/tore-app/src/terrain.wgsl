@@ -74,3 +74,16 @@ struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32>
  let tex=tile(uv,i32(scene.right.w)).rgb;
  return vec4<f32>(mix(linear(scene.sky.rgb),tex,smoothstep(0.0,0.4,ray.y)),1.0);
 }
+struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32>, @location(1) distance:f32 }
+@vertex fn vapor_vertex(@location(0) position:vec3<f32>,@location(1) color:vec4<f32>)->VaporOut {
+ let p=position-scene.eye.xyz;
+ let z=dot(p,scene.forward.xyz);
+ let near=1.0;let far=2200000.0;let f=1.7320508*scene.up.w;
+ var out:VaporOut;
+ out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
+ out.color=color;out.distance=length(p);return out;
+}
+@fragment fn vapor_fragment(in:VaporOut)->@location(0) vec4<f32>{
+ // Vapor sits in the same atmosphere as everything else, so haze thins it too.
+ return vec4<f32>(linear(in.color.rgb),in.color.a*(1.0-haze(in.distance)));
+}
