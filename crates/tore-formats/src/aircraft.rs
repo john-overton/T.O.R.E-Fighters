@@ -172,8 +172,9 @@ impl Envelope {
         (low <= high).then_some((low, high))
     }
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Hardpoint {
+    pub location: u8,
     pub flags: i32,
     pub position: [i32; 3],
     pub store: Option<String>,
@@ -286,6 +287,8 @@ impl Aircraft {
         for row in h.chunks_exact(12) {
             let f = fields(row, schema::HARDPOINT)?;
             hardpoints.push(Hardpoint {
+                location: u8::try_from(f["name"].number()?)
+                    .map_err(|_| invalid("hardpoint location exceeds byte"))?,
                 flags: f["flags"].number()?,
                 position: [
                     f["pos.x"].number()?,

@@ -1247,6 +1247,54 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn preflight_draft_capacity_fuel_mass_and_clone_isolation() {
+        use crate::combat::loadout::Loadout;
+        use tore_formats::aircraft::Hardpoint;
+        let mut config = fixture(false).configuration().clone();
+        config.stations[0].weapon.source = "M61.JT".into();
+        let mut load = Loadout {
+            aircraft: AircraftId::F18,
+            configuration: config,
+            quantities: vec![11],
+            fuel_lbs: 900.,
+            internal_capacity_lbs: 1000.,
+            empty_lbs: 10000.,
+            maximum_lbs: 11000.,
+            hardpoints: vec![Hardpoint {
+                location: 2,
+                flags: 8,
+                position: [0; 3],
+                store: Some("M61.JT".into()),
+                count: 1000,
+                weight_class: 0,
+            }],
+        };
+        let original = load.clone();
+        load.change(0, 1);
+        assert_eq!(load.quantities[0], 111);
+        load.fuel(true);
+        assert_eq!(load.fuel_lbs, 1000.);
+        assert!(load.validate().is_ok());
+        load.fuel(false);
+        load.fuel(false);
+        load.fuel(false);
+        assert_eq!(load.fuel_lbs, 0.);
+        assert_eq!(original.quantities[0], 11);
+        assert_eq!(original.fuel_lbs, 900.);
+        let mut other = load.configuration.stations[0].weapon.clone();
+        other.source = "OTHER.JT".into();
+        assert!(load.select(0, other).is_err());
+        assert_eq!(load.quantities[0], 111);
+        load.fuel_lbs = f64::NAN;
+        assert!(load.validate().is_err());
+        load.fuel_lbs = 1000.;
+        load.maximum_lbs = 10999.;
+        assert!(load.validate().is_err());
+        load.maximum_lbs = 11000.;
+        load.quantities[0] = 1001;
+        assert!(load.validate().is_err());
+    }
     fn launcher() -> Launcher {
         Launcher {
             position: [0., 1000., 0.],

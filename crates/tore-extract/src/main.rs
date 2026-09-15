@@ -18,6 +18,7 @@ struct Options {
     aircraft: Vec<tore_formats::aircraft::AircraftId>,
     weapons: bool,
     music: bool,
+    creator: bool,
     wav_previews: bool,
     list: bool,
     dry_run: bool,
@@ -463,8 +464,10 @@ fn extract(options: Options) -> Result<bool> {
             let profile = options.theater.is_some()
                 || !options.aircraft.is_empty()
                 || options.weapons
-                || options.music;
-            let in_profile = (options.music && tore_formats::music::resource(&entry.name))
+                || options.music
+                || options.creator;
+            let in_profile = (options.creator && tore_formats::ui::creator::resource(&entry.name))
+                || (options.music && tore_formats::music::resource(&entry.name))
                 || aircraft_names.contains(&entry.name)
                 || options
                     .theater
@@ -636,6 +639,7 @@ fn main() -> Result<()> {
         aircraft: Vec::new(),
         weapons: false,
         music: false,
+        creator: false,
         wav_previews: false,
         list: false,
         dry_run: false,
@@ -665,6 +669,7 @@ fn main() -> Result<()> {
             }
             "--weapons" => options.weapons = true,
             "--music" => options.music = true,
+            "--creator" => options.creator = true,
             "--wav-previews" => options.wav_previews = true,
             "--theater" => {
                 let code = args
@@ -703,7 +708,7 @@ fn main() -> Result<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--aircraft f18|rafale] [--weapons] [--music] [--wav-previews] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and general format conversion are not implemented. --music --wav-previews adds lossless PCM WAV wrappers.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
+                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--aircraft f18|rafale] [--weapons] [--music] [--creator] [--wav-previews] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and general format conversion are not implemented. --music --wav-previews adds lossless PCM WAV wrappers.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
                 );
                 return Ok(());
             }

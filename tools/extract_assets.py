@@ -30,6 +30,7 @@ def main():
     parser.add_argument('--native-menus', action='store_true', help='Static FA creator and ordnance screen research; no retail execution')
     parser.add_argument('--music', action='store_true', help='Original PCM music and bounded FA situation scripts; no MIDI/synth')
     parser.add_argument('--wav-previews', action='store_true', help='With --music, also wrap recorded tracks as lossless local WAV previews')
+    parser.add_argument('--creator', action='store_true', help='Creator aircraft metadata and original ordnance UI resource profile')
     parser.add_argument('--weapons', action='store_true', help='All projectile, sensor, ECM and tank definitions plus reviewed shared combat dependencies')
     parser.add_argument('--theater', help='Defined theater code (e.g. UKR, TVIET), or all; includes shared sky/weather dependencies')
     parser.add_argument('--exclude-archive', action='append', default=[], help='Skip source-relative archive path glob; repeatable (e.g. disc1/LHX/*)')
@@ -46,7 +47,7 @@ def main():
     if sum((args.native_flight, args.native_weapons, args.native_menus)) > 1:
         parser.error('select one native research domain')
     if args.native_flight or args.native_weapons or args.native_menus:
-        if args.aircraft or args.weapons or args.music or args.wav_previews or args.theater or args.include or args.exclude_archive:
+        if args.aircraft or args.weapons or args.creator or args.music or args.wav_previews or args.theater or args.include or args.exclude_archive:
             parser.error('native research is a separate executable-research pass; omit archive selection flags')
         from extract_native_flight import extract
         try:
@@ -69,6 +70,8 @@ def main():
         command.extend(['--aircraft', aircraft])
     if args.wav_previews and not args.music:
         parser.error('--wav-previews requires --music')
+    if args.creator:
+        command.append('--creator')
     if args.music:
         command.append('--music')
     if args.wav_previews:

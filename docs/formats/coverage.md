@@ -115,3 +115,18 @@ Menu research follow-up: bounded five-entry ordnance action dispatch plus aligne
 creator/default/input and ordnance fuel/quantity/compatibility spans.
 [Contracts and evidence](../baselines/menu-behavior-mapping.md). These are static
 research outputs, not a runtime dialog interpreter or accepted loadout flow.
+
+## Creator runtime import — 2026-09-14
+
+The shared `ui::creator` reader verifies the reviewed FA.EXE SHA-256 before
+reading inert active selector lists. The app stores only bounded `TOREQM01`
+option data (33 fields and 16 target lists, exact cardinalities), never executable
+bytes. Synthetic tests cover truncation, trailing data, bounds and SHA-256 vectors.
+The shared `--creator` extraction profile includes PT/JT metadata, weapon thumbnails
+and creator/ordnance UI resources. Full dynamic aircraft eligibility, auxiliary
+store catalogs and other executable builds remain open.
+
+`Hardpoint.location` exposes the bounded source byte used for station headings.
+`tore-sim::combat::loadout` validates supported station compatibility, ammunition,
+fuel and weight before constructing live combat state. See
+[implementation evidence](../baselines/creator-ordnance.md).
