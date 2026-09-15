@@ -5,12 +5,30 @@ This is an implementation and acceptance plan; unchecked items claim no new
 native behavior. Scope is the reviewed F/A-18D (`F18.PT`) and Rafale C
 (`RAFALE.PT`), preserving the legacy default and explicit hybrid selection.
 
-Steps 1–3 are complete for the **supported adapter contracts**, with
-[measurements and remaining native gates](baselines/flight-response.md).
-Legacy remains the default with fitted low-speed behavior; warning/stall/spin
-state-machine support belongs to hybrid. Unrecovered difficulty, tumble and
-movement/display coupling remain explicit limits, not completed native parity.
-Step 4 is next; step 5 retains retail, hardware and platform acceptance.
+## Current priority and provenance
+
+User clarification 2026-09-15: focus first on **native** departure/tumble and
+control/force/movement coupling, with source-derived expected behavior and
+scoped retail comparison. Resume audio/rumble afterward. Follow
+[behavior provenance](behavior-provenance.md): separate native implementation
+steps, existing fitted choices, and explicitly user-directed additions.
+
+The earlier “steps 1–3 complete” summary overstated native coverage. The
+[adapter baseline](baselines/flight-response.md) records completed component and
+regression work; native steps 2–3 remain open where fitted laws or missing
+coupling remain. Legacy is still the default. Native-derived warning/stall/spin
+components are connected only in hybrid, with fitted boundaries.
+
+### Native continuation before step 4
+
+- [x] Establish native warning-transition tumble scheduling and movement-fall
+  source branches; record [contracts and translation status](formats/native-flight.md#native-tumble-continuation--2026-09-15).
+- [ ] Finish diagnostic translation acceptance for tumble/fall and explicit
+  movement-angle composition; no live activation is implied.
+- [ ] Resolve initial envelope/difficulty/device producers and full control,
+  force and movement ordering before connecting a native runtime path.
+- [ ] Compare source-derived expected outputs and, when available, matched
+  retail maneuvers. Record missing implementation separately from missing evidence.
 
 ## Current coverage and remaining gates
 
@@ -59,12 +77,12 @@ remain inert data. A missing native branch stays explicitly unresolved.
 - [x] Correct verified input/output units and state ownership before tuning.
   Resolve reviewed PT fields once into each model's typed configuration; validate
   configuration replacement. Keep F18 and Rafale laws in their own modules.
-- [x] Complete supported G-envelope/loading and pitch-response consumers, checking
+- [ ] Complete native G-envelope/loading and pitch-response consumers, checking
   positive/negative load, low/high speed and relevant device/loading changes.
   Do not equate requested G or raw stick position with achieved load factor.
-- [x] Complete verified roll authority, acceleration/limiting and release behavior;
+- [ ] Complete native roll authority, acceleration/limiting and release behavior;
   preserve actual body rates through vertical/inverted flight.
-- [x] Complete verified rudder authority, sideslip/drag and roll/yaw coupling.
+- [ ] Complete native rudder authority, sideslip/drag and roll/yaw coupling.
   Document any remaining fitted law per aircraft instead of borrowing calibration.
 - [x] Expose typed maneuver telemetry only where existing `AirData`/state channels
   are insufficient; consumers must use one authoritative fixed-tick snapshot.
@@ -76,9 +94,9 @@ velocity. Do not silently switch the default adapter or claim whole-tick parity.
 
 ## 3. Complete supported departure and recovery behavior
 
-- [x] Trace remaining envelope/difficulty/device predicates and warning timers.
+- [ ] Trace remaining envelope/difficulty/device predicates and warning timers.
   Separate the existing fitted stall-entry gate from verified native predicates.
-- [x] Verify control/lift attenuation and implement newly recovered departure
+- [ ] Verify complete control/lift attenuation coupling and implement recovered departure
   consumers, including pitch/roll fall or tumble only when their contracts are
   established. Keep random choices and mutable timers outside configuration.
 - [x] Verify spin direction, entry/recovery thresholds, interrupted recovery,

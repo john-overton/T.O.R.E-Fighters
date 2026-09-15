@@ -605,3 +605,52 @@ filled in by adding noise or applying sound intensity to aerodynamic forces.
 Hybrid uses native yaw endpoints with fitted continuous coupling;
 movement pitch/roll, speed slew and display AoA/bank offsets remain diagnostic.
 See [current runtime contracts](../FLIGHT-MODEL.md#flight-response-contracts--2026-09-15).
+
+## Native tumble continuation — 2026-09-15
+
+**Origin: native, established by static code in the reviewed FA EXE/SMS pair.**
+**Status: initial diagnostic translation and synthetic branch tests; no live
+adapter connection or matched retail comparison.** “Tumble” is our descriptive
+name for this timed movement rotation, not proof of a particular real-world
+flight phenomenon. See [provenance policy](../behavior-provenance.md).
+
+The repeatable extraction adds explicit slices for warning/extended-warning
+expiry, stalled movement fall, the timed movement rotation, the trig wrapper and
+byte RNG wrapper. Native state at cp+0x1c6/1ca holds start/deadline dwords;
+cp+0x1ce/1d0/1d2 holds progress/previous progress/direction words.
+
+### Source-derived expected behavior
+
+| Source | Trigger and observed contract |
+| --- | --- |
+| `0x47b554..0x47b5fb`, repeated at `0x47b681..0x47b72f` | On warning expiry, a still-active deadline cancels. Otherwise start only if signed PA pitch ≥0 and signed forward speed <0, OR pitch ≥0x31c4 and speed ≤110×256. Positive bank selects −1 direction; zero/negative bank selects +1. |
+| Same scheduling branches | Start is current native time. Deadline is start+512 plus signed truncation of pitch×128/−0x3ffc for nonnegative pitch. Previous progress resets to zero. This is not a generic “low speed means tumble” trigger. |
+| `0x47ba8c..0x47bb85` | Ground or spinning mode clears deadline. While current time is strictly below deadline, phase is `(elapsed×32760/duration)` narrowed to a PA word, minus 0x3ffc. Imported sine-table output becomes progress `(sin+32767)/256`; the progress difference produces a signed PA increment. At the deadline the source skips the final sample. |
+| `0x451820 → 0x417f00 → 0x451820` | Convert movement angles to PA, compose the signed increment as a heading offset through native basis-vector math, then convert back. It is not an additive camera shake or a body-Euler heading change. The event call `(4,64)` is separate. |
+| `0x47b2e2..0x47b36f` | Stalled movement pitch approaches −90° unless a tumble deadline is active. Pitch and roll rates use severity and the source cosine factor; roll approaches ±90°. Exact zero movement roll draws a byte and tests bit zero. |
+| `0x4562e0..0x4562ea` | The fall-direction draw is a bound-256 native RNG call, not the spin-direction chance(50) helper. |
+
+`tore-formats::flight_model::tumble` represents these as caller-owned state,
+explicit native time, imported trig/atan tables, and explicit zero-roll RNG input.
+No new force coefficient, random shake or fitted motion is added. The initial
+synthetic tests cover scheduling boundaries, active cancellation, direction,
+progress differences, exclusive deadline, ground/spin cancellation and pitch
+suppression during an active tumble. They do not establish the complete native
+tick or observed retail trajectories.
+
+### What full coupling still needs
+
+The diagnostic component consumes the original movement-state contract. The
+playable adapter integrates independent floating-point body attitude and world
+velocity using several fitted laws. Connecting tumble directly to that body's
+Euler angles would change the meaning of the recovered code. Remaining work is
+native envelope/difficulty/device producers, normal controls and offsets, ordered
+force/velocity stages, movement conversion and event/state lifecycle in one
+explicit update path. Table/composition helpers already exist, but their
+existence alone does not complete that connection.
+
+“Retail comparison missing” means we still lack matched original-game runs that
+show timing, altitude/speed loss, rotation and recovery for the same aircraft,
+loadout, inputs and conditions. That is separate from the missing implementation
+above. Static branch expectations can be established now; whole-trajectory
+agreement cannot yet be claimed. [Checks and limits](../baselines/native-tumble.md).

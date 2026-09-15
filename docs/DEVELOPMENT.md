@@ -504,3 +504,13 @@ Set `TORE_RESPONSE_TRACE=.local/response-traces` to record per-tick state. Trace
 are source-derived local artifacts; do not commit them. See [conditions/results
 and remaining gates](baselines/flight-response.md). This complements the hybrid
 `--validate-flight` extraction suite; it is not a retail trajectory oracle.
+
+### Native departure research
+
+Use `cargo test --locked -p tore-formats tumble` for initial synthetic
+native tumble/fall branch checks. The existing static extraction command now
+includes their scheduling/movement slices. This diagnostic component is not
+called by either live adapter. [Evidence and open gates](baselines/native-tumble.md).
+Apply [behavior provenance](behavior-provenance.md) when interpreting results:
+native source, translation tests, runtime connection and retail comparison are
+separate milestones.

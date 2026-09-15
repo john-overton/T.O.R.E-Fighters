@@ -16,6 +16,12 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('tumble_warning_start', 0x47b554, 0x47b5fb, 'departure'),
+    ('tumble_extended_start', 0x47b681, 0x47b72f, 'departure'),
+    ('tumble_movement', 0x47ba8c, 0x47bb85, 'departure'),
+    ('stalled_movement_fall', 0x47b2e2, 0x47b36f, 'departure'),
+    ('rng_byte', 0x4562e0, 0x4562ea, 'clock'),
+    ('sine_cosine_wrapper', 0x4d5c98, 0x4d5cbe, 'rotation'),
     ('flight_response_setup', 0x47b020, 0x47b250, 'response'),
     ('flight_response_controls', 0x47ba8c, 0x47c682, 'response'),
     ('flight_response_finish', 0x47c682, 0x47c860, 'response'),
@@ -77,6 +83,9 @@ REVIEWED_REGIONS = (
 
 # Partial reviewed instance layout; deliberately independent of guessed reference structs.
 REVIEWED_STATE = (
+    ('tumble_start', 0x50d046, 4), ('tumble_deadline', 0x50d04a, 4),
+    ('tumble_progress', 0x50d04e, 2), ('tumble_previous', 0x50d050, 2),
+    ('tumble_direction', 0x50d052, 2),
     ('speed_f8', 0x50ceb4, 4), ('side_velocity_f8', 0x50cff7, 4),
     ('down_velocity_f8', 0x50cffb, 4), ('roll_rate_f8', 0x50cfff, 4),
     ('pitch_rate_f8', 0x50d003, 4), ('yaw_rate_f8', 0x50d007, 4),

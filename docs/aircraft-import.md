@@ -7,8 +7,9 @@ linked research remains authoritative for byte layouts and native behavior.
 
 ## Scheduled aircraft and execution order
 
-1. Complete the [flight-response and maneuver-buffet slice](flight-response-plan.md)
-   for the existing F/A-18D and Rafale C, recording acceptance and remaining gaps.
+1. Recover native departure/tumble and control/force/movement coupling for
+   F/A-18D and Rafale C, then resume the [maneuver audio/rumble slice](flight-response-plan.md).
+   Keep [native, fitted and user-directed provenance](behavior-provenance.md) separate.
 2. Add **F-14**, then **A-4E**, then **X-31**, using the per-aircraft gates below.
 3. Resume remaining [weather work](weather-plan.md).
 
@@ -26,7 +27,7 @@ Broader AI, new menu screens and the rest of the aircraft roster remain deferred
 | Identity and extraction | Reviewed F18.PT = F/A-18D and RAFALE.PT = Rafale C; shared app/CLI dependency closure, source hashes, bounded readers | Other variants/layouts need review. [Extraction](EXTRACTION.md), [aircraft formats](formats/aircraft.md), [format coverage](formats/coverage.md) |
 | Flight configuration | Separate models own validated typed configuration; source mass, engines, envelopes, controls/equipment and departure fields resolve at construction | Unresolved source fields stay explicit; no per-tick raw PT access. [Model contract](FLIGHT-MODEL.md) |
 | Flight dynamics | Fixed 120 Hz shared integration, independent attitude/velocity, fuel/devices, legacy and selectable hybrid paths; hybrid departure/spin/contact helpers | Fitted response/coupling remains; exact whole-tick native parity is open. [Native research](formats/native-flight.md) |
-| G / roll / rudder / departure | Supported response/telemetry and hybrid stall attenuation/spin recovery validated for both identities/adapters | Native difficulty/tumble/full coupling remain open; maneuver feedback is next. [Flight-response plan](flight-response-plan.md) |
+| G / roll / rudder / departure | Supported response/telemetry and hybrid stall attenuation/spin recovery validated for both identities/adapters | Native difficulty/tumble/full coupling are the current priority; maneuver feedback follows. [Flight-response plan](flight-response-plan.md) |
 | Exterior and animation | Both original shapes/cockpits; separate aircraft animation mappings and fitted device travel | General native SH execution, exact hinges/schedules, LOD/shadow/damage and store-placement acceptance remain incomplete. [Shapes](formats/objects-and-shapes.md) |
 | Cockpit / HUD / instruments | Original art/fonts, full flight canvas, responsive overlays, rear mirror and asynchronous camera windows; supported live instrument channels | Full native HUD/window composition and unmodeled system readings remain open. [Aircraft formats](formats/aircraft.md), [controls](FLIGHT-CONTROLS.md) |
 | Environment / air data | Shared resolved wind, terrain/standard-atmosphere AirData, camera-local weather, physical turbulence and corrected own-shape vapor attachments | Native atmosphere, wake/contact/coupling, broader vapor and weather acceptance remain partial. [Wind/turbulence evidence](baselines/wind-turbulence-vapor.md) |

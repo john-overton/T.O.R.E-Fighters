@@ -8,10 +8,12 @@ trajectory parity or a real-aircraft engineering model.
 
 ## Next scheduled work
 
-The [flight response and maneuver buffet plan](flight-response-plan.md) orders
-completed supported G-load, roll-rate, rudder and departure contracts, followed by
-next scheduled sustained maneuver rumble and verified original audio. This slice precedes further weather
-work. Existing implementations below remain partial/fitted as documented.
+The [flight-response plan](flight-response-plan.md) now prioritizes native
+FA departure/tumble and full control/force/movement coupling. Audio/rumble
+follows that work. [Provenance policy](behavior-provenance.md) distinguishes
+native code contracts, fitted choices and user-directed opinionated changes.
+The adapter response pass implemented selected components and telemetry;
+it did not complete the native flight model.
 
 ## Run and reproduce
 
@@ -201,7 +203,8 @@ are not supported identities yet.
 
 ## Flight response contracts — 2026-09-15
 
-Steps 1–3 of the response plan now have [acceptance evidence](baselines/flight-response.md).
+The adapter response pass has [component/regression evidence](baselines/flight-response.md);
+native steps 2–3 remain open.
 `State::g` / `AirData::load_factor_g` report aerodynamic specific force projected
 on body-up, excluding gravity/contact. Internal filtered lift remains separate.
 `State::maneuver` is the last authoritative fixed-tick snapshot: commanded G,
@@ -239,3 +242,19 @@ Run `cargo run --locked -p tore-sim --example response_probe -- PATH/F18.PT
 PATH/RAFALE.PT` for both-adapter response/loop checks; set `TORE_RESPONSE_TRACE`
 to an ignored local directory for per-tick evidence. The existing extraction
 `--validate-flight` suite continues to cover both identities in hybrid mode.
+
+### Provenance of the response pass
+
+**Native:** source timer, attenuation and spin predicate arithmetic, with the
+specific connections listed above. **Fitted:** response time constants, trim/
+alignment, clean-envelope stall gate, severity reference speed, continuous spin
+motion and `sideslip_drag=0.5`. These fitted choices were authored by the
+implementation; they are not source facts or user-directed flight-law changes.
+**Diagnostic instrumentation:** achieved-G and applied-body-rate snapshots.
+**User-directed addition:** planned sustained rumble; native audio dispatch and
+its future haptic mapping remain separate work.
+
+Native tumble/fall now has an initial diagnostic translation in
+`tore-formats::flight_model::tumble`. Neither live adapter calls it. The native
+movement-state and whole-tick connection gates remain open; see the
+[source continuation](formats/native-flight.md#native-tumble-continuation--2026-09-15).

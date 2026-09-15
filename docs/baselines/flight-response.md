@@ -2,8 +2,10 @@
 
 ## Scope and result
 
-Completed the supported producer/response/departure slice for FA F/A-18D and
-Rafale C. The legacy adapter remains the default; native-derived departure
+Recorded the adapter producer/response/departure pass for FA F/A-18D and
+Rafale C. This completes selected components and regression checks, not native
+steps 2–3. The earlier completion wording is superseded by the
+[provenance policy](../behavior-provenance.md) and current native recovery plan. The legacy adapter remains the default; native-derived departure
 states and stall attenuation belong to the explicit hybrid adapter. Legacy
 low-speed lift loss remains fitted and does not claim warning/spin support.
 Maneuver audio/rumble (step 4) and retail/platform acceptance (step 5) remain open.
