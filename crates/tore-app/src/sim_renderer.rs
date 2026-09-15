@@ -177,7 +177,7 @@ impl SimRenderer {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera and atmosphere"),
-            size: 272,
+            size: 1312,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -565,6 +565,25 @@ impl SimRenderer {
         } else {
             uniform.extend([0.; 36]);
         }
+        // Band rows refer to the imported remap atlas; absent assets disable them.
+        uniform.extend([0.; 4]);
+        if let Some(celestial) = &world.celestial {
+            uniform[68] = world.weather.active().len() as f32;
+            for layer in world.weather.active() {
+                let shade = world.weather.configuration().shade_remap(layer.shade);
+                uniform.extend([
+                    layer.low_feet as f32,
+                    layer.high_feet as f32,
+                    celestial.shade_rows[&shade.color] as f32,
+                    shade.levels.len() as f32,
+                    layer.fog_near as f32,
+                    layer.fog_near_density as f32,
+                    layer.fog_far as f32,
+                    layer.fog_far_density as f32,
+                ]);
+            }
+        }
+        uniform.resize(328, 0.);
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         let mut entries = Vec::with_capacity(11 * 1024);
         for row in std::iter::once(&world.palette).chain(world.fog_palette.iter()) {

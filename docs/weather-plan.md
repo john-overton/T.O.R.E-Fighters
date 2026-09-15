@@ -67,8 +67,9 @@ all sensors are blocked by visible fog.
 Status: callbacks, live six-bit tint/smoothing and imported indexed haze remaps
 are implemented. Named sky/ocean decks now use world-anchored ray/plane
 projection, source altitude/tile scale and deterministic load-time wildcard
-selection. The GPU replacement still needs the native two-layer ray-remap
-composition and special horizon/above-sky branches; these are recorded acceptance
+selection. The GPU now composes target-layer then view-layer indexed remaps, with
+integer distance splitting and overlap restrictions. Special horizon/above-sky
+branches remain open; these are recorded acceptance
 gaps, not prerequisites for decoding the celestial and cloud primitives next.
 The 60 ms palette cadence and separate RNG streams are deterministic host
 adaptations. [Evidence](baselines/weather-foundation.md).
@@ -78,10 +79,10 @@ adaptations. [Evidence](baselines/weather-foundation.md).
 | Area | Implemented | Gap |
 | --- | --- | --- |
 | Mission inputs | `layer` name and choice index, `clouds` altitude, `wind` degrees and feet per second, and time all recovered and consumed | Campaign mission sources; generated and explicit cloud altitudes now draw; campaign sources remain open |
-| Weather records | Reviewed fields of the 352-byte record in `tore-formats::weather`, all 24 supplied modules parsing | Fill-pattern tables and cross-layer ray composition |
+| Weather records | Reviewed fields of the 352-byte record in `tore-formats::weather`, all 24 supplied modules parsing | Vapor fill-pattern tables and native comparison |
 | Environment state | `tore-sim::environment` advances a 120 Hz to 256-unit clock, selects and blends records by time and altitude, and answers pure queries | Pause, compression and long-session audit against the original |
-| Terrain and sky | Artwork uploads as source palette indices; the live palette resolves on the GPU each frame | Special horizon/ray branches, low-detail cloud gates and celestial comparison/glare |
-| Visibility | Recovered per-record ramp and haze color, plus the altitude haze pass | Cross-layer ray remap composition; sensor consumers |
+| Terrain and sky | Artwork uploads as source palette indices; the live palette resolves on the GPU each frame | Special horizon branches, low-detail cloud gates and celestial comparison/glare |
+| Visibility | Recovered ramps, altitude haze and ordered cross-layer indexed remaps | Retail crossing comparison; sensor consumers |
 | Creator | Six source weather choices launch; duplicate overcast removed | Label mapping remains inferred; serialized weather replay |
 | Wind | Resolved to world feet per second and applied by both adapters | Missing-wind native defaults; wind audio |
 | Air data | `telemetry::EnvironmentReading` accepts wind and atmosphere | Still no live producer |

@@ -172,3 +172,31 @@ in this pass. None of the numbered weather parity gates is marked complete.
   sample, so it is not a matched regression measurement. The final cloud pass
   writes opaque depth after a half-coverage cutout test, preventing farther
   vapor from drawing through cloud pixels; its GPU smoke passed.
+
+## Ordered cross-layer fog — 2026-09-15
+
+- Translated `0x4b31f0` into pure CPU ray queries and the indexed terrain/cloud
+  shader. Both preserve target-before-view remap ordering, adjacent-boundary
+  distance splitting, nonadjacent saturation, overlap restrictions and signed
+  WORD distance units. Normal-view bias is explicitly zero. Source indices are
+  remapped before palette lookup; cutout tests retain the original texel index.
+- Synthetic checks distinguish noncommuting map order and cover upward/downward
+  crossings, same/nonadjacent layers, overlap, distance rounding and signed wrap,
+  invalid distance and query purity. GPU projection/interpolation/filtering remain
+  adaptations; own-palette aircraft fog and sensor visibility are separate work.
+- Linux RTX 4070/Vulkan captures `ray-clear-cloud.png`, `ray-in-cloud.png`,
+  `ray-above-cloud.png` and `ray-night.png` were inspected. Clear sheets, band
+  whiteout and stars remain visible in their respective cases. Wide F18/cloudy
+  and tall Rafale/dusk captures, creator smoke and all 24 module diagnostics pass.
+  Artifacts are under ignored `.local/weather-foundation/`.
+- Final checks: 269 Rust tests, 24 Python tests, formatting, Clippy with warnings
+  denied, locked workspace build and repository/binary asset guards passed.
+  The additional signed-wrap/NaN assertions passed in the focused ray test rerun.
+- Repeatable active sample: `TORE_PERF_FRAMES=330 TORE_PERF_ACTIVE=1
+  TORE_CLOUD_ALTITUDE=10000 target/debug/tore-app --free-flight
+  --weather-condition 0 --no-audio --window-size 1280x720`. 300 measured frames,
+  zero paused frames/readbacks; frame interval mean 1.54 ms, p95 1.71 ms.
+  This is host CPU/presentation evidence, not GPU timing or a retail comparison.
+- Special horizon/above-sky branches, celestial glare/native clipping, low-detail
+  cloud dispatch and unresolved CLOUDS placement remain open. Windows/macOS and
+  matched retail acceptance were not exercised; steps 1–3 are not marked 1:1.

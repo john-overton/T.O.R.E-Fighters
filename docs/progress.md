@@ -13,11 +13,14 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
   - [x] Typed bounded callback imports, persistent source-record fog state,
     validated seed and one/ten-second selection cadence independent of cameras.
   - [x] Correct altitude-haze RGB source; test selective six-bit palette tint and
-    smoothing helpers (diagnostic only, not yet applied to rendered pixels).
-  - [ ] View-dependent tint reduction, complete palette/remaps and native horizon.
+    smoothing in the live renderer.
+  - [x] View-dependent tint reduction and ordered target/view indexed haze remaps.
+  - [ ] Native special horizon/above-sky branches and matched retail acceptance.
   - [x] Extend static extraction and imported shape coverage diagnostics.
     [Foundation slice evidence](baselines/weather-foundation.md).
-- [ ] Steps 2–3: sun/moon/stars and cloud geometry.
+- [x] Steps 2–3 implementation slices: original sun/moon/stars and imported cloud sheets.
+- [ ] Steps 2–3 parity: glare/clipping, low-detail clouds, unresolved CLOUDS producer
+  and matched retail/platform comparisons.
 - [ ] Step 4: consistent weather in main, mirror and instrument cameras.
 - [ ] Steps 5–7: wind/air data/audio, turbulence, then finish wingtip vapor and
   investigate broader wing-induced vapor.
@@ -28,7 +31,7 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
   duration/priority/AGL rounding, vapor history/reset, typed aircraft coefficient,
   condition metadata/diagnostics and scalar bounds.
 - [x] Remove the duplicate overcast editor row, retaining the imported inventory.
-- [ ] Close remaining callback/tint, default-wind/scattered-cloud, per-camera,
+- [ ] Close remaining horizon/glare, default-wind/low-detail-cloud, per-camera,
   coupling/rounding and serialized replay gaps before parity acceptance.
 
 [Findings, aircraft-file evidence and validation](baselines/weather-review.md).
@@ -795,3 +798,11 @@ altitude choice and original two-sided CLOUD1 sheets now render. Explicit MM
 altitude zero remains clear of scattered sheets. Linux Ukraine/Egypt and
 wide F18/tall Rafale captures passed. Source, renderer adaptations and remaining
 low-detail/CLOUDS-producer/parity work: [weather foundation](baselines/weather-foundation.md).
+
+### Ordered cross-layer fog integration — 2026-09-15
+
+Pure CPU ray queries and GPU indexed terrain/cloud rendering now apply the
+target remap before the view remap, including adjacent-band distance splitting
+and overlap restrictions. Synthetic order/rounding/state checks and Linux
+crossing captures are recorded in [weather foundation](baselines/weather-foundation.md).
+Special horizon branches and matched retail acceptance remain open.

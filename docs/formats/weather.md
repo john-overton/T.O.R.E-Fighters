@@ -581,3 +581,30 @@ GPU filtering uses a half-coverage cutout threshold and opaque depth writes. A c
 cloud deck is not established by these primitives. The LAY whiteout bands are
 separate. `CLOUDS.SH` decodes but remains unplaced pending a verified producer.
 See [cloud evidence](../baselines/weather-foundation.md).
+
+## Ordered line-of-sight haze — 2026-09-15
+
+FA `0x4b31f0` selects original active view and target records. An overlapping
+view restricts both records' ramps against the blended view ramp: minimum
+near/far distances, maximum endpoint densities. Same-record rays use only the
+view map. Adjacent records split distance at the lower record's high boundary;
+nonadjacent records saturate both distances to 65,535. Overlap excludes the lower
+adjacent record. Distance plus explicit bias is clamped nonnegative, shifted
+from 24.8 feet to 256-foot units, then interpreted as a signed WORD. Boundary
+products retain wrapping DWORD arithmetic. `0x4b3410` quantizes each density;
+`0x4cc477` applies target table `0x5843c4` before view table `0x5843c8`.
+
+`tore-sim::environment::ray` supplies pure queries and synthetic order/boundary
+checks. The GPU mirrors these rules for indexed terrain and cloud texels using
+the imported remap atlas; index-255 transparency is tested before remapping.
+Normal-view distance bias is explicitly zero. Camera projection, interpolated
+distance and texture filtering remain GPU adaptations. Aircraft own-palette
+fog, special sky/horizon branches and visibility-sensor consumers remain separate
+contracts; this implementation does not establish their parity.
+
+Remaining horizon trace: the active entry is `0x4aacf0`, not the nearby stub
+`0x4aace0`. At `0x4aaf04` onward the fallback loads palette indices ED/FC/F0
+and branch-selected F1/F3/F4 through remap pointer `0x583da8`; these are not
+Layer RGB fields. `0x4c942c` writes a background geometry program around
+`0x50fda2`, temporarily zeroing camera translation. The program's complete
+geometry contract and above-sky dispatch are not yet translated.
