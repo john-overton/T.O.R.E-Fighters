@@ -1,6 +1,6 @@
 # Native environment and systems implementation plan
 
-**Living plan v4 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
+**Living plan v5 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
 **Status: implementing source/query foundation; live land contact remains gated.**
 John explicitly scheduled this pass after the airborne native flight connection.
 This is the governing dependency and delivery plan for that continuation. It can
@@ -90,7 +90,7 @@ baselines above remain inputs, not acceptance of the new contact producer.
 
 | ID | Package | Depends on | Owner / status | Current next action / exit evidence |
 | --- | --- | --- | --- | --- |
-| NE-00 | Source, state and dependency ledger | Current baselines | Codex / researching | NE-00.1a/b/c complete; finish instance/state producers |
+| NE-00 | Source, state and dependency ledger | Current baselines | Codex / researching | NE-00.1a/b/c/d complete; finish instance/state producers |
 | NE-01 | Ground and sea/ocean discovery/import | NE-00 identity rules | Codex / researching | NE-01.1 selected UKR/STRIP lead extracted; full census and closure remain open |
 | NE-02 | Coordinates, placement, materials and collision resources | NE-01 selected closures, NE-00 | Unassigned / planned | Resolve one land and one sea family end to end; expand catalog coverage |
 | NE-03 | Native terrain/object contact producers | NE-00, NE-02 selected land subset | Codex / researching | NE-03.1 waits on world closure and transactional query state |
@@ -109,11 +109,12 @@ baselines above remain inputs, not acceptance of the new contact producer.
 | NE-00.1a | Codex / complete | Query/cache ordering, preference and expiry predicates | Two pure helpers and boundary tests | No | Unavailable | Narrow precursor gate: reproducible source slices and tested predicate arithmetic; [evidence](baselines/native-land-foundation.md) |
 | NE-00.1b | Codex / complete | Vertical cell planes/normals and shape offset link | Pure geometry, table/offset readers and synthetic tests | No | Unavailable | [Geometry evidence](baselines/native-land-geometry.md); angles followed in NE-00.1c; world assembly remains open |
 | NE-00.1c | Codex / complete | Candidate angles and requested-heading slope projection | Typed helpers, synthetic/source-boundary tests and imported-table replay | No | Unavailable | [Angle evidence](baselines/native-land-angles.md); proceed to world closure |
-| NE-00.1 | Codex / researching | Partial; see NE-00.1a/b/c | Partial | No | Unavailable | Finish instance initialization; extend transaction ledger |
-| NE-01.1 | Codex / researching | UKR.MM → STRIP.OT → RUNWAY.SH / _STRIPProc explicit edges | Four resources extracted; no new OT reader | No | Unavailable | Complete callback/shape/placement closure, archive census and bounded schemas |
+| NE-00.1d | Codex / complete | STRIP add callback, box list, initial placement/query order | Bounded box reader, midpoint tests and original-resource diagnostic | No | Unavailable | Narrow metadata precursor; [evidence](baselines/native-strip.md); full initialization/cleanup and visual closure remain open |
+| NE-00.1 | Codex / researching | Partial; see NE-00.1a/b/c/d | Partial | No | Unavailable | Finish instance initialization; extend transaction ledger |
+| NE-01.1 | Codex / researching | UKR.MM → STRIP.OT → RUNWAY.SH / _STRIPProc explicit edges | Five resources extracted across two filtered runs; no new OT reader | No | Unavailable | Complete callback/shape/placement closure, archive census and bounded schemas |
 | NE-03.1 | Codex / researching | Dual ground-query/cache mutation established | Existing diagnostic only; no new producer | No | Unavailable | Land geometry and staged cache/RNG producer, source-order/rollback tests, then both-aircraft connection |
 
-The parent first slice is not complete. NE-00.1a/b/c are dependency-ready diagnostic
+The parent first slice is not complete. NE-00.1a/b/c/d are dependency-ready diagnostic
 precursors, not an accepted runway or live contact branch.
 
 ### Discovered dependency edges
@@ -127,18 +128,23 @@ Owner is Codex; update 2026-09-15. Required edges remain in the denominator.
 | --- | --- | --- | --- |
 | E001 | NE-00.1 → NE-03.1 / query order | GetGround 0x47af20 calls touching then height/slope; fixed8 feet / PA | Source established; implement two calls inside ground producer |
 | E002 | NE-00.1 → NE-03.1 and NE-10 / mutates state, consumes RNG | 0x42b800 expired-cache branch, +0x27/2b/2d/2f/33; conditional bound-4 draw | Expiry helper tested; stage cache/RNG and test late failure before live connection |
-| E003 | NE-01.1 → NE-02 land subset / places | UKR.MM → STRIP.OT; textual pos/angle/flags | Extracted; native initialization/units mapping unresolved; trace loader |
-| E004 | STRIP.OT → RUNWAY.SH / visual reference | Explicit shape pointer, FA_2.LIB | Extracted; full drawing/texture closure and visual inspection not accepted |
-| E005 | STRIP.OT → _STRIPProc / callback | Explicit utilProc symbol, VA 0x4be640 | Unresolved native dispatch; trace required geometry/lifecycle consumers |
+| E003 | NE-01.1 → NE-02 land subset / places | UKR.MM → STRIP.OT; textual pos/angle/flags | Position/angle conversion and initial ground-query order sourced; full loader/defaults/cleanup still open |
+| E004 | STRIP.OT → RUNWAY.SH / visual reference | Explicit shape pointer, FA_2.LIB | Partial projector finds _RUNWAY.PIC (extracted); full drawing/LOD/palette closure and visual inspection remain open |
+| E005 | STRIP.OT → _STRIPProc / callback | Explicit utilProc symbol, VA 0x4be640 | Selector/add callback sourced; box metadata tested; full registration/reset/failure cleanup and event/speech effects remain open |
 | E006 | NE-03.1 → collision terrain / supplies contact | 0x42bdc0 → 0x42bfc0 → 0x42c1a0; 0x42dda0 fallback | Vertical cell arithmetic translated/tested; general traversal unconnected; E008 arithmetic accepted, world assembly remains open |
 | E007 | NE-03.1 → resolved type offset / supplies contact | 0x42e0c0 returned record signed word +8, shifted 8 | Source/offset reader established: shape F2 relative record; instance/type resolution remains E003/E005 |
 | E008 | E006 → candidate angles / supplies slope | 0x42de60 → 0x411a40 → 0x4c6c30 / sqrt / atan | Source/translation established in NE-00.1c; world dispatcher/cache integration remains open |
 | E009 | E006 → square-root seed table / supplies normal | 0x4d65c4, 1024 dwords at 0x51d624 | Extracted with hash; bounded reader and arithmetic tested; no embedded retail data |
+| E010 | E005 → F2 box list / initializes airport points and orientations | COLGetBox 0x42e100; STRIPAddProc needs IDs 0x25–2c, 11,17,12,18 | Reader/midpoints tested; all 12 present; transforms/default template/runtime registration remain open |
+| E011 | E004 → _RUNWAY.PIC / named face texture | Partial static projection, FA_2.LIB | Extracted with hash; complete drawing reachability and palette/visual acceptance remain open |
+| E012 | E003 → E001/E002 / samples before registration | 0x4a7530 initial ground query before 0x4a77f9 callback 0 | Source established; staged world construction must preserve order and rollback failure |
 
-Selected catalog status: UKR.MM/T2, STRIP.OT and RUNWAY.SH are discovered/extracted;
-existing T2 decoding remains available, OT/placement/native drawing closure is
+Selected catalog status: UKR.MM/T2, STRIP.OT, RUNWAY.SH and _RUNWAY.PIC are discovered/extracted;
+existing T2 and bounded F2 box decoding remain available, OT/placement/native drawing closure is
 unaccepted. No visual or collision acceptance and no runtime eligibility yet.
-No missing-resource absence is asserted from this filtered four-resource pass.
+No missing-resource absence is asserted from these two filtered extraction passes.
+[STRIP callback/metadata contract](formats/native-strip.md) records E003/E005/E010–E012;
+its source discovery does not close full world initialization.
 
 NE-07's event envelope is an early interface dependency, not a requirement to
 finish all damage before testing a runway. Each package can split into numbered
@@ -151,6 +157,9 @@ split rather than introducing a circular “finish everything first” dependenc
 flowchart TD
   A[NE-00 source and state ledger] --> B[NE-01 ground and sea asset catalog]
   B --> C[NE-02 placement materials collision resources]
+  C --> S[NE-00.1d STRIP metadata]
+  S --> W[Staged world construction E012]
+  F --> W
   A --> D[NE-04 equipment and fuel producers]
   A --> E[NE-07a event envelope and ownership]
   C --> F[NE-03 terrain and object queries]
@@ -538,6 +547,7 @@ record its blocked edges and continue independent, already scoped documentation/
 | D09 / 2026-09-15 | Accepted: implement autonomously and commit tested slices locally | John explicitly authorized NE-00.1/01.1/03.1 onward; no AI or push; Jeeves milestone/checkpoint reporting required |
 | D10 / 2026-09-15 | Implementation choice: split NE-00.1a predicate/cache research precursor | Newly verified cache mutation prevents treating the existing read-only diagnostic query interface as a native producer; retain live stop until E001/E002/E006/E007 are accepted |
 | D11 / 2026-09-15 | Implementation choice: NE-00.1b isolated vertical geometry and shape-offset reader | Preserve source integer/table rounding; E008 arithmetic subsequently closed by NE-00.1c. No live query activation from the imported-cell diagnostic |
+| D12 / 2026-09-15 | Implementation choice: NE-00.1d box metadata and STRIP source precursor | E012 reveals initial ground sampling before registration; stage construction/query ownership together. Speech/event callbacks stay unsupported; no autonomous behavior work |
 
 Future decisions include date, requester/reviewer, evidence, accepted/proposed/
 superseded state, affected IDs, rejected alternatives if relevant and migration
@@ -569,6 +579,7 @@ implementation choices must not be attributed to John.
 
 | Revision | Change | Validation state |
 | --- | --- | --- |
+| v5 / 2026-09-15 | NE-00.1d STRIP metadata/source precursor; E010–E012 and D12 | [STRIP validation](baselines/native-strip.md); full initialization, drawing and live queries remain open |
 | v4 / 2026-09-15 | NE-00.1c closes E008 arithmetic; next action advances to STRIP world closure | [Angle validation](baselines/native-land-angles.md); live queries remain open |
 | v3 / 2026-09-15 | NE-00.1b geometry/offset precursor, E008/E009, D11 | [Geometry validation](baselines/native-land-geometry.md); first live slice remains open |
 | v2 / 2026-09-15 | Start authorized implementation; NE-00.1a diagnostic precursor, selected UKR/STRIP discovery, E001–E007 and D09–D10 | [Current checks](baselines/native-land-foundation.md); full first slice still researching |
@@ -595,8 +606,11 @@ Its deliverable is a tested producer contract and narrow live contact connection
 not takeoff/landing acceptance from a flat height sample. This resolves the current
 hard runtime boundary and supplies the foundation for NE-05 and later deck work.
 
-**Current next action:** E003/E005 runway initialization/placement and E004
-drawing/resource closure. E008 angle arithmetic is now tested.
+**Current next action:** E003/E005 type resolution, template defaults, final
+creation/store and failure cleanup; then bounded complete placement assembly.
+E004 full drawing/LOD/palette closure remains open despite the extracted named
+texture. E010 metadata is tested; E012 requires initial ground queries before
+registration. E008 angle arithmetic is tested.
 E006 vertical cell geometry and E007 offset readers are tested diagnostic inputs. Implement E001/E002 staged queries
 before enabling NE-03.1 for either aircraft. No external blocker or user decision
 is currently required; carrier remains behind NE-06 prerequisites.

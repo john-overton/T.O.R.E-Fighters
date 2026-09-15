@@ -1112,3 +1112,16 @@ Special horizon branches and matched retail acceptance remain open.
 
 [Validation and limitations](baselines/native-land-geometry.md). This completes
 only the diagnostic precursor; the parent first slice remains researching.
+
+## STRIP metadata and initialization precursor — 2026-09-15
+
+- [x] NE-00.1d: recover F2 box list, STRIP point/orientation lookups, callback
+  dispatch and initial mission-position/angle/ground-query order.
+- [x] Test bounded box parsing and native signed midpoint rounding; all 12
+  required STRIP IDs exist among 23 RUNWAY.SH boxes. Extract _RUNWAY.PIC.
+- [ ] Complete E003/E005 type/template/creation/cleanup and E004 full drawing
+  closure; stage initial queries before registration (E012).
+- [ ] Connect E001/E002 producer with rollback, then both-aircraft live contact.
+  No new runtime branch, AI, carrier activation or retail acceptance.
+
+[Source contract](formats/native-strip.md), [validation](baselines/native-strip.md).

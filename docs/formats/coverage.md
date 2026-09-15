@@ -211,3 +211,8 @@ collision acceptance remain open. [Foundation](../baselines/native-land-foundati
 
 Candidate-angle and requested-heading projection arithmetic is translated/tested;
 world dispatcher/cache activation remains open. [Evidence](../baselines/native-land-angles.md).
+
+STRIP precursor: bounded F2 contact-box list and native signed midpoint arithmetic
+are tested. Mission conversion/add-callback ordering is source-established only;
+full OT/placement/callback runtime and drawing closure remain open.
+[Contract](native-strip.md), [evidence](../baselines/native-strip.md).

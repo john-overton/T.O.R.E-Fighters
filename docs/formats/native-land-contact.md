@@ -82,8 +82,8 @@ at textual position `(1196032, 0, 983040)`, angle `(0,0,0)`, flags 0x4003 and al
 -10100. These are source text fields; initialization/elevation and world conversion
 are not accepted merely from this record. STRIP.OT has BRF structure type 1,
 size 166, flags 0x208021 (including 0x8000), shape pointer RUNWAY.SH and symbol
-`_STRIPProc`. The symbol resolves to VA `0x4be640`; its dispatch and downstream
-contracts require review. No complete bounded OT schema or runway instance
+`_STRIPProc`. The symbol resolves to VA `0x4be640`; its selector and add callback are now sourced in
+[STRIP initialization](native-strip.md); full lifecycle closure remains open. No complete bounded OT schema or runway instance
 producer is claimed. The SH import/re-entry byte-pattern inspection reports no
 candidates; it does not prove the absence of visual/dynamic dependencies.
 

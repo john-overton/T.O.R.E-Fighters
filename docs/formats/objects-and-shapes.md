@@ -272,3 +272,12 @@ FA 0x42e0c0 and reads only its signed word +8. Absent F2 and malformed links
 remain distinct. This does not decode full collision bounds or establish a
 contact surface from mesh faces. [Source contract](native-land-contact.md#shape-relative-contact-offset--e007),
 [validation](../baselines/native-land-geometry.md).
+
+### STRIP contact boxes — 2026-09-15
+
+`shape::contact_boxes` bounds the F2 subrecord list used by COLGetBox. STRIP
+initialization uses ten midpoint positions and two orientation records; these
+are separate from visible mesh vertices. `native_strip RUNWAY.SH` diagnoses the
+required IDs and partial static texture references. Full world/collision and
+drawing acceptance remain open. [Contract](native-strip.md),
+[commands and validation](../baselines/native-strip.md).

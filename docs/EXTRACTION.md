@@ -8,9 +8,11 @@ NE-01/02 in the [living environment/systems plan](native-environment-systems-pla
 define the next full discovery/catalog/import pass, including conditional/dynamic
 references, missing-asset reason chains and separate visual/collision acceptance.
 Implementation research has started: the selected Ukraine/STRIP discovery
-extracts four resources with provenance; its callback/shape/contact closure
-is still unresolved. This is not a full census or new OT/runtime support.
-[First evidence](baselines/native-land-foundation.md).
+extracts five resources across two filtered runs with provenance, including
+_RUNWAY.PIC. STRIP callback/box metadata is partly recovered; full initialization,
+shape and contact closure remain unresolved. This is not a full census or new OT/runtime support.
+[First evidence](baselines/native-land-foundation.md),
+[STRIP continuation](baselines/native-strip.md).
 
 ## Two different workflows
 

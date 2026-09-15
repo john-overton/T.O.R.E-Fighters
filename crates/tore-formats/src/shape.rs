@@ -57,6 +57,63 @@ fn contact_offset_code(code: &[u8]) -> Result<Option<i16>> {
     slice(code, record, 10)?;
     Ok(Some(u16_at(code, record + 8)? as i16))
 }
+
+/// Inert F2 subrecord consumed by FA COLGetBox (0x42e100).
+/// Coordinate pairs retain source order; flags other than bit 7 are uninterpreted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContactBox {
+    pub flags: u8,
+    pub id: u8,
+    pub pairs: [[i16; 2]; 3],
+}
+
+impl ContactBox {
+    /// STRIPAddProc averages signed endpoints using SAR, including negative odds.
+    pub fn midpoint(self) -> [i16; 3] {
+        self.pairs
+            .map(|[a, b]| ((i32::from(a) + i32::from(b)) >> 1) as i16)
+    }
+}
+
+/// Complete bounded subrecord list, not collision geometry acceptance.
+/// Native lookup returns the first matching ID. Preserve duplicates and order.
+/// Unlike that early-return lookup, parsing validates the entire list terminator.
+pub fn contact_boxes(data: &[u8]) -> Result<Option<Vec<ContactBox>>> {
+    let (code, _) = module::code(data)?;
+    contact_boxes_code(code)
+}
+
+fn contact_boxes_code(code: &[u8]) -> Result<Option<Vec<ContactBox>>> {
+    if u16_at(code, 0x0e)? != 0xf2 {
+        return Ok(None);
+    }
+    let record = 0x12 + u16_at(code, 0x10)?;
+    slice(code, record, 16)?;
+    let mut at = record + 16;
+    let mut boxes = Vec::new();
+    loop {
+        let flags = slice(code, at, 1)?[0];
+        if flags & 0x80 == 0 {
+            return Ok(Some(boxes));
+        }
+        // Host input bound, not a recovered native list capacity.
+        if boxes.len() == 4096 {
+            return Err(invalid("shape contact box count exceeds bound"));
+        }
+        let bytes = slice(code, at, 14)?;
+        boxes.push(ContactBox {
+            flags,
+            id: bytes[1],
+            pairs: std::array::from_fn(|axis| {
+                std::array::from_fn(|side| {
+                    let p = 2 + axis * 4 + side * 2;
+                    i16::from_le_bytes([bytes[p], bytes[p + 1]])
+                })
+            }),
+        });
+        at += 14;
+    }
+}
 /// Wing vapor attachment, from shape opcode 0xce. `?FindStreamerDef@@` at
 /// 0x49fd70 looks at shape offset 0x0e, skips an optional 0xf2 collision record
 /// and its four bytes, then requires the 0xce opcode word.
@@ -405,6 +462,52 @@ mod tests {
         assert!(contact_offset_code(&code[..39]).is_err());
         code[16..18].copy_from_slice(&0xffffu16.to_le_bytes());
         assert!(contact_offset_code(&code).is_err());
+    }
+
+    #[test]
+    fn contact_box_list_preserves_order_flags_signed_pairs_and_terminator() {
+        let mut code = vec![0; 34];
+        code[14] = 0xf2;
+        for (flags, id, pairs) in [
+            (0xc0, 37, [-4_i16, 1, i16::MIN, i16::MAX, 9, 9]),
+            (0x81, 37, [10, 12, 20, 22, 30, 32]),
+        ] {
+            code.extend([flags, id]);
+            for word in pairs {
+                code.extend(word.to_le_bytes());
+            }
+        }
+        code.push(0x7f); // Any clear bit 7 terminates; other bits are not guessed.
+        let boxes = contact_boxes(&module::fixture(&code)).unwrap().unwrap();
+        assert_eq!(boxes.len(), 2);
+        assert_eq!(boxes[0].flags, 0xc0);
+        assert_eq!(boxes[1].id, 37);
+        assert_eq!(boxes[0].midpoint(), [-2, -1, 9]);
+        assert_eq!(boxes[1].midpoint(), [11, 21, 31]);
+        for end in 16..code.len() {
+            assert!(contact_boxes_code(&code[..end]).is_err(), "end={end}");
+        }
+        assert_eq!(contact_boxes_code(&[0; 16]).unwrap(), None);
+        code.truncate(34);
+        code.push(0);
+        assert_eq!(contact_boxes_code(&code).unwrap(), Some(vec![]));
+        code[16..18].copy_from_slice(&u16::MAX.to_le_bytes());
+        assert!(contact_boxes_code(&code).is_err());
+    }
+
+    #[test]
+    fn contact_box_host_count_limit_requires_terminator() {
+        let mut code = vec![0; 34];
+        code[14] = 0xf2;
+        for _ in 0..4096 {
+            code.push(0x80);
+            code.extend([0; 13]);
+        }
+        code.push(0);
+        assert_eq!(contact_boxes_code(&code).unwrap().unwrap().len(), 4096);
+        *code.last_mut().unwrap() = 0x80;
+        code.extend([0; 14]);
+        assert!(contact_boxes_code(&code).is_err());
     }
     #[test]
     fn ce_heading_hinge_preserves_up_coordinate() {

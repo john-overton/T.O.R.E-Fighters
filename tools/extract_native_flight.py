@@ -16,6 +16,23 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('strip_callback_selector', 0x4be640, 0x4be675, 'ground'),
+    ('strip_add', 0x4be2a0, 0x4be636, 'ground'),
+    ('shape_contact_box_lookup', 0x42e100, 0x42e134, 'ground'),
+    ('airport_register', 0x4ba800, 0x4ba867, 'ground'),
+    ('airport_point_transforms', 0x4bd950, 0x4bdb29, 'ground'),
+    ('object_offset_transform', 0x411d10, 0x411dda, 'ground'),
+    ('mission_object_begin', 0x482443, 0x4824b1, 'ground'),
+    ('mission_object_position_angles', 0x4825c4, 0x482695, 'ground'),
+    ('mission_object_create', 0x482dcf, 0x482df7, 'ground'),
+    ('object_initial_ground', 0x4a73b0, 0x4a762c, 'ground'),
+    ('object_static_kind', 0x4a762c, 0x4a7638, 'ground'),
+    ('object_add_callback', 0x4a77e4, 0x4a7810, 'ground'),
+    ('object_callback_dispatch', 0x463f60, 0x463f94, 'ground'),
+    ('object_callback_resolver', 0x463f30, 0x463f5c, 'ground'),
+    ('object_current_load', 0x4628b0, 0x462930, 'ground'),
+    ('object_current_store', 0x462980, 0x4629ba, 'ground'),
+    ('collision_object_register', 0x42e540, 0x42e5bf, 'ground'),
     ('candidate_direction_angles', 0x411a40, 0x411aec, 'ground'),
     ('direction_word_reduction', 0x4c6c30, 0x4c6d5f, 'ground'),
     ('terrain_traversal', 0x42bdc0, 0x42bfb9, 'ground'),
