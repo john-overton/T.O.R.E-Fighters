@@ -8,8 +8,10 @@ native behavior. Scope is the reviewed F/A-18D (`F18.PT`) and Rafale C
 ## Current priority and provenance
 
 User clarification 2026-09-15: focus first on **native** departure/tumble and
-control/force/movement coupling, with source-derived expected behavior and
-scoped retail comparison. Resume audio/rumble afterward. Follow
+control/force/movement coupling, with source-derived expected behavior. A useful
+retail comparison is unavailable; continue implementation using source contracts
+and tests, without claiming retail trajectory parity. Resume audio/rumble
+afterward. Follow
 [behavior provenance](behavior-provenance.md): separate native implementation
 steps, existing fitted choices, and explicitly user-directed additions.
 
@@ -26,8 +28,11 @@ components are connected only in hybrid, with fitted boundaries.
 - [x] Join native tumble/fall/spin dispatch and movement composition; validate
   synthetic contracts and both PTs with imported tables. [Evidence](baselines/native-departure-stage.md).
   This is diagnostic component acceptance; no live activation or retail comparison is implied.
-- [ ] Resolve initial envelope/difficulty/device producers and full control,
-  force and movement ordering before connecting a native runtime path.
+- [x] Resolve initial/bounded/current-G envelope roles and the non-VTOL gate
+  for both supported profiles; translate/test the departure force-G override
+  and ordered force/velocity stage. These remain diagnostic components.
+- [ ] Resolve remaining normal control, load/damage/device producers and full
+  movement ordering before connecting a native runtime path.
 - [ ] Compare source-derived expected outputs and, when available, matched
   retail maneuvers. Record missing implementation separately from missing evidence.
 
@@ -43,7 +48,7 @@ this plan orders the next flight-response slice.
 | G-load / AoA | Source ledger, separate demand/lift/achieved G and geometric AoA telemetry; acceleration checks | Full native loaded/damage force ordering and feedback consumers |
 | Roll rate | Applied body-rate snapshot, verified release and full-loop probes; source hybrid/fitted legacy caps | Full native control/load/damage producers and retail comparison |
 | Rudder / slip | Distinct command/deflection/effective controls, fitted symmetric slip drag and yaw release; tested native spin predicates | Native display-slip/force coupling and retail calibration |
-| Departure / spin | Translated warning/stall predicates and timers, connected severity/control/lift attenuation; corrected hybrid spin entry/recovery with fitted continuous coupling | Native initial difficulty/device classification, movement fall/tumble and full coupling remain open |
+| Departure / spin | Translated warning/stall predicates and timers, connected severity/control/lift attenuation; corrected hybrid spin entry/recovery with fitted continuous coupling | Native initial classification and movement fall/tumble translated diagnostically; full live coupling remains open |
 | Maneuver feedback | Native sound-side `Turbulence` routine traced at `0x434550`, caller at `0x434d76` | Recover full input-to-intensity and sound dispatch contracts; integrate a distinct maneuver-feedback signal |
 | Controller rumble | Environmental turbulence supplies severity only when its shake flag is set; overlapping pulses support sustained strong events | Add sustained maneuver feedback with intensity tracking, release and lifecycle checks; audit the mild environmental threshold separately |
 
@@ -95,8 +100,9 @@ velocity. Do not silently switch the default adapter or claim whole-tick parity.
 
 ## 3. Complete supported departure and recovery behavior
 
-- [ ] Trace remaining envelope/difficulty/device predicates and warning timers.
-  Separate the existing fitted stall-entry gate from verified native predicates.
+- [x] Trace the supported non-VTOL envelope/difficulty/device predicates and
+  warning timers. Diagnostic source predicates are separate from the existing
+  fitted live stall-entry gate; runtime replacement remains open.
 - [ ] Verify complete control/lift attenuation coupling and implement recovered departure
   consumers, including pitch/roll fall or tumble only when their contracts are
   established. Keep random choices and mutable timers outside configuration.

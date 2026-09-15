@@ -715,3 +715,28 @@ outputs, complete ordered force/velocity/movement update, and event/contact
 lifecycle. These remain separate from the now joined departure stage. The
 existing hybrid is unchanged; no body-Euler shortcut connects this stage to it.
 [Native-data checks and reproduction](../baselines/native-departure-stage.md).
+
+
+### Departure force/velocity connection — 2026-09-15
+
+**Native, translated/tested diagnostically:** `force_stage::advance` joins the
+previously reviewed force helpers with `velocity_step`. Source/build identity
+is unchanged. `0x47c682..0x47c6b5` substitutes 256 for the native stored G only
+when departure mode is **stalled (2)**, calls `0x47c860`, then restores G. The
+Rust API takes stored G by value and exposes the temporary force G separately.
+Warning and spinning retain their input G. This affects excess-G drag; it does
+not replace the independently attenuated lift scale at `0x54b6e0`.
+
+The stage shares forward speed, weight and device state across thrust, drag,
+lift, gravity and ordered scalar velocity integration. Lift uses the first 1G
+vertex cutoff and altitude-adjusted **1G** stall reference, not the current-G
+severity reference. Preserve the existing low-speed lift floor of 160, including
+when departure attenuation supplies zero. Gravity uses cached body pitch and
+negative body bank, not reconstructed movement angles. Transverse decay precedes
+force application and does not feed these force producers.
+
+Loaded coefficients/limits, selected thrust, engine scale, idle floor, damage,
+devices and cached body angles remain explicit inputs. The example checks force
+snapshots from departure outputs independently; it does not feed their velocity
+back into a trajectory with the intervening normal controls and later movement
+still absent. This is not a new live adapter. [Evidence](../baselines/native-departure-stage.md#force-connection-follow-up).

@@ -266,3 +266,13 @@ native component motion from a full flight trajectory. Native ground-control
 inhibition, initial/bounded-G envelope selection and the non-VTOL early return
 are now established for these profiles. Normal control/force coupling is next;
 audio/rumble remains deferred behind that native work.
+
+
+The diagnostic `force_stage` now connects departure lift scale and the native
+stalled-only force-G override to thrust/drag/lift/gravity and ordered scalar
+velocity integration. Both PTs pass separate force snapshot probes; output
+velocities are not yet fed into a complete native trajectory. Normal control,
+loaded/damage/device producers and movement/contact coupling remain open.
+Retail comparison is unavailable per the user's 2026-09-15 clarification and
+is recorded as an evidence limitation, not an implementation prerequisite.
+[Validation and scope](baselines/native-departure-stage.md#force-connection-follow-up).

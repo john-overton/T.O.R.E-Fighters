@@ -6,7 +6,9 @@ use tore_formats::{
         clock_rng::NativeRng,
         departure::{DepartureMode, StallState},
         departure_stage::{EnvelopeInputs, StageInput, StageState},
-        integration::MovementAngles,
+        force_stage::{self, Input as ForceInput, Setup as ForceSetup},
+        forces::DragDevices,
+        integration::{MovementAngles, Velocity},
         profile::FlightProfile,
         rotation::{AtanTable, TrigTable, degrees_to_pa},
     },
@@ -37,7 +39,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             aircraft
                 .fields
                 .get(key)
-                .ok_or_else(|| std::io::Error::other("missing PT field"))?
+                .or_else(|| aircraft.object.get(key))
+                .ok_or_else(|| std::io::Error::other(format!("missing PT field {key}")))?
                 .number()
         };
         let structure = [
@@ -48,6 +51,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if field("vtLimitDown")? != 0 {
             return Err("probe requires reviewed non-VTOL profile".into());
         }
+        let clean = aircraft
+            .envelopes
+            .iter()
+            .find(|e| e.g == 1)
+            .ok_or("missing 1G envelope")?;
+        let upper = i16::try_from(
+            tore_formats::flight_model::envelope_limits(clean, 15000 * 256, false, structure)?
+                .maximum,
+        )?;
+        // Explicit empty, fuel-off, undamaged setup: loading percentages are zero.
+        let force_setup = ForceSetup {
+            drag: p.drag,
+            loaded_drag: field("coefDrag")?,
+            loaded_pull_drag: field("_gpullDrag")?,
+            loaded_afterburner_thrust: field("aftThrust")?,
+            selected_thrust: field("thrust")?,
+            flaps_lift: i16::try_from(field("flapsLift")?)?,
+            upper_fps: upper,
+            limits: p.loaded_velocity(upper)?,
+        };
+        let empty_weight = field("weight")?;
         println!(
             "aircraft={} source_departure={:?} extended_warning={} vtLimitDown=0",
             aircraft.name, p.departure, p.extended_warning
@@ -117,6 +141,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 assert_eq!(s, replay);
                 assert_eq!(out, repeated);
                 assert_eq!(rng, replay_rng);
+                // Evaluate a force snapshot from the departure outputs. Do not
+                // feed it back without the intervening normal-control/movement contract.
+                let force_input = ForceInput {
+                    velocity: Velocity {
+                        forward: s.speed_f8,
+                        side: 0,
+                        down: 0,
+                    },
+                    weight: empty_weight,
+                    fuel: 0,
+                    altitude_f8: 15000 * 256,
+                    g_f8: 256,
+                    departure: s.departure.mode,
+                    lift_scale_f8: out.lift_scale_f8,
+                    envelopes: i.envelopes,
+                    devices: DragDevices::default(),
+                    throttle_f8: 0,
+                    thrust_scale_f8: 256,
+                    thrust_vector_pa: 0,
+                    body_angles_pa: [degrees_to_pa(s.movement.pitch)?, i.body_bank_pa],
+                    rudder_slip_f8: s.offsets_f8[2],
+                    turbulence_pitch_f8: 0,
+                    turbulence_yaw_f8: 0,
+                    idle_floor: 0,
+                    ticks: i.ticks,
+                };
+                let force = force_stage::advance(force_setup, &t, force_input)?;
+                let force_replay = force_stage::advance(force_setup, &t, force_input)?;
+                assert_eq!(force.velocity, force_replay.velocity);
+                assert_eq!(force.lift, force_replay.lift);
+                assert_eq!(force.force_g_f8, 256);
                 seen_tumble |= out.tumble_applied;
                 seen_spin |= s.departure.mode == DepartureMode::Spinning;
                 recovered |= out.recovered_spin;
@@ -151,7 +206,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     println!(
-        "Diagnostic departure stage only: scripted inputs; normal controls/forces/contact and retail trajectories are not simulated."
+        "Diagnostic departure stage only: scripted inputs; force snapshots evaluated separately; normal controls/movement/contact and retail trajectories are not simulated."
     );
     Ok(())
 }

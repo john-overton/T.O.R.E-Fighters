@@ -520,3 +520,7 @@ native movement composition. Pass extracted sine table, atan table and one or
 more reviewed PT files; see [commands and scope](baselines/native-departure-stage.md).
 It uses explicit scripted native-time inputs, not the full flight scheduler or
 normal force update. It adds no live flight mode.
+
+The departure example also evaluates separate native force/velocity snapshots
+from each departure output, using explicit empty/fuel-off inputs. These are
+component probes: they do not feed velocity back into a full flight trajectory.

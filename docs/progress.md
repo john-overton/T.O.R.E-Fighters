@@ -1006,3 +1006,16 @@ Special horizon branches and matched retail acceptance remain open.
   scale: 10-degree ticks, labels every 30 degrees and a fixed triangle index.
   Rotation follows aircraft attitude and wraps through inverted flight.
   [Layout and validation](baselines/hud-bank-scale.md).
+
+
+### Native departure force continuation — 2026-09-15
+
+- [x] Translate stalled-only temporary 1G force input without overwriting stored
+  G or attenuated lift; connect native force assembly and ordered scalar velocity.
+- [x] Verify low-speed lift floor/cutoff, mode distinction, ground clamp and
+  invalid inputs; evaluate 7,200 separate force snapshots across both aircraft's
+  eight departure cases. [Evidence](baselines/native-departure-stage.md#force-connection-follow-up).
+- [ ] Finish normal controls, load/damage/device producers and movement/contact
+  ordering before live native activation. Steps 2–3 remain open at those boundaries.
+- Retail flight comparison is unavailable per user clarification; continue native
+  implementation without making comparison a prerequisite or claiming parity.

@@ -9,8 +9,9 @@ Track concrete steps, substeps and acceptance gates in [progress.md](progress.md
 This is the sequencing document for the ground-up rebuild in Rust.  The existing TypeScript repo /USNF-ATF is the guide, not the gospel: its format docs, decoders, recovered geometry, audio recovery, and baselines are the reference material.  Its engine is not being ported.
 
 Current user priority (2026-09-15): recover **native** F18/Rafale departure/tumble
-and complete control/force/movement coupling, with source-derived expectations
-and scoped retail comparison. Existing [adapter response work](baselines/flight-response.md)
+and complete control/force/movement coupling, with source-derived expectations.
+Retail flight comparison is unavailable and does not block implementation.
+Existing [adapter response work](baselines/flight-response.md)
 does not complete native flight parity. Follow [behavior provenance](behavior-provenance.md).
 Then resume maneuver audio/rumble and final acceptance in the
 [flight-response plan](flight-response-plan.md), add F-14, A-4E and X-31 through

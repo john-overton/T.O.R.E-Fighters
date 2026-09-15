@@ -43,6 +43,11 @@ Track these independently; a later step must not be implied by an earlier one:
 
 Synthetic tests can validate arithmetic and invariants. Deterministic replay
 can validate repeatability. Neither establishes retail trajectory parity.
+For the F18/Rafale departure work, the user confirmed on 2026-09-15 that a
+useful retail flight comparison is unavailable. This is a recorded evidence
+limitation, not a prerequisite for continuing source-backed implementation.
+Do not turn that limitation into a claim of retail trajectory parity.
+
 Static source recovery can establish expected branch behavior without running
 native modules; it does not automatically establish a complete flight tick.
 

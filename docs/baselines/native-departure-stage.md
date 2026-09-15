@@ -64,10 +64,13 @@ The original tumble, departure, matrix/angle and clock tests remain in place.
 
 ## Remaining gates
 
-Normal control and force producers, stalled force-G substitution, full movement
-and collision/event order are not connected in a live native flight tick.
+Normal-control and loaded/damage/device force producers, full movement and
+collision/event order are not connected in a live native flight tick. The
+force-G substitution and force/velocity component connection are now translated
+and tested as described below.
 Matched retail flight recordings are unavailable. Their absence is a comparison
-gap, separate from the known missing implementation. No fitted law or gameplay
+gap, separate from the known missing implementation. The user confirmed that
+a useful retail comparison is unavailable; it does not block implementation. No fitted law or gameplay
 addition is used to bridge these gaps. See [native contracts](../formats/native-flight.md#joined-native-departure-stage--2026-09-15).
 
 ## Validation
@@ -79,3 +82,30 @@ The static extraction and all eight native-data probe cases passed. Local logs
 are under `.local/native-departure-stage/`; no retail derivatives are committed.
 No live simulation or rendering behavior changes in this slice. Fresh GPU,
 audio/controller, Windows and macOS acceptance checks were not run.
+
+
+## Force connection follow-up
+
+The same eight scenarios now also evaluate 7,200 force/velocity snapshots from
+the departure outputs, with replay checks. They use each PT's own empty weight,
+clean drag/pull coefficients, flap lift, device drag and velocity limits. The
+forward maximum comes from the altitude-adjusted 1G envelope, never raw PT
+`_bv.x.max`. Fuel, throttle, stores, damage, turbulence and idle floor are explicitly
+zero; body pitch/bank are scripted inputs. Output velocities are not fed back
+into the departure trajectory, so the earlier motion measurements remain scoped
+to that isolated stage. Local output: `.local/native-departure-stage/force-probe.txt`.
+
+Three additional synthetic tests check temporary stalled-only 1G substitution,
+independent lift attenuation, clean-envelope cutoff and low-speed floor, ground
+clamping and invalid integration inputs. A 4G fixture at 500 fps produces 12,600
+more drag force units in normal/warning/spinning than stalled mode, while lift
+remains 128,000 units in all four modes. Its stalled down-velocity increment is
+32 fixed8 units at a two-unit service step. These are calculated contract
+expectations, not original-game recordings.
+
+
+Follow-up validation passed: workspace formatting, Clippy with warnings denied,
+tests and build using `--locked`; all 24 Python tool tests; repository and both
+binary asset guards. Both PT probes passed. Logs are in
+`.local/native-departure-stage/checks/force-*.txt`. No live/rendering change or
+new GPU, audible/controller, Windows or macOS acceptance is claimed.
