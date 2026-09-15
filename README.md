@@ -1,6 +1,26 @@
-# T.O.R.E-Fighters
+<p align="center">
+  <img src="docs/images/tore-fighters-logo.png" alt="T.O.R.E Fighters squadron patch" width="320">
+</p>
 
-Tasteful Opinionated Reverse Engineered: a native Rust rebuild of Fighters Anthology, following [the roadmap](docs/ROADMAP.md). The current slices are original menus, all 16 original theaters, and F/A-18D / Rafale C free flight with raster instrument windows.
+<h1 align="center">T.O.R.E-Fighters</h1>
+
+<p align="center"><em>Tasteful Opinionated Reverse Engineered &mdash; a native Rust rebuild of Fighters Anthology</em></p>
+
+<p align="center">
+  <a href="https://github.com/john-overton/T.O.R.E-Fighters/actions/workflows/ci.yml"><img alt="Rust baseline build" src="https://github.com/john-overton/T.O.R.E-Fighters/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="rust-toolchain.toml"><img alt="Rust 1.91.1 pinned" src="https://img.shields.io/badge/rust-1.91.1-b7410e?logo=rust&logoColor=white"></a>
+  <a href="docs/DEVELOPMENT.md"><img alt="Linux, Windows and macOS" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-2f6f9f"></a>
+  <a href="docs/ROADMAP.md"><img alt="Milestone M1 in progress" src="https://img.shields.io/badge/milestone-M1%20in%20progress-orange"></a>
+</p>
+
+<p align="center">
+  <a href="docs/formats/theater.md"><img alt="16 theaters" src="https://img.shields.io/badge/theaters-16-3c7a57"></a>
+  <a href="docs/FLIGHT-MODEL.md"><img alt="F/A-18D and Rafale C" src="https://img.shields.io/badge/aircraft-F%2FA--18D%20%7C%20Rafale%20C-3c7a57"></a>
+  <a href="docs/baselines/weapons-systems.md"><img alt="135 weapon definitions" src="https://img.shields.io/badge/weapon%20definitions-135-3c7a57"></a>
+  <a href="AGENTS.md"><img alt="No retail game data in this repository" src="https://img.shields.io/badge/retail%20game%20data-none%20shipped-6b4fbb"></a>
+</p>
+
+T.O.R.E-Fighters follows [the roadmap](docs/ROADMAP.md). The current slices are original menus, all 16 original theaters, and F/A-18D / Rafale C free flight with raster instrument windows.
 
 The app launches into the original **Choose Activity** menu using artwork, button pieces, proportional fonts, and sounds imported from your own Fighters Anthology files. Buttons animate; `?`, `Pref`, and `Multi` open dropdowns. **Create Quick Mission** opens the original-style briefing: click the aircraft name in Wing 1 or the theater name in “You are flying over…” to select, then **OK** to fly. F/A-18D and Rafale C are available. All briefing fields are editable; unsupported mission systems are validated before launch. Custom weapons opens the original-art Load Ordnance screen with compatible weapon and fuel edits. Set enemy Wing 1 to zero for the supported single-aircraft preview. [Testing steps and remaining parity](docs/baselines/creator-ordnance.md). The explicit `--live-fire` range supports manual weapon testing, incoming fixtures, ECM contact resolution and partial automatic subsystem damage. Controller combat bindings and bounded haptics are integrated; [native-parity limits and evidence](docs/baselines/weapons-systems.md) remain explicit. For hands-on testing, see the [keyboard controls](docs/FLIGHT-CONTROLS.md#weapons-and-systems-continuation) and [controller combat layer](docs/INPUT.md#manual-combat-layer--2026-09-14). Physical vibration acceptance remains open. No retail game data ships in this repository.
 
