@@ -441,3 +441,9 @@ inert cloud layout automatically re-import when local reviewed media is present.
 `TORE_SUN_GLARE=0|1` disables/enables the recovered glare and palette whitening
 (default on in this host adapter). This is a diagnostic for the native glare
 preference, not an implemented graphics-preferences menu.
+
+`TORE_CLOUD_DETAIL=0|1|2` selects recovered cloud candidate placement (default 2).
+Levels 0/1 use the base period; level 2 uses the 4x4 repeat. Native coordinate
+range and view-sector gates can make the visible results identical in forward
+views. Use a downward view to inspect copies around the aircraft. This override
+is cloud-specific; the lower-detail terrain/sky raster is not selected by it.

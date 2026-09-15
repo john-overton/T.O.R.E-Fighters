@@ -679,3 +679,41 @@ Original moon art, sun circles/glow remap and 94 stars remain intact. Host glare
 preference defaults on and has a diagnostic override; the native preference UI
 is not implemented. Matched retail captures remain unavailable while the user
 builds the Windows test machine.
+
+### Cloud visibility continuation — 2026-09-15
+
+FA `0x4a8bd0` dispatches detail >=2 through the 4x4 repeat helper; lower detail
+passes the base period directly, yielding nine candidates rather than 144.
+`0x4a9660` publishes forward heading sectors: +Z [-10920,10920], -Z outside
+(-21840,21840), +X [5460,27300], -X [-27300,-5460]. At pitch >=-8190,
+`0x4a8130` moves a periodic representative one whole period forward if its
+shape radius lies strictly behind a selected sector. Steeper downward views
+skip that relocation. `CLOUD1.SH` bounds are radius 1889, exponent 10: 7556 feet.
+The pure view query now applies these rules; roll and repeated sampling do not
+advance weather/RNG. Host radians-to-word rounding is an explicit adaptation.
+
+Cloud callers use first-bucket mask 3, maximum signed distance and terrain class
+-1; subsequent zero masks do not remove these candidates. They overwrite the
+Y coordinate with mission cloud altitude and bypass ground lookup. The queue
+at `0x4a8c30` stores the anonymous shape record; it is not a frustum test. Its
+consumer `0x4a7c26` passes the shape into `0x4d057c`. That entry rejects any
+absolute camera-minus-center component >=32767 after the signed SH exponent
+shift. This observable coordinate-range gate is now applied before upload,
+including its asymmetric negative rounding boundary. For CLOUD1 this is roughly
+131068 feet per axis. The following `0x4d028c` sphere/frustum tests avoid work on
+out-of-view shapes; GPU triangle clipping remains the host adaptation for them.
+Native integer edge rounding and finite native queue exhaustion are not claimed.
+
+Audited 1654 FA_2.LIB resources: 1275 SH, 145 PT, 135 JT, 75 MM and 24 LAY.
+No direct CLOUDS.SH or zero-terminated CLOUDS reference occurs. All LAY shape
+fields name wave1.SH; the reviewed cloud initializer/descriptor producer loads
+CLOUD1.SH. This bounds the negative evidence; constructed names, other paths
+and runtime appearance are not disproven. The 16 CLOUDS.SH billboards remain
+decoded but unplaced. No time/wind input appears in the traced cloud placement;
+camera-relative periodic relocation is not cloud drift.
+
+Original cutout pixels remain tested before fog remapping, opposite faces are
+selected across the altitude plane, and depth resolves world/cloud occlusion.
+The host's filtered alpha cutoff is an adaptation, not source pixel acceptance.
+`TORE_CLOUD_DETAIL=0|1|2` exposes cloud preference behavior (default 2) without
+claiming the deferred graphics menu or lower-detail terrain raster is complete.

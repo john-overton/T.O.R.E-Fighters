@@ -161,3 +161,8 @@ Weather continuation: bounded `TORE_FLARE_V1` import recovers the nine reviewed
 FA circle descriptors; LAY remaps 265/266 drive lens-flare composition. Source
 whitening order/gates and moon world basis are implemented. GPU color-index
 reconstruction and circle projection remain adaptations; see weather.md.
+
+Cloud placement now covers detail 0/1 versus 2, source heading-sector relocation,
+SH bounds and signed coordinate-range rejection. Native generic frustum work
+rejection uses GPU clipping; CLOUDS.SH placement remains unverified after the
+resource/producer audit recorded in weather.md.

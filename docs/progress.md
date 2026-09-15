@@ -828,3 +828,16 @@ Special horizon branches and matched retail acceptance remain open.
   tall GPU checks passed on Linux Vulkan. Moon captures include 0 and +/-45 bank.
 - [ ] Finish special horizon transitions and native projection/rounding assessment;
   matched retail and Windows/macOS acceptance remain open.
+
+### Weather cloud visibility continuation (2026-09-15)
+
+- [x] Native low-detail candidate count, forward-sector relocation and steep
+  downward exception, using original SH bounds and pure view queries.
+- [x] Native signed shape-coordinate range gate; boundary tests prevent GPU far
+  clipping from silently extending the source cloud draw range.
+- [x] Trace anonymous cloud queue into shared shape/frustum consumer; audit
+  1654 FA_2 resources and all LAY shape fields for CLOUDS.SH producer evidence.
+- [ ] CLOUDS.SH active placement remains unverified; no invented spawn or drift.
+- [x] 276 Rust and 24 Python tests, locked build, warnings-denied Clippy, formatting
+  and asset guards. Creator/viewer, low/high cloud view, crossing and both
+  aircraft wide/tall Linux GPU paths pass. Matched retail/platform acceptance open.

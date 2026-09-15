@@ -8,6 +8,9 @@ pub struct Clouds {
     shape: Shape,
     scale: f32,
     texture: usize,
+    radius_feet: i32,
+    detail: u8,
+    exponent: u16,
 }
 impl Clouds {
     pub fn load(
@@ -26,7 +29,9 @@ impl Clouds {
         let shape = Shape::parse(data)?;
         let (code, _) = tore_formats::module::code(data)?;
         let exponent = u16::from_le_bytes(code[6..8].try_into().unwrap());
-        if exponent > 20
+        let radius = i16::from_le_bytes(code[4..6].try_into().unwrap());
+        if !(8..=20).contains(&exponent)
+            || radius < 0
             || shape.faces.len() != 2
             || shape.faces.iter().any(|f| {
                 f.texture != "_CLOUD1.PIC"
@@ -37,6 +42,16 @@ impl Clouds {
         {
             return Err("unsupported cloud sheet geometry".into());
         }
+        let radius_feet = i32::from(radius) << (exponent - 8);
+        if radius_feet > 1_000_000 {
+            return Err("unsupported cloud bounds".into());
+        }
+        let detail = match std::env::var("TORE_CLOUD_DETAIL").as_deref() {
+            Err(std::env::VarError::NotPresent) | Ok("2") => 2,
+            Ok("0") => 0,
+            Ok("1") => 1,
+            _ => return Err("TORE_CLOUD_DETAIL must be 0, 1 or 2".into()),
+        };
         let pic = Pic::parse(read("_CLOUD1.PIC")?)?;
         if pic.width > 256 || pic.height > 256 || !pic.palette.is_empty() {
             return Err("unsupported cloud texture".into());
@@ -58,11 +73,36 @@ impl Clouds {
             shape,
             scale: 2_f32.powi(i32::from(exponent) - 8),
             texture,
+            radius_feet,
+            detail,
+            exponent,
         })
     }
     pub fn vertices(&self, camera: &Camera) -> Vec<f32> {
-        let mut centers =
-            tore_sim::clouds::centers(&self.layout, camera.position.map(f64::from), self.altitude);
+        // Host radians to native binary-angle words; exact native matrix rounding
+        // is not implied. Normalize before converting so long-running turns wrap.
+        let angle = |v: f32| {
+            (v.rem_euclid(std::f32::consts::TAU) * 65536. / std::f32::consts::TAU).round() as i32
+                as i16
+        };
+        let mut centers = tore_sim::clouds::centers_for_view(
+            &self.layout,
+            camera.position.map(f64::from),
+            self.altitude,
+            tore_sim::clouds::View {
+                heading: angle(camera.yaw),
+                pitch: angle(camera.pitch),
+                detail: self.detail,
+                radius_feet: self.radius_feet,
+            },
+        );
+        centers.retain(|(center, _)| {
+            tore_sim::clouds::within_shape_range(
+                camera.position.map(f64::from),
+                *center,
+                self.exponent,
+            )
+        });
         let distance = |p: [f64; 3]| {
             p.iter()
                 .zip(camera.position)

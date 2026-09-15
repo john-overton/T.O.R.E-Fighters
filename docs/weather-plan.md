@@ -316,5 +316,8 @@ Original CLOUD1 top/bottom geometry, cutout texture, runtime-imported nine-entry
 layout, high-detail 4×4 repeats, generated altitude defaults and explicit mission
 altitude now render. Crossings and a second theater were captured. The sixteen
 CLOUDS billboards are decoded but have no established active producer; native
-low-detail/frustum branches and matched retail comparisons remain open. Cloud
+low-detail, forward-sector relocation and SH coordinate-range rejection now
+work. GPU triangle clipping replaces native sphere/frustum work rejection;
+integer edge rounding and matched retail comparisons remain open. The static
+resource/producer audit still establishes no active CLOUDS.SH placement. Cloud
 bands are source fog records, not evidence for an authored volumetric deck.
