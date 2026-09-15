@@ -21,6 +21,8 @@ pub enum Action {
     Click,
     QuickMission,
     FreeFlight,
+    Mission,
+    MissionFly,
     Theater(usize),
     Aircraft(usize),
     Back,
@@ -577,7 +579,14 @@ impl Canvas<'_> {
             self.rect(rect, color);
         }
     }
-    fn blit(&mut self, s: &Sprite, (x, y): (i32, i32), sx: usize, width: usize, gain: f32) {
+    pub(crate) fn blit(
+        &mut self,
+        s: &Sprite,
+        (x, y): (i32, i32),
+        sx: usize,
+        width: usize,
+        gain: f32,
+    ) {
         for yy in 0..s.height {
             for xx in 0..width {
                 let (dx, dy) = (x + xx as i32, y + yy as i32);

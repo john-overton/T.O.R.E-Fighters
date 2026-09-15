@@ -136,3 +136,10 @@ are recorded separately from unresolved behavior. Implementation and original-ga
 acceptance gates above remain open.
 
 Track remaining source questions in the [mapping ledger](menu-parity-matrix.md).
+
+## Implementation checkpoint — 2026-09-14
+
+Bounded imports, editable briefing, original-art ordnance and supported armed
+airborne launch/restart are implemented. [Validation and remaining gates](baselines/creator-ordnance.md).
+Full original-game parity and custom-load replay remain open; the checklist above
+is the full target, not a claim that every acceptance gate passed.

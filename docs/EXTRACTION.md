@@ -285,3 +285,22 @@ cargo run --locked -p tore-formats --example dialog_geometry -- .local/menu-reso
 This resolves imported draw references as inert data. Printed coordinates are
 static local parameters; native runtime placement/hit testing remains separate.
 [Active options and geometry](formats/quick-mission.md).
+
+## Creator metadata and ordnance UI
+
+`--creator` adds all PT/JT metadata, weapon thumbnails and original creator/ordnance
+UI resources through the same profile used by the app. Combine it with
+`--aircraft f18 --aircraft rafale` for supported flight dependencies. Archive boundaries,
+conflict checks and provenance are retained; other aircraft metadata does not enable flight.
+
+The app additionally requires the reviewed FA.EXE during import to recover active
+selector tables. It checks the complete fingerprint and reads bounded inert lists;
+it never executes or caches the executable. The standalone equivalent is:
+
+```sh
+cargo run --locked -p tore-formats --example creator_options -- gameassets/fighters-anthology/FA.EXE .local/creator-options.bin
+```
+
+The output is create-new and must remain ignored. `--creator` itself extracts archive
+resources; it does not implicitly read executable tables. Unknown executable builds
+are rejected until independently reviewed. Old app caches re-import when media is available.

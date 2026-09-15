@@ -39,6 +39,7 @@ pub struct Combat {
     pub input: FireInput,
     pub controller: FireInput,
     pub range: bool,
+    initial_ammo: Option<Vec<u16>>,
     pub recorder: Option<crate::combat_tape::Recorder>,
     last_launcher: Option<Launcher>,
     shapes: Vec<Option<Shape>>,
@@ -61,6 +62,29 @@ impl Combat {
                 .cloned()
                 .ok_or_else(|| std::io::Error::other(format!("missing live-fire resource {name}")))
         })?;
+        Self::configured(h, data, range, config, None)
+    }
+    pub fn with_loadout(
+        h: &Airframe,
+        data: &BTreeMap<String, Vec<u8>>,
+        load: &tore_sim::combat::loadout::Loadout,
+    ) -> AppResult<Self> {
+        load.validate()?;
+        Self::configured(
+            h,
+            data,
+            false,
+            load.configuration.clone(),
+            Some(load.quantities.clone()),
+        )
+    }
+    fn configured(
+        h: &Airframe,
+        data: &BTreeMap<String, Vec<u8>>,
+        range: bool,
+        config: live::Configuration,
+        initial_ammo: Option<Vec<u16>>,
+    ) -> AppResult<Self> {
         let shapes = config.stations.iter().map(|s| s.weapon.shape.as_ref().and_then(|name| {
             match data.get(name).ok_or("missing shape".to_string()).and_then(|b| Shape::parse(b).map_err(|e| e.to_string())) {
                 Ok(shape) if !shape.faces.is_empty() => Some(shape),
@@ -100,6 +124,7 @@ impl Combat {
             input: FireInput::default(),
             controller: FireInput::default(),
             range,
+            initial_ammo,
             recorder: None,
             last_launcher: None,
             shapes,
@@ -133,7 +158,13 @@ impl Combat {
             r.record("reset", l);
         }
         self.last_launcher = Some(l);
-        self.state = live::State::new(self.state.configuration().clone(), self.range)?;
+        self.state = live::State::new(
+            self.state.configuration().clone(),
+            self.range || self.initial_ammo.is_some(),
+        )?;
+        if let Some(ammo) = &self.initial_ammo {
+            self.state.ammo.clone_from(ammo);
+        }
         self.input = FireInput::default();
         self.controller.cancel();
         s.set_payload(self.state.payload_lbs())?;

@@ -23,7 +23,7 @@ question. Every planned control group has an entry; full 1:1 recovery is open.
 | Fuel and mass | Partial | 500-unit edit/clamp, fixed-point serialization and overweight gate mapped; full mass accounting and flight initialization open |
 | Ordnance menus | Partial | Menu tree, Cheat and fort-only aircraft availability mapped; campaign-root visibility open |
 | Fly / Select Plane / return | Partial | Action 5 → state 18, other exits →13; custom directive link mapped; outer state-machine and cancel/retry ownership open |
-| Runtime import and implementation | Open | Readers are research-only; app cache, typed drafts and both full screens remain planned |
+| Runtime import and implementation | Partial | Shared bounded active tables, app cache, typed drafts, both screens and supported armed launch/restart implemented; filters, auxiliary stores and custom replay open |
 | Original-game acceptance | Open | Supplied screenshots constrain appearance; popup, gestures, restart and cross-platform comparisons still required |
 
 Detailed contracts and source addresses:
@@ -31,5 +31,5 @@ Detailed contracts and source addresses:
 [validation](baselines/menu-behavior-mapping.md).
 
 Do not fill unresolved entries with the custom reference app's behavior. The next
-implementation gate is shared bounded catalog/resource resolution and typed
-mission/loadout state; source gaps above must remain explicit during that work.
+acceptance gate is hands-on creator/ordnance/flight testing and original-game
+comparison; source gaps above remain explicit. See [implementation evidence](baselines/creator-ordnance.md).

@@ -24,9 +24,9 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 - [x] Add repeatable `--native-menus` extraction with hash-gated regions/string
   references; validate QM_MENU/ARMPLANE trees through the shared bounded reader.
   [First implementation evidence](baselines/menu-contract-pass.md).
-- [ ] Add bounded imports, typed setup and explicit capability validation.
+- [x] Add bounded imports, typed setup and explicit capability validation.
 - [ ] Build all recovered controls and faithful downstream placeholders.
-- [ ] Build ordnance catalog/station cards, category/page controls, fuel/weight,
+- [x] Build ordnance catalog/station cards, category/page controls, fuel/weight,
   supported load edits and creator/Select Plane/Fly navigation.
 - [ ] Pass accepted loadout into flight/combat/restart/replay independently of
   manual range fixtures; validate both aircraft and unsupported-store feedback.
@@ -34,8 +34,10 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   implemented AI, objectives or scoring. Other mission behaviors stay placeholders.
 - [ ] Complete source/visual/interaction/launch checks and platform evidence.
 
-This schedules the creator flow specifically; unrelated menus and combat AI
-remain deferred. Planning has not changed current free-flight behavior.
+Implemented all 30 editable briefing fields and supported custom-load flight/restart.
+Full native filters, auxiliary equipment, replay and original-game interaction
+acceptance remain open. [Implementation, validation and testing gate](baselines/creator-ordnance.md).
+Unrelated menus and combat AI remain deferred.
 
 ## Manual systems continuation — 2026-09-14
 

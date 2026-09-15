@@ -16,6 +16,7 @@ mod instruments;
 mod look;
 mod menu;
 mod mirrors;
+mod ordnance;
 mod performance;
 mod preferences;
 mod quick_mission;
@@ -72,6 +73,7 @@ struct App {
     theater_resources: std::collections::BTreeMap<String, Vec<u8>>,
     camera: terrain::Camera,
     quick: quick_mission::QuickMission,
+    mission: Option<(f64, f64)>,
     screen: Screen,
     frame_time: Instant,
     instrument_time: Instant,
@@ -496,6 +498,107 @@ impl App {
                 self.screen = Screen::Quick;
                 self.menu.state.cancel();
             }
+            Action::Mission => {
+                let Some(id) = self.quick.player() else {
+                    return;
+                };
+                let index = tore_formats::aircraft::AircraftId::ALL
+                    .iter()
+                    .position(|v| *v == id)
+                    .unwrap();
+                self.action(event_loop, Action::Theater(self.quick.theater_index()));
+                if self.error.is_some() {
+                    return;
+                }
+                self.action(event_loop, Action::Aircraft(index));
+                if self.error.is_some() {
+                    return;
+                }
+                let result = (|| -> AppResult<()> {
+                    if self.quick.draft.values[18] == 0
+                        || self
+                            .quick
+                            .ordnance
+                            .as_ref()
+                            .is_none_or(|o| o.loadout.aircraft != id)
+                    {
+                        let load = tore_sim::combat::loadout::Loadout::new(
+                            &self.hornet.profile,
+                            |name| {
+                                self.theater_resources.get(name).cloned().ok_or_else(|| {
+                                    std::io::Error::other(format!(
+                                        "missing loadout resource {name}"
+                                    ))
+                                })
+                            },
+                        )?;
+                        self.quick.ordnance =
+                            Some(ordnance::Ordnance::new(load, &self.theater_resources)?);
+                    }
+                    let o = self.quick.ordnance.as_mut().unwrap();
+                    if self.quick.draft.values[19] == 0 {
+                        for (s, n) in o
+                            .loadout
+                            .configuration
+                            .stations
+                            .iter()
+                            .zip(&mut o.loadout.quantities)
+                        {
+                            if !s.internal {
+                                *n = 0;
+                            }
+                        }
+                    }
+                    o.visible = true;
+                    o.message=Some("Airborne patrol preview: no enemy AI or mission objectives yet. Review your load, then Fly.".into());
+                    Ok(())
+                })();
+                if let Err(e) = result {
+                    self.quick.notice = Some(e.to_string());
+                } else if self.quick.draft.values[18] == 0 {
+                    self.action(event_loop, Action::MissionFly);
+                }
+            }
+            Action::MissionFly => {
+                if let Some(message) = self.quick.unsupported() {
+                    self.quick.ordnance.as_mut().unwrap().message = Some(message);
+                    return;
+                }
+                let load = &self.quick.ordnance.as_ref().unwrap().loadout;
+                if self.quick.draft.values[19] == 0
+                    && load
+                        .configuration
+                        .stations
+                        .iter()
+                        .zip(&load.quantities)
+                        .any(|(s, n)| !s.internal && *n > 0)
+                {
+                    self.quick.ordnance.as_mut().unwrap().message=Some("Guns only is selected. Unload external weapons or return to setup and change the restriction.".into());
+                    return;
+                }
+                let altitude = [5000., 10000., 20000., 40000.][self.quick.draft.values[14]];
+                let start = self.hornet.start(&self.world);
+                let ground = f64::from(
+                    self.world
+                        .height(start.position[0] as f32, start.position[2] as f32),
+                );
+                if altitude < ground + 100. {
+                    self.quick.ordnance.as_mut().unwrap().message = Some(format!(
+                        "Selected altitude is below safe terrain clearance ({:.0} feet). Select a higher altitude.",
+                        ground + 100.
+                    ));
+                    return;
+                }
+                let fuel = load.fuel_lbs;
+                match combat::Combat::with_loadout(&self.hornet, &self.theater_resources, load) {
+                    Ok(c) => {
+                        self.combat = c;
+                        self.mission = Some((altitude, fuel));
+                        self.action(event_loop, Action::FreeFlight);
+                    }
+                    Err(e) => self.quick.ordnance.as_mut().unwrap().message = Some(e.to_string()),
+                }
+            }
             Action::FreeFlight => {
                 if let Some(audio) = &self.audio {
                     audio.restart_flight();
@@ -505,6 +608,10 @@ impl App {
                 }
                 self.input.context(true, self.focused);
                 self.flight = self.hornet.start(&self.world);
+                if let Some((altitude, fuel)) = self.mission {
+                    self.flight.position[1] = altitude;
+                    self.flight.fuel = fuel;
+                }
                 if self.researched_flight
                     && let Err(error) = self.flight.enable_research(1)
                 {
@@ -704,6 +811,16 @@ impl ApplicationHandler for App {
             }
             WindowEvent::MouseInput {
                 state,
+                button: MouseButton::Right,
+                ..
+            } if self.screen == Screen::Quick => self
+                .quick
+                .ordnance
+                .as_mut()
+                .filter(|o| o.visible)
+                .map_or(Action::None, |o| o.right(state == ElementState::Pressed)),
+            WindowEvent::MouseInput {
+                state,
                 button: MouseButton::Left,
                 ..
             } => {
@@ -735,6 +852,7 @@ impl ApplicationHandler for App {
                     Action::None
                 } else if self.screen == Screen::Quick {
                     if state == ElementState::Pressed {
+                        self.quick.shift = self.modifiers.shift_key();
                         self.quick.down();
                         Action::None
                     } else {
@@ -1371,6 +1489,7 @@ fn main() -> AppResult<()> {
     let mut flight_controls = None;
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
+    let mut validate_creator = false;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -1649,9 +1768,10 @@ fn main() -> AppResult<()> {
             "--smoke-test" => smoke_test = true,
             "--no-audio" => no_audio = true,
             "--import-only" => import_only = true,
+            "--validate-creator" => validate_creator = true,
             "--help" | "-h" => {
                 println!(
-                    "Combat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; I launches one incoming selected weapon; Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-2 combat-service inputs; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Creator: --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks both imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; I launches one incoming selected weapon; Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-2 combat-service inputs; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -1671,8 +1791,8 @@ fn main() -> AppResult<()> {
     {
         return Err("scene capture requires flight/viewer and cannot combine with --snapshot or --import-only".into());
     }
-    if snapshot.is_none() && snapshot_state != "normal" {
-        return Err("--snapshot-state requires --snapshot".into());
+    if snapshot.is_none() && !smoke_test && snapshot_state != "normal" {
+        return Err("--snapshot-state requires --snapshot or --smoke-test".into());
     }
     if let Some(seconds) = input_seconds {
         return input::diagnostics(
@@ -1877,7 +1997,7 @@ fn main() -> AppResult<()> {
         }
         return Ok(());
     }
-    let audio = if no_audio || smoke_test || snapshot.is_some() {
+    let audio = if no_audio || smoke_test || validate_creator || snapshot.is_some() {
         None
     } else {
         match audio::Audio::new(std::mem::take(&mut assets.sounds), &assets.music_scores) {
@@ -1893,7 +2013,11 @@ fn main() -> AppResult<()> {
         background = Some("CHOOSEV".into());
     }
     let world = terrain::World::for_theater(&assets.theater_resources, &theater_code)?;
+    if validate_creator {
+        return ordnance::validate_sources(&assets.theater_resources, &world);
+    }
     let theater_resources = assets.theater_resources.clone();
+    let creator_options = assets.creator_options.clone();
     let mut menu = Menu::new(assets, background.as_deref())?;
     if let Some(path) = snapshot {
         if matches!(initial_screen, Screen::Viewer | Screen::Flight) {
@@ -1903,12 +2027,28 @@ fn main() -> AppResult<()> {
             );
         }
         if initial_screen == Screen::Quick {
-            let mut quick = quick_mission::QuickMission::for_aircraft(aircraft_id);
-            quick.selection = world
+            let mut quick = quick_mission::QuickMission::new(
+                aircraft_id,
+                creator_options.clone(),
+                &theater_resources,
+            );
+            let selection = world
                 .catalog
                 .iter()
                 .position(|(code, _)| code == &theater_code)
                 .unwrap_or(0);
+            quick.theater(selection);
+            if snapshot_state == "ordnance" {
+                quick.ordnance = Some(ordnance::Ordnance::new(
+                    tore_sim::combat::loadout::Loadout::new(&hornet.profile, |n| {
+                        theater_resources
+                            .get(n)
+                            .cloned()
+                            .ok_or_else(|| std::io::Error::other("missing loadout resource"))
+                    })?,
+                    &theater_resources,
+                )?);
+            }
             quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
             quick.preview_selector(&snapshot_state)?;
             quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
@@ -1932,8 +2072,20 @@ fn main() -> AppResult<()> {
         .iter()
         .position(|(code, _)| code == &theater_code)
         .unwrap_or(0);
-    let mut quick = quick_mission::QuickMission::for_aircraft(aircraft_id);
-    quick.selection = selection;
+    let mut quick =
+        quick_mission::QuickMission::new(aircraft_id, creator_options.clone(), &theater_resources);
+    quick.theater(selection);
+    if initial_screen == Screen::Quick && snapshot_state == "ordnance" {
+        quick.ordnance = Some(ordnance::Ordnance::new(
+            tore_sim::combat::loadout::Loadout::new(&hornet.profile, |n| {
+                theater_resources
+                    .get(n)
+                    .cloned()
+                    .ok_or_else(|| std::io::Error::other("missing loadout resource"))
+            })?,
+            &theater_resources,
+        )?);
+    }
     let animation_capture = capture_terrain.is_some()
         && (flight_devices.is_some() || flight_controls.is_some() || flight_probe_ticks.is_some());
     let mut flight = hornet.start(&world);
@@ -2073,6 +2225,7 @@ fn main() -> AppResult<()> {
         && !animation_capture
         && std::env::var_os("TORE_PERF_FRAMES").is_none();
     let mut app = App {
+        mission: None,
         preference_path: if preferences_enabled {
             Some(assets::data_directory()?.join("preferences-v1.conf"))
         } else {

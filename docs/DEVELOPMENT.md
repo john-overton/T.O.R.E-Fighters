@@ -49,7 +49,7 @@ Expect a 960 × 720 logical-pixel window showing Choose Activity and a terminal 
 
 Startup chooses randomly among all five original backgrounds; it does not run a timed slideshow. Force a variant for comparison with `--background CHOOSEV` (also accepts CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM). The top bar moves to match each artwork's native origin. Hovering and keyboard focus are silent. An older menu-only cache requires re-import; the local default media is automatically used if available.
 
-First launch automatically imports `gameassets/fighters-anthology/` if no valid cache exists. Use `--import <directory>` to refresh or choose other media. `--import-only` imports and exits without opening a window/audio device. Required archives: `FA_1.LIB` and `FA_2.LIB`; optional `FA_4B.LIB` and `FA_4D.LIB` supply flight and shell music. Missing required media produces an actionable terminal error; there is no file-picker UI yet.
+First launch automatically imports `gameassets/fighters-anthology/` if no valid cache exists. Use `--import <directory>` to refresh or choose other media. `--import-only` imports and exits without opening a window/audio device. Required media: reviewed `FA.EXE` alongside `FA_1.LIB` and `FA_2.LIB`; optional `FA_4B.LIB` and `FA_4D.LIB` supply flight and shell music. Missing required media produces an actionable terminal error; there is no file-picker UI yet.
 
 Cache locations:
 
@@ -139,7 +139,7 @@ An editor with rust-analyzer is useful but optional. No global editor configurat
 
 ## Terrain development loop
 
-The main-menu Create Quick Mission action opens the original `QUIKMIS3.PIC` artwork with a theater selector and Free Flight button. The terrain inspection camera is now a CLI diagnostic. This is an authored shell, not the full quick-mission system. Launch it with `--quick-mission`, or skip to the world with `--viewer`.
+The main-menu Create Quick Mission action opens the original `QUIKMIS3.PIC` artwork with editable briefing fields and standard/custom weapons selection. The terrain inspection camera is now a CLI diagnostic. This supports an airborne patrol preview; AI and mission objectives remain open. Launch it with `--quick-mission`, or skip to the world with `--viewer`.
 
 ```sh
 cargo run --locked -p tore-app -- --quick-mission --smoke-test
@@ -160,13 +160,17 @@ Controls: arrows move horizontally, Shift accelerates translation 8×, Q/E or Pa
 
 All 16 creator entries now select/load a theater, rebuild its GPU resources, update its briefing map and reset the free camera. `--theater CODE` also works with `--viewer`, `--quick-mission` and `--capture-terrain`. Ukraine retains the original inspection pose; others start near the grid center at 28,000 feet with a terrain-clearance floor. Example: `cargo run --locked -p tore-app -- --viewer --theater EGY`.
 
-Older Ukraine-only caches automatically re-import from default local media. For external media, refresh with `--import`. The selective all-theater pack is capped at 128 MiB / 2,048 resources; it is still a development cache. Source textures use the first three theater-code characters (TVI for TVIET); Kurile's base MM has no numbered texture placements and currently renders palette-colored height geometry.
+Older Ukraine-only caches automatically re-import from default local media. For external media, refresh with `--import`. The creator/all-theater pack is capped at 256 MiB / 4,096 resources; it is still a development cache. Source textures use the first three theater-code characters (TVI for TVIET); Kurile's base MM has no numbered texture placements and currently renders palette-colored height geometry.
 
 The creator and placeholder notices now use original `ARMFONT.PIC` sans-serif glyphs; the compact viewer HUD uses `SMLFONT.PIC`. Tinted glyphs preserve source shading instead of flattening every visible pixel to white. Button labels retain original FONTACT artwork. These remain legacy raster fonts scaled with the menu; they are not resolution-independent vector text. No system font or new dependency is required. Use `--snapshot-state notice --snapshot .local/notice.ppm` to inspect the placeholder message.
 
 ## Hornet free flight
 
-Create Quick Mission now launches **Free Flight** directly, skipping the deferred loadout page. Theater selection remains functional; dotted placeholders identify other deferred mission selectors. The initial aircraft is the retail F/A-18D, clean external fit, full internal fuel, 450 KTAS, at 5,000 feet or 2,000 feet above local terrain when necessary.
+Create Quick Mission supports F/A-18D and Rafale C airborne previews with accepted
+weapons, ammunition and fuel. Set all additional wings to zero, clear conditions
+and no ground targets/defenses. Select a custom load to open Load Ordnance; standard
+uses reviewed PT defaults. Direct `--free-flight` remains clean with full fuel.
+Selected creator altitude is retained exactly or rejected for terrain clearance.
 
 ```sh
 cargo run --locked -p tore-app -- --free-flight --theater UKR
@@ -246,10 +250,10 @@ trajectories. It does not change the app's flight model.
 
 ## Aircraft selection and briefing selectors
 
-Quick Mission now selects the theater through its highlighted briefing name and
-F/A-18D or Rafale C through the Wing 1 aircraft name (the Aircraft menu opens the
-same selector). OK launches clean free flight. Enemy fields and unsupported
-mission settings are ghosted and cannot be activated.
+Quick Mission uses all recovered active scalar tables and imported aircraft names.
+Click scalar text to cycle; Shift-click opens a scrollable list. Aircraft names
+open the list directly. Only F/A-18D and Rafale C can fly. Unsupported mission
+systems remain editable setup placeholders with launch validation.
 
 ```sh
 cargo run --locked -p tore-app -- --quick-mission --aircraft rafale
@@ -260,7 +264,7 @@ cargo run --locked -p tore-app -- --quick-mission --snapshot-state theaters --sn
 ```
 
 `--aircraft f18` remains the default. Quick-mission snapshot states are `normal`,
-`aircraft`, `theaters`, and `help`; they use the original 640×480 menu canvas.
+`aircraft`, `theaters`, `ordnance`, and `help`; they use the original 640×480 menu canvas.
 Old caches re-import when local media is present. Aircraft switching refreshes
 GPU atlas/cockpit resources, camera previews and instruments before launch.
 See [validation and remaining parity](baselines/rafale-quick-mission.md).
@@ -389,3 +393,18 @@ and `--combat-command damage|incoming|target-jammer`. Probe logs include haptic
 event/mixer counts without playing historical pulses on hardware. Use a new
 `TORE_COMBAT_EVIDENCE` directory for ten serialized slot tapes. Current native
 research has 28 reviewed regions; full subsystem/ECM parity remains open.
+
+## Creator / ordnance acceptance
+
+```sh
+cargo run --locked -p tore-app -- --validate-creator
+cargo run --locked -p tore-app -- --quick-mission --snapshot-state ordnance --snapshot .local/ordnance.ppm
+cargo run --locked -p tore-app -- --quick-mission --snapshot-state ordnance --smoke-test
+```
+
+`--validate-creator` needs imported media but no display/audio, and checks both
+aircraft's supported placements, fuel, empty stations and accepted-ammo restart.
+In Load Ordnance click a catalog weapon then a compatible station, or drag between
+them. Tab changes selected station; +/- changes ammunition; right-click decrements.
+Fuel rocker edits 500 lb at a time. Select Plane preserves the custom draft.
+[Evidence, hands-on steps and material limits](baselines/creator-ordnance.md).

@@ -224,3 +224,11 @@ is set, `0x1000000`, `0x2000`, and `0x40000000`. Tilde-prefixed resources have
 special modifier gates. Flag construction, pluralization and final catalog
 identity mapping remain separate from these verified call masks; do not treat
 any nonzero overlap as full eligibility, or catalog presence as flyable support.
+
+## Runtime implementation checkpoint
+
+The app now consumes the fingerprinted active tables through `ui::creator` and an
+inert cache; scalar controls, list acceptance/cancel, nationality/target dependencies
+and supported airborne setup are wired. Aircraft catalog metadata is imported at
+runtime; native eligibility/era flags remain incomplete. Popup geometry and sentence
+fitting are provisional. [Behavior and acceptance](../baselines/creator-ordnance.md).

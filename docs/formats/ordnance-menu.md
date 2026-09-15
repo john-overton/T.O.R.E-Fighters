@@ -151,3 +151,19 @@ closure, full event/repeat timing, stock
 rollback on cancel, accepted fuel/weight serialization, start/task generation,
 and original-game visual/interaction acceptance. Use this contract alongside
 [the implementation plan](../ordnance-plan.md), not as proof that its gates pass.
+
+## Additional card recovery and implementation
+
+Static FA evidence: hardpoint byte +0x17 indexes table 0x4ee7e8 (Centerline,
+Fuselage, Internal Gun, Internal Bay, Wing, Wingtip). Station anchors are headings;
+the shared card is offset +2,+14. Heading font is PANELFNT; normal card labels use
+SMLFONT and selected labels FNTWPNY. Thumbnail naming derives `$<store stem>.PIC`.
+Guidance branch 0x41a5ae..0x41a65d uses flag bit 1 for guided/unguided, then
+signature 0 optical, 1 laser, 2 IR, 3 radar; radar flag 0x200 selects SARH,
+otherwise active radar. These facts are separate from fitted border colors,
+dial angle selection, menu presentation and event timing.
+
+The app implements JT catalog cards, station compatibility, quantity/fuel controls,
+weight validation and custom-load flight/restart. Auxiliary stores and native stock,
+year, cheat and airbase lifecycle remain open. See
+[implementation evidence and user testing gate](../baselines/creator-ordnance.md).

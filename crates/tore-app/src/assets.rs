@@ -9,6 +9,11 @@ use tore_formats::{Archive, Button, Pic};
 
 const ART: &[&str] = &[
     "QUIKMIS3.PIC",
+    "ORD_AIR3.PIC",
+    "ROCKER00.PIC",
+    "DIAL00.PIC",
+    "DIAL04.PIC",
+    "PANELFNT.PIC",
     "CHOOSEV.PIC",
     "CHOOSEAC.PIC",
     "CHOOSE3.PIC",
@@ -40,6 +45,7 @@ const DATA: &[&str] = &[
 ];
 const MAX_PACK_BYTES: u64 = 256 * 1024 * 1024;
 pub struct Assets {
+    pub creator_options: tore_formats::ui::creator::Options,
     pub theater_resources: BTreeMap<String, Vec<u8>>,
     pub pics: BTreeMap<String, Pic>,
     pub buttons: Vec<Button>,
@@ -141,6 +147,12 @@ impl Assets {
                 .ok_or_else(|| format!("menu cache missing {name}; re-import media"))?;
             pics.insert(name.to_string(), Pic::parse(bytes)?);
         }
+        for (name, bytes) in resources.iter().filter(|(n, _)| {
+            n.starts_with('$') && n.ends_with(".PIC")
+                || ["FNTWPNB.PIC", "FNTWPNY.PIC"].contains(&n.as_str())
+        }) {
+            pics.insert(name.clone(), Pic::parse(bytes)?);
+        }
         for name in [
             "CHOOSEV.PIC",
             "CHOOSEAC.PIC",
@@ -195,7 +207,13 @@ impl Assets {
         if sounds.values().any(|s| s.is_empty() || s.len() > 1_000_000) {
             return Err("invalid menu PCM size".into());
         }
+        let creator_options = tore_formats::ui::creator::Options::decode(
+            resources
+                .get("TORE_CREATOR_V1")
+                .ok_or("cache predates creator options; re-import media")?,
+        )?;
         Ok(Self {
+            creator_options,
             theater_resources: resources
                 .iter()
                 .filter(|(name, _)| !tore_formats::music::resource(name))
@@ -213,6 +231,20 @@ impl Assets {
         let mut report = String::from(
             "T.O.R.E-Fighters menu import v1\nOnly selected resources decompressed. No executable resources executed.\n",
         );
+        let exe_path = fs::read_dir(source)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("FA.EXE"))
+            })
+            .ok_or("creator import needs reviewed FA.EXE alongside archives")?;
+        if fs::metadata(&exe_path)?.len() > 16 * 1024 * 1024 {
+            return Err("FA.EXE exceeds input bound".into());
+        }
+        let tables = tore_formats::ui::creator::Options::parse(&fs::read(&exe_path)?)?;
+        resources.insert("TORE_CREATOR_V1".into(), tables.encode());
+        report.push_str("FA.EXE: reviewed SHA-256 e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c; inert creator lists only\n");
         let aircraft_libs = [archive(source, "FA_1.LIB")?, archive(source, "FA_2.LIB")?];
         let aircraft_names = tore_formats::aircraft::dependencies(
             &aircraft_libs.iter().collect::<Vec<_>>(),
@@ -231,6 +263,7 @@ impl Assets {
                 .filter(|n| {
                     names.contains(&n.as_str())
                         || aircraft_names.contains(*n)
+                        || tore_formats::ui::creator::resource(n)
                         || tore_formats::music::resource(n)
                         || tore_formats::theater::theater_resource(n, "ALL")
                 })
@@ -245,6 +278,9 @@ impl Assets {
                     entry.size,
                     bytes.len()
                 ));
+                if resources.get(name).is_some_and(|old| *old != bytes) {
+                    return Err(format!("conflicting resource {filename}/{name}").into());
+                }
                 resources.insert(name.to_string(), bytes);
             }
         }
@@ -302,8 +338,13 @@ impl Assets {
                 .iter()
                 .map(|(name, bytes)| 6 + name.len() as u64 + bytes.len() as u64)
                 .sum::<u64>();
-        if encoded_size > MAX_PACK_BYTES || resources.len() > 2048 {
-            return Err("import exceeds cache bounds".into());
+        if encoded_size > MAX_PACK_BYTES || resources.len() > 4096 {
+            return Err(format!(
+                "import exceeds cache bounds: {} resources, {} bytes",
+                resources.len(),
+                encoded_size
+            )
+            .into());
         }
         let path = destination.join(format!("menu-{generation}.pack"));
         let mut file = fs::OpenOptions::new()
@@ -369,7 +410,7 @@ impl Assets {
             Ok(u32::from_le_bytes(b) as usize)
         }
         let count = word(&mut cursor)?;
-        if count > 2048 {
+        if count > 4096 {
             return Err("too many menu resources".into());
         }
         let mut resources = BTreeMap::new();
