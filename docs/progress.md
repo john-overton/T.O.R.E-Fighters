@@ -862,3 +862,13 @@ Special horizon branches and matched retail acceptance remain open.
   viewer, both aircraft wide/tall actual flight captures and repeatable performance.
 - [ ] HUD primary color and special display-mode audit; matched retail raster
   and Windows/macOS acceptance. See corrected capture labels in the baseline.
+
+
+### Weather HUD continuation (2026-09-15)
+
+- [x] Original HUD primary index and private cockpit palette shared by artwork
+  and HUD; source brightness steps, bounds and weather ordering.
+- [x] Preserve saved preferences with versioned signed-brightness migration.
+- [x] 284 Rust/24 Python tests and required checks; creator/viewer and both
+  aircraft wide/tall cockpit GPU captures, plus active performance sample.
+- [ ] Final horizon sampling/acceptance audit and matched retail/platform checks.

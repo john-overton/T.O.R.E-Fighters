@@ -81,18 +81,13 @@ pub fn draw(
     font: &Font,
     ground: f64,
     ladder: bool,
-    brightness: u8,
+    color: [u8; 3],
     zoom: f32,
 ) {
     let mut p = Paint {
         pixels,
         clip: (174, 96, 292, 222),
-        color: [
-            60 + brightness * 12,
-            115 + brightness * 14,
-            60 + brightness * 8,
-            255,
-        ],
+        color: [color[0], color[1], color[2], 255],
     };
     let hdg = heading(s.yaw);
     // Heading strip and pointer, wrapped across north.

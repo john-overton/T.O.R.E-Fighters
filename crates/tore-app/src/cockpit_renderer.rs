@@ -11,7 +11,6 @@ pub struct CockpitRenderer {
     bind: Option<wgpu::BindGroup>,
     hud: wgpu::Texture,
     palette: wgpu::Texture,
-    prefix: [[u8; 3]; 64],
     uniform: wgpu::Buffer,
     art_size: [u32; 2],
     enabled: bool,
@@ -141,7 +140,6 @@ impl CockpitRenderer {
             bind: None,
             hud,
             palette: texture(device, 256, 1),
-            prefix: [[0; 3]; 64],
             uniform,
             art_size: [1, 1],
             enabled: false,
@@ -188,9 +186,6 @@ impl CockpitRenderer {
             },
             art.size(),
         );
-        self.prefix = std::array::from_fn(|i| {
-            indexed.palette[i].map(|c| ((u16::from(c) * 63 + 127) / 255) as u8)
-        });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
@@ -274,28 +269,8 @@ impl CockpitRenderer {
             ],
         }));
     }
-    /// Preserve the cockpit's private first 64 colors, then run the native
-    /// palette tint ranges; higher indices already use the resolved world palette.
-    pub fn weather(&self, queue: &wgpu::Queue, world: &crate::terrain::World, altitude: f64) {
-        let mut colors = world.palette;
-        if let Some(layer) = world.weather.sample(altitude) {
-            let mut prefix = [[0; 3]; 256];
-            prefix[..64].copy_from_slice(&self.prefix);
-            tore_formats::weather::palette::apply_sun_whitening(
-                &mut prefix,
-                world.weather_presentation.sun_whitening,
-            )
-            .expect("validated cockpit palette");
-            tore_formats::weather::palette::apply_tint(
-                &mut prefix,
-                layer.tint,
-                world.weather_presentation.tint,
-            )
-            .expect("validated cockpit palette");
-            for i in 0..64 {
-                colors[i] = prefix[i].map(|c| ((u16::from(c) * 255 + 31) / 63) as u8);
-            }
-        }
+    /// Upload the palette shared with the CPU HUD raster.
+    pub fn weather(&self, queue: &wgpu::Queue, colors: &[[u8; 3]; 256]) {
         let pixels: Vec<u8> = colors
             .iter()
             .flat_map(|c| [c[0], c[1], c[2], 255])

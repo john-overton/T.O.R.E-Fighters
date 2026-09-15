@@ -229,3 +229,10 @@ Weapons page V/R/E reports visual availability, radar and ECM: `+` available/on,
 `-` off, `!` failed. Automatic source-index faults are separate from the manual
 bracket injection. Unknown engine/hydraulic effects remain unimplemented.
 [Recovered contracts, runtime evidence and remaining gates](baselines/weapons-systems.md).
+
+
+HUD brightness now uses the recovered signed range -256..256, steps of 16 and
+neutral zero, applied to the original palette entry before sunlight whitening.
+The primary ink comes from each aircraft's HUD module; layout remains authored.
+Version-1 preferences migrate the old setting relative to its neutral value 7;
+version 2 persists the new signed amount. Other saved display choices are retained.

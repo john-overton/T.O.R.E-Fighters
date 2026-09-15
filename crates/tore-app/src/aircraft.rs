@@ -17,6 +17,7 @@ pub struct Airframe {
     pub sprites: BTreeMap<String, Sprite>,
     pub font: Font,
     pub hud_font: Font,
+    pub hud: tore_formats::hud::Hud,
     pub flight_menu: Vec<tore_formats::ui::MenuNode>,
     pub equipment: BTreeMap<String, tore_formats::aircraft::Equipment>,
     pub poses: Vec<Shape>,
@@ -196,11 +197,39 @@ impl Airframe {
             sprites,
             font,
             hud_font: Font::parse(get("HUD11.FNT")?)?,
+            hud: tore_formats::hud::Hud::parse(get(id.hud())?)?,
             flight_menu,
             equipment,
             poses,
             streamer,
         })
+    }
+    /// One palette for cockpit art and HUD, retaining the original private prefix.
+    pub fn cockpit_palette(&self, world: &World, altitude: f64, brightness: i16) -> [[u8; 3]; 256] {
+        let mut colors = world.palette;
+        let mut source = [[0; 3]; 256];
+        for (out, color) in source.iter_mut().zip(&self.cockpit_pic.palette) {
+            *out = color.map(|c| ((u16::from(c) * 63 + 127) / 255) as u8);
+        }
+        tore_formats::weather::palette::apply_hud_brightness(&mut source, brightness)
+            .expect("validated HUD brightness");
+        tore_formats::weather::palette::apply_sun_whitening(
+            &mut source,
+            world.weather_presentation.sun_whitening,
+        )
+        .expect("validated cockpit palette");
+        if let Some(layer) = world.weather.sample(altitude) {
+            tore_formats::weather::palette::apply_tint(
+                &mut source,
+                layer.tint,
+                world.weather_presentation.tint,
+            )
+            .expect("validated cockpit palette");
+        }
+        for i in 0..64 {
+            colors[i] = source[i].map(|c| ((u16::from(c) * 255 + 31) / 63) as u8);
+        }
+        colors
     }
     /// The two wingtip vapor attachments in world feet for one pose. Shape
     /// geometry is right/forward/up in thirds of a foot, matching `combat::mesh`.

@@ -176,3 +176,8 @@ projection remains distinct from native integer scanline acceptance.
 LAY light-map counts/pointers and SH polygon normal flags now feed the reviewed
 solid/texture light-before-fog path. Source signed dot and row boundaries are
 tested; float animated orientation remains an adaptation. See weather.md.
+
+
+HUD CODE+0x72 primary color is bounded by the native copied root; both supported
+aircraft select cockpit index 40. Source brightness applies before sun whitening
+and outside fog tint ranges. Remaining HUD geometry is authored; see weather.md.

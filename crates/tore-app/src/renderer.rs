@@ -105,10 +105,9 @@ impl Renderer {
         art: bool,
         hud: bool,
         pixels: &[u8],
-        world: &crate::terrain::World,
+        colors: &[[u8; 3]; 256],
     ) {
-        self.cockpit
-            .weather(&self.queue, world, camera.position[1] as f64);
+        self.cockpit.weather(&self.queue, colors);
         self.cockpit.update(
             &self.queue,
             self.flight_size(),

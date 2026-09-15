@@ -65,8 +65,10 @@ all sensors are blocked by visible fog.
   lower solid size/inversion gates and per-shape fog control.
 - [x] Original per-normal shade/highlight maps for solid and textured aircraft,
   source day/night light selection and light-before-fog ordering.
-- [ ] Assess special display-mode effects and affected HUD color; compare native
-  scanline rounding and horizon filtering with retail.
+- [x] Original HUD primary index, shared cockpit palette and source brightness
+  ordering; versioned migration preserves existing preferences.
+- [ ] Assess special display-mode effects; compare native scanline rounding and
+  horizon filtering with retail.
 - [ ] Add synthetic boundary/state tests, imported-module diagnostics and matched
   fog/transition captures; run creator/viewer/flight checks after rendering edits.
 

@@ -63,7 +63,7 @@ pub struct Preferences {
     pub cockpit: bool,
     pub hud: bool,
     pub ladder: bool,
-    pub brightness: u8,
+    pub brightness: i16,
     pub music: bool,
     pub effects: bool,
 }
@@ -126,7 +126,7 @@ impl Preferences {
             }
         }
         format!(
-            "tore-preferences 1\nzoom {}\nrwr-range {}\nradar-range {}\nradar-mode {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nbrightness {}\nmusic {}\neffects {}\n",
+            "tore-preferences 2\nzoom {}\nrwr-range {}\nradar-range {}\nradar-mode {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nbrightness {}\nmusic {}\neffects {}\n",
             self.zoom,
             self.rwr_range,
             self.radar_range,
@@ -149,9 +149,11 @@ impl Preferences {
         }
         let mut values = std::collections::BTreeMap::new();
         let mut lines = text.lines();
-        if lines.next() != Some("tore-preferences 1") {
-            return Err("unsupported preferences version".into());
-        }
+        let legacy = match lines.next() {
+            Some("tore-preferences 1") => true,
+            Some("tore-preferences 2") => false,
+            _ => return Err("unsupported preferences version".into()),
+        };
         for line in lines {
             let fields: Vec<_> = line.split_whitespace().collect();
             if fields.len() != 2 || values.insert(fields[0], fields[1]).is_some() {
@@ -185,11 +187,20 @@ impl Preferences {
             return Err("unknown preference".into());
         }
         let brightness = get("brightness")?
-            .parse::<u8>()
+            .parse::<i16>()
             .map_err(|_| "invalid brightness")?;
-        if brightness > 9 {
-            return Err("brightness outside bounds".into());
-        }
+        let brightness = if legacy {
+            if !(0..=9).contains(&brightness) {
+                return Err("brightness outside legacy bounds".into());
+            }
+            // Host migration: retain step distance from the old neutral setting.
+            (brightness - 7) * 16
+        } else {
+            if !(-256..=256).contains(&brightness) {
+                return Err("brightness outside bounds".into());
+            }
+            brightness
+        };
         let integer = |k, max| -> Result<usize, String> {
             let n = get(k)?
                 .parse::<usize>()
@@ -276,7 +287,16 @@ mod tests {
             effects: true,
         };
         assert_eq!(Preferences::parse(&p.text()).unwrap(), p);
-        assert!(Preferences::parse(&p.text().replace("brightness 3", "brightness 10")).is_err());
+        let legacy = p.text().replace("tore-preferences 2", "tore-preferences 1");
+        assert_eq!(Preferences::parse(&legacy).unwrap().brightness, -64);
+        assert_eq!(
+            Preferences::parse(&legacy.replace("brightness 3", "brightness 7"))
+                .unwrap()
+                .brightness,
+            0
+        );
+        assert!(Preferences::parse(&legacy.replace("brightness 3", "brightness 10")).is_err());
+        assert!(Preferences::parse(&p.text().replace("brightness 3", "brightness 257")).is_err());
         assert!(
             Preferences::parse(&p.text().replace("large-pages 9,5", "large-pages 1,2,3,4,5"))
                 .is_err()

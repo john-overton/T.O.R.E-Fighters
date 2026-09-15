@@ -770,3 +770,28 @@ The port retains source arithmetic/remaps; animation/world orientation still
 uses the host float basis, then Q15 rounding. It is not native matrix parity.
 Neutral imported F18/RAF/CLOUD1 lit-face counts are 275/201/0. Special sensor or
 display color maps remain outside this reviewed ordinary world path.
+
+
+### HUD palette consumer — continuation 2026-09-15
+
+FA `_HUDDraw` at 0x406ad6 reads 0x5213d2 and sends the byte directly to the
+indexed raster color setter (0x497680); there is no object distance/light remap
+in that call. HUD initialization at 0x406193 copies 0x2b2 bytes from the loaded
+HUD CODE root to 0x521360. The bounded HUD reader therefore reads CODE+0x72,
+not file offset 0x72. Both F18.HUD and RAFALE.HUD select index 40 in the private
+cockpit palette. Authored HUD geometry and other instrument colors are separate.
+
+`HUDBrightness` (0x40aac0) changes a signed value by 16, clamping -256..256;
+0x4b2f24 initializes it to zero. The palette worker at 0x4b3f74 changes just
+index 40: positive `c += (63-c)*amount >> 8`, negative
+`c = c*(256+amount) >> 8`. Endpoints give white/black. This occurs before sun
+whitening, and index 40 is outside fog's 47..60 / 64..254 tint ranges. The app
+now shares one resolved palette between cockpit artwork and primary HUD ink.
+Brightness controls use the recovered range/step instead of the fitted green
+formula. Preferences version 2 stores the signed amount; version 1 is accepted
+with explicit host migration `(old-7)*16`, preserving step distance from the old
+default without claiming equivalent fitted colors. Other preferences survive.
+
+Tests cover bounded module extraction, brightness endpoints, order/tint exclusion,
+control saturation and preference migration. The complete ordered native palette
+pipeline still includes non-weather effects beyond this slice.

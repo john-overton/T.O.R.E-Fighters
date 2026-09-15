@@ -156,3 +156,12 @@ combat/loadout and complete systems are not complete. See the
 [cockpit-switch and animation follow-up](../baselines/rafale-animations.md). [Validation](../baselines/rafale-quick-mission.md).
 
 Mirror source seeds, safeguards, optics and acceptance evidence are recorded in [live mirrors](../baselines/mirrors.md). Native mirror-camera recovery remains open.
+
+
+### HUD primary color (2026-09-15)
+
+The bounded HUD reader consumes CODE+0x72 after requiring the native 0x2b2-byte
+copied root. F18.HUD and RAFALE.HUD both select private cockpit palette index 40.
+The app shares weather/sunlight/brightness palette resolution with cockpit art;
+HUD geometry remains authored. Source brightness and palette ordering are in
+[weather.md](weather.md#hud-palette-consumer--continuation-2026-09-15).

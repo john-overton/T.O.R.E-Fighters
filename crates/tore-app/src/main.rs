@@ -1385,6 +1385,11 @@ impl ApplicationHandler for App {
                             &presented,
                             &self.instruments,
                         );
+                        let cockpit_palette = self.hornet.cockpit_palette(
+                            &self.world,
+                            self.camera.position[1] as f64,
+                            self.flight_ui.brightness,
+                        );
                         self.menu.pixels.fill(0);
                         if self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4) {
                             hud::draw(
@@ -1396,7 +1401,7 @@ impl ApplicationHandler for App {
                                     presented.position[2] as f32,
                                 ) as f64,
                                 self.flight_ui.ladder,
-                                self.flight_ui.brightness,
+                                cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                                 self.flight_canvas.hud_zoom(1.),
                             );
                         }
@@ -1406,7 +1411,7 @@ impl ApplicationHandler for App {
                             self.flight_ui.cockpit && matches!(self.flight_view, 0 | 3 | 4),
                             self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4),
                             &self.menu.pixels,
-                            &self.world,
+                            &cockpit_palette,
                         );
                         self.menu.pixels.fill(0);
                         if !self.flight_ui.menu {

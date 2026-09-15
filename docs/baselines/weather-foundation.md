@@ -395,3 +395,36 @@ corrected flight captures validate the cumulative horizon/fog/lighting path.
 A 630-frame active F18 run measured 2.17 ms mean / 2.56 p95, max 5.38, with
 630 mirrors and zero paused frames/readbacks. CPU intervals are not GPU timing.
 Matched retail and Windows/macOS checks remain pending external access.
+
+
+### HUD palette consumer — continuation 2026-09-15
+
+FA `_HUDDraw` at 0x406ad6 reads 0x5213d2 and sends the byte directly to the
+indexed raster color setter (0x497680); there is no object distance/light remap
+in that call. HUD initialization at 0x406193 copies 0x2b2 bytes from the loaded
+HUD CODE root to 0x521360. The bounded HUD reader therefore reads CODE+0x72,
+not file offset 0x72. Both F18.HUD and RAFALE.HUD select index 40 in the private
+cockpit palette. Authored HUD geometry and other instrument colors are separate.
+
+`HUDBrightness` (0x40aac0) changes a signed value by 16, clamping -256..256;
+0x4b2f24 initializes it to zero. The palette worker at 0x4b3f74 changes just
+index 40: positive `c += (63-c)*amount >> 8`, negative
+`c = c*(256+amount) >> 8`. Endpoints give white/black. This occurs before sun
+whitening, and index 40 is outside fog's 47..60 / 64..254 tint ranges. The app
+now shares one resolved palette between cockpit artwork and primary HUD ink.
+Brightness controls use the recovered range/step instead of the fitted green
+formula. Preferences version 2 stores the signed amount; version 1 is accepted
+with explicit host migration `(old-7)*16`, preserving step distance from the old
+default without claiming equivalent fitted colors. Other preferences survive.
+
+Tests cover bounded module extraction, brightness endpoints, order/tint exclusion,
+control saturation and preference migration. The complete ordered native palette
+pipeline still includes non-weather effects beyond this slice.
+
+Validation: 284 Rust tests, 24 Python tests, formatting, warnings-denied Clippy,
+locked build and source/binary asset guards pass. Imported diagnostics read both
+HUD indices. Linux Vulkan creator/viewer smoke and actual F18 noon wide / Rafale
+dawn tall cockpit captures pass and were inspected (`hud-*.ppm` in ignored
+`.local/weather-continuation/`). A 630-frame active F18 run measured 1.63 ms mean,
+1.76 p95, max 5.98, with 630 mirrors and no paused/readback frames. This short
+CPU interval sample does not establish a causal performance improvement.

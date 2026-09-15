@@ -36,7 +36,7 @@ pub struct FlightUi {
     pub cockpit: bool,
     pub hud: bool,
     pub ladder: bool,
-    pub brightness: u8,
+    pub brightness: i16,
     pub zoom: f32,
     pub look: [f32; 2],
     pub time_scale: f64,
@@ -59,7 +59,7 @@ impl Default for FlightUi {
             cockpit: true,
             hud: true,
             ladder: true,
-            brightness: 7,
+            brightness: 0,
             zoom: 1.,
             look: [0.; 2],
             time_scale: 1.,
@@ -159,11 +159,11 @@ impl FlightUi {
                 Command::Click
             }
             "Dim HUD" => {
-                self.brightness = self.brightness.saturating_sub(1);
+                self.brightness = (self.brightness - 16).max(-256);
                 Command::Click
             }
             "Brighten HUD" => {
-                self.brightness = (self.brightness + 1).min(9);
+                self.brightness = (self.brightness + 16).min(256);
                 Command::Click
             }
             "Sound..." => {
@@ -668,6 +668,21 @@ mod tests {
                 children: vec![],
             }],
         }]
+    }
+    #[test]
+    fn hud_brightness_uses_source_steps_and_saturates() {
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.brightness, 0);
+        ui.activate("Dim HUD", "");
+        assert_eq!(ui.brightness, -16);
+        for _ in 0..40 {
+            ui.activate("Brighten HUD", "");
+        }
+        assert_eq!(ui.brightness, 256);
+        for _ in 0..40 {
+            ui.activate("Dim HUD", "");
+        }
+        assert_eq!(ui.brightness, -256);
     }
     #[test]
     fn control_root_opens_editor_without_changing_imported_tree() {

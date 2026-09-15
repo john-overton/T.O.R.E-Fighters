@@ -73,6 +73,15 @@ pub fn validate_sources(
         }
     }
 
+    for id in [
+        tore_formats::aircraft::AircraftId::F18,
+        tore_formats::aircraft::AircraftId::Rafale,
+    ] {
+        if let Some(bytes) = resources.get(id.hud()) {
+            let hud = tore_formats::hud::Hud::parse(bytes)?;
+            println!("{}: primary palette index {}", id.hud(), hud.primary_color);
+        }
+    }
     for name in ["SUN.SH", "MOON.SH", "STARS.SH", "CLOUD1.SH", "CLOUDS.SH"] {
         let bytes = resources
             .get(name)

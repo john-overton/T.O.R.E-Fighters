@@ -1,5 +1,5 @@
 //! Reviewed fog palette helpers in the six-bit source domain. These are not the
-//! complete ordered native palette pipeline, and exclude non-weather brightness effects.
+//! complete ordered native palette pipeline, and exclude unreviewed non-weather effects.
 use crate::{Result, invalid};
 
 /// FA 0x4b3f28..0x4b3f74, restricted to the reviewed 0..255 tint domain.
@@ -38,6 +38,23 @@ pub fn apply_sun_whitening(palette: &mut [[u8; 3]; 256], strength: u8) -> Result
     }
     for channel in palette[..255].iter_mut().flatten() {
         *channel += (((63 - u16::from(*channel)) * u16::from(strength)) >> 8) as u8;
+    }
+    Ok(())
+}
+
+/// FA 0x4b3f74: HUD brightness changes palette entry 40 before sun whitening.
+/// Positive values blend toward 63; negative values multiply toward zero.
+pub fn apply_hud_brightness(palette: &mut [[u8; 3]; 256], brightness: i16) -> Result<()> {
+    if !(-256..=256).contains(&brightness) || palette[40].iter().any(|c| *c > 63) {
+        return Err(invalid("HUD brightness outside reviewed domain"));
+    }
+    for channel in &mut palette[40] {
+        let c = i32::from(*channel);
+        *channel = if brightness >= 0 {
+            c + (((63 - c) * i32::from(brightness)) >> 8)
+        } else {
+            (c * (256 + i32::from(brightness))) >> 8
+        } as u8;
     }
     Ok(())
 }
@@ -88,6 +105,32 @@ mod tests {
         assert_eq!(p[255], [0, 32, 63]);
         apply_tint(&mut p, [0; 3], 254).unwrap();
         assert_eq!(p[64], [1; 3]);
+    }
+    #[test]
+    fn hud_brightness_bounds_order_and_tint_exclusion() {
+        let source = [[12, 32, 60]; 256];
+        for (brightness, expected) in [
+            (-256, [0; 3]),
+            (-16, [11, 30, 56]),
+            (0, [12, 32, 60]),
+            (16, [15, 33, 60]),
+            (256, [63; 3]),
+        ] {
+            let mut p = source;
+            apply_hud_brightness(&mut p, brightness).unwrap();
+            assert_eq!(p[40], expected);
+            assert_eq!(p[39], source[39]);
+            assert_eq!(p[41], source[41]);
+            apply_tint(&mut p, [0; 3], 254).unwrap();
+            assert_eq!(p[40], expected);
+        }
+        let mut p = source;
+        apply_hud_brightness(&mut p, -256).unwrap();
+        apply_sun_whitening(&mut p, 128).unwrap();
+        assert_eq!(p[40], [31; 3], "sunlight follows HUD dimming");
+        let before = p;
+        assert!(apply_hud_brightness(&mut p, 257).is_err());
+        assert_eq!(p, before);
     }
     #[test]
     fn smoothing_clamps_overshoot_and_subtracts_reduction() {
