@@ -65,6 +65,45 @@ impl Paint<'_> {
         }
     }
 }
+// Authored F-16-style bank scale requested by the user. The graduated arc
+// rotates past a fixed index, keeping full rolls readable through +/-180.
+fn bank_scale(p: &mut Paint<'_>, font: &Font, bank: f64) {
+    let point = |angle: f64, radius: f64| {
+        let a = angle.to_radians();
+        (320. + radius * a.sin(), 285. + radius * a.cos())
+    };
+    for mark in (-180i32..180).step_by(10) {
+        let angle = bank_tick_angle(mark, bank);
+        if angle.abs() > 60. {
+            continue;
+        }
+        let major = mark % 30 == 0;
+        p.line(
+            point(angle, if major { 35. } else { 38. }),
+            point(angle, 42.),
+        );
+        if major {
+            let text = mark.abs().to_string();
+            let width = text
+                .bytes()
+                .map(|c| font.glyphs[c as usize].advance)
+                .sum::<usize>() as i32;
+            let (x, y) = point(angle, 58.);
+            p.text(
+                font,
+                &text,
+                x.round() as i32 - width / 2,
+                y.round() as i32 - font.height as i32 / 2,
+            );
+        }
+    }
+    p.line((320., 329.), (316., 336.));
+    p.line((316., 336.), (324., 336.));
+    p.line((324., 336.), (320., 329.));
+}
+fn bank_tick_angle(mark: i32, bank: f64) -> f64 {
+    (f64::from(mark) - bank.to_degrees() + 180.).rem_euclid(360.) - 180.
+}
 pub fn heading(yaw: f64) -> f64 {
     yaw.to_degrees().rem_euclid(360.)
 }
@@ -232,19 +271,21 @@ pub fn draw(
     } else if !s.engine {
         p.text(font, "ENGINE OFF", 283, 306);
     } else {
-        // User-requested numeric cue; aircraft attitude, never camera roll.
-        let bank = ((s.bank.to_degrees() + 180.).rem_euclid(360.) - 180.).round() as i32;
-        let text = format!("BANK {bank:+} DEG");
-        let width = text
-            .bytes()
-            .map(|c| font.glyphs[c as usize].advance)
-            .sum::<usize>() as i32;
-        p.text(font, &text, 320 - width / 2, 306);
+        p.clip = (174, 96, 292, 254);
+        bank_scale(&mut p, font, s.bank);
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bank_scale_tracks_aircraft_attitude_through_full_rolls() {
+        assert_eq!(bank_tick_angle(30, 30f64.to_radians()), 0.);
+        assert_eq!(bank_tick_angle(-30, (-30f64).to_radians()), 0.);
+        assert_eq!(bank_tick_angle(0, 360f64.to_radians()), 0.);
+        assert!((bank_tick_angle(-180, 179f64.to_radians()) - 1.).abs() < 1e-9);
+        assert!((bank_tick_angle(-180, 181f64.to_radians()) + 1.).abs() < 1e-9);
+    }
     #[test]
     fn heading_wrap_and_horizon_projection() {
         assert!((heading(-0.1) - 354.270422).abs() < 0.00001);

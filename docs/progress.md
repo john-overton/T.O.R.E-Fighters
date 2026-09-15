@@ -914,3 +914,10 @@ Special horizon branches and matched retail acceptance remain open.
 - [x] Add transparent outlines around the main HUD's current TAS/MSL values,
   following the supplied retail reference, and a centered signed bank-angle
   readout at the bottom. Layout remains authored; bank uses aircraft attitude.
+
+## Graphical HUD bank scale — 2026-09-15
+
+- [x] Replace the preceding numeric bank line with the user's requested curved
+  scale: 10-degree ticks, labels every 30 degrees and a fixed triangle index.
+  Rotation follows aircraft attitude and wraps through inverted flight.
+  [Layout and validation](baselines/hud-bank-scale.md).
