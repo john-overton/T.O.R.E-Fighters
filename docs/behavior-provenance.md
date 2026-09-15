@@ -76,8 +76,8 @@ native modules; it does not automatically establish a complete flight tick.
 | --- | --- | --- |
 | Warning/stall timers, spin entry/recovery predicates | Native | Translated/tested; selected hybrid connections, with fitted initial stall classification |
 | Stall control/lift attenuation | Native arithmetic | Connected in hybrid; clean-envelope reference speed and later force integration remain fitted |
-| Timed warning-transition rotation (“tumble”) and stalled movement fall | Native source-backed research | Joined diagnostic stage tested with both PTs/imported tables; not enabled in either live adapter |
-| Loaded normal controls, rudder/auxiliary rates, departure→force→movement/contact | Native translations with authored diagnostic driver | Joined recurrent diagnostic tested for both PTs; explicit turbulence bypass and caller producers, no live activation or retail comparison |
+| Timed warning-transition rotation (“tumble”) and stalled movement fall | Native source-backed research | Joined stage tested with both PTs/imported tables and connected in the explicit airborne native option; legacy/hybrid unchanged |
+| Loaded normal controls, rudder/auxiliary rates, departure→force→movement/contact | Native translations with authored diagnostic driver | Joined diagnostic and restricted airborne live connection tested for both PTs; explicit turbulence bypass and adapted clock/device/fuel producers, no contact/lifecycle or retail acceptance |
 | Clean-envelope stall-entry gate | Fitted | Runtime; does not close native current-G/difficulty/device classification |
 | Response filters, trim/alignment, continuous spin coupling | Fitted | Runtime; not original force/control-law acceptance |
 | `sideslip_drag=0.5` in both aircraft models | Fitted | Added by the implementation, not requested as an opinionated change and not extracted from FA |

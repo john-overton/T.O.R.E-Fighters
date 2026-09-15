@@ -10,3 +10,5 @@ pub mod turbulence;
 pub mod vapor;
 
 pub mod clouds;
+
+pub mod native;

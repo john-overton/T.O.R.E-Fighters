@@ -2,7 +2,7 @@
 //! The sine table is imported data, never generated or embedded retail bytes.
 use super::{divide, mul_div};
 use crate::{Result, invalid};
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TrigTable([i16; 321]);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SinCos {
@@ -218,7 +218,7 @@ pub fn world_velocity(
         velocity.forward,
     ])
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AtanTable([u16; 514]);
 impl AtanTable {
     pub fn parse(bytes: &[u8]) -> Result<Self> {

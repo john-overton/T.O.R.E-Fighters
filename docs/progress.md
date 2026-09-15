@@ -1051,3 +1051,21 @@ Special horizon branches and matched retail acceptance remain open.
   scheduler contracts before live activation. Environmental turbulence remains
   in its weather scope. Retail comparison is unavailable; platform and runtime
   evidence are distinct from this completed diagnostic.
+
+
+### Airborne native live connection — 2026-09-15
+
+- [x] Add explicit `--native-flight-tables DIR` selection for both aircraft;
+  aircraft-owned typed configuration and imported tables initialize the shared
+  native runtime once. Legacy/hybrid remain separate.
+- [x] Connect native controls/departure/forces/movement to live authoritative state,
+  project velocity/body attitude into instruments/cameras and preserve independent
+  movement. Keep clock, devices and fuel sampling labeled as host adaptations.
+- [x] Validate 28 cases/33,600 replayed live-API updates, fresh restart, full app
+  loops for both aircraft, coordinate mapping and atomic late-contact failure.
+  Both aircraft pass active Vulkan camera/mirror runs and inspected captures;
+  creator/viewer smoke checks pass. [Evidence](baselines/native-live-flight.md).
+- [ ] Complete native terrain/object/carrier producers, lifecycle/event execution,
+  refresh cadence and environmental turbulence before unrestricted native flight.
+  The airborne option rejects contact and suppresses the separate fitted turbulence
+  path. No retail/platform/manual-handling parity is claimed.

@@ -19,7 +19,8 @@ The earlier “steps 1–3 complete” summary overstated native coverage. The
 [adapter baseline](baselines/flight-response.md) records completed component and
 regression work; native steps 2–3 remain open where fitted laws or missing
 coupling remain. Legacy is still the default. Native-derived warning/stall/spin
-components are connected only in hybrid, with fitted boundaries.
+components retain fitted hybrid boundaries; a separate restricted airborne native
+option now runs the joined service. [Live scope](baselines/native-live-flight.md).
 
 ### Native continuation before step 4
 
@@ -38,9 +39,13 @@ components are connected only in hybrid, with fitted boundaries.
   auxiliary rates, full rudder/steering, ordered forces/movement/contact and
   returned events. Both PTs pass recurrent state/replay probes.
   [Evidence and explicit native turbulence bypass](baselines/native-flight-diagnostic.md).
+- [x] Connect the joined service to an explicit airborne live research path, with
+  caller-owned clock/RNG, output projection, restart and error rollback. Validate
+  both aircraft headlessly and on the GPU. [Evidence](baselines/native-live-flight.md).
 - [ ] Connect terrain/carrier queries, equipment/fuel/damage lifecycle producers,
-  event execution and native runtime ownership before live activation. The
-  diagnostic consumes explicit samples; it does not close these runtime gates.
+  event execution and complete native runtime ownership before unrestricted
+  activation. The airborne path consumes adapted samples and rejects contact;
+  it does not close these lifecycle/landing gates.
 - [ ] Compare source-derived expected outputs and, when available, matched
   retail maneuvers. Record missing implementation separately from missing evidence.
 
@@ -53,10 +58,10 @@ this plan orders the next flight-response slice.
 
 | Area | Already present | Work to finish in this slice |
 | --- | --- | --- |
-| G-load / AoA | Source ledger, separate demand/lift/achieved G and geometric AoA telemetry; acceleration checks | Loaded/damage force ordering joined diagnostically; lifecycle producers, live connection and feedback remain |
-| Roll rate | Applied body-rate snapshot, verified release and full-loop probes; source hybrid/fitted legacy caps | Control/load/damage consumers joined diagnostically; lifecycle producers and live connection remain |
-| Rudder / slip | Distinct command/deflection/effective controls, fitted symmetric slip drag and yaw release; tested native spin predicates | Native display-slip/force coupling joined diagnostically; live connection and unavailable retail acceptance remain |
-| Departure / spin | Translated warning/stall predicates and timers, connected severity/control/lift attenuation; corrected hybrid spin entry/recovery with fitted continuous coupling | Native initial classification and movement fall/tumble translated diagnostically; full live coupling remains open |
+| G-load / AoA | Source ledger, separate demand/lift/achieved G and geometric AoA telemetry; acceleration checks | Loaded/damage force ordering connected in airborne research; native lifecycle producers and feedback remain |
+| Roll rate | Applied body-rate snapshot, verified release and full-loop probes; source hybrid/fitted legacy caps | Control/load/damage consumers connected in airborne research; native lifecycle producers remain |
+| Rudder / slip | Distinct command/deflection/effective controls, fitted symmetric slip drag and yaw release; tested native spin predicates | Native display-slip/force coupling connected in airborne research; native lifecycle and unavailable retail acceptance remain |
+| Departure / spin | Translated warning/stall predicates and timers, connected severity/control/lift attenuation; corrected hybrid spin entry/recovery with fitted continuous coupling | Native initial classification and movement fall/tumble translated diagnostically; restricted airborne live coupling is connected; lifecycle/contact producers remain open |
 | Maneuver feedback | Native sound-side `Turbulence` routine traced at `0x434550`, caller at `0x434d76` | Recover full input-to-intensity and sound dispatch contracts; integrate a distinct maneuver-feedback signal |
 | Controller rumble | Environmental turbulence supplies severity only when its shake flag is set; overlapping pulses support sustained strong events | Add sustained maneuver feedback with intensity tracking, release and lifecycle checks; audit the mild environmental threshold separately |
 
@@ -91,12 +96,15 @@ remain inert data. A missing native branch stays explicitly unresolved.
 - [x] Correct verified input/output units and state ownership before tuning.
   Resolve reviewed PT fields once into each model's typed configuration; validate
   configuration replacement. Keep F18 and Rafale laws in their own modules.
-- [ ] Complete native G-envelope/loading and pitch-response consumers, checking
+- [x] Complete native G-envelope/loading and pitch-response consumers in the
+  diagnostic and restricted airborne path, checking
   positive/negative load, low/high speed and relevant device/loading changes.
   Do not equate requested G or raw stick position with achieved load factor.
-- [ ] Complete native roll authority, acceleration/limiting and release behavior;
+- [x] Complete native roll authority, acceleration/limiting and release behavior
+  in the diagnostic and restricted airborne path;
   preserve actual body rates through vertical/inverted flight.
-- [ ] Complete native rudder authority, sideslip/drag and roll/yaw coupling.
+- [x] Complete native rudder authority, slip/drag and roll/yaw coupling in the
+  diagnostic and restricted airborne path.
   Document any remaining fitted law per aircraft instead of borrowing calibration.
 - [x] Expose typed maneuver telemetry only where existing `AirData`/state channels
   are insufficient; consumers must use one authoritative fixed-tick snapshot.
@@ -107,17 +115,19 @@ consistent G/AoA/rate telemetry. Preserve independent aircraft attitude and
 velocity. Do not silently switch the default adapter or claim whole-tick parity.
 
 Diagnostic status: native G/pitch/roll/rudder consumers above are now joined and
-tested for both PTs. Their unchecked items retain the **runtime** connection gate;
-no fitted live law has been promoted to native acceptance.
+tested for both PTs. The complete native **producer/lifecycle** gate remains open;
+restricted airborne runtime connection is now tested. No fitted host device or
+fuel producer has been promoted to native acceptance.
 
 ## 3. Complete supported departure and recovery behavior
 
 - [x] Trace the supported non-VTOL envelope/difficulty/device predicates and
   warning timers. Diagnostic source predicates are separate from the existing
   fitted live stall-entry gate; runtime replacement remains open.
-- [ ] Verify complete control/lift attenuation coupling and implement recovered departure
+- [x] Verify control/lift attenuation coupling and implement recovered departure
   consumers, including pitch/roll fall or tumble only when their contracts are
-  established. Keep random choices and mutable timers outside configuration.
+  established, connected in the restricted airborne path. Keep random choices and
+  mutable timers outside configuration.
 - [x] Verify spin direction, entry/recovery thresholds, interrupted recovery,
   neutral/opposite rudder, throttle/pitch requirements and source state flags for
   each aircraft. Preserve movement/display-angle distinctions.
@@ -126,8 +136,8 @@ no fitted live law has been promoted to native acceptance.
 
 The requested remaining diagnostic is complete: native departure attenuation,
 tumble, recovery dispatch and downstream control/force/movement/contact order
-are joined. Full live activation, external lifecycle/query producers and event
-execution remain open. See the [joined baseline](baselines/native-flight-diagnostic.md).
+are joined. Restricted airborne live activation is now tested; external lifecycle/query
+producers and event execution remain open. See the [joined baseline](baselines/native-flight-diagnostic.md).
 
 **Gate:** deterministic warning → stall/spin → recovery traces, threshold-boundary
 and timer-interruption tests, no hidden RNG draws from audio, rumble or cameras.

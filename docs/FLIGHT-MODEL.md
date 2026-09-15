@@ -6,6 +6,11 @@ with fitted continuous dynamics where the original engine contract is still
 incomplete. It is a usable free-flight model, not a claim of byte-for-byte native
 trajectory parity or a real-aircraft engineering model.
 
+The opt-in **airborne native research** path now connects the joined native
+service to the live loop for both aircraft. It retains explicitly authored
+clock/device/fuel boundaries and stops at unsupported contact. This is separate
+from legacy and hybrid. [Acceptance and limits](baselines/native-live-flight.md).
+
 ## Next scheduled work
 
 The [flight-response plan](flight-response-plan.md) now prioritizes native
@@ -269,11 +274,13 @@ into the next service for both PTs. It includes rudder/steering, auxiliary rates
 passive fall, sampled loading/damage/device effects and returned native events.
 [Current acceptance and commands](baselines/native-flight-diagnostic.md).
 
-This completes the requested diagnostic continuation, not live native activation.
-It requires the verified native environmental-turbulence bypass, uses scripted
-clock/input samples and explicit flat contact queries, and does not execute
-sound/damage/ejection callbacks. Native terrain/carrier queries, fuel/device/
-damage lifecycle producers, setup refresh cadence and scheduler/RNG ownership
-remain open. Legacy and hybrid retain their existing fitted coupling. Retail
-comparison is unavailable and is an evidence limitation, not an implementation
-prerequisite. Audio/rumble remains after the scheduled native flight work.
+The next continuation now provides restricted airborne live activation with
+`--native-flight-tables DIR`, where DIR contains extracted sine/atan tables.
+The translated control/departure/force/movement service is authoritative; the
+existing host clock, input, device and fuel producers remain explicit adaptations.
+Terrain contact stops the research flight and environmental turbulence is disabled.
+Native query producers, engine/device/fuel/damage lifecycles, setup refresh cadence,
+event execution and scheduler/RNG parity remain open. Legacy and hybrid retain
+their existing behavior. [Live commands and validation](baselines/native-live-flight.md).
+Retail comparison remains an unavailable evidence item, not an implementation
+prerequisite. Audio/rumble follows the scheduled native work.

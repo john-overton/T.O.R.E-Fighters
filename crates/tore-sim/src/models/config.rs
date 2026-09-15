@@ -41,6 +41,12 @@ pub struct Equipment {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Configuration {
+    // Resolve once even when the legacy/hybrid subset is the only available data.
+    // Failure remains explicit and prevents native activation; no zero defaults.
+    joined_native: std::result::Result<
+        std::sync::Arc<tore_formats::flight_model::diagnostic::Configuration>,
+        String,
+    >,
     pub mass: Mass,
     pub propulsion: Propulsion,
     pub aerodynamics: Aerodynamics,
@@ -67,6 +73,9 @@ impl Configuration {
             Ok(token.number()? as f64)
         };
         let result = Self {
+            joined_native: tore_formats::flight_model::diagnostic::Configuration::from_aircraft(a)
+                .map(std::sync::Arc::new)
+                .map_err(|e| e.to_string()),
             mass: Mass {
                 empty_lbs: number("weight")?,
                 internal_fuel_lbs: number("internalFuel")?,
@@ -98,6 +107,27 @@ impl Configuration {
         };
         result.validate()?;
         Ok(result)
+    }
+    pub fn joined_native(&self) -> Result<&tore_formats::flight_model::diagnostic::Configuration> {
+        let n = self.joined_native.as_deref().map_err(|e| {
+            std::io::Error::other(format!("native flight configuration unavailable: {e}"))
+        })?;
+        if n.profile != self.native
+            || n.envelopes != self.aerodynamics.envelopes
+            || n.empty_weight as f64 != self.mass.empty_lbs
+            || n.max_weight as f64 != self.mass.max_takeoff_lbs
+            || n.thrust as f64 != self.propulsion.military_thrust_lbf
+            || n.ab_thrust as f64 != self.propulsion.afterburner_thrust_lbf
+            || n.drag_loading as f64 != self.aerodynamics.loaded_drag_percent
+            || n.elevator_loading as f64 != self.aerodynamics.loaded_elevator_percent
+            || n.pull_drag as f64 != self.aerodynamics.g_pull_drag_f8
+            || (n.axes[0][1] as f64).to_radians() != self.aerodynamics.roll_limit_rad_per_second
+        {
+            return Err(std::io::Error::other(
+                "edited host configuration differs from resolved native configuration; native activation is unavailable",
+            ));
+        }
+        Ok(n)
     }
     pub fn validate(&self) -> Result<()> {
         let m = self.mass;

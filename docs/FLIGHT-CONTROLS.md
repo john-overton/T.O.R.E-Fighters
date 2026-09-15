@@ -264,3 +264,14 @@ survives flight restart. HUD TAS, AGL and vertical speed now use the shared
 AirData sample with explicit wind, terrain and standard atmosphere when in its
 supported altitude range; labels remain TAS and geometric altitude. Missing
 IAS/CAS or indicated/pressure altitude are not synthesized.
+
+
+## Native research flight restriction
+
+With `--native-flight-tables DIR`, the same pilot input feeds the joined native
+airborne service. Existing device animation/threshold and fuel timing are host
+adaptations. The **No turbulence?** setting stays on in this mode; enabling it
+reports that environmental turbulence is unavailable. Reaching terrain contact
+pauses with an explicit unsupported-contact message; restart resets the native
+state. Legacy/hybrid retain their existing controls and behavior.
+[Scope and validation](baselines/native-live-flight.md).

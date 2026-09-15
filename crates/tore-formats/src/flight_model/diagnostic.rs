@@ -19,7 +19,7 @@ use crate::{
     invalid,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Configuration {
     pub profile: FlightProfile,
     pub envelopes: Vec<Envelope>,
@@ -86,7 +86,18 @@ impl Configuration {
             empty_weight: n("weight")?,
             max_weight: n("maxTakeoffWeight")?,
             max_altitude_f8: n("maxAlt")?
-                .checked_mul(if a.object["maxAlt"].scaled { 256 } else { 1 })
+                .checked_mul(
+                    if a.fields
+                        .get("maxAlt")
+                        .or_else(|| a.object.get("maxAlt"))
+                        .ok_or_else(|| invalid("missing maxAlt"))?
+                        .scaled
+                    {
+                        256
+                    } else {
+                        1
+                    },
+                )
                 .ok_or_else(|| invalid("altitude overflow"))?,
             no_lift: n("flags")? & 8 != 0,
             minimum_speed: w("_minSpeed")?,
@@ -179,6 +190,9 @@ pub trait ContactQueries {
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Events {
+    pub air_world_velocity_f8: [i32; 3],
+    pub lift_force: i32,
+    pub weight: i32,
     pub departure: departure_stage::StageOutput,
     pub contact: ground::ContactEvents,
     /// Source 0x412a60 event parameter at >=6,7,8 G; dispatch remains external.
@@ -576,6 +590,9 @@ impl State {
         self.on_ground = ground.on_ground;
         self.ground_height_f8 = ground.height_f8;
         Ok(Events {
+            air_world_velocity_f8: movement.air_world_velocity_f8,
+            lift_force: force.lift,
+            weight: weight.weight,
             departure,
             contact: contact_events,
             high_g,

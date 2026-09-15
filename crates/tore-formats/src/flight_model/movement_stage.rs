@@ -66,6 +66,8 @@ pub struct Input {
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Output {
+    /// Native world velocity before wind and contact; fixed8 feet/second.
+    pub air_world_velocity_f8: [i32; 3],
     pub movement: MovementAngles,
     pub position_f8: [i32; 3],
     pub velocity: Velocity,
@@ -126,6 +128,7 @@ pub fn advance(t: &TrigTable, atan: &AtanTable, i: Input) -> Result<Output> {
         i.ticks,
     )?;
     Ok(Output {
+        air_world_velocity_f8: world,
         movement,
         position_f8: position.position_f8,
         velocity: i.velocity,

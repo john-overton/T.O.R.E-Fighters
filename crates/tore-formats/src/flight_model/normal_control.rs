@@ -1,7 +1,7 @@
 //! Reviewed G/pitch and primary roll consumers, not the entire normal branch.
 use super::{g_to_turn, low_speed_limit, pull_aoa, stick_input};
 use crate::{Result, invalid};
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LoadedAxis {
     /// G axis bounds are fixed8; roll axis bounds are whole degrees/second.
     pub minimum: i16,

@@ -7,7 +7,7 @@ use super::{
     stick_input,
 };
 use crate::{Result, invalid};
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Profile {
     pub rudder: LoadedAxis,
     pub slip: i16,

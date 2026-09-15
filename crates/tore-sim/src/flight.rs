@@ -8,6 +8,7 @@ pub const DT: f64 = 1.0 / 120.0;
 pub struct State {
     model: crate::models::AircraftModel,
     pub research: Option<crate::research::Research>,
+    pub native: Option<crate::native::Native>,
     pub position: [f64; 3],
     pub yaw: f64,
     pub pitch: f64,
@@ -59,6 +60,7 @@ impl State {
         Self {
             model,
             research: None,
+            native: None,
             position,
             yaw: 0.3,
             pitch: 0.,
@@ -185,7 +187,29 @@ impl State {
         self.payload_lbs = pounds;
         Ok(())
     }
+    pub fn enable_native(
+        &mut self,
+        tables: std::sync::Arc<crate::native::Tables>,
+        seed: i32,
+    ) -> tore_formats::Result<()> {
+        self.model.configuration().joined_native()?;
+        if self.research.is_some() {
+            return Err(std::io::Error::other(
+                "native and hybrid modes are mutually exclusive",
+            ));
+        }
+        self.native = Some(crate::native::Native::new(tables, seed)?);
+        Ok(())
+    }
+    pub fn native_fault(&self) -> Option<&str> {
+        self.native.as_ref().and_then(|n| n.fault.as_deref())
+    }
     pub fn enable_research(&mut self, seed: i32) -> tore_formats::Result<()> {
+        if self.native.is_some() {
+            return Err(std::io::Error::other(
+                "native and hybrid modes are mutually exclusive",
+            ));
+        }
         self.research = Some(crate::research::Research::new(seed)?);
         Ok(())
     }
@@ -193,7 +217,7 @@ impl State {
     /// without Euler singularities; velocity remains independent. Native movement
     /// and display-angle coupling/rounding are still a separate acceptance gate.
     pub fn apply_turbulence(&mut self, d: crate::turbulence::Disturbance) {
-        if self.crashed {
+        if self.crashed || self.native.is_some() {
             return;
         }
         let basis = Basis::new(self.yaw, self.pitch, self.bank);
@@ -209,6 +233,17 @@ impl State {
         input: &PilotInput,
         ground: impl Fn(f64, f64) -> crate::research::Surface,
     ) {
+        if self.native.is_some() {
+            if self.crashed || self.native_fault().is_some() {
+                return;
+            }
+            let mut candidate = self.clone();
+            match crate::native::step(&mut candidate, input, ground) {
+                Ok(()) => *self = candidate,
+                Err(e) => self.native.as_mut().unwrap().fault = Some(e.to_string()),
+            }
+            return;
+        }
         let input = input.bounded();
         if let Some(value) = input.throttle {
             self.command(PilotCommand::Throttle(value));

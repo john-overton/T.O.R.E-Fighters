@@ -538,3 +538,16 @@ it feeds position, velocity and control state back into subsequent services.
 Pass the same sine/atan/PT arguments. It requires native environmental turbulence
 disabled and explicit caller samples; it adds no live adapter or terrain producer.
 [Reproduction, scenario coverage and remaining gates](baselines/native-flight-diagnostic.md).
+
+
+### Airborne native research flight
+
+`--native-flight-tables DIR` connects the joined service to live free flight;
+DIR supplies bounded `sine-q15.bin` and `atan-pa.bin` files from the static native
+extraction pass. Use it with either `--aircraft f18` or `--aircraft rafale`, and
+with `--headless-flight`/`--flight-probe-ticks` for repeatable checks. It is mutually
+exclusive with hybrid and combat modes. Contact stops the run; environmental
+turbulence is unavailable. Existing device/fuel/clock adaptation remains explicit.
+[Commands, restart/failure semantics and acceptance](baselines/native-live-flight.md).
+`cargo run --locked -p tore-sim --example native_live -- SINE ATAN PT [PT]` runs
+both-aircraft live-API replay checks independently of the importer hybrid suite.

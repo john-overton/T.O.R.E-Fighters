@@ -114,13 +114,13 @@ coverage notes](docs/formats/native-flight.md). Use `cargo run --locked -p tore-
 for imported-Hornet helper probes. Full native dynamics remain in progress; normal
 free flight still uses the authored adapter.
 
-Native flight research now includes reusable PT profiles, stall/spin components, force/loading calculations, landing checks, extracted trigonometry, and velocity/angle/wind stages. These are diagnostic components; free flight still uses the authored adapter. See [decode coverage and component boundaries](docs/formats/native-flight.md#second-pass-departure-ground-and-integration-components).
+Native flight research now includes reusable PT profiles, stall/spin components, force/loading calculations, landing checks, extracted trigonometry, and velocity/angle/wind stages. These components also power an explicit airborne native research option; legacy remains the default. See [decode coverage and component boundaries](docs/formats/native-flight.md#second-pass-departure-ground-and-integration-components).
 
 Native flight research includes an imported-table world/cockpit composition probe
 and isolated contact, equipment/control and clock/RNG components. See
 [development commands](docs/DEVELOPMENT.md) and
-[extraction status and limits](docs/formats/native-flight.md). These diagnostic
-translations are not yet the playable flight adapter.
+[extraction status and limits](docs/formats/native-flight.md). Their unrestricted runtime/lifecycle acceptance remains open; see the airborne
+research option below.
 
 Rafale C uses its own retail PT, cockpit, exterior and equipment/audio dependencies. Its original canards, elevons, gear, airbrakes, rudder and exhaust now animate through a fitted presentation rig. The imported model has no hook control. Exact native animation and flight-model parity remain open. See [Rafale and creator evidence](docs/baselines/rafale-quick-mission.md).
 
@@ -184,3 +184,11 @@ derivative works of it, so your content stays under whatever license you choose;
 [MODS.md](MODS.md) draws that line and explains the retail-asset rule. Playing
 requires a legally owned copy of Jane's Fighters Anthology; no retail game data
 ships in this repository.
+
+
+For the restricted native flight connection, use `--free-flight --aircraft f18
+--native-flight-tables DIR` (or `--aircraft rafale`). DIR contains statically
+extracted sine/atan tables. This mode runs native control/departure/force/movement
+translations, retains explicit host clock/device/fuel inputs, disables environmental
+turbulence and stops at unsupported terrain contact.
+[Setup, validation and remaining limits](docs/baselines/native-live-flight.md).

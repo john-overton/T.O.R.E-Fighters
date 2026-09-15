@@ -67,6 +67,7 @@ struct App {
     hornet: aircraft::Airframe,
     flight: flight::State,
     researched_flight: bool,
+    native_tables: Option<std::sync::Arc<tore_sim::native::Tables>>,
     previous_flight: flight::State,
     flight_clock: flight::Clock,
     vapor: tore_sim::vapor::Vapor,
@@ -150,6 +151,10 @@ fn step_turbulence(
     world: &terrain::World,
     enabled: bool,
 ) -> Option<tore_input::FeedbackEvent> {
+    // The joined native service explicitly selects the source disabled branch.
+    if flight.native.is_some() {
+        return None;
+    }
     let ground = f64::from(world.height(flight.position[0] as f32, flight.position[2] as f32));
     let agl = flight.position[1] - ground;
     let conditions = tore_sim::turbulence::Conditions {
@@ -380,6 +385,11 @@ impl App {
 
     fn flight_command(&mut self, command: flight_ui::Command) -> Action {
         use flight_ui::Command;
+        if self.native_tables.is_some() && !self.flight_ui.no_turbulence {
+            self.flight_ui.no_turbulence = true;
+            self.flight_ui
+                .message("Environmental turbulence is unavailable in native research flight");
+        }
         match command {
             Command::None => Action::None,
             Command::Click => Action::Click,
@@ -749,6 +759,20 @@ impl App {
                     self.error = Some(error.into());
                     event_loop.exit();
                     return;
+                }
+                if let Some(tables) = &self.native_tables {
+                    if self.combat.range || self.mission.is_some() {
+                        self.error = Some(
+                            "native research flight currently requires clean free flight".into(),
+                        );
+                        event_loop.exit();
+                        return;
+                    }
+                    if let Err(e) = self.flight.enable_native(tables.clone(), 1) {
+                        self.error = Some(e.into());
+                        event_loop.exit();
+                        return;
+                    }
                 }
                 if let Err(e) = self.combat.reset(&mut self.flight) {
                     self.error = Some(e);
@@ -1160,6 +1184,12 @@ impl ApplicationHandler for App {
                             }
                             self.flight
                                 .step_surface(&pilot, |x, z| self.world.surface(x, z));
+                            if let Some(error) = self.flight.native_fault() {
+                                self.flight_ui.message(error.to_owned());
+                                self.flight_ui.paused = true;
+                                eprintln!("{error}");
+                                break;
+                            }
                             // Weather shares the authoritative tick; pausing simply
                             // stops calling it, with no elapsed-time catch-up.
                             let mut weather_view = self.hornet.camera(
@@ -1629,6 +1659,7 @@ fn main() -> AppResult<()> {
     let mut flight_menu = false;
     let mut controls_menu = false;
     let mut researched_flight = false;
+    let mut native_tables_path: Option<PathBuf> = None;
     let mut window_size = [960, 720];
     let mut instrument_page = None;
     let mut instrument_layout = instruments::Layout::Large;
@@ -1740,6 +1771,7 @@ fn main() -> AppResult<()> {
                 input_seconds.get_or_insert(2);
             }
             "--researched-flight" => researched_flight = true,
+            "--native-flight-tables" => native_tables_path = Some(args.next().ok_or("--native-flight-tables needs a directory containing sine-q15.bin and atan-pa.bin")?.into()),
             "--capture-terrain" => {
                 capture_terrain = Some(PathBuf::from(
                     args.next().ok_or("--capture-terrain needs a .ppm path")?,
@@ -1943,13 +1975,35 @@ fn main() -> AppResult<()> {
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D and Rafale C assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--researched-flight enables the hybrid flight/contact model (not native parity).\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight enables the hybrid flight/contact model (not native parity).\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
             }
             _ => return Err(format!("Unknown argument: {arg}").into()),
         }
     }
+    let native_tables = if let Some(path) = native_tables_path {
+        if researched_flight || live_fire || combat_probe.is_some() || combat_smoke {
+            return Err("native research flight cannot combine with hybrid or combat modes".into());
+        }
+        use std::io::Read;
+        let read = |name: &str, limit: u64| -> AppResult<Vec<u8>> {
+            let mut bytes = Vec::new();
+            std::fs::File::open(path.join(name))?
+                .take(limit + 1)
+                .read_to_end(&mut bytes)?;
+            if bytes.len() != limit as usize {
+                return Err(format!("{name}: incorrect table length").into());
+            }
+            Ok(bytes)
+        };
+        Some(std::sync::Arc::new(tore_sim::native::Tables::parse(
+            &read("sine-q15.bin", 642)?,
+            &read("atan-pa.bin", 1028)?,
+        )?))
+    } else {
+        None
+    };
     if capture_terrain.is_some()
         && (snapshot.is_some()
             || import_only
@@ -2101,13 +2155,18 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         println!(
             "flight_model={}",
-            if state.research.is_some() {
+            if native_tables.is_some() {
+                "native-research-airborne"
+            } else if state.research.is_some() {
                 "hybrid"
             } else {
                 "legacy"
             }
         );
         let keys = setup_maneuver(&mut state);
+        if let Some(tables) = &native_tables {
+            state.enable_native(tables.clone(), 1)?;
+        }
         let initial_forward = attitude::Basis::new(state.yaw, state.pitch, state.bank).forward;
         let (mut vertical, mut inverted, mut completed) = (false, false, false);
         for tick in 0..ticks {
@@ -2119,6 +2178,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     0.
                 }
             });
+            if let Some(error) = state.native_fault() {
+                return Err(error.into());
+            }
             let basis = attitude::Basis::new(state.yaw, state.pitch, state.bank);
             vertical |= basis.forward[1] > 0.999;
             inverted |= basis.up[1] < -0.9;
@@ -2301,6 +2363,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     if researched_flight {
         flight.enable_research(1)?;
     }
+    if let Some(tables) = &native_tables {
+        flight.enable_native(tables.clone(), 1)?;
+    }
     // The probe advances weather and vapor with the flight so captures taken
     // after it show the same environment and trail history a live run would.
     let mut probe_vapor =
@@ -2316,6 +2381,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         for _ in 0..ticks {
             flight.step_surface(&keys, |x, z| world.surface(x, z));
+            if let Some(error) = flight.native_fault() {
+                return Err(error.into());
+            }
             let mut weather_view = hornet.camera(&flight, flight_view, Default::default());
             look::apply(
                 &mut weather_view,
@@ -2539,6 +2607,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         combat,
         hornet,
         researched_flight,
+        native_tables,
         previous_flight: flight.clone(),
         flight,
         flight_clock: flight::Clock { remainder: 0. },
@@ -2612,6 +2681,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 app.preference_path = None;
             }
         }
+    }
+    if app.native_tables.is_some() {
+        app.flight_ui.no_turbulence = true;
     }
     app.preference_saved =
         preferences::Preferences::capture(&app.flight_ui, &app.instruments, &app.menu.state).text();

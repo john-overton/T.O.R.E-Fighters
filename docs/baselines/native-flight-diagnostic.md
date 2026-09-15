@@ -7,6 +7,10 @@ Source identity and executable/build distinctions are recorded in
 [native flight research](../formats/native-flight.md); aircraft identities and
 PT hashes are in the [departure baseline](native-departure-stage.md).
 
+Runtime follow-up: the [airborne live connection](native-live-flight.md) now
+reuses this service. The results below remain diagnostic evidence; their original
+no-live-activation scope does not describe the newer opt-in mode.
+
 ## Reproduction and results
 
 ```sh

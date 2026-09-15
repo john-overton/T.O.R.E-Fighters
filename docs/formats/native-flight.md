@@ -106,11 +106,11 @@ by a weight term scaled by the speed-dependent drag percentage.
 | Area | Static evidence | Remaining implementation/acceptance |
 | --- | --- | --- |
 | Main update | `_FMFlight` `0x47b020` located and normal-control/AoA sections traced | Translate complete branch/state graph and all callback contracts |
-| Movement | `_MovePlane` `0x476ae0`; movement angles, gravity, display offsets, velocity and position stages identified | Joined rotation/wind/contact diagnostic tested, including both vertical attitudes; native query producers and live connection remain |
+| Movement | `_MovePlane` `0x476ae0`; movement angles, gravity, display offsets, velocity and position stages identified | Joined rotation/wind/contact diagnostic tested, including both vertical attitudes; native query producers and unrestricted live connection remain |
 | Setup/load | `_FMAircraftSetup` `0x47a690`, `_FMUpdatePlaneFields` `0x452140`, `_FMGetWeight` `0x4516b0` located | Typed aggregate loading/damage consumers joined; refresh cadence and lifecycle producers remain |
 | Power | `_FMGetAcc` `0x47a770` traced as a save/modify/query/restore routine | Loaded force builder, lift/gravity and ordered velocity joined diagnostically; engine/fuel lifecycle remains |
-| Rudder | Normal branch `0x47c419–0x47c682` relates turn rate, authority, slip and bank | Airborne rudder/slip/bank and ground steering joined diagnostically; live connection and retail acceptance remain |
-| Stall/spin | PT fields and `_FMFlight` state branches identified | Dispatch/tumble/normal-control/force/movement joined diagnostically; event execution and live connection remain |
+| Rudder | Normal branch `0x47c419–0x47c682` relates turn rate, authority, slip and bank | Airborne rudder/slip/bank and ground steering joined diagnostically; unrestricted live connection and retail acceptance remain |
+| Stall/spin | PT fields and `_FMFlight` state branches identified | Dispatch/tumble/normal-control/force/movement joined diagnostically; event execution and unrestricted live connection remain |
 | Ground | `_GetGround` `0x47af20`, collision helper `0x477240` located | Landing classifier, wheel drag and pitch settling translated; complete contact/crash/carrier behavior remains |
 | Turbulence | `_FMTurbulence` `0x477590`: low-altitude/nearby-aircraft branches, daylight scaling and timed state traced; [follow-up](weather.md) | Complete geometry/surface semantics, RNG/scheduler acceptance, maneuver buffet and replay determinism |
 | Devices | Gear/flap/brake/vector/fuel update symbols inventoried | Sampled device drag/lift coupling joined; native actuator schedules remain; visual fitted hinges stay separate |
@@ -603,13 +603,14 @@ producers and complete later composition remain unconnected. They must not be
 filled in by adding noise or applying sound intensity to aerodynamic forces.
 
 Hybrid uses native yaw endpoints with fitted continuous coupling;
-movement pitch/roll, speed slew and display AoA/bank offsets remain diagnostic.
+movement pitch/roll, speed slew and display AoA/bank offsets are now connected
+in the restricted airborne native path; unrestricted lifecycle/contact remains open.
 See [current runtime contracts](../FLIGHT-MODEL.md#flight-response-contracts--2026-09-15).
 
 ## Native tumble continuation — 2026-09-15
 
 **Origin: native, established by static code in the reviewed FA EXE/SMS pair.**
-**Status: initial diagnostic translation and synthetic branch tests; no live
+**Historical checkpoint: initial diagnostic translation and synthetic branch tests; no live
 adapter connection or matched retail comparison.** “Tumble” is our descriptive
 name for this timed movement rotation, not proof of a particular real-world
 flight phenomenon. See [provenance policy](../behavior-provenance.md).
@@ -787,7 +788,9 @@ live adapter is switched. [Acceptance scope](../baselines/native-movement-contro
 previously separate components into recurrent state updates. The component-only
 boundaries described above still apply to `native_departure`; the new
 `native_flight` example feeds the complete diagnostic result into the next service.
-Neither live adapter is changed. [Acceptance](../baselines/native-flight-diagnostic.md).
+The legacy and hybrid adapters are unchanged. This diagnostic checkpoint now
+also feeds a restricted airborne live option; see
+[current runtime acceptance](../baselines/native-live-flight.md).
 
 New translated contracts:
 
@@ -832,3 +835,15 @@ commit only after successful queries; external callback side effects cannot be
 rolled back. Departure, high-G and contact events are returned, not executed.
 Terrain/carrier producers, actuator/fuel/damage lifecycles, setup refresh cadence,
 global scheduler/RNG order and live activation remain separate open contracts.
+
+
+### Restricted runtime connection follow-up
+
+The source contracts above now also feed `tore-sim::native` through an explicit
+live airborne option. This supersedes diagnostic-only completion claims for those
+consumers; it does not complete their external producers or callbacks.
+`movement_stage`/`diagnostic::Events` expose pre-contact air-world velocity and
+native fixed8 lift force for host projection without reconstructing travel from
+the cockpit attitude. Source branch order is unchanged. Runtime adaptation,
+provenance and open gates are in the [flight guide](../FLIGHT-MODEL.md) and
+[live baseline](../baselines/native-live-flight.md).
