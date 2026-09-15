@@ -9,6 +9,12 @@ use tore_formats::{
     weather::shape::{Primitive, WeatherShape},
 };
 
+// Authored projection calibration against the user's default-zoom retail
+// dgVoodoo sun/moon captures (2026-09-15). Shared for both original shapes;
+// this is not a recovered native matrix factor. Angular geometry automatically
+// scales with viewport height and camera zoom, without fixed pixel diameters.
+const RETAIL_CELESTIAL_SCALE: f32 = 4.;
+
 pub struct Celestial {
     pub sun: WeatherShape,
     pub flare: tore_formats::weather::flare::Layout,
@@ -157,7 +163,7 @@ impl Celestial {
                 } = p
                 {
                     // Native circle radius is half the projected diameter.
-                    out[4 + i * 4] = *diameter as f32 / (2. * center[2]);
+                    out[4 + i * 4] = *diameter as f32 * RETAIL_CELESTIAL_SCALE / (2. * center[2]);
                     out[5 + i * 4] = *fill as f32;
                 }
             }
@@ -203,8 +209,8 @@ impl Celestial {
                 quad(
                     &mut vertices,
                     center,
-                    horizontal.map(|v| v * size[0] as f32 * 0.5),
-                    vertical.map(|v| v * size[1] as f32 * 0.5),
+                    horizontal.map(|v| v * size[0] as f32 * 0.5 * RETAIL_CELESTIAL_SCALE),
+                    vertical.map(|v| v * size[1] as f32 * 0.5 * RETAIL_CELESTIAL_SCALE),
                     self.moon_texture as f32,
                     0.,
                     self.moon_uv,
@@ -304,6 +310,33 @@ mod tests {
             camera.position[2] -= 300.;
             assert_eq!(celestial.vertices(&world, &camera, 720), expected);
         }
+        // Project the actual quad through the camera basis used by WGSL.
+        // Equal pixel width/height and height-relative diameter survive aspect
+        // changes; zoom changes angular presentation without changing the mesh.
+        camera.yaw = std::f32::consts::FRAC_PI_4;
+        camera.pitch = std::f32::consts::FRAC_PI_8;
+        camera.roll = 0.;
+        for (width, height, zoom) in [
+            (640., 480., 1.),
+            (1280., 960., 1.),
+            (1280., 720., 1.),
+            (720., 960., 2.),
+        ] {
+            camera.zoom = zoom;
+            let u = camera.uniform(width / height, [0.; 4], [0; 3]);
+            let projected = |vertex: usize| {
+                let p = &expected[vertex * 10..vertex * 10 + 3];
+                let dot = |offset: usize| (0..3).map(|k| p[k] * u[offset + k]).sum::<f32>();
+                [
+                    dot(4) / dot(12) * 1.7320508 * u[11] / u[3] * width / 2.,
+                    dot(8) / dot(12) * 1.7320508 * u[11] * height / 2.,
+                ]
+            };
+            let a = projected(0);
+            let b = projected(2);
+            assert!(((b[0] - a[0]) - (b[1] - a[1])).abs() < 0.001);
+            assert!(((b[1] - a[1]) / height / zoom - 0.08660254).abs() < 0.00001);
+        }
         let edge = |a: usize, b: usize| -> Vec<f32> {
             (0..3)
                 .map(|k| expected[a * 10 + k] - expected[b * 10 + k])
@@ -311,7 +344,7 @@ mod tests {
         };
         let right = edge(1, 0);
         let up = edge(2, 1);
-        assert!((right.iter().map(|x| x * x).sum::<f32>() - 16.).abs() < 0.001);
+        assert!((right.iter().map(|x| x * x).sum::<f32>() - 256.).abs() < 0.001);
         assert!((right.iter().zip(up).map(|(a, b)| a * b).sum::<f32>()).abs() < 0.001);
     }
 }

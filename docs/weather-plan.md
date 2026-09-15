@@ -354,3 +354,19 @@ bands are source fog records, not evidence for an authored volumetric deck.
 The implementation supported by the recovered ordinary-view contracts in this
 batch has landed. The open rows above prevent whole-batch retail acceptance;
 steps 4–9 retain their existing scope and were not implemented by this pass.
+
+## Requested smoothing and size follow-up — 2026-09-15
+
+- [x] Smooth source palette colors through fractional mission time and altitude;
+  retain pure queries, fixed ticks and original callback scheduling.
+- [x] Smooth spatial horizon/deck shades and ordered fog remap colors; retain
+  original point-sampled artwork and a stepped diagnostic mode.
+- [x] Share continuous tint/whitening with cockpit/HUD palette effects.
+- [x] Correct sun/moon scale against user-confirmed default-zoom retail captures;
+  preserve proportional viewport sizing, zoom and bank-independent lunar axes.
+- [ ] Confirm fitted celestial projection against an exactly matched retail pose
+  and complete the existing cloud/fog/theater/platform acceptance scenarios.
+
+[Follow-up evidence and fitted/native boundaries](baselines/weather-smoothing.md).
+The user now has retail running through dgVoodoo: the earlier Windows-box-ready
+prerequisite is superseded. Windows/macOS rebuild checks remain separate.

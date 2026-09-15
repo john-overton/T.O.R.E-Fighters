@@ -456,3 +456,10 @@ The latest ignored `.local/weather-continuation/final/manifest.json` records
 commands, explicit weather poses and result codes for the continuation captures.
 Weather sky/ocean, moon and cloud textures now use source point-index samples;
 float GPU projection remains qualified against native coverage/behavior.
+
+`TORE_WEATHER_SMOOTH=0|1` selects stepped or smooth weather presentation (default
+1). Smooth mode blends source time/altitude colors and neighboring horizon/fog
+shades. It uses fractional mission time, freezes on pause and does not change
+simulation/callback scheduling. `--validate-weather` also reports native/smooth
+palette change counts and maximum channel steps over a minute of dawn.
+[Evidence and celestial sizing qualifications](baselines/weather-smoothing.md).

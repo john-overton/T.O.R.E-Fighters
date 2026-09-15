@@ -49,6 +49,39 @@ pub fn validate_sources(
         for index in 0..module.layers.len() {
             module.palette(index).map_err(|e| format!("{name}: {e}"))?;
         }
+        // Compare display cadence over a minute of dawn using the imported
+        // colors, without conflating this diagnostic with retail acceptance.
+        let mut clock = Environment::new(Configuration::new(module.clone(), 7, 6, 0, None)?);
+        let mut last_native = clock.palette(5000.);
+        let mut last_smooth = clock.visual_sample(5000.).map(|s| s.palette(0., 0.));
+        let mut changes = [0; 2];
+        let mut largest = [0u8; 2];
+        for _ in 0..7200 {
+            clock.step();
+            let current = [
+                clock.palette(5000.),
+                clock.visual_sample(5000.).map(|s| s.palette(0., 0.)),
+            ];
+            for (i, previous) in [&mut last_native, &mut last_smooth].into_iter().enumerate() {
+                if let (Some(a), Some(b)) = (previous.as_ref(), current[i].as_ref()) {
+                    if a != b {
+                        changes[i] += 1;
+                    }
+                    largest[i] = largest[i].max(
+                        a.iter()
+                            .flatten()
+                            .zip(b.iter().flatten())
+                            .map(|(a, b)| a.abs_diff(*b))
+                            .max()
+                            .unwrap_or(0),
+                    );
+                }
+                *previous = current[i];
+            }
+        }
+        println!(
+            "{name}: dawn 60s native/smooth changed ticks {changes:?}, largest 8-bit channel step {largest:?}"
+        );
         modules += 1;
     }
     if modules == 0 {
@@ -91,6 +124,9 @@ pub fn validate_sources(
             println!("{name}: {} source faces", shape.faces.len());
         } else {
             let shape = tore_formats::weather::shape::WeatherShape::parse(bytes)?;
+            if name == "SUN.SH" || name == "MOON.SH" {
+                println!("{name}: projected source geometry {:?}", shape.primitives);
+            }
             println!(
                 "{name}: {} reviewed primitives, exponent {}, projected-point consumer {}",
                 shape.primitives.len(),

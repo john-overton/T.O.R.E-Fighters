@@ -213,6 +213,15 @@ impl Airframe {
         }
         tore_formats::weather::palette::apply_hud_brightness(&mut source, brightness)
             .expect("validated HUD brightness");
+        if world.smooth_weather
+            && let Some(sample) = world.weather.visual_sample(altitude)
+        {
+            return sample.palette_with_prefix(
+                Some(source[..64].try_into().expect("fixed cockpit prefix")),
+                world.weather_presentation.visual_tint,
+                world.weather_presentation.visual_sun,
+            );
+        }
         tore_formats::weather::palette::apply_sun_whitening(
             &mut source,
             world.weather_presentation.sun_whitening,

@@ -23,6 +23,8 @@ pub struct World {
     /// Authoritative environment. One instance per world, so every camera,
     /// mirror and panel resolves the same instant.
     pub weather: tore_sim::environment::Environment,
+    pub smooth_weather: bool,
+    pub visual_bands: Vec<tore_formats::weather::Layer>,
     pub weather_presentation: tore_sim::environment::Presentation,
     /// The palette resolved for the presented camera altitude this frame.
     pub palette: [[u8; 3]; 256],
@@ -192,6 +194,12 @@ impl World {
             vertices: Vec::new(),
             texture_indices,
             weather,
+            visual_bands: Vec::new(),
+            smooth_weather: match std::env::var("TORE_WEATHER_SMOOTH").as_deref() {
+                Err(std::env::VarError::NotPresent) | Ok("1") => true,
+                Ok("0") => false,
+                _ => return Err("TORE_WEATHER_SMOOTH must be 0 or 1".into()),
+            },
             weather_presentation: tore_sim::environment::Presentation::seeded(1)?,
             palette: [[0; 3]; 256],
             fog_palette: Vec::new(),
@@ -290,6 +298,10 @@ impl World {
     /// Presentation only: resolves the palette for one camera altitude without
     /// advancing state, so mirrors and camera panels stay on the same instant.
     pub fn resolve_palette(&mut self, altitude_ft: f64) {
+        let visual = self
+            .smooth_weather
+            .then(|| self.weather.visual_sample(altitude_ft))
+            .flatten();
         let Some(layer) = self.weather.sample(altitude_ft) else {
             return;
         };
@@ -303,12 +315,22 @@ impl World {
                 0.,
             ]
         });
+        // Texture selection and draw flags retain native scheduling. Only the
+        // color/fog parameters below use fractional-time presentation samples.
+        let layer = visual.as_ref().map_or(layer.clone(), |s| s.layer.clone());
         self.palette = tore_formats::weather::expand_effects(
             self.weather.configuration().base_palette(),
             &layer,
             self.weather_presentation.tint,
             self.weather_presentation.sun_whitening,
         );
+        if let Some(visual) = visual {
+            self.visual_bands = visual.bands.clone();
+            self.palette = visual.palette(
+                self.weather_presentation.visual_tint,
+                self.weather_presentation.visual_sun,
+            );
+        }
         self.fog_palette = self
             .weather
             .configuration()
@@ -469,6 +491,8 @@ pub(crate) mod tests {
                 )
                 .unwrap(),
             ),
+            visual_bands: Vec::new(),
+            smooth_weather: true,
             palette: [[100; 3]; 256],
             weather_presentation: tore_sim::environment::Presentation::seeded(1).unwrap(),
             fog_palette: vec![[[100; 3]; 256]; 10],

@@ -531,8 +531,13 @@ impl SimRenderer {
         // Band rows refer to the imported remap atlas; absent assets disable them.
         uniform.extend([0.; 4]);
         if let Some(celestial) = &world.celestial {
-            uniform[68] = world.weather.active().len() as f32;
-            for layer in world.weather.active() {
+            let bands = if world.smooth_weather {
+                world.visual_bands.as_slice()
+            } else {
+                world.weather.active()
+            };
+            uniform[68] = bands.len() as f32;
+            for layer in bands {
                 let shade = world.weather.configuration().shade_remap(layer.shade);
                 uniform.extend([
                     layer.low_feet as f32,
@@ -551,7 +556,9 @@ impl SimRenderer {
             let horizon =
                 tore_sim::environment::horizon::Horizon::new(&layer, camera.position[1] as f64);
             uniform[70] = horizon.lower_extent as f32;
-            uniform[71] = (u16::from(horizon.flags()) | ((layer.flags & 0x40) >> 4)) as f32;
+            uniform[71] = (u16::from(horizon.flags())
+                | ((layer.flags & 0x40) >> 4)
+                | (u16::from(world.smooth_weather) << 3)) as f32;
             let roll = (camera.roll.rem_euclid(std::f32::consts::TAU) * 65536.
                 / std::f32::consts::TAU)
                 .round() as i32 as i16;

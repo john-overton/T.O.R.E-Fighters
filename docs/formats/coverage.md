@@ -187,3 +187,10 @@ Weather textures now retain single indexed texel/cutout sampling; native sky
 intermediate resolution/scanlines are adapted to GPU rays. Ordinary map-0 rows
 are identity in all reviewed LAYs. INFO2 override and alternate CP maps are
 identified display consumers, deferred with their actual views. See weather.md.
+
+2026-09-15 presentation follow-up adds no binary grammar: original LAY/SH/PIC
+coverage is unchanged. Fractional-time palette/altitude interpolation and spatial
+shade blending are authored GPU presentation, with stepped diagnostics retained.
+Sun/moon use a common fitted ×4 projection calibration against user-supplied
+retail default-zoom captures; native projection acceptance remains open.
+See [smoothing and size evidence](../baselines/weather-smoothing.md).

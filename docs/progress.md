@@ -4,6 +4,17 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
 
 **Current scope:** Original Choose Activity and Quick Mission briefing lead to all-theater previews and F/A-18D/Rafale C free flight. The explicit manual range now connects the ten PT-default weapon slots, sensors, damage, stores and combat-service replay. Full native environment/flight/combat parity and the remaining menu screens stay open. AI is deferred until manual acceptance. See [current systems evidence](baselines/weapons-systems.md), [earlier manual weapons evidence](baselines/manual-weapons.md) and the dated checklists below.
 
+## Weather smoothing follow-up — 2026-09-15
+
+- [x] User-requested gradual time/altitude colors and spatial horizon/fog shades,
+  with original artwork and selectable stepped diagnostics.
+- [x] Shared smooth cockpit tint/whitening; fixed simulation ticks and pure queries.
+- [x] Common fitted sun/moon size correction from default-zoom retail references;
+  proportional viewport/zoom sizing and bank-independent moon geometry.
+- [ ] Matched retail celestial size/pose acceptance and remaining platform gates.
+  Retail now runs through dgVoodoo; Windows/macOS rebuilds remain untested here.
+  [Implementation, validation and limitations](baselines/weather-smoothing.md).
+
 ## Weather review — 2026-09-15
 
 - [x] Number the remaining work by dependency in the

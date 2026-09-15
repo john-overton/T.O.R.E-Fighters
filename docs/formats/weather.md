@@ -827,3 +827,13 @@ At 0x4aae43 lower-horizon ED/FC selection depends on detail>=1 plus view bit
 current ordinary full-detail view takes ED/FC. Lower-detail terrain/sky and
 INFO2/alternate-map integration are separate display work; cloud-only detail
 selection does not pretend to implement them.
+
+### Optional stepped rendering versus smooth presentation — 2026-09-15
+
+The app now defaults to authored spatial/temporal interpolation of original
+palette colors (`TORE_WEATHER_SMOOTH=0` restores stepped color/fog rendering).
+This adds no format grammar. Source callback scheduling, discrete selection,
+shape art and index cutouts remain intact. Sun/moon geometry additionally has a
+common fitted ×4 projection calibration against the user's default-zoom retail
+captures, with viewport-relative scale. This factor is not decoded native math.
+See [smoothing evidence and limitations](../baselines/weather-smoothing.md).

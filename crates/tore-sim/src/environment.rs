@@ -3,6 +3,7 @@
 //! camera panel or another aircraft never advances weather.
 pub mod horizon;
 pub mod ray;
+pub mod visual;
 use tore_formats::Result;
 use tore_formats::flight_model::clock_rng::{FixedClock, NativeRng};
 use tore_formats::weather::{Callback, Layer, Module};
@@ -199,7 +200,7 @@ pub type Sample = Layer;
 /// The native palette thread services every fourth 15 ms iteration. This host
 /// adapter schedules nominal 60 ms passes on fixed 120 Hz ticks and pauses with
 /// simulation, rather than reproducing wall-thread scheduling artifacts.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Presentation {
     rng: NativeRng,
     next_reduction: i64,
@@ -207,6 +208,8 @@ pub struct Presentation {
     phase: u32,
     pub tint: u8,
     pub sun_whitening: u8,
+    pub visual_tint: f64,
+    pub visual_sun: f64,
 }
 
 impl Presentation {
@@ -218,6 +221,8 @@ impl Presentation {
             phase: 0,
             tint: 0,
             sun_whitening: 0,
+            visual_tint: 0.,
+            visual_sun: 0.,
         })
     }
 
@@ -281,6 +286,15 @@ impl Presentation {
                 )
                 .expect("validated tint domain");
             }
+        }
+        // Authored display smoothing; native callback cadence and integer state
+        // stay unchanged. This runs only on fixed ticks, including time scaling.
+        let amount = 16. / 7.2;
+        for (visual, target) in [
+            (&mut self.visual_tint, self.tint),
+            (&mut self.visual_sun, self.sun_whitening),
+        ] {
+            *visual += (f64::from(target) - *visual).clamp(-amount, amount);
         }
     }
 }
