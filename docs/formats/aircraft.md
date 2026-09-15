@@ -46,6 +46,10 @@ Flight runs at 120 fixed ticks/second using f64 state. A renderer-independent ad
 
 ## Exterior and device recovery
 
+For component origins, texture state, LODs, damage/shadow resources and practical
+editing constraints, see [objects and shapes](objects-and-shapes.md). Its local
+F18C examples are research references, not an alias for the supported F18.PT.
+
 SH is an inert PL/PE module containing an interpreted drawing program plus native re-entry blocks. The Rust projector bounds sections, shared vertex slots, calls, scopes, polygons, textures, state guards and instruction counts. It recognizes limited static re-entry patterns; it never OS-loads or executes x86. Unknown records fail. Nearest-detail and neutral/static device poses are the supported scope, not a complete VM or animation system.
 
 F18.SH resolves to 287 source polygons in the reference neutral projection, including five unconfigured decal polygons. Rust omits those transparent decal faces and retains 282. Source vertices use X/right, Y/forward, Z/up; world presentation uses X/right, Y/up, Z/north. The source atlas is **256×644**, retained without forced square resampling. UVs use texel centers and reversed source V. Keyed texture-only faces discard index 255; filled textured faces blend paint over recovered base colors. Stored normals select visible faces. Terrain and aircraft share GPU depth, with a one-foot near plane for nearby geometry.

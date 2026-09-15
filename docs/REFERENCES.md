@@ -30,3 +30,12 @@ Read these inside the local reference checkout:
 The reference's `Docs/` capitalization is intentional. Rebuild documentation belongs in lowercase `docs/` so paths work on case-sensitive Linux filesystems.
 
 This is an initial orientation, not a completed spec-versus-implementation inventory. Validate recovered claims against the user's Fighters Anthology files as each importer format is implemented. Record provenance and synthetic test cases without committing extracted retail data.
+
+## Local SH editing reference
+
+`.local/fa-shape-file-explination/` contains Plurry's v2.01 shape explanations,
+annotated spreadsheets, historical tools and F18C examples. The
+[objects and shapes guide](formats/objects-and-shapes.md) records useful details
+and disagreements with our existing readers; [review evidence](baselines/shape-reference-review.md)
+identifies the checked sample. This optional ignored collection is not required
+to build or run the app. F18C remains separate from the supported F/A-18D.

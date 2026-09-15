@@ -4,6 +4,21 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
 
 **Current scope:** Original Choose Activity and Quick Mission briefing lead to all-theater previews and F/A-18D/Rafale C free flight. The explicit manual range now connects the ten PT-default weapon slots, sensors, damage, stores and combat-service replay. Full native environment/flight/combat parity and the remaining menu screens stay open. AI is deferred until manual acceptance. See [current systems evidence](baselines/weapons-systems.md), [earlier manual weapons evidence](baselines/manual-weapons.md) and the dated checklists below.
 
+## Object and shape reference review — 2026-09-15
+
+- [x] Review the local Plurry v2.01 guides, annotated workbooks and F18C
+  examples; document object resource ownership, component transforms, materials,
+  attachments and editing constraints in [objects and shapes](formats/objects-and-shapes.md).
+- [x] Verify corrected CSV byte coverage, sample connection targets and OBJ
+  inventories; distinguish reference hypotheses from existing reader behavior.
+  [Evidence and reproduction](baselines/shape-reference-review.md).
+- [ ] Validate the user-reported vapor and exterior-store placement errors against
+  each supported aircraft's own coordinates, units and attachment transforms.
+  The F18C document/sample mismatch does not establish a runtime correction.
+- [ ] General object placement, damage/shadow selection, SH LOD/visibility,
+  native articulation and complete materials remain open. No new implementation
+  or aircraft support is claimed by this documentation pass.
+
 ## Weather smoothing follow-up — 2026-09-15
 
 - [x] User-requested gradual time/altitude colors and spatial horizon/fog shades,
