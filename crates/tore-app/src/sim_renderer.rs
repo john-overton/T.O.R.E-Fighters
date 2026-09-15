@@ -6,6 +6,7 @@ fn bytes(values: &[f32]) -> Vec<u8> {
 }
 pub struct SimRenderer {
     battle: Option<(wgpu::Buffer, u32)>,
+    palette: wgpu::Texture,
     pipeline: wgpu::RenderPipeline,
     aircraft: Option<(wgpu::BindGroup, wgpu::Buffer, u32)>,
     bind: wgpu::BindGroup,
@@ -38,9 +39,9 @@ impl SimRenderer {
                 entry_point: Some("vertex"),
                 compilation_options: Default::default(),
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: 36,
+                    array_stride: 40,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3],
+                    attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3,4=>Float32],
                 }],
             },
             fragment: Some(wgpu::FragmentState {
@@ -112,12 +113,12 @@ impl SimRenderer {
             size: wgpu::Extent3d {
                 width: 256,
                 height: 256,
-                depth_or_array_layers: (world.texture_pixels.len() / (256 * 256 * 4) + 1) as u32,
+                depth_or_array_layers: (world.texture_indices.len() / (256 * 256) + 1) as u32,
             },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: wgpu::TextureFormat::R8Uint,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -128,27 +129,41 @@ impl SimRenderer {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &[world.texture_pixels.as_slice(), world.sky_pixels.as_slice()].concat(),
+            &[
+                world.texture_indices.as_slice(),
+                world.sky_indices.as_slice(),
+            ]
+            .concat(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(1024),
+                bytes_per_row: Some(256),
                 rows_per_image: Some(256),
             },
             wgpu::Extent3d {
                 width: 256,
                 height: 256,
-                depth_or_array_layers: (world.texture_pixels.len() / (256 * 256 * 4) + 1) as u32,
+                depth_or_array_layers: (world.texture_indices.len() / (256 * 256) + 1) as u32,
             },
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             ..Default::default()
         });
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
+        let palette = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Live weather palette"),
+            size: wgpu::Extent3d {
+                width: 256,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         });
+        let palette_view = palette.create_view(&wgpu::TextureViewDescriptor::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Simulation scene bindings"),
             layout: &pipeline.get_bind_group_layout(0),
@@ -163,7 +178,7 @@ impl SimRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
+                    resource: wgpu::BindingResource::TextureView(&palette_view),
                 },
             ],
         });
@@ -174,13 +189,14 @@ impl SimRenderer {
         });
         Self {
             battle: None,
+            palette,
             pipeline,
             aircraft: None,
             sky_pipeline,
             bind,
             uniform,
             vertices,
-            count: (world.vertices.len() / 9) as u32,
+            count: (world.vertices.len() / 10) as u32,
             spare_depth: None,
             depth: Self::depth(device, width, height),
             size: [width, height],
@@ -199,11 +215,11 @@ impl SimRenderer {
             ));
         }
         if let Some((buffer, count)) = &mut self.battle {
-            let length = vertices.len().min((8 * 1024 * 1024 / 4 / 27) * 27);
+            let length = vertices.len().min((8 * 1024 * 1024 / 4 / 30) * 30);
             if length > 0 {
                 queue.write_buffer(buffer, 0, &bytes(&vertices[..length]));
             }
-            *count = (length / 9) as u32;
+            *count = (length / 10) as u32;
         }
     }
     pub fn clear_aircraft(&mut self) {
@@ -218,6 +234,8 @@ impl SimRenderer {
     ) {
         if self.aircraft.is_none() {
             let pic = &hornet.atlas;
+            // The aircraft atlas takes the same index-plus-palette path as the
+            // terrain, with its own airframe palette rather than the weather one.
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("Retail aircraft atlas"),
                 size: wgpu::Extent3d {
@@ -228,17 +246,23 @@ impl SimRenderer {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                format: wgpu::TextureFormat::R8Uint,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             });
-            let mut pixels = pic.rgba(&hornet.palette);
-            for (i, p) in pixels.chunks_exact_mut(4).enumerate() {
-                if pic.pixels[i] == 255 {
-                    p[3] = 0;
+            // write_texture needs a 256-byte row pitch; pad each source row.
+            let pitch = pic.width.div_ceil(256) * 256;
+            let mut indices = Vec::with_capacity(pitch * pic.height * 2);
+            for row in 0..pic.height {
+                for column in 0..pitch {
+                    let at = row * pic.width + column;
+                    indices.push(match pic.pixels.get(at) {
+                        Some(index) if column < pic.width && pic.mask[at] => *index,
+                        _ => 255,
+                    });
                 }
             }
-            pixels.extend_from_within(..);
+            indices.extend_from_within(..);
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &texture,
@@ -246,10 +270,10 @@ impl SimRenderer {
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                &pixels,
+                &indices,
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(pic.width as u32 * 4),
+                    bytes_per_row: Some(pitch as u32),
                     rows_per_image: Some(pic.height as u32),
                 },
                 wgpu::Extent3d {
@@ -262,11 +286,47 @@ impl SimRenderer {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()
             });
-            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                ..Default::default()
+            // The atlas overrides the airframe palette with its own prefix.
+            let mut resolved = hornet.palette;
+            resolved[..pic.palette.len()].copy_from_slice(&pic.palette);
+            let palette = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Airframe palette"),
+                size: wgpu::Extent3d {
+                    width: 256,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             });
+            let mut entries = Vec::with_capacity(1024);
+            for rgb in &resolved {
+                entries.extend([rgb[0], rgb[1], rgb[2], 255]);
+            }
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &palette,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &entries,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(1024),
+                    rows_per_image: Some(1),
+                },
+                wgpu::Extent3d {
+                    width: 256,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
+            let palette_view = palette.create_view(&wgpu::TextureViewDescriptor::default());
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Aircraft textures"),
                 layout: &self.pipeline.get_bind_group_layout(0),
@@ -281,7 +341,7 @@ impl SimRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&sampler),
+                        resource: wgpu::BindingResource::TextureView(&palette_view),
                     },
                 ],
             });
@@ -298,7 +358,7 @@ impl SimRenderer {
             if !vertices.is_empty() {
                 queue.write_buffer(buffer, 0, &bytes(vertices));
             }
-            *count = (vertices.len() / 9) as u32;
+            *count = (vertices.len() / 10) as u32;
         }
     }
     pub fn update_aircraft_vertices(&mut self, queue: &wgpu::Queue, vertices: &[f32]) {
@@ -307,7 +367,7 @@ impl SimRenderer {
             if !vertices.is_empty() {
                 queue.write_buffer(buffer, 0, &bytes(vertices));
             }
-            *count = (vertices.len() / 9) as u32;
+            *count = (vertices.len() / 10) as u32;
         }
     }
     pub fn hide_aircraft(&mut self) {
@@ -358,8 +418,31 @@ impl SimRenderer {
             0.000004,
             sky,
         );
-        uniform[7] = (world.texture_pixels.len() / (256 * 256 * 4)) as f32;
+        uniform[7] = (world.texture_indices.len() / (256 * 256)) as f32;
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
+        let mut entries = Vec::with_capacity(1024);
+        for rgb in &world.palette {
+            entries.extend([rgb[0], rgb[1], rgb[2], 255]);
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.palette,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &entries,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(1024),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 256,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
         let linear = |v: u8| ((v as f64 / 255.0 + 0.055) / 1.055).powf(2.4);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Simulation world"),

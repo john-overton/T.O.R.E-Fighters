@@ -316,6 +316,9 @@ impl Airframe {
                         color[0] as f32 / 255.,
                         color[1] as f32 / 255.,
                         color[2] as f32 / 255.,
+                        // Aircraft art resolves against its own atlas palette,
+                        // not the weather palette.
+                        -1.,
                     ]);
                 }
             }

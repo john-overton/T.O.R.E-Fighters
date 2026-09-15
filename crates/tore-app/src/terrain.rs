@@ -10,9 +10,16 @@ pub struct World {
     pub theater: Theater,
     pub environment: Environment,
     pub catalog: Vec<(String, String)>,
-    pub sky_pixels: Vec<u8>,
+    /// Source palette indices, one byte per texel. Retail terrain and sky art is
+    /// entirely weather-palette indexed, so the artwork is uploaded unresolved
+    /// and the live palette is applied on the GPU. 255 is the water cutout.
+    pub sky_indices: Vec<u8>,
     pub vertices: Vec<f32>,
-    pub texture_pixels: Vec<u8>,
+    pub texture_indices: Vec<u8>,
+    /// Authoritative environment. One instance per world, so every camera,
+    /// mirror and panel resolves the same instant.
+    pub weather: tore_sim::environment::Environment,
+    /// The palette resolved for the presented camera altitude this frame.
     pub palette: [[u8; 3]; 256],
 }
 impl World {
@@ -34,9 +41,27 @@ impl World {
                 catalog.push((n.trim_end_matches(".T2").into(), t.name));
             }
         }
-        // Explicit midday weather keyframe; no invented runtime palette colors.
-        let palette = tore_formats::theater::layer_palette(required(&environment.layer)?, 2)?;
-        let mut texture_pixels = Vec::new();
+        let module = tore_formats::weather::Module::parse(required(&environment.layer)?)?;
+        let [hour, minute] = match std::env::var("TORE_WEATHER_TIME") {
+            Ok(text) => {
+                let (h, m) = text
+                    .split_once(':')
+                    .ok_or("TORE_WEATHER_TIME needs HH:MM")?;
+                [h.parse::<i32>()?, m.parse::<i32>()?]
+            }
+            Err(_) => environment.time.unwrap_or([12, 0]),
+        };
+        let weather =
+            tore_sim::environment::Environment::new(tore_sim::environment::Configuration::new(
+                module,
+                hour,
+                minute,
+                environment.layer_parameter.unwrap_or(0),
+            )?);
+        let palette = weather
+            .palette(0.)
+            .ok_or("mission weather layer covers no altitude at its launch time")?;
+        let mut texture_indices = Vec::new();
         let count = environment
             .textures
             .values()
@@ -49,27 +74,34 @@ impl World {
             if pic.width != 256 || pic.height != 256 {
                 return Err("expected 256-square terrain texture".into());
             }
-            let mut rgba = pic.rgba(&palette);
-            // Native terrain texture scanning tests 255 as water/cutout (0x4aa739).
-            for (j, index) in pic.pixels.iter().enumerate() {
-                if *index == 255 {
-                    rgba[j * 4 + 3] = 0;
-                }
+            if !pic.palette.is_empty() {
+                return Err("terrain texture overrides the weather palette".into());
             }
-            texture_pixels.extend(rgba);
+            // Native terrain texture scanning tests 255 as water/cutout (0x4aa739);
+            // a masked-out texel is equally transparent, so it reuses that index.
+            texture_indices.extend(
+                pic.pixels
+                    .iter()
+                    .zip(&pic.mask)
+                    .map(|(index, visible)| if *visible { *index } else { 255 }),
+            );
         }
         let sky = Pic::parse(required("SKY0.PIC")?)?;
         if sky.width != 256 || sky.height != 256 {
             return Err("invalid sky texture dimensions".into());
         }
-        let sky_pixels = sky.rgba(&palette);
+        if !sky.palette.is_empty() {
+            return Err("sky texture overrides the weather palette".into());
+        }
+        let sky_indices = sky.pixels.clone();
         let mut out = Self {
             theater,
             environment,
             catalog,
-            sky_pixels,
+            sky_indices,
             vertices: Vec::new(),
-            texture_pixels,
+            texture_indices,
+            weather,
             palette,
         };
         out.build_mesh();
@@ -87,10 +119,12 @@ impl World {
                     .textures
                     .get(&((x & !3) as i32, (y & !3) as i32));
                 let layer = placement.map_or(-1.0, |p| p.texture as f32);
-                let color = if c.color == 255 {
-                    self.palette[223]
+                // 0x4aa739 treats 255 as water and draws it with the terrain
+                // ramp's last entry. The index is resolved on the GPU each frame.
+                let index = if c.color == 255 {
+                    223.
                 } else {
-                    self.palette[c.color as usize]
+                    f32::from(c.color)
                 };
                 for (dx, dy) in [(0, 0), (0, 1), (1, 0), (1, 0), (0, 1), (1, 1)] {
                     let sample = t.cell(x + dx, y + dy);
@@ -109,14 +143,28 @@ impl World {
                         u,
                         1.0 - v,
                         layer,
-                        color[0] as f32 / 255.0,
-                        color[1] as f32 / 255.0,
-                        color[2] as f32 / 255.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        index,
                     ]);
                 }
             }
         }
     }
+    /// Exactly one 120 Hz tick of environment time. Pausing means not calling it.
+    pub fn step_weather(&mut self) {
+        self.weather.step();
+    }
+
+    /// Presentation only: resolves the palette for one camera altitude without
+    /// advancing state, so mirrors and camera panels stay on the same instant.
+    pub fn resolve_palette(&mut self, altitude_ft: f64) {
+        if let Some(palette) = self.weather.palette(altitude_ft) {
+            self.palette = palette;
+        }
+    }
+
     pub fn height(&self, x: f32, z: f32) -> f32 {
         let fx = (x / CELL_FEET).clamp(0.0, (self.theater.cols - 1) as f32 - 0.001);
         let fy = (z / CELL_FEET).clamp(0.0, (self.theater.rows - 1) as f32 - 0.001);
@@ -236,8 +284,20 @@ mod tests {
             environment: Environment::default(),
             catalog: vec![],
             vertices: vec![],
-            texture_pixels: vec![],
-            sky_pixels: vec![],
+            texture_indices: vec![],
+            sky_indices: vec![],
+            weather: tore_sim::environment::Environment::new(
+                tore_sim::environment::Configuration::new(
+                    tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(
+                        1,
+                    ))
+                    .unwrap(),
+                    12,
+                    0,
+                    0,
+                )
+                .unwrap(),
+            ),
             palette: [[100; 3]; 256],
         }
     }

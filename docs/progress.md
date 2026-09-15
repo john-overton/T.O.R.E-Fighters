@@ -32,7 +32,11 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 - [x] W2 remainder: translate the native blend kernel and apply it to both the
   time and altitude overlap windows; `--validate-weather` now resolves a real
   dawn and dusk from `DAY2.LAY`.
-- [ ] W3: implement accepted time/palette/sky/celestial behavior.
+- [x] W3 palette: upload retail terrain, sky and aircraft art as source palette
+  indices and resolve the live weather palette on the GPU. Night, dawn and dusk
+  now render, including the original city lighting, with no authored colors.
+- [ ] W3 remainder: celestial shapes, sun/moon direction and the recovered
+  sunrise/sunset fields.
 - [ ] W4: implement accepted clouds, fog and visibility behavior.
 - [ ] W5: connect verified wind/turbulence, air data and environment feedback.
 - [ ] W6: connect creator/restart/replay and complete theater/platform acceptance.

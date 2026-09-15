@@ -1028,6 +1028,9 @@ impl ApplicationHandler for App {
                             }
                             self.flight
                                 .step(&pilot, |x, z| self.world.height(x as f32, z as f32) as f64);
+                            // Weather shares the authoritative tick; pausing simply
+                            // stops calling it, with no elapsed-time catch-up.
+                            self.world.step_weather();
                             if let Some(audio) = &self.audio {
                                 audio.controls(&self.previous_flight, &self.flight);
                             }
@@ -1140,6 +1143,9 @@ impl ApplicationHandler for App {
                             matches!(self.flight_view, 1 | 2),
                         );
                         self.camera.zoom = self.flight_ui.zoom;
+                        // One resolved instant per frame, shared by the main view,
+                        // the mirrors and the camera panels.
+                        self.world.resolve_palette(presented.position[1]);
                         match renderer.poll_previews() {
                             Ok(previews) => {
                                 self.performance.completed_previews += previews.len();
@@ -1269,11 +1275,14 @@ impl ApplicationHandler for App {
                     }
                     Screen::Viewer => {
                         let now = Instant::now();
-                        self.camera.step(
-                            (now - self.frame_time).as_secs_f32(),
-                            self.modifiers.shift_key(),
-                            &self.world,
-                        );
+                        let elapsed = (now - self.frame_time).as_secs_f64().min(0.25);
+                        self.camera
+                            .step(elapsed as f32, self.modifiers.shift_key(), &self.world);
+                        for _ in 0..self.flight_clock.steps(elapsed) {
+                            self.world.step_weather();
+                        }
+                        self.world
+                            .resolve_palette(f64::from(self.camera.position[1]));
                         self.frame_time = now;
                         quick_mission::hud(
                             &mut self.menu.pixels,

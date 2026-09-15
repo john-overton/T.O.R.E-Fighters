@@ -463,6 +463,7 @@ fn mesh(
     }
 }
 fn vertex(out: &mut Vec<f32>, pos: Vector, color: [f32; 3]) {
+    // Trailing -1 opts out of the weather palette: this color is already resolved.
     out.extend([
         pos[0] as f32,
         pos[1] as f32,
@@ -473,6 +474,7 @@ fn vertex(out: &mut Vec<f32>, pos: Vector, color: [f32; 3]) {
         color[0],
         color[1],
         color[2],
+        -1.,
     ]);
 }
 
@@ -955,6 +957,7 @@ mod tests {
             [0., 0., 1.],
             &[[255; 3]; 256],
         );
-        assert_eq!(out.len(), 27);
+        // One triangle of ten-float vertices; the exhaust face is omitted.
+        assert_eq!(out.len(), 30);
     }
 }
