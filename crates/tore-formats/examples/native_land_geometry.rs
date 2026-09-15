@@ -1,16 +1,22 @@
 //! Local geometry diagnostic: imported inputs, no world/cache or flight activation.
-use std::{env, fs};
+use std::{env, fs, path::Path};
 use tore_formats::{
-    flight_model::terrain_contact::{SqrtTable, vertical_cell},
+    flight_model::{
+        rotation::{AtanTable, TrigTable},
+        terrain_contact::{SqrtTable, candidate_angles, project_angles, vertical_cell},
+    },
     shape,
     theater::Theater,
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args.len() < 2 {
-        return Err("usage: native_land_geometry SQRT_TABLE T2 [SH ...]".into());
+        return Err("usage: native_land_geometry TABLE_DIR T2 [SH ...]".into());
     }
-    let table = SqrtTable::parse(&fs::read(&args[0])?)?;
+    let tables = Path::new(&args[0]);
+    let table = SqrtTable::parse(&fs::read(tables.join("sqrt-seed.bin"))?)?;
+    let atan = AtanTable::parse(&fs::read(tables.join("atan-pa.bin"))?)?;
+    let trig = TrigTable::parse(&fs::read(tables.join("sine-q15.bin"))?)?;
     let terrain = Theater::parse(&fs::read(&args[1])?)?;
     // The native traversal's signed fixed8 theater extent must be representable.
     if terrain.cols >= 1024 || terrain.rows >= 1024 {
@@ -20,6 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut min_y = i32::MAX;
     let mut max_y = i32::MIN;
     let mut sloped = 0usize;
+    let mut pitch_range = [i16::MAX, i16::MIN];
     for row in 0..terrain.rows {
         for col in 0..terrain.cols {
             let heights = [
@@ -58,12 +65,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 min_y = min_y.min(hit.position[1]);
                 max_y = max_y.max(hit.position[1]);
                 sloped += usize::from(hit.normal[0] != 0 || hit.normal[2] != 0);
+                let angles = candidate_angles(&table, &atan, hit.normal);
+                for heading in [0, 0x4000] {
+                    let projected = project_angles(&trig, angles, heading);
+                    assert_eq!(
+                        projected,
+                        project_angles(&trig, candidate_angles(&table, &atan, hit.normal), heading)
+                    );
+                    pitch_range[0] = pitch_range[0].min(projected[1]);
+                    pitch_range[1] = pitch_range[1].max(projected[1]);
+                    if hit.normal == [0, 32767, 0] {
+                        assert_eq!(projected, [heading, 0, 0]);
+                    }
+                }
                 queries += 1;
             }
         }
     }
     println!(
         "cell geometry: {queries} cases, repeated identically; sloped={sloped}; Y fixed8={min_y}..{max_y}"
+    );
+    println!(
+        "candidate/projection replay: {} cases; pitch PA={}..{}",
+        queries * 2,
+        pitch_range[0],
+        pitch_range[1]
     );
     for path in &args[2..] {
         println!(

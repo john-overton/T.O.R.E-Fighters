@@ -202,9 +202,12 @@ F18/Rafale neutral mesh vertices. No new aircraft or format coverage is implied.
 
 ## Land-contact foundation — 2026-09-15
 
-Static FA slices, tested preference/cache helpers and vertical cell geometry;
+Static FA slices, tested preference/cache helpers and vertical cell geometry/angle projection;
 a bounded shape F2 contact-offset reader and external square-root table reader.
 No runtime contact support or complete collision-record grammar. Selected UKR/STRIP/RUNWAY resources
 are extracted with provenance; OT schema, placement/callback/shape closure and
 collision acceptance remain open. [Foundation](../baselines/native-land-foundation.md),
 [geometry evidence](../baselines/native-land-geometry.md).
+
+Candidate-angle and requested-heading projection arithmetic is translated/tested;
+world dispatcher/cache activation remains open. [Evidence](../baselines/native-land-angles.md).

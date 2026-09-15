@@ -852,7 +852,8 @@ provenance and open gates are in the [flight guide](../FLIGHT-MODEL.md) and
 
 [The land-contact contract](native-land-contact.md) now establishes GetGround
 dual-query ordering, collision cache mutations/deadlines and landing preference.
-Preference/cache helpers and vertical cell geometry are diagnostic translations;
+Preference/cache helpers, vertical cell geometry and candidate/slope angles are
+diagnostic translations;
 no complete world producer or live contact activation is implied. The repeatable
-extraction now includes 92 reviewed regions and the external square-root seed table. Query-cache mutation and conditional RNG require transactional ownership
+extraction now includes 94 reviewed regions and the external square-root seed table. Query-cache mutation and conditional RNG require transactional ownership
 before the current read-only diagnostic interface can host native queries.

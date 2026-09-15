@@ -16,6 +16,8 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('candidate_direction_angles', 0x411a40, 0x411aec, 'ground'),
+    ('direction_word_reduction', 0x4c6c30, 0x4c6d5f, 'ground'),
     ('terrain_traversal', 0x42bdc0, 0x42bfb9, 'ground'),
     ('terrain_cell', 0x42bfc0, 0x42c1a0, 'ground'),
     ('terrain_plane', 0x42c1a0, 0x42c413, 'ground'),

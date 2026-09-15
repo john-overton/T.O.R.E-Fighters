@@ -260,9 +260,108 @@ pub fn vertical_cell(
     Ok(hit)
 }
 
+/// FA 0x42de60 -> 0x411a40, with zero origin and a normal shifted left 16.
+/// Returns [heading, pitch minus 0x3ffc, zero roll] in native PA words.
+pub fn candidate_angles(
+    table: &SqrtTable,
+    atan: &super::rotation::AtanTable,
+    normal: [i16; 3],
+) -> [i16; 3] {
+    let mut v = normal.map(|n| i32::from(n) << 16);
+    // 0x4c6c30: unsigned comparisons for the first two four-bit reductions,
+    // then signed comparisons for the two-bit reductions. Preserve that split.
+    let mut mask = v.iter().fold(0i32, |m, n| m | n.wrapping_abs());
+    for _ in 0..2 {
+        if mask as u32 >= 0x40000 {
+            v = v.map(|n| n >> 4);
+            mask >>= 4;
+        }
+    }
+    while mask >= 0x4000 {
+        v = v.map(|n| n >> 2);
+        mask >>= 2;
+    }
+    let [x, y, z] = v.map(|n| n as i16);
+    let horizontal = if x == 0 {
+        i32::from(z).unsigned_abs()
+    } else if z == 0 {
+        i32::from(x).unsigned_abs()
+    } else {
+        table.root((i32::from(x) * i32::from(x)).wrapping_add(i32::from(z) * i32::from(z)) as u32)
+    };
+    let pitch = atan.angle(y, horizontal as i16).clamp(-0x3ffc, 0x3ffc);
+    [atan.angle(x, z), pitch.wrapping_sub(0x3ffc), 0]
+}
+
+/// FA 0x42bd30: project candidate pitch/roll into the requested heading.
+/// Each signed product is divided separately; word sums wrap afterward.
+pub fn project_angles(
+    table: &super::rotation::TrigTable,
+    candidate: [i16; 3],
+    heading: i16,
+) -> [i16; 3] {
+    let trig = table.sin_cos(heading.wrapping_sub(candidate[0]));
+    let product = |a: i16, b: i16| ((i32::from(a) * i32::from(b)) / 32767) as i16;
+    [
+        heading,
+        product(candidate[1], trig.cos).wrapping_add(product(candidate[2], trig.sin)),
+        product(candidate[2], trig.cos).wrapping_sub(product(candidate[1], trig.sin)),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn candidate_normal_angles_axes_clamp_and_projection() {
+        let root = SqrtTable([0; 1024]);
+        let atan = super::super::rotation::AtanTable::parse(&[0; 1028]).unwrap();
+        // INT_MIN magnitude keeps the signed mask negative after the initial
+        // unsigned reductions; word narrowing and square addition still wrap.
+        assert_eq!(
+            candidate_angles(&root, &atan, [128, i16::MIN, 128]),
+            [0x7ff8, -0x3ffc, 0]
+        );
+        assert_eq!(candidate_angles(&root, &atan, [0, 32767, 0]), [0, 0, 0]);
+        assert_eq!(
+            candidate_angles(&root, &atan, [32767, 0, 0]),
+            [0x3ffc, -0x3ffc, 0]
+        );
+        assert_eq!(
+            candidate_angles(&root, &atan, [0, -32767, 0]),
+            [0, -32760, 0]
+        );
+        assert_eq!(
+            candidate_angles(&root, &atan, [0, 0, 32767]),
+            [0, -0x3ffc, 0]
+        );
+        let mut root = SqrtTable([0; 1024]);
+        root.0[38] = 12649 << 13;
+        let values: Vec<_> = (0..514u16).flat_map(|i| (i * 16).to_le_bytes()).collect();
+        let linear_atan = super::super::rotation::AtanTable::parse(&values).unwrap();
+        // Reduction gives [4000,8000,12000], horizontal square=160,000,000.
+        assert_eq!(
+            candidate_angles(&root, &linear_atan, [1000, 2000, 3000]),
+            [2730, -11199, 0]
+        );
+        // Synthetic quarter-cycle samples; imported tables remain external.
+        let mut values = [0i16; 321];
+        values[64] = 32767;
+        values[192] = -32767;
+        values[320] = 32767;
+        let bytes: Vec<_> = values.into_iter().flat_map(i16::to_le_bytes).collect();
+        let trig = super::super::rotation::TrigTable::parse(&bytes).unwrap();
+        assert_eq!(project_angles(&trig, [0, -100, 40], 0), [0, -100, 40]);
+        assert_eq!(
+            project_angles(&trig, [0, -100, 40], 0x4000),
+            [0x4000, 40, 100]
+        );
+        assert_eq!(
+            project_angles(&trig, [0, -100, 40], i16::MIN),
+            [i16::MIN, 100, -40]
+        );
+    }
 
     #[test]
     fn seed_selection_and_single_refinement_are_not_exact_sqrt() {

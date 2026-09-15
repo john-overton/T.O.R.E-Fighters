@@ -32,7 +32,7 @@ unsigned dword width and section bounds. Unit fixtures contain no retail data.
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/geometry-source
-cargo run --locked -p tore-formats --example native_land_geometry -- .local/native-environment/geometry-source/tables/sqrt-seed.bin .local/native-environment/land-discovery/FA_2.LIB/UKR.T2 .local/native-environment/land-discovery/FA_2.LIB/RUNWAY.SH
+cargo run --locked -p tore-formats --example native_land_geometry -- .local/native-environment/geometry-source/tables .local/native-environment/land-discovery/FA_2.LIB/UKR.T2 .local/native-environment/land-discovery/FA_2.LIB/RUNWAY.SH
 ```
 
 The T2/SH hashes are recorded in the [selected extraction baseline](native-land-foundation.md).
@@ -42,6 +42,10 @@ edge's native zero-elevation fallback. **166,400 cases run twice identically**;
 (0–7,936 feet). RUNWAY.SH resolves `Some(0)` from its own F2 record, not an absent
 record. This validates decoder coverage and repeatability; it is not an independent
 retail trajectory oracle or a runway placement/handling acceptance test.
+
+The current probe accepts the table directory; the [angle follow-up](native-land-angles.md)
+adds candidate/projection checks using its sine and atan files. The counts above
+record the NE-00.1b geometry run.
 
 ## Validation and limitations
 
@@ -57,8 +61,8 @@ regressions; there is no new visual feature or active handling/performance claim
 The controller evdev warning remains; physical input/audio, Windows/macOS
 build/runtime and retail comparisons are unavailable/not run.
 
-The live stop, legacy default and hybrid path remain unchanged. Source-normal
-angle conversion (E008), complete STRIP placement/init/callback/resource closure,
+The live stop, legacy default and hybrid path remain unchanged. E008 angle arithmetic is now closed by the [follow-up](native-land-angles.md).
+Complete STRIP placement/init/callback/resource closure,
 staged query/cache/RNG ownership and late-failure rollback still block the first
 live land branch for both aircraft. General segment traversal, full collision
 record parsing and carrier activation remain outside this completed precursor.

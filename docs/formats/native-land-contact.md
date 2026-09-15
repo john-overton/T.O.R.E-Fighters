@@ -1,6 +1,6 @@
 # Native land-contact foundation
 
-2026-09-15, NE-00.1a/b under the [living plan](../native-environment-systems-plan.md).
+2026-09-15, NE-00.1a/b/c under the [living plan](../native-environment-systems-plan.md).
 **Native static source**, with diagnostic translations only where identified.
 Uses the exact reviewed FA EXE/SMS hashes in [native flight](native-flight.md).
 No imported code executes. [Validation](../baselines/native-land-foundation.md).
@@ -147,8 +147,7 @@ and below-plane rules must not be unified into a floating-point ray cast.
 `terrain_contact` translates these pure helpers and vertical cell construction.
 It returns a point and normal, **not** a complete ground sample. The downstream
 candidate reducer converts normals through `0x411a40` (which calls `0x4c6c30`,
-square root and atan) and subtracts PA `0x3ffc`. That angle producer still needs
-complete review/translation before the existing slope projection can be joined.
+square root and atan) and subtracts PA `0x3ffc`. That angle producer and heading projection are translated as described below.
 
 ## Shape-relative contact offset — E007
 
@@ -165,6 +164,32 @@ link errors instead of becoming the native zero fallback. A missing shape pointe
 is handled by the future type resolver, not by passing an empty byte buffer.
 The remaining record fields and collision subrecords are not decoded here.
 
-Next: finish candidate-normal angle conversion, trace STRIP initialization,
+Next: trace STRIP initialization,
 placement and drawing dependencies, then integrate staged query state with
 source-order traces and late-failure rollback. Carrier stays gated.
+
+
+## Candidate and requested-heading angles — NE-00.1c
+
+`0x42de60` passes zero origin (`0x4eb710`) and `normal<<16` to
+`0x411a40..0x411aec`. The difference reducer at `0x4c6c30..0x4c6d5f` ORs
+wrapping absolute dword magnitudes. Twice, if the mask is unsigned >=0x40000,
+it arithmetic-shifts the vector and mask by four. It then shifts by two while
+the mask is signed >=0x4000, finally narrowing the vector to signed words.
+The helper's shift-count return is unused by this caller.
+
+Heading is native atan(X,Z). Horizontal length is abs(Z) when X=0, abs(X)
+when Z=0, otherwise the imported-table square root of X²+Z². Pitch is
+atan(Y,horizontal-as-word), clamped to [-0x3ffc,0x3ffc]. The candidate reducer
+subtracts 0x3ffc from that pitch with word wrap and initializes roll to zero.
+`candidate_angles` translates precisely this zero-origin normal caller, not an
+unrestricted position-to-position service.
+
+`project_angles` translates `0x42bd30..0x42bdb1`: let sine/cosine come from the
+imported table at requested heading minus candidate heading (word wrapping).
+Output pitch is `pitch*cos/32767 + roll*sin/32767`; output roll is
+`roll*cos/32767 - pitch*sin/32767`. Each signed product divides separately,
+truncating toward zero, then word additions/subtractions wrap. Requested heading
+is retained. The query cache stores candidate angles before this projection.
+This closes E008's arithmetic dependency, not dispatcher/cache or world ownership.
+[Validation](../baselines/native-land-angles.md).

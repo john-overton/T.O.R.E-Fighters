@@ -1103,7 +1103,9 @@ Special horizon branches and matched retail acceptance remain open.
   external square-root table extraction and bounded shape contact-offset field.
 - [x] Synthetic seam, diagonal, rounding, degenerate and malformed-input tests;
   166,400 imported UKR cell cases repeated identically in the diagnostic.
-- [ ] E008 candidate angle conversion, E003/E005 placement/callback closure,
+- [x] NE-00.1c / E008 candidate angle conversion and heading projection.
+  [Synthetic and imported-table replay evidence](baselines/native-land-angles.md).
+- [ ] E003/E005 placement/callback closure,
   full visual resources and collision record semantics.
 - [ ] E001/E002 staged query/cache/RNG and late-failure rollback, then reviewed
   both-aircraft live contact. Carrier remains gated; no AI or default changes.
