@@ -37,7 +37,10 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   now render, including the original city lighting, with no authored colors.
 - [ ] W3 remainder: celestial shapes, sun/moon direction and the recovered
   sunrise/sunset fields.
-- [ ] W4: implement accepted clouds, fog and visibility behavior.
+- [x] W4 visibility: replace the authored exponential fog with the recovered
+  per-record ramp and haze color, and apply the altitude haze pass.
+- [ ] W4 remainder: cloud and ocean decks, horizon geometry and inside-cloud
+  rendering; the ten-step native remap quantization is approximated by the ramp.
 - [ ] W5: connect verified wind/turbulence, air data and environment feedback.
 - [ ] W6: connect creator/restart/replay and complete theater/platform acceptance.
 

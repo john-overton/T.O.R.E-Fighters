@@ -49,9 +49,20 @@ pub struct Layer {
     pub high_feet: i32,
     /// 31 sky colors; native 0x4b364a copies them to palette indices 224..255.
     pub sky: [[u8; 3]; 31],
-    /// Nine scalars at +0x12..+0x36, all linearly interpolated by 0x4b3820.
-    /// Their individual meanings are UNRESOLVED.
-    pub scalars: [i32; 9],
+    /// Visibility ramp at +0x12..+0x22, in units of 256 feet. Density runs 0..256.
+    /// `_WRSetRemaps@8` shifts a 24.8-foot distance right 16 before comparing,
+    /// and `_WRWeatherEffects` shifts `see_distance` left 16 against the same
+    /// 24.8 distances: both give the identical 256-foot unit.
+    pub fog_near: i32,
+    pub fog_near_density: i32,
+    pub fog_far: i32,
+    pub fog_far_density: i32,
+    pub see_distance: i32,
+    /// Altitude haze ramp at +0x26..+0x32, in units of 256 feet above `low_feet`.
+    pub haze_low: i32,
+    pub haze_low_blend: i32,
+    pub haze_high: i32,
+    pub haze_high_blend: i32,
     /// Interpolated color at +0x36. 0x4b3ad0 resolves it against the shade table
     /// at `[0x580e1c]` and caches the match in the runtime-only field at +0x3a.
     pub shade: [u8; 3],
@@ -60,9 +71,17 @@ pub struct Layer {
     /// A second interpolated color and scalar at +0xfb and +0xfe.
     pub tint: [u8; 3],
     pub tint_scalar: i32,
-    /// Two named dependencies with two scalars each, at +0x102 and +0x118.
-    /// 0x4b3a19 and 0x4b3a6c copy them whole instead of interpolating.
-    pub shapes: [Dependency; 2],
+    /// Two texture decks at +0x102 and +0x118. 0x4b3a19 and 0x4b3a6c copy them
+    /// whole instead of interpolating, and only when the source name is set.
+    pub decks: [Deck; 2],
+    /// Night light direction when the sun is down, binary angles (0x8000 = 180 degrees).
+    pub moon_azimuth: i16,
+    pub moon_elevation: i16,
+    /// Seconds of day at which the sun sits about five degrees below the horizon.
+    pub sunrise_seconds: i32,
+    pub sunset_seconds: i32,
+    pub sun_azimuth_morning: i16,
+    pub sun_azimuth_evening: i16,
     /// 0x4b4720 indexes this by an effect selector and takes the span minimum.
     /// Raw source values may exceed 100; only that consumer's ceiling clamps them.
     pub effects: [u8; EFFECTS],
@@ -92,17 +111,13 @@ impl Layer {
         if sky.iter().chain(&terrain).flatten().any(|c| *c > 63) {
             return Err(invalid("invalid weather palette component"));
         }
-        let mut scalars = [0; 9];
-        for (i, value) in scalars.iter_mut().enumerate() {
-            *value = i32_at(raw, 0x12 + i * 4)?;
-        }
         let shade = slice(raw, 0x36, 3)?.try_into().unwrap();
         let tint = slice(raw, 0xfb, 3)?.try_into().unwrap();
         let tint_scalar = i32_at(raw, 0xfe)?;
-        let shapes = [
-            Dependency::parse(raw, 0x102)?,
-            Dependency::parse(raw, 0x118)?,
-        ];
+        let decks = [Deck::parse(raw, 0x102)?, Deck::parse(raw, 0x118)?];
+        let word = |at: usize| -> Result<i16> {
+            Ok(i16::from_le_bytes(slice(raw, at, 2)?.try_into().unwrap()))
+        };
         let mut effects = [0; EFFECTS];
         effects.copy_from_slice(slice(raw, 0x14e, EFFECTS)?);
         let shape = name(slice(raw, 0x153, RECORD - 0x153)?)?;
@@ -116,13 +131,27 @@ impl Layer {
             end_seconds,
             low_feet,
             high_feet,
-            sky,
-            scalars,
+            fog_near: i32_at(raw, 0x12)?,
+            fog_near_density: i32_at(raw, 0x16)?,
+            fog_far: i32_at(raw, 0x1a)?,
+            fog_far_density: i32_at(raw, 0x1e)?,
+            see_distance: i32_at(raw, 0x22)?,
+            haze_low: i32_at(raw, 0x26)?,
+            haze_low_blend: i32_at(raw, 0x2a)?,
+            haze_high: i32_at(raw, 0x2e)?,
+            haze_high_blend: i32_at(raw, 0x32)?,
             shade,
+            sky,
             terrain,
             tint,
             tint_scalar,
-            shapes,
+            decks,
+            moon_azimuth: word(0x13e)?,
+            moon_elevation: word(0x140)?,
+            sunrise_seconds: i32_at(raw, 0x142)?,
+            sunset_seconds: i32_at(raw, 0x146)?,
+            sun_azimuth_morning: word(0x14a)?,
+            sun_azimuth_evening: word(0x14c)?,
             effects,
             shape,
         })
@@ -159,21 +188,49 @@ impl Layer {
     }
 }
 
-/// A named record dependency: a NUL-terminated name and two scalars after it.
+/// One textured deck: a resource name, the altitude it sits at and the
+/// power-of-two exponent giving its tile size in feet.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Dependency {
+pub struct Deck {
     pub name: String,
-    pub scalars: [i32; 2],
+    pub altitude_feet: i32,
+    pub tile_exponent: i32,
 }
 
-impl Dependency {
-    /// The name occupies 14 bytes; an empty name means the field is unused
-    /// and the native copy at 0x4b3a25 skips it entirely.
+impl Deck {
+    /// The name occupies 14 bytes; an empty name means the deck is unused and
+    /// the native copy at 0x4b3a25 skips it entirely. A `*` in the name selects
+    /// one of a numbered range at load time (0x4b4680), which is how a mission
+    /// picks among SKY0 to SKY8.
     fn parse(record: &[u8], at: usize) -> Result<Self> {
         Ok(Self {
             name: name(slice(record, at, 14)?)?,
-            scalars: [i32_at(record, at + 14)?, i32_at(record, at + 18)?],
+            altitude_feet: i32_at(record, at + 14)?,
+            tile_exponent: i32_at(record, at + 18)?,
         })
+    }
+
+    /// The numbered alternatives a wildcard name stands for, in order.
+    /// Returns the name itself when it carries no wildcard.
+    pub fn alternatives(&self) -> Result<Vec<String>> {
+        let Some((head, rest)) = self.name.split_once('*') else {
+            return Ok(vec![self.name.clone()]);
+        };
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        let tail = &rest[digits.len()..];
+        if digits.len() != 2 {
+            return Err(invalid("weather deck wildcard needs two bound digits"));
+        }
+        let low = digits[..1]
+            .parse::<u32>()
+            .map_err(|_| invalid("bad bound"))?;
+        let high = digits[1..]
+            .parse::<u32>()
+            .map_err(|_| invalid("bad bound"))?;
+        if low > high {
+            return Err(invalid("weather deck wildcard bounds are inverted"));
+        }
+        Ok((low..=high).map(|i| format!("{head}{i}{tail}")).collect())
     }
 }
 
@@ -219,7 +276,18 @@ impl Layer {
         let factor = (position << 8) / span;
         self.low_feet = self.low_feet.min(source.low_feet);
         self.high_feet = self.high_feet.max(source.high_feet);
-        for (d, s) in self.scalars.iter_mut().zip(source.scalars) {
+        // 0x4b3892 onward: the visibility and altitude-haze ramps interpolate.
+        for (d, s) in [
+            (&mut self.fog_near, source.fog_near),
+            (&mut self.fog_near_density, source.fog_near_density),
+            (&mut self.fog_far, source.fog_far),
+            (&mut self.fog_far_density, source.fog_far_density),
+            (&mut self.see_distance, source.see_distance),
+            (&mut self.haze_low, source.haze_low),
+            (&mut self.haze_low_blend, source.haze_low_blend),
+            (&mut self.haze_high, source.haze_high),
+            (&mut self.haze_high_blend, source.haze_high_blend),
+        ] {
             *d = lerp(*d, s, factor);
         }
         lerp_color(&mut self.shade, source.shade, factor);
@@ -234,11 +302,68 @@ impl Layer {
         self.flags = merge_flags(self.flags, source.flags, factor);
         self.start_seconds = self.start_seconds.min(source.start_seconds);
         self.end_seconds = self.end_seconds.max(source.end_seconds);
-        for (d, s) in self.shapes.iter_mut().zip(&source.shapes) {
+        for (d, s) in self.decks.iter_mut().zip(&source.decks) {
             if !s.name.is_empty() {
                 d.clone_from(s);
             }
         }
+    }
+}
+
+/// One record distance unit is 256 feet. See `Layer::fog_near`.
+pub const DISTANCE_FEET: f64 = 256.;
+/// Flag bit 0x02 enables the altitude haze pass at 0x4b3cb0.
+pub const ALTITUDE_HAZE: u16 = 0x02;
+
+impl Layer {
+    /// `0x4b3cb0`. Blends this record's color ramps toward its haze color by an
+    /// amount that rises with height above the band floor. The terrain ramp takes
+    /// the full blend; the sky ramp fades it out from index 30 down to index 16.
+    pub fn apply_altitude_haze(&mut self, altitude_feet: i32) {
+        if self.flags & ALTITUDE_HAZE == 0 {
+            return;
+        }
+        // Both sides are shifted into 256-foot steps first (0x4b3ccc, 0x4b3ccf).
+        let above = (altitude_feet >> 8) - (self.low_feet >> 8);
+        let blend = if above <= self.haze_low {
+            self.haze_low_blend
+        } else if above >= self.haze_high {
+            self.haze_high_blend
+        } else {
+            let span = self.haze_high - self.haze_low;
+            let factor = ((above - self.haze_low) << 8) / span;
+            lerp(self.haze_low_blend, self.haze_high_blend, factor).min(0x100)
+        };
+        if blend <= 0 {
+            return;
+        }
+        let haze = self.shade;
+        for entry in &mut self.terrain {
+            lerp_color(entry, haze, blend);
+        }
+        // 0x4b3d47: the weight decays linearly over the top fifteen sky entries.
+        let step = blend / 15;
+        let mut weight = blend;
+        for index in (16..31).rev() {
+            lerp_color(&mut self.sky[index], haze, weight);
+            weight -= step;
+        }
+    }
+
+    /// `0x4b3410`. Haze density 0..256 at one distance, plus whether the target
+    /// is inside `see_distance` at all.
+    pub fn visibility(&self, distance_feet: f64) -> (i32, bool) {
+        let distance = (distance_feet / DISTANCE_FEET) as i32;
+        let density = if distance <= self.fog_near {
+            self.fog_near_density
+        } else if distance >= self.fog_far {
+            self.fog_far_density
+        } else {
+            let span = self.fog_far - self.fog_near;
+            self.fog_near_density
+                + (self.fog_far_density - self.fog_near_density) * (distance - self.fog_near) / span
+        };
+        (density.clamp(0, 0x100), self.see_distance >= distance)
     }
 }
 
@@ -306,6 +431,11 @@ pub fn expand(base: &[[u8; 3]; 256], layer: &Layer) -> [[u8; 3]; 256] {
         }
     }
     palette
+}
+
+/// Temporary diagnostic accessor.
+pub fn debug_section(data: &[u8]) -> Result<(&[u8], usize)> {
+    section(data)
 }
 
 /// Locates the single CODE section of a PL module and its RVA base.

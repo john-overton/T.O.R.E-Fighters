@@ -104,7 +104,7 @@ impl SimRenderer {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera and atmosphere"),
-            size: 80,
+            size: 96,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -412,10 +412,11 @@ impl SimRenderer {
             self.spare_depth = Some((self.size, std::mem::replace(&mut self.depth, next)));
             self.size = size;
         }
-        let sky = world.palette[235];
+        // The recovered haze color the visibility ramp blends toward.
+        let sky = world.haze;
         let mut uniform = camera.uniform(
             size[0] as f32 / (size[1] as f32 * camera.view_fraction),
-            0.000004,
+            world.fog,
             sky,
         );
         uniform[7] = (world.texture_indices.len() / (256 * 256)) as f32;

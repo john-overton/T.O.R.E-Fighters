@@ -94,12 +94,46 @@ bytes. Otherwise `factor = (position << 8) / span` drives
 
 | Offset | Width | Treatment | Meaning |
 | --- | --- | --- | --- |
-| `+0x12` | 9 × dword | interpolated | scalars; individual meanings UNRESOLVED |
-| `+0x36` | RGB | interpolated | horizon/shade color; `0x4b3ad0` then resolves the nearest entry of the table at `[0x580e1c]` and caches it at `+0x3a` |
-| `+0xfb` | RGB | interpolated | a second color |
-| `+0xfe` | dword | interpolated | a scalar paired with it |
-| `+0x102` | 14 + 2 × dword | replaced when non-empty | named dependency |
-| `+0x118` | 14 + 2 × dword | replaced when non-empty | named dependency |
+| `+0x12`, `+0x16` | dword ×2 | interpolated | visibility ramp: distance and haze density (0..256) at the near end |
+| `+0x1a`, `+0x1e` | dword ×2 | interpolated | the same at the far end |
+| `+0x22` | dword | interpolated | maximum see distance |
+| `+0x26`..`+0x32` | dword ×4 | interpolated | altitude haze ramp: two heights above the band floor and their blends |
+| `+0x36` | RGB | interpolated | haze color; `0x4b3ad0` resolves the nearest remap table and caches it at `+0x3a` |
+| `+0xfb`, `+0xfe` | RGB + dword | interpolated | global palette tint color and target |
+| `+0x102` | 14 + dword ×2 | replaced when non-empty | deck A: name, altitude in feet, tile-size exponent |
+| `+0x118` | 14 + dword ×2 | replaced when non-empty | deck B |
+| `+0x13e`, `+0x140` | word ×2 | kept | night light azimuth and elevation |
+| `+0x142`, `+0x146` | dword ×2 | kept | sunrise and sunset seconds |
+| `+0x14a`, `+0x14c` | word ×2 | kept | sun azimuth before and after noon |
+
+### The distance unit is 256 feet
+
+`_WRSetRemaps@8` at `0x4b31f7` adds a global bias to a 24.8-foot distance and
+shifts it right 16 before comparing it against `+0x12` and `+0x22`, which makes
+one record unit 256 feet. `_WRWeatherEffects` reaches the same scale from the
+other side: it returns `see_distance << 16` and `@WRCanSee@8` compares that
+against a 24.8-foot distance. Both give 256 feet per unit, and the retail values
+then read as ordinary aviation figures:
+
+| Record | Haze starts | Full haze | See distance |
+| --- | --- | --- | --- |
+| `DAY2` day | 7 nm, none | 30 nm, 80 percent | 261 nm |
+| `DAY2` night | 0, 50 percent | 3.5 nm, total | 43 nm |
+| `CLOUD1` inside deck | 0, 10 percent | 0.8 nm, total | 0.4 nm |
+| `FOG1` low | 0, 10 percent | 0.8 nm, total | 0.8 nm |
+
+`DAY2`'s daylight records also name a `SKY*08.PIC` deck at 75,000 feet with
+131,072-foot tiles and an `OCEAN*06.PIC` deck at sea level with 32,768-foot
+tiles. The `*` is a load-time choice among a numbered range (`0x4b4680`), which
+is what SKY0 through SKY8 are for.
+
+### Altitude haze
+
+`0x4b3cb0`, gated on flag `0x02`, blends a record's own ramps toward its haze
+color before that record takes part in any altitude blend. The weight comes from
+the `+0x26`..`+0x32` ramp, measured in 256-foot steps above the band floor. The
+terrain ramp takes the full weight; the sky ramp fades it out linearly from
+index 30 down to index 16 and leaves 0 through 15 untouched.
 
 Bounds take the union rather than blending: `+0x0a` takes the minimum, `+0x0e`,
 `+0x06` the maximum and `+0x02` the minimum. The flag byte is merged at

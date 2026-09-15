@@ -1,9 +1,17 @@
-struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32> }
+struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32> }
 @group(0) @binding(0) var<uniform> scene:Scene;
 // Retail terrain and sky artwork is stored as weather-palette indices, so it is
 // uploaded unresolved and the live palette is applied here every frame.
 @group(0) @binding(1) var tiles:texture_2d_array<u32>;
 @group(0) @binding(2) var palette:texture_2d<f32>;
+// 0x4b3410: haze density is a piecewise-linear ramp between two recovered
+// distances, flat outside them. The native engine then quantizes it into ten
+// remap steps; this applies the ramp directly.
+fn haze(distance:f32)->f32{
+ if distance<=scene.fog.x { return scene.fog.z; }
+ if distance>=scene.fog.y { return scene.fog.w; }
+ return scene.fog.z+(scene.fog.w-scene.fog.z)*(distance-scene.fog.x)/(scene.fog.y-scene.fog.x);
+}
 struct VertexOut {
  @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
  @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32
@@ -51,9 +59,7 @@ fn tile(uv:vec2<f32>,layer:i32)->vec4<f32>{
   if in.layer == -2.0 && tex.a < 0.5 { discard; }
   color=mix(color,tex.rgb,tex.a);
  }
- // Live source palette; the recovered LAY visibility ramp is not applied yet.
- let fog=1.0-exp(-in.distance*scene.sky.w);
- return vec4<f32>(mix(color,linear(scene.sky.rgb),fog),1.0);
+ return vec4<f32>(mix(color,linear(scene.sky.rgb),haze(in.distance)),1.0);
 }
 struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32> }
 @vertex fn sky_vertex(@builtin(vertex_index) i:u32)->SkyOut {

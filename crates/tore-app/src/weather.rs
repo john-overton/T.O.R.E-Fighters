@@ -18,18 +18,20 @@ pub fn validate_sources(
             .iter()
             .map(|l| {
                 format!(
-                    "{}-{}s/{}-{}ft/flags={:#x}/effects={:?}/scalars={:?}/shade={:?}/tint={:?},{}/dep={:?}",
+                    "{}-{}s/{}-{}ft/flags={:#x}/effects={:?}/fog={}..{}ft {}..{}/see={}ft/shade={:?}/decks={:?}",
                     l.start_seconds,
                     l.end_seconds,
                     l.low_feet,
                     l.high_feet,
                     l.flags,
                     l.effects,
-                    l.scalars,
+                    f64::from(l.fog_near) * tore_formats::weather::DISTANCE_FEET,
+                    f64::from(l.fog_far) * tore_formats::weather::DISTANCE_FEET,
+                    l.fog_near_density,
+                    l.fog_far_density,
+                    f64::from(l.see_distance) * tore_formats::weather::DISTANCE_FEET,
                     l.shade,
-                    l.tint,
-                    l.tint_scalar,
-                    l.shapes
+                    l.decks
                 )
             })
             .collect();
@@ -98,7 +100,7 @@ pub fn validate_sources(
         let changed = previous.as_ref() != Some(&sample.shade);
         if changed || blended {
             println!(
-                "  {:02}:{:02} flags={:#05x}{}{} horizon={:?} light={} haze={} visibility={}",
+                "  {:02}:{:02} flags={:#05x}{}{} haze={:?} fog={}..{}/256 clear-to={:.0}nm visibility={}",
                 minute / 60,
                 minute % 60,
                 sample.flags,
@@ -109,8 +111,9 @@ pub fn validate_sources(
                 },
                 if blended { " blend" } else { "      " },
                 sample.shade,
-                sample.scalars[0],
-                sample.scalars[4],
+                sample.fog_near_density,
+                sample.fog_far_density,
+                f64::from(sample.see_distance) * tore_formats::weather::DISTANCE_FEET / 6076.,
                 sample.effect(VISIBILITY)?
             );
         }

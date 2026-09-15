@@ -21,6 +21,10 @@ pub struct World {
     pub weather: tore_sim::environment::Environment,
     /// The palette resolved for the presented camera altitude this frame.
     pub palette: [[u8; 3]; 256],
+    /// The resolved visibility ramp: near feet, far feet, and the 0..1 haze
+    /// fractions at each, plus the haze color those distances blend toward.
+    pub fog: [f32; 4],
+    pub haze: [u8; 3],
 }
 impl World {
     pub fn for_theater(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> AppResult<Self> {
@@ -58,9 +62,9 @@ impl World {
                 minute,
                 environment.layer_parameter.unwrap_or(0),
             )?);
-        let palette = weather
-            .palette(0.)
-            .ok_or("mission weather layer covers no altitude at its launch time")?;
+        if weather.sample(0.).is_none() {
+            return Err("mission weather layer covers no altitude at its launch time".into());
+        }
         let mut texture_indices = Vec::new();
         let count = environment
             .textures
@@ -102,8 +106,11 @@ impl World {
             vertices: Vec::new(),
             texture_indices,
             weather,
-            palette,
+            palette: [[0; 3]; 256],
+            fog: [0.; 4],
+            haze: [0; 3],
         };
+        out.resolve_palette(0.);
         out.build_mesh();
         Ok(out)
     }
@@ -160,9 +167,20 @@ impl World {
     /// Presentation only: resolves the palette for one camera altitude without
     /// advancing state, so mirrors and camera panels stay on the same instant.
     pub fn resolve_palette(&mut self, altitude_ft: f64) {
-        if let Some(palette) = self.weather.palette(altitude_ft) {
-            self.palette = palette;
-        }
+        let Some(layer) = self.weather.sample(altitude_ft) else {
+            return;
+        };
+        self.palette =
+            tore_formats::weather::expand(self.weather.configuration().base_palette(), &layer);
+        let feet = |v: i32| (f64::from(v) * tore_formats::weather::DISTANCE_FEET) as f32;
+        self.fog = [
+            feet(layer.fog_near),
+            feet(layer.fog_far),
+            layer.fog_near_density as f32 / 256.,
+            layer.fog_far_density as f32 / 256.,
+        ];
+        // Six-bit source components, the same expansion the palette ramps use.
+        self.haze = layer.shade.map(|c| ((u16::from(c) * 255 + 31) / 63) as u8);
     }
 
     pub fn height(&self, x: f32, z: f32) -> f32 {
@@ -235,7 +253,7 @@ impl Camera {
             400_000.0,
         );
     }
-    pub fn uniform(&self, aspect: f32, fog: f32, sky: [u8; 3]) -> Vec<f32> {
+    pub fn uniform(&self, aspect: f32, fog: [f32; 4], sky: [u8; 3]) -> Vec<f32> {
         let (sy, cy) = self.yaw.sin_cos();
         let (sp, cp) = self.pitch.sin_cos();
         let (sr, cr) = self.roll.sin_cos();
@@ -251,8 +269,9 @@ impl Camera {
                 sky[0] as f32 / 255.0,
                 sky[1] as f32 / 255.0,
                 sky[2] as f32 / 255.0,
-                fog,
+                0.0,
             ],
+            fog.to_vec(),
         ]
         .concat()
     }
@@ -286,6 +305,8 @@ mod tests {
             vertices: vec![],
             texture_indices: vec![],
             sky_indices: vec![],
+            fog: [0., 1., 0., 0.],
+            haze: [0; 3],
             weather: tore_sim::environment::Environment::new(
                 tore_sim::environment::Configuration::new(
                     tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(

@@ -130,10 +130,16 @@ impl Environment {
                 // 0x4b3c37: position walks from this record's floor to the
                 // previous record's ceiling, so bands cross over their overlap.
                 Some(previous) => {
+                    let mut next = layer.clone();
+                    next.apply_altitude_haze(feet);
                     let span = previous.high_feet.saturating_sub(layer.low_feet);
-                    previous.blend(layer, feet.saturating_sub(layer.low_feet), span);
+                    previous.blend(&next, feet.saturating_sub(layer.low_feet), span);
                 }
-                None => result = Some(layer.clone()),
+                None => {
+                    let mut first = layer.clone();
+                    first.apply_altitude_haze(feet);
+                    result = Some(first);
+                }
             }
         }
         result
