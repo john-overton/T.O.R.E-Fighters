@@ -750,3 +750,23 @@ vertices carry it through indexed color and texture remapping. Ordinary terrain
 and cloud vertices retain their existing enabled mode. Source per-normal light
 remaps and other display-mode effect masks remain separate work; this does not
 claim complete native shape execution or authored HUD parity.
+
+
+### Original per-normal light maps — continuation 2026-09-15
+
+LAY CODE root +0x14/+0x18 is shade count/pointer array; +0x40/+0x44 is highlight
+count/pointer array. Counts are bounded 1..10 and every pointer resolves a full
+256-byte row inside CODE. All 24 reviewed LAYs have 7/6 rows. FA 0x4cd854
+computes `sum((normal[i]*light[i]) >> 15) >> 7`, clamped -255..255. With object
+negative highlights enabled, 0x4cc4b4 selects highlight
+`(-amount-192)*count >> 6` strictly below -192, otherwise shade
+`max(amount,0)*count >> 8`. SH polygon subtype bit 0x20 invokes this operation
+for solids (0x4d4619) and textures (0x4d46b7); subtype bits 0x60 include the
+normal. Light remapping precedes distance fog.
+
+0x4b35b8..0x4b364a selects daytime sun arc or moon angles, adds 32760 to azimuth
+and negates elevation. This light producer does not use the sun visibility flag.
+The port retains source arithmetic/remaps; animation/world orientation still
+uses the host float basis, then Q15 rounding. It is not native matrix parity.
+Neutral imported F18/RAF/CLOUD1 lit-face counts are 275/201/0. Special sensor or
+display color maps remain outside this reviewed ordinary world path.

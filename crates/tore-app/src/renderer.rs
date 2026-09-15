@@ -125,17 +125,18 @@ impl Renderer {
         state: &crate::flight::State,
         visible: bool,
         camera: &crate::terrain::Camera,
+        world: &crate::terrain::World,
     ) {
         self.mirror_camera = crate::mirrors::camera(state);
         if !visible {
-            self.mirror_vertices = hornet.vertices(state, &self.mirror_camera);
+            self.mirror_vertices = hornet.vertices(state, &self.mirror_camera, world);
         }
         if visible {
             self.sim.aircraft(
                 &self.device,
                 &self.queue,
                 hornet,
-                &hornet.vertices(state, camera),
+                &hornet.vertices(state, camera, world),
             );
         } else {
             self.sim.hide_aircraft();

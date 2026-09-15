@@ -16,7 +16,7 @@ fn haze(distance:f32)->f32{
 }
 struct VertexOut {
  @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
- @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>, @location(7) @interpolate(flat) fog_enabled:u32
+ @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>, @location(7) @interpolate(flat) fog_enabled:u32, @location(8) @interpolate(flat) light_row:i32
 }
 fn linear(c:vec3<f32>)->vec3<f32>{return pow((c+vec3<f32>(0.055))/1.055,vec3<f32>(2.4));}
 // Index 255 is the native water/cutout test at 0x4aa739 and stays transparent.
@@ -85,6 +85,7 @@ fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec
    let original=textureLoad(tiles,at,layer,0).r;
    var index=original;
    var palette_row=row;
+   if sun_passes<0 && core>=0 { index=textureLoad(weather_tiles,vec2<i32>(i32(index),core),i32(scene.deck_a.w),0).r; }
    if sun_passes>=0 {
     index=textureLoad(tiles,vec2<i32>(i32(index),i32(scene.deck_b.w)+row-1),i32(scene.deck_a.w),0).r;
     for(var n=0;n<sun_passes;n++){ index=textureLoad(tiles,vec2<i32>(i32(index),0),i32(scene.deck_a.w),0).r; }
@@ -109,20 +110,21 @@ fn tile(uv:vec2<f32>,layer:i32,row:i32)->vec4<f32>{return sample_tile(uv,layer,r
  let near=1.0;let far=2200000.0;let f=1.7320508*scene.up.w;
  var out:VertexOut;
  out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
- let fog_mode=u32(max(index,0.0))/256u;
+ let fog_mode=(u32(max(index,0.0))/256u)%4u;
+ out.light_row=i32(max(index,0.0))/1024-1;
  let fog_enabled=fog_mode==0u || (fog_mode==2u && (i32(scene.ray.w)&4)==0);
  out.fog_enabled=select(0u,1u,fog_enabled);
  out.direction=p;out.altitude=position.y;out.uv=uv;out.layer=layer;out.own_color=select(0.0,1.0,index<0.0);
  // A negative index means the vertex carries its own color; terrain carries a
  // source palette index instead, resolved per frame and then Gouraud blended.
- if index>=0.0 { var source_index=u32(index)%256u; if fog_enabled {source_index=ray_index(source_index,ray_rows(length(p),position.y));} out.color=shade(source_index,0).rgb; } else { out.color=linear(color); }
+ if index>=0.0 { var source_index=u32(index)%256u; if out.light_row>=0 {source_index=textureLoad(weather_tiles,vec2<i32>(i32(source_index),out.light_row),i32(scene.deck_a.w),0).r;} if fog_enabled {source_index=ray_index(source_index,ray_rows(length(p),position.y));} out.color=shade(source_index,0).rgb; } else { out.color=linear(color); }
  out.distance=length(p);return out;
 }
 @fragment fn fragment(in:VertexOut)->@location(0) vec4<f32>{
  var color=in.color;
  if in.layer>=0.0 || in.layer == -2.0 {
   var remaps=vec2<i32>(-1);if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
-  let tex=sample_tile(in.uv,i32(max(in.layer,0.0)),0,-1,-1,remaps);
+  let tex=sample_tile(in.uv,i32(max(in.layer,0.0)),0,-1,in.light_row,remaps);
   if in.layer == -2.0 && tex.a < 0.5 { discard; }
   color=mix(color,tex.rgb,tex.a);
  }
@@ -265,7 +267,7 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
  let z=dot(position,scene.forward.xyz);let f=1.7320508*scene.up.w;
  var out:VertexOut;
  out.clip=vec4<f32>(dot(position,scene.right.xyz)*f/scene.eye.w,dot(position,scene.up.xyz)*f,z,z);
- out.fog_enabled=0u;out.uv=uv;out.layer=layer;out.color=shade(u32(index),0).rgb;out.distance=position.y;out.own_color=0.;out.altitude=position.y;out.direction=position;return out;
+ out.light_row=-1;out.fog_enabled=0u;out.uv=uv;out.layer=layer;out.color=shade(u32(index),0).rgb;out.distance=position.y;out.own_color=0.;out.altitude=position.y;out.direction=position;return out;
 }
 @fragment fn celestial_fragment(in:VertexOut)->@location(0) vec4<f32>{
  if celestial_occluded(normalize(in.direction)) {discard;}

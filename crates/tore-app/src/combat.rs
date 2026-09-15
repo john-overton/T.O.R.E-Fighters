@@ -322,7 +322,13 @@ impl Combat {
             self.state.projectiles.iter().filter(|p| p.incoming).count()
         )
     }
-    pub fn vertices(&self, h: &Airframe, s: &flight::State, camera: &Camera) -> Vec<f32> {
+    pub fn vertices(
+        &self,
+        h: &Airframe,
+        s: &flight::State,
+        camera: &Camera,
+        world: &crate::terrain::World,
+    ) -> Vec<f32> {
         let mut v = Vec::new();
         for t in self.state.targets.iter().filter(|t| t.hp > 0) {
             let mut pose = s.clone();
@@ -338,7 +344,7 @@ impl Combat {
             pose.rudder = 0.;
             pose.brake = 0.;
             pose.hook = 0.;
-            v.extend(h.vertices(&pose, camera));
+            v.extend(h.vertices(&pose, camera, world));
         }
         // One original model per surviving source station group. Pair/rack
         // offsets are not decoded; never fabricate positions for each round.

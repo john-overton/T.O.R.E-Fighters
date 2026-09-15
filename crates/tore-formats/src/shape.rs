@@ -256,7 +256,7 @@ impl Shape {
                     let flags = h[2];
                     let color = u16_at(c, p + 3)? as u8;
                     p += 5;
-                    let normal = if sub & 0x40 != 0 {
+                    let normal = if sub & 0x60 != 0 {
                         let n = [
                             word(c, p)? as f32,
                             word(c, p + 2)? as f32,

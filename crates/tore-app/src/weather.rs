@@ -39,9 +39,11 @@ pub fn validate_sources(
             })
             .collect();
         println!(
-            "{name}: {} records [{}]",
+            "{name}: {} records [{}]; light maps {}/{}",
             module.layers.len(),
-            spans.join(" ")
+            spans.join(" "),
+            module.lighting.shade.len(),
+            module.lighting.highlight.len()
         );
         // Every record must expand to a full palette without a bounds failure.
         for index in 0..module.layers.len() {
@@ -60,7 +62,14 @@ pub fn validate_sources(
             for face in &shape.faces {
                 modes[face.fog as usize] += 1;
             }
-            println!("{name}: fog-enabled/disabled/conditional faces {modes:?}");
+            let lit = shape
+                .faces
+                .iter()
+                .filter(|f| f.subtype & 0x20 != 0 && f.normal.is_some())
+                .count();
+            println!(
+                "{name}: fog-enabled/disabled/conditional faces {modes:?}, {lit} normal-lit faces"
+            );
         }
     }
 

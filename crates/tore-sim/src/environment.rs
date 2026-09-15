@@ -169,6 +169,10 @@ impl Configuration {
         &self.module.shades
     }
 
+    pub fn lighting(&self) -> &tore_formats::weather::lighting::Lighting {
+        &self.module.lighting
+    }
+
     pub fn flare_fills(&self) -> &[[u8; 256]; 2] {
         &self.module.flare_fills
     }
@@ -706,8 +710,14 @@ mod tests {
 /// FA 0x4b354f/0x4ab205: inclusive time gate and reflected binary-angle arc.
 /// Returns source azimuth/elevation; no host astronomy or latitude model.
 pub fn sun_angles(layer: &Layer, seconds: i32) -> Option<[i16; 2]> {
-    if layer.flags & 8 == 0
-        || seconds < layer.sunrise_seconds
+    if layer.flags & 8 == 0 {
+        return None;
+    }
+    sun_arc(layer, seconds).filter(|angle| angle[1] >= -1820)
+}
+
+fn sun_arc(layer: &Layer, seconds: i32) -> Option<[i16; 2]> {
+    if seconds < layer.sunrise_seconds
         || seconds > layer.sunset_seconds
         || layer.sunset_seconds <= layer.sunrise_seconds
     {
@@ -723,12 +733,44 @@ pub fn sun_angles(layer: &Layer, seconds: i32) -> Option<[i16; 2]> {
         elevation = 32760i16.wrapping_sub(elevation);
         layer.sun_azimuth_evening
     };
-    (elevation >= -1820).then_some([azimuth, elevation])
+    Some([azimuth, elevation])
+}
+
+/// FA 0x4b35b8/0x4b35f1: light points opposite the sun during its time interval,
+/// even when its drawing flag is off; otherwise use the LAY night-light angles.
+pub fn light_angles(layer: &Layer, seconds: i32) -> [i16; 2] {
+    let [azimuth, elevation] =
+        sun_arc(layer, seconds).unwrap_or([layer.moon_azimuth, layer.moon_elevation]);
+    [azimuth.wrapping_add(32760), elevation.wrapping_neg()]
 }
 
 #[cfg(test)]
 mod celestial_tests {
     use super::*;
+    #[test]
+    fn lighting_uses_the_arc_without_the_sun_drawing_flag() {
+        let mut layer = Module::parse(&tore_formats::weather::synthetic_module(1))
+            .unwrap()
+            .layers
+            .remove(0);
+        layer.flags = 0;
+        layer.sunrise_seconds = 25200;
+        layer.sunset_seconds = 68400;
+        layer.sun_azimuth_morning = 18000;
+        layer.moon_azimuth = 8000;
+        layer.moon_elevation = 3000;
+        assert!(sun_angles(&layer, 43200).is_none());
+        let arc = sun_arc(&layer, 43200).unwrap();
+        assert_eq!(
+            light_angles(&layer, 43200),
+            [arc[0].wrapping_add(32760), -arc[1]]
+        );
+        assert_eq!(
+            light_angles(&layer, 25199),
+            [8000i16.wrapping_add(32760), -3000]
+        );
+        assert_ne!(light_angles(&layer, 25200), light_angles(&layer, 25199));
+    }
     #[test]
     fn glare_gates_smoothing_and_view_queries_are_separate() {
         let mut module = Module::parse(&tore_formats::weather::synthetic_module(1)).unwrap();

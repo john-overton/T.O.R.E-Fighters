@@ -171,3 +171,8 @@ SH static projection now preserves opcode CA fog control, including conditional
 weather flag 0x40 suppression. Horizon coverage includes original indexed
 deck/ground transitions and lower solid size/inversion gates; analytic GPU
 projection remains distinct from native integer scanline acceptance.
+
+
+LAY light-map counts/pointers and SH polygon normal flags now feed the reviewed
+solid/texture light-before-fog path. Source signed dot and row boundaries are
+tested; float animated orientation remains an adaptation. See weather.md.

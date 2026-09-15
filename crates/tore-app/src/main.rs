@@ -1323,6 +1323,7 @@ impl ApplicationHandler for App {
                             &self.hornet,
                             &presented,
                             &self.camera,
+                            &self.world,
                         ));
                         if now.duration_since(self.instrument_time).as_millis() >= 100
                             || self.smoke_test
@@ -1345,7 +1346,13 @@ impl ApplicationHandler for App {
                                         }
                                         camera.pitch = -(30f32 / 65.).atan();
                                     }
-                                    renderer.aircraft(&self.hornet, &presented, page == 3, &camera);
+                                    renderer.aircraft(
+                                        &self.hornet,
+                                        &presented,
+                                        page == 3,
+                                        &camera,
+                                        &self.world,
+                                    );
                                     let result = if self.smoke_test {
                                         renderer
                                             .scene_pixels(&camera, &self.world, 138, 114, false)
@@ -1368,6 +1375,7 @@ impl ApplicationHandler for App {
                             &presented,
                             matches!(self.flight_view, 1 | 2),
                             &self.camera,
+                            &self.world,
                         );
                         simulation_ms = frame_start.elapsed().as_secs_f64() * 1000.;
                         self.instruments.combat = Some(self.combat.readout(&self.flight));
@@ -1459,7 +1467,7 @@ impl ApplicationHandler for App {
                     }
                 };
                 if self.screen != Screen::Flight {
-                    renderer.aircraft(&self.hornet, &self.flight, false, &self.camera);
+                    renderer.aircraft(&self.hornet, &self.flight, false, &self.camera, &self.world);
                     if let Some(audio) = &self.audio {
                         audio.pause_flight(false);
                         audio.flight(None);

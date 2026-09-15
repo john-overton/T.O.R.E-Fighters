@@ -6,6 +6,7 @@ mod callbacks;
 pub use callbacks::Callback;
 pub mod clouds;
 pub mod flare;
+pub mod lighting;
 pub mod palette;
 mod remap;
 pub mod shape;
@@ -421,6 +422,7 @@ pub struct Module {
     pub shades: Vec<ShadeRemap>,
     pub sun_fill: [u8; 256],
     pub flare_fills: [[u8; 256]; 2],
+    pub lighting: lighting::Lighting,
 }
 
 impl Module {
@@ -457,6 +459,7 @@ impl Module {
             resolve(u32_at(code, 0x48)?, 256)?.try_into().unwrap(),
             resolve(u32_at(code, 0x4c)?, 256)?.try_into().unwrap(),
         ];
+        let lighting = lighting::Lighting::parse(code, base_rva)?;
         let shades = remap::parse(code, base_rva, u32_at(code, 0x6c)?)?;
         let mut layers = Vec::new();
         for index in 0..MAX_RECORDS {
@@ -471,6 +474,7 @@ impl Module {
                     shades,
                     sun_fill,
                     flare_fills,
+                    lighting,
                 });
             }
             let callback = callbacks::resolve(data, code, base_rva, u32_at(record, 0x136)?)?;
@@ -562,6 +566,10 @@ pub fn synthetic_module(records: usize) -> Vec<u8> {
     // The base palette occupies the first 768 bytes; the table follows it.
     let table = 0x600;
     let mut code = vec![0; table + (records + 1) * RECORD];
+    code[0x14..0x18].copy_from_slice(&1u32.to_le_bytes());
+    code[0x18..0x1c].copy_from_slice(&0x600u32.to_le_bytes());
+    code[0x40..0x44].copy_from_slice(&1u32.to_le_bytes());
+    code[0x44..0x48].copy_from_slice(&0x600u32.to_le_bytes());
     code[0x70..0x74].copy_from_slice(&0x100u32.to_le_bytes());
     code[0x74..0x78].copy_from_slice(&(0x100 + table as u32).to_le_bytes());
     code[0x48..0x4c].copy_from_slice(&0x600u32.to_le_bytes());

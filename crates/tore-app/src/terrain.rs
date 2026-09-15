@@ -172,6 +172,7 @@ impl World {
             texture_indices.len() / 65536,
             weather.configuration().sun_fill(),
             weather.configuration().shades(),
+            weather.configuration().lighting(),
         )?);
         let clouds = Some(crate::clouds::Clouds::load(
             resources,

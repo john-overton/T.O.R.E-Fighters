@@ -356,9 +356,42 @@ Validation: 278 Rust tests, 24 Python tests, locked build, warnings-denied Clipp
 formatting and source/binary asset guards pass. Imported neutral F18/RAF/CLOUD1
 faces all retain enabled fog (282/206/2); this audit found no neutral face that
 needed a disabled mode. Synthetic fixtures exercise the recovered disabled and
-conditional cases. Linux creator/viewer and F18 wide/Rafale tall flight GPU
-checks passed, with dusk, dawn, above-sky bank and horizon captures in ignored
+conditional cases. Linux creator/viewer GPU checks passed, with dusk, dawn,
+above-sky bank and horizon captures in ignored
 `.local/weather-continuation/`. A 330-frame run had presentation stalls (2.99 ms
 mean / 12.29 p95); a 630-frame repeat measured 2.09 / 2.34 ms, max 5.21, with
 630 mirrors and no paused frames/readbacks. Neither result is GPU timing. Retail
 comparison and Windows/macOS execution remain unavailable in this session.
+
+
+### Per-normal aircraft lighting — 2026-09-15
+
+LAY root +14/+18 supplies shade count/pointers; +40/+44 supplies highlight
+count/pointers. All 24 reviewed modules contain seven shade and six highlight
+rows. The bounded reader retains these original 256-index maps. FA 0x4cd854
+shifts each Q15 normal/light product before summation; 0x4cc4b4 selects a shade
+row for nonnegative amounts or a highlight row below -192. The reviewed object
+path enables negative highlights. Polygon subtype bit 0x20 applies these maps
+to flat and textured faces (0x4d4619 / 0x4d46b7), before fog. Subtype bits 0x60
+carry the source normal. Neutral F18 has 275 lit faces of 282, Rafale 201 of
+206; CLOUD1's two faces do not request this light operation.
+
+Weather light direction (0x4b35b8..0x4b364a) uses the inverted daytime sun arc
+or night moon angles, independently of the sun draw flag. Tests cover both
+inclusive day boundaries. The app packs light-row and fog selectors into the
+existing indexed vertex field and shares the original maps with solid/texture
+shading. Animated normals and directions are quantized from the existing float
+orientation; native integer matrix parity remains unclaimed.
+
+Validation: 281 Rust tests, 24 Python tests, formatting, warnings-denied Clippy,
+locked build and source/binary asset guards pass. Linux Vulkan creator/viewer
+checks and actual F18 1280x720/Rafale 720x960 flight captures pass, including
+Rafale cockpit at dusk. Correct flight images use `--capture-flight` and are
+named `lighting-{f18,rafale,cockpit}-flight.ppm` in ignored
+`.local/weather-continuation/`. Earlier `horizon-f18`, `horizon-rafale`,
+`lighting-f18` and `lighting-rafale` files used `--capture-terrain`, which selects
+the viewer even after `--free-flight`; those are viewer evidence only. The
+corrected flight captures validate the cumulative horizon/fog/lighting path.
+A 630-frame active F18 run measured 2.17 ms mean / 2.56 p95, max 5.38, with
+630 mirrors and zero paused frames/readbacks. CPU intervals are not GPU timing.
+Matched retail and Windows/macOS checks remain pending external access.

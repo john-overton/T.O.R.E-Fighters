@@ -18,6 +18,7 @@ pub struct Celestial {
     pub moon_texture: usize,
     pub moon_uv: [f32; 4],
     pub sun_remap: usize,
+    pub light_rows: [usize; 2],
     pub shade_rows: BTreeMap<[u8; 3], usize>,
 }
 impl Celestial {
@@ -27,6 +28,7 @@ impl Celestial {
         offset: usize,
         sun_fill: &[u8; 256],
         shades: &[tore_formats::weather::ShadeRemap],
+        lighting: &tore_formats::weather::lighting::Lighting,
     ) -> AppResult<Self> {
         let read = |n: &str| {
             resources
@@ -105,6 +107,20 @@ impl Celestial {
                 row += 1;
             }
         }
+        let mut light_rows = [0; 2];
+        for (i, bank) in [&lighting.shade, &lighting.highlight]
+            .into_iter()
+            .enumerate()
+        {
+            light_rows[i] = row;
+            if row + bank.len() > 256 {
+                return Err("too many weather light rows".into());
+            }
+            for map in bank {
+                pixels[row * 256..(row + 1) * 256].copy_from_slice(map);
+                row += 1;
+            }
+        }
         images.extend(pixels);
         Ok(Self {
             sun,
@@ -120,6 +136,7 @@ impl Celestial {
             moon_uv,
             sun_remap,
             shade_rows,
+            light_rows,
         })
     }
     pub fn sun_uniform(&self, world: &World, altitude: f32) -> Vec<f32> {
@@ -273,6 +290,7 @@ mod tests {
             moon_uv: [0., 0., 1., 1.],
             sun_remap: 0,
             shade_rows: BTreeMap::new(),
+            light_rows: [0; 2],
             flare: tore_formats::weather::flare::Layout { circles: vec![] },
             sun_effects: true,
         };

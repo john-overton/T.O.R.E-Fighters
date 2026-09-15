@@ -250,7 +250,7 @@ impl Airframe {
         }
         c
     }
-    pub fn vertices(&self, s: &flight::State, camera: &Camera) -> Vec<f32> {
+    pub fn vertices(&self, s: &flight::State, camera: &Camera, world: &World) -> Vec<f32> {
         let mut result = Vec::new();
         let (sy, cy) = (s.yaw as f32).sin_cos();
         let (sp, cp) = (s.pitch as f32).sin_cos();
@@ -261,6 +261,16 @@ impl Airframe {
             let (y, z) = (y * cp + z * sp, -y * sp + z * cp);
             [x * cy + z * sy, y, -x * sy + z * cy]
         };
+        let lighting = world
+            .weather
+            .sample(camera.position[1] as f64)
+            .map(|layer| {
+                let direction = crate::celestial::rotate(
+                    [0., 0., 1.],
+                    tore_sim::environment::light_angles(&layer, world.weather.seconds_of_day()),
+                );
+                direction.map(|v| (v * 32767.).round().clamp(-32767., 32767.) as i16)
+            });
         let hornet_rig = self.profile.id == tore_formats::aircraft::AircraftId::F18;
         for source in self.poses[if hornet_rig {
             15
@@ -295,6 +305,24 @@ impl Airframe {
                 }
             }
 
+            // Native polygon subtype bit 0x20 selects per-normal light remapping.
+            // Animated world normals and light angles use the host float rig;
+            // the following Q15 dot, row selection and remap order are translated.
+            let light_row = if f.subtype & 0x20 != 0 {
+                f.normal
+                    .zip(lighting)
+                    .zip(world.celestial.as_ref())
+                    .map(|((normal, light), celestial)| {
+                        let normal =
+                            orient(normal).map(|v| v.round().clamp(-32767., 32767.) as i16);
+                        let amount = tore_formats::weather::lighting::amount(normal, light);
+                        let (bank, row) = world.weather.configuration().lighting().row(amount);
+                        (celestial.light_rows[bank] + row + 1) as f32
+                    })
+                    .unwrap_or(0.)
+            } else {
+                0.
+            };
             for i in 1..f.positions.len() - 1 {
                 for j in [0, i, i + 1] {
                     let p = f.positions[j];
@@ -350,7 +378,7 @@ impl Airframe {
                         if cold_nozzle {
                             -1.
                         } else {
-                            f.colors[j] as f32 + 256. * f.fog as u8 as f32
+                            f.colors[j] as f32 + 256. * f.fog as u8 as f32 + 1024. * light_row
                         },
                     ]);
                 }

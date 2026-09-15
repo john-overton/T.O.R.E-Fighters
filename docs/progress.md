@@ -851,3 +851,14 @@ Special horizon branches and matched retail acceptance remain open.
 - [x] Carry original SH CA fog modes through indexed aircraft shading.
 - [ ] Per-normal light remaps and special display modes remain under review.
 - [ ] Native scanline/filtering and matched retail/platform visual acceptance.
+
+
+### Weather aircraft lighting continuation (2026-09-15)
+
+- [x] Decode original LAY shade/highlight maps; retain SH normal lighting flags.
+- [x] Source signed dot/row selection and day/night direction, applied before fog
+  to solid and textured aircraft; animation matrix rounding remains adapted.
+- [x] 281 Rust/24 Python tests and required locked/lint/asset checks; creator,
+  viewer, both aircraft wide/tall actual flight captures and repeatable performance.
+- [ ] HUD primary color and special display-mode audit; matched retail raster
+  and Windows/macOS acceptance. See corrected capture labels in the baseline.

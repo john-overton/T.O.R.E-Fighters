@@ -63,8 +63,10 @@ all sensors are blocked by visible fog.
   and selective cockpit tint; render normal full-detail horizon bands.
 - [x] Recover deck/ground transition boundaries, above-sky transition/underside,
   lower solid size/inversion gates and per-shape fog control.
-- [ ] Finish per-normal light remaps and assess special display-mode effects;
-  compare native scanline rounding and horizon filtering with retail.
+- [x] Original per-normal shade/highlight maps for solid and textured aircraft,
+  source day/night light selection and light-before-fog ordering.
+- [ ] Assess special display-mode effects and affected HUD color; compare native
+  scanline rounding and horizon filtering with retail.
 - [ ] Add synthetic boundary/state tests, imported-module diagnostics and matched
   fog/transition captures; run creator/viewer/flight checks after rendering edits.
 
