@@ -83,6 +83,8 @@ REVIEWED_REGIONS = (
     ('transverse_decay', 0x47cb80, 0x47cbdb, 'integration'),
     ('axis_integration', 0x47cbe0, 0x47cc67, 'integration'),
     ('service_multiply', 0x4c65ec, 0x4c65f8, 'clock'),
+    ('movement_gravity_turn', 0x476bb0, 0x476cba, 'movement'),
+    ('movement_low_speed_travel', 0x476d67, 0x476ed2, 'movement'),
     ('movement_angle_step', 0x476ae0, 0x476bb0, 'movement'),
 )
 

@@ -524,3 +524,9 @@ normal force update. It adds no live flight mode.
 The departure example also evaluates separate native force/velocity snapshots
 from each departure output, using explicit empty/fuel-off inputs. These are
 component probes: they do not feed velocity back into a full flight trajectory.
+
+`cargo test --locked -p tore-formats normal_control` and
+`cargo test --locked -p tore-formats movement_stage` check the diagnostic primary
+control and movement/contact contracts. `native_departure` now evaluates paired
+force→movement snapshots with both PTs; it still does not run a full native flight.
+[Scope and results](baselines/native-movement-control.md).

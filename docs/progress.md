@@ -1019,3 +1019,15 @@ Special horizon branches and matched retail acceptance remain open.
   ordering before live native activation. Steps 2–3 remain open at those boundaries.
 - Retail flight comparison is unavailable per user clarification; continue native
   implementation without making comparison a prerequisite or claiming parity.
+
+### Native primary-control and movement/contact continuation — 2026-09-15
+
+- [x] Join native primary G/pitch/AoA and roll response, including whole-degree
+  low-speed roll limiting and ground inhibition, using explicit loaded inputs.
+- [x] Join movement-rate transform, gravity turn, display composition, low-speed
+  travel pitch, world velocity, position/wind and explicit post-query settling.
+- [x] Test repeated loops in both directions and contact/display ordering; both
+  PTs pass 7,200 paired force→movement snapshot replay checks.
+  [Evidence](baselines/native-movement-control.md).
+- [ ] Complete loading/damage, auxiliary rates, rudder/steering, query producers,
+  event/lifecycle and whole-tick activation. Steps 2–3 remain partially complete.

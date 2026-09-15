@@ -109,3 +109,8 @@ tests and build using `--locked`; all 24 Python tool tests; repository and both
 binary asset guards. Both PT probes passed. Logs are in
 `.local/native-departure-stage/checks/force-*.txt`. No live/rendering change or
 new GPU, audible/controller, Windows or macOS acceptance is claimed.
+
+
+The later [movement/control baseline](native-movement-control.md) extends the
+force snapshots through movement integration and explicit contact tests. These
+still do not feed a complete native flight trajectory or activate a live adapter.

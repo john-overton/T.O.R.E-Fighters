@@ -315,6 +315,7 @@ mod matrix_tests {
 }
 
 /// FA 0x476cba..0x476d67. Movement -> display, then slip/AoA, bank, turbulence.
+/// Offsets are [slip, AoA, bank]; departure state stores [bank, AoA, slip].
 /// Returns display PA words and the native heading-chart flag-toggle predicate.
 pub fn cockpit_angles(
     t: &TrigTable,

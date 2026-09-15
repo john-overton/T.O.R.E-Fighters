@@ -31,8 +31,12 @@ components are connected only in hybrid, with fitted boundaries.
 - [x] Resolve initial/bounded/current-G envelope roles and the non-VTOL gate
   for both supported profiles; translate/test the departure force-G override
   and ordered force/velocity stage. These remain diagnostic components.
-- [ ] Resolve remaining normal control, load/damage/device producers and full
-  movement ordering before connecting a native runtime path.
+- [x] Join primary G/pitch/AoA/roll consumers and movement through explicit
+  post-query contact settling; validate component tests and both PT snapshot
+  probes. [Evidence](baselines/native-movement-control.md).
+- [ ] Resolve remaining loaded/damage/device producers, auxiliary rates, full
+  rudder/steering, terrain/carrier queries and whole-tick event/lifecycle ordering
+  before connecting a native runtime path.
 - [ ] Compare source-derived expected outputs and, when available, matched
   retail maneuvers. Record missing implementation separately from missing evidence.
 

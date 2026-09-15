@@ -8,6 +8,8 @@ pub mod forces;
 pub mod ground;
 pub mod integration;
 pub mod loading;
+pub mod movement_stage;
+pub mod normal_control;
 pub mod profile;
 pub mod queries;
 pub mod rotation;

@@ -9,6 +9,7 @@ use tore_formats::{
         force_stage::{self, Input as ForceInput, Setup as ForceSetup},
         forces::DragDevices,
         integration::{MovementAngles, Velocity},
+        movement_stage::{self, Input as MovementInput},
         profile::FlightProfile,
         rotation::{AtanTable, TrigTable, degrees_to_pa},
     },
@@ -72,6 +73,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             limits: p.loaded_velocity(upper)?,
         };
         let empty_weight = field("weight")?;
+        let low_speed_span = i16::try_from(field("lowAOASpeed")?)?;
+        let low_speed_pitch = i16::try_from(field("lowAOAPitch")?)?;
         println!(
             "aircraft={} source_departure={:?} extended_warning={} vtLimitDown=0",
             aircraft.name, p.departure, p.extended_warning
@@ -172,6 +175,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 assert_eq!(force.velocity, force_replay.velocity);
                 assert_eq!(force.lift, force_replay.lift);
                 assert_eq!(force.force_g_f8, 256);
+                let movement_input = MovementInput {
+                    movement: s.movement,
+                    position_f8: [0, 15000 * 256, 0],
+                    velocity: force.velocity,
+                    body_rates_f8: s.body_rates_f8,
+                    cached_speed_fps: s.speed_f8 >> 8,
+                    departure: s.departure.mode,
+                    on_ground: false,
+                    offsets_f8: s.offsets_f8,
+                    turbulence_f8: [0; 2],
+                    previous_heading_pa: 0,
+                    clean_stall_fps: i.envelopes.clean_stall_fps,
+                    low_speed_span,
+                    low_speed_pitch,
+                    wind_fps: 0,
+                    wind_heading_pa: 0,
+                    ticks: i.ticks,
+                };
+                let movement = movement_stage::advance(&t, &a, movement_input)?;
+                assert_eq!(movement, movement_stage::advance(&t, &a, movement_input)?);
                 seen_tumble |= out.tumble_applied;
                 seen_spin |= s.departure.mode == DepartureMode::Spinning;
                 recovered |= out.recovered_spin;
@@ -206,7 +229,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     println!(
-        "Diagnostic departure stage only: scripted inputs; force snapshots evaluated separately; normal controls/movement/contact and retail trajectories are not simulated."
+        "Diagnostic departure stage only: scripted inputs; force/movement snapshots evaluated separately; full normal controls/contact queries and retail trajectories are not simulated."
     );
     Ok(())
 }

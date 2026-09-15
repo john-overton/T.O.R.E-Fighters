@@ -740,3 +740,42 @@ devices and cached body angles remain explicit inputs. The example checks force
 snapshots from departure outputs independently; it does not feed their velocity
 back into a trajectory with the intervening normal controls and later movement
 still absent. This is not a new live adapter. [Evidence](../baselines/native-departure-stage.md#force-connection-follow-up).
+
+### Normal-control and movement/contact composition — 2026-09-15
+
+**Native, diagnostic translation:** `normal_control` joins the reviewed primary
+G/pitch/AoA and roll consumers (`0x47c0a2..0x47c12b`, `0x47c18c..0x47c1e5`,
+`0x47c235..0x47c2a5`, `0x47c2f0`). Loaded axis limits and commands after departure
+attenuation are explicit inputs. G bounds are fixed8 and reduce about 1G below
+twice stall speed; the lower bound is capped at zero. Roll bounds reduce in
+**whole degrees before the fixed8 shift**. The updated G minus 1G drives pitch
+rate through `0x476aa0`, while AoA uses the separate `pull_aoa` response. Ground
+clears primary roll rate; bank display offset slews to zero at 90 degrees/sec.
+Loaded/damage limit producers, auxiliary rates, high-G events and the remaining
+rudder/control branches are not implemented by this component.
+
+`movement_stage` joins `0x476ae0..0x476f98`, before the contact query call:
+
+1. Transform body rates using movement roll/pitch, integrate movement angles and
+   preserve both vertical chart crossings.
+2. Apply `0x476bb0..0x476cba` gravity-turn correction except when spinning,
+   grounded or already at/below −90° movement pitch. It uses cached speed at
+   `0x5451f0`, a 1G turn rate, pitch cosine and then roll cosine/sine. Preserve
+   the separate signed service-time products and final downward pitch bound.
+3. Compose body/display angles. Departure offsets are `[bank,AoA,slip]`;
+   `cockpit_angles` takes `[slip,AoA,bank]`. The boundary explicitly reorders them.
+4. Resolve low-speed travel pitch using a **flaps-cleared** 1G stall query.
+   Add the offset for nonnegative forward speed, subtract for negative speed;
+   clamp only that effective travel pitch to ±90°. The movement attitude itself
+   remains independent. Transform velocity, integrate position and separate wind,
+   then record vertical speed before contact.
+5. `Output::settle` supplies the new position/attitude/velocity to translated
+   contact settling. Query results must refer to that position. Cached ground,
+   second touching query, retained height and classified code remain distinct.
+   Display angles and vertical speed retain their source pre-contact values.
+   Touchdown rate changes and contact events are returned to caller-owned state.
+
+The repeatable extraction now includes gravity-turn and low-speed-travel slices.
+No terrain/carrier producer, equipment callback or imported native code executes.
+The normal branch's auxiliary rates and damage effects remain upstream; neither
+live adapter is switched. [Acceptance scope](../baselines/native-movement-control.md).

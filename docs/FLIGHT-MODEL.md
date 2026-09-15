@@ -276,3 +276,11 @@ loaded/damage/device producers and movement/contact coupling remain open.
 Retail comparison is unavailable per the user's 2026-09-15 clarification and
 is recorded as an evidence limitation, not an implementation prerequisite.
 [Validation and scope](baselines/native-departure-stage.md#force-connection-follow-up).
+
+The next diagnostic slice joins primary native G/pitch/AoA/roll consumers and
+movement integration through explicit post-query contact settling. It adds the
+native gravity-turn correction and preserves low-speed travel/display separation.
+Both PTs pass force→movement snapshot replay; synthetic tests cover loops and
+contact order. Loading/damage, auxiliary rates, rudder/steering, terrain/carrier
+producers and whole-tick live activation remain open.
+[Current component evidence](baselines/native-movement-control.md).
