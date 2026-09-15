@@ -22,6 +22,16 @@ movement coupling and source-derived expectations before audio/rumble.
 Follow [provenance policy](behavior-provenance.md); no new fitted flight laws
 are scheduled. Existing fitted choices remain identified in the model guide.
 
+### Native departure continuation
+
+- [x] Join source ground gates, warning/stall transitions, movement fall,
+  tumble composition and spin recovery in a diagnostic native stage.
+- [x] Exercise both PTs and imported trig/atan tables with deterministic replay;
+  keep movement, display offsets, native G and measured adapter G distinct.
+  [Conditions, results and limitations](baselines/native-departure-stage.md).
+- [ ] Connect normal control/force producers and the full movement/event update
+  before claiming native live flight or matched retail trajectories.
+
 ## Scheduled aircraft additions — 2026-09-15
 
 - [x] Consolidate the [full aircraft import/acceptance guide](aircraft-import.md),

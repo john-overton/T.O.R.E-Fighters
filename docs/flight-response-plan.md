@@ -23,8 +23,9 @@ components are connected only in hybrid, with fitted boundaries.
 
 - [x] Establish native warning-transition tumble scheduling and movement-fall
   source branches; record [contracts and translation status](formats/native-flight.md#native-tumble-continuation--2026-09-15).
-- [ ] Finish diagnostic translation acceptance for tumble/fall and explicit
-  movement-angle composition; no live activation is implied.
+- [x] Join native tumble/fall/spin dispatch and movement composition; validate
+  synthetic contracts and both PTs with imported tables. [Evidence](baselines/native-departure-stage.md).
+  This is diagnostic component acceptance; no live activation or retail comparison is implied.
 - [ ] Resolve initial envelope/difficulty/device producers and full control,
   force and movement ordering before connecting a native runtime path.
 - [ ] Compare source-derived expected outputs and, when available, matched

@@ -254,7 +254,15 @@ implementation; they are not source facts or user-directed flight-law changes.
 **User-directed addition:** planned sustained rumble; native audio dispatch and
 its future haptic mapping remain separate work.
 
-Native tumble/fall now has an initial diagnostic translation in
-`tore-formats::flight_model::tumble`. Neither live adapter calls it. The native
+Native tumble/fall/spin now has a joined diagnostic stage in
+`tore-formats::flight_model::departure_stage`, with explicit envelope roles and
+source movement composition. Both reviewed PTs pass its imported-table probes.
+Neither live adapter calls it. The native
 movement-state and whole-tick connection gates remain open; see the
 [source continuation](formats/native-flight.md#native-tumble-continuation--2026-09-15).
+
+The [joined-stage evidence](baselines/native-departure-stage.md) distinguishes
+native component motion from a full flight trajectory. Native ground-control
+inhibition, initial/bounded-G envelope selection and the non-VTOL early return
+are now established for these profiles. Normal control/force coupling is next;
+audio/rumble remains deferred behind that native work.

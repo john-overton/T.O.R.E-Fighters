@@ -34,3 +34,8 @@ asset guards. The reviewed static extraction succeeded (107 symbol spans,
 3,829 symbols). No live simulation/rendering code was changed in this diagnostic
 continuation, so no new GPU, controller or audible acceptance is claimed.
 Windows/macOS checks were not run.
+
+The subsequent [joined native departure stage](native-departure-stage.md) adds
+imported-table composition and both-aircraft diagnostic probes. It supersedes
+this initial pass's pending component-composition check, while live integration
+and matched retail trajectories remain open.

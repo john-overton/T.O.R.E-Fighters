@@ -514,3 +514,9 @@ called by either live adapter. [Evidence and open gates](baselines/native-tumble
 Apply [behavior provenance](behavior-provenance.md) when interpreting results:
 native source, translation tests, runtime connection and retail comparison are
 separate milestones.
+
+The `native_departure` example joins warning/stall/spin/tumble branches with
+native movement composition. Pass extracted sine table, atan table and one or
+more reviewed PT files; see [commands and scope](baselines/native-departure-stage.md).
+It uses explicit scripted native-time inputs, not the full flight scheduler or
+normal force update. It adds no live flight mode.

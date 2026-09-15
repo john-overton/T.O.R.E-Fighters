@@ -654,3 +654,64 @@ show timing, altitude/speed loss, rotation and recovery for the same aircraft,
 loadout, inputs and conditions. That is separate from the missing implementation
 above. Static branch expectations can be established now; whole-trajectory
 agreement cannot yet be claimed. [Checks and limits](../baselines/native-tumble.md).
+
+## Joined native departure stage — 2026-09-15
+
+**Origin: native static contracts. Status: joined diagnostic stage tested with
+synthetic inputs and both reviewed PTs/imported trig tables. Live integration
+and retail trajectory comparison remain open.** No fitted flight law was added.
+
+`departure_stage` joins the preceding timer, attenuation, spin and tumble
+translations in original movement coordinates. Inputs retain the source G state,
+explicit envelope queries, commands, flags, native time and RNG. The diagnostic
+example resolves PT fields before stepping; kernels do not access raw PT maps.
+
+### Producer refinements
+
+- `0x47b4ec..0x47b50c` / `0x47b9e8`: initial classification uses floor(G).
+  Global flag `0x20` moves that row one step toward −1..1. The flag's numeric
+  branch is established; a complete user-facing difficulty mapping is not claimed.
+- `0x47cc70`: the continued-stall query uses floor(G) clamped to 0..2, requires
+  class 1 and excludes vertical-thrust support. This differs from initial
+  classification, current-G severity speed and clean 1G spin-recovery speed.
+- `0x49d200/0x49d230`: a missing classification row returns class 1. The severity
+  query requires a present current-G row; malformed/missing required data becomes
+  an explicit error rather than executing a native null pointer path.
+- `0x49d1d0`: stall speed from the selected envelope is floored to one fps.
+  Existing envelope interpolation preserves flap reduction for −1..1 G; the
+  first clean 1G polygon point remains separate for ground-control inhibition.
+- `0x47add0` reads `vtLimitDown` at cpt-derived `0x50d3c5`. Both reviewed aircraft
+  store zero, so the native helper returns false before thrust/vector arithmetic.
+  The diagnostic probe requires that source value; nonzero VTOL profiles are
+  not silently assigned the same result.
+- `0x47b207..0x47b250`: ground dispatch clears the mode and suppresses pitch below
+  `min(first1Gspeed,73)` whole fps, then roll/rudder below 5 fixed8 fps. Exact
+  thresholds retain source signedness and comparisons.
+
+### Ordering now exercised together
+
+1. Refresh source pitch PA from movement, preserve the caller-supplied cp body-bank
+   word, and apply ground control inhibition. FMFlight does not rebuild body bank
+   from movement roll at entry; existing display offsets can make them differ.
+2. Spin entry gates, including the distinct chance(50) tie draw and entry reset.
+3. For spin: slew rates, movement pitch/roll, speed and display offsets; evaluate
+   recovery after speed slew. Return the updated recovery-lock state to the caller.
+   The jump at `0x47b9e3` skips tumble **and normal controls even on recovery**.
+4. Otherwise, stalled mode samples severity before timer increment, performs
+   movement fall with explicit bound-256 RNG only at zero roll, and attenuates
+   controls/lift. Warning/extended-warning expiry schedules or cancels tumble.
+5. Apply the timed native movement composition, then expose that normal controls
+   should run. Failed diagnostic updates leave state and RNG unchanged.
+
+The stage exposes control/lift outputs and the normal-control dispatch decision.
+It does not execute normal controls, force integration, collisions or sound/event
+consumers. In particular, `0x47c682..0x47c6b5` temporarily substitutes 1G during
+the stalled force call and restores the source G state afterward. A complete
+native flight path must preserve that ordering rather than feed our adapter's
+measured G into this source-controlled channel.
+
+Remaining coupling work: normal loaded/damage control producers and yaw/slip/AoA
+outputs, complete ordered force/velocity/movement update, and event/contact
+lifecycle. These remain separate from the now joined departure stage. The
+existing hybrid is unchanged; no body-Euler shortcut connects this stage to it.
+[Native-data checks and reproduction](../baselines/native-departure-stage.md).

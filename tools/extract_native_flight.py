@@ -16,6 +16,11 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('departure_envelope_row', 0x49d200, 0x49d229, 'departure'),
+    ('departure_envelope_class', 0x49d230, 0x49d2cb, 'departure'),
+    ('departure_stall_speed', 0x49d1d0, 0x49d1fa, 'departure'),
+    ('vertical_thrust_support', 0x47add0, 0x47aeb0, 'departure'),
+    ('ground_control_inhibition', 0x47b201, 0x47b250, 'departure'),
     ('tumble_warning_start', 0x47b554, 0x47b5fb, 'departure'),
     ('tumble_extended_start', 0x47b681, 0x47b72f, 'departure'),
     ('tumble_movement', 0x47ba8c, 0x47bb85, 'departure'),
