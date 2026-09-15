@@ -60,12 +60,16 @@ whether celestial placement depends on theater, date or merely a source clock.
 
 Audit additional weather-related behavior: stars, cloud bases/tops/coverage/drift,
 inside-cloud visibility, ground/water/object shading, cockpit/HUD/night palettes,
-wind audio, visibility/seeker effects and turbulence. Recover engine contrails,
-wingtip vapor trails and broader wing-induced vapor, with distinct triggers,
-attachment points, original art, lifetime and visibility. Investigate precipitation,
+wind audio, visibility/seeker effects and turbulence. Investigate precipitation,
 lightning, icing and other candidates only as evidence warrants. Mark each
 verified-present, verified-absent in the reviewed scope, or unresolved; lack of a
 string reference is not proof of absence.
+
+Vapor scope is now settled. Wingtip vapor trails are a recovered streamer
+subsystem with a complete trigger, attachment, sampling and fade contract.
+Engine contrails and broader wing-induced vapor are verified-absent from the
+reviewed executable; the afterburner plume is data-driven inside aircraft shapes
+whose embedded code we never execute. See [the source specification](formats/weather.md).
 
 Create matched retail scenarios recording build, theater, condition, mission
 time, position, altitude, heading, settings and elapsed time. Start with Ukraine

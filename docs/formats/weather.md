@@ -255,13 +255,50 @@ color indices are the only fade; there is no particle lifetime, no growth and no
 drift. The trail is recomputed every frame from the shared position history, so
 it is attached to the aircraft's recent path rather than emitted into the world.
 
-### Still unresolved
+### Engine contrails and broader wing vapor are absent from the engine
 
-Object flag `+0x10 & 0x80` guarding the roll-rate reduction is untraced, and the
-`0x10d..0x109` and `0x96` values are shape-interpreter color/shade arguments
-whose palette roles are not yet confirmed. No separate **engine contrail** and no
-**broader wing-induced vapor** has been identified in the reviewed scope: only
-two streamers exist per aircraft, chosen by a one-word side selector. Generic
-`_GRAPHICAddSmoke` / `_GRAPHICAddSmokeAdder` at `0x443e80` / `0x443f90` remain
-damage and projectile producers. Absence of a symbol is not proof of absence;
-these two remain open parity questions rather than verified-absent.
+An exhaustive second pass settles the remaining scope questions. These are
+verified-absent **in the reviewed executable**, not merely unfound:
+
+- Every `.SH` and `.PIC` resource name in the data section was enumerated. The
+  complete effect art set is `crater`, `debris`, `smoke`, `chaff`, `flare`,
+  `fire`, `exp`, `spd`, `mpd`, `lpd`, plus scenery, `cloud1`, `sun`, `moon`,
+  `stars` and `eject`. There is no contrail, vapor or plume artwork.
+- Every caller of every `GRAPHICAdd*` entry point resolves to damage, crash, an
+  engine/fuel event, carrier takeoff, missile motor smoke, the burning-wreck
+  fire adder or network replay. None is gated on altitude, temperature or lift.
+- `_DrawStreamer@12` has exactly one call site, and the position-history API has
+  exactly two clients: the HUD and the wingtip streamers.
+- The full 128-entry opcode table was decoded. The opcodes adjacent to the
+  streamer pair — `0xcc`, `0xd4`, `0xd8` — all point at the bare dispatch stub.
+- `_effects` / `_effectsAllowed` are renderer feature bits set by the graphics
+  preferences dialog, not a contrail toggle.
+
+So exactly **two** vapor emitters exist per aircraft, both wingtip streamers,
+selected by a one-word side operand. There is no third attachment point, no flap
+or over-wing point, and no altitude trigger anywhere.
+
+One caveat keeps this short of proving the *game* shows no such effect. Shape
+opcode `0xf0` `do_start_asm` at `0x4d4254` is `push esi; ret`: it jumps into the
+shape byte stream as native code. The 44 `_PL*` animation variables, including
+`_PLafterBurner` at `0x57cd34`, are written by `@ShapeSetup@4` `0x4ab450` and
+read by **nobody in the executable** — their consumers are those embedded
+routines. The afterburner plume is therefore real but entirely data-driven, and
+any further aircraft-specific vapor would live there too. We never execute
+imported modules, so that path stays out of scope; treat per-aircraft vapor
+beyond the wingtip streamers as unavailable rather than proven absent.
+
+### Corrections and remaining gaps
+
+The aircraft render leads in the previous pass were wrong: `0x48d780` is
+`_PLANESayProc` and `0x48ec40` is `_PLANECommentProc`, both radio chatter. The
+trail code is `0x49fd70–0x4a0310`.
+
+The five streamer colors `0x10d` down to `0x109` pass through `Remap`
+`0x4cc44c`, which consults `_effects` bits `0x8` and `0x10`. They are logical
+indices, not palette entries, so the rendered fade depends on the active remap
+table. Object flag `+0x10 & 0x80`, which gates the roll-rate shortening, and
+which axis of the body-rate triple `+0x17f` selects, both remain UNRESOLVED.
+`?wasAfterburn@@3DA` has no reference anywhere in the image and appears to be
+dead.
+

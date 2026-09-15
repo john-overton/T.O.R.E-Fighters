@@ -22,8 +22,10 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   selectors. [Contracts](formats/weather.md).
 - [x] Recover the wing vapor streamer subsystem: shape opcodes, attachment
   geometry, position-history sampling, G trigger and night suppression.
-- [ ] Recover engine contrail and broader wing-induced vapor contracts; only two
-  wingtip streamers per aircraft are established so far.
+- [x] Settle engine contrails and broader wing-induced vapor: both are absent
+  from the reviewed executable. Exactly two wingtip streamers exist per aircraft.
+  The afterburner plume is real but drawn by shape-embedded code we never execute,
+  so per-aircraft vapor beyond the wingtips is unavailable, not proven absent.
 - [x] W2: bounded `tore-formats::weather` records and deterministic
   `tore-sim::environment` clock, selection and queries, with `--validate-weather`
   exercising every imported module over a full simulated day.
