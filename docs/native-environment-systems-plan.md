@@ -1,7 +1,7 @@
 # Native environment and systems implementation plan
 
-**Living plan v1 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
-**Status: planned; this revision adds documentation only. No implementation starts here.**
+**Living plan v2 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
+**Status: implementing source/query foundation; live land contact remains gated.**
 John explicitly scheduled this pass after the airborne native flight connection.
 This is the governing dependency and delivery plan for that continuation. It can
 split into linked child plans as dependency trees become known; stable IDs below
@@ -84,15 +84,16 @@ stated gate; partial source evidence cannot complete the package.
 
 ### Work register
 
-All packages start **planned**; owner/reviewer are unassigned. Existing component
-baselines above are inputs, not completed work under these new IDs.
+Packages below retain their own gates. Codex owns the active children; reviewed
+static evidence and tests do not constitute independent retail review. Existing
+baselines above remain inputs, not acceptance of the new contact producer.
 
 | ID | Package | Depends on | Owner / status | Current next action / exit evidence |
 | --- | --- | --- | --- | --- |
-| NE-00 | Source, state and dependency ledger | Current baselines | Unassigned / planned | Review contact caller/producers; establish build-scoped state/event/RNG ledger |
-| NE-01 | Ground and sea/ocean discovery/import | NE-00 identity rules | Unassigned / planned | Inventory all available roots and missing dependency chains; publish catalog methodology |
+| NE-00 | Source, state and dependency ledger | Current baselines | Codex / researching | NE-00.1a complete; finish geometry/type/state producers |
+| NE-01 | Ground and sea/ocean discovery/import | NE-00 identity rules | Codex / researching | NE-01.1 selected UKR/STRIP lead extracted; full census and closure remain open |
 | NE-02 | Coordinates, placement, materials and collision resources | NE-01 selected closures, NE-00 | Unassigned / planned | Resolve one land and one sea family end to end; expand catalog coverage |
-| NE-03 | Native terrain/object contact producers | NE-00, NE-02 selected land subset | Unassigned / planned | Replace one verified query branch with synthetic and imported-data evidence |
+| NE-03 | Native terrain/object contact producers | NE-00, NE-02 selected land subset | Codex / researching | NE-03.1 waits on geometry/type mapping and transactional query state |
 | NE-04 | Native equipment and fuel lifecycle | NE-00 | Unassigned / planned | Trace actuator, engine/fuel and refresh producers; replace fitted bridges individually |
 | NE-05 | Runway landing, takeoff and ground handling | NE-03, relevant NE-04, NE-07 event core | Unassigned / planned | Both-aircraft land handling matrix and restart/replay evidence |
 | NE-06 | Sea/carrier contact and deck handling | NE-02 sea subset, NE-03/04/05, NE-07 event core | Unassigned / planned | Carrier type/eligibility and deck query contract before applicable launch/recovery |
@@ -100,6 +101,39 @@ baselines above are inputs, not completed work under these new IDs.
 | NE-08 | Decoy/guidance intersections | NE-02 contact/material classification, NE-04, NE-07 | Unassigned / planned | Explicit dispenser-to-seeker chain and supported guidance branch matrix |
 | NE-09 | Environmental turbulence/weather interaction | NE-03, NE-06 deck interface, NE-04/07 | Unassigned / planned | Reviewed surface/state/time inputs; one authoritative turbulence coupling |
 | NE-10 | Combined replay, compatibility, performance and platforms | Accepted branches of NE-01–09 | Unassigned / planned | Versioned replay and integrated acceptance; retain explicit unavailable cells |
+
+### Active children — updated 2026-09-15
+
+| ID | Owner / status | Source established | Translated/tested | Runtime connected | Retail compared | Gate / next action |
+| --- | --- | --- | --- | --- | --- | --- |
+| NE-00.1a | Codex / complete | Query/cache ordering, preference and expiry predicates | Two pure helpers and boundary tests | No | Unavailable | Narrow precursor gate: reproducible source slices and tested predicate arithmetic; [evidence](baselines/native-land-foundation.md) |
+| NE-00.1 | Codex / researching | Partial; see NE-00.1a | Partial | No | Unavailable | Resolve geometry, type +8 and instance initialization; extend transaction ledger |
+| NE-01.1 | Codex / researching | UKR.MM → STRIP.OT → RUNWAY.SH / _STRIPProc explicit edges | Four resources extracted; no new OT reader | No | Unavailable | Complete callback/shape/placement closure, archive census and bounded schemas |
+| NE-03.1 | Codex / researching | Dual ground-query/cache mutation established | Existing diagnostic only; no new producer | No | Unavailable | Land geometry and staged cache/RNG producer, source-order/rollback tests, then both-aircraft connection |
+
+The parent first slice is not complete. NE-00.1a is a dependency-ready diagnostic
+precursor, not an accepted runway or live contact branch.
+
+### Discovered dependency edges
+
+All rows use the reviewed FA EXE/SMS pair in [the contract](formats/native-land-contact.md)
+and the FA_2 archive/resource hashes in [evidence](baselines/native-land-foundation.md).
+Owner is Codex; update 2026-09-15. Required edges remain in the denominator.
+
+| Edge | Parent → child / relation | Predicate / field / units | Status / blocked consumer / next action |
+| --- | --- | --- | --- |
+| E001 | NE-00.1 → NE-03.1 / query order | GetGround 0x47af20 calls touching then height/slope; fixed8 feet / PA | Source established; implement two calls inside ground producer |
+| E002 | NE-00.1 → NE-03.1 and NE-10 / mutates state, consumes RNG | 0x42b800 expired-cache branch, +0x27/2b/2d/2f/33; conditional bound-4 draw | Expiry helper tested; stage cache/RNG and test late failure before live connection |
+| E003 | NE-01.1 → NE-02 land subset / places | UKR.MM → STRIP.OT; textual pos/angle/flags | Extracted; native initialization/units mapping unresolved; trace loader |
+| E004 | STRIP.OT → RUNWAY.SH / visual reference | Explicit shape pointer, FA_2.LIB | Extracted; full drawing/texture closure and visual inspection not accepted |
+| E005 | STRIP.OT → _STRIPProc / callback | Explicit utilProc symbol, VA 0x4be640 | Unresolved native dispatch; trace required geometry/lifecycle consumers |
+| E006 | NE-03.1 → collision terrain / supplies contact | 0x42bdc0 → 0x42bfc0 → 0x42c1a0; 0x42dda0 fallback | Geometry unreviewed; blocks accepted height/slope producer |
+| E007 | NE-03.1 → resolved type offset / supplies contact | 0x42e0c0 returned record signed word +8, shifted 8 | Mapping unknown; do not substitute fitted CG clearance |
+
+Selected catalog status: UKR.MM/T2, STRIP.OT and RUNWAY.SH are discovered/extracted;
+existing T2 decoding remains available, OT/placement/native drawing closure is
+unaccepted. No visual or collision acceptance and no runtime eligibility yet.
+No missing-resource absence is asserted from this filtered four-resource pass.
 
 NE-07's event envelope is an early interface dependency, not a requirement to
 finish all damage before testing a runway. Each package can split into numbered
@@ -457,8 +491,9 @@ Use [development checks](DEVELOPMENT.md) with `--locked` for code changes and
 [performance methodology](baselines/flight-performance.md) for repeatable bounded
 runs. Future evidence belongs in `docs/baselines/`; future source specifications
 belong in `docs/formats/`. Link actual artifacts/methods only when produced.
-Existing repository regression checks may be rerun during planning; they do not
-turn any T01–15 new implementation gate green. No new import occurs in this revision.
+Repository regressions and the first selected discovery are recorded in the
+[new baseline](baselines/native-land-foundation.md). T01–15 remain open for the
+end-to-end producer; two diagnostic helpers do not close those matrix rows.
 
 ## 7. Research questions and risks
 
@@ -487,14 +522,16 @@ record its blocked edges and continue independent, already scoped documentation/
 
 | ID / date | Decision / status | Basis and implications |
 | --- | --- | --- |
-| D01 / 2026-09-15 | Accepted: plan the next native environment/systems pass now | John's explicit request; this turn is documentation only; implementation follows the packages and evidence gates |
+| D01 / 2026-09-15 | Accepted: plan the next native environment/systems pass now | Initial planning request; documentation-only restriction superseded by D09 |
 | D02 / 2026-09-15 | Accepted: no AI work or scope | John's explicit constraint; all dynamic test actors are explicit fixtures |
 | D03 / 2026-09-15 | Accepted: retain exact F18.PT and RAFALE.PT identities | Existing aircraft acceptance; Rafale carrier eligibility must be established separately |
 | D04 / 2026-09-15 | Accepted: missing retail comparison does not block source-backed progress | Existing user clarification and provenance policy; retail-comparison column stays unavailable |
 | D05 / 2026-09-15 | Retained: legacy default, hybrid and native research remain distinct | No default switch requested; source/host bridge provenance and branch restrictions remain explicit |
 | D06 / 2026-09-15 | Proposed implementation sequence: NE-00 plus selected land discovery → NE-03 query producer | Smallest verifiable contact slice; full land/sea discovery continues before claiming catalog completion |
 | D07 / pending | Exact representative runway, carrier and sea asset families | Select only after build-scoped census and eligibility review; no filenames or naval capability guessed here |
-| D08 / pending | Native event/RNG ownership and recording schema | Resolve NE-00/07 contracts before combining flight, weather and systems streams |
+| D08 / pending | Native event/RNG ownership and recording schema | Resolve NE-00/07 contracts before combining flight, weather and systems streams; E002 adds query cache/RNG ownership |
+| D09 / 2026-09-15 | Accepted: implement autonomously and commit tested slices locally | John explicitly authorized NE-00.1/01.1/03.1 onward; no AI or push; Jeeves milestone/checkpoint reporting required |
+| D10 / 2026-09-15 | Implementation choice: split NE-00.1a predicate/cache research precursor | Newly verified cache mutation prevents treating the existing read-only diagnostic query interface as a native producer; retain live stop until E001/E002/E006/E007 are accepted |
 
 Future decisions include date, requester/reviewer, evidence, accepted/proposed/
 superseded state, affected IDs, rejected alternatives if relevant and migration
@@ -526,9 +563,10 @@ implementation choices must not be attributed to John.
 
 | Revision | Change | Validation state |
 | --- | --- | --- |
+| v2 / 2026-09-15 | Start authorized implementation; NE-00.1a diagnostic precursor, selected UKR/STRIP discovery, E001–E007 and D09–D10 | [Current checks](baselines/native-land-foundation.md); full first slice still researching |
 | v1 / 2026-09-15 | Initial comprehensive plan after `ed50aba`; NE-00–10, dependency/catalog templates, matrix and decisions | Scope/dependency/link review and repository checks passed; implementation work packages remain planned |
 
-Planning validation: local file/heading links in the changed Markdown set were
+Historical v1 planning validation: local file/heading links in the changed Markdown set were
 checked; Markdown table widths/fences and `git diff --check` were reviewed.
 Formatting, warnings-denied Clippy, 336 existing Rust tests, locked build,
 24 Python tests and repo/app/extractor asset guards pass. No fresh GPU or
@@ -548,3 +586,8 @@ trace. Keep landing damage side effects behind the accepted NE-07a event boundar
 Its deliverable is a tested producer contract and narrow live contact connection,
 not takeoff/landing acceptance from a flat height sample. This resolves the current
 hard runtime boundary and supplies the foundation for NE-05 and later deck work.
+
+**Current next action:** finish E006 vertical terrain geometry and E007 type offset,
+then E003/E005 runway initialization/closure. Implement E001/E002 staged queries
+before enabling NE-03.1 for either aircraft. No external blocker or user decision
+is currently required; carrier remains behind NE-06 prerequisites.

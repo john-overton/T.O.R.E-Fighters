@@ -15,8 +15,10 @@ from legacy and hybrid. [Acceptance and limits](baselines/native-live-flight.md)
 
 The [living native environment/systems plan](native-environment-systems-plan.md)
 now governs the next contact/handling, ground/sea asset, lifecycle/event,
-decoy/guidance and environmental dependency pass. This turn establishes the plan
-only; no AI scope or runtime change is included. Maneuver audio/rumble and final
+decoy/guidance and environmental dependency pass. Implementation is now authorized, beginning with the land-contact source and
+query foundation; no AI scope is included. The first
+[cache/preference checkpoint](baselines/native-land-foundation.md) is diagnostic
+only and does not remove the live contact stop. Maneuver audio/rumble and final
 [flight-response acceptance](flight-response-plan.md) follow that continuation.
 [Provenance policy](behavior-provenance.md) keeps native contracts, fitted choices
 and user-directed changes distinct; airborne acceptance does not close the

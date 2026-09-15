@@ -4,7 +4,7 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
 
 **Current scope:** Original Choose Activity and Quick Mission briefing lead to all-theater previews and F/A-18D/Rafale C free flight. The explicit manual range now connects the ten PT-default weapon slots, sensors, damage, stores and combat-service replay. Full native environment/flight/combat parity and the remaining menu screens stay open. AI is deferred until manual acceptance. See [current systems evidence](baselines/weapons-systems.md), [earlier manual weapons evidence](baselines/manual-weapons.md) and the dated checklists below.
 
-## Next priority: flight response and maneuver buffet — 2026-09-15
+## Flight response and maneuver buffet — 2026-09-15
 
 - [x] Review existing flight-model/native-research coverage and write the
   [ordered implementation plan](flight-response-plan.md).
@@ -17,8 +17,9 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
 Further weather work follows this slice and the scheduled aircraft additions below. Existing weather work is retained.
 The [adapter response evidence](baselines/flight-response.md) closes component
 and regression work, not native steps 2–3. Their earlier completed status is
-corrected. Current user priority is native departure/tumble, control/force/
-movement coupling and source-derived expectations before audio/rumble.
+corrected. Current user priority is the native environment/systems continuation below,
+following the restricted airborne control/force/movement connection and before
+audio/rumble.
 Follow [provenance policy](behavior-provenance.md); no new fitted flight laws
 are scheduled. Existing fitted choices remain identified in the model guide.
 
@@ -1085,9 +1086,12 @@ Special horizon branches and matched retail acceptance remain open.
 - [x] Review scope/dependency completeness and local links; run documentation/diff,
   formatting, Clippy, existing locked tests/build, Python and asset checks. This
   validates the documentation change, not the future implementation packages.
-- [ ] Start the next implementation slice only in a subsequent implementation
-  turn: NE-00.1/01.1/03.1, one reviewed land-contact producer and original surface
-  dependency closure, with both-aircraft query/rollback evidence.
-- Planning/documentation only in this turn; no AI work or scope, runtime changes,
-  new imports or completed implementation packages. Native lifecycle/contact,
+- [x] Start the authorized implementation continuation at NE-00.1/01.1/03.1.
+- [x] NE-00.1a: establish native dual-query/cache ordering and translate/test
+  landing preference and cache-deadline helpers.
+- [x] Extract UKR.MM/T2, STRIP.OT and RUNWAY.SH with archive/hash evidence.
+- [ ] Complete the original runway closure, terrain/collision producer and
+  transactional cache/RNG integration, then both-aircraft live contact evidence.
+  [Source and validation checkpoint](baselines/native-land-foundation.md).
+- This continuation includes no AI. Live contact/carrier activation remains gated;
   full asset coverage and Windows/macOS/retail acceptance remain open.

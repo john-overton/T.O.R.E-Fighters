@@ -199,3 +199,10 @@ CE attachment semantics corrected (2026-09-15): right/up/forward vectors and
 right/forward heading hinges, verified against native consumers and exact
 F18/Rafale neutral mesh vertices. No new aircraft or format coverage is implied.
 [Evidence](../baselines/wind-turbulence-vapor.md).
+
+## Land-contact foundation — 2026-09-15
+
+Five new static FA slices and two tested preference/cache-expiry helpers; no
+new binary grammar or runtime contact support. Selected UKR/STRIP/RUNWAY resources
+are extracted with provenance; OT schema, placement/callback/shape closure and
+collision acceptance remain open. [Evidence](../baselines/native-land-foundation.md).

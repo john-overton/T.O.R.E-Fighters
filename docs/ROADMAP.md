@@ -13,8 +13,8 @@ connection is implemented and [validated](baselines/native-live-flight.md).
 The next continuation is the [living native environment/systems plan](native-environment-systems-plan.md):
 full ground and sea/ocean asset discovery/import, native contact and land/deck
 handling, equipment/fuel/damage lifecycles, event dispatch, decoy/guidance
-intersections and environmental coupling. The current turn creates that plan
-only; it starts no implementation. **No AI work or scope is included.**
+intersections and environmental coupling. John authorized implementation on 2026-09-15, starting with the land-query
+foundation NE-00.1/NE-01.1/NE-03.1 and tested local commits. **No AI work or scope is included.**
 
 Follow that dependency-led continuation with maneuver audio/rumble and final
 [flight-response acceptance](flight-response-plan.md), then F-14, A-4E and X-31
@@ -22,7 +22,7 @@ through the [aircraft import gates](aircraft-import.md), then weather work outsi
 the new plan. Native/fitted/runtime/retail evidence remains separate under
 [behavior provenance](behavior-provenance.md). Retail flight comparison is
 unavailable and does not block source-backed progress. No default adapter change,
-new flyable identity or broader menu work is implied by this planning pass.
+new flyable identity or broader menu work is implied by this implementation pass.
 
 The preceding execution order (2026-09-14) remains a broader gate: finish manual weapons, sensors and damage
 acceptance for F/A-18D and Rafale C before AI work. The only AI authorized for the

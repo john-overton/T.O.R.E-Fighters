@@ -847,3 +847,12 @@ native fixed8 lift force for host projection without reconstructing travel from
 the cockpit attitude. Source branch order is unchanged. Runtime adaptation,
 provenance and open gates are in the [flight guide](../FLIGHT-MODEL.md) and
 [live baseline](../baselines/native-live-flight.md).
+
+### Land-query foundation — 2026-09-15
+
+[The land-contact contract](native-land-contact.md) now establishes GetGround
+dual-query ordering, collision cache mutations/deadlines and landing preference.
+Two predicate helpers are diagnostic translations; no terrain producer or live
+contact activation is implied. The repeatable extraction adds five reviewed
+regions. Query-cache mutation and conditional RNG require transactional ownership
+before the current read-only diagnostic interface can host native queries.
