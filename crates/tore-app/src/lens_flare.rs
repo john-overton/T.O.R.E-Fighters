@@ -38,7 +38,7 @@ pub fn circles(world: &World, camera: &Camera, size: [u32; 2]) -> Vec<[f32; 4]> 
     let Some(celestial) = &world.celestial else {
         return vec![];
     };
-    if !celestial.sun_effects {
+    if !world.glare_enabled() {
         return vec![];
     }
     let Some(layer) = world.weather.sample(camera.position[1] as f64) else {
@@ -136,6 +136,7 @@ impl LensFlare {
             backing: None,
         }
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -143,6 +144,7 @@ impl LensFlare {
         world: &World,
         camera: &Camera,
         size: [u32; 2],
+        palette: &[[u8; 3]; 256],
     ) -> Option<wgpu::TextureView> {
         let circles = circles(world, camera, size);
         if circles.is_empty() {
@@ -194,8 +196,7 @@ impl LensFlare {
         values.resize(68, 0.);
         let bytes: Vec<u8> = values.into_iter().flat_map(f32::to_le_bytes).collect();
         queue.write_buffer(&self.uniform, 0, &bytes);
-        let pixels: Vec<u8> = world
-            .palette
+        let pixels: Vec<u8> = palette
             .iter()
             .flat_map(|c| [c[0], c[1], c[2], 255])
             .collect();

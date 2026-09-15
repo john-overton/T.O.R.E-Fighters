@@ -6,6 +6,16 @@ use tore_formats::{
     theater::{CELL_FEET, Environment, HEIGHT_FEET, Theater},
 };
 
+/// A pure camera query; contains no clock, random generator or trail history.
+pub struct ViewWeather {
+    pub palette: [[u8; 3]; 256],
+    pub fog_palette: Vec<[[u8; 3]; 256]>,
+    pub decks: [[f32; 4]; 2],
+    pub fog: [f32; 4],
+    pub haze: [u8; 3],
+    pub visual_bands: Vec<tore_formats::weather::Layer>,
+}
+
 pub struct World {
     pub theater: Theater,
     pub environment: Environment,
@@ -25,6 +35,8 @@ pub struct World {
     pub weather: tore_sim::environment::Environment,
     pub smooth_weather: bool,
     pub visual_bands: Vec<tore_formats::weather::Layer>,
+    pub no_sun_whiteout: bool,
+    pub auxiliary_presentations: [tore_sim::environment::Presentation; 3],
     pub weather_presentation: tore_sim::environment::Presentation,
     /// The palette resolved for the presented camera altitude this frame.
     pub palette: [[u8; 3]; 256],
@@ -88,13 +100,23 @@ impl World {
             }
             Err(_) => launch.unwrap_or([12, 0]),
         };
+        let wind = match std::env::var("TORE_WIND") {
+            Ok(value) => {
+                let (heading, speed) = value
+                    .split_once(',')
+                    .ok_or("TORE_WIND needs heading,speed in degrees/feet per second")?;
+                Some([heading.parse::<i32>()?, speed.parse::<i32>()?])
+            }
+            Err(std::env::VarError::NotPresent) => environment.wind,
+            Err(e) => return Err(e.into()),
+        };
         let weather =
             tore_sim::environment::Environment::new(tore_sim::environment::Configuration::new(
                 module,
                 hour,
                 minute,
                 condition.map_or_else(|| environment.layer_parameter.unwrap_or(0), |i| i as i32),
-                environment.wind,
+                wind,
             )?);
         if weather.sample(0.).is_none() {
             return Err("mission weather layer covers no altitude at its launch time".into());
@@ -200,6 +222,10 @@ impl World {
                 Ok("0") => false,
                 _ => return Err("TORE_WEATHER_SMOOTH must be 0 or 1".into()),
             },
+            no_sun_whiteout: false,
+            auxiliary_presentations: std::array::from_fn(|_| {
+                tore_sim::environment::Presentation::seeded(1).unwrap()
+            }),
             weather_presentation: tore_sim::environment::Presentation::seeded(1)?,
             palette: [[0; 3]; 256],
             fog_palette: Vec::new(),
@@ -260,6 +286,37 @@ impl World {
         self.weather.configuration().wind_world_fps()
     }
 
+    /// Native T_Info/Collision publishes whether the winning terrain class is 1.
+    /// This host samples the T2 cell under the aircraft; native object/carrier
+    /// collision overrides and triangle-boundary parity remain unimplemented.
+    pub fn turbulence_reduced_surface(&self, x: f64, z: f64) -> bool {
+        let col = (x / f64::from(CELL_FEET))
+            .floor()
+            .clamp(0., (self.theater.cols - 1) as f64) as usize;
+        let row = (z / f64::from(CELL_FEET))
+            .floor()
+            .clamp(0., (self.theater.rows - 1) as f64) as usize;
+        self.theater.cell(col, row).class == 1
+    }
+
+    /// Explicit authored standard atmosphere, shared wind and rendered terrain.
+    /// No weather-derived temperature/pressure is inferred from LAY colors.
+    pub fn air_data(
+        &self,
+        state: &crate::flight::State,
+    ) -> tore_formats::Result<tore_sim::telemetry::AirData> {
+        tore_sim::telemetry::AirData::sample(
+            state,
+            tore_sim::telemetry::EnvironmentReading {
+                terrain_msl_ft: f64::from(
+                    self.height(state.position[0] as f32, state.position[2] as f32),
+                ),
+                wind_world_fps: self.wind(),
+                atmosphere: tore_sim::telemetry::Atmosphere::standard(state.position[1])?,
+            },
+        )
+    }
+
     /// The terrain surface plus the environment's wind, for one fixed step.
     pub fn surface(&self, x: f64, z: f64) -> tore_sim::research::Surface {
         let mut surface =
@@ -269,43 +326,75 @@ impl World {
     }
 
     /// Exactly one 120 Hz tick of environment time. Pausing means not calling it.
-    pub fn step_weather(&mut self, altitude_ft: f64, speed_fps: f64, camera: &Camera) {
+    pub fn step_weather(&mut self, speed_fps: f64, camera: &Camera) {
         self.weather.step();
-        let alignment = self
-            .weather
-            .sample(altitude_ft)
-            .and_then(|l| tore_sim::environment::sun_angles(&l, self.weather.seconds_of_day()))
-            .map_or(-1., |a| {
-                let sun = crate::celestial::rotate([0., 0., 1.], a);
-                let view = camera.uniform(1., [0.; 4], [0; 3]);
-                (0..3)
-                    .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
-                    .sum()
-            });
-        let alignment = if self.celestial.as_ref().is_some_and(|c| c.sun_effects) {
-            alignment
+        self.step_view_weather(camera, speed_fps);
+    }
+
+    pub fn glare_enabled(&self) -> bool {
+        !self.no_sun_whiteout && self.celestial.as_ref().is_some_and(|c| c.sun_effects)
+    }
+
+    /// Each fixed camera slot advances once per simulation tick, even if hidden.
+    /// Slots have independent seeded presentation state; queries never consume RNG.
+    pub fn step_view_weather(&mut self, camera: &Camera, speed_fps: f64) {
+        let altitude = f64::from(camera.position[1]);
+        let alignment = if self.glare_enabled() {
+            self.weather
+                .sample(altitude)
+                .and_then(|l| tore_sim::environment::sun_angles(&l, self.weather.seconds_of_day()))
+                .map_or(-1., |a| {
+                    let sun = crate::celestial::rotate([0., 0., 1.], a);
+                    let view = camera.uniform(1., [0.; 4], [0; 3]);
+                    (0..3)
+                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
+                        .sum()
+                })
         } else {
             -1.
         };
-        self.weather_presentation.step_with_alignment(
-            &self.weather,
-            altitude_ft,
-            speed_fps,
-            alignment,
-        );
+        let presentation = if camera.weather_slot == 0 {
+            &mut self.weather_presentation
+        } else {
+            &mut self.auxiliary_presentations[camera.weather_slot - 1]
+        };
+        presentation.step_with_alignment(&self.weather, altitude, speed_fps, alignment);
     }
 
     /// Presentation only: resolves the palette for one camera altitude without
     /// advancing state, so mirrors and camera panels stay on the same instant.
     pub fn resolve_palette(&mut self, altitude_ft: f64) {
+        let view = self.sample_view(altitude_ft, 0);
+        self.palette = view.palette;
+        self.fog_palette = view.fog_palette;
+        self.decks = view.decks;
+        self.fog = view.fog;
+        self.haze = view.haze;
+        self.visual_bands = view.visual_bands;
+    }
+
+    pub fn sample_view(&self, altitude_ft: f64, slot: usize) -> ViewWeather {
+        let presentation = if slot == 0 {
+            &self.weather_presentation
+        } else {
+            &self.auxiliary_presentations[slot - 1]
+        };
+        let mut out = ViewWeather {
+            palette: self.palette,
+            fog_palette: self.fog_palette.clone(),
+            decks: self.decks,
+            fog: self.fog,
+            haze: self.haze,
+            visual_bands: Vec::new(),
+        };
         let visual = self
             .smooth_weather
             .then(|| self.weather.visual_sample(altitude_ft))
             .flatten();
         let Some(layer) = self.weather.sample(altitude_ft) else {
-            return;
+            return out;
         };
-        self.decks = layer.decks.clone().map(|deck| {
+        out.decks = layer.decks.clone().map(|deck| {
             [
                 deck.altitude_feet as f32,
                 2_f32.powi(deck.tile_exponent),
@@ -318,36 +407,45 @@ impl World {
         // Texture selection and draw flags retain native scheduling. Only the
         // color/fog parameters below use fractional-time presentation samples.
         let layer = visual.as_ref().map_or(layer.clone(), |s| s.layer.clone());
-        self.palette = tore_formats::weather::expand_effects(
+        out.palette = tore_formats::weather::expand_effects(
             self.weather.configuration().base_palette(),
             &layer,
-            self.weather_presentation.tint,
-            self.weather_presentation.sun_whitening,
+            presentation.tint,
+            if self.glare_enabled() {
+                presentation.sun_whitening
+            } else {
+                0
+            },
         );
         if let Some(visual) = visual {
-            self.visual_bands = visual.bands.clone();
-            self.palette = visual.palette(
-                self.weather_presentation.visual_tint,
-                self.weather_presentation.visual_sun,
+            out.visual_bands = visual.bands.clone();
+            out.palette = visual.palette(
+                presentation.visual_tint,
+                if self.glare_enabled() {
+                    presentation.visual_sun
+                } else {
+                    0.
+                },
             );
         }
-        self.fog_palette = self
+        out.fog_palette = self
             .weather
             .configuration()
             .shade_remap(layer.shade)
             .levels
             .iter()
-            .map(|indices| indices.map(|index| self.palette[usize::from(index)]))
+            .map(|indices| indices.map(|index| out.palette[usize::from(index)]))
             .collect();
         let feet = |v: i32| (f64::from(v) * tore_formats::weather::DISTANCE_FEET) as f32;
-        self.fog = [
+        out.fog = [
             feet(layer.fog_near),
             feet(layer.fog_far),
             layer.fog_near_density.clamp(0, 256) as f32 / 256.,
             layer.fog_far_density.clamp(0, 256) as f32 / 256.,
         ];
         // Six-bit source components, the same expansion the palette ramps use.
-        self.haze = layer.shade.map(|c| ((u16::from(c) * 255 + 31) / 63) as u8);
+        out.haze = layer.shade.map(|c| ((u16::from(c) * 255 + 31) / 63) as u8);
+        out
     }
 
     pub fn height(&self, x: f32, z: f32) -> f32 {
@@ -364,6 +462,8 @@ impl World {
     }
 }
 pub struct Camera {
+    /// 0 main, 1 rear mirror, 2 forward panel, 3 other panel.
+    pub weather_slot: usize,
     pub position: [f32; 3],
     pub yaw: f32,
     pub pitch: f32,
@@ -375,6 +475,7 @@ pub struct Camera {
 impl Camera {
     pub fn new() -> Self {
         Self {
+            weather_slot: 0,
             position: [1_070_000.0, 28_000.0, 590_000.0],
             yaw: 0.3,
             pitch: -0.32,
@@ -494,10 +595,157 @@ pub(crate) mod tests {
             visual_bands: Vec::new(),
             smooth_weather: true,
             palette: [[100; 3]; 256],
+            no_sun_whiteout: false,
+            auxiliary_presentations: std::array::from_fn(|_| {
+                tore_sim::environment::Presentation::seeded(1).unwrap()
+            }),
             weather_presentation: tore_sim::environment::Presentation::seeded(1).unwrap(),
             fog_palette: vec![[[100; 3]; 256]; 10],
         }
     }
+    #[test]
+    fn turbulence_surface_uses_class_not_color_or_height() {
+        let mut w = world();
+        assert!(!w.turbulence_reduced_surface(0., 0.));
+        w.theater.cells[0].class = 1;
+        assert!(w.turbulence_reduced_surface(0., 0.));
+        w.theater.cells[0].color = 255;
+        w.theater.cells[0].elevation = 200;
+        assert!(w.turbulence_reduced_surface(0., 0.));
+        assert!(!w.turbulence_reduced_surface(f64::from(CELL_FEET), 0.));
+    }
+
+    #[test]
+    fn whiteout_cheat_clears_all_views_without_ticks_and_preserves_sun() {
+        use tore_formats::weather::shape::{Primitive, WeatherShape};
+        let mut w = world();
+        let mut module =
+            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
+                .unwrap();
+        let l = &mut module.layers[0];
+        l.flags = 8;
+        l.start_seconds = 0;
+        l.end_seconds = 86399;
+        l.sunrise_seconds = 0;
+        l.sunset_seconds = 86400;
+        let angles = tore_sim::environment::sun_angles(l, 9 * 3600).unwrap();
+        w.weather = tore_sim::environment::Environment::new(
+            tore_sim::environment::Configuration::new(module, 9, 0, 0, None).unwrap(),
+        );
+        let empty = WeatherShape {
+            primitives: vec![],
+            scale_exponent: 8,
+            publishes_point: false,
+        };
+        w.celestial = Some(crate::celestial::Celestial {
+            sun: WeatherShape {
+                primitives: vec![Primitive::Circle {
+                    center: [0., 0., 160.],
+                    diameter: 4,
+                    fill: 254,
+                }],
+                ..empty.clone()
+            },
+            moon: empty.clone(),
+            stars: empty,
+            sun_effects: true,
+            moon_texture: 0,
+            moon_uv: [0., 0., 1., 1.],
+            sun_remap: 0,
+            shade_rows: BTreeMap::new(),
+            light_rows: [0; 2],
+            flare: tore_formats::weather::flare::Layout {
+                circles: vec![tore_formats::weather::flare::Circle {
+                    offset_percent: 50,
+                    radius: 10,
+                    fill: 265,
+                }],
+            },
+        });
+        let sun = crate::celestial::rotate([0., 0., 1.], angles);
+        let mut forward = Camera::new();
+        forward.position[1] = 5000.;
+        forward.yaw = sun[0].atan2(sun[2]);
+        forward.pitch = sun[1].asin() - 0.1;
+        let mut rear = Camera::new();
+        rear.weather_slot = 1;
+        rear.position = forward.position;
+        rear.yaw = forward.yaw + std::f32::consts::PI;
+        rear.pitch = -forward.pitch;
+        for _ in 0..240 {
+            w.step_weather(700., &forward);
+            w.step_view_weather(&rear, 700.);
+        }
+        assert!(w.weather_presentation.sun_whitening > 0);
+        assert_eq!(w.auxiliary_presentations[0].sun_whitening, 0);
+        assert!(!crate::lens_flare::circles(&w, &forward, [1280, 720]).is_empty());
+        let sun_geometry = w.celestial.as_ref().unwrap().sun_uniform(&w, 5000.);
+        let bright = w.sample_view(5000., 0).palette;
+        let ticks = w.weather.ticks();
+        w.no_sun_whiteout = true;
+        assert!(crate::lens_flare::circles(&w, &forward, [1280, 720]).is_empty());
+        assert_ne!(bright, w.sample_view(5000., 0).palette);
+        assert_eq!(
+            w.sample_view(5000., 0).palette,
+            w.sample_view(5000., 1).palette
+        );
+        assert_eq!(
+            sun_geometry,
+            w.celestial.as_ref().unwrap().sun_uniform(&w, 5000.)
+        );
+        assert_eq!(ticks, w.weather.ticks());
+    }
+
+    #[test]
+    fn camera_weather_is_altitude_local_and_query_order_is_pure() {
+        let mut module =
+            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(2))
+                .unwrap();
+        for layer in &mut module.layers {
+            layer.start_seconds = 0;
+            layer.end_seconds = 86399;
+        }
+        module.layers[0].high_feet = 8000;
+        module.layers[0].fog_far = 100;
+        module.layers[0].tint_scalar = 200;
+        module.layers[1].low_feet = 7500;
+        module.layers[1].fog_far = 1000;
+        module.layers[1].tint_scalar = 0;
+        let mut w = world();
+        w.weather = tore_sim::environment::Environment::new(
+            tore_sim::environment::Configuration::new(module, 12, 0, 0, None).unwrap(),
+        );
+        let mut low = Camera::new();
+        low.position[1] = 7000.;
+        let mut high = Camera::new();
+        high.weather_slot = 1;
+        high.position[1] = 9000.;
+        for _ in 0..120 {
+            w.step_weather(700., &low);
+            w.step_view_weather(&high, 700.);
+        }
+        assert_ne!(
+            w.weather_presentation.tint,
+            w.auxiliary_presentations[0].tint
+        );
+        let state = (
+            w.weather.clone(),
+            w.weather_presentation.clone(),
+            w.auxiliary_presentations.clone(),
+        );
+        let low_view = w.sample_view(7000., 0);
+        let high_view = w.sample_view(9000., 1);
+        assert_ne!(low_view.fog, high_view.fog);
+        for _ in 0..10 {
+            assert_eq!(high_view.palette, w.sample_view(9000., 1).palette);
+            assert_eq!(low_view.palette, w.sample_view(7000., 0).palette);
+        }
+        assert_eq!(
+            state,
+            (w.weather, w.weather_presentation, w.auxiliary_presentations)
+        );
+    }
+
     #[test]
     fn height_matches_triangle_corners_and_center() {
         let w = world();

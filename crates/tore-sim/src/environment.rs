@@ -4,6 +4,7 @@
 pub mod horizon;
 pub mod ray;
 pub mod visual;
+pub mod wind;
 use tore_formats::Result;
 use tore_formats::flight_model::clock_rng::{FixedClock, NativeRng};
 use tore_formats::weather::{Callback, Layer, Module};
@@ -89,13 +90,13 @@ pub struct Configuration {
     module: Module,
     start_seconds: i32,
     parameter: i32,
-    wind: [f64; 3],
+    wind: wind::Wind,
     weather_seed: i32,
 }
 
 impl Configuration {
     /// `hour`/`minute` come from the mission `time` line; `parameter` from
-    /// `layer`; `wind` from the `wind` line, unresolved and in source units.
+    /// `layer`; `wind` is explicit degrees/ft/s or a generated native default.
     pub fn new(
         mut module: Module,
         hour: i32,
@@ -131,7 +132,7 @@ impl Configuration {
             module,
             start_seconds: (hour * 60 + minute) * 60,
             parameter,
-            wind: resolve_wind(wind)?,
+            wind: wind::Wind::resolve(wind, &mut NativeRng::seeded(1)?)?,
             weather_seed: 1,
         })
     }
@@ -188,6 +189,10 @@ impl Configuration {
 
     /// Steady horizontal wind in world feet per second, X east and Z north.
     pub fn wind_world_fps(&self) -> [f64; 3] {
+        self.wind.world_fps()
+    }
+
+    pub fn wind(&self) -> wind::Wind {
         self.wind
     }
 }
@@ -450,29 +455,6 @@ impl Environment {
     }
 }
 
-/// The mission `wind` line is a compass heading in whole degrees and a speed in
-/// feet per second: `0x481e70` multiplies the heading by 182 into a binary angle
-/// and stores the speed unscaled, and `0x476f3d` then advances position by
-/// `speed * ticks` rotated by that angle. `_Rotate2@8` turns (0, d) into
-/// `(d sin h, d cos h)`, so heading zero is north and ninety is east.
-///
-/// Whether the value names the direction the wind blows towards or comes from
-/// is UNRESOLVED; this reproduces the arithmetic, which drifts an aircraft
-/// towards the stated heading.
-fn resolve_wind(wind: Option<[i32; 2]>) -> Result<[f64; 3]> {
-    let Some([heading, speed]) = wind else {
-        return Ok([0.; 3]);
-    };
-    if !(0..=360).contains(&heading) || !(0..=200).contains(&speed) {
-        return Err(std::io::Error::other("mission wind outside source range"));
-    }
-    // The native conversion truncates into a 16-bit binary angle; keep that.
-    let binary = f64::from((heading * 182) as i16);
-    let radians = binary * std::f64::consts::TAU / 65536.;
-    let speed = f64::from(speed);
-    Ok([speed * radians.sin(), 0., speed * radians.cos()])
-}
-
 /// `sar ecx, 8` then a negative clamp at 0x4b3195. Non-finite altitudes clamp low.
 fn clamp_altitude(feet: f64) -> i32 {
     if !feet.is_finite() {
@@ -638,7 +620,7 @@ mod tests {
             "from the north-east: {ukraine:?}"
         );
         assert_eq!(
-            Configuration::new(module, 12, 0, 0, None)
+            Configuration::new(module, 12, 0, 0, Some([0, 0]))
                 .unwrap()
                 .wind_world_fps(),
             [0.; 3]

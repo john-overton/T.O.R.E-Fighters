@@ -132,11 +132,13 @@ pub fn project(
         240. - (x * sr + y * cr) * scale,
     ))
 }
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     pixels: &mut [u8],
     s: &State,
     font: &Font,
     ground: f64,
+    air: Option<&tore_sim::telemetry::AirData>,
     ladder: bool,
     color: [u8; 3],
     zoom: f32,
@@ -213,7 +215,7 @@ pub fn draw(
             p.line((x, y - 8.), (x, y - 4.));
         }
     }
-    let speed = s.speed / 1.68781;
+    let speed = air.map_or(s.speed / 1.68781, |d| d.true_airspeed_knots);
     for i in -3..=3 {
         let v = (speed / 10.).floor() * 10. + i as f64 * 10.;
         let y = 228. - (v - speed) * 2.;
@@ -256,13 +258,20 @@ pub fn draw(
     }
     p.text(
         font,
-        &format!("AGL {:.0}", (s.position[1] - ground).max(0.)),
+        &format!(
+            "AGL {:.0}",
+            air.map_or(s.position[1] - ground, |d| d.altitude_agl_ft)
+                .max(0.)
+        ),
         244,
         291,
     );
     p.text(
         font,
-        &format!("V/S {:+.0}", s.vertical_speed * 60.),
+        &format!(
+            "V/S {:+.0}",
+            air.map_or(s.vertical_speed * 60., |d| d.vertical_speed_fpm)
+        ),
         336,
         291,
     );

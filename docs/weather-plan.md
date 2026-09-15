@@ -11,13 +11,22 @@ Target the supplied Fighters Anthology build first, then validate every supporte
 base theater. Follow the roadmap's behavioral/asset fidelity definition; original
 resolution and pixel-identical rasterization are not acceptance requirements.
 
+## Scheduling update — 2026-09-15
+
+The user scheduled [flight response and maneuver buffet](flight-response-plan.md)
+next, before further weather work. Finish and record that slice's acceptance
+first, then add F-14, A-4E and X-31 through the
+[aircraft import guide](aircraft-import.md), then resume the remaining sequence below. Existing camera, wind,
+turbulence and vapor improvements remain in place; unchecked weather gates
+are still open.
+
 ## Current implementation
 
 Updated 2026-09-15 after the continuation through steps 1–3. The ordinary
 flight weather path now includes recovered horizon branches, glare, aircraft
 lighting, HUD palette handling and cloud preferences/visibility. Matched retail
-acceptance remains pending the user's Windows setup; it is not implied by host
-captures. [Current evidence](baselines/weather-foundation.md#final-weather-sampling-and-batch-checkpoint--2026-09-15),
+acceptance remains open; retail now runs through dgVoodoo, and host captures
+do not establish retail acceptance. [Current evidence](baselines/weather-foundation.md#final-weather-sampling-and-batch-checkpoint--2026-09-15),
 [earlier review](baselines/weather-review.md).
 
 ## Numbered dependency sequence — 2026-09-15
@@ -102,8 +111,8 @@ streams, float orientation and GPU rasterization remain explicit adaptations.
 | Clouds | Original CLOUD1 sheets, generated/explicit altitude, detail counts, sectors, range gates and point-sampled cutouts | Unestablished CLOUDS.SH producer; matched coverage and clipping |
 | Visibility | Recovered ramps, altitude haze and ordered cross-layer indexed remaps | Retail crossing comparison; sensor consumers |
 | Creator | Six source weather choices launch; duplicate overcast removed | Label mapping remains inferred; serialized weather replay |
-| Wind | Resolved to world feet per second and applied by both adapters | Missing-wind native defaults; wind audio |
-| Air data | `telemetry::EnvironmentReading` accepts wind and atmosphere | Still no live producer |
+| Wind | Resolved to world feet per second and applied by both adapters | Native default draw order implemented; wind audio and shared native RNG scheduling open |
+| Air data | `telemetry::EnvironmentReading` accepts wind and atmosphere | Live terrain/standard-atmosphere producer; native atmosphere/instrument calibration open |
 | Turbulence | Reviewed event generator, with corrected duration/priority, driving authored coupling | Nearby-aircraft wake strength; the daytime ground-query flag |
 | Wing vapor | Shape-supplied attachment, position history, trigger, roll shortening and night suppression | Patterned fills, roll gate, scale and integer sample rounding remain open |
 
@@ -250,6 +259,21 @@ complete loops, restart/pause/replay; independent generator tests and retail
 response comparisons. Aircraft count, camera changes and haptic/audio enablement
 must not accidentally alter weather random sequencing.
 
+### W5 integration checkpoint — 2026-09-15
+
+Typed generated/explicit wind now reaches both adapters and live AirData.
+Synthetic checks cover calm/cardinal drift, preserved starting TAS and complete
+attitude loops. The daytime flat-terrain class gate is traced; wake strength
+has an explicit diagnostic input, with no fabricated flying neighbors.
+The physical consumer uses body-axis rotations and supports the session
+No turbulence cheat. F18/Rafale CE attachment axes are corrected and drawn
+trail heads follow interpolated aircraft poses.
+
+The gate remains partial: native whole-tick angular coupling, exact wake
+geometry, object/carrier surface producers, audio dispatch, serialized replay
+and retail response comparisons are open.
+[Validation and scope](baselines/wind-turbulence-vapor.md).
+
 ## W6 — Creator integration and parity acceptance
 
 Pass recovered conditions into one validated launch environment shared by creator,
@@ -353,7 +377,8 @@ bands are source fog records, not evidence for an authored volumetric deck.
 
 The implementation supported by the recovered ordinary-view contracts in this
 batch has landed. The open rows above prevent whole-batch retail acceptance;
-steps 4–9 retain their existing scope and were not implemented by this pass.
+steps 4–9 retain their existing scope. The later step-4 checkpoint below
+supersedes this batch's camera implementation status.
 
 ## Requested smoothing and size follow-up — 2026-09-15
 
@@ -370,3 +395,26 @@ steps 4–9 retain their existing scope and were not implemented by this pass.
 [Follow-up evidence and fitted/native boundaries](baselines/weather-smoothing.md).
 The user now has retail running through dgVoodoo: the earlier Windows-box-ready
 prerequisite is superseded. Windows/macOS rebuild checks remain separate.
+
+## Step 4 camera implementation checkpoint — 2026-09-15
+
+- [x] Connect the original **No sun whiteout?** cheat to immediate suppression
+  of whitening and lens flare across all views, retaining original sun geometry.
+- [x] Resolve each drawn camera's palette, fog ramp, shade rows and sky/ocean
+  decks at its own altitude from one authoritative environment instant.
+- [x] Give main, rear mirror, forward panel and other panel independent fixed-tick
+  tint/glare smoothing and seeded presentation RNG; update hidden slots too.
+  Shared panel pose construction keeps simulation and rendering consistent.
+- [x] Resolve the existing fitted vapor color through each camera's palette;
+  camera queries do not change trail histories, weather callbacks or RNG.
+- [x] Synthetic altitude/query/glare/pause checks, Linux creator/viewer and both
+  aircraft GPU captures, wide/tall composition and bounded frame-time evidence.
+- [ ] Matched retail camera comparisons, alternate CP display-map branch
+  identification/integration, and Windows/macOS runtime acceptance.
+
+The independent camera presentation streams are an authored host integration,
+not recovered native multi-camera palette-thread scheduling. Instrument imagery
+retains the existing asynchronous 10 Hz update and may lag the current main
+image; every submitted scene uses one coherent weather instant. Unimplemented
+target/missile cameras and special sensor/INFO2 displays are not newly enabled.
+[Implementation and acceptance evidence](baselines/weather-cameras.md).

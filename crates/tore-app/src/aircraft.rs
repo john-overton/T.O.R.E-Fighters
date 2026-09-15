@@ -219,12 +219,20 @@ impl Airframe {
             return sample.palette_with_prefix(
                 Some(source[..64].try_into().expect("fixed cockpit prefix")),
                 world.weather_presentation.visual_tint,
-                world.weather_presentation.visual_sun,
+                if world.glare_enabled() {
+                    world.weather_presentation.visual_sun
+                } else {
+                    0.
+                },
             );
         }
         tore_formats::weather::palette::apply_sun_whitening(
             &mut source,
-            world.weather_presentation.sun_whitening,
+            if world.glare_enabled() {
+                world.weather_presentation.sun_whitening
+            } else {
+                0
+            },
         )
         .expect("validated cockpit palette");
         if let Some(layer) = world.weather.sample(altitude) {
@@ -241,28 +249,40 @@ impl Airframe {
         colors
     }
     /// The two wingtip vapor attachments in world feet for one pose. Shape
-    /// geometry is right/forward/up in thirds of a foot, matching `combat::mesh`.
+    /// CE vectors are right/up/forward, unlike the mesh's right/forward/up.
+    /// Both retain the host's one-third-foot model scale.
     pub fn streamer_points(&self, s: &flight::State) -> Option<[[f64; 3]; 2]> {
         let def = self.streamer.as_ref()?;
-        let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
-        let mut points = [[0.; 3]; 2];
-        for (side, out) in points.iter_mut().enumerate() {
-            // Neither reviewed aircraft has a swing wing, so the hinge is static.
-            let p = def.attachment(side, 0).ok()?;
-            let (x, forward, up) = (p[0] / 3., p[1] / 3., p[2] / 3.);
-            *out = std::array::from_fn(|k| {
-                s.position[k] + basis.right[k] * x + basis.up[k] * up + basis.forward[k] * forward
-            });
-        }
-        Some(points)
+        streamer_world_points(def, s.position, [s.yaw, s.pitch, s.bank])
     }
 
     pub fn start(&self, world: &World) -> flight::State {
         let c = Camera::for_world(world);
         let mut p = c.position.map(|v| v as f64);
         p[1] = 5000f64.max(world.height(p[0] as f32, p[2] as f32) as f64 + 2000.);
-        flight::State::from_model(self.model.clone(), p)
+        let mut state = flight::State::from_model(self.model.clone(), p);
+        // State velocity is ground-relative; initialize the requested airspeed
+        // with advection already present so the first tick does not subtract it twice.
+        for (v, wind) in state.velocity.iter_mut().zip(world.wind()) {
+            *v += wind;
+        }
+        state
     }
+    /// Shared fitted instrument camera pose for fixed-tick weather and rendering.
+    pub fn panel_camera(&self, state: &flight::State, page: u8) -> Camera {
+        let mut camera = self.camera(state, if page == 2 { 0 } else { 2 }, Default::default());
+        camera.weather_slot = usize::from(page);
+        camera.view_fraction = 1.;
+        if page == 3 {
+            for i in 0..3 {
+                camera.position[i] = state.position[i] as f32
+                    + (camera.position[i] - state.position[i] as f32) * 0.5;
+            }
+            camera.pitch = -(30f32 / 65.).atan();
+        }
+        camera
+    }
+
     pub fn camera(&self, state: &flight::State, view: u8, keys: BTreeSet<String>) -> Camera {
         let mut c = Camera::new();
         c.keys = keys;
@@ -423,5 +443,52 @@ impl Airframe {
             }
         }
         result
+    }
+}
+
+fn streamer_world_points(
+    def: &tore_formats::shape::StreamerDef,
+    position: [f64; 3],
+    attitude: [f64; 3],
+) -> Option<[[f64; 3]; 2]> {
+    let basis = tore_sim::attitude::Basis::new(attitude[0], attitude[1], attitude[2]);
+    let mut points = [[0.; 3]; 2];
+    for (side, out) in points.iter_mut().enumerate() {
+        // Neither reviewed aircraft has a swing wing, so the hinge is static.
+        let p = def.attachment(side, 0).ok()?;
+        let (x, up, forward) = (p[0] / 3., p[1] / 3., p[2] / 3.);
+        *out = std::array::from_fn(|k| {
+            position[k] + basis.right[k] * x + basis.up[k] * up + basis.forward[k] * forward
+        });
+    }
+    Some(points)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn ce_uses_up_then_forward_and_follows_body_axes() {
+        let def = tore_formats::shape::StreamerDef {
+            pivot: [0; 3],
+            hinge_scale: 0,
+            points: [[12 * 256, 6 * 256, -15 * 256]; 2],
+        };
+        let q = std::f64::consts::FRAC_PI_2;
+        for (attitude, expected) in [
+            ([0.; 3], [4., 2., -5.]),
+            ([q, 0., 0.], [-5., 2., -4.]),
+            ([0., q, 0.], [4., -5., -2.]),
+            ([0., 0., q], [2., -4., -5.]),
+        ] {
+            let actual = streamer_world_points(&def, [100.; 3], attitude).unwrap()[1];
+            for i in 0..3 {
+                assert!((actual[i] - 100. - expected[i]).abs() < 1e-10);
+            }
+        }
+        assert_eq!(
+            streamer_world_points(&def, [0.; 3], [0.; 3]).unwrap()[0],
+            [-4., 2., -5.]
+        );
     }
 }

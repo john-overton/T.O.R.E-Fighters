@@ -105,18 +105,23 @@ fn vapor_vertices(
     vapor: &tore_sim::vapor::Vapor,
     world: &terrain::World,
     presented: &flight::State,
+    attachments: Option<[[f64; 3]; 2]>,
 ) -> Vec<f32> {
     let hazing = world
         .weather
         .sample(presented.position[1])
         .is_some_and(|l| l.night_hazing());
     let roll_rate = presented.roll_rate.to_degrees();
-    let color = world.palette[254].map(|c| f32::from(c) / 255.);
     let mut out = Vec::new();
     for side in 0..2 {
-        let Some(trail) = vapor.trail(side, presented.g, roll_rate, hazing) else {
+        let Some(mut trail) = vapor.trail(side, presented.g, roll_rate, hazing) else {
             continue;
         };
+        // The mesh is interpolated for display; pin only the drawn head to that
+        // same pose. Authoritative trail samples remain unchanged.
+        if let Some(points) = attachments {
+            trail[0] = points[side];
+        }
         for (i, pair) in trail.windows(2).enumerate() {
             for (end, point) in pair.iter().enumerate() {
                 let step = (i + end) as f32 / vapor.segments() as f32;
@@ -124,9 +129,9 @@ fn vapor_vertices(
                     point[0] as f32,
                     point[1] as f32,
                     point[2] as f32,
-                    color[0],
-                    color[1],
-                    color[2],
+                    1.,
+                    1.,
+                    1.,
                     0.55 * (1. - step),
                 ]);
             }
@@ -143,6 +148,7 @@ fn step_turbulence(
     rng: &mut tore_formats::flight_model::clock_rng::NativeRng,
     flight: &mut flight::State,
     world: &terrain::World,
+    enabled: bool,
 ) -> Option<tore_input::FeedbackEvent> {
     let ground = f64::from(world.height(flight.position[0] as f32, flight.position[2] as f32));
     let agl = flight.position[1] - ground;
@@ -152,9 +158,9 @@ fn step_turbulence(
         speed_fps: flight.speed,
         seconds_of_day: world.weather.seconds_of_day(),
         percent: flight.model().configuration().turbulence_percent,
-        // The daytime ground-query flag's surface meaning is unresolved.
-        daytime_ground: false,
-        enabled: true,
+        daytime_ground: world.turbulence_reduced_surface(flight.position[0], flight.position[2]),
+        enabled,
+        nearby_strength: 0,
     };
     let d = turbulence
         .step(world.weather.ticks(), 2, conditions, rng)
@@ -162,10 +168,7 @@ fn step_turbulence(
     if d == tore_sim::turbulence::Disturbance::default() {
         return None;
     }
-    flight.position[1] += d.vertical_fps * flight::DT;
-    flight.yaw += d.yaw * flight::DT;
-    flight.pitch += d.pitch * flight::DT;
-    flight.bank += d.roll * flight::DT;
+    flight.apply_turbulence(d);
     d.shake.then(|| tore_input::FeedbackEvent::Turbulence {
         intensity: d.severity(),
     })
@@ -193,6 +196,8 @@ impl App {
     fn reset_weather(&mut self) {
         self.world.weather_presentation = tore_sim::environment::Presentation::seeded(1)
             .expect("fixed valid weather presentation seed");
+        self.world.auxiliary_presentations =
+            std::array::from_fn(|_| self.world.weather_presentation.clone());
         self.world.weather =
             tore_sim::environment::Environment::new(self.world.weather.configuration().clone());
         self.turbulence = Default::default();
@@ -759,7 +764,7 @@ impl App {
                     &self.instruments,
                     &self.menu.state,
                 );
-                self.flight_ui = flight_ui::FlightUi::default();
+                self.flight_ui.reset_for_flight();
                 saved.apply(
                     &mut self.flight_ui,
                     &mut self.instruments,
@@ -1129,6 +1134,7 @@ impl ApplicationHandler for App {
                         false
                     }
                     Screen::Flight => {
+                        self.world.no_sun_whiteout = self.flight_ui.no_sun_whiteout;
                         let now = Instant::now();
                         let elapsed = (now - self.frame_time).as_secs_f64().min(0.25);
                         let steps = self.flight_ui.steps(&mut self.flight_clock, elapsed);
@@ -1167,16 +1173,23 @@ impl ApplicationHandler for App {
                                 self.flight_ui.look,
                                 matches!(self.flight_view, 1 | 2),
                             );
-                            self.world.step_weather(
-                                self.flight.position[1],
+                            self.world.step_weather(self.flight.speed, &weather_view);
+                            self.world.step_view_weather(
+                                &mirrors::camera(&self.flight),
                                 self.flight.speed,
-                                &weather_view,
                             );
+                            for page in [2, 3] {
+                                self.world.step_view_weather(
+                                    &self.hornet.panel_camera(&self.flight, page),
+                                    self.flight.speed,
+                                );
+                            }
                             let turbulence_cue = step_turbulence(
                                 &mut self.turbulence,
                                 &mut self.turbulence_rng,
                                 &mut self.flight,
                                 &self.world,
+                                !self.flight_ui.no_turbulence,
                             );
                             if let Some(points) = self.hornet.streamer_points(&self.flight) {
                                 self.vapor.step(self.world.weather.ticks(), points);
@@ -1286,8 +1299,14 @@ impl ApplicationHandler for App {
                         self.camera.zoom = self.flight_ui.zoom;
                         // One resolved instant per frame, shared by the main view,
                         // the mirrors and the camera panels.
-                        self.world.resolve_palette(presented.position[1]);
-                        let vapor = vapor_vertices(&self.vapor, &self.world, &presented);
+                        self.world
+                            .resolve_palette(f64::from(self.camera.position[1]));
+                        let vapor = vapor_vertices(
+                            &self.vapor,
+                            &self.world,
+                            &presented,
+                            self.hornet.streamer_points(&presented),
+                        );
                         renderer.vapor(&vapor);
                         match renderer.poll_previews() {
                             Ok(previews) => {
@@ -1314,21 +1333,7 @@ impl ApplicationHandler for App {
                             self.instrument_time = now;
                             for page in [2, 3] {
                                 if self.instruments.pages.contains(&page) {
-                                    let mut camera = self.hornet.camera(
-                                        &presented,
-                                        if page == 2 { 0 } else { 2 },
-                                        Default::default(),
-                                    );
-                                    camera.view_fraction = 1.;
-                                    if page == 3 {
-                                        for i in 0..3 {
-                                            camera.position[i] = presented.position[i] as f32
-                                                + (camera.position[i]
-                                                    - presented.position[i] as f32)
-                                                    * 0.5;
-                                        }
-                                        camera.pitch = -(30f32 / 65.).atan();
-                                    }
+                                    let camera = self.hornet.panel_camera(&presented, page);
                                     renderer.aircraft(
                                         &self.hornet,
                                         &presented,
@@ -1383,6 +1388,7 @@ impl ApplicationHandler for App {
                                     presented.position[0] as f32,
                                     presented.position[2] as f32,
                                 ) as f64,
+                                self.world.air_data(&presented).ok().as_ref(),
                                 self.flight_ui.ladder,
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                                 self.flight_canvas.hud_zoom(1.),
@@ -1415,11 +1421,7 @@ impl ApplicationHandler for App {
                         self.camera
                             .step(elapsed as f32, self.modifiers.shift_key(), &self.world);
                         for _ in 0..self.flight_clock.steps(elapsed) {
-                            self.world.step_weather(
-                                f64::from(self.camera.position[1]),
-                                0.,
-                                &self.camera,
-                            );
+                            self.world.step_weather(0., &self.camera);
                         }
                         self.world
                             .resolve_palette(f64::from(self.camera.position[1]));
@@ -2161,18 +2163,23 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         return Ok(());
     }
-    let audio =
-        if no_audio || smoke_test || validate_creator || validate_weather || snapshot.is_some() {
-            None
-        } else {
-            match audio::Audio::new(std::mem::take(&mut assets.sounds), &assets.music_scores) {
-                Ok(audio) => Some(audio),
-                Err(error) => {
-                    eprintln!("Continuing without audio: {error}");
-                    None
-                }
+    let audio = if no_audio
+        || smoke_test
+        || validate_creator
+        || validate_weather
+        || snapshot.is_some()
+        || std::env::var_os("TORE_ENVIRONMENT_PROBE").is_some()
+    {
+        None
+    } else {
+        match audio::Audio::new(std::mem::take(&mut assets.sounds), &assets.music_scores) {
+            Ok(audio) => Some(audio),
+            Err(error) => {
+                eprintln!("Continuing without audio: {error}");
+                None
             }
-        };
+        }
+    };
     // Saved previews stay reproducible; normal launches randomly select all five.
     if snapshot.is_some() && background.is_none() {
         background = Some("CHOOSEV".into());
@@ -2235,6 +2242,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         println!("Menu preview: {}", path.display());
         return Ok(());
     }
+    let turbulence_enabled = match std::env::var("TORE_TURBULENCE").as_deref() {
+        Err(std::env::VarError::NotPresent) | Ok("1") => true,
+        Ok("0") => false,
+        _ => return Err("TORE_TURBULENCE needs 0 or 1".into()),
+    };
     let mut camera = terrain::Camera::for_world(&world);
     if let Ok(pose) = std::env::var("TORE_WEATHER_VIEW") {
         let values = pose
@@ -2277,6 +2289,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let animation_capture = capture_terrain.is_some()
         && (flight_devices.is_some() || flight_controls.is_some() || flight_probe_ticks.is_some());
     let mut flight = hornet.start(&world);
+    if let Ok(value) = std::env::var("TORE_FLIGHT_AGL") {
+        let agl = value.parse::<f64>()?;
+        if !agl.is_finite() || !(10. ..=90000.).contains(&agl) {
+            return Err("TORE_FLIGHT_AGL needs 10..90000 feet".into());
+        }
+        flight.position[1] =
+            f64::from(world.height(flight.position[0] as f32, flight.position[2] as f32)) + agl;
+    }
     flight.jammer = jammer_on;
     if researched_flight {
         flight.enable_research(1)?;
@@ -2289,6 +2309,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let mut probe_turbulence_rng = tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?;
     if let Some(ticks) = flight_probe_ticks {
         let keys = setup_maneuver(&mut flight);
+        if maneuver == "stall" {
+            for (v, wind) in flight.velocity.iter_mut().zip(world.wind()) {
+                *v += wind;
+            }
+        }
         for _ in 0..ticks {
             flight.step_surface(&keys, |x, z| world.surface(x, z));
             let mut weather_view = hornet.camera(&flight, flight_view, Default::default());
@@ -2298,12 +2323,17 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 flight_look.map(f32::to_radians),
                 matches!(flight_view, 1 | 2),
             );
-            world.step_weather(flight.position[1], flight.speed, &weather_view);
+            world.step_weather(flight.speed, &weather_view);
+            world.step_view_weather(&mirrors::camera(&flight), flight.speed);
+            for page in [2, 3] {
+                world.step_view_weather(&hornet.panel_camera(&flight, page), flight.speed);
+            }
             step_turbulence(
                 &mut probe_turbulence,
                 &mut probe_turbulence_rng,
                 &mut flight,
                 &world,
+                turbulence_enabled,
             );
             if let Some(points) = hornet.streamer_points(&flight) {
                 probe_vapor.step(world.weather.ticks(), points);
@@ -2312,6 +2342,27 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     // Bounded wing-vapor probe: prints the resolved trail without a window.
     if std::env::var_os("TORE_VAPOR_PROBE").is_some() {
+        if let Some(def) = &hornet.streamer {
+            for side in 0..2 {
+                let p = def.attachment(side, 0)?;
+                let nearest = hornet.poses[0]
+                    .faces
+                    .iter()
+                    .flat_map(|f| &f.positions)
+                    .map(|v| {
+                        let v = v.map(f64::from);
+                        let distance =
+                            ((v[0] - p[0]).powi(2) + (v[1] - p[2]).powi(2) + (v[2] - p[1]).powi(2))
+                                .sqrt()
+                                / 3.;
+                        (distance, v)
+                    })
+                    .min_by(|a, b| a.0.total_cmp(&b.0));
+                println!(
+                    "CE side={side} right/up/forward={p:?}; nearest mesh distance_ft/vertex={nearest:?}"
+                );
+            }
+        }
         println!(
             "wing vapor: g={:.2} roll_rate_deg={:.1} position={:?}",
             flight.g,
@@ -2332,6 +2383,20 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 None => println!("  side {side}: no trail"),
             }
         }
+    }
+    if std::env::var_os("TORE_ENVIRONMENT_PROBE").is_some() {
+        println!(
+            "Environment: wind={:?} world_fps={:?} air_data={:?}",
+            world.weather.configuration().wind(),
+            world.wind(),
+            world.air_data(&flight)
+        );
+        println!(
+            "Turbulence: enabled={turbulence_enabled} state={probe_turbulence:?}; position={:?} attitude={:?}",
+            flight.position,
+            [flight.yaw, flight.pitch, flight.bank]
+        );
+        return Ok(());
     }
     if let Some(v) = flight_devices {
         if v[3] > 0. && !flight.hook_available() {
@@ -2485,6 +2550,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         window_size,
         flight_ui: {
             let mut ui = flight_ui::FlightUi::default();
+            ui.no_turbulence = !turbulence_enabled;
             ui.menu = flight_menu;
             ui.paused = animation_capture || combat_probe.is_some();
             ui.look = flight_look.map(f32::to_radians);

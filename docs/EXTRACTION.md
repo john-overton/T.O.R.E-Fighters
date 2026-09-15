@@ -315,3 +315,10 @@ The app also imports the reviewed executable's nine lens-flare descriptors into
 `TORE_FLARE_V1` using the bounded `weather::flare` reader. All LAY modules supply
 fill remaps 265/266 as well as the existing sun-glow remap 267. Older caches
 without this inert layout re-import from available reviewed media.
+
+## Aircraft implementation guide
+
+The [aircraft import and acceptance guide](aircraft-import.md) joins extraction,
+existing flight/presentation/systems coverage and all per-aircraft acceptance
+gates. F-14, A-4E and X-31 are scheduled after the flight-response slice; they
+are not supported identities yet.

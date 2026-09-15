@@ -243,3 +243,24 @@ fixed triangular index, with 10-degree ticks and numbers every 30 degrees.
 It follows aircraft attitude, including full rolls, independently of head-look.
 The readout outlines are transparent. Combat debug status and range hints are no longer overlaid on
 flight; normal HUD and instrument windows remain available.
+
+## Sun glare cheat
+
+**Escape → Cheat → No sun whiteout?** toggles glare suppression. **On** removes
+sun whitening from world/cockpit/HUD palettes and disables lens-flare circles in
+all rendered views; the original sun remains visible. It applies while paused,
+lasts across mission restarts in the current session and is not saved to disk.
+The developer override `TORE_SUN_GLARE=0` also disables these effects.
+
+Main, mirror and instrument camera scenes now resolve their own altitude, fog,
+palette and glare from the same weather clock. Mirror rendering stays GPU-only;
+camera instruments retain their asynchronous, roughly 10 Hz feed and can show
+an older completed image. [Evidence and remaining work](baselines/weather-cameras.md).
+
+### Wind/turbulence continuation
+
+**Cheat → No turbulence?** toggles physical turbulence for this session and
+survives flight restart. HUD TAS, AGL and vertical speed now use the shared
+AirData sample with explicit wind, terrain and standard atmosphere when in its
+supported altitude range; labels remain TAS and geometric altitude. Missing
+IAS/CAS or indicated/pressure altitude are not synthesized.

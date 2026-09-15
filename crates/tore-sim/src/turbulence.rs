@@ -26,11 +26,14 @@ pub struct Conditions {
     pub seconds_of_day: i32,
     /// The aircraft's own `turbulencePercent` source field.
     pub percent: i16,
-    /// 0x477a69 scales daytime strength by two thirds behind a ground query
-    /// whose surface meaning is UNRESOLVED.
+    /// 0x477a69 scales daytime strength by two thirds when T_Info/Collision
+    /// reports native surface class 1. Native object overrides stay caller-owned.
     pub daytime_ground: bool,
     /// 0x477593: a preference bit suppresses turbulence entirely.
     pub enabled: bool,
+    /// Maximum reviewed nearby-aircraft contribution (0..100). Zero means the
+    /// caller has no qualifying neighbor; it does not create one implicitly.
+    pub nearby_strength: u8,
 }
 
 /// One tick of disturbance. Angles are rates in radians per second.
@@ -88,6 +91,67 @@ fn speed_shape(speed: i32) -> i32 {
     }
 }
 
+/// Reviewed distance/signature/angular consumer at 0x477870..0x477a13.
+/// Distance is 24.8 feet; angles are the native `_Angles` result after the
+/// 50-foot lateral/vertical dead zones. Producers remain explicit so callers
+/// cannot quietly turn visual mesh bounds into a validated native wake volume.
+pub fn wake_strength(distance_f8: i32, signature: i16, heading: i16, pitch: i16) -> u8 {
+    if !(0..2000 * 256).contains(&distance_f8) {
+        return 0;
+    }
+    let reach = i64::from(signature.clamp(75, 200)) * 125 * 4096 / 100;
+    let distance = (100 - i64::from(distance_f8) * 100 / reach).clamp(0, 100);
+    let angle = (32760 - i32::from(heading).abs()).max(i32::from(pitch).abs());
+    let angular = (100 - 100 * angle / 1820).clamp(0, 100);
+    (distance * i64::from(angular) / 100) as u8
+}
+
+/// Authored float producer for the reviewed scalar wake consumer. Only actual
+/// aircraft supplied by a caller belong here; no fictitious neighbors are made.
+#[derive(Clone, Copy, Debug)]
+pub struct NearbyAircraft {
+    pub position: [f64; 3],
+    /// Heading, pitch, bank in radians, separately from motion/speed.
+    pub attitude: [f64; 3],
+    pub speed_fps: f64,
+    /// Native type +0x3f, `sigs[0]`; not an inferred wing span or mass.
+    pub signature: i16,
+}
+impl NearbyAircraft {
+    pub fn strength_at(self, position: [f64; 3]) -> u8 {
+        use crate::attitude::{Basis, dot};
+        if self.speed_fps < 293.
+            || !self.speed_fps.is_finite()
+            || position
+                .iter()
+                .chain(self.position.iter())
+                .chain(self.attitude.iter())
+                .any(|v| !v.is_finite())
+        {
+            return 0;
+        }
+        let delta = std::array::from_fn(|i| position[i] - self.position[i]);
+        let distance = dot(delta, delta).sqrt();
+        if distance >= 2000. {
+            return 0;
+        }
+        let b = Basis::new(self.attitude[0], self.attitude[1], self.attitude[2]);
+        let dead_zone = |x: f64| x.signum() * (x.abs() - 50.).max(0.);
+        let x = dead_zone(dot(delta, b.right));
+        let y = dead_zone(dot(delta, b.up));
+        let z = dot(delta, b.forward);
+        // Float orientation/atan and conversion remain host adaptations. The
+        // source uses the imported integer matrix/atan lookup tables instead.
+        let angle = |r: f64| (r * 65520. / std::f64::consts::TAU).round() as i16;
+        wake_strength(
+            (distance * 256.).floor() as i32,
+            self.signature,
+            angle(x.atan2(z)),
+            angle(y.atan2(x.hypot(z))),
+        )
+    }
+}
+
 impl Turbulence {
     /// One native service step. `service_ticks` is the elapsed clock delta.
     /// Draws happen in the original's order so a shared seed replays.
@@ -117,9 +181,7 @@ impl Turbulence {
     }
 
     fn generate(&mut self, tick: i64, c: Conditions, rng: &mut NativeRng) -> Result<()> {
-        // Nearby-aircraft strength at 0x477826 needs contact geometry this
-        // adapter does not supply, so only the low-altitude term applies.
-        let strength = low_altitude_strength(c.agl_feet);
+        let strength = low_altitude_strength(c.agl_feet).max(i32::from(c.nearby_strength.min(100)));
         if strength <= 0 {
             self.next_update = tick + IDLE_DELAY;
             return Ok(());
@@ -200,6 +262,7 @@ mod tests {
             percent: 100,
             daytime_ground: false,
             enabled: true,
+            nearby_strength: 0,
         }
     }
 
@@ -210,6 +273,43 @@ mod tests {
             .map(|tick| state.step(tick, 2, c, &mut rng).unwrap())
             .collect();
         (state, out)
+    }
+
+    #[test]
+    fn nearby_wake_has_speed_distance_dead_zone_and_rear_cone_gates() {
+        let n = NearbyAircraft {
+            position: [0.; 3],
+            attitude: [0.; 3],
+            speed_fps: 300.,
+            signature: 100,
+        };
+        assert_eq!(n.strength_at([0., 0., -500.]), 75);
+        assert_eq!(n.strength_at([0., 0., 500.]), 0);
+        assert_eq!(n.strength_at([0., 0., -2000.]), 0);
+        assert_eq!(
+            NearbyAircraft {
+                speed_fps: 292.,
+                ..n
+            }
+            .strength_at([0., 0., -500.]),
+            0
+        );
+        assert!(n.strength_at([25., 25., -500.]) > 0);
+        assert_eq!(n.strength_at([500., 0., -500.]), 0);
+        let east = NearbyAircraft {
+            attitude: [std::f64::consts::FRAC_PI_2, 0., 0.],
+            ..n
+        };
+        assert_eq!(east.strength_at([-500., 0., 0.]), 75);
+        let (state, out) = run(
+            Conditions {
+                nearby_strength: 75,
+                ..conditions(20000.)
+            },
+            4000,
+        );
+        assert!(out.iter().any(|d| *d != Disturbance::default()));
+        assert_ne!(state, Turbulence::default());
     }
 
     #[test]

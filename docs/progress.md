@@ -4,6 +4,32 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
 
 **Current scope:** Original Choose Activity and Quick Mission briefing lead to all-theater previews and F/A-18D/Rafale C free flight. The explicit manual range now connects the ten PT-default weapon slots, sensors, damage, stores and combat-service replay. Full native environment/flight/combat parity and the remaining menu screens stay open. AI is deferred until manual acceptance. See [current systems evidence](baselines/weapons-systems.md), [earlier manual weapons evidence](baselines/manual-weapons.md) and the dated checklists below.
 
+## Next priority: flight response and maneuver buffet — 2026-09-15
+
+- [x] Review existing flight-model/native-research coverage and write the
+  [ordered implementation plan](flight-response-plan.md).
+- [ ] 1. Trace G, body rates, rudder and departure producers/consumers; record baselines.
+- [ ] 2. Finish verified G/roll/rudder response and typed telemetry contracts.
+- [ ] 3. Complete supported departure/warning/spin/recovery behavior.
+- [ ] 4. Connect sustained intensity-based maneuver rumble and verified original audio.
+- [ ] 5. Validate both aircraft/adapters, record evidence and hand off to aircraft imports.
+
+Further weather work follows this slice and the scheduled aircraft additions below. Existing weather work is retained.
+The plan adds no runtime behavior and does not claim native flight parity.
+
+## Scheduled aircraft additions — 2026-09-15
+
+- [x] Consolidate the [full aircraft import/acceptance guide](aircraft-import.md),
+  including current implementation coverage and subsystem-specific gates.
+- [ ] After the flight-response slice, review the exact FA F-14 variant and add it
+  through extraction, model, exterior/cockpit, effects/systems and acceptance gates.
+- [ ] Add A-4E through the same gates using its own source data and model.
+- [ ] Add X-31 through the same gates, reviewing source special-control modes.
+- [ ] Record per-aircraft support/limitations, then resume remaining weather work.
+
+These are scheduled additions, not currently supported CLI/runtime identities.
+Existing F18/Rafale support and remaining native-parity gaps are unchanged.
+
 ## Object and shape reference review — 2026-09-15
 
 - [x] Review the local Plurry v2.01 guides, annotated workbooks and F18C
@@ -12,12 +38,40 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
 - [x] Verify corrected CSV byte coverage, sample connection targets and OBJ
   inventories; distinguish reference hypotheses from existing reader behavior.
   [Evidence and reproduction](baselines/shape-reference-review.md).
-- [ ] Validate the user-reported vapor and exterior-store placement errors against
-  each supported aircraft's own coordinates, units and attachment transforms.
-  The F18C document/sample mismatch does not establish a runtime correction.
+- [x] Correct F18/Rafale vapor CE axes using each aircraft's own records; all
+  four attachments match neutral mesh vertices exactly. See below.
+- [ ] Validate exterior-store placement against each supported aircraft's own
+  coordinates, units and transforms; the F18C sample is not a runtime correction.
 - [ ] General object placement, damage/shadow selection, SH LOD/visibility,
   native articulation and complete materials remain open. No new implementation
   or aircraft support is claimed by this documentation pass.
+
+## Wind, turbulence and vapor attachments — 2026-09-15
+
+- [x] Typed native-order default wind draws and explicit calm; consistent wind
+  for both adapters, starting velocity and live terrain/standard-atmosphere AirData.
+- [x] Trace the daytime T2 class-1 surface gate; add bounded wake strength and
+  explicit geometry inputs, without inventing live neighbors.
+- [x] Body-axis turbulence application, complete-loop regression and session
+  **No turbulence?** cheat with restart preservation.
+- [x] Fix CE right/up/forward axes and heading hinge plane; pin rendered vapor
+  heads to interpolated aircraft attachments. Own-shape checks for both aircraft.
+- [ ] Native angular coupling, exact wake rounding, object/carrier collision
+  producers, wind audio, environment replay and retail/platform comparisons.
+  [Acceptance evidence](baselines/wind-turbulence-vapor.md).
+
+## Weather camera slice — 2026-09-15
+
+- [x] Wire **Cheat → No sun whiteout?** to all-view glare/whitening suppression,
+  including paused frames, without removing the original sun.
+- [x] Camera-local altitude palettes, visibility and decks; independent fixed-tick
+  main/mirror/panel smoothing, shared poses and query-only rendering.
+- [x] Keep vapor histories shared while resolving their fitted color per camera.
+- [x] Synthetic tests, Linux creator/viewer and both-aircraft wide/tall GPU checks,
+  asynchronous panel and bounded CPU frame-time evidence.
+- [ ] Retail camera comparisons, CP alternate display-map consumer recovery and
+  Windows/macOS runtime checks. Instrument feeds retain asynchronous 10 Hz latency.
+  [Evidence and qualifications](baselines/weather-cameras.md).
 
 ## Weather smoothing follow-up — 2026-09-15
 
@@ -46,7 +100,8 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
   alternate display/terrain-detail consumers and Windows/macOS checks remain.
   [Current batch evidence](baselines/weather-foundation.md#final-weather-sampling-and-batch-checkpoint--2026-09-15)
   supersedes older unchecked implementation substeps in this chronological log.
-- [ ] Step 4: consistent weather in main, mirror and instrument cameras.
+- [x] Step 4 ordinary-camera implementation; retail/special-display acceptance
+  remains open as recorded in the camera slice above.
 - [ ] Steps 5–7: wind/air data/audio, turbulence, then finish wingtip vapor and
   investigate broader wing-induced vapor.
 - [ ] Step 8: serialized environment replay and full retail/platform acceptance.

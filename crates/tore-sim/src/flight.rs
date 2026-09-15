@@ -184,6 +184,21 @@ impl State {
         self.research = Some(crate::research::Research::new(seed)?);
         Ok(())
     }
+    /// Authored coupling of recovered disturbance rates. Rotate the body basis
+    /// without Euler singularities; velocity remains independent. Native movement
+    /// and display-angle coupling/rounding are still a separate acceptance gate.
+    pub fn apply_turbulence(&mut self, d: crate::turbulence::Disturbance) {
+        if self.crashed {
+            return;
+        }
+        let basis = Basis::new(self.yaw, self.pitch, self.bank);
+        let rotation = std::array::from_fn(|i| {
+            (basis.up[i] * d.yaw - basis.right[i] * d.pitch - basis.forward[i] * d.roll) * DT
+        });
+        [self.yaw, self.pitch, self.bank] = basis.rotated(rotation).angles();
+        self.position[1] += d.vertical_fps * DT;
+    }
+
     pub fn step_surface(
         &mut self,
         input: &PilotInput,
@@ -413,7 +428,61 @@ impl Clock {
 }
 #[cfg(test)]
 mod tests {
+    use super::integration_tests::profile;
     use super::*;
+    #[test]
+    fn disturbance_rotation_completes_loop_without_rotating_velocity() {
+        let mut state = State::new(&profile(), [0., 5000., 0.]).unwrap();
+        state.yaw = 0.;
+        state.pitch = 0.;
+        state.bank = 0.;
+        let velocity = state.velocity;
+        let d = crate::turbulence::Disturbance {
+            pitch: std::f64::consts::TAU / (240. * DT),
+            ..Default::default()
+        };
+        let mut inverted = false;
+        for _ in 0..240 {
+            state.apply_turbulence(d);
+            inverted |= Basis::new(state.yaw, state.pitch, state.bank).up[1] < -0.99;
+            assert_eq!(state.velocity, velocity);
+        }
+        assert!(inverted);
+        assert!(Basis::new(state.yaw, state.pitch, state.bank).forward[2] > 0.999999);
+    }
+
+    #[test]
+    fn both_adapters_advect_once_and_air_data_remains_air_relative() {
+        for hybrid in [false, true] {
+            let mut calm = State::new(&profile(), [0., 5000., 0.]).unwrap();
+            if hybrid {
+                calm.enable_research(1).unwrap();
+            }
+            let mut windy = calm.clone();
+            windy.velocity[0] += 40.;
+            let mut surface = crate::research::Surface::terrain(0.);
+            surface.wind = [40., 0., 0.];
+            for _ in 0..1200 {
+                calm.step_surface(&Default::default(), |_, _| {
+                    crate::research::Surface::terrain(0.)
+                });
+                windy.step_surface(&Default::default(), |_, _| surface);
+            }
+            assert!((windy.position[0] - calm.position[0] - 400.).abs() < 1e-7);
+            let reading = crate::telemetry::AirData::sample(
+                &windy,
+                crate::telemetry::EnvironmentReading {
+                    terrain_msl_ft: 0.,
+                    wind_world_fps: surface.wind,
+                    atmosphere: crate::telemetry::Atmosphere::standard(windy.position[1]).unwrap(),
+                },
+            )
+            .unwrap();
+            assert!((reading.true_airspeed_knots * 1.6878098571 - calm.speed).abs() < 1e-7);
+            assert!(reading.indicated_airspeed_knots.is_none());
+        }
+    }
+
     #[test]
     fn presentation_wraps_angles_without_changing_simulation() {
         let a = super::integration_tests::profile();

@@ -293,7 +293,7 @@ weather table indices.
 | `0x4777d4–0x47781e` | Queries ground; strength zero at/above 1,000 ft AGL, otherwise `100 - trunc(100 * height_f8 / 256000)` | Consistent with a low-altitude thermal approximation; native physical label unverified |
 | `0x477826–0x477a2e` | Scans other active aircraft moving at least 293 fps; rejects distance >= 2,000 ft; distance and aircraft-relative geometry weighting can raise strength | Wake-like disturbance is a strong inference; exact volume needs validation |
 | `0x477870–0x4778c7` | Nearby-aircraft weighting uses type field `+0x3f`, clamped 75–200 | Shared schema names this `sigs[0]`; not established wingspan/weight |
-| `0x477a4b–0x477a89` | Reads PT `turbulencePercent` at `cpt+0x100`; outside inclusive 07:00–19:00 divides it by four; in daytime a ground-query flag selects two-thirds scaling | Final surface meaning of the flag remains open |
+| `0x477a4b–0x477a89` | Reads PT `turbulencePercent` at `cpt+0x100`; outside inclusive 07:00–19:00 divides it by four; in daytime a ground-query flag selects two-thirds scaling | Flat-terrain producer tests T2 class 1; object/cached collision parity remains open |
 | `0x477a8b–0x477cfa` | Randomizes interval, recurrence, signed three-axis amplitudes and vertical disturbance; scales by strength, aircraft coefficient and speed | Exact RNG/scheduler replay and source ranges remain open |
 
 Without low-altitude or nearby-plane strength, reconsideration is delayed five
@@ -343,7 +343,9 @@ the new event on that call.
 The draw order is length, gap, three amplitudes, three sign flips, vertical
 rate, one more sign flip. Reproducing that order with the already-translated
 native generator gives replayable events from a shared seed. The nearby-aircraft
-strength term at `0x477826` needs contact geometry and is not applied.
+strength term at `0x477826` now has a bounded scalar helper and an explicit
+nearby-aircraft input. The float geometry adapter remains authored; free flight
+supplies zero until actual flying neighbors exist.
 
 ## Maneuver effects and sound are separate
 
@@ -448,8 +450,10 @@ fixed-wing aircraft — and the attachment points are plain wingtips:
 | F/A-18D | `(-54, 1, -17)` | `(55, 0, -16)` |
 | Rafale C | `(-54, -1, -30)` | `(54, -1, -30)` |
 
-Those are source units; a third of a foot each, in the shape's right, forward
-and up order. The app’s existing one-third-foot scale puts them about 18 feet outboard;
+Those are source units; a third of a foot each, in CE **right, up, forward**
+order (unlike mesh right, forward, up). The native streamer copies the second
+coordinate into the altitude axis. Permuting CE into mesh order gives exact
+neutral-mesh vertex matches for both attachments on both supported aircraft. The app’s existing one-third-foot scale puts them about 18 feet outboard;
 that scale remains provisional, not independent retail size acceptance.
 
 ### The trail colors are patterned fills, not palette entries
@@ -837,3 +841,32 @@ shape art and index cutouts remain intact. Sun/moon geometry additionally has a
 common fitted ×4 projection calibration against the user's default-zoom retail
 captures, with viewport-relative scale. This factor is not decoded native math.
 See [smoothing evidence and limitations](../baselines/weather-smoothing.md).
+
+## Wind/turbulence integration follow-up — 2026-09-15
+
+Mission initialization at `0x4808fb..0x480921` draws heading then speed even
+when `0x481e6b..0x481e85` subsequently overrides them. The app now retains a
+typed resolved wind, uses a dedicated seed of 1 for reproducible launch defaults,
+and preserves explicit calm. Floating-point direction conversion and the isolated
+seed are authored integration choices, not native scheduler/replay parity.
+Both flight adapters and live `AirData` use the same vector. Initial ground
+velocity includes wind so starting TAS is preserved. AirData samples actual
+terrain and a declared standard atmosphere, not a decoded LAY atmosphere.
+
+The daytime surface gate is now traced through `_T_Info` (`0x4abab0`),
+`_Collision` (`0x42b800`) and the flat-terrain leaf class producer
+(`0x42ba86..0x42baf1`). The hit writer stores class at `0x536764`;
+`0x42bc02` compares it with 1. The app samples current T2 class 1, while
+native cached/object/carrier/triangle collision winners remain unimplemented.
+This is not a water or validated-runway classification.
+
+Wake strength uses maximum rather than summed contributors, speed at least
+293 fps, distance below 2000 feet, clamped signature 75..200, and rear-cone
+angular fade over 1820 binary units. Its float geometry adapter applies the
+50-foot lateral/vertical deadzone; exact native matrix/atan rounding is open.
+The shared turbulence consumer rotates attitude about body axes and integrates
+vertical displacement at 120 Hz without locking velocity to the nose. This
+remains an authored coupling, not full native movement/display delta parity.
+Cheat → No turbulence? suppresses physical events and survives restart.
+Wind-dependent audio, serialized environment replay and retail response
+comparisons remain open. [Acceptance](../baselines/wind-turbulence-vapor.md).

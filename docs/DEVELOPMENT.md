@@ -439,8 +439,12 @@ chance; normal MM launches preserve their `clouds` field. Caches predating the
 inert cloud layout automatically re-import when local reviewed media is present.
 
 `TORE_SUN_GLARE=0|1` disables/enables the recovered glare and palette whitening
-(default on in this host adapter). This is a diagnostic for the native glare
-preference, not an implemented graphics-preferences menu.
+(default on in this host adapter). In flight, **Escape → Cheat → No sun
+whiteout? → On** suppresses both whitening and lens flare immediately, including
+while paused; the sun itself remains visible. The cheat lasts for the session
+and across restarts, without changing saved preferences. `TORE_SUN_GLARE=0`
+keeps glare disabled regardless of the cheat. Camera-specific weather sampling
+and validation are described in [weather cameras](baselines/weather-cameras.md).
 
 `TORE_CLOUD_DETAIL=0|1|2` selects recovered cloud candidate placement (default 2).
 Levels 0/1 use the base period; level 2 uses the 4x4 repeat. Native coordinate
@@ -463,3 +467,25 @@ shades. It uses fractional mission time, freezes on pause and does not change
 simulation/callback scheduling. `--validate-weather` also reports native/smooth
 palette change counts and maximum channel steps over a minute of dawn.
 [Evidence and celestial sizing qualifications](baselines/weather-smoothing.md).
+
+### Wind, turbulence and attachment probes
+
+`TORE_WIND=heading,speed` supplies whole degrees (0..360) and feet/second
+(0..200); `0,0` is explicit calm. Without an override or mission line, native-order
+heading/speed draws use an isolated launch seed of 1. Both adapters start with
+the wind added to ground velocity to preserve starting TAS.
+`TORE_TURBULENCE=0|1` sets the initial session preference; the flight Cheat menu
+can change it and restart preserves it. `TORE_FLIGHT_AGL=10..90000` sets
+diagnostic starting height above terrain, not a validated runway.
+
+```sh
+TORE_ENVIRONMENT_PROBE=1 TORE_FLIGHT_AGL=100 TORE_WIND=90,20 target/debug/tore-app --free-flight --aircraft f18 --flight-probe-ticks 600 --no-audio
+TORE_VAPOR_PROBE=1 TORE_WIND=0,0 target/debug/tore-app --free-flight --aircraft rafale --maneuver pull --flight-probe-ticks 400 --smoke-test --no-audio
+```
+
+The environment probe exits before window creation and prints resolved wind,
+live AirData, turbulence state and final pose after the full fixed-tick service.
+It differs from the isolated `--headless-flight` dynamics probe. AirData uses
+a declared standard atmosphere; unavailable IAS/CAS/indicated altitude remain
+unavailable. The vapor probe includes each raw CE point and nearest neutral
+mesh vertex. [Acceptance](baselines/wind-turbulence-vapor.md).

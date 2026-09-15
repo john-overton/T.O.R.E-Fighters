@@ -6,6 +6,13 @@ with fitted continuous dynamics where the original engine contract is still
 incomplete. It is a usable free-flight model, not a claim of byte-for-byte native
 trajectory parity or a real-aircraft engineering model.
 
+## Next scheduled work
+
+The [flight response and maneuver buffet plan](flight-response-plan.md) orders
+remaining G-load, roll-rate, rudder and departure work, followed by sustained
+maneuver rumble and verified original audio. This slice precedes further weather
+work. Existing implementations below remain partial/fitted as documented.
+
 ## Run and reproduce
 
 Use the installed local media through the portable extraction entry point:
@@ -116,9 +123,9 @@ state and explicit terrain, wind, temperature and static pressure:
   belong in future sensor components. AoA/sideslip are unavailable at zero airspeed.
 
 Steam gauges can consume this snapshot without reading aircraft-specific structs.
-Existing HUD/panel drawing still uses its legacy state fields; this adds the
-shared data interface, not a new gauge renderer or a fully modeled pitot/static
-system. Gauge animation/filtering must not modify authoritative flight state.
+The HUD now consumes the shared sample for TAS, AGL and vertical speed using
+explicit wind, terrain and standard atmosphere; other panel channels retain
+existing integration. This is not a fully modeled pitot/static system. Gauge animation/filtering must not modify authoritative flight state.
 
 The optional engineering atmosphere helper follows the published
 [NASA Glenn three-zone atmosphere approximation](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/earth-atmosphere-equation-metric/).
@@ -184,3 +191,10 @@ helpers; the continuous adapter still uses fitted force/contact coupling. Other
 unresolved PT fields remain in raw imported `Aircraft` data for research, including
 unimplemented equipment, damage and loadout behavior. It is not whole-game or
 whole-tick parity. External mod-file serialization/loading remains future work.
+
+## Aircraft import and expansion
+
+The [aircraft import and acceptance guide](aircraft-import.md) joins extraction,
+existing flight/presentation/systems coverage and all per-aircraft acceptance
+gates. F-14, A-4E and X-31 are scheduled after the flight-response slice; they
+are not supported identities yet.

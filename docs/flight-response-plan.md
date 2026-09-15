@@ -1,0 +1,150 @@
+# Flight response and maneuver buffet plan
+
+Requested 2026-09-15. **Next scheduled work, before further weather work.**
+This is an implementation and acceptance plan; unchecked items claim no new
+native behavior. Scope is the reviewed F/A-18D (`F18.PT`) and Rafale C
+(`RAFALE.PT`), preserving the legacy default and explicit hybrid selection.
+
+## Existing work and the gap
+
+[FLIGHT-MODEL](FLIGHT-MODEL.md) describes the working adapters and their fitted
+parts. [Native flight research](formats/native-flight.md) records translated
+components and unresolved whole-tick contracts. Those are the existing backlog;
+this plan orders the next flight-response slice.
+
+| Area | Already present | Work to finish in this slice |
+| --- | --- | --- |
+| G-load / AoA | Source envelopes/loading, fitted pitch/trim response and load-factor/AoA telemetry | Verify commanded versus achieved G, sign/units and native producers; finish supported response and feedback consumers |
+| Roll rate | Body response; source roll maximum in hybrid, configured fitted cap in legacy | Verify actual body-rate units, limiting, release and departure coupling; avoid deriving rates from camera or wrapped Euler angles |
+| Rudder / slip | Fitted yaw/slip response; native spin-entry/recovery predicates | Trace control scaling, authority and drag/coupling, then verify symmetric response and recovery |
+| Departure / spin | Translated warning/stall predicates and timers; hybrid spin entry/recovery with fitted continuous coupling | Resolve missing producers and warning/stall/tumble/control effects incrementally; preserve explicit clock/RNG inputs |
+| Maneuver feedback | Native sound-side `Turbulence` routine traced at `0x434550`, caller at `0x434d76` | Recover full input-to-intensity and sound dispatch contracts; integrate a distinct maneuver-feedback signal |
+| Controller rumble | Environmental turbulence supplies severity only when its shake flag is set; overlapping pulses support sustained strong events | Add sustained maneuver feedback with intensity tracking, release and lifecycle checks; audit the mild environmental threshold separately |
+
+The sound routine reads G, roll rate, rudder, departure, speed and device/state
+flags. That establishes maneuver-responsive sound logic, **not an aerodynamic
+buffet-force equation or a verified rumble mapping**. Do not translate its sound
+intensity into forces. Do not trigger feedback merely from stick deflection.
+[Source boundaries](formats/weather.md#maneuver-effects-and-sound-are-separate).
+
+## 1. Trace producers and establish a baseline
+
+- [ ] Extend the repeatable static extraction pass for the relevant flight and
+  sound callers. Record executable/resource hashes, source-build distinctions,
+  offsets, units, signedness, clamps, update order and unresolved branches.
+- [ ] Map G, actual roll rate, rudder command/deflection, AoA/slip and departure
+  state from source producers through force/control, display and sound consumers.
+  Establish whether a channel is a demand, measured response or display offset.
+- [ ] Record the current behavior of both adapters and aircraft before edits:
+  level flight, hard pull and push, sustained turn, roll/release, rudder/release,
+  low-speed warning/stall, spin entry and recovery.
+- [ ] Capture per-tick inputs, configuration identity, wind/atmosphere/contact,
+  G/AoA/slip, body rates, velocity, attitude, departure state/timers and RNG state.
+  Put local source-derived traces in `.local/`, committed methodology and results
+  in `docs/baselines/flight-response.md` when that evidence exists.
+
+**Gate:** a producer/consumer ledger distinguishing translated, fitted and unknown
+behavior; repeatable baseline for both identities and adapters. Native modules
+remain inert data. A missing native branch stays explicitly unresolved.
+
+## 2. Finish G, roll and rudder response contracts
+
+- [ ] Correct verified input/output units and state ownership before tuning.
+  Resolve reviewed PT fields once into each model's typed configuration; validate
+  configuration replacement. Keep F18 and Rafale laws in their own modules.
+- [ ] Complete supported G-envelope/loading and pitch-response consumers, checking
+  positive/negative load, low/high speed and relevant device/loading changes.
+  Do not equate requested G or raw stick position with achieved load factor.
+- [ ] Complete verified roll authority, acceleration/limiting and release behavior;
+  preserve actual body rates through vertical/inverted flight.
+- [ ] Complete verified rudder authority, sideslip/drag and roll/yaw coupling.
+  Document any remaining fitted law per aircraft instead of borrowing calibration.
+- [ ] Expose typed maneuver telemetry only where existing `AirData`/state channels
+  are insufficient; consumers must use one authoritative fixed-tick snapshot.
+
+**Gate:** symmetric left/right probes where supported by the model; finite
+full loops through both vertical attitudes; stable release; wind advection once;
+consistent G/AoA/rate telemetry. Preserve independent aircraft attitude and
+velocity. Do not silently switch the default adapter or claim whole-tick parity.
+
+## 3. Complete supported departure and recovery behavior
+
+- [ ] Trace remaining envelope/difficulty/device predicates and warning timers.
+  Separate the existing fitted stall-entry gate from verified native predicates.
+- [ ] Verify control/lift attenuation and implement newly recovered departure
+  consumers, including pitch/roll fall or tumble only when their contracts are
+  established. Keep random choices and mutable timers outside configuration.
+- [ ] Verify spin direction, entry/recovery thresholds, interrupted recovery,
+  neutral/opposite rudder, throttle/pitch requirements and source state flags for
+  each aircraft. Preserve movement/display-angle distinctions.
+- [ ] Make warning/departure state available to feedback without feeding a
+  presentation effect back into aerodynamic state.
+
+**Gate:** deterministic warning → stall/spin → recovery traces, threshold-boundary
+and timer-interruption tests, no hidden RNG draws from audio, rumble or cameras.
+Unrecovered native coupling remains listed rather than filled with assumed physics.
+
+## 4. Connect maneuver buffet feedback and original audio
+
+- [ ] Recover the complete sound-intensity helper, activation gates, sample
+  selection, gain/retrigger/stop behavior and call cadence. Verify source G/rate
+  scales before using host floating-point channels.
+- [ ] Produce maneuver-feedback state from the verified flight channels. Keep
+  environmental turbulence, maneuver feedback and any verified aerodynamic
+  disturbance independently identifiable in diagnostics.
+- [ ] Add an explicitly authored controller mapping: sustained nonzero maneuver
+  intensity sustains rumble; changing intensity changes strength; release/recovery
+  clears it promptly. Define bounded attack/release, clamping and mixer priority
+  so repeated pulses do not accumulate or mask weapon/damage cues unexpectedly.
+- [ ] Test strong stick input with little achieved response, sustained hard turns,
+  rolls, rudder maneuvers and departure/recovery. Do not assume every positive G
+  or roll rate must activate a cue; use recovered sound gates and label authored
+  haptic choices separately.
+- [ ] Connect original audio only after its dispatch is verified. If no exact
+  sample/caller mapping is established, record the gap instead of choosing a
+  similarly named resource. Sound-side thresholds are not force laws.
+- [ ] Verify settings semantics: effects mute, rumble disable, pause/focus loss,
+  device disconnect, crash, restart and aircraft switch clear/restore the correct
+  state without stale pulses. Trace whether **No turbulence?** also affects native
+  maneuver sound; do not assume the environmental cheat suppresses all buffet.
+- [ ] Audit the existing environmental shake threshold. Document whether mild
+  turbulence feedback should remain gated or gain an authored continuous mapping;
+  any change must be independently tested and must not alter environmental RNG.
+
+**Gate:** fixed-input intensity/envelope tests plus sustained physical-controller
+and audio checks on available hardware. Enabled/disabled feedback must yield
+identical flight-state traces. No rumble or audible acceptance claim from tests
+that only exercise the mixer. Record hardware/platform availability honestly.
+
+## 5. Acceptance and aircraft-import handoff
+
+- [ ] Run the same `--validate-flight` suite for both aircraft, plus the new
+  maneuver probes in legacy and hybrid modes. Include explicit calm/crosswind,
+  pause/resume without catch-up, restart, and deterministic same-input replay.
+- [ ] Cover hard pull/push and release at multiple speeds/altitudes; sustained
+  turns; left/right roll and rudder; warning/stall/spin entry and recovery;
+  gear/flap/airbrake and supported mass cases where relevant to traced consumers.
+- [ ] Run formatting, warnings-denied Clippy, tests and build with `--locked`,
+  Python checks and asset guards as listed in [DEVELOPMENT](DEVELOPMENT.md).
+  Use synthetic fixtures for committed tests.
+- [ ] Run flight/camera GPU checks and creator/viewer smoke tests for rendering
+  changes. Capture wide/tall composition if feedback changes the view; preserve
+  full-canvas HUD/cockpit projection and screen-anchored instruments. Record
+  bounded frame-time evidence for flight-performance changes.
+- [ ] Compare matched retail maneuvers when recordings/runtime are available,
+  recording input/aircraft/loadout/conditions and measurable differences. Separate
+  synthetic invariants, host regression results and retail parity evidence.
+- [ ] Update `FLIGHT-MODEL.md`, native research, progress and the acceptance record
+  with completed substeps and unresolved gates. Next add F-14, A-4E and X-31
+  using the [aircraft import guide](aircraft-import.md), then return to remaining
+  weather work. Carry unavailable retail/platform evidence explicitly.
+
+## Broader flight-model backlog retained
+
+This slice does not close native full-tick trajectory parity, integer scheduling
+and global RNG order, terrain/object collision/cache and carrier producers,
+remaining equipment/damage/fuel-transfer coupling, pitot/static calibration,
+indicated instruments or new-aircraft acceptance. These stay in
+[flight-model status](FLIGHT-MODEL.md) and [progress](progress.md). Broader weather,
+AI and remaining menu screens are outside this scheduled slice. New aircraft
+follow it as a separate scheduled pass through the import guide.

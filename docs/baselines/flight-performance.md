@@ -77,3 +77,16 @@ clean/gun/incoming/camera samples and a measured notification-composition fix.
 Incoming-run CPU means dropped from 4.85/4.64 ms to 2.51/2.49 ms by reusing the
 existing range HUD line; physics and event scheduling were unchanged. These are
 short CPU/presentation measurements, not native-parity or displayed-FPS claims.
+
+## Per-camera weather
+
+The [weather camera slice](weather-cameras.md) records paired clear/fog runs
+with an active Other View feed: mean CPU intervals 1.79/1.63 ms, p95 2.73/2.08 ms,
+zero paused frames and 330 GPU-only mirror renders each. These are short
+presentation-inclusive measurements, not GPU timings or a before/after claim.
+
+Wind/turbulence/attachment continuation: matched calm F18 1280×720/page-3
+630-frame debug runs measured mean CPU intervals 2.17 ms before and 2.16 ms
+after, with simulation/cameras 0.19 ms in both. No paused frames; 14 completed
+asynchronous camera readbacks each. Short-run tail variability and full
+qualification are in [the acceptance record](wind-turbulence-vapor.md#frame-time-evidence).

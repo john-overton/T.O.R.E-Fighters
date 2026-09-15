@@ -83,6 +83,7 @@ pub fn camera(state: &State) -> Camera {
     let body = Basis::new(state.yaw, state.pitch, state.bank);
     let [yaw, pitch, bank] = rear_basis(body).angles();
     let mut c = Camera::new();
+    c.weather_slot = 1;
     // Fitted eye above/forward of the model origin, in feet.
     c.position = std::array::from_fn(|i| {
         (state.position[i] + body.up[i] * 7. + body.forward[i] * 10.) as f32

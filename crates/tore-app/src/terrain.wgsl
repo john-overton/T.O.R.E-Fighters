@@ -322,7 +322,8 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
 }
 @fragment fn vapor_fragment(in:VaporOut)->@location(0) vec4<f32>{
  // Vapor sits in the same atmosphere as everything else, so haze thins it too.
- return vec4<f32>(linear(in.color.rgb),in.color.a*(1.0-haze(in.distance)));
+ // Resolve the fitted sky-entry material in this camera palette.
+ return vec4<f32>(shade(254u,0).rgb*in.color.rgb,in.color.a*(1.0-haze(in.distance)));
 }
 
 @vertex fn celestial_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {

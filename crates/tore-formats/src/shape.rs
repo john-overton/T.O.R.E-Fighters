@@ -43,11 +43,11 @@ pub struct Shape {
 /// and its four bytes, then requires the 0xce opcode word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StreamerDef {
-    /// Hinge pivot in 24.8 source units. All-zero disables the hinge (0x4a0181).
+    /// Hinge pivot in right/up/forward 24.8 source units. All-zero disables the hinge (0x4a0181).
     pub pivot: [i32; 3],
     /// Scale applied to the aircraft's swing-wing position before the hinge.
     pub hinge_scale: i16,
-    /// Side 0 then side 1, in 24.8 source units. Side 0's X is mirrored.
+    /// Side 0 then side 1, in right/up/forward 24.8 source units. Side 0's X is mirrored.
     pub points: [[i32; 3]; 2],
 }
 
@@ -96,9 +96,9 @@ impl StreamerDef {
             let radians = 182. * units / 32767. * std::f64::consts::TAU / 65536.;
             let (s, c) = radians.sin_cos();
             point = [
-                point[0] * c - point[1] * s,
-                point[0] * s + point[1] * c,
-                point[2],
+                point[0] * c + point[2] * s,
+                point[1],
+                point[2] * c - point[0] * s,
             ];
             for (value, pivot) in point.iter_mut().zip(self.pivot) {
                 *value += f64::from(pivot);
@@ -373,6 +373,19 @@ impl Shape {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ce_heading_hinge_preserves_up_coordinate() {
+        let d = StreamerDef {
+            pivot: [0, 256, 0],
+            hinge_scale: 90,
+            points: [[2560, 512, 0]; 2],
+        };
+        let point = d.attachment(1, 32767).unwrap();
+        assert!((point[0]).abs() < 0.02);
+        assert_eq!(point[1], 3.);
+        assert!((point[2] + 10.).abs() < 0.02);
+    }
+
     #[test]
     fn fog_opcode_survives_static_shape_projection() {
         for (word, mode) in [

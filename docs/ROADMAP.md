@@ -8,7 +8,12 @@ Track concrete steps, substeps and acceptance gates in [progress.md](progress.md
 
 This is the sequencing document for the ground-up rebuild in Rust.  The existing TypeScript repo /USNF-ATF is the guide, not the gospel: its format docs, decoders, recovered geometry, audio recovery, and baselines are the reference material.  Its engine is not being ported.
 
-Current execution order (2026-09-14): finish manual weapons, sensors and damage
+Next scheduled slice (2026-09-15): [flight response and maneuver buffet](flight-response-plan.md),
+covering G-load, roll rate, rudder, departure and sustained feedback. Then add
+F-14, A-4E and X-31 through the [aircraft import gates](aircraft-import.md),
+before resuming remaining weather work. This does not schedule broader AI or menus.
+
+The preceding execution order (2026-09-14) remains a broader gate: finish manual weapons, sensors and damage
 acceptance for F/A-18D and Rafale C before AI work. The only AI authorized for the
 later weapon-testing phase is a basic fly-forward target. The broader future AI
 milestone below is not authorization to implement combat AI now. See

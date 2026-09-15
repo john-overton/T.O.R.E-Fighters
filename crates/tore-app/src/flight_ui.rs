@@ -36,6 +36,8 @@ pub struct FlightUi {
     pub cockpit: bool,
     pub hud: bool,
     pub ladder: bool,
+    pub no_sun_whiteout: bool,
+    pub no_turbulence: bool,
     pub brightness: i16,
     pub zoom: f32,
     pub look: [f32; 2],
@@ -58,6 +60,8 @@ impl Default for FlightUi {
             cockpit: true,
             hud: true,
             ladder: true,
+            no_sun_whiteout: false,
+            no_turbulence: false,
             brightness: 0,
             zoom: 1.,
             look: [0.; 2],
@@ -75,6 +79,16 @@ impl Default for FlightUi {
     }
 }
 impl FlightUi {
+    /// Reset transient flight UI while retaining the session-only cheat.
+    /// Saved display preferences are reapplied by the caller.
+    pub fn reset_for_flight(&mut self) {
+        *self = Self {
+            no_sun_whiteout: self.no_sun_whiteout,
+            no_turbulence: self.no_turbulence,
+            ..Default::default()
+        };
+    }
+
     pub fn frozen(&self) -> bool {
         self.menu || self.paused
     }
@@ -131,6 +145,24 @@ impl FlightUi {
             "Large windows?" => Command::WindowLayout,
             "Show cockpit?" => {
                 self.cockpit = !self.cockpit;
+                Command::Click
+            }
+            "No turbulence?" => {
+                self.no_turbulence = !self.no_turbulence;
+                self.message(if self.no_turbulence {
+                    "Turbulence: off"
+                } else {
+                    "Turbulence: on"
+                });
+                Command::Click
+            }
+            "No sun whiteout?" => {
+                self.no_sun_whiteout = !self.no_sun_whiteout;
+                self.message(if self.no_sun_whiteout {
+                    "Sun glare: off"
+                } else {
+                    "Sun glare: on"
+                });
                 Command::Click
             }
             "HUD pitch ladder?" => {
@@ -455,7 +487,13 @@ impl FlightUi {
                 (142, 50 + i as i32 * 19, 356, 19),
                 format!(
                     "{label}  {}{}",
-                    n.shortcut,
+                    if n.label == "No sun whiteout?" {
+                        if self.no_sun_whiteout { "On" } else { "Off" }
+                    } else if n.label == "No turbulence?" {
+                        if self.no_turbulence { "On" } else { "Off" }
+                    } else {
+                        &n.shortcut
+                    },
                     if n.children.is_empty() { "" } else { " >" }
                 ),
             ));
@@ -648,6 +686,32 @@ mod tests {
             }],
         }]
     }
+    #[test]
+    fn no_turbulence_is_a_session_toggle_preserved_by_restart() {
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.activate("No turbulence?", ""), Command::Click);
+        assert!(ui.no_turbulence);
+        ui.reset_for_flight();
+        assert!(ui.no_turbulence);
+        ui.activate("No turbulence?", "");
+        assert!(!ui.no_turbulence);
+    }
+
+    #[test]
+    fn source_whiteout_cheat_toggles_while_paused() {
+        let mut ui = FlightUi {
+            menu: true,
+            ..Default::default()
+        };
+        assert_eq!(ui.activate("No sun whiteout?", ""), Command::Click);
+        assert!(ui.no_sun_whiteout && ui.frozen());
+        ui.reset_for_flight();
+        assert!(ui.no_sun_whiteout);
+        assert!(!ui.frozen());
+        assert_eq!(ui.activate("No sun whiteout?", ""), Command::Click);
+        assert!(!ui.no_sun_whiteout);
+    }
+
     #[test]
     fn hud_brightness_uses_source_steps_and_saturates() {
         let mut ui = FlightUi::default();

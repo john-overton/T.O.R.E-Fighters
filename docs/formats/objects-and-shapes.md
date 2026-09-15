@@ -206,9 +206,9 @@ No such general writer is implemented here.
 ## 5. Attachment points are not interchangeable
 
 The user reports misplaced vapor attachments and exterior ordnance in the
-current implementation (2026-09-15). This remains an open runtime defect report:
-check source units, record-specific axis order, model scale and body/component
-transforms for each supported aircraft. The sample discrepancy below does not
+implementation (2026-09-15). Vapor attachment axes are now corrected as recorded
+below; exterior-store placement remains open. Check source units, record-specific
+axis order, model scale and body/component transforms for each supported aircraft. The sample discrepancy below does not
 by itself identify the cause or justify copying F18C coordinates to another model.
 
 **Wing vapor:** chapter 03-10 guesses at 16-bit coordinates and separator/sign
@@ -255,3 +255,12 @@ its presence does not mean arbitrary retail PT bytes can be edited as text.
 
 This review schedules no new aircraft, ground-object renderer, editor, AI or
 mission systems. Those remain subject to their existing roadmap gates.
+
+### Supported-aircraft vapor correction — 2026-09-15
+
+Native CE attachment vectors use **right/up/forward**, while mesh vertices use
+right/forward/up. Applying this distinction to F18.SH and RAFALE.SH gives exact
+vertex matches for all four attachments, with the existing one-third-foot scale.
+Heading hinges rotate the right/forward plane, preserving up. This fixes vapor
+placement; exterior-store placement remains a separate open investigation.
+[Evidence](../baselines/wind-turbulence-vapor.md).

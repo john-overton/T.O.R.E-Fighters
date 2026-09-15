@@ -169,3 +169,10 @@ copied root. F18.HUD and RAFALE.HUD both select private cockpit palette index 40
 The app shares weather/sunlight/brightness palette resolution with cockpit art;
 HUD geometry remains authored. Source brightness and palette ordering are in
 [weather.md](weather.md#hud-palette-consumer--continuation-2026-09-15).
+
+## End-to-end aircraft guide
+
+The [aircraft import and acceptance guide](../aircraft-import.md) joins extraction,
+existing flight/presentation/systems coverage and all per-aircraft acceptance
+gates. F-14, A-4E and X-31 are scheduled after the flight-response slice; they
+are not supported identities yet.

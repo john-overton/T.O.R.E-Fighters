@@ -263,15 +263,20 @@ impl SimRenderer {
                 },
             ],
         });
-        // The vapor pipeline only reads the camera uniform, so its derived
-        // layout differs from the terrain pipeline's and needs its own group.
+        // Vapor reads this view's camera and palette, with its own derived layout.
         let vapor_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Wing vapor bindings"),
             layout: &vapor_pipeline.get_bind_group_layout(0),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&palette_view),
+                },
+            ],
         });
         let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Retail T2 terrain mesh"),
@@ -501,16 +506,17 @@ impl SimRenderer {
             self.spare_depth = Some((self.size, std::mem::replace(&mut self.depth, next)));
             self.size = size;
         }
+        let weather = world.sample_view(f64::from(camera.position[1]), camera.weather_slot);
         // The recovered haze color the visibility ramp blends toward.
-        let sky = world.haze;
+        let sky = weather.haze;
         let mut uniform = camera.uniform(
             size[0] as f32 / (size[1] as f32 * camera.view_fraction),
-            world.fog,
+            weather.fog,
             sky,
         );
         uniform[7] = (world.texture_indices.len() / (256 * 256)) as f32;
-        uniform[15] = world.fog_palette.len() as f32;
-        uniform.extend(world.decks.into_iter().flatten());
+        uniform[15] = weather.fog_palette.len() as f32;
+        uniform.extend(weather.decks.into_iter().flatten());
         let mut celestial_count = 0;
         if let Some(celestial) = &world.celestial {
             let data = celestial.vertices(world, camera, size[1]);
@@ -532,7 +538,7 @@ impl SimRenderer {
         uniform.extend([0.; 4]);
         if let Some(celestial) = &world.celestial {
             let bands = if world.smooth_weather {
-                world.visual_bands.as_slice()
+                weather.visual_bands.as_slice()
             } else {
                 world.weather.active()
             };
@@ -569,7 +575,7 @@ impl SimRenderer {
         }
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         let mut entries = Vec::with_capacity(11 * 1024);
-        for row in std::iter::once(&world.palette).chain(world.fog_palette.iter()) {
+        for row in std::iter::once(&weather.palette).chain(weather.fog_palette.iter()) {
             for rgb in row {
                 entries.extend([rgb[0], rgb[1], rgb[2], 255]);
             }
@@ -604,7 +610,9 @@ impl SimRenderer {
             queue.write_buffer(&self.cloud_vertices, 0, &bytes(&cloud_data));
         }
         let linear = |v: u8| ((v as f64 / 255.0 + 0.055) / 1.055).powf(2.4);
-        let flare_target = self.lens_flare.prepare(device, queue, world, camera, size);
+        let flare_target =
+            self.lens_flare
+                .prepare(device, queue, world, camera, size, &weather.palette);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Simulation world"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {

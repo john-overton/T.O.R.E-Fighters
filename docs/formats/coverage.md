@@ -194,3 +194,8 @@ shade blending are authored GPU presentation, with stepped diagnostics retained.
 Sun/moon use a common fitted ×4 projection calibration against user-supplied
 retail default-zoom captures; native projection acceptance remains open.
 See [smoothing and size evidence](../baselines/weather-smoothing.md).
+
+CE attachment semantics corrected (2026-09-15): right/up/forward vectors and
+right/forward heading hinges, verified against native consumers and exact
+F18/Rafale neutral mesh vertices. No new aircraft or format coverage is implied.
+[Evidence](../baselines/wind-turbulence-vapor.md).
