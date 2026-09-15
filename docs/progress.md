@@ -4,6 +4,29 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 
 **Current scope:** Original Choose Activity and Quick Mission briefing lead to all-theater previews and F/A-18D/Rafale C free flight. The explicit manual range now connects the ten PT-default weapon slots, sensors, damage, stores and combat-service replay. Full native environment/flight/combat parity and the remaining menu screens stay open. AI is deferred until manual acceptance. See [current systems evidence](baselines/weapons-systems.md), [earlier manual weapons evidence](baselines/manual-weapons.md) and the dated checklists below.
 
+## Quick Mission Creator and Load Ordnance — scheduled 2026-09-14
+
+- [x] Review creator state/launch code, supplied retail photo and extracted
+  creator dialogs/menu; identify stale embedded lists and active-table research gaps.
+- [x] Record the [implementation plan](quick-mission-plan.md) and
+  [planning evidence](baselines/quick-mission-research.md).
+- [x] Expand scope to a working Load Ordnance screen; review both retail images,
+  ArmPlane/loading code references and existing weapons integration. Record the
+  [ordnance plan](ordnance-plan.md) and [evidence](baselines/ordnance-research.md).
+- [ ] Recover complete active FA option/default/filter/geometry contracts.
+- [ ] Add bounded imports, typed setup and explicit capability validation.
+- [ ] Build all recovered controls and faithful downstream placeholders.
+- [ ] Build ordnance catalog/station cards, category/page controls, fuel/weight,
+  supported load edits and creator/Select Plane/Fly navigation.
+- [ ] Pass accepted loadout into flight/combat/restart/replay independently of
+  manual range fixtures; validate both aircraft and unsupported-store feedback.
+- [ ] Wire supported airborne setup; represent BARCAP intent without claiming
+  implemented AI, objectives or scoring. Other mission behaviors stay placeholders.
+- [ ] Complete source/visual/interaction/launch checks and platform evidence.
+
+This schedules the creator flow specifically; unrelated menus and combat AI
+remain deferred. Planning has not changed current free-flight behavior.
+
 ## Manual systems continuation — 2026-09-14
 
 - [x] Translate reviewed player HP/amount, weighted subsystem selection/eligibility,
