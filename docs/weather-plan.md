@@ -13,12 +13,15 @@ resolution and pixel-identical rasterization are not acceptance requirements.
 
 ## Scheduling update — 2026-09-15
 
-The user scheduled [flight response and maneuver buffet](flight-response-plan.md)
-next, before further weather work. Finish and record that slice's acceptance
-first, then add F-14, A-4E and X-31 through the
-[aircraft import guide](aircraft-import.md), then resume the remaining sequence below. Existing camera, wind,
-turbulence and vapor improvements remain in place; unchecked weather gates
-are still open.
+The next continuation is now governed by the
+[living native environment/systems plan](native-environment-systems-plan.md).
+Its NE-01/02 sea/ocean asset discovery and NE-09 native environmental coupling
+advance the dependencies needed by restricted native flight; this supersedes
+the earlier blanket deferral of all weather work until after new aircraft.
+This turn is planning only, with no AI scope. Remaining weather work outside
+those recorded dependencies follows native environment/systems, maneuver
+feedback/acceptance and the scheduled aircraft-import pass. Existing weather
+behavior remains unchanged; the detailed weather gates below stay open.
 
 ## Current implementation
 
@@ -31,7 +34,8 @@ do not establish retail acceptance. [Current evidence](baselines/weather-foundat
 
 ## Numbered dependency sequence — 2026-09-15
 
-This is the current execution order requested after the implementation review.
+This is the internal weather dependency order; the scheduling update above
+governs when its remaining work runs.
 The older W1–W7 sections below retain their contract detail and existing links;
 their numbers no longer describe the order of remaining work. Each step finishes
 the existing implementation where one exists, rather than replacing it.

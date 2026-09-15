@@ -192,3 +192,11 @@ extracted sine/atan tables. This mode runs native control/departure/force/moveme
 translations, retains explicit host clock/device/fuel inputs, disables environmental
 turbulence and stops at unsupported terrain contact.
 [Setup, validation and remaining limits](docs/baselines/native-live-flight.md).
+
+
+The next native continuation is tracked in the
+[living environment and systems plan](docs/native-environment-systems-plan.md):
+ground/sea asset discovery, land/deck contact and handling, equipment/fuel/damage,
+events, decoys/guidance and environmental coupling. It records dependencies,
+acceptance evidence and remaining platform/retail gaps; this planning pass adds
+no runtime behavior or AI scope.

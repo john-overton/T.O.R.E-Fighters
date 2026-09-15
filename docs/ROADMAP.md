@@ -8,17 +8,21 @@ Track concrete steps, substeps and acceptance gates in [progress.md](progress.md
 
 This is the sequencing document for the ground-up rebuild in Rust.  The existing TypeScript repo /USNF-ATF is the guide, not the gospel: its format docs, decoders, recovered geometry, audio recovery, and baselines are the reference material.  Its engine is not being ported.
 
-Current user priority (2026-09-15): recover **native** F18/Rafale departure/tumble
-and complete control/force/movement coupling, with source-derived expectations.
-Retail flight comparison is unavailable and does not block implementation.
-The [joined native diagnostic](baselines/native-flight-diagnostic.md) is complete
-for both aircraft; [restricted airborne live connection](baselines/native-live-flight.md)
-is now tested. Native lifecycle/query producers and unrestricted flight remain open. Existing [adapter response work](baselines/flight-response.md)
-does not complete native flight parity. Follow [behavior provenance](behavior-provenance.md).
-Then resume maneuver audio/rumble and final acceptance in the
-[flight-response plan](flight-response-plan.md), add F-14, A-4E and X-31 through
-the [aircraft import gates](aircraft-import.md), and resume remaining weather.
-This does not schedule broader AI or menus.
+Current user priority (2026-09-15): the restricted F18/Rafale native airborne
+connection is implemented and [validated](baselines/native-live-flight.md).
+The next continuation is the [living native environment/systems plan](native-environment-systems-plan.md):
+full ground and sea/ocean asset discovery/import, native contact and land/deck
+handling, equipment/fuel/damage lifecycles, event dispatch, decoy/guidance
+intersections and environmental coupling. The current turn creates that plan
+only; it starts no implementation. **No AI work or scope is included.**
+
+Follow that dependency-led continuation with maneuver audio/rumble and final
+[flight-response acceptance](flight-response-plan.md), then F-14, A-4E and X-31
+through the [aircraft import gates](aircraft-import.md), then weather work outside
+the new plan. Native/fitted/runtime/retail evidence remains separate under
+[behavior provenance](behavior-provenance.md). Retail flight comparison is
+unavailable and does not block source-backed progress. No default adapter change,
+new flyable identity or broader menu work is implied by this planning pass.
 
 The preceding execution order (2026-09-14) remains a broader gate: finish manual weapons, sensors and damage
 acceptance for F/A-18D and Rafale C before AI work. The only AI authorized for the

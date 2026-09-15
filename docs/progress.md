@@ -1069,3 +1069,25 @@ Special horizon branches and matched retail acceptance remain open.
   refresh cadence and environmental turbulence before unrestricted native flight.
   The airborne option rejects contact and suppresses the separate fitted turbulence
   path. No retail/platform/manual-handling parity is claimed.
+
+
+### Native environment and systems planning — 2026-09-15
+
+- [x] Verify clean `main` and fast-forward-push the seven completed native-flight
+  commits through `ed50aba` to `origin/main`; no remote commits were displaced.
+- [x] Create the [living implementation plan](native-environment-systems-plan.md),
+  covering ground/sea asset discovery and provenance, contact/land/deck handling,
+  lifecycle/event/damage/death/RNG work, decoys/guidance and environmental coupling.
+- [x] Define NE-00–10 dependencies, child/asset/edge record templates, concrete
+  deliverables and acceptance gates, module touchpoints, questions/risks, test
+  matrix, decision log and update conventions. Link current evidence without
+  promoting it to acceptance of future work.
+- [x] Review scope/dependency completeness and local links; run documentation/diff,
+  formatting, Clippy, existing locked tests/build, Python and asset checks. This
+  validates the documentation change, not the future implementation packages.
+- [ ] Start the next implementation slice only in a subsequent implementation
+  turn: NE-00.1/01.1/03.1, one reviewed land-contact producer and original surface
+  dependency closure, with both-aircraft query/rollback evidence.
+- Planning/documentation only in this turn; no AI work or scope, runtime changes,
+  new imports or completed implementation packages. Native lifecycle/contact,
+  full asset coverage and Windows/macOS/retail acceptance remain open.

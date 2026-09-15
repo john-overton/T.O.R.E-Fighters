@@ -13,12 +13,14 @@ from legacy and hybrid. [Acceptance and limits](baselines/native-live-flight.md)
 
 ## Next scheduled work
 
-The [flight-response plan](flight-response-plan.md) now prioritizes native
-FA departure/tumble and full control/force/movement coupling. Audio/rumble
-follows that work. [Provenance policy](behavior-provenance.md) distinguishes
-native code contracts, fitted choices and user-directed opinionated changes.
-The adapter response pass implemented selected components and telemetry;
-it did not complete the native flight model.
+The [living native environment/systems plan](native-environment-systems-plan.md)
+now governs the next contact/handling, ground/sea asset, lifecycle/event,
+decoy/guidance and environmental dependency pass. This turn establishes the plan
+only; no AI scope or runtime change is included. Maneuver audio/rumble and final
+[flight-response acceptance](flight-response-plan.md) follow that continuation.
+[Provenance policy](behavior-provenance.md) keeps native contracts, fitted choices
+and user-directed changes distinct; airborne acceptance does not close the
+remaining lifecycle/contact gates.
 
 ## Run and reproduce
 

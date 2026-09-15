@@ -1,11 +1,19 @@
 # Flight response and maneuver buffet plan
 
-Requested 2026-09-15. **Next scheduled work, before further weather work.**
+Requested 2026-09-15. **Remaining native dependencies now follow the
+[living environment/systems plan](native-environment-systems-plan.md).**
 This is an implementation and acceptance plan; unchecked items claim no new
 native behavior. Scope is the reviewed F/A-18D (`F18.PT`) and Rafale C
 (`RAFALE.PT`), preserving the legacy default and explicit hybrid selection.
 
 ## Current priority and provenance
+
+Scheduling clarification: after the restricted airborne connection, the next
+contact, ground/sea asset, lifecycle/event, decoy/guidance and environmental
+continuation is organized in the linked living plan. Its creation turn is
+planning only and includes no AI scope. Maneuver audio/rumble and final response
+acceptance follow those dependencies; detailed feedback work remains here.
+
 
 User clarification 2026-09-15: focus first on **native** departure/tumble and
 control/force/movement coupling, with source-derived expected behavior. A useful

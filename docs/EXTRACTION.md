@@ -2,6 +2,13 @@
 
 `tools/extract_assets.py` is the shared, cross-platform extraction entry point. It runs the repository's Rust `tore-extract` tool and adds SHA-256 provenance to its report. It requires Python 3.10+ and the pinned Rust toolchain. There is no dependency on USNF-ATF, Bun/Node, graphics drivers, an audio device, or third-party Python packages.
 
+## Planned ground and sea/ocean pass
+
+NE-01/02 in the [living environment/systems plan](native-environment-systems-plan.md)
+define the next full discovery/catalog/import pass, including conditional/dynamic
+references, missing-asset reason chains and separate visual/collision acceptance.
+This is planned coverage, not new reader support or an import performed here.
+
 ## Two different workflows
 
 | Task | Command | Output |
