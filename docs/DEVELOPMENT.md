@@ -398,6 +398,7 @@ research has 28 reviewed regions; full subsystem/ECM parity remains open.
 
 ```sh
 cargo run --locked -p tore-app -- --validate-creator
+cargo run --locked -p tore-app -- --validate-weather
 cargo run --locked -p tore-app -- --quick-mission --snapshot-state ordnance --snapshot .local/ordnance.ppm
 cargo run --locked -p tore-app -- --quick-mission --snapshot-state ordnance --smoke-test
 ```

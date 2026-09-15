@@ -24,6 +24,7 @@ mod rafale_animation;
 mod renderer;
 mod sim_renderer;
 mod terrain;
+mod weather;
 
 use assets::Assets;
 use menu::{Action, Menu};
@@ -1490,6 +1491,7 @@ fn main() -> AppResult<()> {
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
     let mut validate_creator = false;
+    let mut validate_weather = false;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -1769,6 +1771,7 @@ fn main() -> AppResult<()> {
             "--no-audio" => no_audio = true,
             "--import-only" => import_only = true,
             "--validate-creator" => validate_creator = true,
+            "--validate-weather" => validate_weather = true,
             "--help" | "-h" => {
                 println!(
                     "Creator: --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks both imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; I launches one incoming selected weapon; Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-2 combat-service inputs; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight. Guidance/contact/damage coupling is a development approximation, not native parity."
@@ -1997,17 +2000,18 @@ fn main() -> AppResult<()> {
         }
         return Ok(());
     }
-    let audio = if no_audio || smoke_test || validate_creator || snapshot.is_some() {
-        None
-    } else {
-        match audio::Audio::new(std::mem::take(&mut assets.sounds), &assets.music_scores) {
-            Ok(audio) => Some(audio),
-            Err(error) => {
-                eprintln!("Continuing without audio: {error}");
-                None
+    let audio =
+        if no_audio || smoke_test || validate_creator || validate_weather || snapshot.is_some() {
+            None
+        } else {
+            match audio::Audio::new(std::mem::take(&mut assets.sounds), &assets.music_scores) {
+                Ok(audio) => Some(audio),
+                Err(error) => {
+                    eprintln!("Continuing without audio: {error}");
+                    None
+                }
             }
-        }
-    };
+        };
     // Saved previews stay reproducible; normal launches randomly select all five.
     if snapshot.is_some() && background.is_none() {
         background = Some("CHOOSEV".into());
@@ -2015,6 +2019,9 @@ fn main() -> AppResult<()> {
     let world = terrain::World::for_theater(&assets.theater_resources, &theater_code)?;
     if validate_creator {
         return ordnance::validate_sources(&assets.theater_resources, &world);
+    }
+    if validate_weather {
+        return weather::validate_sources(&assets.theater_resources, &world.environment);
     }
     let theater_resources = assets.theater_resources.clone();
     let creator_options = assets.creator_options.clone();

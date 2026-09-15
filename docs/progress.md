@@ -17,7 +17,17 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   [Evidence](baselines/weather-research.md), [contracts](formats/weather.md).
 - [ ] Recover contrails, wingtip vapor and broader wing-induced vapor contracts;
   all are included in the weather plan following the user's clarification.
-- [ ] W2: implement bounded records and independent deterministic environment state.
+- [x] Decode the complete LAY record layout and confirm it against all 24 imported
+  retail modules; recover the day/night windows, altitude bands and effect
+  selectors. [Contracts](formats/weather.md).
+- [x] Recover the wing vapor streamer subsystem: shape opcodes, attachment
+  geometry, position-history sampling, G trigger and night suppression.
+- [ ] Recover engine contrail and broader wing-induced vapor contracts; only two
+  wingtip streamers per aircraft are established so far.
+- [x] W2: bounded `tore-formats::weather` records and deterministic
+  `tore-sim::environment` clock, selection and queries, with `--validate-weather`
+  exercising every imported module over a full simulated day.
+- [ ] W2 remainder: altitude and time interpolation across the overlap windows.
 - [ ] W3: implement accepted time/palette/sky/celestial behavior.
 - [ ] W4: implement accepted clouds, fog and visibility behavior.
 - [ ] W5: connect verified wind/turbulence, air data and environment feedback.

@@ -1,7 +1,7 @@
-"""Reviewed FA clock/weather/turbulence research slices; no retail execution."""
+"""Reviewed FA clock/weather/turbulence/vapor research slices; no retail execution."""
 import json
 
-KEYWORDS = ('_time', '_wr', 'turbulence', 'cloud', 'graphicaddsmoke')
+KEYWORDS = ('_time', '_wr', 'turbulence', 'cloud', 'graphicaddsmoke', 'streamer', 'sample')
 
 # Half-open, instruction-aligned regions in the reviewed EXE/SMS pair only.
 REGIONS = (
@@ -11,11 +11,25 @@ REGIONS = (
     ('weather_view_update', 0x4b3480, 0x4b3746, 'weather'),
     ('weather_time_selection', 0x4b3750, 0x4b3817, 'weather'),
     ('weather_interpolation', 0x4b3820, 0x4b3b60, 'weather'),
+    ('layer_query', 0x4b3190, 0x4b31e3, 'weather'),
+    ('layer_altitude_blend', 0x4b3be0, 0x4b3ca5, 'weather'),
     ('fog_callback', 0x4b4320, 0x4b4370, 'weather'),
+    ('weather_effects', 0x4b4720, 0x4b4785, 'weather'),
+    ('weather_visibility', 0x4b4b30, 0x4b4ba4, 'weather'),
     ('physical_turbulence', 0x477590, 0x477d07, 'turbulence'),
     ('flight_turbulence_call', 0x47c7b6, 0x47c7fa, 'turbulence'),
     ('sound_turbulence_level', 0x434550, 0x434620, 'audio'),
     ('sound_turbulence_dispatch', 0x434d63, 0x434dc2, 'audio'),
+    ('streamer_def_lookup', 0x49fd70, 0x49fd8b, 'vapor'),
+    ('streamer_draw', 0x49fd90, 0x4a0007, 'vapor'),
+    ('streamers_init', 0x4a0010, 0x4a0101, 'vapor'),
+    ('streamer_attachment', 0x4a0110, 0x4a0249, 'vapor'),
+    ('streamers_update', 0x4a0250, 0x4a02cf, 'vapor'),
+    ('streamer_shape_opcodes', 0x4d47a4, 0x4d4871, 'vapor'),
+    ('swing_wing_publish', 0x4ab7c1, 0x4ab7e6, 'vapor'),
+    ('sample_init', 0x4124e0, 0x412542, 'vapor'),
+    ('sample_update', 0x412570, 0x4125b7, 'vapor'),
+    ('sample_get', 0x4125c0, 0x412771, 'vapor'),
 )
 
 
@@ -29,7 +43,7 @@ def artifacts(exe, rows, instructions):
         'complete native scheduler/RNG and long-session clock behavior',
         'ground-query surface flag and nearby-aircraft geometry acceptance',
         'complete maneuver buffet and sound event mapping',
-        'contrail and wing-induced vapor triggers, assets and lifecycle',
+        'engine contrail and broader wing-induced vapor triggers and assets',
         'complete LAY fields/celestial/cloud rendering and retail comparison',
     ]
     result['reviewed-components.json'] = json.dumps(manifest, indent=2) + '\n'

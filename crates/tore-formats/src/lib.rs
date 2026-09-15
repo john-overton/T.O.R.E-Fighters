@@ -11,6 +11,7 @@ pub mod shape;
 pub mod theater;
 pub mod ui;
 pub mod weapons;
+pub mod weather;
 pub use pic::Pic;
 use std::{
     collections::BTreeMap,
