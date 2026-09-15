@@ -106,15 +106,15 @@ by a weight term scaled by the speed-dependent drag percentage.
 | Area | Static evidence | Remaining implementation/acceptance |
 | --- | --- | --- |
 | Main update | `_FMFlight` `0x47b020` located and normal-control/AoA sections traced | Translate complete branch/state graph and all callback contracts |
-| Movement | `_MovePlane` `0x476ae0`; movement angles, gravity, display offsets, velocity and position stages identified | Translate fixed-point rotations, signed angle conversions, wind and collision; loops through both vertical attitudes |
-| Setup/load | `_FMAircraftSetup` `0x47a690`, `_FMUpdatePlaneFields` `0x452140`, `_FMGetWeight` `0x4516b0` located | Trace stores/fuel/damage into weight, authority, thrust and drag |
-| Power | `_FMGetAcc` `0x47a770` traced as a save/modify/query/restore routine | Ordered velocity kernel and drag assembly translated; loaded force builder, lift and gravity still open |
-| Rudder | Normal branch `0x47c419–0x47c682` relates turn rate, authority, slip and bank | Translate all scaling/caller ranges and coupled turn acceptance |
-| Stall/spin | PT fields and `_FMFlight` state branches identified | Translated branch-local timers/severity and spin entry/motion/recovery; full dispatch, tumble and events remain |
+| Movement | `_MovePlane` `0x476ae0`; movement angles, gravity, display offsets, velocity and position stages identified | Joined rotation/wind/contact diagnostic tested, including both vertical attitudes; native query producers and live connection remain |
+| Setup/load | `_FMAircraftSetup` `0x47a690`, `_FMUpdatePlaneFields` `0x452140`, `_FMGetWeight` `0x4516b0` located | Typed aggregate loading/damage consumers joined; refresh cadence and lifecycle producers remain |
+| Power | `_FMGetAcc` `0x47a770` traced as a save/modify/query/restore routine | Loaded force builder, lift/gravity and ordered velocity joined diagnostically; engine/fuel lifecycle remains |
+| Rudder | Normal branch `0x47c419–0x47c682` relates turn rate, authority, slip and bank | Airborne rudder/slip/bank and ground steering joined diagnostically; live connection and retail acceptance remain |
+| Stall/spin | PT fields and `_FMFlight` state branches identified | Dispatch/tumble/normal-control/force/movement joined diagnostically; event execution and live connection remain |
 | Ground | `_GetGround` `0x47af20`, collision helper `0x477240` located | Landing classifier, wheel drag and pitch settling translated; complete contact/crash/carrier behavior remains |
 | Turbulence | `_FMTurbulence` `0x477590`: low-altitude/nearby-aircraft branches, daylight scaling and timed state traced; [follow-up](weather.md) | Complete geometry/surface semantics, RNG/scheduler acceptance, maneuver buffet and replay determinism |
-| Devices | Gear/flap/brake/vector/fuel update symbols inventoried | Native actuator schedules and drag/lift coupling; visual fitted hinges remain separate |
-| Integration | Reviewed pure helpers exposed through headless report | Partial typed state/profiles and angle/velocity stages; clock, full rotations/contact and gameplay integration remain |
+| Devices | Gear/flap/brake/vector/fuel update symbols inventoried | Sampled device drag/lift coupling joined; native actuator schedules remain; visual fitted hinges stay separate |
+| Integration | Reviewed pure helpers exposed through headless report | Joined typed diagnostic state and rotations/contact; scheduler, query producers and gameplay integration remain |
 | Acceptance | Synthetic arithmetic and imported-data probes | Captured original-game trajectories; level, banked pull, negative G, stall/recovery, device transients, full loops |
 
 The ignored reference checkout's `Docs/formats/native-flight-code.md`,
@@ -578,7 +578,7 @@ another source build has these contracts.
 | G, cp+0x19b (`0x50d01b`) | Signed fixed8 G; `0x47c0ea..0x47c10b` sends pitch command, loaded limits, neutral 256 and source rates to `StickInput` | AoA/G-to-turn, drag, stall selection, sound `0x434555`. This is a controlled G state, not a measured accelerometer. Runtime achieved normal-force G is a separately defined adapter channel. |
 | Roll rate, cp+0x17f (`0x50cfff`) | Signed fixed8 degrees/time, source `_brv.x` limits and `StickInput` around `0x47c246..0x47c2aa` | Body/movement transform, spin direction, sound absolute value divided by 37 plus 384. Native scheduling remains separate from host seconds. |
 | Rudder (`0x545200`) | Signed pilot/control domain −256..256, read at setup `0x47b048`; stalled branch modifies it at `0x47b3b0..0x47b3c4` | Spin entry/recovery, normal yaw `StickInput` at `0x47c529..0x47c578`, sound absolute command ×4 unless flag 0x1000. It is not measured sideslip or a physical pedal angle. |
-| Slip offset, cp+0x1ab (`0x50d02b`) | Normal control computes offset after yaw response; spin slews it toward zero | Display-angle composition and native drag. It is distinct from world-velocity-derived sideslip used by AirData. Full normal loaded/damage control producers remain incomplete. |
+| Slip offset, cp+0x1ab (`0x50d02b`) | Normal control computes offset after yaw response; spin slews it toward zero | Display-angle composition and native drag. It is distinct from world-velocity-derived sideslip used by AirData. Loaded/damage consumers are joined diagnostically; subsystem producers and live connection remain open. |
 | Departure, cp+0x20c / timer +0x20d | Byte mode / signed word time; entry before dispatch at `0x47b250`; warning/stall transitions in that slice | Control/lift attenuation, movement fall, spin, sound. Modes/transition helper are translated; native current-G classification, difficulty, device and tumble producers are not all runtime-connected. |
 | AoA offset, cp+0x1a7 (`0x50d027`) | Controlled fixed8 degree display offset, from normal G/speed and spin endpoints | Display composition; not interchangeable with geometric AoA from body/velocity. |
 
@@ -779,3 +779,56 @@ The repeatable extraction now includes gravity-turn and low-speed-travel slices.
 No terrain/carrier producer, equipment callback or imported native code executes.
 The normal branch's auxiliary rates and damage effects remain upstream; neither
 live adapter is switched. [Acceptance scope](../baselines/native-movement-control.md).
+
+
+### Joined flight diagnostic — 2026-09-15
+
+**Native, diagnostic connection:** `flight_model::diagnostic` now joins the
+previously separate components into recurrent state updates. The component-only
+boundaries described above still apply to `native_departure`; the new
+`native_flight` example feeds the complete diagnostic result into the next service.
+Neither live adapter is changed. [Acceptance](../baselines/native-flight-diagnostic.md).
+
+New translated contracts:
+
+- `loading::loaded_g_limits`, `0x452167..0x452482`: accepted envelope rows and
+  adjacent-row interpolation, loaded scaling and difficulty/player adjustments.
+  The enclosing refresh cadence at `0x452140` is not reproduced.
+- `normal_control::passive_fall`, `0x47bb85..0x47bcb2`: normal-mode low-speed
+  pitch/bank fall, signed-speed target and cached pitch cosine.
+- `control_disturbance`, `0x47bcb2..0x47c0a2` and selector `0x47af70`: numeric
+  pitch/heading selection, throttle/speed/touching gates, signed offset response,
+  zero-crossing and quiet timers. Numeric request producers remain external;
+  this is distinct from environmental `_FMTurbulence`.
+- `control_tail`: auxiliary scaling at `0x47b0e7..0x47b182` and rate consumers
+  at `0x47c130`, `0x47c2aa`, `0x47c63a` use original commands before departure
+  attenuation. Preserve the source vector **minimum with −90**, not a maximum.
+  Ground steering `0x47c301..0x47c419` selects the larger absolute command
+  (rudder wins ties) and quarters bounds over 73..146 fps. Airborne rudder
+  `0x47c419..0x47c682` scales authority against PT `envMax`, applies damage,
+  normalizes rudder, updates display slip and couples yaw percentage to bank.
+- `forces::idle_drag_floor`, `0x47ac20`, called at `0x47a99e..0x47a9cd`: airborne
+  idle throttle adds a pitch-dependent floor up to 64, regardless of fuel.
+
+Joined order: initial ground query; typed weight/loaded G/control inputs;
+departure dispatch and exact tumble PA composition; optional passive fall,
+control disturbance, primary and auxiliary/rudder response; loaded forces and
+ordered velocity; temporary auxiliary-rate addition; movement/display/world
+position and wind; new-position ground query, retained height and touching
+query; contact classification/settling/flags; auxiliary-rate subtraction.
+Normal controls remain skipped on a spin recovery tick. Pre-contact display
+and vertical speed remain cached independently of contact-corrected movement.
+
+The service requires native environmental turbulence disabled for airborne
+updates (`0x477590` tests `0x01000000`); ground also bypasses that routine. Its
+bypass resets next/start/end times at `0x477ce4`, with no movement change. These
+unused environmental timer words are excluded, and the enabled airborne branch
+returns an error. This explicitly bounds the flight diagnostic without inventing
+an environmental force or silently omitting an enabled native call.
+
+Configuration resolves names only at construction. Mutable fuel/device/damage
+samples, clock and read-only contact queries belong to the caller. State and RNG
+commit only after successful queries; external callback side effects cannot be
+rolled back. Departure, high-G and contact events are returned, not executed.
+Terrain/carrier producers, actuator/fuel/damage lifecycles, setup refresh cadence,
+global scheduler/RNG order and live activation remain separate open contracts.

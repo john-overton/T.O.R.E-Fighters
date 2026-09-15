@@ -261,26 +261,19 @@ Neither live adapter calls it. The native
 movement-state and whole-tick connection gates remain open; see the
 [source continuation](formats/native-flight.md#native-tumble-continuation--2026-09-15).
 
-The [joined-stage evidence](baselines/native-departure-stage.md) distinguishes
-native component motion from a full flight trajectory. Native ground-control
-inhibition, initial/bounded-G envelope selection and the non-VTOL early return
-are now established for these profiles. Normal control/force coupling is next;
-audio/rumble remains deferred behind that native work.
+The [departure-stage evidence](baselines/native-departure-stage.md) and
+[primary-control/movement evidence](baselines/native-movement-control.md) record
+component checkpoints. The current `native_flight` diagnostic now feeds native
+loaded controls, departure, force/velocity and movement/contact results back
+into the next service for both PTs. It includes rudder/steering, auxiliary rates,
+passive fall, sampled loading/damage/device effects and returned native events.
+[Current acceptance and commands](baselines/native-flight-diagnostic.md).
 
-
-The diagnostic `force_stage` now connects departure lift scale and the native
-stalled-only force-G override to thrust/drag/lift/gravity and ordered scalar
-velocity integration. Both PTs pass separate force snapshot probes; output
-velocities are not yet fed into a complete native trajectory. Normal control,
-loaded/damage/device producers and movement/contact coupling remain open.
-Retail comparison is unavailable per the user's 2026-09-15 clarification and
-is recorded as an evidence limitation, not an implementation prerequisite.
-[Validation and scope](baselines/native-departure-stage.md#force-connection-follow-up).
-
-The next diagnostic slice joins primary native G/pitch/AoA/roll consumers and
-movement integration through explicit post-query contact settling. It adds the
-native gravity-turn correction and preserves low-speed travel/display separation.
-Both PTs pass force→movement snapshot replay; synthetic tests cover loops and
-contact order. Loading/damage, auxiliary rates, rudder/steering, terrain/carrier
-producers and whole-tick live activation remain open.
-[Current component evidence](baselines/native-movement-control.md).
+This completes the requested diagnostic continuation, not live native activation.
+It requires the verified native environmental-turbulence bypass, uses scripted
+clock/input samples and explicit flat contact queries, and does not execute
+sound/damage/ejection callbacks. Native terrain/carrier queries, fuel/device/
+damage lifecycle producers, setup refresh cadence and scheduler/RNG ownership
+remain open. Legacy and hybrid retain their existing fitted coupling. Retail
+comparison is unavailable and is an evidence limitation, not an implementation
+prerequisite. Audio/rumble remains after the scheduled native flight work.

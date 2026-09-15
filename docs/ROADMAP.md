@@ -11,7 +11,9 @@ This is the sequencing document for the ground-up rebuild in Rust.  The existing
 Current user priority (2026-09-15): recover **native** F18/Rafale departure/tumble
 and complete control/force/movement coupling, with source-derived expectations.
 Retail flight comparison is unavailable and does not block implementation.
-Existing [adapter response work](baselines/flight-response.md)
+The [joined native diagnostic](baselines/native-flight-diagnostic.md) is complete
+for both aircraft; live connection and external lifecycle/query producers remain
+open. Existing [adapter response work](baselines/flight-response.md)
 does not complete native flight parity. Follow [behavior provenance](behavior-provenance.md).
 Then resume maneuver audio/rumble and final acceptance in the
 [flight-response plan](flight-response-plan.md), add F-14, A-4E and X-31 through

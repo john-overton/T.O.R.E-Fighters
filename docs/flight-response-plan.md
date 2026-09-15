@@ -34,9 +34,13 @@ components are connected only in hybrid, with fitted boundaries.
 - [x] Join primary G/pitch/AoA/roll consumers and movement through explicit
   post-query contact settling; validate component tests and both PT snapshot
   probes. [Evidence](baselines/native-movement-control.md).
-- [ ] Resolve remaining loaded/damage/device producers, auxiliary rates, full
-  rudder/steering, terrain/carrier queries and whole-tick event/lifecycle ordering
-  before connecting a native runtime path.
+- [x] Finish the joined diagnostic: loaded G/control/drag consumers, passive fall,
+  auxiliary rates, full rudder/steering, ordered forces/movement/contact and
+  returned events. Both PTs pass recurrent state/replay probes.
+  [Evidence and explicit native turbulence bypass](baselines/native-flight-diagnostic.md).
+- [ ] Connect terrain/carrier queries, equipment/fuel/damage lifecycle producers,
+  event execution and native runtime ownership before live activation. The
+  diagnostic consumes explicit samples; it does not close these runtime gates.
 - [ ] Compare source-derived expected outputs and, when available, matched
   retail maneuvers. Record missing implementation separately from missing evidence.
 
@@ -49,9 +53,9 @@ this plan orders the next flight-response slice.
 
 | Area | Already present | Work to finish in this slice |
 | --- | --- | --- |
-| G-load / AoA | Source ledger, separate demand/lift/achieved G and geometric AoA telemetry; acceleration checks | Full native loaded/damage force ordering and feedback consumers |
-| Roll rate | Applied body-rate snapshot, verified release and full-loop probes; source hybrid/fitted legacy caps | Full native control/load/damage producers and retail comparison |
-| Rudder / slip | Distinct command/deflection/effective controls, fitted symmetric slip drag and yaw release; tested native spin predicates | Native display-slip/force coupling and retail calibration |
+| G-load / AoA | Source ledger, separate demand/lift/achieved G and geometric AoA telemetry; acceleration checks | Loaded/damage force ordering joined diagnostically; lifecycle producers, live connection and feedback remain |
+| Roll rate | Applied body-rate snapshot, verified release and full-loop probes; source hybrid/fitted legacy caps | Control/load/damage consumers joined diagnostically; lifecycle producers and live connection remain |
+| Rudder / slip | Distinct command/deflection/effective controls, fitted symmetric slip drag and yaw release; tested native spin predicates | Native display-slip/force coupling joined diagnostically; live connection and unavailable retail acceptance remain |
 | Departure / spin | Translated warning/stall predicates and timers, connected severity/control/lift attenuation; corrected hybrid spin entry/recovery with fitted continuous coupling | Native initial classification and movement fall/tumble translated diagnostically; full live coupling remains open |
 | Maneuver feedback | Native sound-side `Turbulence` routine traced at `0x434550`, caller at `0x434d76` | Recover full input-to-intensity and sound dispatch contracts; integrate a distinct maneuver-feedback signal |
 | Controller rumble | Environmental turbulence supplies severity only when its shake flag is set; overlapping pulses support sustained strong events | Add sustained maneuver feedback with intensity tracking, release and lifecycle checks; audit the mild environmental threshold separately |
@@ -102,6 +106,10 @@ full loops through both vertical attitudes; stable release; wind advection once;
 consistent G/AoA/rate telemetry. Preserve independent aircraft attitude and
 velocity. Do not silently switch the default adapter or claim whole-tick parity.
 
+Diagnostic status: native G/pitch/roll/rudder consumers above are now joined and
+tested for both PTs. Their unchecked items retain the **runtime** connection gate;
+no fitted live law has been promoted to native acceptance.
+
 ## 3. Complete supported departure and recovery behavior
 
 - [x] Trace the supported non-VTOL envelope/difficulty/device predicates and
@@ -115,6 +123,11 @@ velocity. Do not silently switch the default adapter or claim whole-tick parity.
   each aircraft. Preserve movement/display-angle distinctions.
 - [x] Make warning/departure state available to feedback without feeding a
   presentation effect back into aerodynamic state.
+
+The requested remaining diagnostic is complete: native departure attenuation,
+tumble, recovery dispatch and downstream control/force/movement/contact order
+are joined. Full live activation, external lifecycle/query producers and event
+execution remain open. See the [joined baseline](baselines/native-flight-diagnostic.md).
 
 **Gate:** deterministic warning → stall/spin → recovery traces, threshold-boundary
 and timer-interruption tests, no hidden RNG draws from audio, rumble or cameras.

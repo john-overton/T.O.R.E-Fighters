@@ -1015,8 +1015,8 @@ Special horizon branches and matched retail acceptance remain open.
 - [x] Verify low-speed lift floor/cutoff, mode distinction, ground clamp and
   invalid inputs; evaluate 7,200 separate force snapshots across both aircraft's
   eight departure cases. [Evidence](baselines/native-departure-stage.md#force-connection-follow-up).
-- [ ] Finish normal controls, load/damage/device producers and movement/contact
-  ordering before live native activation. Steps 2–3 remain open at those boundaries.
+- [x] Complete the control/force/movement diagnostic continuation below.
+  Live activation and external lifecycle/query producers remain open.
 - Retail flight comparison is unavailable per user clarification; continue native
   implementation without making comparison a prerequisite or claiming parity.
 
@@ -1029,5 +1029,25 @@ Special horizon branches and matched retail acceptance remain open.
 - [x] Test repeated loops in both directions and contact/display ordering; both
   PTs pass 7,200 paired force→movement snapshot replay checks.
   [Evidence](baselines/native-movement-control.md).
-- [ ] Complete loading/damage, auxiliary rates, rudder/steering, query producers,
-  event/lifecycle and whole-tick activation. Steps 2–3 remain partially complete.
+- [x] Complete sampled loading/damage, auxiliary rates and rudder/steering in
+  the joined diagnostic below. Query producers, event/lifecycle and live
+  activation remain open; native runtime steps 2–3 are partially complete.
+
+
+### Joined native flight diagnostic — 2026-09-15
+
+- [x] Join loaded-G interpolation, control/load/damage consumers, passive fall,
+  control-disturbance response, auxiliary rates and rudder/ground steering.
+- [x] Preserve exact tumble PA words, source idle drag and force/control order;
+  feed movement/contact state into subsequent services. Preserve skipped normal
+  controls on spin recovery and temporary rate subtraction after contact.
+- [x] Validate 42 F18/Rafale cases, 37,800 updates with state/RNG/event replay,
+  synthetic boundary/rollback tests and prior departure snapshot regressions.
+  [Acceptance and commands](baselines/native-flight-diagnostic.md).
+- [x] Enforce the source environmental-turbulence bypass; reject unsupported
+  airborne enabled input. Document source translations separately from scripted
+  clock, input and contact fixtures. No new fitted gameplay law or live mode.
+- [ ] Recover/connect native query, equipment/fuel/damage lifecycle, event and
+  scheduler contracts before live activation. Environmental turbulence remains
+  in its weather scope. Retail comparison is unavailable; platform and runtime
+  evidence are distinct from this completed diagnostic.

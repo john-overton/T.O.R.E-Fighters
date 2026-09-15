@@ -7,7 +7,7 @@ use super::{
     },
     integration::MovementAngles,
     rotation::{AtanTable, TrigTable, degrees_to_pa},
-    tumble::{FallInput, TumbleState, compose_tumble, stalled_fall},
+    tumble::{FallInput, TumbleState, compose_tumble_state, stalled_fall},
 };
 use crate::{Result, invalid};
 
@@ -140,6 +140,7 @@ pub struct StageOutput {
     pub run_normal_controls: bool,
     pub recovered_spin: bool,
     pub tumble_applied: bool,
+    pub tumble_body_pa: Option<[i16; 3]>,
     pub recovery_locked: bool,
 }
 impl StageState {
@@ -185,6 +186,7 @@ impl StageState {
             run_normal_controls: true,
             recovered_spin: false,
             tumble_applied: false,
+            tumble_body_pa: None,
             recovery_locked: i.recovery_locked,
         };
         let pitch_pa = degrees_to_pa(self.movement.pitch)?;
@@ -300,7 +302,9 @@ impl StageState {
             .tumble
             .advance(t, i.now, i.on_ground, self.departure.mode)?
         {
-            self.movement = compose_tumble(t, atan, self.movement, delta)?;
+            let (movement, body) = compose_tumble_state(t, atan, self.movement, delta)?;
+            self.movement = movement;
+            out.tumble_body_pa = Some(body);
             out.tumble_applied = true;
         }
         Ok(out)

@@ -76,6 +76,64 @@ pub fn advance(mut s: State, i: Input) -> Result<State> {
     s.bank_offset_f8 = super::match_f24(s.bank_offset_f8, 0, 90 * 256, i.ticks);
     Ok(s)
 }
+/// 0x47bb85..0x47bcb2: distinct low-speed movement fall while departure is NORMAL.
+/// Source body words may have been updated by tumble; pitch cosine is cached at tick entry.
+#[allow(clippy::too_many_arguments)]
+pub fn passive_fall(
+    t: &super::rotation::TrigTable,
+    mut movement: super::integration::MovementAngles,
+    body_pitch_pa: i16,
+    body_bank_pa: i16,
+    cached_pitch_cos: i16,
+    speed_f8: i32,
+    stall_fps: i32,
+    ground: bool,
+    mode: super::departure::DepartureMode,
+    ticks: i16,
+) -> Result<super::integration::MovementAngles> {
+    if ticks < 0 {
+        return Err(invalid("negative passive fall time"));
+    }
+    let deficit = stall_fps.wrapping_sub(speed_f8 >> 8);
+    if deficit < 0 || ground || mode != super::departure::DepartureMode::Normal {
+        return Ok(movement);
+    }
+    let percent = (super::div32(deficit.wrapping_mul(100), stall_fps.max(1))? + 50).min(100);
+    let rate = |angle: i16, maximum: i32| -> Result<i32> {
+        let sine = (t.sin_cos(angle / 2).sin as i32).abs();
+        super::div32(
+            super::div32(sine.wrapping_mul(maximum), 32767)?.wrapping_mul(percent),
+            100,
+        )
+    };
+    let pitch_target = if movement.pitch >= 0 && speed_f8 < 0 {
+        90 * 256
+    } else {
+        -90 * 256
+    };
+    movement.pitch = super::match_f24(
+        movement.pitch,
+        pitch_target,
+        rate(body_pitch_pa, 40 * 256)?,
+        ticks,
+    );
+    let roll_rate = super::div32(
+        rate(body_bank_pa, 60 * 256)?.wrapping_mul(cached_pitch_cos as i32),
+        32767,
+    )?;
+    movement.roll = super::match_f24(
+        movement.roll,
+        if movement.roll < 0 {
+            -180 * 256
+        } else {
+            180 * 256
+        },
+        roll_rate,
+        ticks,
+    );
+    Ok(movement)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,6 +168,28 @@ mod tests {
                 ticks: 256,
             },
         )
+    }
+    #[test]
+    fn passive_fall_is_normal_only_and_reverses_pitch_target_for_backward_travel() {
+        let bytes: Vec<_> = [32767i16; 321]
+            .into_iter()
+            .flat_map(i16::to_le_bytes)
+            .collect();
+        let t = super::super::rotation::TrigTable::parse(&bytes).unwrap();
+        let m = super::super::integration::MovementAngles {
+            pitch: 75 * 256,
+            roll: 5 * 256,
+            heading: 0,
+        };
+        use super::super::departure::DepartureMode;
+        let fall = |speed, ground, mode| {
+            passive_fall(&t, m, 10000, 1000, 32767, speed, 200, ground, mode, 256).unwrap()
+        };
+        assert_eq!(fall(0, false, DepartureMode::Normal).pitch, 35 * 256);
+        assert_eq!(fall(0, false, DepartureMode::Normal).roll, 65 * 256);
+        assert_eq!(fall(-1, false, DepartureMode::Normal).pitch, 90 * 256);
+        assert_eq!(fall(0, false, DepartureMode::Warning), m);
+        assert_eq!(fall(0, true, DepartureMode::Normal), m);
     }
     #[test]
     fn low_speed_bounds_and_neutral_release_have_native_units() {

@@ -530,3 +530,11 @@ component probes: they do not feed velocity back into a full flight trajectory.
 control and movement/contact contracts. `native_departure` now evaluates paired
 force→movement snapshots with both PTs; it still does not run a full native flight.
 [Scope and results](baselines/native-movement-control.md).
+
+
+`native_flight` now joins loaded controls, departure, forces, movement and contact
+into recurrent diagnostic updates for F18 and Rafale. Unlike `native_departure`,
+it feeds position, velocity and control state back into subsequent services.
+Pass the same sine/atan/PT arguments. It requires native environmental turbulence
+disabled and explicit caller samples; it adds no live adapter or terrain producer.
+[Reproduction, scenario coverage and remaining gates](baselines/native-flight-diagnostic.md).

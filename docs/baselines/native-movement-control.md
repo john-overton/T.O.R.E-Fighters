@@ -33,12 +33,11 @@ changes, and no new fitted flight law is introduced.
 
 ## Remaining implementation
 
-Normal-control loading/damage producers, auxiliary rate response, full rudder/slip
-and ground steering, event dispatch, terrain/object/carrier queries and the whole
-flight lifecycle. Departure dispatch must still skip normal controls on a spin
-recovery tick. Contact rate updates must propagate through the native temporary
-rate add/subtract caller. These gaps prevent live native activation; they are
-separate from the unavailable retail comparison.
+The subsequent [joined diagnostic](native-flight-diagnostic.md) closes the sampled
+loading/damage consumers, auxiliary response, rudder/slip/steering, recovery-tick
+skip and temporary rate/contact ordering gaps from this checkpoint. Event
+execution, terrain/object/carrier queries and the full flight lifecycle remain
+open before live native activation, separately from unavailable retail comparison.
 
 ## Validation
 

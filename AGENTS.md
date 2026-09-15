@@ -41,6 +41,8 @@ Read [docs/ROADMAP.md](docs/ROADMAP.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.
 
 - Native flight component profiles resolve PT names at import time; update kernels use typed values and caller-owned state. Do not use raw `_bv.x.max` as the loaded speed limit (Hornet stores zero). Preserve ordered drag/force updates, movement/body separation, explicit RNG/contact inputs, and fitted-versus-translated provenance. Research components remain diagnostic until the whole-tick acceptance gate is met.
 
+- Joined native flight diagnostics must enforce reviewed branch restrictions, including the environmental-turbulence bypass until its producer is connected. Document caller-supplied lifecycle/query samples and returned-but-unexecuted events; recurrent replay does not establish live or retail acceptance.
+
 - Native matrix/contact/clock helpers are diagnostic. Preserve extracted sine/atan rounding and separate display-angle composition from movement. Contact queries must remain explicit until native terrain/carrier producers are verified. The 120 Hz-to-256-unit remainder clock is authored; do not describe it or seeded helper draws as native scheduler/replay parity.
 
 - Shared dynamics live in `tore-sim`; rendering and separate F18/Rafale animation mappings stay in the app. `--researched-flight` explicitly selects a hybrid adapter with fitted coupling; the legacy default and native-parity research are separate. RAFALE.PT is reviewed for extraction, headless flight and its own rendered cockpit/animation rig; RAFALEE/RAFALEF and F18C remain unsupported. Use the same `--validate-flight` suite for both identities and preserve explicit runway/water/wind inputs; never mark arbitrary theater height samples as validated runways.

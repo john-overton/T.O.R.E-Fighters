@@ -16,6 +16,15 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('control_disturbance', 0x47bcb2, 0x47c0a2, 'response'),
+    ('control_disturbance_select', 0x47af70, 0x47b01e, 'response'),
+    ('environment_disabled_gate', 0x477590, 0x4775b5, 'integration'),
+    ('environment_disabled_reset', 0x477ce4, 0x477d07, 'integration'),
+    ('loaded_g_envelopes', 0x452167, 0x452482, 'loading'),
+    ('normal_passive_fall', 0x47bb85, 0x47bcb2, 'response'),
+    ('auxiliary_rate_scale', 0x47b0e7, 0x47b182, 'response'),
+    ('rudder_ground_and_air', 0x47c301, 0x47c682, 'response'),
+    ('idle_pitch_floor', 0x47ac20, 0x47ac56, 'integration'),
     ('departure_envelope_row', 0x49d200, 0x49d229, 'departure'),
     ('departure_envelope_class', 0x49d230, 0x49d2cb, 'departure'),
     ('departure_stall_speed', 0x49d1d0, 0x49d1fa, 'departure'),

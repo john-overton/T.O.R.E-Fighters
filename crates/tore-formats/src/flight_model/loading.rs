@@ -256,3 +256,149 @@ mod equipment_tests {
         );
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct GLoadInput {
+    pub range: [i16; 2],
+    pub altitude_f8: i32,
+    pub speed_f8: i32,
+    pub flaps: bool,
+    pub structure: [i16; 2],
+    pub load_percent: i32,
+    pub elevator_coefficient: i16,
+    pub player: bool,
+    pub low_skill: bool,
+    pub extra_g_flag: bool,
+}
+/// FA 0x452167..0x452482 after the external refresh/weight-update gate.
+/// Native row scan, adjacent-row interpolation, loading and player/skill flags.
+pub fn loaded_g_limits(envelopes: &[crate::aircraft::Envelope], i: GLoadInput) -> Result<[i16; 2]> {
+    if i.range[0] > i.range[1] || (i.range[1] as i32 - i.range[0] as i32) > 255 {
+        return Err(invalid("invalid diagnostic G envelope range"));
+    }
+    let limits = |g: i32| -> Result<super::Limits> {
+        super::envelope_limits(
+            envelopes
+                .iter()
+                .find(|e| e.g == g)
+                .ok_or_else(|| invalid("missing loaded G row"))?,
+            i.altitude_f8,
+            i.flaps,
+            i.structure,
+        )
+    };
+    let mut bounds = [0i16; 2];
+    for g in i.range[0] as i32..=i.range[1] as i32 {
+        if super::envelope_class(&limits(g)?, i.speed_f8) == 0 {
+            bounds[0] = bounds[0].min((g << 8) as i16);
+            bounds[1] = bounds[1].max((g << 8) as i16);
+        }
+    }
+    let speed = i.speed_f8 >> 8;
+    for (j, bound) in bounds.iter_mut().enumerate() {
+        let g = (*bound >> 8) as i32;
+        if g == i.range[j] as i32 {
+            continue;
+        }
+        let current = limits(g)?;
+        let next = limits(g + if j == 0 { -1 } else { 1 })?;
+        let pair = if next.minimum >= speed {
+            Some((current.minimum, next.minimum))
+        } else if next.maximum <= speed {
+            Some((current.maximum, next.maximum))
+        } else {
+            None
+        };
+        if let Some((a, b)) = pair.filter(|(a, b)| a != b) {
+            let delta = if j == 0 {
+                a.wrapping_sub(speed)
+            } else {
+                speed.wrapping_sub(a)
+            };
+            *bound = bound.wrapping_add(div32(delta.wrapping_shl(8), b.wrapping_sub(a))? as i16);
+        }
+    }
+    let percent =
+        100i32.wrapping_sub(i.load_percent.wrapping_mul(i.elevator_coefficient as i32) / 100);
+    for b in &mut bounds {
+        *b = (((*b as i32).wrapping_mul(percent)) / 100) as i16;
+    }
+    if !i.player && i.low_skill {
+        bounds[0] = bounds[0].wrapping_add(256).min(-512);
+        bounds[1] = bounds[1].wrapping_sub(256).max(512);
+    }
+    if i.player && i.extra_g_flag {
+        bounds[0] = bounds[0].wrapping_sub(256).max(i.range[0].wrapping_shl(8));
+        bounds[1] = bounds[1].wrapping_add(256).min(i.range[1].wrapping_shl(8));
+    }
+    bounds[0] = bounds[0].min(0);
+    bounds[1] = bounds[1].max(512);
+    Ok(bounds)
+}
+
+#[cfg(test)]
+mod g_limit_tests {
+    use super::*;
+    #[test]
+    fn adjacent_rows_loading_player_flags_and_missing_data() {
+        let rows: Vec<_> = (-4i32..=4)
+            .map(|g| crate::aircraft::Envelope {
+                g,
+                points: vec![
+                    [100. + g.abs() as f64 * 50., 0.],
+                    [100. + g.abs() as f64 * 50., 10000.],
+                    [1000., 10000.],
+                    [1000., 0.],
+                ],
+            })
+            .collect();
+        let i = GLoadInput {
+            range: [-4, 4],
+            altitude_f8: 1000 * 256,
+            speed_f8: 275 * 256,
+            flaps: false,
+            structure: [2000, 2000],
+            load_percent: 0,
+            elevator_coefficient: 20,
+            player: true,
+            low_skill: false,
+            extra_g_flag: false,
+        };
+        assert_eq!(loaded_g_limits(&rows, i).unwrap(), [-896, 896]);
+        assert_eq!(
+            loaded_g_limits(
+                &rows,
+                GLoadInput {
+                    load_percent: 50,
+                    ..i
+                }
+            )
+            .unwrap(),
+            [-806, 806]
+        );
+        assert_eq!(
+            loaded_g_limits(
+                &rows,
+                GLoadInput {
+                    extra_g_flag: true,
+                    ..i
+                }
+            )
+            .unwrap(),
+            [-1024, 1024]
+        );
+        assert_eq!(
+            loaded_g_limits(
+                &rows,
+                GLoadInput {
+                    player: false,
+                    low_skill: true,
+                    ..i
+                }
+            )
+            .unwrap(),
+            [-640, 640]
+        );
+        assert!(loaded_g_limits(&rows[1..], i).is_err());
+    }
+}

@@ -400,3 +400,32 @@ mod force_tests {
         assert_eq!((f.drag, f.forward, f.side, f.down), (10, 20, 0, 0));
     }
 }
+
+/// FA 0x47ac20 and 0x47a99e..0x47a9cd: throttle-off airborne pitch floor.
+/// It applies even without fuel. Signed PA pitch maps [-0x1ffe,0] to [0,64].
+pub fn idle_drag_floor(throttle_f8: i32, on_ground: bool, pitch_pa: i16) -> i32 {
+    if throttle_f8 & !255 != 0 || on_ground {
+        return 0;
+    }
+    let scale = if pitch_pa >= 0 {
+        256
+    } else if pitch_pa >= -0x1ffe {
+        ((pitch_pa as i32 + 0x1ffe) << 8) / 0x1ffe
+    } else {
+        0
+    };
+    scale.wrapping_shl(6) / 256
+}
+#[cfg(test)]
+mod idle_tests {
+    #[test]
+    fn pitch_and_throttle_floor_boundaries() {
+        use super::idle_drag_floor as f;
+        assert_eq!(f(0, false, 0), 64);
+        assert_eq!(f(0, false, -0xfff), 32);
+        assert_eq!(f(0, false, -0x1ffe), 0);
+        assert_eq!(f(255, false, 1), 64);
+        assert_eq!(f(256, false, 0), 0);
+        assert_eq!(f(0, true, 0), 0);
+    }
+}

@@ -80,18 +80,30 @@ pub fn compose_tumble(
     movement: MovementAngles,
     delta_pa: i16,
 ) -> Result<MovementAngles> {
+    Ok(compose_tumble_state(table, atan, movement, delta_pa)?.0)
+}
+/// Preserve the exact PA words left in native body state before inverse conversion.
+pub fn compose_tumble_state(
+    table: &TrigTable,
+    atan: &AtanTable,
+    movement: MovementAngles,
+    delta_pa: i16,
+) -> Result<(MovementAngles, [i16; 3])> {
     let body = [
         degrees_to_pa(movement.heading)?,
         degrees_to_pa(movement.pitch)?,
         degrees_to_pa(movement.roll.wrapping_neg())?,
     ];
     let result = cockpit_offset(table, atan, body, delta_pa, 0);
-    Ok(MovementAngles {
-        heading: pa_to_degrees(result[0])?,
-        pitch: pa_to_degrees(result[1])?,
-        // The source negates the PA WORD before converting, not the result.
-        roll: pa_to_degrees(result[2].wrapping_neg())?,
-    })
+    Ok((
+        MovementAngles {
+            heading: pa_to_degrees(result[0])?,
+            pitch: pa_to_degrees(result[1])?,
+            // The source negates the PA WORD before converting, not the result.
+            roll: pa_to_degrees(result[2].wrapping_neg())?,
+        },
+        result,
+    ))
 }
 
 #[derive(Clone, Copy, Debug)]
