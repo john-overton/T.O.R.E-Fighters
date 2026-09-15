@@ -925,6 +925,7 @@ impl ApplicationHandler for App {
                                     return;
                                 }
                             };
+                            self.flight_ui.combat_tick();
                             let mut sounds = std::collections::BTreeSet::new();
                             for event in &events {
                                 use tore_sim::combat::live::Event;
@@ -936,24 +937,24 @@ impl ApplicationHandler for App {
                                 match event {
                                     Event::PlayerDamaged(amount) => {
                                         sounds.insert("&EXPL3.5K");
-                                        self.flight_ui.message(format!(
+                                        self.flight_ui.combat_message(format!(
                                             "Player hit: {amount}; HP {}",
                                             self.combat.state.player_hp
                                         ));
                                     }
                                     Event::SubsystemDamaged(i) => self
                                         .flight_ui
-                                        .message(format!("Source subsystem {i} damaged")),
+                                        .combat_message(format!("Source subsystem {i} damaged")),
                                     Event::PlayerDestroyed => {
                                         sounds.insert("&EXPL12.5K");
                                         self.flight.crashed = true;
                                     }
                                     Event::Defeated(id) => self
                                         .flight_ui
-                                        .message(format!("ECM defeated contact T{id}")),
+                                        .combat_message(format!("ECM defeated contact T{id}")),
                                     Event::TrackLost(id) => {
                                         self.flight_ui
-                                            .message(format!("Missile track lost: T{id}"));
+                                            .combat_message(format!("Missile track lost: T{id}"));
                                     }
                                     Event::Fired(i) => {
                                         if let Some(name) =
@@ -1129,7 +1130,7 @@ impl ApplicationHandler for App {
                             if self.combat.range {
                                 paint.text(
                                     &self.hornet.font,
-                                    "LIVE RANGE  SPACE FIRE  ; WEAPON  T TARGET",
+                                    self.flight_ui.combat_text(),
                                     175,
                                     385,
                                 );

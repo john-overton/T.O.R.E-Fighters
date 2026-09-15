@@ -69,3 +69,11 @@ CPU intervals 1.71 / 2.15 / 2.06 ms, p95 1.96 / 2.42 / 2.39 ms, zero paused
 frames, 330 mirrors each and seven camera readbacks in the Rafale case.
 These remain short CPU measurements with presentation backpressure; native
 parity, GPU timing and sustained maximum-load performance are not established.
+
+## Weapons/systems notifications
+
+The [systems pass](weapons-systems.md#frame-time-investigation-and-fix) records
+clean/gun/incoming/camera samples and a measured notification-composition fix.
+Incoming-run CPU means dropped from 4.85/4.64 ms to 2.51/2.49 ms by reusing the
+existing range HUD line; physics and event scheduling were unchanged. These are
+short CPU/presentation measurements, not native-parity or displayed-FPS claims.

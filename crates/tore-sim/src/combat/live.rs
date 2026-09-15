@@ -1572,7 +1572,7 @@ mod tests {
         assert_eq!(s.ammo, ammo);
         assert_eq!(events, replay.step(false, l, |_, _| 0.));
         assert_eq!(format!("{s:?}"), format!("{replay:?}"));
-        l.jammer = false;
+        s.ecm_failed = true; // A powered request cannot bypass equipment failure.
         s.command(Command::Incoming, l);
         s.projectiles[0].position = l.position;
         let events = s.step(false, l, |_, _| 0.);
@@ -1608,5 +1608,28 @@ mod tests {
             assert!(!reset.radar_failed && !reset.ecm_failed);
             assert_eq!(reset.subsystem_counts, [0; 45]);
         }
+    }
+
+    #[test]
+    fn automatic_radar_failure_inhibits_launch_and_breaks_illumination() {
+        let mut s = fixture(true);
+        let l = launcher();
+        s.range_target(l);
+        s.designate_next(l);
+        let id = s.designated.unwrap();
+        assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
+        s.config.system_damage = [0; 45];
+        s.config.system_damage[37] = 0x1f;
+        s.config.damage_capacity = 1;
+        s.player_hp = 10000;
+        let mut events = vec![];
+        for _ in 0..30 {
+            s.apply_player_damage(4, &mut events);
+        }
+        assert!(s.radar_failed);
+        assert_eq!(s.readiness(l), Readiness::RadarFailed);
+        let ammo = s.ammo.clone();
+        assert!(s.step(true, l, |_, _| 0.).contains(&Event::TrackLost(id)));
+        assert_eq!(s.ammo, ammo);
     }
 }

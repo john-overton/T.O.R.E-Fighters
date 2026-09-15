@@ -42,6 +42,7 @@ pub struct FlightUi {
     pub time_scale: f64,
     pub effects: bool,
     pub notice: Option<(String, Instant)>,
+    combat_notice: Option<(String, u16)>,
     pub help: bool,
     pub controls_editor: Option<crate::controls_editor::Editor>,
     root: usize,
@@ -64,6 +65,7 @@ impl Default for FlightUi {
             time_scale: 1.,
             effects: true,
             notice: None,
+            combat_notice: None,
             help: false,
             controls_editor: None,
             root: 0,
@@ -92,6 +94,25 @@ impl FlightUi {
         if let Some(editor) = &mut self.controls_editor {
             editor.cancel_capture();
         }
+    }
+    pub fn combat_message(&mut self, text: impl Into<String>) {
+        self.combat_notice = Some((text.into(), 480));
+    }
+    pub fn combat_tick(&mut self) {
+        if self.frozen() {
+            return;
+        }
+        if let Some((_, ticks)) = &mut self.combat_notice {
+            *ticks = ticks.saturating_sub(1);
+        }
+    }
+    pub fn combat_text(&self) -> &str {
+        self.combat_notice
+            .as_ref()
+            .filter(|(_, ticks)| *ticks > 0)
+            .map_or("LIVE RANGE  SPACE FIRE  ; WEAPON  T TARGET", |(text, _)| {
+                text.as_str()
+            })
     }
     pub fn message(&mut self, text: impl Into<String>) {
         self.notice = Some((text.into(), Instant::now()));
@@ -789,5 +810,25 @@ mod tests {
                 Command::Combat(_)
             ));
         }
+    }
+
+    #[test]
+    fn combat_feedback_uses_existing_hud_line_and_tick_owned_expiry() {
+        let mut ui = FlightUi::default();
+        ui.combat_message("Player hit");
+        assert!(ui.notice.is_none());
+        assert_eq!(ui.combat_text(), "Player hit");
+        ui.paused = true;
+        for _ in 0..480 {
+            ui.combat_tick();
+        }
+        assert_eq!(ui.combat_text(), "Player hit");
+        ui.paused = false;
+        for _ in 0..479 {
+            ui.combat_tick();
+        }
+        assert_eq!(ui.combat_text(), "Player hit");
+        ui.combat_tick();
+        assert!(ui.combat_text().starts_with("LIVE RANGE"));
     }
 }
