@@ -59,9 +59,11 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 - [ ] W6 remainder: restart and replay identity, the remaining theaters and
   platform acceptance.
 
-The follow-up adds static research tooling and evidence; runtime weather remains
-unchanged and native environment parity stays open. Existing manual systems
-acceptance and unrelated menu deferrals remain.
+Weather now runs in the engine: the day and night cycle, visibility, mission
+wind, physical turbulence and wing vapor all come from recovered source data.
+[Implementation evidence](baselines/weather.md). Celestial and cloud geometry,
+retail side-by-side comparison and the remaining acceptance matrix stay open, as
+do existing manual systems acceptance and unrelated menu deferrals.
 
 ## Quick Mission Creator and Load Ordnance — scheduled 2026-09-14
 

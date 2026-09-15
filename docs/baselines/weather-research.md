@@ -28,9 +28,13 @@ Physical low-altitude and nearby-aircraft turbulence exists, with daylight
 scaling and per-aircraft randomized event state. A separate sound intensity
 function responds to maneuver state. See the [source specification](../formats/weather.md).
 
-Contrails and vapor are user-confirmed; wing-induced vapor extends the requested
-investigation beyond wingtip trails. No emission contract, complete physical
-buffet model, retail trajectory or visual comparison is claimed.
+Follow-up passes recovered the complete LAY record layout, the blend kernel, the
+visibility ramp, the wind line, the turbulence event generator and the wing
+vapor streamer subsystem, and found engine contrails and broader wing-induced
+vapor absent from the reviewed executable. Those contracts and their limits are
+in the [source specification](../formats/weather.md), and the implementation
+evidence is in [weather implementation evidence](weather.md). No complete
+physical buffet model, retail trajectory or visual comparison is claimed.
 
 ## Validation
 

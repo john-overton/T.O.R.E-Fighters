@@ -13,17 +13,21 @@ resolution and pixel-identical rasterization are not acceptance requirements.
 
 ## Current implementation
 
+Updated 2026-09-14 after the first implementation pass.
+[Evidence](baselines/weather.md).
+
 | Area | Implemented | Gap |
 | --- | --- | --- |
-| Mission inputs | `tore-formats/src/theater.rs` reads layer, layer parameter, clouds, raw wind and time | Runtime loads the base MM; weather selection, defaults and units are unresolved |
-| Weather records | Bounded PL/CODE palette reader, explicit keyframe | Complete record fields, selection, interpolation, altitude and update timing |
-| Terrain and sky | `tore-app/src/terrain.rs` selects keyframe 2 and SKY0 | Palette is baked into RGBA textures and vertex colors at world construction |
-| Fog | `sim_renderer.rs` supplies palette entry 235 and density 0.000004; `terrain.wgsl` applies exponential distance fog | Native visibility, horizon and fog evolution |
-| Celestial/cloud assets | Shared importer selects SKY0–8, SUN/MOON/STARS, CLOUD1/CLOUDS and named textures | Dedicated shape interpretation, placement, animation and compositing |
-| Creator | Recovered seven condition labels; `quick_mission.rs` rejects launch unless condition index is 1 | Native condition-to-environment mapping and accepted launch/restart state |
-| Wind | Diagnostic native position helper and hybrid `tore-sim::flight::State::step_surface` support explicit wind | Live app passes height only; legacy adapter ignores supplied wind |
-| Air data | `telemetry::EnvironmentReading` accepts wind and atmosphere | Shared live weather integration; standard atmosphere remains an authored approximation |
-| Turbulence | Native force/display helpers accept turbulence; haptic event type exists | Generator, scheduling, weather coupling and live producer |
+| Mission inputs | `layer` name and choice index, `clouds` altitude, `wind` degrees and feet per second, and time all recovered and consumed | Campaign mission sources; the `clouds` deck is read but not drawn |
+| Weather records | Complete 352-byte record in `tore-formats::weather`, all 24 supplied modules parsing | Header shade and fill-pattern tables; the untranslated per-record callbacks |
+| Environment state | `tore-sim::environment` advances a 120 Hz to 256-unit clock, selects and blends records by time and altitude, and answers pure queries | Pause, compression and long-session audit against the original |
+| Terrain and sky | Artwork uploads as source palette indices; the live palette resolves on the GPU each frame | Celestial shapes, cloud and ocean decks, native sky mapping |
+| Visibility | Recovered per-record ramp and haze color, plus the altitude haze pass | The engine's ten-step remap quantization; sensor consumers |
+| Creator | Six source weather choices launch, with the per-theater module suffix | Overcast has no source module; restart and replay identity |
+| Wind | Resolved to world feet per second and applied by both adapters | Whether the heading names towards or from; wind audio |
+| Air data | `telemetry::EnvironmentReading` accepts wind and atmosphere | Still no live producer |
+| Turbulence | Complete event generator translated, driving attitude, height and haptics | Nearby-aircraft wake strength; the daytime ground-query flag |
+| Wing vapor | Shape-supplied attachment, position history, trigger, roll shortening and night suppression | Colour and fade are fitted; the native patterned fills are undecoded |
 
 Source foundations: [theater format](formats/theater.md),
 [creator contract](formats/quick-mission.md),
