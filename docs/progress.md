@@ -4,6 +4,25 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
 
 **Current scope:** Original Choose Activity and Quick Mission briefing lead to all-theater previews and F/A-18D/Rafale C free flight. The explicit manual range now connects the ten PT-default weapon slots, sensors, damage, stores and combat-service replay. Full native environment/flight/combat parity and the remaining menu screens stay open. AI is deferred until manual acceptance. See [manual weapons evidence](baselines/manual-weapons.md) and the dated checklists below.
 
+## Manual systems continuation — 2026-09-14
+
+- [x] Translate reviewed player HP/amount, weighted subsystem selection/eligibility,
+  and ECM hit-probability contracts; preserve explicit adapter/native boundaries.
+- [x] Connect manual incoming weapons, player damage/destruction, automatic visual,
+  radar, ECM and weapon-hardpoint faults, typed source configuration and tape v2.
+- [x] Connect controller fire and 14 isolated modifier bindings, controls editor/help,
+  bounded confirmed-event haptics and per-device feedback error handling.
+- [x] Validate 218 Rust tests, 14 Python tests, 50 outgoing and 20 incoming source
+  cases, two automatic-damage sequences, ten serialized tapes and 26 flight scenarios.
+- [ ] Complete native decoy/sensor/guidance contracts, unknown subsystem effects,
+  native RNG/difficulty/death timing, remaining loadouts/effects and original-game
+  differential acceptance. Current implementation is not full native parity.
+- [ ] Physical controller/haptic acceptance and Windows/macOS runtime checks.
+  AI remains deferred.
+
+[Current evidence, captures, limitations](baselines/weapons-systems.md).
+
+
 ## Two-aircraft live-fire pass — 2026-09-14
 
 - [x] Resolve exact ported identities from registry, models and assets: F/A-18D

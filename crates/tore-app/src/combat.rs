@@ -37,6 +37,7 @@ impl FireInput {
 pub struct Combat {
     pub state: live::State,
     pub input: FireInput,
+    pub controller: FireInput,
     pub range: bool,
     pub recorder: Option<crate::combat_tape::Recorder>,
     last_launcher: Option<Launcher>,
@@ -48,7 +49,8 @@ pub fn launcher(s: &flight::State) -> Launcher {
         position: s.position,
         basis: Basis::new(s.yaw, s.pitch, s.bank),
         speed_fps: s.speed,
-        radar: s.radar,
+        radar: s.radar && s.engine,
+        jammer: s.jammer && s.engine,
         alive: !s.crashed,
     }
 }
@@ -96,6 +98,7 @@ impl Combat {
         Ok(Self {
             state: live::State::new(config, range)?,
             input: FireInput::default(),
+            controller: FireInput::default(),
             range,
             recorder: None,
             last_launcher: None,
@@ -121,6 +124,7 @@ impl Combat {
             r.record("release", l);
         }
         self.input.cancel();
+        self.controller.cancel();
         self.state.release();
     }
     pub fn reset(&mut self, s: &mut flight::State) -> AppResult<()> {
@@ -131,6 +135,7 @@ impl Combat {
         self.last_launcher = Some(l);
         self.state = live::State::new(self.state.configuration().clone(), self.range)?;
         self.input = FireInput::default();
+        self.controller.cancel();
         s.set_payload(self.state.payload_lbs())?;
         if self.range {
             self.state.range_target(launcher(s));
@@ -141,12 +146,30 @@ impl Combat {
         let l = launcher(s);
         self.last_launcher = Some(l);
         if let Some(r) = &mut self.recorder {
-            r.record(if self.input.held { "fire" } else { "tick" }, l);
+            r.record(
+                if self.input.held || self.controller.held {
+                    "fire"
+                } else {
+                    "tick"
+                },
+                l,
+            );
         }
-        let events = self.state.step(self.input.held, l, |x, z| {
-            f64::from(world.height(x as f32, z as f32))
-        });
+        let events = self
+            .state
+            .step(self.input.held || self.controller.held, l, |x, z| {
+                f64::from(world.height(x as f32, z as f32))
+            });
         s.set_payload(self.state.payload_lbs())?;
+        if self.state.radar_failed {
+            s.radar = false;
+        }
+        if self.state.ecm_failed {
+            s.jammer = false;
+        }
+        if self.state.player_hp == 0 {
+            s.crashed = true;
+        }
         Ok(events)
     }
     pub fn readout(&self, s: &flight::State) -> crate::instruments::CombatReadout {
@@ -159,12 +182,35 @@ impl Combat {
                 .signature
                 != 0,
             ammo: self.state.rounds(i),
+            systems: format!(
+                "HP{} V{} R{} E{}",
+                self.state.player_hp,
+                if self.state.visual_failed { "!" } else { "+" },
+                if self.state.radar_failed {
+                    "!"
+                } else if launcher(s).radar {
+                    "+"
+                } else {
+                    "-"
+                },
+                if self.state.ecm_failed {
+                    "!"
+                } else if launcher(s).jammer {
+                    "+"
+                } else {
+                    "-"
+                }
+            ),
             readiness: self.state.readiness(launcher(s)).label(),
             damage: self
                 .state
-                .history
-                .last()
-                .map(|hit| format!("C{} HIT {} HP {}", hit.class, hit.applied, hit.hp_after)),
+                .last_subsystem
+                .map(|i| format!("SOURCE FAULT {i}"))
+                .or_else(|| {
+                    self.state.history.last().map(|hit| {
+                        format!("C{} HIT {} HP {}", hit.class, hit.applied, hit.hp_after)
+                    })
+                }),
             loaded: self.range,
             target: self
                 .state
@@ -219,13 +265,30 @@ impl Combat {
                 })
         });
         format!(
-            "{} {} {}  {} C{} HIT {}",
+            "{} {} {}  {} C{} HIT {} | HP {} SYS {} ECM {} T-JAM {} IN {}",
             self.state.configuration().stations[i].weapon.name,
             self.state.rounds(i),
             self.state.readiness(launcher(s)).label(),
             target,
             live::damage_class(self.state.range_category),
-            self.state.history.last().map_or(0, |hit| hit.applied)
+            self.state.history.last().map_or(0, |hit| hit.applied),
+            self.state.player_hp,
+            self.state
+                .last_subsystem
+                .map_or("--".into(), |i| i.to_string()),
+            if self.state.ecm_failed {
+                "FAIL"
+            } else if launcher(s).jammer {
+                "ON"
+            } else {
+                "OFF"
+            },
+            if self.state.target_jammer {
+                "ON"
+            } else {
+                "OFF"
+            },
+            self.state.projectiles.iter().filter(|p| p.incoming).count()
         )
     }
     pub fn vertices(&self, h: &Airframe, s: &flight::State, camera: &Camera) -> Vec<f32> {
@@ -384,9 +447,147 @@ fn vertex(out: &mut Vec<f32>, pos: Vector, color: [f32; 3]) {
 
 /// Uses the same imported configuration, flight state, trigger host, movement and
 /// hit/effect path as desktop flight. Explicit scripted range, not a retail replay.
+/// Haptics follow confirmed ownship events. A distant target explosion is not
+/// player damage; incoming fixture launches must not feel like own launches.
+pub fn feedback(event: &Event, config: &live::Configuration) -> Option<tore_input::FeedbackEvent> {
+    use tore_input::FeedbackEvent as F;
+    match event {
+        Event::Fired(i) => Some(if config.stations[*i].internal {
+            F::GunFired
+        } else {
+            F::MissileLaunched
+        }),
+        Event::PlayerDamaged(_) => Some(F::Damage),
+        Event::PlayerDestroyed => Some(F::Crash),
+        _ => None,
+    }
+}
 pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let world = World::for_theater(data, "UKR")?;
     let mut combat = Combat::new(h, data, true)?;
+    println!(
+        "systems source {:?}: player capacity={} ECM={:?} weights={} repeat-limited=45",
+        h.profile.id,
+        combat.state.configuration().damage_capacity,
+        combat.state.configuration().ecm,
+        combat
+            .state
+            .configuration()
+            .system_damage
+            .iter()
+            .map(|v| u32::from(v & 15))
+            .sum::<u32>()
+    );
+    let mut damaged = live::State::new(combat.state.configuration().clone(), true)?;
+    let l = launcher(&h.start(&world));
+    // A source missile followed by gun hits exercises selection on a varied
+    // damage history; a particular all-gun seed can legitimately select no fault.
+    damaged.selected = damaged
+        .configuration()
+        .stations
+        .iter()
+        .position(|s| s.weapon.source == "AGM65G.JT")
+        .ok_or("missing reviewed AGM65G fixture")?;
+    damaged.command(live::Command::Incoming, l);
+    let mut replica = damaged.clone();
+    let mut systems = 0;
+    let mut destroyed = 0;
+    for _ in 0..1200 {
+        let events = damaged.step(false, l, |_, _| 0.);
+        if events != replica.step(false, l, |_, _| 0.) {
+            return Err("source incoming damage replay diverged".into());
+        }
+        systems += events
+            .iter()
+            .filter(|e| matches!(e, Event::SubsystemDamaged(_)))
+            .count();
+        destroyed += events
+            .iter()
+            .filter(|e| matches!(e, Event::PlayerDestroyed))
+            .count();
+        if damaged.projectiles.is_empty() {
+            break;
+        }
+    }
+    for _ in 0..40 {
+        damaged.command(live::Command::DamagePlayer, l);
+        replica.command(live::Command::DamagePlayer, l);
+        let events = damaged.step(false, l, |_, _| 0.);
+        if events != replica.step(false, l, |_, _| 0.)
+            || format!("{damaged:?}") != format!("{replica:?}")
+        {
+            return Err("source damage replay diverged".into());
+        }
+        systems += events
+            .iter()
+            .filter(|e| matches!(e, Event::SubsystemDamaged(_)))
+            .count();
+        destroyed += events
+            .iter()
+            .filter(|e| matches!(e, Event::PlayerDestroyed))
+            .count();
+    }
+    if systems == 0 || destroyed != 1 || damaged.player_hp != 0 {
+        return Err(format!("source automatic damage/destruction failed faults={systems} kills={destroyed} HP={} damage={} counts={:?} source={:?}",damaged.player_hp,damaged.player_damage,damaged.subsystem_counts,damaged.configuration().system_damage).into());
+    }
+    println!(
+        "systems automatic {:?}: faults={systems} destruction={destroyed} indices={:?} PASS",
+        h.profile.id, damaged.subsystem_counts
+    );
+    for index in 0..combat.state.ammo.len() {
+        for jammer in [false, true] {
+            let mut state = live::State::new(combat.state.configuration().clone(), true)?;
+            state.selected = index;
+            let mut l = launcher(&h.start(&world));
+            l.jammer = jammer;
+            state.command(live::Command::Incoming, l);
+            let mut replay = state.clone();
+            let initial = state.player_hp;
+            let ammo = state.ammo.clone();
+            let mut outcome = false;
+            let mut mixer = tore_input::FeedbackMixer::default();
+            let mut pulses = 0;
+            for _ in 0..1200 {
+                let events = state.step(false, l, |_, _| 0.);
+                if events != replay.step(false, l, |_, _| 0.)
+                    || format!("{state:?}") != format!("{replay:?}")
+                {
+                    return Err("incoming replay diverged".into());
+                }
+                for event in &events {
+                    if let Some(cue) = feedback(event, state.configuration()) {
+                        mixer.event(cue);
+                    }
+                    outcome |= matches!(event, Event::PlayerDamaged(_) | Event::Defeated(0));
+                }
+                if matches!(mixer.tick(), Some(tore_input::FeedbackUpdate::Pulse { .. })) {
+                    pulses += 1;
+                }
+                if outcome {
+                    break;
+                }
+            }
+            if !outcome || state.ammo != ammo || (state.player_hp < initial && pulses == 0) {
+                return Err(format!(
+                    "incoming lifecycle failed slot {} jammer={jammer}",
+                    index + 1
+                )
+                .into());
+            }
+            for _ in 0..120 {
+                mixer.tick();
+            }
+            if mixer.tick().is_some() {
+                return Err("feedback failed to settle".into());
+            }
+            println!(
+                "systems incoming {:?} slot={} jammer={jammer} HP={initial}->{} haptic-pulses={pulses} PASS",
+                h.profile.id,
+                index + 1,
+                state.player_hp
+            );
+        }
+    }
     for index in 0..combat.state.ammo.len() {
         for (class, category) in [
             combat.state.configuration().target_category,
@@ -632,6 +833,9 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     live::Command::Jettison,
                     live::Command::NextWeapon,
                     live::Command::CycleClass,
+                    live::Command::DamagePlayer,
+                    live::Command::ToggleTargetJammer,
+                    live::Command::Incoming,
                 ] {
                     combat.cancel();
                     combat.command(command, launcher(&flight));

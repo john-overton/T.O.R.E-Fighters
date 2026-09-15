@@ -12,6 +12,13 @@ use tore_formats::{
     weapons::Weapon,
 };
 
+fn draw(state: &mut u32, bound: u16) -> u16 {
+    *state ^= *state << 13;
+    *state ^= *state >> 17;
+    *state ^= *state << 5;
+    (*state % u32::from(bound)) as u16
+}
+
 pub const MAX_PROJECTILES: usize = 256;
 pub const MAX_EFFECTS: usize = 64;
 pub const MAX_HIT_RECORDS: usize = 128;
@@ -38,6 +45,7 @@ pub enum Readiness {
     NoTarget,
     TargetDestroyed,
     RadarOff,
+    RadarFailed,
     RadarCoverage,
     TerrainMasked,
     MinimumRange,
@@ -57,6 +65,7 @@ impl Readiness {
             Self::NoTarget => "NO TARGET",
             Self::TargetDestroyed => "TARGET DESTROYED",
             Self::RadarOff => "RADAR OFF",
+            Self::RadarFailed => "RADAR FAILED",
             Self::RadarCoverage => "RADAR COVERAGE",
             Self::TerrainMasked => "TERRAIN MASKED",
             Self::MinimumRange => "MIN RANGE",
@@ -78,6 +87,9 @@ pub enum Command {
     ReplaceTarget,
     CycleClass,
     FailStation,
+    DamagePlayer,
+    Incoming,
+    ToggleTargetJammer,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,6 +111,14 @@ pub struct Station {
 }
 #[derive(Clone, Debug)]
 pub struct Configuration {
+    pub ecm: tore_formats::weapons::Countermeasures,
+    pub system_damage: [u8; 45],
+    pub damage_capacity: i32,
+    pub afterburner_available: bool,
+    pub hardpoint_slots: Vec<Option<usize>>,
+    pub radar_hardpoint: usize,
+    pub visual_hardpoint: usize,
+    pub ecm_hardpoint: usize,
     pub aircraft: AircraftId,
     pub stations: Vec<Station>,
     pub hit_points: i32,
@@ -111,6 +131,7 @@ impl Configuration {
     fn validate(&self) -> Result<()> {
         if self.stations.is_empty()
             || self.stations.len() > 32
+            || self.damage_capacity <= 0
             || self.hit_points <= 0
             || self.external_equipment_lbs < 0
         {
@@ -221,7 +242,63 @@ impl Configuration {
             .find(|n| *n == "VIS340.SEE")
             .ok_or_else(|| super::invalid("missing reviewed visual sensor"))?;
         let visual = tore_formats::weapons::Seeker::parse(visual_name, &read(visual_name)?)?;
+        let ecm_hardpoint = a
+            .hardpoints
+            .iter()
+            .position(|h| h.store.as_deref().is_some_and(|n| n.ends_with(".ECM")))
+            .ok_or_else(|| super::invalid("missing ECM"))?;
+        let ecm = tore_formats::weapons::Countermeasures::parse(
+            a.hardpoints[ecm_hardpoint].store.as_deref().unwrap(),
+            &read(a.hardpoints[ecm_hardpoint].store.as_deref().unwrap())?,
+        )?;
+        let mut system_damage = [0; 45];
+        for (i, out) in system_damage.iter_mut().enumerate() {
+            *out = a
+                .fields
+                .get(&format!("systemDamage[{i}]"))
+                .ok_or_else(|| super::invalid("missing system damage"))?
+                .number()? as u8;
+        }
+        let mut slot = 0;
+        let hardpoint_slots = a
+            .hardpoints
+            .iter()
+            .map(|h| {
+                if h.store.as_deref().is_some_and(|n| n.ends_with(".JT")) {
+                    let i = slot;
+                    slot += 1;
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let damage_capacity = hit_points
+            .checked_mul(2)
+            .filter(|v| *v <= i32::from(i16::MAX))
+            .ok_or_else(|| super::invalid("native player damage capacity"))?;
         Ok(Self {
+            ecm,
+            system_damage,
+            damage_capacity,
+            afterburner_available: a
+                .fields
+                .get("aftThrust")
+                .ok_or_else(|| super::invalid("missing afterburner thrust"))?
+                .number()?
+                != 0,
+            hardpoint_slots,
+            visual_hardpoint: a
+                .hardpoints
+                .iter()
+                .position(|h| h.store.as_deref() == Some(visual_name))
+                .unwrap(),
+            radar_hardpoint: a
+                .hardpoints
+                .iter()
+                .position(|h| h.store.as_deref() == Some(radar_name))
+                .unwrap(),
+            ecm_hardpoint,
             radar,
             visual,
             external_equipment_lbs,
@@ -247,6 +324,7 @@ pub struct Target {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projectile {
+    pub incoming: bool,
     pub station: usize,
     pub position: Vector,
     pub previous: Vector,
@@ -276,6 +354,10 @@ pub enum Event {
     Destroyed(u32),
     Ground,
     TrackLost(u32),
+    PlayerDamaged(i32),
+    SubsystemDamaged(usize),
+    PlayerDestroyed,
+    Defeated(u32),
 }
 #[derive(Clone, Debug)]
 pub struct State {
@@ -290,6 +372,19 @@ pub struct State {
     pub hits: u32,
     pub kills: u32,
     pub armed: bool,
+    pub player_hp: i32,
+    pub player_damage: i32,
+    pub subsystem_counts: [u8; 45],
+    pub last_subsystem: Option<usize>,
+    pub radar_failed: bool,
+    pub visual_failed: bool,
+    pub ecm_failed: bool,
+    pub chaff: u8,
+    pub flares: u8,
+    pub target_jammer: bool,
+    rng: u32,
+    pending_damage: bool,
+    previous_player_position: Option<Vector>,
     pub history: Vec<HitRecord>,
     pub range_category: u16,
     next_target_id: u32,
@@ -305,6 +400,7 @@ pub struct Launcher {
     pub basis: Basis,
     pub speed_fps: f64,
     pub radar: bool,
+    pub jammer: bool,
     pub alive: bool,
 }
 impl State {
@@ -321,6 +417,19 @@ impl State {
         let triggers = vec![PlayerTrigger::default(); config.stations.len()];
         let range_category = config.target_category;
         Ok(Self {
+            chaff: config.ecm.chaff[0],
+            flares: config.ecm.flare[0],
+            player_hp: config.damage_capacity,
+            player_damage: 0,
+            subsystem_counts: [0; 45],
+            last_subsystem: None,
+            radar_failed: false,
+            visual_failed: false,
+            ecm_failed: false,
+            target_jammer: false,
+            rng: 0x46414a54,
+            pending_damage: false,
+            previous_player_position: None,
             external,
             armed: true,
             history: vec![],
@@ -362,6 +471,33 @@ impl State {
     }
     pub fn command(&mut self, command: Command, launcher: Launcher) {
         match command {
+            Command::Incoming => {
+                if self.projectiles.len() < MAX_PROJECTILES && self.player_hp > 0 {
+                    let w = &self.config.stations[self.selected].weapon;
+                    let position = std::array::from_fn(|i| {
+                        launcher.position[i] + launcher.basis.forward[i] * 1800.
+                    });
+                    self.projectiles.push(Projectile {
+                        incoming: true,
+                        station: self.selected,
+                        position,
+                        previous: position,
+                        direction: launcher.basis.forward.map(|v| -v),
+                        speed_f8: launch_speed(&w.movement, (launcher.speed_fps * 256.) as i32)
+                            .expect("validated speed")
+                            * 256,
+                        launched_t: (self.tick / 30) as u16,
+                        target: if w.seeker.signature != 0 {
+                            Some(0)
+                        } else {
+                            None
+                        },
+                        fall: FallState::default(),
+                    });
+                }
+            }
+            Command::DamagePlayer => self.pending_damage = true,
+            Command::ToggleTargetJammer => self.target_jammer = !self.target_jammer,
             Command::NextWeapon => self.select_next(),
             Command::Designate => self.designate_next(launcher),
             Command::ClearDesignation => self.designated = None,
@@ -389,11 +525,71 @@ impl State {
             }
         }
     }
+    fn apply_player_damage(&mut self, amount: i32, events: &mut Vec<Event>) {
+        let applied = amount.max(0).min(self.player_hp);
+        if applied == 0 {
+            return;
+        }
+        self.player_hp -= applied;
+        self.player_damage = self.player_damage.saturating_add(amount);
+        events.push(Event::PlayerDamaged(applied));
+        let chance = super::systems::subsystem_chance(
+            self.player_damage,
+            self.config.damage_capacity,
+            amount,
+        );
+        if chance > 0
+            && i32::from(draw(&mut self.rng, 100)) < chance
+            && let Some(index) = super::systems::select(
+                &self.config.system_damage,
+                &self.subsystem_counts,
+                self.player_damage,
+                self.config.damage_capacity,
+                self.config.afterburner_available,
+                |n| draw(&mut self.rng, n),
+            )
+        {
+            self.subsystem_counts[index] += 1;
+            self.last_subsystem = Some(index);
+            events.push(Event::SubsystemDamaged(index));
+            if let Some(h) = index.checked_sub(36) {
+                if let Some(Some(slot)) = self.config.hardpoint_slots.get(h) {
+                    if self.rounds(*slot) > 0 {
+                        self.ammo[*slot] |= 0x8000;
+                    }
+                } else if h == self.config.radar_hardpoint {
+                    self.radar_failed = true;
+                } else if h == self.config.visual_hardpoint {
+                    self.visual_failed = true;
+                } else if h == self.config.ecm_hardpoint {
+                    for _ in 0..10 {
+                        let roll = draw(&mut self.rng, 100);
+                        if roll < 25 && self.config.ecm.mode_flags & 0x110 != 0 {
+                            self.ecm_failed = true;
+                            self.chaff = 0;
+                            self.flares = 0;
+                            break;
+                        } else if (25..65).contains(&roll) && self.config.ecm.chaff[0] != 0 {
+                            self.chaff = 0;
+                            break;
+                        } else if roll >= 65 && self.config.ecm.flare[0] != 0 {
+                            self.flares = 0;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if self.player_hp == 0 {
+            self.release();
+            events.push(Event::PlayerDestroyed);
+        }
+    }
     pub fn rounds(&self, station: usize) -> u16 {
         self.ammo[station] & 0x7fff
     }
     pub fn readiness(&self, launcher: Launcher) -> Readiness {
-        if !launcher.alive {
+        if !launcher.alive || self.player_hp <= 0 {
             return Readiness::LauncherLost;
         }
         if !self.armed {
@@ -428,6 +624,9 @@ impl State {
             return Readiness::TerrainMasked;
         }
         if w.seeker.signature == 3 {
+            if self.radar_failed {
+                return Readiness::RadarFailed;
+            }
             if !launcher.radar {
                 return Readiness::RadarOff;
             }
@@ -493,12 +692,13 @@ impl State {
         target.hp > 0
             && !self.masked_targets.contains(&target.id)
             && (self.radar_detects(launcher, target.position)
-                || cone(
-                    &self.config.visual.zones[0],
-                    launcher.position,
-                    launcher.basis.forward,
-                    target.position,
-                ))
+                || (!self.visual_failed
+                    && cone(
+                        &self.config.visual.zones[0],
+                        launcher.position,
+                        launcher.basis.forward,
+                        target.position,
+                    )))
     }
     pub fn radar_detects(&self, launcher: Launcher, target: Vector) -> bool {
         !self
@@ -506,6 +706,7 @@ impl State {
             .iter()
             .any(|t| t.position == target && self.masked_targets.contains(&t.id))
             && launcher.radar
+            && !self.radar_failed
             && cone(
                 &self.config.radar.zones[0],
                 launcher.position,
@@ -541,6 +742,15 @@ impl State {
         ground: impl Fn(f64, f64) -> f64,
     ) -> Vec<Event> {
         let mut events = Vec::new();
+        if std::mem::take(&mut self.pending_damage) && self.player_hp > 0 {
+            // Explicit no-AI hit fixture uses this aircraft's gun damage. Native
+            // percent input is 100; deterministic adapter RNG is not native RNG.
+            let base = self.config.stations[0].weapon.damage.by_class
+                [damage_class(self.config.target_category)]
+            .max(0) as u16;
+            let amount = super::systems::damage_amount(base, 100, draw(&mut self.rng, 40) as u8);
+            self.apply_player_damage(amount, &mut events);
+        }
         let now = (self.tick / 30) as u16;
         self.tick += 1;
         self.service_remainder += 256;
@@ -585,6 +795,7 @@ impl State {
                         + launcher.basis.forward[i] * station.mount[2]
                 });
                 self.projectiles.push(Projectile {
+                    incoming: false,
                     station: index,
                     position,
                     previous: position,
@@ -612,6 +823,19 @@ impl State {
                 }
             }
         }
+        let previous_player = self
+            .previous_player_position
+            .replace(launcher.position)
+            .unwrap_or(launcher.position);
+        let player = Target {
+            id: 0,
+            position: launcher.position,
+            velocity: [0.; 3],
+            radius: 28.,
+            hp: if launcher.alive { self.player_hp } else { 0 },
+            category: self.config.target_category,
+        };
+        let mut player_hits = Vec::new();
         let mut impacts = Vec::new();
         self.projectiles.retain_mut(|p| {
             let w = &self.config.stations[p.station].weapon;
@@ -621,12 +845,21 @@ impl State {
             }
             p.previous = p.position;
             let phase = engine_phase(m, now, p.launched_t);
-            if let Some(t) = p
-                .target
-                .and_then(|id| self.targets.iter().find(|t| t.id == id && t.hp > 0))
-            {
-                if acquisition(w, p.position, p.direction, t.position, launcher.radar, 0)
-                    && terrain_hit(p.position, t.position, &ground).is_none()
+            if let Some(t) = p.target.and_then(|id| {
+                if p.incoming && id == 0 && player.hp > 0 {
+                    Some(&player)
+                } else {
+                    self.targets.iter().find(|t| t.id == id && t.hp > 0)
+                }
+            }) {
+                if acquisition(
+                    w,
+                    p.position,
+                    p.direction,
+                    t.position,
+                    p.incoming || (launcher.radar && !self.radar_failed),
+                    0,
+                ) && terrain_hit(p.position, t.position, &ground).is_none()
                 {
                     let desired = unit(sub(t.position, p.position));
                     let rate = if phase == EnginePhase::Powered {
@@ -674,7 +907,18 @@ impl State {
             ) / 256.;
             let armed = now.wrapping_sub(p.launched_t) >= w.damage.fuze_arm_t;
             let mut first: Option<(f64, Option<usize>)> = None;
-            if armed {
+            if armed
+                && p.incoming
+                && player.hp > 0
+                && let Some(at) = segment_sphere(
+                    sub(p.previous, previous_player),
+                    sub(p.position, player.position),
+                    player.radius + f64::from(w.damage.fuze_radius.max(0)),
+                )
+            {
+                first = Some((at, Some(usize::MAX)));
+            }
+            if armed && !p.incoming {
                 for (i, t) in self.targets.iter().enumerate().filter(|(_, t)| t.hp > 0) {
                     let radius = t.radius + f64::from(w.damage.fuze_radius.max(0));
                     if let Some(at) = segment_sphere(
@@ -697,8 +941,43 @@ impl State {
             if let Some((at, target)) = first {
                 let position =
                     std::array::from_fn(|i| p.previous[i] + (p.position[i] - p.previous[i]) * at);
+                if target == Some(usize::MAX) {
+                    let deception = super::systems::deception_chance(
+                        self.config.ecm,
+                        w.seeker.signature,
+                        launcher.jammer && !self.ecm_failed,
+                    );
+                    if deception != 0
+                        && i32::from(draw(&mut self.rng, 100))
+                            >= super::systems::hit_chance(100, deception)
+                    {
+                        events.push(Event::Defeated(0));
+                    } else {
+                        let base = w.damage.by_class[damage_class(self.config.target_category)]
+                            .max(0) as u16;
+                        player_hits.push(super::systems::damage_amount(
+                            base,
+                            100,
+                            draw(&mut self.rng, 40) as u8,
+                        ));
+                        impacts.push((position, EffectKind::Hit));
+                    }
+                    return false;
+                }
                 if let Some(i) = target {
                     let t = &mut self.targets[i];
+                    let deception = super::systems::deception_chance(
+                        self.config.ecm,
+                        w.seeker.signature,
+                        self.target_jammer,
+                    );
+                    if deception != 0
+                        && i32::from(draw(&mut self.rng, 100))
+                            >= super::systems::hit_chance(100, deception)
+                    {
+                        events.push(Event::Defeated(t.id));
+                        return false;
+                    }
                     let class = damage_class(t.category);
                     let nominal = i32::from(w.damage.by_class[class]).max(0);
                     let applied = nominal.min(t.hp);
@@ -737,6 +1016,9 @@ impl State {
             }
             true
         });
+        for amount in player_hits {
+            self.apply_player_damage(amount, &mut events);
+        }
         for (p, kind) in impacts {
             self.effect(p, kind);
         }
@@ -928,6 +1210,26 @@ mod tests {
         };
         State::new(
             Configuration {
+                ecm: tore_formats::weapons::Countermeasures {
+                    weight: 0,
+                    flags: 0,
+                    mode_flags: 0x10,
+                    chaff: [0; 4],
+                    flare: [0; 4],
+                    radar_deception_chance: 30,
+                    radar_signature_add: 0,
+                    radar_noise_range: [0; 2],
+                    infrared_deception_chance: 0,
+                    infrared_signature_add: 0,
+                    infrared_lose_lock_time: 0,
+                },
+                system_damage: [0x11; 45],
+                damage_capacity: 30,
+                afterburner_available: true,
+                hardpoint_slots: vec![Some(0)],
+                radar_hardpoint: 1,
+                visual_hardpoint: 3,
+                ecm_hardpoint: 2,
                 aircraft: AircraftId::F18,
                 stations: vec![Station {
                     weapon: w,
@@ -951,6 +1253,7 @@ mod tests {
             basis: Basis::new(0., 0., 0.),
             speed_fps: 300.,
             radar: true,
+            jammer: false,
             alive: true,
         }
     }
@@ -1251,5 +1554,59 @@ mod tests {
         }
         assert_eq!(s.range_category, 0x8000);
         assert_eq!(s.targets[0].category, 0x8000);
+    }
+
+    #[test]
+    fn incoming_contacts_player_ecm_and_replay_are_connected() {
+        let mut s = fixture(true);
+        let mut l = launcher();
+        l.jammer = true;
+        s.config.ecm.radar_deception_chance = 100;
+        s.command(Command::Incoming, l);
+        s.projectiles[0].position = l.position;
+        let ammo = s.ammo.clone();
+        let mut replay = s.clone();
+        let events = s.step(false, l, |_, _| 0.);
+        assert!(events.contains(&Event::Defeated(0)));
+        assert_eq!(s.player_hp, s.config.damage_capacity);
+        assert_eq!(s.ammo, ammo);
+        assert_eq!(events, replay.step(false, l, |_, _| 0.));
+        assert_eq!(format!("{s:?}"), format!("{replay:?}"));
+        l.jammer = false;
+        s.command(Command::Incoming, l);
+        s.projectiles[0].position = l.position;
+        let events = s.step(false, l, |_, _| 0.);
+        assert!(events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))));
+        assert!(s.player_hp < s.config.damage_capacity);
+    }
+    #[test]
+    fn automatic_station_radar_ecm_failures_keep_mass_and_reset() {
+        for index in [36, 37, 38] {
+            let mut s = fixture(false);
+            s.config.system_damage = [0; 45];
+            s.config.system_damage[index] = 0x1f;
+            s.config.damage_capacity = 1;
+            s.player_hp = 10000;
+            let mass = s.payload_lbs();
+            let mut events = vec![];
+            for _ in 0..30 {
+                s.apply_player_damage(4, &mut events);
+            }
+            assert_eq!(s.subsystem_counts[index], 1);
+            assert_eq!(s.last_subsystem, Some(index));
+            if index == 36 {
+                assert_ne!(s.ammo[0] & 0x8000, 0);
+            }
+            if index == 37 {
+                assert!(s.radar_failed);
+            }
+            if index == 38 {
+                assert!(s.ecm_failed);
+            }
+            assert_eq!(mass, s.payload_lbs());
+            let reset = State::new(s.config.clone(), true).unwrap();
+            assert!(!reset.radar_failed && !reset.ecm_failed);
+            assert_eq!(reset.subsystem_counts, [0; 45]);
+        }
     }
 }

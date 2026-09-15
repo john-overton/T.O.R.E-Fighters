@@ -190,6 +190,19 @@ impl App {
             return self.flight_command(command);
         }
         let command = match name.as_str() {
+            "weapon-next" => Command::NextWeapon,
+            "designate" => Command::Target,
+            "clear-designation" => {
+                Command::Combat(tore_sim::combat::live::Command::ClearDesignation)
+            }
+            "master-arm" => Command::Combat(tore_sim::combat::live::Command::ToggleArm),
+            "jettison" => Command::Combat(tore_sim::combat::live::Command::Jettison),
+            "range-target" => Command::RangeReset,
+            "damage-class" => Command::Combat(tore_sim::combat::live::Command::CycleClass),
+            "fail-station" => Command::Combat(tore_sim::combat::live::Command::FailStation),
+            "damage-player" => Command::Combat(tore_sim::combat::live::Command::DamagePlayer),
+            "incoming" => Command::Combat(tore_sim::combat::live::Command::Incoming),
+            "target-jammer" => Command::Combat(tore_sim::combat::live::Command::ToggleTargetJammer),
             "end-flight" => Command::End,
             "restart" => Command::Restart,
             "view-front" => Command::View(0),
@@ -899,6 +912,11 @@ impl ApplicationHandler for App {
                             if let Some(audio) = &self.audio {
                                 audio.controls(&self.previous_flight, &self.flight);
                             }
+                            self.combat.controller.space(
+                                self.input.resolver.held("fire"),
+                                false,
+                                false,
+                            );
                             let events = match self.combat.step(&mut self.flight, &self.world) {
                                 Ok(events) => events,
                                 Err(e) => {
@@ -910,7 +928,29 @@ impl ApplicationHandler for App {
                             let mut sounds = std::collections::BTreeSet::new();
                             for event in &events {
                                 use tore_sim::combat::live::Event;
+                                if let Some(cue) =
+                                    combat::feedback(event, self.combat.state.configuration())
+                                {
+                                    self.input.feedback(cue);
+                                }
                                 match event {
+                                    Event::PlayerDamaged(amount) => {
+                                        sounds.insert("&EXPL3.5K");
+                                        self.flight_ui.message(format!(
+                                            "Player hit: {amount}; HP {}",
+                                            self.combat.state.player_hp
+                                        ));
+                                    }
+                                    Event::SubsystemDamaged(i) => self
+                                        .flight_ui
+                                        .message(format!("Source subsystem {i} damaged")),
+                                    Event::PlayerDestroyed => {
+                                        sounds.insert("&EXPL12.5K");
+                                        self.flight.crashed = true;
+                                    }
+                                    Event::Defeated(id) => self
+                                        .flight_ui
+                                        .message(format!("ECM defeated contact T{id}")),
                                     Event::TrackLost(id) => {
                                         self.flight_ui
                                             .message(format!("Missile track lost: T{id}"));
@@ -924,15 +964,6 @@ impl ApplicationHandler for App {
                                         {
                                             sounds.insert(name);
                                         }
-                                        self.input.feedback(
-                                            if self.combat.state.configuration().stations[*i]
-                                                .internal
-                                            {
-                                                tore_input::FeedbackEvent::GunFired
-                                            } else {
-                                                tore_input::FeedbackEvent::MissileLaunched
-                                            },
-                                        );
                                     }
                                     Event::Hit(_) | Event::Ground => {
                                         sounds.insert("&EXPL3.5K");
@@ -1301,6 +1332,7 @@ impl ApplicationHandler for App {
 fn main() -> AppResult<()> {
     let mut args = std::env::args().skip(1);
     let mut live_fire = false;
+    let mut jammer_on = false;
     let mut combat_smoke = false;
     let mut record_combat = None;
     let mut replay_combat = None;
@@ -1354,7 +1386,7 @@ fn main() -> AppResult<()> {
             }
             "--combat-command" => {
                 let name = args.next().ok_or(
-                    "--combat-command needs arm/jettison/clear/class/fail/next/target/designate",
+                    "--combat-command needs arm/jettison/clear/class/fail/next/target/designate/damage/incoming/target-jammer",
                 )?;
                 if combat_commands.len() >= 32 {
                     return Err("too many combat setup commands".into());
@@ -1375,6 +1407,11 @@ fn main() -> AppResult<()> {
                 replay_combat = Some(PathBuf::from(
                     args.next().ok_or("--replay-combat requires a path")?,
                 ));
+            }
+            "--jammer-on" => {
+                jammer_on = true;
+                live_fire = true;
+                initial_screen = Screen::Flight;
             }
             "--live-fire" => {
                 live_fire = true;
@@ -1613,7 +1650,7 @@ fn main() -> AppResult<()> {
             "--import-only" => import_only = true,
             "--help" | "-h" => {
                 println!(
-                    "Combat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). --record-combat NEW_PATH writes explicit combat-service inputs; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Combat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; I launches one incoming selected weapon; Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-2 combat-service inputs; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -1899,6 +1936,7 @@ fn main() -> AppResult<()> {
     let animation_capture = capture_terrain.is_some()
         && (flight_devices.is_some() || flight_controls.is_some() || flight_probe_ticks.is_some());
     let mut flight = hornet.start(&world);
+    flight.jammer = jammer_on;
     if researched_flight {
         flight.enable_research(1)?;
     }
@@ -1968,12 +2006,30 @@ fn main() -> AppResult<()> {
             combat::launcher(&flight),
         );
         combat.input.space(true, false, false);
+        let mut feedback = tore_input::FeedbackMixer::default();
+        let mut cues = std::collections::BTreeMap::<String, usize>::new();
+        let mut pulses = 0;
         for _ in 0..ticks {
             flight.step(&flight::PilotInput::default(), |x, z| {
                 f64::from(world.height(x as f32, z as f32))
             });
-            combat.step(&mut flight, &world)?;
+            for event in combat.step(&mut flight, &world)? {
+                if let Some(cue) = combat::feedback(&event, combat.state.configuration()) {
+                    *cues.entry(format!("{cue:?}")).or_default() += 1;
+                    feedback.event(cue);
+                }
+            }
+            if matches!(
+                feedback.tick(),
+                Some(tore_input::FeedbackUpdate::Pulse { .. })
+            ) {
+                pulses += 1;
+            }
         }
+        println!(
+            "Combat probe feedback generation (no hardware playback): {cues:?}, pulses={pulses}; {}",
+            combat.status(&flight)
+        );
         combat.cancel();
         println!(
             "Combat probe: {} shots={} hits={} kills={} active={} ammo={:?}",

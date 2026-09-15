@@ -1,5 +1,9 @@
 # Two-aircraft manual weapons integration
 
+Follow-up: [weapons, ECM, player damage and controller integration](weapons-systems.md)
+supersedes the open player-damage/controller statements below. Complete native
+ECM/subsystem/sensor parity remains open; this page retains the earlier evidence.
+
 Continuation of [live fire](live-fire.md), 2026-09-14. Scope remains F18.PT
 (F/A-18D) and RAFALE.PT (Rafale C): ten PT-default JT stations, eight distinct
 weapons. Imported compatible alternatives are a separate acceptance backlog;

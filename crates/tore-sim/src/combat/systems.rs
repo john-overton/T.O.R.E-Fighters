@@ -50,6 +50,7 @@ pub fn select(
     counts: &[u8; 45],
     total: i32,
     structure: i32,
+    afterburner_available: bool,
     mut roll: impl FnMut(u16) -> u16,
 ) -> Option<usize> {
     let mut last = 0;
@@ -70,7 +71,7 @@ pub fn select(
             total,
             structure,
             0,
-            true,
+            afterburner_available,
             index,
         ) {
             return Some(index);
@@ -78,7 +79,17 @@ pub fn select(
     }
     for offset in 1..=45 {
         let i = (last + offset) % 45;
-        if !(31..=33).contains(&i) && eligible(table[i], counts[i], total, structure, 0, true, i) {
+        if !(31..=33).contains(&i)
+            && eligible(
+                table[i],
+                counts[i],
+                total,
+                structure,
+                0,
+                afterburner_available,
+                i,
+            )
+        {
             return Some(i);
         }
     }
@@ -100,11 +111,11 @@ mod tests {
         table[36] = 0x12;
         table[37] = 0x11;
         let mut counts = [0; 45];
-        assert_eq!(select(&table, &counts, 40, 100, |_| 0), Some(36));
+        assert_eq!(select(&table, &counts, 40, 100, true, |_| 0), Some(36));
         counts[36] = 1;
-        assert_eq!(select(&table, &counts, 40, 100, |_| 0), Some(37));
+        assert_eq!(select(&table, &counts, 40, 100, true, |_| 0), Some(37));
         counts[37] = 1;
-        assert_eq!(select(&table, &counts, 40, 100, |_| 0), None);
+        assert_eq!(select(&table, &counts, 40, 100, true, |_| 0), None);
         assert!(!eligible(0x91, 0, 99, 100, 2, true, 0));
         assert!(eligible(0x91, 0, 100, 100, 2, true, 0));
         assert!(!eligible(0x11, 0, 100, 100, 0, false, 8));

@@ -203,3 +203,28 @@ from lock. No automatic subsystem failures or combat AI are implied.
 `--replay-combat PATH` replays headlessly with the same aircraft/theater/assets.
 This is separate from pilot-input recording and does not re-simulate flight.
 [Controls, evidence and remaining gaps](baselines/manual-weapons.md).
+
+## Weapons and systems continuation
+
+In the explicit `--live-fire` range, **D** requests a gun-strength player hit,
+**I** spawns one incoming selected source weapon, and **Y** toggles target ECM.
+These development fixtures replace the unavailable I/IR and Y/history actions;
+D is also a development binding. **J** controls own ECM and **R** radar. I does
+not command AI or spend player ammunition. U arm/safe, K selected-group jettison,
+L clear designation, semicolon next weapon, T/Enter designate, Space hold fire,
+backslash target replacement and bracket fault/class controls remain available.
+
+Standard Linux pads use **held Select** as the combat layer: RB fire, LB weapon,
+A designate, B clear, X arm, Y own ECM, L3 radar, R3 jettison. D-pad up replaces
+target, down requests a player hit, left cycles class, right fails the station.
+Select+Start toggles target ECM; Select+Guide spawns the incoming fixture when
+the desktop exposes Guide. These suppress the corresponding base flight/menu
+bindings. Release before switching layers. Unmodified Start pauses. F10/custom
+`view-external` replaces Select's old default exterior action. Exact mappings,
+profile migration/editor behavior, unsupported controllers and haptic limits are
+in [INPUT.md](INPUT.md#manual-combat-layer--2026-09-14).
+
+Weapons page V/R/E reports visual availability, radar and ECM: `+` available/on,
+`-` off, `!` failed. Automatic source-index faults are separate from the manual
+bracket injection. Unknown engine/hydraulic effects remain unimplemented.
+[Recovered contracts, runtime evidence and remaining gates](baselines/weapons-systems.md).

@@ -105,3 +105,8 @@ mapping and failed-station flags, with carried weapon body geometry and bounded
 combat-service tapes. Native sensor/SH/damage parity remains partial; alternative
 catalog loadouts and non-default ordnance are not enabled by this acceptance.
 [Evidence and non-AI gaps](../baselines/manual-weapons.md).
+
+Manual systems follow-up: PT/ECM source data now feeds bounded player damage,
+automatic hardpoint/sensor fault handling and ECM contact probability for F18/
+Rafale. [Evidence](../baselines/weapons-systems.md). Format/lifecycle parity remains
+partial: no decoy lifecycle, complete subsystem dispatch or alternate loadouts.

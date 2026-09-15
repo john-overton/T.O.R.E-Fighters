@@ -353,3 +353,11 @@ Static extraction now emits 22 reviewed regions, including category, amount and
 station-failure spans; a reviewed span is not a complete native translation.
 All 135 catalog JT files remain preserved; live acceptance covers the ten default
 PT stations of the two ported identities, not alternative compatible loadouts.
+
+## Player systems continuation
+
+The static pass now includes 28 reviewed regions, including player capacity,
+weighted subsystem selection, eligibility, ECM lookup/probability and equipment
+damage. Runtime resolves both PT systemDamage tables and ECM once at startup.
+[Exact translated contracts, integration and open native gates](../baselines/weapons-systems.md).
+The 119 located symbol spans are not 119 fully translated routines.

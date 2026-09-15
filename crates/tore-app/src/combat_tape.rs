@@ -42,7 +42,7 @@ impl Recorder {
         );
         writeln!(
             out,
-            "tore-combat 1 {:?} {} {:016x}",
+            "tore-combat 2 {:?} {} {:016x}",
             config.aircraft,
             theater,
             fingerprint(data)
@@ -74,7 +74,13 @@ impl Recorder {
             {
                 write!(self.out, " {v}")?;
             }
-            writeln!(self.out, " {} {}", u8::from(l.radar), u8::from(l.alive))
+            writeln!(
+                self.out,
+                " {} {} {}",
+                u8::from(l.radar),
+                u8::from(l.alive),
+                u8::from(l.jammer)
+            )
         })();
         if let Err(e) = result {
             self.error = Some(e);
@@ -98,6 +104,9 @@ pub fn command_name(c: Command) -> &'static str {
         Command::ReplaceTarget => "target",
         Command::CycleClass => "class",
         Command::FailStation => "fail",
+        Command::DamagePlayer => "damage",
+        Command::Incoming => "incoming",
+        Command::ToggleTargetJammer => "target-jammer",
     }
 }
 pub fn command(s: &str) -> Option<Command> {
@@ -110,13 +119,16 @@ pub fn command(s: &str) -> Option<Command> {
         Command::ReplaceTarget,
         Command::CycleClass,
         Command::FailStation,
+        Command::DamagePlayer,
+        Command::Incoming,
+        Command::ToggleTargetJammer,
     ]
     .into_iter()
     .find(|c| command_name(*c) == s)
 }
 fn parse(line: &str) -> AppResult<(&str, Launcher)> {
     let fields: Vec<_> = line.split_whitespace().collect();
-    if fields.len() != 16 {
+    if fields.len() != 17 {
         return Err("invalid combat record fields".into());
     }
     let mut values = [0.; 13];
@@ -153,6 +165,7 @@ fn parse(line: &str) -> AppResult<(&str, Launcher)> {
             basis,
             speed_fps: values[12],
             radar: boolean(fields[14])?,
+            jammer: boolean(fields[16])?,
             alive: boolean(fields[15])?,
         },
     ))
@@ -168,7 +181,7 @@ pub fn replay(
         std::io::BufReader::new(std::fs::File::open(path)?),
         config.clone(),
         &format!(
-            "tore-combat 1 {:?} {} {:016x}",
+            "tore-combat 2 {:?} {} {:016x}",
             config.aircraft,
             theater,
             fingerprint(data)
@@ -196,8 +209,17 @@ fn replay_reader(
                 return Err("empty combat replay".into());
             }
             println!(
-                "combat replay: ticks={ticks} shots={} hits={} kills={} ammo={:?}",
-                s.shots, s.hits, s.kills, s.ammo
+                "combat replay: ticks={ticks} shots={} hits={} kills={} ammo={:?} player-hp={} damage={} subsystem={:?} visual-failed={} radar-failed={} ecm-failed={}",
+                s.shots,
+                s.hits,
+                s.kills,
+                s.ammo,
+                s.player_hp,
+                s.player_damage,
+                s.last_subsystem,
+                s.visual_failed,
+                s.radar_failed,
+                s.ecm_failed
             );
             return Ok(s);
         }
@@ -240,9 +262,10 @@ mod tests {
     use super::*;
     #[test]
     fn bounded_records_reject_nonfinite_axes_and_invalid_basis() {
-        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1").is_ok());
-        assert!(parse("tick NaN 1000 0 1 0 0 0 1 0 0 0 1 300 1 1").is_err());
-        assert!(parse("tick 0 1000 0 0 0 0 0 1 0 0 0 1 300 1 1").is_err());
-        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 2 1").is_err());
+        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 0").is_ok());
+        assert!(parse("tick NaN 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 0").is_err());
+        assert!(parse("tick 0 1000 0 0 0 0 0 1 0 0 0 1 300 1 1 0").is_err());
+        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 2 1 0").is_err());
+        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 2").is_err());
     }
 }

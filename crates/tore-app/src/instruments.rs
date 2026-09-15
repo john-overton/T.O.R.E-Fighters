@@ -121,6 +121,7 @@ impl Layout {
 #[derive(Default)]
 pub struct CombatReadout {
     pub weapon: String,
+    pub systems: String,
     pub guided: bool,
     pub readiness: &'static str,
     pub damage: Option<String>,
@@ -407,7 +408,7 @@ impl Instruments {
                     if let Some(damage) = &c.damage {
                         text(&mut r, damage, 20, 94);
                     }
-                    text(&mut r, "CM NOT ACTIVE", 20, 110);
+                    text(&mut r, &c.systems, 20, 110);
                 } else {
                     text(&mut r, "WEAPONS SAFE", 20, 35);
                 }
@@ -486,6 +487,7 @@ impl Instruments {
             _ => {}
         }
         if id == 9
+            && s.engine
             && s.radar
             && let Some(c) = &self.combat
         {

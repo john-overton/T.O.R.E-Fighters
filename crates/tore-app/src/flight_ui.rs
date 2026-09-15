@@ -391,6 +391,8 @@ impl FlightUi {
                 self.help = true;
                 Command::None
             }
+            "d" => Command::Combat(tore_sim::combat::live::Command::DamagePlayer),
+            "y" => Command::Combat(tore_sim::combat::live::Command::ToggleTargetJammer),
             "u" => Command::Combat(tore_sim::combat::live::Command::ToggleArm),
             "k" => Command::Combat(tore_sim::combat::live::Command::Jettison),
             "l" => Command::Combat(tore_sim::combat::live::Command::ClearDesignation),
@@ -402,9 +404,9 @@ impl FlightUi {
             "\\" => Command::RangeReset,
             "w" => self.unavailable("Next waypoint"),
             "n" => self.unavailable("Navigation / weapons mode"),
-            "i" => self.unavailable("IR sensor"),
+            "i" => Command::Combat(tore_sim::combat::live::Command::Incoming),
             "m" => self.unavailable("HARM seeker"),
-            "y" => self.unavailable("Radar history"),
+
             "Enter" | "'" => Command::Target,
             "Space" => Command::None,
             "v" => self.unavailable("Store Other View camera"),
@@ -540,9 +542,12 @@ impl FlightUi {
                     "Ctrl-Shift-1..4: stock instrument buttons (T.O.R.E)".into(),
                     "T/Shift-T: target | Enter/apostrophe: designate | Space: fire".into(),
                     "A: autopilot | W/Shift-W: waypoint | N: nav/weapons".into(),
-                    "I: IR | M: HARM | Y: history | V: store Other View".into(),
-                    "Shift-J/K: jettison | Alt-1..9,B,C,T,H,V,E,W,R,P,D: wingman".into(),
-                    "Unported systems report not implemented; no fake targets.".into(),
+                    "Range: I incoming | D player hit | Y target ECM | J own ECM".into(),
+                    "U arm/safe | K jettison | L clear | ; weapon | [ fault | ] class".into(),
+                    "Pad: hold Select, RB fire / LB weapon / A target / B clear".into(),
+                    "Select+X arm / Y ECM / L3 radar / R3 jettison".into(),
+                    "Select+Dpad: up target / down hit / left class / right fault".into(),
+                    "Select+Start target ECM / Guide incoming; F10 external".into(),
                     "SOURCE MENU SHORTCUTS:".into(),
                 ];
                 fn add(tree: &[MenuNode], lines: &mut Vec<String>) {

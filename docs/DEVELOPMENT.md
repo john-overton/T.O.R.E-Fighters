@@ -382,3 +382,10 @@ runs. The application-data override is optional and must point to an imported
 profile or permit import from local media. Runtime `--record-combat NEW_PATH`,
 headless `--replay-combat PATH`, and `--combat-command NAME` capture setup are
 specified in [manual weapons acceptance](baselines/manual-weapons.md).
+
+The [systems continuation](baselines/weapons-systems.md) adds incoming/player-damage
+and ECM checks to both combat smokes, version-2 combat tapes, `--jammer-on`,
+and `--combat-command damage|incoming|target-jammer`. Probe logs include haptic
+event/mixer counts without playing historical pulses on hardware. Use a new
+`TORE_COMBAT_EVIDENCE` directory for ten serialized slot tapes. Current native
+research has 28 reviewed regions; full subsystem/ECM parity remains open.
