@@ -28,6 +28,16 @@ pub struct World {
 }
 impl World {
     pub fn for_theater(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> AppResult<Self> {
+        Self::for_mission(resources, code, None)
+    }
+
+    /// `condition` selects one of the six recovered weather choices; without it
+    /// the mission's own `layer` line and time are used unchanged.
+    pub fn for_mission(
+        resources: &BTreeMap<String, Vec<u8>>,
+        code: &str,
+        condition: Option<usize>,
+    ) -> AppResult<Self> {
         let required = |n: &str| {
             resources
                 .get(n)
@@ -45,7 +55,20 @@ impl World {
                 catalog.push((n.trim_end_matches(".T2").into(), t.name));
             }
         }
-        let module = tore_formats::weather::Module::parse(required(&environment.layer)?)?;
+        let (layer, launch) = match condition {
+            Some(index) => {
+                let choice = tore_sim::environment::CONDITIONS[index];
+                (
+                    tore_sim::environment::layer_resource(index, &environment.map)?,
+                    Some([
+                        choice.seconds_of_day / 3600,
+                        choice.seconds_of_day / 60 % 60,
+                    ]),
+                )
+            }
+            None => (environment.layer.clone(), environment.time),
+        };
+        let module = tore_formats::weather::Module::parse(required(&layer)?)?;
         let [hour, minute] = match std::env::var("TORE_WEATHER_TIME") {
             Ok(text) => {
                 let (h, m) = text
@@ -53,14 +76,14 @@ impl World {
                     .ok_or("TORE_WEATHER_TIME needs HH:MM")?;
                 [h.parse::<i32>()?, m.parse::<i32>()?]
             }
-            Err(_) => environment.time.unwrap_or([12, 0]),
+            Err(_) => launch.unwrap_or([12, 0]),
         };
         let weather =
             tore_sim::environment::Environment::new(tore_sim::environment::Configuration::new(
                 module,
                 hour,
                 minute,
-                environment.layer_parameter.unwrap_or(0),
+                condition.map_or_else(|| environment.layer_parameter.unwrap_or(0), |i| i as i32),
                 environment.wind,
             )?);
         if weather.sample(0.).is_none() {

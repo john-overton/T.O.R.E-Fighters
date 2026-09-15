@@ -174,6 +174,40 @@ so the night value of 125 in selector 2 can never leave that path above 100.
 Whether another consumer reads the byte uncapped is UNRESOLVED, as are the
 meanings of selectors 1 through 4 and of flag bits 1, 2, 3, 5 and 7.
 
+## The mission weather choices are a recovered table
+
+The source mission writer at `0x495fa0` emits `map %s`, `layer %s %d`,
+`clouds %d` and `wind %d %d`, which settles three previously unverified fields:
+
+- the `layer` line's second value is the **weather choice index** itself;
+- `clouds` is a **cloud deck altitude in feet**, not a count — `0x42a8f9` gives
+  choices 0, 3 and 4 a fifty percent chance of a deck between 7,000 and 20,000
+  feet, and zero otherwise, which is why `UKR.MM` reads `clouds 0`;
+- `wind` is whole degrees and feet per second, as `0x495ff2` divides the stored
+  binary angle back by 182 to print it.
+
+`0x42a7ea` and `0x42a8cc` are parallel tables indexed by that choice:
+
+| Choice | Module | Launch time | Scattered deck |
+| --- | --- | --- | --- |
+| 0 | `day2` | 12:00 | possible |
+| 1 | `cloud1` | 12:00 | no |
+| 2 | `fog1` | 12:00 | no |
+| 3 | `day2` | 07:01 | possible |
+| 4 | `day2` | 19:01 | possible |
+| 5 | `day2` | 00:00 | no |
+
+So cloud and fog are altitude-banded modules while dawn, noon, dusk and night
+are the same day module entered at different times. `0x42a80c` then appends a
+per-theater letter when the map name begins with B, E, F, T or V, after skipping
+a `~` or `$` campaign prefix; every other theater uses the unsuffixed module.
+That is exactly why the archive ships six variants of each.
+
+The creator offers **seven** labels — dawn, clear, cloudy, overcast, foggy,
+sunset and night — against these six choices, and no table joining the two lists
+was found. Matching by label leaves overcast with no source module; treat that
+mapping as an inference and overcast as unavailable.
+
 ## Physical turbulence exists beyond hard-stick maneuvering
 
 `_FMFlight` calls `_FMTurbulence` at `0x47c7b6`. The located routine spans

@@ -401,6 +401,7 @@ cargo run --locked -p tore-app -- --validate-creator
 cargo run --locked -p tore-app -- --validate-weather
 TORE_WEATHER_TIME=19:06 cargo run --locked -p tore-app -- --capture-terrain .local/weather/dusk.ppm
 TORE_VAPOR_PROBE=1 cargo run --locked -p tore-app -- --free-flight --maneuver pull --flight-probe-ticks 400 --smoke-test
+cargo run --locked -p tore-app -- --weather-condition 1 --capture-terrain .local/weather/cloudy.ppm
 cargo run --locked -p tore-app -- --quick-mission --snapshot-state ordnance --snapshot .local/ordnance.ppm
 cargo run --locked -p tore-app -- --quick-mission --snapshot-state ordnance --smoke-test
 ```

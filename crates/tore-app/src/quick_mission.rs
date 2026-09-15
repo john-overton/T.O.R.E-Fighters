@@ -57,6 +57,22 @@ pub struct QuickMission {
     pub help: bool,
     pub shift: bool,
 }
+/// Maps a creator condition onto the six recovered source weather choices.
+/// The two lists are both recovered but the engine holds no table joining
+/// them, so this match is by label: dawn, clear, cloudy, foggy, sunset and
+/// night each name one choice, and overcast names none.
+pub fn condition(value: usize) -> Option<usize> {
+    Some(match value {
+        0 => 3,
+        1 => 0,
+        2 => 1,
+        4 => 2,
+        5 => 4,
+        6 => 5,
+        _ => return None,
+    })
+}
+
 impl QuickMission {
     pub fn new(id: AircraftId, options: Options, data: &BTreeMap<String, Vec<u8>>) -> Self {
         let mut catalog: Vec<(String, String)> = data
@@ -158,8 +174,8 @@ impl QuickMission {
                 "Ground targets and defenses are not available yet. Select none to fly.".into(),
             );
         }
-        if v[15] != 1 {
-            return Some("Only clear daytime conditions are available for flight yet.".into());
+        if condition(v[15]).is_none() {
+            return Some("Overcast has no recovered source weather module yet.".into());
         }
         None
     }
@@ -655,8 +671,13 @@ mod tests {
         q.apply(6, 2);
         assert!(q.unsupported().unwrap().contains("setup only"));
         q.apply(6, 0);
-        q.apply(15, 6);
-        assert!(q.unsupported().unwrap().contains("clear"));
+        // Six of the seven conditions now map onto a recovered source module.
+        for value in [0, 1, 2, 4, 5, 6] {
+            q.apply(15, value);
+            assert!(q.unsupported().is_none(), "condition {value}");
+        }
+        q.apply(15, 3);
+        assert!(q.unsupported().unwrap().contains("Overcast"));
         q.apply(15, 1);
         q.apply(30, 1);
         assert!(q.unsupported().unwrap().contains("Ground"));

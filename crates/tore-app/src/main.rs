@@ -172,6 +172,23 @@ fn step_turbulence(
 }
 
 impl App {
+    /// Rebuilds the world under one recovered weather condition. The renderer
+    /// owns per-world GPU resources, so it is rebuilt with it.
+    fn set_condition(&mut self, index: usize) -> AppResult<()> {
+        let code = self
+            .world
+            .environment
+            .map
+            .trim_end_matches(".T2")
+            .to_string();
+        self.world = terrain::World::for_mission(&self.theater_resources, &code, Some(index))?;
+        if let Some(renderer) = &mut self.renderer {
+            renderer.set_world(&self.world);
+            renderer.prepare_aircraft(&self.hornet);
+        }
+        Ok(())
+    }
+
     /// A restart or aircraft change teleports the aircraft, so the position
     /// history must be reseeded rather than drawn across the jump.
     fn reset_vapor(&mut self) {
@@ -689,6 +706,15 @@ impl App {
                     Ok(c) => {
                         self.combat = c;
                         self.mission = Some((altitude, fuel));
+                        // Rebuild the world on the mission's own weather choice
+                        // before entering flight, so palette, clock and wind
+                        // all start from it.
+                        if let Some(index) = quick_mission::condition(self.quick.draft.values[15])
+                            && let Err(error) = self.set_condition(index)
+                        {
+                            self.quick.ordnance.as_mut().unwrap().message = Some(error.to_string());
+                            return;
+                        }
                         self.action(event_loop, Action::FreeFlight);
                     }
                     Err(e) => self.quick.ordnance.as_mut().unwrap().message = Some(e.to_string()),
@@ -1611,6 +1637,7 @@ fn main() -> AppResult<()> {
     let mut panel_snapshot = None;
     let mut validate_creator = false;
     let mut validate_weather = false;
+    let mut weather_condition: Option<usize> = None;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -1891,6 +1918,16 @@ fn main() -> AppResult<()> {
             "--import-only" => import_only = true,
             "--validate-creator" => validate_creator = true,
             "--validate-weather" => validate_weather = true,
+            "--weather-condition" => {
+                let value: usize = args
+                    .next()
+                    .ok_or("--weather-condition needs 0..5")?
+                    .parse()?;
+                if value >= tore_sim::environment::CONDITIONS.len() {
+                    return Err("--weather-condition needs one of the six source choices".into());
+                }
+                weather_condition = Some(value);
+            }
             "--help" | "-h" => {
                 println!(
                     "Creator: --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks both imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; I launches one incoming selected weapon; Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-2 combat-service inputs; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight. Guidance/contact/damage coupling is a development approximation, not native parity."
@@ -2135,7 +2172,8 @@ fn main() -> AppResult<()> {
     if snapshot.is_some() && background.is_none() {
         background = Some("CHOOSEV".into());
     }
-    let mut world = terrain::World::for_theater(&assets.theater_resources, &theater_code)?;
+    let mut world =
+        terrain::World::for_mission(&assets.theater_resources, &theater_code, weather_condition)?;
     if validate_creator {
         return ordnance::validate_sources(&assets.theater_resources, &world);
     }

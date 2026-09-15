@@ -52,7 +52,12 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   amplitudes and the native draw order, and drive haptics from its real output.
 - [ ] W5 remainder: nearby-aircraft wake strength, the daytime ground-query
   flag, wind audio and the air-data integration.
-- [ ] W6: connect creator/restart/replay and complete theater/platform acceptance.
+- [x] W6 creator: recover the six-entry source weather table, the per-theater
+  module suffix, and the meaning of the `layer` parameter, `clouds` altitude and
+  `wind` line. Six of the seven creator conditions now launch; only overcast,
+  which matches no source choice, stays gated.
+- [ ] W6 remainder: restart and replay identity, the remaining theaters and
+  platform acceptance.
 
 The follow-up adds static research tooling and evidence; runtime weather remains
 unchanged and native environment parity stays open. Existing manual systems

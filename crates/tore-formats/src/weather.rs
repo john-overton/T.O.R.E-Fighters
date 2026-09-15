@@ -433,11 +433,6 @@ pub fn expand(base: &[[u8; 3]; 256], layer: &Layer) -> [[u8; 3]; 256] {
     palette
 }
 
-/// Temporary diagnostic accessor.
-pub fn debug_section(data: &[u8]) -> Result<(&[u8], usize)> {
-    section(data)
-}
-
 /// Locates the single CODE section of a PL module and its RVA base.
 pub(crate) fn section(data: &[u8]) -> Result<(&[u8], usize)> {
     let pe = u32_at(data, 60)?;

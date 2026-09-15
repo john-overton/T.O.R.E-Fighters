@@ -11,6 +11,75 @@ pub const SECONDS_PER_DAY: i64 = 86_400;
 /// `_WRWeatherEffects` selector 0 drives the visibility distance at 0x48d98d.
 pub const VISIBILITY: usize = 0;
 
+/// One recovered weather choice. `0x4f0670` and `0x4f0688` are parallel tables
+/// indexed by the mission's `layer` parameter, which `0x495fbf` writes out as
+/// the second value on the `layer` line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Condition {
+    pub layer: &'static str,
+    pub seconds_of_day: i32,
+    /// 0x42a8df: only these three picks can also carry a scattered cloud deck,
+    /// and then only half the time, between 7,000 and 20,000 feet.
+    pub scattered_clouds: bool,
+}
+
+/// The six choices the source weather table offers, in its own order.
+pub const CONDITIONS: [Condition; 6] = [
+    Condition {
+        layer: "DAY2",
+        seconds_of_day: 43_200,
+        scattered_clouds: true,
+    },
+    Condition {
+        layer: "CLOUD1",
+        seconds_of_day: 43_200,
+        scattered_clouds: false,
+    },
+    Condition {
+        layer: "FOG1",
+        seconds_of_day: 43_200,
+        scattered_clouds: false,
+    },
+    Condition {
+        layer: "DAY2",
+        seconds_of_day: 25_260,
+        scattered_clouds: true,
+    },
+    Condition {
+        layer: "DAY2",
+        seconds_of_day: 68_460,
+        scattered_clouds: true,
+    },
+    Condition {
+        layer: "DAY2",
+        seconds_of_day: 0,
+        scattered_clouds: false,
+    },
+];
+
+/// 0x42a80c: a theater whose map name begins with one of these letters uses the
+/// matching per-theater module variant; every other theater uses the plain one.
+const VARIANTS: [char; 5] = ['B', 'E', 'F', 'T', 'V'];
+
+/// The `.LAY` resource one condition selects for one theater map name.
+pub fn layer_resource(condition: usize, map: &str) -> Result<String> {
+    let choice = CONDITIONS
+        .get(condition)
+        .ok_or_else(|| std::io::Error::other("weather condition outside the source table"))?;
+    // The native skip covers generated campaign prefixes.
+    let letter = map
+        .chars()
+        .find(|c| *c != '~' && *c != '$')
+        .ok_or_else(|| std::io::Error::other("theater map name is empty"))?
+        .to_ascii_uppercase();
+    let suffix = if VARIANTS.contains(&letter) {
+        letter.to_string()
+    } else {
+        String::new()
+    };
+    Ok(format!("{}{suffix}.LAY", choice.layer))
+}
+
 /// Validated launch environment. Construction resolves every source field once.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Configuration {
@@ -248,6 +317,24 @@ mod tests {
     fn configuration(records: usize) -> Configuration {
         let module = Module::parse(&tore_formats::weather::synthetic_module(records)).unwrap();
         Configuration::new(module, 0, 0, 0, None).unwrap()
+    }
+
+    #[test]
+    fn conditions_select_the_recovered_module_and_time() {
+        assert_eq!(layer_resource(0, "UKR.T2").unwrap(), "DAY2.LAY");
+        assert_eq!(layer_resource(1, "UKR.T2").unwrap(), "CLOUD1.LAY");
+        assert_eq!(layer_resource(2, "UKR.T2").unwrap(), "FOG1.LAY");
+        // Theater variants, including a generated campaign prefix.
+        assert_eq!(layer_resource(0, "EGY.T2").unwrap(), "DAY2E.LAY");
+        assert_eq!(layer_resource(0, "~VIET6.T2").unwrap(), "DAY2V.LAY");
+        assert_eq!(layer_resource(5, "TAI.T2").unwrap(), "DAY2T.LAY");
+        assert!(layer_resource(6, "UKR.T2").is_err());
+        assert!(layer_resource(0, "").is_err());
+        // Dawn, sunset and night are the day module at different times.
+        assert_eq!(CONDITIONS[3].seconds_of_day, 25_260);
+        assert_eq!(CONDITIONS[4].seconds_of_day, 68_460);
+        assert_eq!(CONDITIONS[5].seconds_of_day, 0);
+        assert!(!CONDITIONS[5].scattered_clouds);
     }
 
     #[test]

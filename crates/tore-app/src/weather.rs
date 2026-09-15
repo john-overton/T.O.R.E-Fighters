@@ -50,12 +50,6 @@ pub fn validate_sources(
         return Err("no weather modules were imported".into());
     }
 
-    for name in ["F18.SH", "RAF.SH"] {
-        if let Some(bytes) = resources.get(name) {
-            let (code, _) = tore_formats::module::code(bytes)?;
-            println!("PROBE {name} head: {:02x?}", &code[..0x40.min(code.len())]);
-        }
-    }
     let layer = &environment.layer;
     let bytes = resources
         .get(layer)
@@ -141,6 +135,40 @@ pub fn validate_sources(
         return Err("no minute of the day fell inside a recovered transition window".into());
     }
     println!("  {interpolated} of 1440 minutes are inside a recovered transition");
+    // Every recovered condition must resolve a module for this theater and
+    // band correctly with altitude.
+    for (index, choice) in tore_sim::environment::CONDITIONS.iter().enumerate() {
+        let name = tore_sim::environment::layer_resource(index, &environment.map)?;
+        let bytes = resources
+            .get(&name)
+            .ok_or_else(|| format!("condition {index} needs {name}, which is not imported"))?;
+        let probe = Environment::new(Configuration::new(
+            Module::parse(bytes)?,
+            choice.seconds_of_day / 3600,
+            choice.seconds_of_day / 60 % 60,
+            index as i32,
+            environment.wind,
+        )?);
+        let mut bands = Vec::new();
+        for altitude in [500., 6_000., 30_000.] {
+            let layer = probe
+                .sample(altitude)
+                .ok_or_else(|| format!("{name} covers no record at {altitude} ft"))?;
+            let (density, _) = layer.visibility(20_000.);
+            bands.push(format!("{:.0}ft {}/256", altitude, density));
+        }
+        println!(
+            "  condition {index}: {name} at {:02}:{:02}, haze at 20,000 ft: {}{}",
+            choice.seconds_of_day / 3600,
+            choice.seconds_of_day / 60 % 60,
+            bands.join(", "),
+            if choice.scattered_clouds {
+                "; may carry a scattered deck"
+            } else {
+                ""
+            }
+        );
+    }
     println!(
         "Weather sources validated: {modules} modules; clock, record selection and palette \
          expansion accepted. Celestial and cloud rendering remain open."
