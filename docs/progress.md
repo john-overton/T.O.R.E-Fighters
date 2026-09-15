@@ -14,6 +14,13 @@ Updated 2026-09-14. This is the actionable checklist for the [roadmap](ROADMAP.m
   ArmPlane/loading code references and existing weapons integration. Record the
   [ordnance plan](ordnance-plan.md) and [evidence](baselines/ordnance-research.md).
 - [ ] Recover complete active FA option/default/filter/geometry contracts.
+- [x] Recover 60 active option dispatch entries, 16 theater target lists and
+  29 native briefing rectangles; decode static controls in 26 DLG resources.
+  Defaults/dynamic filters and final text/art hit geometry remain open.
+  [Source specification](formats/quick-mission.md), [validation](baselines/menu-options-geometry.md).
+- [x] Add repeatable `--native-menus` extraction with hash-gated regions/string
+  references; validate QM_MENU/ARMPLANE trees through the shared bounded reader.
+  [First implementation evidence](baselines/menu-contract-pass.md).
 - [ ] Add bounded imports, typed setup and explicit capability validation.
 - [ ] Build all recovered controls and faithful downstream placeholders.
 - [ ] Build ordnance catalog/station cards, category/page controls, fuel/weight,

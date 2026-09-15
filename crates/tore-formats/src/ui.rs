@@ -1,4 +1,5 @@
 use crate::{Result, invalid, slice, u16_at, u32_at};
+pub mod dialog;
 #[derive(Clone, Debug)]
 pub struct Button {
     pub x: i32,
@@ -107,6 +108,12 @@ pub struct MenuNode {
     pub children: Vec<MenuNode>,
 }
 pub fn flight_menu(data: &[u8]) -> Result<Vec<MenuNode>> {
+    menu_tree(data)
+}
+
+/// Shared inert tree grammar reviewed for FMENUD, QM_MENU and ARMPLANE.
+/// Labels and hierarchy are data; visibility/check-state callbacks are not run.
+pub fn menu_tree(data: &[u8]) -> Result<Vec<MenuNode>> {
     let (code, base) = crate::module::code(data)?;
     fn nodes(
         code: &[u8],
@@ -201,5 +208,42 @@ mod menu_tests {
         assert!(flight_menu(&crate::module::fixture(&c)).is_err());
         c[26..30].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(flight_menu(&crate::module::fixture(&c)).is_err());
+    }
+
+    #[test]
+    fn anonymous_containers_preserve_order_and_reject_shared_children() {
+        let mut c = vec![0; 140];
+        let pointer = |offset: usize| (4096 + offset as u32).to_le_bytes();
+        c[4..8].copy_from_slice(&pointer(32));
+        c[24..29].copy_from_slice(b"Root\0");
+        c[36..40].copy_from_slice(&pointer(64));
+        c[64..68].copy_from_slice(&pointer(100));
+        c[82] = 0x1e;
+        c[83..89].copy_from_slice(b"First\0");
+        c[118] = 0x1e;
+        c[119..126].copy_from_slice(b"Second\0");
+        let tree = menu_tree(&crate::module::fixture(&c)).unwrap();
+        assert_eq!(tree[0].children.len(), 2);
+        assert_eq!(tree[0].children[0].label, "First");
+        assert_eq!(tree[0].children[1].label, "Second");
+        c[104..108].copy_from_slice(&pointer(64));
+        assert!(menu_tree(&crate::module::fixture(&c)).is_err());
+    }
+
+    #[test]
+    fn invalid_markers_encoding_and_unterminated_labels_fail() {
+        let mut c = vec![0; 256];
+        c[4..8].copy_from_slice(&4128u32.to_le_bytes());
+        c[24..29].copy_from_slice(b"Root\0");
+        c[50] = 0x1e;
+        c[51..56].copy_from_slice(b"Item\0");
+        assert!(menu_tree(&crate::module::fixture(&c)).is_ok());
+        c[50] = 0x1f;
+        assert!(menu_tree(&crate::module::fixture(&c)).is_err());
+        c[50] = 0x1e;
+        c[51] = 0x80;
+        assert!(menu_tree(&crate::module::fixture(&c)).is_err());
+        c[51..212].fill(b'a');
+        assert!(menu_tree(&crate::module::fixture(&c)).is_err());
     }
 }

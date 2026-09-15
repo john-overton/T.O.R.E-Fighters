@@ -213,7 +213,7 @@ def field_addresses(repo, base, layouts=('OBJECT', 'NPC', 'PLANE')):
 
 
 def extract(source, output, *, overwrite=False, preview=False, domain='flight'):
-    if domain not in ('flight', 'weapons'):
+    if domain not in ('flight', 'weapons', 'menus'):
         raise ValueError('unknown native research domain')
     repo = Path(__file__).resolve().parents[1]
     source, output = source.resolve(), output.resolve()
@@ -233,6 +233,9 @@ def extract(source, output, *, overwrite=False, preview=False, domain='flight'):
         ('fm', 'plane', 'envelope', 'stickinput', 'gtoturn', 'matchf24', 'turntoward', 'ground', 'fuel', 'cobv', 'cobrv', 'cothrust', 'codrag', 'copull', 'cospeed', 'timeupdate', 'instaltimer', 'installtimer', 'stall', 'landing'))]
     if domain == 'weapons':
         from native_weapons import KEYWORDS
+        selected = [s for s in names if executable(s['va']) and any(t in s['name'].lower() for t in KEYWORDS)]
+    if domain == 'menus':
+        from native_menus import KEYWORDS
         selected = [s for s in names if executable(s['va']) and any(t in s['name'].lower() for t in KEYWORDS)]
     report = {'schema_version': 1, 'method': 'static disassembly only; no retail execution',
               'exe_sha256': hashlib.sha256(exe).hexdigest(), 'sms_sha256': hashlib.sha256(sms).hexdigest(),
@@ -275,6 +278,23 @@ def extract(source, output, *, overwrite=False, preview=False, domain='flight'):
     if report['reviewed_fa_build'] and domain == 'weapons':
         from native_weapons import artifacts as weapon_artifacts
         artifacts.update(weapon_artifacts(exe, rows, instructions, repo))
+    if report['reviewed_fa_build'] and domain == 'menus':
+        from native_menus import artifacts as menu_artifacts
+        from native_menu_tables import ALIGNED_REGIONS, read_va
+        artifacts.update(menu_artifacts(exe, rows, instructions))
+        aligned = []
+        for name, start, end in ALIGNED_REGIONS:
+            code_bytes = read_va(exe, rows, start, end-start, executable=True)
+            output_text = subprocess.run(
+                [objdump, '-d', '--x86-asm-syntax=intel',
+                 f'--start-address={start:#x}', f'--stop-address={end:#x}', str(files['FA.EXE'])],
+                capture_output=True, text=True, check=True, timeout=120).stdout
+            if len(output_text) > 1024*1024 or not re.search(rf'\b{start:x}:', output_text):
+                raise ValueError('invalid aligned menu disassembly')
+            artifacts[f'aligned/{start:08x}-{name}.txt'] = output_text
+            aligned.append({'name': name, 'va': start, 'end': end,
+                            'sha256': hashlib.sha256(code_bytes).hexdigest()})
+        artifacts['aligned-regions.json'] = json.dumps(aligned, indent=2)+'\n'
     if report['reviewed_fa_build'] and domain == 'flight':
         cpt = next(s['va'] for s in names if s['name']=='_cpt')
         fields = field_addresses(repo,cpt)

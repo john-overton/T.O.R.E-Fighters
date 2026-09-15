@@ -250,3 +250,38 @@ coverage. `dependencies.filtered` identifies a closure reduced by `--include`;
 `native_parity` is always false. Unknown callback/art/module edges remain explicit.
 PTS modules are inert and their absent icon candidates are unresolved; required
 reviewed shape/texture/audio dependencies still fail with a source reason chain.
+
+## Static creator and ordnance research
+
+```sh
+python3 tools/extract_assets.py --native-menus --out .local/menu-contract-pass
+python3 tools/extract_assets.py --include 'QM_MENU.MNU' --include 'ARMPLANE.MNU' --include 'QUIKMISS.DLG' --include 'LOADORD.DLG' --exclude-archive 'disc1/LHX/*' --exclude-archive 'disc1/WB/*' --out .local/menu-resources
+cargo run --locked -p tore-formats --example menu_tree -- .local/menu-resources/FA_2.LIB/QM_MENU.MNU .local/menu-resources/FA_2.LIB/ARMPLANE.MNU
+```
+
+`--native-menus` is exclusive with other native domains and archive profiles.
+It reuses the bounded EXE/SMS research pass and emits named symbol spans, six
+reviewed subregions, direct edges and candidate string references. Fixed-address
+artifacts require both reviewed hashes. Candidate strings are not complete active
+option tables; disassembly may include data interpreted as instructions, and
+symbol boundaries may include unnamed routines. Imported code is never run.
+
+`menu_tree` reads extracted MNU files through `tore-formats::ui::menu_tree`, the
+same bounded grammar used by flight menus. It prints source hierarchy/shortcuts;
+it does not evaluate native visibility, check-state or action callbacks. Keep
+output and source resources ignored. [First-pass evidence](baselines/menu-contract-pass.md).
+
+The menu pass also emits `creator-options.json`: all 60 selector dispatch entries,
+16 theater-specific target lists and 29 briefing geometry rows. Dynamic aircraft
+producers are identified rather than replaced with guessed lists. Three aligned
+consumer disassemblies are emitted separately from the full linear disassembly.
+
+Inspect extracted static dialog geometry with:
+
+```sh
+cargo run --locked -p tore-formats --example dialog_geometry -- .local/menu-resources/FA_2.LIB/QUIKMISS.DLG .local/menu-resources/FA_2.LIB/LOADORD.DLG
+```
+
+This resolves imported draw references as inert data. Printed coordinates are
+static local parameters; native runtime placement/hit testing remains separate.
+[Active options and geometry](formats/quick-mission.md).

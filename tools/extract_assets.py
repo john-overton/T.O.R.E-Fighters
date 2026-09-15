@@ -27,6 +27,7 @@ def main():
     parser.add_argument('--validate-flight', action='store_true', help='After aircraft extraction, run the shared headless hybrid-flight acceptance suite')
     parser.add_argument('--native-flight', action='store_true', help='Static FA.EXE/FA.SMS research instead of archive extraction; no retail code execution')
     parser.add_argument('--native-weapons', action='store_true', help='Static FA weapon, sensor, loading and effect code research; no retail execution')
+    parser.add_argument('--native-menus', action='store_true', help='Static FA creator and ordnance screen research; no retail execution')
     parser.add_argument('--music', action='store_true', help='Original PCM music and bounded FA situation scripts; no MIDI/synth')
     parser.add_argument('--wav-previews', action='store_true', help='With --music, also wrap recorded tracks as lossless local WAV previews')
     parser.add_argument('--weapons', action='store_true', help='All projectile, sensor, ECM and tank definitions plus reviewed shared combat dependencies')
@@ -40,17 +41,17 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.max_entry_mib <= 1024:
         parser.error('--max-entry-mib must be 1..1024')
-    if args.validate_flight and (not args.aircraft or args.native_flight or args.native_weapons or args.list or args.dry_run or args.include):
+    if args.validate_flight and (not args.aircraft or args.native_flight or args.native_weapons or args.native_menus or args.list or args.dry_run or args.include):
         parser.error('--validate-flight requires --aircraft and full extraction (no preview/include/native-flight)')
-    if args.native_flight and args.native_weapons:
+    if sum((args.native_flight, args.native_weapons, args.native_menus)) > 1:
         parser.error('select one native research domain')
-    if args.native_flight or args.native_weapons:
+    if args.native_flight or args.native_weapons or args.native_menus:
         if args.aircraft or args.weapons or args.music or args.wav_previews or args.theater or args.include or args.exclude_archive:
             parser.error('native research is a separate executable-research pass; omit archive selection flags')
         from extract_native_flight import extract
         try:
             extract(args.source, args.out, overwrite=args.overwrite, preview=args.list or args.dry_run,
-                    domain='weapons' if args.native_weapons else 'flight')
+                    domain='menus' if args.native_menus else 'weapons' if args.native_weapons else 'flight')
         except (ValueError, OSError, subprocess.SubprocessError) as error:
             parser.exit(1, f'{error}\n')
         return 0

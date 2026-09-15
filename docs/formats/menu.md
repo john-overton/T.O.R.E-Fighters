@@ -144,3 +144,32 @@ recovered FMENUD callbacks. The bounded reader and imported source tree are
 unchanged. Other source roots and the keyboard-help reference remain available.
 Normal-session music/effects and flight display/instrument preferences persist;
 the earlier session-only behavior is superseded. See [input settings](../INPUT.md).
+
+## Creator and ordnance menu-tree recovery — 2026-09-14
+
+The existing bounded FMENUD grammar also reads QM_MENU.MNU and ARMPLANE.MNU.
+It is exposed as `ui::menu_tree`; `flight_menu` remains a compatible wrapper.
+The `menu_tree` example inspects extracted files without loading any native code.
+
+QM_MENU recovers Aircraft → Fly all and Era → four source year ranges. The
+current app's aircraft-selector shortcut is still authored. ARMPLANE recovers
+Weapons → Unload All / Cheat (load anything anywhere), Airbase → Next Aircraft
+(`]`) / Previous Aircraft (`[`), and Campaign → Replay This Mission / Exit Campaign.
+Both include source exit actions. The screenshot's missing Campaign root means
+mode-dependent visibility must be recovered before presenting the full resource
+tree as the quick-mission screen. Native callbacks remain unimplemented.
+
+`--native-menus` now makes creator-filter and ordnance-loading research repeatable,
+with both executable/symbol hashes gating fixed addresses. String references
+remain research candidates rather than imported active options. Full DLG record
+recovery and screen implementation remain open. [Evidence](../baselines/menu-contract-pass.md).
+
+### Active option tables and static DLG geometry
+
+The next pass recovers the live selector dispatch, including theater-dependent
+lists, and establishes QUICK14 as the shared runtime-populated selector. A bounded
+import/relocation reader now inspects creator/ordnance DLG controls, while the
+native text compositor supplies separate briefing rectangles. This supersedes
+using stale QUICKB strings as active choices. See [the source contract](quick-mission.md)
+and [validation](../baselines/menu-options-geometry.md). Screen rendering and
+runtime inline hit regions remain unimplemented by this research step.

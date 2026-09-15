@@ -45,6 +45,13 @@ Preserve exact aircraft identities and missing-resource evidence.
 **Gate:** each control and rule has source evidence or an explicit unresolved
 status. A station-capacity result alone is not mission/stock/year eligibility.
 
+First implementation pass: shared MNU decoding confirms Unload All and Cheat
+(load anything anywhere), Airbase next/previous aircraft, and a Campaign root
+whose quick-mission visibility remains unresolved. Recover the native cheat's
+scope and keep normal compatibility distinct from that explicit option; its
+presence does not make unsupported projectile execution available. See
+[menu contract evidence](baselines/menu-contract-pass.md).
+
 ## B. Build a shared typed loadout model
 
 - Represent station ID, selected store ID and quantity, internal gun ammunition,

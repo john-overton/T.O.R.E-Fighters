@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import extract_native_flight as native
+import native_menus
 
 
 def sms():
@@ -30,6 +31,39 @@ def pe():
 
 
 class NativeResearchTests(unittest.TestCase):
+    def test_menu_unknown_build_has_no_fixed_address_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root/'media'
+            source.mkdir()
+            (source/'FA.EXE').write_bytes(pe())
+            (source/'FA.SMS').write_bytes(struct.pack('<III', 1, 0, 0x401000) + b'_QuickMission\0')
+            with patch.object(native.subprocess, 'run') as run, \
+                 patch.object(native.shutil, 'which', return_value='/tool/objdump'), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                run.return_value.stdout = '  401000: 00  synthetic instruction\n'
+                native.extract(source, root/'out', domain='menus')
+            report = json.loads((root/'out/inventory.json').read_text())
+            self.assertEqual(report['domain'], 'menus')
+            self.assertEqual(report['selected_symbol_count'], 1)
+            self.assertFalse(report['reviewed_fa_build'])
+            self.assertFalse((root/'out/menu-string-references.json').exists())
+            self.assertFalse((root/'out/reviewed-components.json').exists())
+
+    def test_menu_strings_require_bounded_file_backed_data(self):
+        data = b'Alpha\0Beta\0' + b'X'*161 + b'\0' + b'No terminator'
+        rows = [{'va': 100, 'size': len(data), 'raw': 0, 'executable': False}]
+        found = native_menus.strings_in_region(data, rows, 100, 100+len(data))
+        self.assertEqual(found, [{'va': 100, 'text': 'Alpha'}, {'va': 106, 'text': 'Beta'}])
+        for start, end in [(99, 110), (100, 100), (100, 16500), (100, 100+len(data)+1)]:
+            with self.assertRaises(ValueError):
+                native_menus.strings_in_region(data, rows, start, end)
+        with self.assertRaises(ValueError):
+            native_menus.strings_in_region(data[:4], rows, 100, 111)
+        rows[0]['executable'] = True
+        with self.assertRaises(ValueError):
+            native_menus.strings_in_region(data, rows, 100, 111)
+
     def test_weapons_unknown_build_keeps_reviewed_addresses_disabled(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

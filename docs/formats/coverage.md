@@ -8,8 +8,8 @@ Status is for this **Rust rebuild**, not the reference project's decoders. The a
 | DCL | Partial | All 7,372 raw-literal entries extracted; 22 menu resources match reference output; coded literals unimplemented |
 | PIC / embedded PAL | Partial | Menu/creator backgrounds, action pieces, glyph strips, theater maps/variable numbered terrain textures and SKY0 rendered; malformed-input bounds checks |
 | Standalone PAL | Decoded | Aircraft palette and cockpit overlays; viewer uses recovered LAY palette data |
-| DLG | Partial | CHOOSEAC rectangle and eight action labels/positions recovered at runtime |
-| MNU | Partial | Bounded FA FMENUD sibling/child tree, labels and accelerators decoded and used by in-flight menu; native handlers/flags and other editions unported |
+| DLG | Partial | CHOOSEAC runtime; bounded import/relocation geometry inspection validated on 26 creator/ordnance/selector dialogs; runtime text regions and callbacks remain open |
+| MNU | Partial | Bounded FMENUD tree used in flight; QM_MENU and ARMPLANE hierarchy/shortcuts validated with shared reader and inspection example; setup handlers/visibility and other editions unported |
 | 5K / 11K | Partial | 99 recorded music tracks, lossless WAV previews, PT-selected engine/AB/start/stop and actuator samples including speed brakes; bounded PCM8 mono reader, authored mixer gains |
 | FNT | Partial | Bounded bitmap-writing grammar; WIN11 instrument/menu and HUD11 flight fonts rendered |
 | ESA | Not started | Loose LIB installation used |

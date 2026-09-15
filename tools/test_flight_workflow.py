@@ -22,8 +22,20 @@ class FlightWorkflowTests(unittest.TestCase):
             self.assertNotIn('shell', run.call_args.kwargs)
 
     def test_native_domains_are_separate_from_archive_profiles(self):
-        for options in [['--native-flight'], ['--weapons'], ['--aircraft', 'f18']]:
+        for options in [['--native-flight'], ['--native-menus'], ['--weapons'], ['--aircraft', 'f18']]:
             result = subprocess.run([sys.executable, str(SCRIPT), '--native-weapons', *options],
+                                    capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 2)
+
+    def test_menu_research_forwarding_and_exclusive_selection(self):
+        with patch.object(sys, 'argv', [str(SCRIPT), '--native-menus', '--dry-run']), \
+             patch('extract_native_flight.extract') as extract:
+            self.assertEqual(extract_assets.main(), 0)
+            self.assertEqual(extract.call_args.kwargs['domain'], 'menus')
+            self.assertTrue(extract.call_args.kwargs['preview'])
+        for options in [['--native-flight'], ['--music'], ['--theater', 'UKR'],
+                        ['--aircraft', 'f18', '--validate-flight']]:
+            result = subprocess.run([sys.executable, str(SCRIPT), '--native-menus', *options],
                                     capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 2)
 
