@@ -31,6 +31,17 @@ pub fn apply_tint(palette: &mut [[u8; 3]; 256], tint: [u8; 3], strength: u8) -> 
     Ok(())
 }
 
+/// FA 0x4b3fd5 / 0x4c8e6c: whiten entries 0..254 before weather tint.
+pub fn apply_sun_whitening(palette: &mut [[u8; 3]; 256], strength: u8) -> Result<()> {
+    if palette.iter().flatten().any(|v| *v > 63) {
+        return Err(invalid("sun whitening requires six-bit colors"));
+    }
+    for channel in palette[..255].iter_mut().flatten() {
+        *channel += (((63 - u16::from(*channel)) * u16::from(strength)) >> 8) as u8;
+    }
+    Ok(())
+}
+
 fn tint_colors(colors: &mut [[u8; 3]], tint: [u8; 3], strength: u8) {
     // Native shifts strength right one, signed-multiplies the byte difference,
     // doubles the product and subtracts its high byte. Negative differences
@@ -68,6 +79,16 @@ mod tests {
         assert_eq!(palette, before, "reject before mutation");
     }
 
+    #[test]
+    fn sunlight_whitens_before_fog_without_changing_transparency() {
+        let mut p = [[0, 32, 63]; 256];
+        apply_sun_whitening(&mut p, 255).unwrap();
+        assert_eq!(p[0], [62, 62, 63]);
+        assert_eq!(p[254], [62, 62, 63]);
+        assert_eq!(p[255], [0, 32, 63]);
+        apply_tint(&mut p, [0; 3], 254).unwrap();
+        assert_eq!(p[64], [1; 3]);
+    }
     #[test]
     fn smoothing_clamps_overshoot_and_subtracts_reduction() {
         assert_eq!(smooth_tint(0, 225, 0, 16).unwrap(), 16);

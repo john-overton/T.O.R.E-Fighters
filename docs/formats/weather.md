@@ -643,3 +643,39 @@ applies the verified fog tint to 47..60 with the cap of 92. It filters resolved
 colors with premultiplied coverage; mirror feeds remain independently composed.
 The HUD is still an authored RGBA raster with no verified source index mapping;
 no invented fog response is applied to its green text.
+
+### Celestial continuation — 2026-09-15
+
+- Fixed the reported moon bank distortion: both textured-quad axes now use the
+  world celestial rotation. The old mixed camera-right/world-up basis sheared
+  the disc during banking. Camera rotation still rotates the whole world in
+  the image; it no longer changes the moon's own basis. A synthetic geometry
+  regression covers five rolls, translation, orthogonality and edge lengths.
+- FA `0x4b4170` / `0x4cd8b0` consume sun/view alignment for whitening. The
+  recovered target uses the Q15 dot result, threshold `0x3ccc`, division by three
+  and 0..255 saturation, with the source daylight/elevation gates. Presentation
+  smooths it alongside fog tint; `0x4c8e6c` whitens palette entries 0..254 before
+  fog tint. Fixed flight ticks supply the authoritative current view alignment;
+  render queries do not advance it. Float view-to-Q15 conversion remains an
+  adapter, not native scheduler or whole-frame rounding parity.
+- FA `0x4b4990` consumes `_sunPoint` for nine original lens-flare circles from
+  `0x50c8d8`. Runtime import preserves their offsets, radii and fills. LAY root
+  pointers +0x48/+0x4c provide indexed remaps 265/266. The source one-degree
+  elevation, screen bounds and center dead-zone gates are applied. Glare is
+  composed after the world and before cockpit/UI. GPU filtered RGB is resolved
+  to the nearest live palette index inside circles before source remapping;
+  this and drawable-size projection are explicit GPU adaptations. No CPU
+  readback or imported machine-code execution is involved.
+- The lower native Gouraud band also masks celestial fragments through its
+  five-unit upper edge. Special textured horizon transitions and native
+  screen/pixel rounding still need work; no Earth-curvature model was invented.
+- Every record in all 24 supplied LAY modules has moon angles 8190/3640,
+  sunrise/sunset 25200/68400 and sun azimuths 18200/-18200. The traced angle/draw
+  paths consume these fields and time, with no theater latitude or calendar
+  input. This establishes the reviewed placement contract, not absence from
+  every executable subsystem.
+
+Original moon art, sun circles/glow remap and 94 stars remain intact. Host glare
+preference defaults on and has a diagnostic override; the native preference UI
+is not implemented. Matched retail captures remain unavailable while the user
+builds the Windows test machine.

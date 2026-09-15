@@ -260,10 +260,30 @@ impl World {
     }
 
     /// Exactly one 120 Hz tick of environment time. Pausing means not calling it.
-    pub fn step_weather(&mut self, altitude_ft: f64, speed_fps: f64) {
+    pub fn step_weather(&mut self, altitude_ft: f64, speed_fps: f64, camera: &Camera) {
         self.weather.step();
-        self.weather_presentation
-            .step(&self.weather, altitude_ft, speed_fps);
+        let alignment = self
+            .weather
+            .sample(altitude_ft)
+            .and_then(|l| tore_sim::environment::sun_angles(&l, self.weather.seconds_of_day()))
+            .map_or(-1., |a| {
+                let sun = crate::celestial::rotate([0., 0., 1.], a);
+                let view = camera.uniform(1., [0.; 4], [0; 3]);
+                (0..3)
+                    .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
+                    .sum()
+            });
+        let alignment = if self.celestial.as_ref().is_some_and(|c| c.sun_effects) {
+            alignment
+        } else {
+            -1.
+        };
+        self.weather_presentation.step_with_alignment(
+            &self.weather,
+            altitude_ft,
+            speed_fps,
+            alignment,
+        );
     }
 
     /// Presentation only: resolves the palette for one camera altitude without
@@ -282,10 +302,11 @@ impl World {
                 0.,
             ]
         });
-        self.palette = tore_formats::weather::expand_tinted(
+        self.palette = tore_formats::weather::expand_effects(
             self.weather.configuration().base_palette(),
             &layer,
             self.weather_presentation.tint,
+            self.weather_presentation.sun_whitening,
         );
         self.fog_palette = self
             .weather
@@ -401,9 +422,9 @@ impl Camera {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    fn world() -> World {
+    pub(crate) fn world() -> World {
         use tore_formats::theater::TerrainCell;
         let cells = [0, 4, 8, 12]
             .map(|elevation| TerrainCell {

@@ -5,6 +5,7 @@ fn bytes(values: &[f32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 pub struct SimRenderer {
+    lens_flare: crate::lens_flare::LensFlare,
     battle: Option<(wgpu::Buffer, u32)>,
     vapor: Option<(wgpu::Buffer, u32)>,
     vapor_pipeline: wgpu::RenderPipeline,
@@ -278,6 +279,7 @@ impl SimRenderer {
             usage: wgpu::BufferUsages::VERTEX,
         });
         Self {
+            lens_flare: crate::lens_flare::LensFlare::new(device, format),
             battle: None,
             vapor: None,
             vapor_pipeline,
@@ -600,10 +602,11 @@ impl SimRenderer {
             queue.write_buffer(&self.cloud_vertices, 0, &bytes(&cloud_data));
         }
         let linear = |v: u8| ((v as f64 / 255.0 + 0.055) / 1.055).powf(2.4);
+        let flare_target = self.lens_flare.prepare(device, queue, world, camera, size);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Simulation world"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
+                view: flare_target.as_ref().unwrap_or(target),
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
@@ -670,6 +673,10 @@ impl SimRenderer {
             pass.set_bind_group(0, &self.vapor_bind, &[]);
             pass.set_vertex_buffer(0, buffer.slice(..));
             pass.draw(0..*count, 0..1);
+        }
+        drop(pass);
+        if flare_target.is_some() {
+            self.lens_flare.draw(encoder, target);
         }
     }
 }

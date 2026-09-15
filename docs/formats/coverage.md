@@ -156,3 +156,8 @@ shared indexed aircraft fog/palette and indexed cockpit selective tint now rende
 Cockpit prefix and exterior no-palette contracts are validated at import. Special
 horizon branches, HUD source indices and retail comparisons remain open; see
 [weather contract](weather.md#horizon-and-shared-aircraft-palettes--continuation-2026-09-15).
+
+Weather continuation: bounded `TORE_FLARE_V1` import recovers the nine reviewed
+FA circle descriptors; LAY remaps 265/266 drive lens-flare composition. Source
+whitening order/gates and moon world basis are implemented. GPU color-index
+reconstruction and circle projection remain adaptations; see weather.md.

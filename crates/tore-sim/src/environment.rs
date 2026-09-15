@@ -169,6 +169,10 @@ impl Configuration {
         &self.module.shades
     }
 
+    pub fn flare_fills(&self) -> &[[u8; 256]; 2] {
+        &self.module.flare_fills
+    }
+
     pub fn sun_fill(&self) -> &[u8; 256] {
         &self.module.sun_fill
     }
@@ -198,6 +202,7 @@ pub struct Presentation {
     reduction: i16,
     phase: u32,
     pub tint: u8,
+    pub sun_whitening: u8,
 }
 
 impl Presentation {
@@ -208,11 +213,23 @@ impl Presentation {
             reduction: 0,
             phase: 0,
             tint: 0,
+            sun_whitening: 0,
         })
     }
 
     /// One authoritative host tick; rendering and additional queries never call this.
     pub fn step(&mut self, environment: &Environment, altitude: f64, speed_fps: f64) {
+        self.step_with_alignment(environment, altitude, speed_fps, -1.);
+    }
+
+    /// Explicit primary-view input; querying another camera cannot advance smoothing.
+    pub fn step_with_alignment(
+        &mut self,
+        environment: &Environment,
+        altitude: f64,
+        speed_fps: f64,
+        alignment: f64,
+    ) {
         let feet = clamp_altitude(altitude);
         let first = environment
             .active
@@ -244,6 +261,14 @@ impl Presentation {
         if self.phase >= 7200 {
             self.phase -= 7200;
             if let Some(layer) = environment.sample(altitude) {
+                let target = sun_whitening_target(&layer, environment.seconds_of_day(), alignment);
+                self.sun_whitening = tore_formats::weather::palette::smooth_tint(
+                    self.sun_whitening,
+                    i16::from(target),
+                    0,
+                    16,
+                )
+                .expect("bounded sun target");
                 self.tint = tore_formats::weather::palette::smooth_tint(
                     self.tint,
                     layer.tint_scalar as i16,
@@ -705,6 +730,38 @@ pub fn sun_angles(layer: &Layer, seconds: i32) -> Option<[i16; 2]> {
 mod celestial_tests {
     use super::*;
     #[test]
+    fn glare_gates_smoothing_and_view_queries_are_separate() {
+        let mut module = Module::parse(&tore_formats::weather::synthetic_module(1)).unwrap();
+        let l = &mut module.layers[0];
+        l.flags = 8;
+        l.start_seconds = 0;
+        l.end_seconds = 86399;
+        l.sunrise_seconds = 0;
+        l.sunset_seconds = 86400;
+        assert_eq!(sun_whitening_target(l, 43200, 1.), 255);
+        assert_eq!(sun_whitening_target(l, 43200, 0.9), 0);
+        assert_eq!(sun_whitening_target(l, 43200, f64::NAN), 0);
+        assert_eq!(sun_whitening_target(l, 0, 1.), 0);
+        let mut e = Environment::new(Configuration::new(module, 12, 0, 0, None).unwrap());
+        let mut p = Presentation::seeded(1).unwrap();
+        for _ in 0..120 {
+            e.step();
+            p.step_with_alignment(&e, 0., 0., 1.);
+        }
+        assert_eq!(p.sun_whitening, 255);
+        let before = p.clone();
+        for altitude in [0., 5000., 10000.] {
+            e.sample(altitude);
+            e.palette(altitude);
+        }
+        assert_eq!(p, before);
+        for _ in 0..120 {
+            e.step();
+            p.step_with_alignment(&e, 0., 0., -1.);
+        }
+        assert_eq!(p.sun_whitening, 0);
+    }
+    #[test]
     fn source_sun_boundaries_and_midday_reflection() {
         let mut l = Module::parse(&tore_formats::weather::synthetic_module(1))
             .unwrap()
@@ -724,4 +781,15 @@ mod celestial_tests {
         l.flags = 0;
         assert_eq!(sun_angles(&l, 43200), None);
     }
+}
+
+/// FA 0x4b4170: full-detail sunlight preference is an explicit caller gate.
+/// `_Sun` is a Q15 light/view dot product shifted by 16, approximately 16383*cos.
+/// Float camera vectors are a host projection adaptation, not native matrix parity.
+pub fn sun_whitening_target(layer: &Layer, seconds: i32, alignment: f64) -> u8 {
+    if !alignment.is_finite() || sun_angles(layer, seconds).is_none_or(|a| a[1] < -364) {
+        return 0;
+    }
+    (((alignment.clamp(-1., 1.) * (32767. * 32767. / 65536.)).floor() as i32 - 15564) / 3)
+        .clamp(0, 255) as u8
 }

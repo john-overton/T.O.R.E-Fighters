@@ -102,6 +102,15 @@ pub fn validate_sources(
         clouds.period_f8 / 256,
         environment.clouds
     );
+    let flare = tore_formats::weather::flare::Layout::decode(
+        resources
+            .get("TORE_FLARE_V1")
+            .ok_or("flare layout missing")?,
+    )?;
+    println!(
+        "Lens flare: {} source circle descriptors; fills 265/266",
+        flare.circles.len()
+    );
     let layer = &environment.layer;
     let bytes = resources
         .get(layer)

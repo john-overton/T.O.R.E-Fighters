@@ -310,3 +310,8 @@ The app's reviewed-EXE import also preserves the inert cloud placement table as
 The standalone archive extractor includes original cloud SH/PIC and ocean PIC
 resources through the same theater dependency predicate. It does not generate
 app cache records from executables.
+
+The app also imports the reviewed executable's nine lens-flare descriptors into
+`TORE_FLARE_V1` using the bounded `weather::flare` reader. All LAY modules supply
+fill remaps 265/266 as well as the existing sun-glow remap 267. Older caches
+without this inert layout re-import from available reviewed media.

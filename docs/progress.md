@@ -817,3 +817,14 @@ Special horizon branches and matched retail acceptance remain open.
 - [ ] Textured horizon transition polygons, special flags/light masks, source HUD
   color mapping, filtering comparison and matched retail acceptance remain open.
 [Current evidence](baselines/weather-foundation.md).
+
+### Weather celestial continuation (2026-09-15)
+
+- [x] Fix mixed moon basis under camera bank; retain original art and world placement.
+- [x] Recover sun-view whitening and nine lens-flare descriptors/remap consumers.
+- [x] Validate all 24 LAY modules' placement fields and source time consumers.
+- [x] Pass 274 Rust tests, 24 Python tests, locked build, warnings-denied Clippy,
+  formatting and source/binary asset guards. Creator/viewer and F18 wide/Rafale
+  tall GPU checks passed on Linux Vulkan. Moon captures include 0 and +/-45 bank.
+- [ ] Finish special horizon transitions and native projection/rounding assessment;
+  matched retail and Windows/macOS acceptance remain open.

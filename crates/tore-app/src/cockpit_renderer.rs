@@ -281,6 +281,11 @@ impl CockpitRenderer {
         if let Some(layer) = world.weather.sample(altitude) {
             let mut prefix = [[0; 3]; 256];
             prefix[..64].copy_from_slice(&self.prefix);
+            tore_formats::weather::palette::apply_sun_whitening(
+                &mut prefix,
+                world.weather_presentation.sun_whitening,
+            )
+            .expect("validated cockpit palette");
             tore_formats::weather::palette::apply_tint(
                 &mut prefix,
                 layer.tint,

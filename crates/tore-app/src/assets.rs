@@ -213,6 +213,11 @@ impl Assets {
                 .get("TORE_CLOUDS_V1")
                 .ok_or("cache predates cloud layout; re-import media")?,
         )?;
+        tore_formats::weather::flare::Layout::decode(
+            resources
+                .get("TORE_FLARE_V1")
+                .ok_or("cache predates lens flare; re-import media")?,
+        )?;
         let creator_options = tore_formats::ui::creator::Options::decode(
             resources
                 .get("TORE_CREATOR_V1")
@@ -252,6 +257,10 @@ impl Assets {
         let tables = tore_formats::ui::creator::Options::parse(&executable)?;
         let clouds = tore_formats::weather::clouds::Layout::parse(&executable)?;
         resources.insert("TORE_CLOUDS_V1".into(), clouds.encode());
+        resources.insert(
+            "TORE_FLARE_V1".into(),
+            tore_formats::weather::flare::Layout::parse(&executable)?.encode(),
+        );
         resources.insert("TORE_CREATOR_V1".into(), tables.encode());
         report.push_str("FA.EXE: reviewed SHA-256 e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c; inert creator lists and cloud layout\n");
         let aircraft_libs = [archive(source, "FA_1.LIB")?, archive(source, "FA_2.LIB")?];

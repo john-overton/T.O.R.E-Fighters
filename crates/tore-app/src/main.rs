@@ -15,6 +15,7 @@ mod flight_ui;
 mod hud;
 mod input;
 mod instruments;
+mod lens_flare;
 mod look;
 mod menu;
 mod mirrors;
@@ -1160,8 +1161,22 @@ impl ApplicationHandler for App {
                                 .step_surface(&pilot, |x, z| self.world.surface(x, z));
                             // Weather shares the authoritative tick; pausing simply
                             // stops calling it, with no elapsed-time catch-up.
-                            self.world
-                                .step_weather(self.flight.position[1], self.flight.speed);
+                            let mut weather_view = self.hornet.camera(
+                                &self.flight,
+                                self.flight_view,
+                                Default::default(),
+                            );
+                            look::apply(
+                                &mut weather_view,
+                                self.flight.position.map(|v| v as f32),
+                                self.flight_ui.look,
+                                matches!(self.flight_view, 1 | 2),
+                            );
+                            self.world.step_weather(
+                                self.flight.position[1],
+                                self.flight.speed,
+                                &weather_view,
+                            );
                             let turbulence_cue = step_turbulence(
                                 &mut self.turbulence,
                                 &mut self.turbulence_rng,
@@ -1425,8 +1440,11 @@ impl ApplicationHandler for App {
                         self.camera
                             .step(elapsed as f32, self.modifiers.shift_key(), &self.world);
                         for _ in 0..self.flight_clock.steps(elapsed) {
-                            self.world
-                                .step_weather(f64::from(self.camera.position[1]), 0.);
+                            self.world.step_weather(
+                                f64::from(self.camera.position[1]),
+                                0.,
+                                &self.camera,
+                            );
                         }
                         self.world
                             .resolve_palette(f64::from(self.camera.position[1]));
@@ -2248,17 +2266,19 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             .split(',')
             .map(str::parse::<f32>)
             .collect::<Result<Vec<_>, _>>()?;
-        if values.len() != 5
+        if !(5..=6).contains(&values.len())
             || values.iter().any(|v| !v.is_finite())
             || values[..3].iter().any(|v| v.abs() > 2_000_000.)
             || values[3].abs() > 360.
             || values[4].abs() > 90.
+            || values.get(5).is_some_and(|roll| roll.abs() > 360.)
         {
-            return Err("TORE_WEATHER_VIEW needs x,y,z,yaw,pitch in feet/degrees".into());
+            return Err("TORE_WEATHER_VIEW needs x,y,z,yaw,pitch[,roll] in feet/degrees".into());
         }
         camera.position.copy_from_slice(&values[..3]);
         camera.yaw = values[3].to_radians();
         camera.pitch = values[4].to_radians();
+        camera.roll = values.get(5).copied().unwrap_or(0.).to_radians();
     }
     let selection = world
         .catalog
@@ -2296,7 +2316,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let keys = setup_maneuver(&mut flight);
         for _ in 0..ticks {
             flight.step_surface(&keys, |x, z| world.surface(x, z));
-            world.step_weather(flight.position[1], flight.speed);
+            let mut weather_view = hornet.camera(&flight, flight_view, Default::default());
+            look::apply(
+                &mut weather_view,
+                flight.position.map(|v| v as f32),
+                flight_look.map(f32::to_radians),
+                matches!(flight_view, 1 | 2),
+            );
+            world.step_weather(flight.position[1], flight.speed, &weather_view);
             step_turbulence(
                 &mut probe_turbulence,
                 &mut probe_turbulence_rng,

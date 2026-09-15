@@ -27,6 +27,7 @@ REGIONS = (
     ('horizon_gouraud', 0x4c942c, 0x4c95c8, 'weather'),
     ('deck_distance_helpers', 0x447970, 0x447a40, 'weather'),
     ('indexed_effect_remap', 0x4cc44c, 0x4cc4ac, 'weather'),
+    ('sun_whitening_channels', 0x4c8e6c, 0x4c8ec6, 'weather'),
     ('sun_whitening_target', 0x4b4170, 0x4b41e3, 'weather'),
     ('sun_view_alignment', 0x4cd8b0, 0x4cd8f0, 'weather'),
     ('sun_lens_flare', 0x4b4990, 0x4b4b2a, 'weather'),

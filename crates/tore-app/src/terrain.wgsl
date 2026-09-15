@@ -16,7 +16,7 @@ fn haze(distance:f32)->f32{
 }
 struct VertexOut {
  @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
- @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32
+ @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>
 }
 fn linear(c:vec3<f32>)->vec3<f32>{return pow((c+vec3<f32>(0.055))/1.055,vec3<f32>(2.4));}
 // Index 255 is the native water/cutout test at 0x4aa739 and stays transparent.
@@ -109,7 +109,7 @@ fn tile(uv:vec2<f32>,layer:i32,row:i32)->vec4<f32>{return sample_tile(uv,layer,r
  let near=1.0;let far=2200000.0;let f=1.7320508*scene.up.w;
  var out:VertexOut;
  out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
- out.altitude=position.y;out.uv=uv;out.layer=layer;out.own_color=select(0.0,1.0,index<0.0);
+ out.direction=p;out.altitude=position.y;out.uv=uv;out.layer=layer;out.own_color=select(0.0,1.0,index<0.0);
  // A negative index means the vertex carries its own color; terrain carries a
  // source palette index instead, resolved per frame and then Gouraud blended.
  if index>=0.0 { out.color=shade(ray_index(u32(index),ray_rows(length(p),position.y)),0).rgb; } else { out.color=linear(color); }
@@ -150,7 +150,7 @@ fn horizon_index(ray:vec3<f32>)->u32 {
  // Source deck planes: world feet, power-of-two tiling, reversed north axis.
  // The GPU ray/plane intersection replaces the source scanline rasterizer.
  var passes=0;var core=-1;
- if scene.sun.w>0.0 && ray.y>=0.0 {
+ if scene.sun.w>0.0 && ray.y>=0.0 && !((i32(scene.ray.w)&2)!=0 && horizon_height(ray)<=5.0) {
   let cosine=dot(ray,scene.sun.xyz);
   if cosine>0.0 {
    let tangent=sqrt(max(0.0,1.0-cosine*cosine))/cosine;
@@ -198,10 +198,10 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
  let z=dot(position,scene.forward.xyz);let f=1.7320508*scene.up.w;
  var out:VertexOut;
  out.clip=vec4<f32>(dot(position,scene.right.xyz)*f/scene.eye.w,dot(position,scene.up.xyz)*f,z,z);
- out.uv=uv;out.layer=layer;out.color=shade(u32(index),0).rgb;out.distance=position.y;out.own_color=0.;out.altitude=position.y;return out;
+ out.uv=uv;out.layer=layer;out.color=shade(u32(index),0).rgb;out.distance=position.y;out.own_color=0.;out.altitude=position.y;out.direction=position;return out;
 }
 @fragment fn celestial_fragment(in:VertexOut)->@location(0) vec4<f32>{
- if in.distance<0.0 {discard;}
+ if in.distance<0.0 || ((i32(scene.ray.w)&2)!=0 && horizon_height(normalize(in.direction))<=5.0) {discard;}
  if in.layer>=0.0 {let tex=tile(in.uv,i32(in.layer),0);if tex.a<0.01 {discard;}return tex;}
  return vec4<f32>(in.color,1.0);
 }

@@ -425,9 +425,9 @@ objdump. It never executes imported shape code and does not prove effect absence
 
 ### Weather inspection cameras
 
-`TORE_WEATHER_VIEW=x,y,z,yaw,pitch` sets the terrain viewer pose in feet and
+`TORE_WEATHER_VIEW=x,y,z,yaw,pitch[,roll]` sets the terrain viewer pose in feet and
 absolute degrees for reproducible sky/deck captures. It does not change the
-flight camera. For example:
+flight camera. Optional roll permits reproducible celestial bank checks. For example:
 
 ```sh
 TORE_WEATHER_VIEW=1070000,5000,590000,45,20 cargo run --locked -p tore-app -- --viewer --weather-condition 5 --capture-terrain .local/moon.ppm --no-audio
@@ -437,3 +437,7 @@ TORE_WEATHER_VIEW=1070000,5000,590000,45,20 cargo run --locked -p tore-app -- --
 crossing captures. Generated weather choices use the recovered scattered-cloud
 chance; normal MM launches preserve their `clouds` field. Caches predating the
 inert cloud layout automatically re-import when local reviewed media is present.
+
+`TORE_SUN_GLARE=0|1` disables/enables the recovered glare and palette whitening
+(default on in this host adapter). This is a diagnostic for the native glare
+preference, not an implemented graphics-preferences menu.

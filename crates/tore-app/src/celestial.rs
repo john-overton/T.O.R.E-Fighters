@@ -11,6 +11,8 @@ use tore_formats::{
 
 pub struct Celestial {
     pub sun: WeatherShape,
+    pub flare: tore_formats::weather::flare::Layout,
+    pub sun_effects: bool,
     pub moon: WeatherShape,
     pub stars: WeatherShape,
     pub moon_texture: usize,
@@ -31,6 +33,7 @@ impl Celestial {
                 .get(n)
                 .ok_or_else(|| format!("Missing {n}; re-import media"))
         };
+        let flare = tore_formats::weather::flare::Layout::decode(read("TORE_FLARE_V1")?)?;
         let sun = WeatherShape::parse(read("SUN.SH")?)?;
         let moon = WeatherShape::parse(read("MOON.SH")?)?;
         let stars = WeatherShape::parse(read("STARS.SH")?)?;
@@ -105,6 +108,12 @@ impl Celestial {
         images.extend(pixels);
         Ok(Self {
             sun,
+            flare,
+            sun_effects: match std::env::var("TORE_SUN_GLARE").as_deref() {
+                Ok("0") => false,
+                Ok("1") | Err(_) => true,
+                _ => return Err("TORE_SUN_GLARE needs 0 or 1".into()),
+            },
             moon,
             stars,
             moon_texture,
@@ -170,12 +179,14 @@ impl Celestial {
         for p in &self.moon.primitives {
             if let Primitive::Billboard { center, size, .. } = p {
                 let center = rotate(*center, angle);
-                // Source ea uses camera-facing horizontal and shape-relative vertical.
+                // The lunar texture basis belongs to the sky, not aircraft bank.
+                // Mixing a rolled camera right with a world vertical shears it.
+                let horizontal = rotate([1., 0., 0.], angle);
                 let vertical = rotate([0., 1., 0.], angle);
                 quad(
                     &mut vertices,
                     center,
-                    right.map(|v| v * size[0] as f32 * 0.5),
+                    horizontal.map(|v| v * size[0] as f32 * 0.5),
                     vertical.map(|v| v * size[1] as f32 * 0.5),
                     self.moon_texture as f32,
                     0.,
@@ -222,5 +233,67 @@ fn quad(
             0.,
             index,
         ]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn lunar_geometry_is_independent_of_camera_bank_and_translation() {
+        let mut world = crate::terrain::tests::world();
+        let mut module =
+            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
+                .unwrap();
+        let layer = &mut module.layers[0];
+        layer.flags = 16;
+        layer.moon_azimuth = 8192;
+        layer.moon_elevation = 4096;
+        world.weather = tore_sim::environment::Environment::new(
+            tore_sim::environment::Configuration::new(module, 0, 0, 0, None).unwrap(),
+        );
+        let empty = WeatherShape {
+            primitives: vec![],
+            scale_exponent: 8,
+            publishes_point: false,
+        };
+        let celestial = Celestial {
+            sun: empty.clone(),
+            stars: empty.clone(),
+            moon: WeatherShape {
+                primitives: vec![Primitive::Billboard {
+                    center: [0., 0., 160.],
+                    size: [4, 4],
+                    texture: "SYNTH.PIC".into(),
+                    uv: None,
+                }],
+                ..empty
+            },
+            moon_texture: 0,
+            moon_uv: [0., 0., 1., 1.],
+            sun_remap: 0,
+            shade_rows: BTreeMap::new(),
+            flare: tore_formats::weather::flare::Layout { circles: vec![] },
+            sun_effects: true,
+        };
+        let mut camera = Camera::new();
+        camera.position[1] = 0.;
+        let expected = celestial.vertices(&world, &camera, 720);
+        assert_eq!(expected.len(), 60);
+        for roll in [-2., -1., 0., 1., 2.] {
+            camera.roll = roll;
+            camera.position[0] += 100.;
+            camera.position[2] -= 300.;
+            assert_eq!(celestial.vertices(&world, &camera, 720), expected);
+        }
+        let edge = |a: usize, b: usize| -> Vec<f32> {
+            (0..3)
+                .map(|k| expected[a * 10 + k] - expected[b * 10 + k])
+                .collect()
+        };
+        let right = edge(1, 0);
+        let up = edge(2, 1);
+        assert!((right.iter().map(|x| x * x).sum::<f32>() - 16.).abs() < 0.001);
+        assert!((right.iter().zip(up).map(|(a, b)| a * b).sum::<f32>()).abs() < 0.001);
     }
 }

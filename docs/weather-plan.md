@@ -305,8 +305,10 @@ Corrected helper tests and source-art screenshots alone do not close these gates
 
 Original sun circles/glow remap, moon texture and 94 stars now render with source
 time/flag/angle selection. Weather SH decoding is bounded and independent of
-aircraft animation. Glare, exact raster/horizon clipping and matched retail
-acceptance remain open. Continue with cloud placement and geometry.
+aircraft animation. The continuation implements sun-view whitening, nine original
+lens-flare circles/remaps and the moon bank fix. Lower Gouraud horizon masking
+is applied. Exact textured horizon clipping, pixel rounding and matched retail
+acceptance remain open. See the continuation evidence in weather-foundation.md.
 
 ### Step 3 implementation checkpoint
 

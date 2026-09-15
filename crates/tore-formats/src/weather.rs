@@ -5,6 +5,7 @@ use crate::{Result, invalid, slice, u32_at};
 mod callbacks;
 pub use callbacks::Callback;
 pub mod clouds;
+pub mod flare;
 pub mod palette;
 mod remap;
 pub mod shape;
@@ -419,6 +420,7 @@ pub struct Module {
     pub layers: Vec<Layer>,
     pub shades: Vec<ShadeRemap>,
     pub sun_fill: [u8; 256],
+    pub flare_fills: [[u8; 256]; 2],
 }
 
 impl Module {
@@ -451,6 +453,10 @@ impl Module {
         )?
         .try_into()
         .unwrap();
+        let flare_fills = [
+            resolve(u32_at(code, 0x48)?, 256)?.try_into().unwrap(),
+            resolve(u32_at(code, 0x4c)?, 256)?.try_into().unwrap(),
+        ];
         let shades = remap::parse(code, base_rva, u32_at(code, 0x6c)?)?;
         let mut layers = Vec::new();
         for index in 0..MAX_RECORDS {
@@ -464,6 +470,7 @@ impl Module {
                     layers,
                     shades,
                     sun_fill,
+                    flare_fills,
                 });
             }
             let callback = callbacks::resolve(data, code, base_rva, u32_at(record, 0x136)?)?;
@@ -503,9 +510,19 @@ pub fn expand(base: &[[u8; 3]; 256], layer: &Layer) -> [[u8; 3]; 256] {
 }
 
 pub fn expand_tinted(base: &[[u8; 3]; 256], layer: &Layer, strength: u8) -> [[u8; 3]; 256] {
+    expand_effects(base, layer, strength, 0)
+}
+
+pub fn expand_effects(
+    base: &[[u8; 3]; 256],
+    layer: &Layer,
+    strength: u8,
+    sun: u8,
+) -> [[u8; 3]; 256] {
     let mut palette = *base;
     palette[224..255].copy_from_slice(&layer.sky);
     palette[192..224].copy_from_slice(&layer.terrain);
+    palette::apply_sun_whitening(&mut palette, sun).expect("validated six-bit weather colors");
     palette::apply_tint(&mut palette, layer.tint, strength)
         .expect("validated six-bit weather colors");
     for rgb in &mut palette {
@@ -547,6 +564,8 @@ pub fn synthetic_module(records: usize) -> Vec<u8> {
     let mut code = vec![0; table + (records + 1) * RECORD];
     code[0x70..0x74].copy_from_slice(&0x100u32.to_le_bytes());
     code[0x74..0x78].copy_from_slice(&(0x100 + table as u32).to_le_bytes());
+    code[0x48..0x4c].copy_from_slice(&0x600u32.to_le_bytes());
+    code[0x4c..0x50].copy_from_slice(&0x600u32.to_le_bytes());
     code[0x50..0x54].copy_from_slice(&0x600u32.to_le_bytes());
     code[0x6c..0x70].copy_from_slice(&0x500u32.to_le_bytes());
     code[0x404..0x408].copy_from_slice(&10u32.to_le_bytes());
