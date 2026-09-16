@@ -1229,8 +1229,22 @@ AI, carrier or new aircraft activation.
   default event replacement; translate the saturated command-deadline helper.
 - [x] Preserve initial completion and subsequent ground-following/mask changes;
   keep script execution unsupported and timing distinct from wrapping deadlines.
-- [ ] Finish intermediate movement/type fields and E021 queue/interceptor/
+- [ ] Finish full type-load ownership and E021 queue/interceptor/
   observer/damage consumers before staged E001/E002; E016/E004 remain open.
 
 [Source contract](formats/native-strip.md#initial-commands-and-default-event-response--ne-001l),
 [validation](baselines/native-strip-commands.md). No service or live activation.
+
+
+## Selected stationary STRIP movement — 2026-09-15
+
+- [x] NE-00.1m: establish the initial/default command path through heading,
+  pitch, bank and speed consumers, with original zero-valued type inputs.
+- [x] Translate the word-angle approach helper; test zero rates, signed step
+  normalization, half-turn magnitude and word crossings.
+- [ ] Finish E021 queue/observer/interceptor ownership and E003/E005 typed
+  construction, retaining E016/E004 and staged E001/E002 gates.
+
+[Source contract](formats/native-strip.md#selected-stationary-movement-path--ne-001m),
+[validation](baselines/native-strip-movement.md). Ground sampling and flag-1 Y
+assignment remain required at zero speed; no runtime service or contact activation.

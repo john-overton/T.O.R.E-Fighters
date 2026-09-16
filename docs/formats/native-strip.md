@@ -815,7 +815,8 @@ heading/pitch and initializes the command block at instance +0x38:
 `0x53826c`, then entering the shared movement body. The bounded helpers at
 `0x478090`, `0x4780d0` and `0x477d10` return signed type words +0x5f, +0x5d and
 +0x67 respectively for kind 0; kind-4/6 paths are outside this selected contract.
-Resolving these type fields and the intermediate pitch/bank body remains open.
+The selected zero-valued type inputs and intermediate pitch/bank path are now
+established in NE-00.1m below; full loader and service ownership remain open.
 
 `0x43805e..0x438226` first adjusts speed toward its selected target; **only then**
 does zero speed skip position integration. Command flag 1 can still replace Y
@@ -884,3 +885,85 @@ payload mutation and notification (`0x443d00`); those consumers remain open.
 other event values reach the true tail; that does not authorize dropping their
 upstream payload/state effects. Complete movement, command overrides, event
 interceptor and damage/speech consumers remain prerequisites for live service.
+
+## Selected stationary movement path — NE-00.1m
+
+**Native source ledger; only the angle-approach helper is translated/tested.**
+[Validation](../baselines/native-strip-movement.md). This closes the intermediate
+movement path for the established initial/default commands with the selected
+zero-speed STRIP inputs. It does not close the surrounding query, event, resource
+loader, clock or scheduler producers, or accept arbitrary command overrides.
+
+### Type inputs and selected dispatch
+
+The OBJECT schema places `_turnRate`, `_bankRate`, `_minSpeed` and `maxAlt` at
++0x5d/+0x5f/+0x67/+0x79 respectively. The selected original STRIP.OT has zero in
+all four; `maxAlt` is caret-marked zero. Its other movement scalars are also zero.
+These are resource observations, not permission to default missing fields or
+ignore scaling markers. The existing metadata reader preserves those tokens;
+it does not yet produce a typed service configuration. Full resource load and
+current-type ownership remain E003/E005 dependencies.
+
+The reviewed kind-0 helpers return the signed turn/bank/minimum-speed words.
+Common movement reads the maximum-altitude dword at 0x50d2e1. Type flags 0x208021
+exclude the 0x40 bank-dependent rate, 0x1000 low-speed descent and 0x2000 pitch/
+speed coupling branches. The local touching byte is false for kind 0 because
+only kind 4 calls the prefix's touching predicate. Initial/default command flags
+0/1 exclude the other command-rate, avoidance and offset overrides below.
+
+The dispatch tables were inspected as inert data, separately from code:
+
+| Table | Selected index and target |
+| --- | --- |
+| Heading dwords 0x438228 | 0 → 0x436eca, movement-heading hold |
+| Pitch selector bytes 0x438274 and dwords 0x43825c | 0 → selector 0 → 0x4376d6; 11 → selector 4 → 0x4376f5 |
+| Bank selector bytes 0x43829c and dwords 0x438280 | 0 → selector 0 → 0x437a84; 11 → selector 5 → 0x437c17 |
+| Speed dwords 0x4382a8 | 1 → 0x437ef2, signed low word of command value |
+
+### Intermediate update order
+
+1. `0x4374ac..0x4376d5`: form wrapping target-minus-movement heading. The selected
+   hold command has zero difference. Body-minus-movement heading offset, captured
+   before the body, approaches its command offset (zero) using half the turn rate.
+   Recompose body heading from the retained offset plus movement heading. Command
+   flags 4/0x80 and heading mode 5 are not part of the selected commands.
+2. Pitch mode 0 reads movement pitch at `0x4376d6`; mode 11 reads the earlier
+   ground-angle output at `0x4376f5`. Clamp the target to signed ±0x3ffc. If
+   current Y >= type maximum altitude and target pitch is positive, replace the
+   target with zero. Command flag 2's avoidance call and kind-4 attachment branch
+   are excluded here.
+3. `0x4377af..0x437a83`: the minimum-speed helper is called even for kind 0,
+   although the local-touching and excluded type predicates bypass its adjustments
+   for this STRIP. Approach movement pitch toward the clamped target with the
+   turn rate; approach body-minus-movement pitch offset toward its command offset
+   (zero) with half that rate; recompose body pitch. Command flags 4/0x100/0x400,
+   direct-rate mode 5 and aircraft-specific branches are excluded.
+4. Bank mode 0 at `0x437a84` holds body bank; mode 11 at `0x437c17` selects the
+   earlier ground bank. `0x437c26..0x437da9` obtains the bank rate, approaches the
+   bank target, then bypasses type-0x2000 and kind-4 coupling. No autonomous bank
+   command branches are accepted from the surrounding routine.
+5. `0x437ecb..0x437efe` selects speed mode 1's signed word, which is zero for both
+   established commands. The existing finish slice sees current speed equal to
+   target zero, bypassing acceleration/deceleration calls and position integration.
+   It still applies command flag 1's Y assignment and evaluates completion.
+
+### Zero rate does not mean an omitted service
+
+`0x411950..0x41199a` takes word current/target angles and a dword step. It forms a
+wrapping **word** difference, widens its absolute magnitude through `0x4c6614`,
+and snaps to target only when that magnitude <= signed normalized step. Otherwise
+it adds/subtracts the low word of the step according to the difference sign.
+Step normalization is wrapping dword negation; INT_MIN remains negative. A
+half-turn difference 0x8000 has magnitude 32768 and follows the negative branch
+when the step is smaller. This is not a float-degree shortest-path approximation.
+`native_objects::approach_angle` preserves these boundaries diagnostically.
+
+Consequently, with the selected zero rate fields, initial or replacement commands
+do not change movement/body angles merely because the ground-angle target differs.
+No angle delta is produced from a zero rate. Replacement flag 1 nevertheless
+assigns Y to the earlier ground sample, even at zero speed; initial flags 0 do
+not perform that assignment. Both still make the initial ground query and reach
+the established completion/event path. These are conditional source deductions,
+not a runtime result or permission to use a flat height/skip service callbacks.
+Nonzero speed/rates, other commands, mutated type state, and full service entry/
+exit ownership require their own accepted contracts. Live contact stays gated.

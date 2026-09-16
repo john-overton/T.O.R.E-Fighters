@@ -1,6 +1,22 @@
 //! Diagnostic native object state; no world construction or live activation.
 //! Source: docs/formats/native-strip.md.
 
+/// Diagnostic FA 0x411950: move a word angle by at most the supplied step.
+/// Difference wraps as a word; magnitude is widened, including -32768.
+/// Step normalization retains native dword wrapping, even for i32::MIN.
+/// No time, rate, command, or terrain producer is implied by this helper.
+pub fn approach_angle(current: i16, target: i16, step: i32) -> i16 {
+    let step = step.wrapping_abs();
+    let difference = target.wrapping_sub(current);
+    if i32::from(difference).abs() <= step {
+        target
+    } else if difference < 0 {
+        current.wrapping_sub(step as i16)
+    } else {
+        current.wrapping_add(step as i16)
+    }
+}
+
 /// Diagnostic command deadline at FA 0x463b90, distinct from wrapping service
 /// and speech deadlines. Both source operands are widened unsigned words.
 /// No command execution, scheduler state or clock producer is connected here.
@@ -137,6 +153,28 @@ fn remove_first(ids: &mut Vec<u16>, id: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn angle_approach_preserves_zero_rates_and_word_crossings() {
+        for (current, target, step, expected) in [
+            (123, -456, 0, 123),
+            (123, 123, 0, 123),
+            (100, 130, 29, 129),
+            (100, 130, 30, 130),
+            (100, 130, -40, 130),
+            (130, 100, -29, 101),
+            (32760, -32760, 10, -32766),
+            (-32760, 32760, 10, 32766),
+            (0, i16::MIN, 1, -1),
+            (0, i16::MIN, 32767, -32767),
+            (0, i16::MIN, 32768, i16::MIN),
+            (0, i16::MIN, -32768, i16::MIN),
+            (20, -30, i32::MAX, -30),
+            (20, -30, i32::MIN, 20),
+        ] {
+            assert_eq!(approach_angle(current, target, step), expected);
+        }
+    }
 
     #[test]
     fn command_deadline_saturates_before_word_wrap() {

@@ -16,6 +16,15 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('object_movement_heading_common', 0x4374ac, 0x4376d6, 'ground'),
+    ('object_movement_pitch_hold', 0x4376d6, 0x4376de, 'ground'),
+    ('object_movement_pitch_ground', 0x4376f5, 0x43777b, 'ground'),
+    ('object_movement_pitch_common', 0x4377af, 0x437a84, 'ground'),
+    ('object_movement_bank_hold', 0x437a84, 0x437a90, 'ground'),
+    ('object_movement_bank_common', 0x437c17, 0x437daa, 'ground'),
+    ('object_movement_speed_select', 0x437ecb, 0x437eff, 'ground'),
+    ('object_angle_approach', 0x411950, 0x41199b, 'ground'),
+    ('signed_word_magnitude', 0x4c6614, 0x4c661d, 'ground'),
     ('object_command_initialize', 0x463a20, 0x463ae6, 'ground'),
     ('object_command_condition', 0x463af0, 0x463b74, 'ground'),
     ('object_command_deadline', 0x463b90, 0x463bbc, 'clock'),
