@@ -1246,3 +1246,104 @@ exclusion is source-backed, not an assumption from the no-AI scope.
 Clock/scheduler state, object scratch, links, callback effects and RNG must share
 the future transaction. E015/E019/E021 remain open for trailing special services,
 notifications, dead-object behavior and event/output ownership before E001/E002.
+
+## Trailing events and death accounting — NE-00.1q
+
+**Native source ledger only; no new runtime behavior.**
+[Validation](../baselines/native-strip-accounting.md). This closes bounded
+E019/E021 caller and notification gates, not effect creation or full death parity.
+
+### Events after the scheduler merge
+
+`0x462c91..0x462d38` repeatedly calls consuming event lookup with selector 0x800b,
+mask 0xffff. In the previously reviewed lookup, that selector also matches an
+ordinary recipient **without scheduled flag 2**, excluding the special range
+0x8003..0x800b unless exactly equal. Thus inactive/unscheduled objects do not
+necessarily stop receiving events when absent from the main service list.
+Recipient validity must be checked by the host; the caller loads the returned
+recipient into current scratch without a null guard or a push/pop pair.
+
+Only event mask exactly 0x4000 takes the hit branch: pass payload to 0x463980,
+then examine the stored recipient's live flag and 0x4747c0 predicate. A dead or
+predicate-false stored recipient selects 1, otherwise 0, for the subsequent
+0x4432d0 argument. That effect call uses local controller, payload byte +0x20,
+payload XYZ +0x14, recipient ID, zero, the selected value and final 1. It precedes
+0x462980 storing scratch. Consequently inspecting the stored object after a
+scratch callback is a real ownership distinction; do not substitute scratch
+flags without establishing intervening stores. Other returned masks skip that
+hit/effect branch but still store scratch. The next lookup can run observers.
+After the first loop returns null, a second loop consumes selector 0x800c with
+mask 0xffff and ignores returned payloads. A null return may itself follow
+consumption/observation of flag-4 events, as established in NE-00.1k.
+
+`0x462d40..0x462e21` then consumes mask 0xffff for word recipient
+`local_controller - 0x7ffd` (equivalently +0x8003, wrapping). It dispatches by
+subtype byte +0xa, not mask. The six dword targets at 0x462e24 and 37 selector
+bytes at 0x462e3c are inert data outside the code slice:
+
+| Subtype | Branch | Accepted caller behavior; downstream remains open |
+| --- | --- | --- |
+| 0 | 0x462d77 | Payload flag +0x10 can replace payload XYZ +1 from object ID +0xd's stored XYZ; calls GRAPHICAddExp 0x4432d0 using payload type +0, XYZ +1, ID +0xd and byte +0xf |
+| 1 | 0x462dcb | Calls GRAPHICAddSmoke 0x443e80 with payload position, byte +0xe and signed words +0xc/+0xf/+0x11 |
+| 3 | 0x462dfa | Calls 0x47ceb0 with payload base, byte +0xd, vectors +0xe/+0x1a and signed word +0x26 |
+| 2, 4..0x23, 0x24; values >0x24 | Loop | No subtype body; the consuming lookup and its observer have already run |
+
+In particular subtype 0x24 speech has no additional body here; that does **not**
+make the event a no-op because lookup can invoke the speech observer before
+returning it. Pointer/ID fields, string payloads, effect lifetimes and resources
+still require bounds and staged ownership. No visual/sound effect is activated.
+
+### Score gate and separate death counters
+
+`0x486580..0x4865b7` returns -1 immediately for global 0x4eb604 ==1. Otherwise
+it also returns -1 when current kind is not 4 and controller bit 0x80 is clear.
+The selected ordinary STRIP meets the second exclusion independently of the
+first. Thus its generic-hit/death calls do not enter this scoring body under
+those reviewed inputs. Other kinds/controllers retain the unsupported body at
+0x4865b8; do not generalize this exclusion to aircraft or change the controller.
+
+The distinct `0x485820..0x485a38` receives controller, credited-ID word and
+victim-ID word. It exits when global player ID 0x520a1c or credited ID is zero.
+For the local controller it calls 0x471400(credited ID, victim ID) **before**
+checking whether the credited ID equals the player (counter slot 0) or second
+tracked ID 0x520a14 (slot 1). Other IDs exit only after that possible call.
+0x471400 remains an open consumer, not a UI-only notification assumption.
+
+For a tracked credited ID it resolves both objects. Equal nationality high bit,
+victim flag 0x80 clear and byte 0x54bdb0 !=2 take the counter at 0x54de38, except
+that bytes 0x529200 !=0 and 0x5291e0 ==1 together with signed global count >1
+require victim controller bit 0x80; otherwise return without increment.
+All remaining cases choose the first matching category below, adding one to a
+dword at `base + 4*slot` with native wrapping arithmetic:
+
+| First matching victim predicate | Counter base / additional write |
+| --- | --- |
+| Kind 4 and type dword +0xba bit 8 | 0x54ddf8 |
+| Type class word +0xd bit 0x8000 | 0x54dde8; also 0x54de40 unless instance flag 0x8000 |
+| Class bit 0x4000 | 0x54ddf0 |
+| Class bit 0x2000 | 0x54de00; also 0x54de48 if signed type HP +0x49 >=1000 |
+| Class bit 0x1000 / 0x800 / 0x400 / 0x200 / 0x100 / 0x40 | 0x54de08 / 0x54de10 / 0x54de18 / 0x54de20 / 0x54de28 / 0x54de30 |
+| No match | No counter write |
+
+STRIP's class 0x0100 selects 0x54de28 only after the preceding gates. Counter
+reset, credited-ID lifetime and 0x471400 effects remain open; neither speculative
+score names nor an empty credited ID may replace these dependencies.
+
+### Attribution prefix and remaining lifetime
+
+A bounded prefix of PROJDamageProc, `0x4c1870..0x4c18fb`, establishes one writer
+of current instance +0x76. Nonzero payload byte +0 is required. Nonzero payload
+object ID +1 resolves that object and its +0xe2 word owner ID; zero object ID
+loads the named type at payload +3 but supplies owner zero. A nonzero owner
+different from current ID writes +0x76: if the owner resolves and its controller
+has bit 0x80, write `(controller & 0x7f) - 100` as a word; otherwise write owner
+ID. Zero or self owner leaves previous attribution unchanged. That owner field's
+producer and the rest of projectile damage are still outside this slice.
+
+The established death caller reads signed +0x76; negative values index the
+word table near 0x4eb6d8, nonnegative values become IDs. Do not reinterpret this
+as the placement alias +0x74, clear it on every hit, or assume the newly found
+prefix is the only writer. Existing fitted combat remains separate. Future
+transactional state must own counters/attribution and any notification effects
+alongside object scratch, queue and RNG. Full removal, APComment middle,
+output/effect resource closure and initial world ownership remain gated.

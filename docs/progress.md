@@ -1290,3 +1290,17 @@ open; no live damage, service, carrier or AI activation.
 [Source contract](formats/native-strip.md#clock-and-scheduler-ownership--ne-001p),
 [validation](baselines/native-strip-clock.md). No scheduler or clock replacement,
 AI, carrier or contact activation; fixed 120 Hz adaptation remains authored.
+
+
+## STRIP trailing events and death accounting — 2026-09-15
+
+- [x] NE-00.1q: recover unscheduled/local event consumers, selected scoring
+  exclusion, death statistics caller and damage attribution prefix.
+- [x] Preserve observer-before-subtype work and scratch-versus-stored object
+  ordering; document counters and unresolved effect/notification ownership.
+- [ ] Close downstream notification, effect resources, removal, comment and
+  world/query ownership before runtime contact or damage activation.
+
+[Source contract](formats/native-strip.md#trailing-events-and-death-accounting--ne-001q),
+[validation](baselines/native-strip-accounting.md). Source only; no AI, carrier,
+new combat behavior or native runtime claim.
