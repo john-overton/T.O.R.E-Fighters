@@ -195,7 +195,7 @@ All 16 creator entries now select/load a theater, rebuild its GPU resources, upd
 
 Older Ukraine-only caches automatically re-import from default local media. For external media, refresh with `--import`. The creator/all-theater pack is capped at 256 MiB / 4,096 resources; it is still a development cache. Source textures use the first three theater-code characters (TVI for TVIET); Kurile's base MM has no numbered texture placements and currently renders palette-colored height geometry.
 
-The creator and placeholder notices now use original `ARMFONT.PIC` sans-serif glyphs; the compact viewer HUD uses `SMLFONT.PIC`. Tinted glyphs preserve source shading instead of flattening every visible pixel to white. Button labels retain original FONTACT artwork. These remain legacy raster fonts scaled with the menu; they are not resolution-independent vector text. No system font or new dependency is required. Use `--snapshot-state notice --snapshot .local/notice.ppm` to inspect the placeholder message.
+Quick Mission uses a bundled, open-licensed Noto Sans Bold raster atlas for clean flat text, with beveled field boxes. See the [menu presentation spec](spec/quick-mission-menu.md) and [font provenance](../crates/tore-app/assets/README.md). Other menus retain their original imported fonts. No system font or new runtime dependency is required. Use `--quick-mission --snapshot .local/quick.ppm` to inspect the page.
 
 ## Hornet free flight
 
@@ -284,8 +284,10 @@ trajectories. It does not change the app's flight model.
 ## Aircraft selection and briefing selectors
 
 Quick Mission uses all recovered active scalar tables and imported aircraft names.
-Click scalar text to cycle; Shift-click opens a scrollable list. Aircraft names
-open the list directly. Only F/A-18D and Rafale C can fly. Unsupported mission
+Click scalar text to cycle; Shift-click opens a paged list. Aircraft and theater
+fields open the list directly. Aircraft choices are restricted to imported flight
+profiles for F/A-18D, Rafale C, F-14D, A-4E and X-31 EFM.
+See the [menu presentation spec](spec/quick-mission-menu.md). Unsupported mission
 systems remain editable setup placeholders with launch validation.
 
 ```sh

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use tore_formats::{aircraft::AircraftId, ui::creator::Options};
 type Rect = (i32, i32, i32, i32);
 const POPUP: Rect = (185, 100, 270, 370);
-const ROWS: usize = 21;
+const ROWS: usize = 15;
 const ROW_BASE: usize = 100;
 const OK: usize = 1;
 const CANCEL: usize = 2;
@@ -79,15 +79,16 @@ impl QuickMission {
         // the duplicate. Draft indices below refer to this six-row list.
         options.fields[15]
             .retain(|label| !label.trim_end_matches('.').eq_ignore_ascii_case("overcast"));
-        let mut catalog: Vec<(String, String)> = data
-            .iter()
-            .filter(|(n, _)| n.ends_with(".PT") && !n.starts_with('~'))
-            .filter_map(|(file, bytes)| {
-                let brf = tore_formats::aircraft::Brf::parse(bytes).ok()?;
-                let names = brf.strings("ot_names").ok()?;
-                (names.len() == 3 && names[2].eq_ignore_ascii_case(file))
-                    .then(|| (file.clone(), names[0].clone()))
+        // Metadata for the full retail catalog is also cached. Only expose the
+        // exact aircraft identities whose flight profiles were imported.
+        let mut catalog: Vec<(String, String)> = AircraftId::ALL
+            .into_iter()
+            .filter(|id| {
+                data.get(id.pt())
+                    .and_then(|bytes| tore_formats::aircraft::Aircraft::parse(bytes).ok())
+                    .is_some_and(|aircraft| aircraft.id == *id)
             })
+            .map(|id| (id.pt().to_string(), id.label().to_string()))
             .collect();
         catalog.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
         let (aircraft_files, aircraft_names): (Vec<_>, Vec<_>) = catalog.into_iter().unzip();
@@ -201,7 +202,7 @@ impl QuickMission {
     fn open(&mut self, id: usize) {
         self.selector = Some(id);
         self.cursor = self.draft.values[id];
-        self.scroll = self.cursor.saturating_sub(ROWS - 1);
+        self.scroll = self.cursor / ROWS * ROWS;
         self.hover = None;
         self.pressed = None;
         self.help = false;
@@ -263,6 +264,9 @@ impl QuickMission {
         if let Some(field) = self.selector {
             match id {
                 POP_OK => {
+                    if self.values(field).is_empty() {
+                        return Action::None;
+                    }
                     self.apply(field, self.cursor);
                     self.selector = None;
                     self.focus = field;
@@ -271,10 +275,10 @@ impl QuickMission {
                     self.selector = None;
                     self.focus = field;
                 }
-                UP => self.scroll = self.scroll.saturating_sub(1),
+                UP => self.scroll = self.scroll.saturating_sub(ROWS),
                 DOWN => {
-                    self.scroll =
-                        (self.scroll + 1).min(self.values(field).len().saturating_sub(ROWS))
+                    self.scroll = (self.scroll + ROWS)
+                        .min(self.values(field).len().saturating_sub(1) / ROWS * ROWS)
                 }
                 ROW_BASE.. => {
                     let index = self.scroll + id - ROW_BASE;
@@ -292,7 +296,7 @@ impl QuickMission {
                 self.help = !self.help;
             }
             60 => {
-                self.notice=Some("Aircraft era filters are not available yet. The list shows imported aircraft; F/A-18D, Rafale C, F-14D, A-4E and X-31 EFM can fly.".into());
+                self.notice=Some("Aircraft era filters are not available yet. The list shows only supported imported aircraft.".into());
             }
             61 => return Action::Exit,
             OK => {
@@ -305,7 +309,7 @@ impl QuickMission {
             CANCEL => return Action::Back,
             3..=32 => {
                 self.focus = id;
-                if matches!(id, 6 | 9 | 12 | 23 | 26 | 29) ^ self.shift {
+                if matches!(id, 6 | 9 | 12 | 13 | 23 | 26 | 29) ^ self.shift {
                     self.open(id);
                 } else {
                     let n = self.values(id).len();
@@ -346,12 +350,7 @@ impl QuickMission {
                 "Enter" => return self.activate(POP_OK),
                 _ => {}
             }
-            if self.cursor < self.scroll {
-                self.scroll = self.cursor;
-            }
-            if self.cursor >= self.scroll + ROWS {
-                self.scroll = self.cursor + 1 - ROWS;
-            }
+            self.scroll = self.cursor / ROWS * ROWS;
             return Action::None;
         }
         match key {
@@ -382,7 +381,7 @@ impl QuickMission {
         pixels.copy_from_slice(&sprites["QUIKMIS3.PIC"].rgba);
         self.controls.clear();
         let mut c = Canvas(pixels);
-        let font = &sprites["ARMFONT.PIC"];
+        let font = &sprites["QUICKFONT"];
         c.text(&sprites["MENUFONT.PIC"], "Aircraft", 103, 36, None);
         self.controls
             .extend([(0, (84, 35, 18, 24)), (60, (103, 35, 95, 24))]);
@@ -428,33 +427,62 @@ impl QuickMission {
                 vec![
                     ("You are at ", None),
                     ("", Some(14)),
-                    (". It is ", None),
+                    (" feet. It is ", None),
                     ("", Some(15)),
                 ],
             ),
             (249, vec![("Your situation is ", None), ("", Some(16))]),
-            (263, vec![("Enemy forces are ", None), ("", Some(17))]),
+            (
+                263,
+                vec![
+                    ("You are ", None),
+                    ("", Some(17)),
+                    (" from enemy forces.", None),
+                ],
+            ),
             (291, vec![("You are carrying ", None), ("", Some(18))]),
-            (305, vec![("Air combat is ", None), ("", Some(19))]),
+            (305, vec![("Air combat is with ", None), ("", Some(19))]),
         ] {
             self.line(&mut c, font, 35, y, &parts);
         }
-        self.line(
-            &mut c,
-            font,
-            340,
-            221,
-            &[("Ground target: ", None), ("", Some(30))],
-        );
-        self.line(&mut c, font, 340, 249, &[("AAA: ", None), ("", Some(31))]);
-        self.line(&mut c, font, 340, 263, &[("SAM: ", None), ("", Some(32))]);
-        c.text(
-            &sprites["SMLFONT.PIC"],
-            "Airborne patrol preview; no enemy AI or objectives yet.",
-            35,
-            348,
-            None,
-        );
+        let (mut x, mut y) = (340, 221);
+        for (text, id) in [
+            ("Friendly ground target is ", None),
+            ("", Some(30)),
+            ("", Some(31)),
+            ("defended by AAA and ", None),
+            ("", Some(32)),
+            ("defended by SAMs.", None),
+        ] {
+            let text = id.map(|i| self.value(i)).unwrap_or_else(|| text.into());
+            for word in text.split_whitespace() {
+                let width = text_width(font, word);
+                if x + width > 605 {
+                    x = 340;
+                    y += 14;
+                }
+                if let Some(id) = id {
+                    let rect = (
+                        x - 1,
+                        y - 1,
+                        width + 2,
+                        font.glyphs.iter().map(|g| g[2]).max().unwrap_or(9) as i32 + 2,
+                    );
+                    self.controls.push((id, rect));
+                    c.rect(
+                        rect,
+                        if self.hover == Some(id) {
+                            [127, 139, 144, 255]
+                        } else {
+                            [101, 107, 109, 255]
+                        },
+                    );
+                    bevel(&mut c, rect, false);
+                }
+                c.text(font, word, x, y, None);
+                x += width + text_width(font, " ") + if id.is_some() { 2 } else { 0 };
+            }
+        }
         self.button(&mut c, sprites, OK, "OK", (387, 419, 85, 24));
         self.button(&mut c, sprites, CANCEL, "Cancel", (492, 419, 85, 24));
         if let Some(message) = &self.notice {
@@ -467,30 +495,61 @@ impl QuickMission {
         }
         if let Some(field) = self.selector {
             self.controls.clear();
-            c.rect(POPUP, [176, 183, 179, 255]);
-            c.rect((205, 115, 230, 304), [213, 216, 209, 255]);
-            for (row, text) in self
-                .values(field)
-                .iter()
-                .skip(self.scroll)
-                .take(ROWS)
-                .enumerate()
-            {
-                let y = 115 + row as i32 * 14;
-                if self.cursor == self.scroll + row {
-                    c.rect((205, y, 230, 14), [125, 148, 129, 255]);
+            // Reuse the original metal panel texture, inset list wells and rocker.
+            let background = &sprites["QUIKMIS3.PIC"];
+            for y in 0..POPUP.3 {
+                for x in 0..POPUP.2 {
+                    let source = (((140 + y % 240) as usize * WIDTH) + (50 + x % 240) as usize) * 4;
+                    c.rect(
+                        (POPUP.0 + x, POPUP.1 + y, 1, 1),
+                        background.rgba[source..source + 4].try_into().unwrap(),
+                    );
                 }
-                let label = fit(font, text, 224);
-                c.text(font, &label, 208, y + 1, Some([32, 42, 36]));
+            }
+            bevel(&mut c, POPUP, false);
+            for row in 0..ROWS {
+                let y = 116 + row as i32 * 18;
+                c.rect((207, y, 226, 14), [12, 16, 16, 255]);
+                bevel(&mut c, (207, y, 226, 14), true);
+                let Some(text) = self.values(field).get(self.scroll + row) else {
+                    continue;
+                };
+                stripe(
+                    &mut c,
+                    (209, y + 1, 11, 12),
+                    self.cursor == self.scroll + row,
+                );
+                c.text(font, &fit(font, text, 208), 223, y + 2, None);
             }
             for row in 0..ROWS.min(self.values(field).len().saturating_sub(self.scroll)) {
                 self.controls
-                    .push((ROW_BASE + row, (205, 115 + row as i32 * 14, 230, 14)));
+                    .push((ROW_BASE + row, (207, 116 + row as i32 * 18, 226, 14)));
+            }
+            c.text(font, "PAGE", 277, 394, None);
+            c.rect((307, 389, 50, 17), [12, 16, 16, 255]);
+            bevel(&mut c, (307, 389, 50, 17), true);
+            c.text(
+                font,
+                &format!(
+                    "{} of {}",
+                    self.scroll / ROWS + 1,
+                    self.values(field).len().div_ceil(ROWS).max(1)
+                ),
+                314,
+                394,
+                None,
+            );
+            c.text(font, "PREV", 380, 394, None);
+            c.text(font, "NEXT", 380, 417, None);
+            let rocker = &sprites["ROCKER00.PIC"];
+            c.blit(rocker, (410, 393), 0, rocker.width, 1.);
+            self.controls
+                .extend([(UP, (410, 393, 18, 17)), (DOWN, (410, 410, 18, 17))]);
+            if self.values(field).is_empty() {
+                c.text(font, "No imported aircraft available.", 209, 118, None);
             }
             self.button(&mut c, sprites, POP_OK, "OK", (217, 437, 85, 24));
             self.button(&mut c, sprites, POP_CANCEL, "Cancel", (312, 437, 85, 24));
-            self.button(&mut c, sprites, UP, "-", (440, 120, 20, 24));
-            self.button(&mut c, sprites, DOWN, "+", (440, 385, 20, 24));
         }
     }
     fn line(
@@ -506,10 +565,18 @@ impl QuickMission {
             let text = id
                 .map(|i| self.value(i))
                 .unwrap_or_else(|| text.to_string());
+            if id.is_some() {
+                x += 2;
+            }
             let text = fit(font, &text, if x < 320 { 299 - x } else { 605 - x });
             let width = text_width(font, &text);
             if let Some(id) = id {
-                let r = (x - 1, y - 1, width + 2, 13);
+                let r = (
+                    x - 1,
+                    y - 1,
+                    width + 2,
+                    font.glyphs.iter().map(|g| g[2]).max().unwrap_or(9) as i32 + 2,
+                );
                 self.controls.push((*id, r));
                 c.rect(
                     r,
@@ -519,9 +586,10 @@ impl QuickMission {
                         [101, 107, 109, 255]
                     },
                 );
+                bevel(c, r, false);
             }
-            c.text(font, &text, x, y, Some([224, 225, 221]));
-            x += width;
+            c.text(font, &text, x, y, None);
+            x += width + if id.is_some() { 2 } else { 0 };
         }
     }
     fn button(
@@ -532,18 +600,60 @@ impl QuickMission {
         label: &str,
         r: Rect,
     ) {
-        self.controls.push((id, r));
+        let default = id == OK || id == POP_OK;
+        let marker = if default { 20 } else { 0 };
+        let frame = (r.0 - marker, r.1 - 3, r.2 + marker - 5, 27);
+        self.controls.push((id, frame));
+        if default {
+            let cap = &sprites["ACTDFLT.PIC"];
+            c.blit(cap, (r.0 - cap.width as i32, r.1 - 3), 0, cap.width, 1.0);
+        }
+        // Default artwork includes three extra top rows. Align the colour faces.
         c.button_style(
             sprites,
-            label,
-            (r.0, r.1, r.2),
+            "",
+            (r.0, r.1 - if default { 3 } else { 0 }, r.2),
             if self.pressed == Some(id) { 0.8 } else { 1.0 },
-            if id == OK || id == POP_OK {
-                "ACTDFT0"
-            } else {
-                "ACTION0"
-            },
+            if default { "ACTDFT0" } else { "ACTION0" },
         );
+        let font = &sprites["QUICKFONT"];
+        let height = label
+            .bytes()
+            .map(|b| font.glyphs[b as usize][2])
+            .max()
+            .unwrap_or(0) as i32;
+        c.text(
+            font,
+            label,
+            r.0 + (r.2 - 10 - text_width(font, label)) / 2,
+            r.1 + (21 - height) / 2 + 2,
+            None,
+        );
+    }
+}
+fn bevel(c: &mut Canvas, (x, y, w, h): Rect, inset: bool) {
+    let light = [115, 120, 119, 255];
+    let dark = [24, 27, 27, 255];
+    let (top, bottom) = if inset { (dark, light) } else { (light, dark) };
+    c.rect((x, y, w, 1), top);
+    c.rect((x, y, 1, h), top);
+    c.rect((x, y + h - 1, w, 1), bottom);
+    c.rect((x + w - 1, y, 1, h), bottom);
+}
+fn stripe(c: &mut Canvas, (x, y, w, h): Rect, selected: bool) {
+    // Fitted diagonal status marker, using the reference's blue/gold treatment.
+    let colors = if selected {
+        [[230, 181, 39, 255], [73, 53, 17, 255]]
+    } else {
+        [[180, 193, 215, 255], [58, 94, 168, 255]]
+    };
+    for yy in 0..h {
+        for xx in 0..w {
+            c.rect(
+                (x + xx, y + yy, 1, 1),
+                colors[((xx - yy).rem_euclid(6) / 3) as usize],
+            );
+        }
     }
 }
 fn source_theaters() -> [&'static str; 16] {
@@ -638,6 +748,38 @@ mod tests {
         q.aircraft_names = vec!["Hornet".into(), "Rafale".into(), "Other".into()];
         q.aircraft_files = vec!["F18.PT".into(), "RAFALE.PT".into(), "OTHER.PT".into()];
         q
+    }
+    #[test]
+    fn selectors_page_and_cancel_without_changing_the_draft() {
+        let mut q = setup();
+        q.activate(13);
+        assert_eq!(q.selector, Some(13));
+        q.activate(DOWN);
+        assert_eq!(q.scroll, 15);
+        q.activate(ROW_BASE);
+        assert_eq!(q.cursor, 15);
+        q.activate(POP_CANCEL);
+        assert_eq!(q.draft.values[13], 0);
+        q.open(13);
+        q.key("PageDown", false);
+        assert_eq!((q.scroll, q.cursor), (15, 15));
+        q.key("Enter", false);
+        assert_eq!(q.draft.values[13], 15);
+        q.aircraft_names.clear();
+        q.aircraft_files.clear();
+        q.open(6);
+        assert_eq!(q.activate(POP_OK), Action::None);
+        assert!(q.player().is_none());
+    }
+    #[test]
+    fn catalog_metadata_and_variant_aliases_do_not_create_imported_aircraft() {
+        let options = setup().options;
+        let data = ["F18C.PT", "RAFALEE.PT", "RAFALEF.PT", "OTHER.PT", "F18.PT"]
+            .into_iter().map(|name| (name.to_string(), format!(
+                "[brent's_relocatable_format]\n:ot_names\nstring \"Plane\"\nstring \"Planes\"\nstring \"{name}\"\nend\n"
+            ).into_bytes())).collect();
+        let q = QuickMission::new(AircraftId::F18, options, &data);
+        assert!(q.aircraft_files.is_empty());
     }
     #[test]
     fn draft_cancel_and_pointer_release_are_transactional() {

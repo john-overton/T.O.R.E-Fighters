@@ -200,3 +200,6 @@ and does not change A-4E presentation or flame geometry.
 Researched flight is now the default; `--legacy-flight` preserves the previous
 model. HUD and audio share the [stall warning signal](spec/stall-warnings.md),
 including the original imported warning samples.
+
+Quick Mission lists only supported aircraft with parsed imported flight profiles,
+not the wider metadata catalog. See [selector behaviour](spec/quick-mission-menu.md).

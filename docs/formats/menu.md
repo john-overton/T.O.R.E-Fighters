@@ -24,6 +24,7 @@ This is the first native menu slice, researched against the user's local media o
 | --- | --- | --- |
 | `CHOOSEV.PIC` | `FA_1.LIB` | Exact aircraft/background variant in the user's photo; 640 × 480, embedded 256-color palette, title, logo, blank menu bar, panels, screws and Jane's plaque |
 | `CHOOSEAC.PIC`, `CHOOSE3.PIC`, `CHOOSEU.PIC`, `CHOOSEM.PIC` | `FA_1.LIB` | Other original backgrounds; randomly selected on menu setup |
+| `ACTDFLT.PIC` | `FA_1.LIB` | 20 by 27 default-button cap: striped marker, blue outer edge and left face rim |
 | `ACTION0L/M/R.PIC` | `FA_1.LIB` | Original enabled green button caps/middle/shadow |
 | `ACTIOD0L/M/R.PIC` | `FA_1.LIB` | Original disabled gray button caps/middle/shadow |
 | `FONTACT.PIC` / `FONTACD.PIC` | `FA_1.LIB` | Enabled/disabled proportional button labels, each a 1064 × 12 strip with 256 glyph records |
@@ -140,17 +141,12 @@ Wing 1, and selectable theater inside “You are flying over…”. The separate
 inset and Theater/Flight Setup box are removed. Aircraft on the top bar opens
 the same aircraft selector. OK starts clean free flight; Cancel returns.
 
-Original QUIKMIS3, ARMFONT/MENUFONT/FONTACT and button pieces are retained. The
-blue OK button uses imported ACTDFT0L/M/R; Cancel uses ACTION0L/M/R. Briefing field
-rectangles derive from the original font's glyph advances. Unavailable wing,
-enemy, loadout, weather and mission options have dim text/boxes without hit
-regions. The exact fills, popup layouts, keyboard traversal and hover/press
-presentation are fitted/authored, not decoded native DLG behavior. No opponents
-are spawned and no editable setting is represented as implemented merely to fill
-the screenshot. Matching press/release and click-only audio remain enforced.
-
-Both selectors support mouse and keyboard, commit only on selection, and close
-on Escape before leaving the creator. [Acceptance evidence](../baselines/rafale-quick-mission.md).
+Original QUIKMIS3, ARMFONT/MENUFONT/FONTACT and button pieces are retained.
+Current selector presentation, compact font metrics, bevels and filtering are
+specified in the [Quick Mission menu spec](../spec/quick-mission-menu.md).
+All briefing fields remain editable, with unsupported mission settings rejected
+at launch. Selectors commit with OK/Enter; Cancel/Escape preserves the draft.
+Matching press/release and click-only audio remain enforced.
 
 ### Authored controls editor and saved preferences
 

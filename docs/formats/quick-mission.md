@@ -246,5 +246,5 @@ any nonzero overlap as full eligibility, or catalog presence as flyable support.
 The app now consumes the fingerprinted active tables through `ui::creator` and an
 inert cache; scalar controls, list acceptance/cancel, nationality/target dependencies
 and supported airborne setup are wired. Aircraft catalog metadata is imported at
-runtime; native eligibility/era flags remain incomplete. Popup geometry and sentence
-fitting are provisional. [Behavior and acceptance](../baselines/creator-ordnance.md).
+runtime; native eligibility/era flags remain incomplete. Popup presentation and imported-only filtering are defined by the
+[fitted menu specification](../spec/quick-mission-menu.md). [Behavior and acceptance](../baselines/creator-ordnance.md).

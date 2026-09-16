@@ -402,6 +402,25 @@ impl Menu {
                 },
             );
         }
+        // Open-licensed Noto Sans Bold atlas, independent of retail artwork.
+        // Regenerate with tools/build_menu_font.py; license is beside the atlas.
+        let atlas = include_bytes!("../assets/menu-font.bin");
+        let glyphs = (0..256)
+            .map(|code| [code * 16, atlas[code] as usize, 11])
+            .collect();
+        let rgba = atlas[256..]
+            .iter()
+            .flat_map(|&alpha| [232, 233, 230, alpha])
+            .collect();
+        quick_sprites.insert(
+            "QUICKFONT".into(),
+            Sprite {
+                width: 4096,
+                height: 11,
+                rgba,
+                glyphs,
+            },
+        );
         for (name, bytes) in &assets.theater_resources {
             if name.ends_with(".T2") {
                 let t = tore_formats::theater::Theater::parse(bytes)?;
@@ -599,7 +618,12 @@ impl Canvas<'_> {
                 }
                 let dest = (dy as usize * WIDTH + dx as usize) * 4;
                 for c in 0..3 {
-                    self.0[dest + c] = (s.rgba[source + c] as f32 * gain).min(255.0) as u8;
+                    let foreground = (s.rgba[source + c] as f32 * gain).min(255.0) as u32;
+                    let alpha = s.rgba[source + 3] as u32;
+                    self.0[dest + c] = ((foreground * alpha
+                        + self.0[dest + c] as u32 * (255 - alpha)
+                        + 127)
+                        / 255) as u8;
                 }
                 self.0[dest + 3] = 255;
             }
@@ -642,6 +666,20 @@ impl Canvas<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn translucent_glyph_edges_blend_with_the_field_background() {
+        let mut pixels = vec![40; WIDTH * HEIGHT * 4];
+        let sprite = Sprite {
+            width: 3,
+            height: 1,
+            glyphs: vec![],
+            rgba: vec![224, 224, 224, 128, 224, 224, 224, 0, 224, 224, 224, 255],
+        };
+        Canvas(&mut pixels).blit(&sprite, (0, 0), 0, 3, 1.0);
+        assert_eq!(&pixels[..4], &[132, 132, 132, 255]);
+        assert_eq!(&pixels[4..8], &[40; 4]);
+        assert_eq!(&pixels[8..12], &[224, 224, 224, 255]);
+    }
     #[test]
     fn tinted_text_preserves_shading_and_transparency() {
         let mut glyphs = vec![[0, 0, 0]; 256];

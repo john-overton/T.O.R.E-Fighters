@@ -209,7 +209,7 @@ impl Renderer {
             view_formats: &[],
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            mag_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });

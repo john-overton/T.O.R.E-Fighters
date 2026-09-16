@@ -18,17 +18,19 @@
 ## Delivered behavior
 
 All 30 briefing fields are editable from the fingerprinted active FA selector
-contract. Scalar clicks cycle; Shift-click opens the list. Aircraft clicks open
-the imported metadata catalog. List selection commits with OK/Enter; Cancel/Escape
+contract. Scalar clicks cycle; Shift-click opens the list. Aircraft and theater clicks open
+the paged selector. Aircraft choices now follow the
+[imported-only menu specification](../spec/quick-mission-menu.md). List selection commits with OK/Enter; Cancel/Escape
 preserves the previous field. Theater selection maps all 16 source entries by
 identity and resets nationality/target dependencies. Friendly Wing 1 cannot be zero.
 
-Creator OK validates the supported airborne preview: F/A-18D or Rafale C, one
-player aircraft, all other wings zero, no ground targets/defenses, clear conditions.
+Creator OK validates the supported airborne preview: a supported imported aircraft, one
+player aircraft, all other wings zero, no ground targets/defenses, and one of the
+six supported weather conditions.
 Selected 5,000/10,000/20,000/40,000-foot altitude is passed unchanged; insufficient
 local terrain clearance rejects launch. Nationality, skill, situation and separation
 remain setup data with no AI/objective effects. BARCAP mission generation is not
-implemented; the screen explicitly identifies the patrol preview.
+implemented; unsupported configurations are explained by launch notices.
 
 Custom weapons opens Load Ordnance with the original background/palette, fonts,
 weapon thumbnails, station headings, dial and rocker art. Catalog categories retain

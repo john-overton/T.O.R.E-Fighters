@@ -19,6 +19,7 @@ const ART: &[&str] = &[
     "CHOOSE3.PIC",
     "CHOOSEU.PIC",
     "CHOOSEM.PIC",
+    "ACTDFLT.PIC",
     "ACTDFT0L.PIC",
     "ACTDFT0M.PIC",
     "ACTDFT0R.PIC",
