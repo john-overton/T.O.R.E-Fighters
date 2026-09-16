@@ -55,8 +55,60 @@ cargo run --locked -p tore-app -- --quick-mission --snapshot .local/theater-rese
 
 Captures remain ignored at `.local/theater-research/terrain.ppm` and `quick.ppm`, with local PNG conversions. Terrain capture uses the actual sim GPU pass without the HUD; creator capture is CPU-only. No Linux/Windows graphical runtime or original-game side-by-side flight comparison was performed. No new audible acceptance of weather/flight sounds is claimed.
 
-## Parity limits and next gate
+## Historical parity limits and next gate (2026-09-13)
 
-The fixed full-resolution mesh, water palette fallback, spherical SKY0 projection and distance fog are initial rendering choices. Native adaptive subdivision, shoreline coverage, fallback terrain materials, 3D objects and native lighting remain open. DAY2 keyframe 2 supplies source colors, but time/altitude interpolation and weather simulation remain unimplemented. Sun/moon/star/cloud shapes are **extracted, not rendered**. No aircraft physics or mission generation is present.
+This paragraph records the initial implementation, not current coverage. The water fallback is superseded by the shoreline correction below; current weather/flight coverage is in [the parity plan](../parity-plan.md). The fixed full-resolution mesh, water palette fallback, spherical SKY0 projection and distance fog were initial rendering choices. Native adaptive subdivision, shoreline coverage, fallback terrain materials, 3D objects and native lighting remain open. DAY2 keyframe 2 supplies source colors, but time/altitude interpolation and weather simulation remain unimplemented. Sun/moon/star/cloud shapes are **extracted, not rendered**. No aircraft physics or mission generation is present.
 
 Next: recover sky/cloud SH commands and native weather scheduling, native terrain coverage/LOD, ground-object dependencies and a second theater; compare identifiable original landmarks and controlled weather scenarios. Track these separately in [progress](../research/progress.md); this baseline does not close M1b.
+
+## Shoreline correction, 2026-09-16
+
+Implementation mode, responding to the green strips beyond beaches reported in
+Ukraine quick mission at 5,000 feet. Linux, NVIDIA GeForce RTX 4070, Vulkan.
+The default Ukraine viewer pose reproduced the same artifact before the change.
+
+The source terrain texture already marked the water correctly. The shared
+surface shader turned index-255 texels into zero alpha, then mixed them with the
+T2 base land color and wrote an opaque pixel/depth. Untextured color-255 cells
+also wrote a flat palette-223 placeholder. Those two paths produced the
+rectangular green fringe and flat open water. This was a renderer composition
+bug, not evidence of corrupt theater extraction.
+
+Terrain now has its own fragment entry point: water coverage discards without
+writing color/depth, revealing the existing ocean/horizon pass. Untextured water
+emits no opaque geometry. Aircraft retain the previous material path. Source
+texture placements, UV rotations, T2 heights and simulation queries are unchanged.
+[Provenance, exact coverage rule and remaining scope](../spec/terrain-shorelines.md).
+
+Matched local captures: `.local/shoreline/before.ppm` and `after.ppm` at the
+unchanged default Ukraine viewer pose. Visual inspection confirms the green
+strips are gone and the ocean reaches the beach. Retail-derived images remain
+ignored. Additional captures and check logs are in `.local/shoreline/`.
+
+Reproduction:
+
+```sh
+target/debug/tore-app --theater UKR --capture-terrain .local/shoreline/after.ppm --no-audio
+TORE_WEATHER_VIEW=1070000,5000,590000,17.1887,-10 target/debug/tore-app --capture-terrain .local/shoreline/low.ppm --no-audio
+target/debug/tore-app --capture-flight .local/shoreline/flight.ppm --no-audio
+```
+
+Validation:
+
+- Formatting, warnings-denied workspace/all-target Clippy, locked workspace build
+  and **367 Rust tests** passed. The synthetic shoreline regression verifies
+  open-water omission, preservation of textured beach geometry in all four
+  rotations, untextured land and unchanged height queries.
+- **40 Python tests**, documentation checks, diff whitespace check, and repository
+  plus both debug executable asset guards passed.
+- Real window/GPU checks passed for menu and creator; Ukraine terrain at 28,000
+  and 5,000 feet and cockpit flight with mirrors rendered successfully.
+- All **16 theater startup captures** succeeded. APA/BAL/CUB/EGY used their
+  mission defaults. France's default stopped before rendering with the existing
+  `mission wind outside source range` error; FRA and the remaining theaters
+  used `TORE_WIND=0,0` to isolate rendering. Contact sheets are
+  `.local/shoreline/theaters-a.png` and `theaters-b.png`. These checks cover the
+  starting views, not every shoreline in every theater.
+
+macOS/Windows runtime checks and a retail comparison are unavailable on this host.
+No change to simulation or claim of retail raster parity is implied.

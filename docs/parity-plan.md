@@ -48,7 +48,7 @@ name, with the numbers a player would notice.
 
 | Spec | Covers | Status |
 | --- | --- | --- |
-| n/a | n/a | None written yet |
+| [Terrain shorelines](spec/terrain-shorelines.md) | Beach/water coverage and absence of land-color strips | Implemented; validation in the viewer baseline |
 
 The research to build the first specs from already exists: recovered numbers are
 in [`formats/`](formats/) (weather, native flight, quick mission, ordnance menu,
@@ -63,7 +63,7 @@ player-visible numbers out of those files and leaving the byte layouts behind.
 | Main menu and Choose Activity | Original art, fonts, sounds, five backgrounds | native assets, spec-derived layout | [main-menu](baselines/main-menu.md) |
 | Quick Mission creator | Briefing screen, aircraft and theater selection, editable fields | mixed | [creator/ordnance](baselines/creator-ordnance.md) |
 | Load Ordnance screen | Original art, compatible weapon and fuel edits | mixed | [creator/ordnance](baselines/creator-ordnance.md) |
-| Theaters | All 16 selectable, terrain renderer, free camera | native data, fitted rendering | [viewer](baselines/ukraine-viewer.md) |
+| Theaters | All 16 selectable, terrain renderer, free camera; shoreline water cutouts corrected | native data, fitted rendering | [viewer](baselines/ukraine-viewer.md) |
 | Weather | Day/night palettes, horizon, sun/moon/stars, cloud sheets, fog maps | mixed | [weather](baselines/weather.md), [review](baselines/weather-review.md) |
 | F/A-18D and Rafale C free flight | Cockpit, HUD, instrument windows, mirrors, external views, animation rigs | fitted flight laws, native-derived components | [flight response](baselines/flight-response.md), [mirrors](baselines/mirrors.md) |
 | Ground contact and landing | Runway contact, taxi, brakes, touchdown | **opinionated**, authored, not awaiting a recovered producer | [land foundation](baselines/native-land-foundation.md) |
