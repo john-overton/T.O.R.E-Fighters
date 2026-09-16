@@ -9,6 +9,7 @@ pub mod music;
 pub mod pcm;
 mod pic;
 pub mod shape;
+pub mod strip;
 pub mod theater;
 pub mod ui;
 pub mod weapons;

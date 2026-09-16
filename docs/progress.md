@@ -1134,3 +1134,15 @@ only the diagnostic precursor; the parent first slice remains researching.
 [Source contract](formats/native-strip.md), [metadata validation](baselines/native-strip.md),
 [lifecycle validation](baselines/native-strip-lifecycle.md),
 [placement validation](baselines/native-strip-placement.md).
+
+
+## Bounded STRIP definition — 2026-09-15
+
+- [x] NE-01.1a: validate the reviewed STRIP/166 BRF metadata and explicit shape
+  reference, preserving unknown values/scaling markers and rejecting unsupported
+  classes, layouts, selectors, paths and extra shape slots.
+- [x] Inspect original STRIP.OT with RUNWAY.SH through the shared formats reader.
+- [ ] Complete full placement/resource/template/scheduler/query integration. This
+  reader adds no runtime eligibility or general OT/NT support.
+
+[Contract](formats/native-strip.md), [validation](baselines/native-strip-definition.md).

@@ -348,3 +348,10 @@ The same reviewed-build pass now exports `tables/strip-template.bin`, the bounde
 It contains inert pointer words and uninterpreted defaults; it is diagnostic
 data, not an executable callback table or a live-world input. No new requirement
 is added to the airborne option. [Lifecycle evidence](baselines/native-strip-lifecycle.md).
+
+Inspect the selected extracted definition and shape together with
+`cargo run --locked -p tore-formats --example native_strip -- RUNWAY.SH STRIP.OT`.
+The shared formats reader validates the reviewed static STRIP/166 metadata;
+the diagnostic checks the shape basename against its explicit reference. It does
+not extend app/CLI extraction profiles, resolve the full drawing program or place
+an airport. [Definition-reader scope](baselines/native-strip-definition.md).

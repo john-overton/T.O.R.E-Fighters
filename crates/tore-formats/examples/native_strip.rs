@@ -4,8 +4,22 @@ use tore_formats::shape::{self, Shape};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = env::args().skip(1).collect();
-    if args.len() != 1 {
-        return Err("usage: native_strip RUNWAY.SH".into());
+    if !(1..=2).contains(&args.len()) {
+        return Err("usage: native_strip RUNWAY.SH [STRIP.OT]".into());
+    }
+    if let Some(path) = args.get(1) {
+        let definition = tore_formats::strip::Definition::parse(&fs::read(path)?)?;
+        let shape_name = std::path::Path::new(&args[0])
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or("invalid shape filename")?;
+        if !shape_name.eq_ignore_ascii_case(&definition.shape) {
+            return Err("shape filename does not match the STRIP definition reference".into());
+        }
+        println!(
+            "{path}: shape={}, flags={:#x}; definition metadata only",
+            definition.shape, definition.flags
+        );
     }
     let bytes = fs::read(&args[0])?;
     let boxes = shape::contact_boxes(&bytes)?.ok_or("shape has no F2 box list")?;

@@ -131,7 +131,7 @@ impl Brf {
             .collect()
     }
 }
-fn fields(tokens: &[Token], layout: &[(&str, &str)]) -> Result<BTreeMap<String, Token>> {
+pub(crate) fn fields(tokens: &[Token], layout: &[(&str, &str)]) -> Result<BTreeMap<String, Token>> {
     if tokens.len() != layout.len() {
         return Err(invalid("BRF schema length mismatch"));
     }

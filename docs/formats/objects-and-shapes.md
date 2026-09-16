@@ -281,3 +281,9 @@ are separate from visible mesh vertices. `native_strip RUNWAY.SH` diagnoses the
 required IDs and partial static texture references. Full world/collision and
 drawing acceptance remain open. [Contract](native-strip.md),
 [commands and validation](../baselines/native-strip.md).
+
+`native_strip RUNWAY.SH STRIP.OT` also validates the bounded STRIP/166 definition
+and matches its explicit shape filename. Unknown source tokens remain preserved;
+extra shape slots, different selectors/classes and unsupported layouts fail.
+This is metadata inspection, not object placement or full resource resolution.
+[Definition-reader evidence](../baselines/native-strip-definition.md).

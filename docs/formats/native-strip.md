@@ -4,7 +4,7 @@
 [living plan](../native-environment-systems-plan.md). **Native static source**
 from the exact [reviewed EXE/SMS](native-flight.md). The bounded box reader,
 midpoint arithmetic, mission nationality conversion and candidate-list operations
-are translated/tested.
+are translated/tested. NE-01.1a adds bounded STRIP definition metadata below.
 No runway is runtime-connected; retail comparison is unavailable.
 [Metadata validation](../baselines/native-strip.md),
 [lifecycle validation](../baselines/native-strip-lifecycle.md),
@@ -292,3 +292,30 @@ deadline gates can avoid those draws. This does **not** establish that every
 STRIP service draws RNG. The complete predicates and callback effects remain
 unreviewed; do not implement or activate autonomous branches. This unresolved
 ownership edge must be reconciled with E002 before claiming native replay.
+
+## Bounded STRIP definition metadata — NE-01.1a
+
+`strip::Definition::parse` reuses the bounded BRF grammar and packed OBJECT field
+order from [aircraft formats](aircraft.md), requiring a complete root layout,
+type 1, type size 166, instance size 0, class 0x0100, three identity strings with
+resource identity STRIP.OT, and the inert `_STRIPProc` selector name. It resolves
+the identity and main-shape labels from their actual pointer tokens. The reviewed
+null +0x13/+0x17 shape slots are required; additional dependencies are rejected.
+
+The reader exposes flags and an uppercase explicit SH name while retaining the
+entire BRF token tree, including uninterpreted numeric values and `^` markers.
+It does not silently apply scaling to unknown fields. Scaling markers on the
+interpreted header, identity or shape fields are unsupported and rejected.
+The existing 1 MiB BRF cap, exact root length/kinds and resolved-label checks
+apply. The shape name must be one bounded ASCII leaf ending in `.SH`, at most
+12 bytes; path separators, parent components and unsupported characters fail.
+These are host input limits, not a claim that every native OT name follows them.
+
+`native_strip RUNWAY.SH [STRIP.OT]` optionally validates the definition and
+checks its shape name against the supplied SH basename, then runs the existing
+box/partial-projection diagnostic. This does not validate source archive identity
+by basename alone: keep extraction reports and reviewed hashes with the inputs.
+Full OT field semantics, resource-manager behavior, shared app/CLI profile
+resolution, placement, templates, scheduling and E004 drawing closure remain
+separate gates. No definition token or symbol executes code.
+[Validation](../baselines/native-strip-definition.md).
