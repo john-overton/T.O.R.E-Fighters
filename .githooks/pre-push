@@ -1,0 +1,71 @@
+#!/bin/sh
+# Pre-push checks. Everything CI runs that this machine can run, so a broken
+# commit never reaches the remote. Cross-platform and GPU checks stay in CI.
+#
+# Install once per clone:  python3 tools/setup_dev.py
+# Bypass once, knowingly:  git push --no-verify
+
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+# Cargo is often missing from the environment a GUI Git client hands to hooks.
+if ! command -v cargo >/dev/null 2>&1 && [ -f "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+    PYTHON=python3
+elif command -v python >/dev/null 2>&1; then
+    PYTHON=python
+else
+    echo "pre-push: no python on PATH; install Python 3 or push with --no-verify" >&2
+    exit 1
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "pre-push: no cargo on PATH; see docs/DEVELOPMENT.md" >&2
+    exit 1
+fi
+
+EXE=""
+case "$(uname -s 2>/dev/null)" in
+    MINGW* | MSYS* | CYGWIN*) EXE=".exe" ;;
+esac
+
+failed=""
+
+run() {
+    label="$1"
+    shift
+    if "$@" >/tmp/tore-pre-push.log 2>&1; then
+        echo "  ok    $label"
+    else
+        echo "  FAIL  $label"
+        sed 's/^/        /' /tmp/tore-pre-push.log | tail -30
+        failed="yes"
+    fi
+}
+
+echo "Pre-push checks:"
+run "formatting"        cargo fmt --all -- --check
+run "clippy"            cargo clippy --workspace --all-targets --locked -- -D warnings
+run "tests"             cargo test --workspace --locked
+run "build"             cargo build --workspace --locked
+run "python tests"      "$PYTHON" -m unittest discover -s tools -p 'test_*.py'
+run "asset guard"       "$PYTHON" tools/check_assets.py
+run "app binary"        "$PYTHON" tools/check_assets.py "target/debug/tore-app$EXE"
+run "extractor binary"  "$PYTHON" tools/check_assets.py "target/debug/tore-extract$EXE"
+run "doc headers"       "$PYTHON" tools/check_docs.py
+
+rm -f /tmp/tore-pre-push.log
+
+if [ -n "$failed" ]; then
+    echo ""
+    echo "Push aborted. Fix the failures above, or push with --no-verify if you"
+    echo "know what you are doing."
+    exit 1
+fi
+
+echo "All checks passed."
+exit 0

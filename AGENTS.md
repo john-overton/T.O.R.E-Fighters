@@ -155,6 +155,11 @@ not have to be replaced by a `native` one before acceptance. See
 
 ## Development checks
 
+On a fresh clone, run `python3 tools/setup_dev.py` once. It points Git at the
+committed `.githooks/` directory, which installs a pre-push hook that runs the
+checks below and aborts the push if any fail. Git hooks are not version
+controlled, so a clone without that step has no hook at all.
+
 Run these before finishing, from the repository root. Full details and
 platform-specific setup are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 

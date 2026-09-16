@@ -90,6 +90,23 @@ display connection closes, and keep its window alive through GPU cleanup.
 
 Windows: install rustup from the official installer and Visual Studio 2022 Build Tools with **Desktop development with C++** and a Windows SDK. Use the MSVC Rust host toolchain. Install Python 3 and Git. Run the same Cargo commands in PowerShell; use `python` instead of `python3` where appropriate. The renderer can use Direct3D 12 or Vulkan.
 
+## Fresh clone
+
+Run this once, before anything else:
+
+```sh
+python3 tools/setup_dev.py
+```
+
+It sets `core.hooksPath` to the committed `.githooks/` directory and reports any
+missing tool. From then on `git push` runs the everyday checks below and aborts
+the push if any of them fail, so a broken commit never reaches the remote.
+Git hooks live in `.git/hooks/`, which is not version controlled, so every clone
+needs this step. A single push can skip the hook with `git push --no-verify`.
+
+The hook runs everything the CI job runs that a single machine can run. Windows,
+macOS and GPU checks stay in CI.
+
 ## Everyday checks
 
 Run from the repository root:
