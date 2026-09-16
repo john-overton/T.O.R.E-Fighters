@@ -1170,3 +1170,15 @@ only the diagnostic precursor; the parent first slice remains researching.
   required before world placement or either aircraft's live contact connection.
 
 [Contract](formats/native-strip.md), [validation](baselines/native-strip-record.md).
+
+## Airport and callback ownership ledger — 2026-09-15
+
+- [x] NE-00.1h: source airport lookup/reset, three template predicates, comment
+  selection/exit and separate actor-list insertion/removal/reset.
+- [x] E020 records speech-buffer clearing even before the suppression deadline,
+  per-airport mutable service fields and current-object switching dependencies.
+- [ ] Complete middle callback bodies, actor/attachment/clock/speech producers,
+  E016 remaining defaults and E004 before staged query/world integration.
+  No native callback execution or autonomous behavior is enabled.
+
+[Contract](formats/native-strip.md), [source validation](baselines/native-strip-ownership.md).

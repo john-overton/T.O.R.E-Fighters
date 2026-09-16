@@ -172,7 +172,8 @@ classes. Do not synthesize RUNWAY_A or RUNWAY_S from reference naming patterns.
 The static template at **0x50ccc8 is 0x134 bytes**, and is not zero-filled.
 The hash-gated static pass exports it as `tables/strip-template.bin`; it remains
 inert external diagnostic data. Its first five dwords are callback addresses,
-not host function pointers. Their downstream behavior is outside this slice.
+not host function pointers. NE-00.1h below reviews three predicate consumers;
+the first two callbacks and complete downstream ownership remain open.
 STRIPAddProc overwrites its local position/orientation inputs, type-derived flag
 bytes and current object ID, then transforms and copies the full record.
 Uninterpreted defaults must be preserved or explicitly unsupported; they cannot
@@ -423,3 +424,84 @@ Selecting a record from a larger MM is a research step, not a full mission
 resolver. Zero Y remains an input to the initial native ground query; no world,
 airport, candidate, scheduler or query state is constructed by this reader.
 [Validation](../baselines/native-strip-record.md).
+
+## Airport ownership and comment preflight — NE-00.1h
+
+**Source established for the bounded routines below; no translation or live
+callback activation.** These refinements of E016/E019 add E020 (ordered actor
+IDs, lookup/current-object ownership and speech scratch). Same reviewed EXE/SMS
+identities; [extraction and validation](../baselines/native-strip-ownership.md).
+
+### Airport records are mutable, independently of the source template
+
+`0x4bd2d0..0x4bd30f` returns the first airport record whose word +0xe6 matches
+the supplied ID, or null. It scans count 0x58b828 in forward order with stride
+0x134 from 0x58b850. This is the same ordered storage copied by APAdd, not a
+lookup into the static template. Native callers can retain pointers into this
+compacting storage; host identity/lifetime handling must avoid stale references.
+
+`0x4bd310..0x4bd3c9` clears exactly 18 bytes at +0x111..+0x122 of each active
+airport record. It then scans the separate actor-ID list described below and
+changes instance +0xe3 in inclusive ranges 1..0x12 or 0x13..0x1e to 0x1f. It
+does not clear the template, erase airport records, or clear comment state at
++0x127 onward. The direct caller at 0x4242b5 is a scheduling/lifecycle lead,
+not proof that this reset occurs on every service. Its complete caller context
+remains open. This must remain distinct from APInit's count/auxiliary reset.
+
+Three initial template callbacks now have bounded consumer evidence. They read
+the current instance's airport pointer at +0x231, not the static template:
+
+| Callback | Source-established inputs and predicates | Open dependency |
+| --- | --- | --- |
+| +8 → 0x4bab20 | Touching query first; null airport then fails. Replace current Y with record +0xae and compare approximate distance to point +0xaa against signed 0x7d00 inclusive | Native touching producer and attached-record ownership |
+| +0xc → 0x4bab80 | Null airport / byte +0xea clear fail before touching. Heading delta against +0xda passes 0x4c6614, folds around 0x7ff8 when AX >=0x3ffc, requires signed AX <=0x1554; distance to +0xc8 <=0xc800 inclusive | Angle helper, touching and pointer lifetime |
+| +0x10 → 0x4bac00 | Null airport fails. 0x411af0 on point +0xc8 must return signed AX <0x1ffe; 0x4c6614 heading/pitch deltas against +0xda/+0xdc must each return signed EAX <=0x1ffe | Direction helper and airport attachment producer |
+
+Distances use the already reviewed 0x4c66cc approximation (largest absolute
+component plus quarters of the others), not Euclidean length. Preserve each
+caller's word/dword comparison widths. These are predicate contracts, not
+permission to call inert template pointer words or activate approach behavior.
+The first two template callbacks and other nonzero defaults remain unaccepted.
+
+### Comment callback selection and observable early exit
+
+`APCommentProc` begins at 0x48f6a0 by calling 0x48d410, which zeroes bytes
+0x552ff0 and 0x553050 (two buffer starts). Only then does it compare unsigned
+word deadline 0x552fdc with word time 0x5528e0; deadline > time exits. Thus even
+a suppressed callback is not an effect-free no-op. Clock/deadline/buffer producers
+and later speech dispatch remain required owned state under NE-07a/E020.
+
+If not suppressed, it obtains the current STRIP's airport record through
+0x4bd2d0, then scans IDs at 0x5713a8 with signed-word count 0x570ef0. Each ID
+resolves through 0x491240. Eligibility requires instance flag 1, controller bit
+0x80, byte +0xe3 in 1..0x12 or 0x13..0x1e, the same nationality high bit as
+the STRIP, and instance airport pointer +0x231 equal to the looked-up record.
+A null record is not checked separately in this prefix; host construction must
+validate references rather than inherit unsafe later dereferences. Do not assume
+this list is empty simply because autonomous behavior is excluded.
+
+An eligible actor begins with byte rank 0 for the first range or 0x80 for the
+second. A successful 0x45e710 call adds its returned byte with byte wrapping.
+The first lowest unsigned rank wins; ties retain the earlier ID. With no chosen
+ID the callback exits through 0x49008b with the current-object-switch flag clear.
+After selection it switches current object via 0x4629e0; the middle action/speech
+branches remain unaccepted. The exit tail calls 0x462a20 only if that switch flag
+is set. These helpers' complete stack/lookup failure ownership remains open.
+
+The reviewed finish slice 0x490041..0x49009f writes airport word +0x129=current
+actor ID, byte +0x12b=current +0xe3, word +0x12c=distance-derived value; it calls
+0x48e950 and conditionally schedules +0x127 through 0x48d5e0 plus word time.
+Earlier unaccepted action branches also access +0x12e and +0x132. These are
+mutable per-airport service fields, not immutable template defaults. No claim
+is made that their generators share or do not share the flight RNG yet.
+
+### Ordered service actor list
+
+The bounded list producer at 0x49fa50 scans for a duplicate current ID first:
+duplicate returns 0 unchanged even when full; count >=60 returns 1; otherwise
+append and increment count, return 0. `0x49d520` removes the first supplied-ID
+match and compacts in forward order. `0x49d510` resets count only. These are
+separate from the 900/450 collision candidates and 40 airport records. The
+registration function address is selected at 0x49fb2e; full selector/caller and
+instance +0xe3/+0x231 producers remain to trace. No autonomous behavior or
+aircraft service is translated by recording this list's storage contract.

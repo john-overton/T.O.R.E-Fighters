@@ -16,6 +16,17 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('airport_comment_selection', 0x48f6a0, 0x48f7a6, 'ground'),
+    ('airport_comment_finish', 0x490041, 0x4900a0, 'ground'),
+    ('speech_buffer_reset', 0x48d410, 0x48d41d, 'ground'),
+    ('airport_lookup', 0x4bd2d0, 0x4bd310, 'ground'),
+    ('airport_service_reset', 0x4bd310, 0x4bd3ca, 'ground'),
+    ('airport_predicate_point', 0x4bab20, 0x4bab7c, 'ground'),
+    ('airport_predicate_axis', 0x4bab80, 0x4babfb, 'ground'),
+    ('airport_predicate_approach', 0x4bac00, 0x4bac6a, 'ground'),
+    ('service_actor_list_reset', 0x49d510, 0x49d51a, 'ground'),
+    ('service_actor_list_remove', 0x49d520, 0x49d57a, 'ground'),
+    ('service_actor_list_register', 0x49fa50, 0x49fa9f, 'ground'),
     ('object_service_dispatch', 0x462e70, 0x4631a9, 'ground'),
     ('object_service_priority', 0x464550, 0x464637, 'ground'),
     ('rng_word_bound', 0x4562f0, 0x4562fb, 'clock'),
