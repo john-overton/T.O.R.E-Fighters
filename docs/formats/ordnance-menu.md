@@ -19,7 +19,8 @@
 Static research against the hash-identified FA.EXE/SMS pair recorded in
 [menu evidence](../baselines/menu-contract-pass.md). Addresses below are virtual
 addresses in that executable. No imported instructions are executed. This is a
-partial source contract, not an implemented screen or full interaction parity.
+partial source contract, not full interaction parity. Current presentation is
+defined in the [ordnance presentation spec](../spec/ordnance-presentation.md).
 
 ## Actions, pages and fuel
 

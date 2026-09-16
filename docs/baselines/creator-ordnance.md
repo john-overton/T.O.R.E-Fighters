@@ -47,6 +47,9 @@ Accepted stores feed combat, geometry, instruments and flight payload without a
 practice target. Restart restores accepted ammunition, fuel and selected altitude.
 Direct CLI clean free flight and the explicit live-fire range remain available.
 
+Current visual validation is recorded in the
+[ordnance presentation pass](ordnance-presentation.md).
+
 ## Validation
 
 Linux, Rust 1.91.1, locked dependencies:

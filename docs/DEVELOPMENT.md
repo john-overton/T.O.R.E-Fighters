@@ -195,7 +195,7 @@ All 16 creator entries now select/load a theater, rebuild its GPU resources, upd
 
 Older Ukraine-only caches automatically re-import from default local media. For external media, refresh with `--import`. The creator/all-theater pack is capped at 256 MiB / 4,096 resources; it is still a development cache. Source textures use the first three theater-code characters (TVI for TVIET); Kurile's base MM has no numbered texture placements and currently renders palette-colored height geometry.
 
-Quick Mission uses a bundled, open-licensed Noto Sans Bold raster atlas for clean flat text, with beveled field boxes. See the [menu presentation spec](spec/quick-mission-menu.md) and [font provenance](../crates/tore-app/assets/README.md). Other menus retain their original imported fonts. No system font or new runtime dependency is required. Use `--quick-mission --snapshot .local/quick.ppm` to inspect the page.
+Quick Mission and Load Ordnance use a bundled, open-licensed Noto Sans Bold raster atlas for clean flat text, with beveled field boxes. See the [menu presentation spec](spec/quick-mission-menu.md) and [font provenance](../crates/tore-app/assets/README.md). Top menu bars retain MENUFONT and center labels using visible glyph bounds. Other menus retain their original imported fonts. No system font or new runtime dependency is required. Use `--quick-mission --snapshot .local/quick.ppm` to inspect the page.
 
 ## Hornet free flight
 

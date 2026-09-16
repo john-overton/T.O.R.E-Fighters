@@ -45,6 +45,11 @@ impl Ordnance {
                         "ORD_AIR3.PIC",
                         "DIAL00.PIC",
                         "DIAL04.PIC",
+                        "DIAL11.PIC",
+                        "DIAL13.PIC",
+                        "LIGHTON.PIC",
+                        "LIGHTOFF.PIC",
+                        "ACTDFLT.PIC",
                         "ROCKER00.PIC",
                         "PANELFNT.PIC",
                         "ARMFONT.PIC",
@@ -67,6 +72,13 @@ impl Ordnance {
                 },
             );
         }
+        for (name, color) in [
+            ("QUICKFONT", [232, 233, 230]),
+            ("WPNBLUE", [42, 124, 217]),
+            ("WPNYELLOW", [255, 211, 38]),
+        ] {
+            sprites.insert(name.into(), crate::menu::flat_font(color));
+        }
         let mut catalog: Vec<_> = data
             .iter()
             .filter(|(n, _)| n.ends_with(".JT") && !n.starts_with('~'))
@@ -84,7 +96,7 @@ impl Ordnance {
                 && let Ok(brf) = tore_formats::aircraft::Brf::parse(bytes)
                 && let Ok(names) = brf.strings("si_names")
                 && let Some(long) = names.get(1)
-                && text_width(&sprites["SMLFONT.PIC"], long) <= 111
+                && text_width(&sprites["QUICKFONT"], long) <= 111
             {
                 w.name = long.clone();
             }
@@ -260,11 +272,13 @@ impl Ordnance {
         pixels.copy_from_slice(&self.sprites["ORD_AIR3.PIC"].rgba);
         self.controls.clear();
         let mut c = Canvas(pixels);
-        let font = &self.sprites["SMLFONT.PIC"];
-        c.text(&self.sprites["MENUFONT.PIC"], "Weapons", 103, 36, None);
-        c.text(&self.sprites["MENUFONT.PIC"], "Airbase", 198, 36, None);
+        let font = &self.sprites["QUICKFONT"];
+        let menu_font = &self.sprites["MENUFONT.PIC"];
+        for (label, x) in [("?", 87), ("Weapons", 103), ("Airbase", 178)] {
+            c.centered_text(menu_font, label, (x, 38, text_width(menu_font, label), 20));
+        }
         self.controls
-            .extend([(11, (103, 35, 95, 24)), (14, (198, 35, 90, 24))]);
+            .extend([(11, (103, 35, 75, 24)), (14, (178, 35, 90, 24))]);
         let title = self.loadout.aircraft.label();
         c.text(
             &self.sprites["ARMFONT.PIC"],
@@ -311,7 +325,7 @@ impl Ordnance {
             .get(self.loadout.hardpoints[i].location as usize)
             .copied()
             .unwrap_or("Station");
-            c.text(&self.sprites["PANELFNT.PIC"], location, x + 1, y, None);
+            c.text(font, location, x + 1, y, None);
             if *n > 0 || s.internal {
                 card(
                     &mut c,
@@ -333,33 +347,41 @@ impl Ordnance {
             c.text(font, &amount, x + 2, y + 52, None);
         }
         let total = self.loadout.total_lbs();
-        let panel = &self.sprites["PANELFNT.PIC"];
         for (y, value) in [
             (351, self.loadout.maximum_lbs),
             (365, total),
-            (379, self.loadout.maximum_lbs - total),
+            (381, self.loadout.maximum_lbs - total),
         ] {
-            let text = format!("{value:.0} lbs");
-            c.text(panel, &text, 465 - text_width(panel, &text), y, None);
+            let text = format!("{} lbs", grouped(value));
+            c.centered_text(
+                font,
+                &text,
+                (
+                    467 - text_width(font, &text),
+                    y,
+                    text_width(font, &text),
+                    12,
+                ),
+            );
         }
-        let text = format!("{:.0} lbs", self.loadout.fuel_lbs);
-        c.text(panel, &text, 543 - text_width(panel, &text), 356, None);
-        c.text(
-            panel,
+        c.centered_text(
+            font,
+            &format!("{} lbs", grouped(self.loadout.fuel_lbs)),
+            (487, 354, 56, 14),
+        );
+        // The original background already supplies the percent sign.
+        c.centered_text(
+            font,
             &format!(
-                "{:.0}%",
+                "{:.0}",
                 100. * self.loadout.fuel_lbs / self.loadout.internal_capacity_lbs
             ),
-            487,
-            379,
-            None,
+            (487, 375, 27, 14),
         );
-        c.text(
-            panel,
+        c.centered_text(
+            font,
             &format!("{} of {}", page + 1, entries.len().div_ceil(8).max(1)),
-            249,
-            386,
-            None,
+            (248, 388, 48, 15),
         );
         let rocker = &self.sprites["ROCKER00.PIC"];
         c.blit(rocker, (260, 408), 0, rocker.width, 1.);
@@ -373,23 +395,31 @@ impl Ordnance {
             (4, (68, 420, 160, 31)),
         ]);
         let dial = &self.sprites[if self.category == 0 {
-            "DIAL00.PIC"
+            "DIAL13.PIC"
         } else {
-            "DIAL04.PIC"
+            "DIAL11.PIC"
         }];
-        c.blit(dial, (148, 394), 0, dial.width, 1.);
+        c.blit(dial, (148, 393), 0, dial.width, 1.);
+        for (category, y) in [(0, 394), (1, 422)] {
+            let lamp = &self.sprites[if self.category == category {
+                "LIGHTON.PIC"
+            } else {
+                "LIGHTOFF.PIC"
+            }];
+            c.blit(lamp, (115, y), 0, lamp.width, 1.);
+        }
         for (id, label, r) in [
             (7, "Fly", (493, 414, 80, 24)),
             (8, "Select Plane", (363, 414, 100, 24)),
         ] {
-            self.controls.push((id, r));
-            c.button_style(
+            let hit = c.action_button(
                 &self.sprites,
                 label,
                 (r.0, r.1, r.2),
-                if self.pressed == Some(id) { 0.8 } else { 1.0 },
-                if id == 7 { "ACTDFT0" } else { "ACTION0" },
+                id == 7,
+                self.pressed == Some(id),
             );
+            self.controls.push((id, hit));
         }
         if self.menu {
             c.rect((103, 60, 230, 50), [210, 214, 211, 255]);
@@ -402,7 +432,7 @@ impl Ordnance {
                 None,
             );
             self.controls = vec![
-                (11, (103, 35, 95, 24)),
+                (11, (103, 35, 75, 24)),
                 (12, (103, 60, 230, 25)),
                 (13, (103, 85, 230, 25)),
             ];
@@ -411,6 +441,21 @@ impl Ordnance {
             notice(&mut c, font, message);
         }
     }
+}
+fn grouped(value: f64) -> String {
+    let digits = format!("{value:.0}");
+    let mut result = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0
+            && ch.is_ascii_digit()
+            && (digits.len() - i).is_multiple_of(3)
+            && digits.as_bytes()[i - 1].is_ascii_digit()
+        {
+            result.push(',');
+        }
+        result.push(ch);
+    }
+    result
 }
 fn card(
     c: &mut Canvas,
@@ -434,18 +479,14 @@ fn card(
     if let Some(p) = sprites.get(&pic) {
         c.blit(p, (x + 1, y), 0, p.width, 1.);
     }
-    let font = &sprites[if selected {
-        "FNTWPNY.PIC"
-    } else {
-        "SMLFONT.PIC"
-    }];
+    let font = &sprites[if selected { "WPNYELLOW" } else { "QUICKFONT" }];
     let mut name = w.name.clone();
     while text_width(font, &name) > 111 && !name.is_empty() {
         name.pop();
     }
     c.text(font, &name, x, y + 25, None);
     if catalog {
-        let font = &sprites["FNTWPNB.PIC"];
+        let font = &sprites["WPNBLUE"];
         c.text(font, &format!("{} lbs", w.weight), x, y + 37, None);
         let guidance = if w.flags & 1 == 0 {
             "unguided"

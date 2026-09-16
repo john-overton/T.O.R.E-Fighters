@@ -61,3 +61,6 @@ down two pixels to match John's supplied close-up. Label placement remains fitte
 
 Exact original font choice, popup texture placement and field bevel composition remain
 unknown. Further research would inspect the original dialog drawing data.
+
+The Aircraft menu label is vertically centered by visible glyph bounds within
+y=38..58, matching the [ordnance menu bar](ordnance-presentation.md).

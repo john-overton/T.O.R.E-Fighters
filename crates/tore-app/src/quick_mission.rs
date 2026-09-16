@@ -382,7 +382,16 @@ impl QuickMission {
         self.controls.clear();
         let mut c = Canvas(pixels);
         let font = &sprites["QUICKFONT"];
-        c.text(&sprites["MENUFONT.PIC"], "Aircraft", 103, 36, None);
+        c.centered_text(
+            &sprites["MENUFONT.PIC"],
+            "Aircraft",
+            (
+                103,
+                38,
+                text_width(&sprites["MENUFONT.PIC"], "Aircraft"),
+                20,
+            ),
+        );
         self.controls
             .extend([(0, (84, 35, 18, 24)), (60, (103, 35, 95, 24))]);
         c.text(font, "FRIENDLY SITUATION", 116, 104, None);
@@ -600,35 +609,14 @@ impl QuickMission {
         label: &str,
         r: Rect,
     ) {
-        let default = id == OK || id == POP_OK;
-        let marker = if default { 20 } else { 0 };
-        let frame = (r.0 - marker, r.1 - 3, r.2 + marker - 5, 27);
-        self.controls.push((id, frame));
-        if default {
-            let cap = &sprites["ACTDFLT.PIC"];
-            c.blit(cap, (r.0 - cap.width as i32, r.1 - 3), 0, cap.width, 1.0);
-        }
-        // Default artwork includes three extra top rows. Align the colour faces.
-        c.button_style(
+        let hit = c.action_button(
             sprites,
-            "",
-            (r.0, r.1 - if default { 3 } else { 0 }, r.2),
-            if self.pressed == Some(id) { 0.8 } else { 1.0 },
-            if default { "ACTDFT0" } else { "ACTION0" },
-        );
-        let font = &sprites["QUICKFONT"];
-        let height = label
-            .bytes()
-            .map(|b| font.glyphs[b as usize][2])
-            .max()
-            .unwrap_or(0) as i32;
-        c.text(
-            font,
             label,
-            r.0 + (r.2 - 10 - text_width(font, label)) / 2,
-            r.1 + (21 - height) / 2 + 2,
-            None,
+            (r.0, r.1, r.2),
+            id == OK || id == POP_OK,
+            self.pressed == Some(id),
         );
+        self.controls.push((id, hit));
     }
 }
 fn bevel(c: &mut Canvas, (x, y, w, h): Rect, inset: bool) {
