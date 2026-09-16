@@ -1248,3 +1248,17 @@ AI, carrier or new aircraft activation.
 [Source contract](formats/native-strip.md#selected-stationary-movement-path--ne-001m),
 [validation](baselines/native-strip-movement.md). Ground sampling and flag-1 Y
 assignment remain required at zero speed; no runtime service or contact activation.
+
+
+## STRIP queue and speech observation — 2026-09-15
+
+- [x] NE-00.1n: recover queue/speech resets, routing caller order, sender-scoped
+  observation, default speech timing/sample sequence and mission-code gate.
+- [x] Record E022 output/resource ownership: full queues can still notify, and
+  empty speech can still advance deadlines; imported mission code stays inert.
+- [ ] Complete damage/cleanup, selected service/clock producers, comment middle
+  and owned output interfaces before staged world/query and runtime activation.
+
+[Source contract](formats/native-strip.md#queue-routing-and-speech-observation--ne-001n),
+[validation](baselines/native-strip-observer.md). Source ledger only; no runtime
+callback, audio, networking, AI or carrier activation.

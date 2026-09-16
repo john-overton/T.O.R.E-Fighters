@@ -789,8 +789,8 @@ unsigned +0x68 exceeds **widened word-clock +1** is switched in, reinserted thro
 `0x4626b0`, then switched out. At clock 0xffff that comparison uses 65536, not
 word zero. Enqueue can consequently mutate current scratch/stores and scheduling
 as well as the queue and RNG. Special recipients skip this wakeup path.
-Full recipient expansion, remote routing `0x470640`, speech observer and queue
-reset are not closed by these slices. No event emitter or scheduler is enabled.
+NE-00.1n below establishes queue reset, routing caller order and the speech
+observer. Expansion helpers, remote transport and output consumers remain open. No event emitter or scheduler is enabled.
 
 ## Initial commands and default event response — NE-00.1l
 
@@ -967,3 +967,107 @@ the established completion/event path. These are conditional source deductions,
 not a runtime result or permission to use a flat height/skip service callbacks.
 Nonzero speed/rates, other commands, mutated type state, and full service entry/
 exit ownership require their own accepted contracts. Live contact stays gated.
+
+## Queue routing and speech observation — NE-00.1n
+
+**Native source ledger only.** [Validation](../baselines/native-strip-observer.md).
+This extends E020/E021 and adds E022 for owned speech output/resource requests.
+It does not execute event callbacks, imported mission code, audio or networking.
+
+### Reset and enqueue routing
+
+`0x418070..0x418097` sets deadline +6 to 0xffff in each of the 120 stride-0xd5
+queue slots, then zeros word 0x522d38 and byte 0x522c58. It does not clear other
+record bytes or shared returned-record scratch. `0x48d2b0..0x48d2e2` separately
+zeros eight speech words: 0x552fdc, 0x55304c, 0x552fd8, 0x552fe4, 0x552fd4,
+0x4fef0c, 0x4fef08 and 0x5530cc. This is not the two string-start reset at
+0x48d410 and not the sample-handle reset at 0x48d600.
+
+The now contiguous enqueue slices `0x4180a0..0x41859e` establish caller ordering;
+recipient expansion helpers and remote transport are still unaccepted consumers:
+
+- The prefix ORs input flags with global byte 0x522c58. If preference dword
+  0x4eb6f8 lacks 0x100000 and flags lack 2, subtypes 0x11–0x15, 0x17, 0x1c–0x1e,
+  0x22 and 0x24 set suppression flag 1. The established bound-100 draw follows,
+  including when suppression applies.
+- Only mode word 0x520a50 ==0x10 expands recipients 0x8000/1/2 through group
+  helpers 0x45e710/0x45e630/0x45e6e0. An ordinary recipient is appended directly.
+  The resulting temporary ID list is consumed **backwards**, not forward.
+- IDs 0x8003–0x800b take the special-recipient branch; a special ID minus local
+  controller dword 0x4eb608 equal to 0x8003 selects local insertion. Ordinary
+  objects select local insertion when controller byte +0x10 &0x7f equals that
+  dword; otherwise a temporary record is constructed for transport 0x470640.
+- After record construction, qualifying player-sender speech is observed at
+  most once per enqueue invocation, before remote/local finalization. The prefix
+  qualification requires mode 0x10, nonzero live player ID, true 0x4747c0 and
+  kind 4. Observer flag 1 suppresses it. These producers remain explicit inputs,
+  not assumed properties of either supported aircraft.
+- A nonspecial, nonzero remote sender additionally receives one forwarded record
+  through 0x470640: temporarily set recipient to sender and OR flag 4, then
+  restore recipient/flags. Recipient transport follows. Neither transport nor
+  observer is equivalent to appending one inert event.
+- The terminal fallback can construct a self-addressed player-sender observation
+  when none was observed inside the loop, **including when local capacity skipped
+  all recipients**. It reuses the original draw; it does not draw again. Its
+  payload copy is not independently clamped there. Host validation must bound
+  the input before any queue/RNG/observer mutation; the ordinary-record clamp
+  alone is insufficient evidence of safety.
+
+### Sender-scoped observer and default callback
+
+`0x48d350..0x48d3b2` uses event **sender +2**, not recipient +4. If sender is
+nonzero, outside 0x8003–0x800b and differs from current ID, push/switch current
+object before dispatch. Ordinary senders dispatch callback request 6 with the
+record pointer; zero/special senders call 0x48d3c0 directly. Pop only if switched.
+Thus the earlier current-object store/restore contract also applies to queue
+observation. STRIP request 6 resolves the same default callback; other selectors
+and instance overrides remain separate dependencies.
+
+`0x48d3c0..0x48d401` first clears both speech-buffer starts. For subtype 0x24,
+payload +0xd contains two consecutive NUL-terminated strings; the second starts
+just after the first terminator. There is no payload-length check in this bounded
+callback. It passes the two pointers to `0x48d420`, then always calls 0x48d470.
+Host code must bound both terminators within the accepted payload and destination
+capacities before staging. No permissive unbounded C-string behavior is imported.
+
+`0x48d420..0x48d46b` appends a nonnull first string to buffer 0x552ff0. A nonnull
+second string is appended to 0x553050, with a comma separator if that destination
+was already nonempty. The pointer test is distinct from testing string contents.
+The native append calls have no capacity argument in this wrapper.
+
+### Output timing, resources and commit boundary
+
+`0x48d470..0x48d5db` first invokes 0x490480 for ordinary senders whose nationality
+low seven bits are 20 or 21. That formatter remains unresolved. A nonempty first
+buffer goes through sender/player naming and 0x405f50; those display/name
+consumers remain unresolved. A nonempty second buffer resets the sample handle
+and calls 0x48d610. Regardless of empty buffers, the tail writes global speech
+deadline 0x552fdc = word(clock 0x5528e0 + scaled_delay(3)). This differs from the
+submission wrapper's empty-buffers early return in NE-00.1j.
+
+`0x48d600..0x48d609` sets handle word 0x4ff058 to 0xffff. The sequence routine
+`0x48d610..0x48d6d7` temporarily replaces the next comma with NUL, copies that
+sample token, appends `.5K` only if no dot occurs anywhere in the token, and
+calls 0x433680. It restores the comma and continues in order. Each call receives
+the prior handle and gain `unsigned_word(0x5718ec) * 255 / 100`; returned AX
+replaces the handle unless it is 0xffff. Do not infer a universal 0–100 source
+range or reuse authored mixer gain as this contract. The sample loader/playback
+routine, string bounds and exact referenced sample closure remain open.
+
+E022 requires separating authoritative queue/current-object/buffer/deadline
+changes from externally committed display/audio requests. Preserve output order
+and handle-return dependencies; irreversible output cannot be rolled back by
+restoring a queue snapshot. Full output acceptance belongs to NE-07; its owned
+interface is needed before effects are dispatched by staged world service.
+
+### Mission interceptor selection
+
+`0x481f30..0x481f84` matches the mission keyword `code`, reads a name into
+0x4fb238 and applies the `.MC` extension through 0x4a6870. The activation gate
+`0x480aa0..0x480ac6` calls resource accessor 0x4a6ae0(name, 0x8000) and stores its
+result in global interceptor 0x4f6fb8 only when the name begins nonzero and local
+controller dword 0x4eb608 is zero. This is separate from the scheduler reset
+that clears the pointer. A nonempty code resource stays unsupported/inert;
+absence must be established from the chosen world input and reset lifecycle,
+not inferred from STRIP identity or the no-AI scope. This does not establish a
+full MM parser or complete mission lifecycle.

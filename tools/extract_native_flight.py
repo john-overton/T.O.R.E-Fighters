@@ -16,6 +16,19 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('event_queue_reset', 0x418070, 0x418098, 'ground'),
+    ('event_enqueue_recipients', 0x41818a, 0x4182e8, 'ground'),
+    ('event_enqueue_observers', 0x418382, 0x418433, 'ground'),
+    ('event_enqueue_fallback', 0x4184b6, 0x41859f, 'ground'),
+    ('speech_state_reset', 0x48d2b0, 0x48d2e3, 'clock'),
+    ('speech_event_observer', 0x48d350, 0x48d3b3, 'ground'),
+    ('speech_default_callback', 0x48d3c0, 0x48d402, 'ground'),
+    ('speech_buffer_append', 0x48d420, 0x48d46c, 'ground'),
+    ('speech_emit', 0x48d470, 0x48d5dc, 'ground'),
+    ('speech_handle_reset', 0x48d600, 0x48d60a, 'ground'),
+    ('speech_sample_sequence', 0x48d610, 0x48d6d8, 'ground'),
+    ('mission_interceptor_select', 0x480aa0, 0x480ac7, 'ground'),
+    ('mission_interceptor_name', 0x481f30, 0x481f85, 'ground'),
     ('object_movement_heading_common', 0x4374ac, 0x4376d6, 'ground'),
     ('object_movement_pitch_hold', 0x4376d6, 0x4376de, 'ground'),
     ('object_movement_pitch_ground', 0x4376f5, 0x43777b, 'ground'),
