@@ -10,7 +10,7 @@ acceptance.
 
 ## The decision this plan follows
 
-**D27 — 2026-09-15. Parity by expression of feature.** Recorded from John's
+**D30 — 2026-09-15. Parity by expression of feature.** Recorded from John's
 direction after eighteen plan revisions were built on a misreading of "replicate
 only native functionality":
 
@@ -18,16 +18,19 @@ only native functionality":
    the original program's code, control flow, caches or RNG ordering.
 2. "Native" is a provenance label only. It is never a requirement or a gate.
 3. Ground, terrain and object contact is reclassified as **opinionated** —
-   authored behaviour, no longer waiting on a recovered native producer.
+   authored behaviour, no longer waiting on a recovered native producer. In
+   practice this means both things: the ground contact that exists today is
+   accepted as shipped, and contact is now a feature to design deliberately
+   rather than a gap to be filled by recovery.
 4. Research mode produces prose specs under [`spec/`](spec/). Implementation mode
    reads a spec and builds the behaviour idiomatically.
 5. `spec-derived` is the default provenance for gameplay code. Fitted and
    opinionated components do not have to be replaced before acceptance.
 
-> **ID conflict, needs John's ruling.** The frozen environment plan already uses
-> D27 for "NE-00.1p scheduler/clock ownership", and its decision log runs to D29.
-> This strategy is labelled D27 because that is what it was called when it was
-> given, so two different decisions now share the ID. See
+> John first referred to this as D27. That ID was already taken by "NE-00.1p
+> scheduler/clock ownership" in the frozen environment plan, whose log ends at
+> D29, so the strategy was renumbered **D30** on 2026-09-16 — the next free ID,
+> which leaves every existing link and reference intact. See
 > [the realignment report](doc-realignment-2026-09-15.md).
 
 ## Specs
@@ -91,3 +94,4 @@ columns and sequencing are not authoritative.
 - [ordnance plan](research/ordnance-plan.md)
 - [quick mission plan](research/quick-mission-plan.md)
 - [menu parity matrix](research/menu-parity-matrix.md)
+- [weapons implementation plan](research/weapons-plan.md)

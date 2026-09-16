@@ -30,11 +30,10 @@ Stated in [AGENTS.md](../AGENTS.md) and recorded in
 5. `spec-derived` is the default provenance for gameplay code. Fitted and
    opinionated components need no replacement before acceptance.
 
-### Unresolved: the D27 label
+### The D27 label — resolved 2026-09-16 as D30
 
-**This needs John's ruling and was not resolved here.** The task named this
-strategy "D27 in docs/native-environment-systems-plan.md". That decision ID is
-already taken. The repository's actual D27 reads:
+The task named this strategy "D27 in docs/native-environment-systems-plan.md".
+That decision ID was already taken. The repository's actual D27 reads:
 
 > | D27 / 2026-09-15 | Implementation choice: NE-00.1p scheduler/clock ownership | Reuse existing clock translations, extend only reviewed shift widths and preserve load-before-due and merge tie ordering. The fixed 120 Hz host bridge remains authored; no live scheduler replacement |
 
@@ -43,11 +42,10 @@ by expression of feature, contact as opinionated, or specs under `docs/spec/`.
 `docs/spec/` did not exist. The strategy above was therefore taken from the task
 instruction itself, not read out of the repository.
 
-The new documents label it **D27** because that is the name it was given, so two
-different decisions now share one ID. Options: renumber the strategy **D30** (the
-next free ID, leaves every existing link intact), or renumber the scheduler
-decision and accept churn in the frozen archive. The existing-ID constraint
-argues for D30. One search-and-replace either way.
+The strategy was first written up as D27, which briefly gave two decisions one
+ID. **On 2026-09-16 it was renumbered D30** — the next free ID — which leaves the
+scheduler decision and every existing link untouched. References to "D27" below
+are historical: read them as D30.
 
 ## 1. Inventory
 
@@ -716,3 +714,80 @@ and has zero now. Seven file moves repointed 67 inbound links.
 Clippy, the workspace test suite and the executable asset guards were not re-run:
 no code changed, and they require a build. GPU, Windows and macOS checks were not
 run.
+
+---
+
+# Follow-up — 2026-09-16
+
+John reviewed the pass, approved it, deleted the Jeeves PM control file and asked
+for the open items to be worked through. All nine are closed. Still documentation
+only; no code, test or build change.
+
+**1. D27 → D30.** Renumbered to the next free decision ID, so the frozen plan's
+D27 (NE-00.1p scheduler/clock ownership) keeps its name and every existing link
+resolves. Applied to the seven freeze headers and to `docs/parity-plan.md`, which
+now records the renumber and why.
+
+**2. The Jeeves PM control file is gone.** John deleted it — his words: he is
+rebuilding it. `docs/native-environment-pm.md` was removed along with its
+`.git/info/exclude` entry, so the path is no longer specially ignored. Nothing
+tracked referenced it except the AGENTS.md reporting rule, which now reads:
+"Report to Jeeves at milestones. The PM control file was retired on 2026-09-16
+and is being rebuilt; until it exists, report milestones in the session." The
+broken `awk` verifiers died with the file; there is nothing left to repoint.
+
+**3. The AI VM decision stands as settled.** Behaviours are recreated from a
+spec; the retail bytecode VM is not reimplemented. It was an inference from D30
+and is now confirmed. No AI work is scheduled or authorized either way.
+
+**4. "Contact is opinionated" means both readings.** The parity plan now says so
+explicitly: the ground contact that exists today is accepted as shipped, *and*
+contact is a feature to design deliberately rather than a gap waiting on
+recovery. The restricted `--native-flight-tables` research path keeps its
+unsupported-contact stop — it is a research diagnostic, it is documented as a
+limit of that one option, and removing it would be a code change.
+
+**5. The per-predicate baselines stay.** The sixteen `baselines/native-strip-*`
+files predate the rule that now forbids them, and deleting or merging evidence
+was never on the table. The AGENTS.md rule is now explicitly forward-looking:
+"This governs new baselines; the existing `baselines/native-strip-*` set predates
+the rule and is kept as evidence."
+
+**6. `docs/formats/weapons.md` split.** Its "Implementation status — 2026-09-14"
+log and the ordered W0–W5 plan — 180 lines, and the half of the file carrying
+acceptance-gate language — moved to
+[`docs/research/weapons-plan.md`](research/weapons-plan.md), frozen like the
+others. The formats file keeps the recovered facts and now carries a pointer;
+its title changed from "FA research and implementation plan" to "FA research".
+The one inbound anchor in use,
+`weapons.md#development-live-fire-adapter-subsequent-implementation`, was not in
+the moved block and still resolves.
+
+**7. `docs/INPUT.md` stays a guide.** `docs/spec/` holds specifications of
+*Fighters Anthology's* behaviour — that is the parity target. The input layer is
+deliberately ours, not the original's, so a spec is the wrong home for it. The
+spec README now states the rule: an opinionated subsystem is documented in its
+own guide and its components labelled `opinionated`.
+
+**8. The stale "living plan" link text is fixed.** Twenty files in
+`docs/baselines/` and `docs/formats/` called the frozen archive "the living
+plan"; they now say "the frozen plan", plus one sentence in
+`formats/native-strip.md`. Link targets were already correct and did not change.
+
+**9. `docs/ARCHITECTURE.md` L74 checked against the code.**
+`crates/tore-sim/src/models/config.rs:53` documents the field group as
+"Recovered departure, landing, device drag, velocity bounds and flags", and the
+model reads `n.departure.warning_delay`, `stall_delay` and `severity`. These are
+genuine recovered source values, so the sentence was accurate — it is now worded
+"recovered departure/contact limits" rather than "native", which says the same
+thing without leaning on the overloaded word.
+
+## Follow-up checks
+
+| Check | Result |
+| --- | --- |
+| Relative link and heading-anchor check | 109 files, 0 problems |
+| `git diff --check` | clean |
+| `cargo fmt --all -- --check` | pass — no source file touched |
+| `python3 -m unittest discover -s tools -p 'test_*.py'` | 26 tests, pass |
+| `python3 tools/check_assets.py` | pass, 268 files |

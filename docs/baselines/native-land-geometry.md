@@ -10,7 +10,7 @@
 2026-09-15. NE-00.1b, following clean precursor `24e3106`.
 **Native arithmetic translated/tested; no runtime contact activation.**
 [Contract](../formats/native-land-contact.md),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 ## Recovery and implementation
 

@@ -10,7 +10,7 @@
 2026-09-15, following `a17de47`. **NE-00.1p completes bounded source recovery
 and diagnostic clock arithmetic**, not a native scheduler or contact producer.
 [Contract](../formats/native-strip.md#clock-and-scheduler-ownership--ne-001p),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-clock-final

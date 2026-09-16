@@ -10,7 +10,7 @@
 2026-09-15, following `ad92851`. **NE-00.1e complete only as a diagnostic
 candidate-lifetime/source precursor.** Parent NE-00.1 / NE-01.1 / NE-03.1 remain
 researching. No new runtime contact branch; retail comparison unavailable.
-[Contract](../formats/native-strip.md), [living plan](../research/native-environment-systems-plan.md).
+[Contract](../formats/native-strip.md), [frozen plan](../research/native-environment-systems-plan.md).
 
 ## Reproduction and source evidence
 

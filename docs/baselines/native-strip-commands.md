@@ -10,7 +10,7 @@
 2026-09-15, following `bc709c1`. **NE-00.1l completes bounded source recovery
 and one diagnostic deadline helper**, not full movement/event execution.
 [Contract](../formats/native-strip.md#initial-commands-and-default-event-response--ne-001l),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-commands-aligned-source

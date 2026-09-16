@@ -9,7 +9,7 @@
 
 
 2026-09-15, NE-00.1d/e/f / E003–E005 under the
-[living plan](../research/native-environment-systems-plan.md). **Native static source**
+[frozen plan](../research/native-environment-systems-plan.md). **Native static source**
 from the exact [reviewed EXE/SMS](native-flight.md). The bounded box reader,
 midpoint arithmetic, mission nationality conversion and candidate-list operations
 are translated/tested. NE-01.1a adds bounded STRIP definition metadata below.
@@ -212,7 +212,7 @@ Consequently, **ordinary removal is not the native failed-add rollback path**.
 Collision registration already ran before the callback. The host must stage
 objects, allocated IDs, owned names, template/airport state, candidates and
 query/cache/RNG changes together and discard failed construction. This atomic
-host failure contract is required by the living plan; it is not a claim that
+host failure contract is required by the frozen plan; it is not a claim that
 retail performs complete rollback. No staged world implementation exists yet.
 
 On success, `0x4a7839` calls `0x4beb90`. STRIP type flags include 0x8000,

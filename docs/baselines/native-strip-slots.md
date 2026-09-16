@@ -9,7 +9,7 @@
 
 2026-09-15, following `a9abebb`. **NE-00.1i completes a bounded source ledger**;
 E016/E019/E020 remain open. [Contract](../formats/native-strip.md#airport-slot-and-attachment-producers--ne-001i),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-slots-source

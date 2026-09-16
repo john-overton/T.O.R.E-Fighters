@@ -10,7 +10,7 @@
 2026-09-15, following `9da133d`. **NE-00.1r completes bounded source recovery
 only**, not complete object cleanup, allocation release or runtime deletion.
 [Contract](../formats/native-strip.md#removal-caller-and-notification-exclusions--ne-001r),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-removal-source

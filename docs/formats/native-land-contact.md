@@ -8,7 +8,7 @@
 > [docs/spec/](../spec/).
 
 
-2026-09-15, NE-00.1a/b/c under the [living plan](../research/native-environment-systems-plan.md).
+2026-09-15, NE-00.1a/b/c under the [frozen plan](../research/native-environment-systems-plan.md).
 **Native static source**, with diagnostic translations only where identified.
 Uses the exact reviewed FA EXE/SMS hashes in [native flight](native-flight.md).
 No imported code executes. [Validation](../baselines/native-land-foundation.md).

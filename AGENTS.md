@@ -99,7 +99,9 @@ not have to be replaced by a `native` one before acceptance. See
 - **Do not silently change default adapters or remove compatibility modes.**
   The legacy default, the hybrid `--researched-flight` path and the restricted
   `--native-flight-tables` research path stay distinct.
-- **Report to Jeeves at milestones**, in the format that control file specifies.
+- **Report to Jeeves at milestones.** The PM control file was retired on
+  2026-09-16 and is being rebuilt; until it exists, report milestones in the
+  session.
 - **Agent decisions are recorded as agent decisions.** Never attribute an
   implementation choice to John because he requested the broader feature.
 - Keep dependencies small: `winit`, `wgpu`, `pollster`, `cpal`. `tore-formats`
@@ -135,7 +137,8 @@ not have to be replaced by a `native` one before acceptance. See
 
 - **Nothing else grows a revision log.** `docs/research/` holds the frozen ones.
 - **No per-predicate baseline files.** One baseline per feature or per validation
-  pass, not one per recovered routine.
+  pass, not one per recovered routine. This governs new baselines; the existing
+  `baselines/native-strip-*` set predates the rule and is kept as evidence.
 - **Link, do not duplicate.** A fact has one home; everything else points at it.
 - Keep the guides current in the same change that alters the behaviour they
   document: [aircraft import](docs/aircraft-import.md),

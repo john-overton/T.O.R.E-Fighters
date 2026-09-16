@@ -9,7 +9,7 @@
 
 2026-09-15, following `4447e90`. **NE-01.1a metadata gate complete**; full
 NE-01.1 resource/placement closure and NE-03.1 live contact remain open.
-[Contract](../formats/native-strip.md), [living plan](../research/native-environment-systems-plan.md).
+[Contract](../formats/native-strip.md), [frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 cargo test --locked -p tore-formats strip::

@@ -10,7 +10,7 @@
 2026-09-15. NE-00.1c / E008, following `66a7999`.
 **Native source and diagnostic translation/tested; runtime unconnected; retail unavailable.**
 [Contract](../formats/native-land-contact.md#candidate-and-requested-heading-angles--ne-001c),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 Two aligned slices (`0x411a40..0x411aec`, `0x4c6c30..0x4c6d5f`) extend the
 hash-gated static pass to **94 reviewed regions**. EXE/SMS identities and the

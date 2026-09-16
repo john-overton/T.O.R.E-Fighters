@@ -10,7 +10,7 @@
 2026-09-15, following `dab34e7`. **NE-00.1m completes selected intermediate
 movement source recovery and a diagnostic angle helper.** It does not enable
 object service or native contact. [Contract](../formats/native-strip.md#selected-stationary-movement-path--ne-001m),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-movement-source

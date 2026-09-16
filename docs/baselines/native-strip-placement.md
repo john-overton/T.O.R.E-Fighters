@@ -9,7 +9,7 @@
 
 2026-09-15, following `fad7fd5`. **NE-00.1f complete as a narrow source and
 nationality-conversion precursor.** Parent land producer/closure gates remain
-open. [Contract](../formats/native-strip.md), [living plan](../research/native-environment-systems-plan.md).
+open. [Contract](../formats/native-strip.md), [frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-placement-source

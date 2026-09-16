@@ -10,7 +10,7 @@
 2026-09-15, following `9baf9fa`. **NE-00.1o completes bounded source recovery and
 a diagnostic collision predicate**, not native collision damage or removal.
 [Contract](../formats/native-strip.md#collision-hit-dispatch-and-death-marking--ne-001o),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-hit-source

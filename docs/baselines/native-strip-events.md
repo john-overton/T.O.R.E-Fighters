@@ -9,7 +9,7 @@
 
 2026-09-15, following `1a0f95d`. **NE-00.1k completes a bounded source ledger**,
 not E019/E020/E021 or live contact. [Contract](../formats/native-strip.md#static-object-service-and-consuming-event-lookup--ne-001k),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-events-source

@@ -9,7 +9,7 @@
 
 2026-09-15, following `61eb266`. **NE-00.1n completes a bounded source ledger**,
 not event/speech execution. [Contract](../formats/native-strip.md#queue-routing-and-speech-observation--ne-001n),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-observer-source

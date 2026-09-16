@@ -1,4 +1,4 @@
-> **Frozen as of 2026-09-15. Superseded by the parity strategy (D27) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its recovered weather facts, dated implementation checkpoints and evidence links. Its sequencing, gates and status columns are no longer authoritative.
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its recovered weather facts, dated implementation checkpoints and evidence links. Its sequencing, gates and status columns are no longer authoritative.
 
 # Retail weather parity plan
 

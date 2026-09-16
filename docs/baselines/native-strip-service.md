@@ -10,7 +10,7 @@
 2026-09-15, following `031c31c`. **NE-00.1g is complete only as a dispatcher
 source ledger and diagnostic kind-0 delay selector.** Parent land/world/contact
 and scheduler acceptance remain open. [Contract](../formats/native-strip.md),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-service-source

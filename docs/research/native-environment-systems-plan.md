@@ -1,4 +1,4 @@
-> **Frozen as of 2026-09-15. Superseded by the parity strategy (D27) — see [AGENTS.md](../../AGENTS.md) and [docs/parity-plan.md](../parity-plan.md).** Kept for its recovered facts, evidence links and decision record. Its work-package gates, status columns and sequencing are no longer authoritative.
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30) — see [AGENTS.md](../../AGENTS.md) and [docs/parity-plan.md](../parity-plan.md).** Kept for its recovered facts, evidence links and decision record. Its work-package gates, status columns and sequencing are no longer authoritative.
 
 # Native environment and systems implementation plan
 

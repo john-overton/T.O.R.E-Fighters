@@ -36,6 +36,11 @@ One file per feature a player would name. Suggested sections:
 5. **Source notes** — where the facts came from: build identity, routine or
    resource, and any branch that could not be resolved. Footnote, not the spec.
 
+A spec describes **Fighters Anthology's** behaviour. A subsystem that is
+deliberately ours — the input layer, for instance — is an opinionated design
+and belongs in its own guide, not here. Record the departure from original
+behaviour in that guide and label the component `opinionated`.
+
 Link to the supporting research in [`../formats/`](../formats/) and to measured
 evidence in [`../baselines/`](../baselines/) rather than restating it.
 

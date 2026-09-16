@@ -71,7 +71,7 @@ The shared hybrid adapter and its recovered-versus-fitted boundaries are specifi
 
 Aircraft-specific fitted laws live in `tore-sim::models::{f18,rafale_c}`, selected
 through `AircraftModel` and the `FlightModel` interface. Each owns independent
-validated configuration covering mass, propulsion, envelopes, native departure/contact limits, equipment response and tuning. `State` holds the selected model; `Research` holds only evolving departure/contact/clock state. Updates take no raw aircraft argument. Integration and recovered algorithms are shared components.
+validated configuration covering mass, propulsion, envelopes, recovered departure/contact limits, equipment response and tuning. `State` holds the selected model; `Research` holds only evolving departure/contact/clock state. Updates take no raw aircraft argument. Integration and recovered algorithms are shared components.
 `tore-sim::telemetry` exposes gauge-independent air/ground/altitude channels with
 explicit units and unavailable sensor readings; analog gauge presentation must
 remain downstream of this interface. See [model extension guide](FLIGHT-MODEL.md).

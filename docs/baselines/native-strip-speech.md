@@ -10,7 +10,7 @@
 2026-09-15, following `2a7708b`. **NE-00.1j completes bounded source recovery
 and one diagnostic arithmetic helper**, not full E019/E020.
 [Contract](../formats/native-strip.md#current-object-switches-and-speech-timing--ne-001j),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-speech-source

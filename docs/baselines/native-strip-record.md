@@ -10,7 +10,7 @@
 2026-09-15, following `0c9d806`. **NE-01.1b complete as a bounded input-reader
 slice**, not full mission/world or native contact acceptance.
 [Contract](../formats/native-strip.md#bounded-isolated-placement--ne-011b),
-[living plan](../research/native-environment-systems-plan.md).
+[frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh
 cargo test --locked -p tore-formats strip::
