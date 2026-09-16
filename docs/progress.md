@@ -1194,3 +1194,15 @@ only the diagnostic precursor; the parent first slice remains researching.
 
 [Contract](formats/native-strip.md#airport-slot-and-attachment-producers--ne-001i),
 [validation and remaining boundaries](baselines/native-strip-slots.md).
+
+## Speech timing and current-object state — 2026-09-15
+
+- [x] NE-00.1j: recover nested current-object stores, speech submission/deadlines,
+  clock initialization and exact signed/five-bit word-delay arithmetic.
+- [x] Translate and test the pure delay helper without dispatching events or
+  executing callbacks; retain distinct global and per-airport timers.
+- [ ] Finish E019 static-object service branches, E020 payload/clock/speech
+  producers and remaining E016/E004 closure before staged query integration.
+
+[Contract](formats/native-strip.md#current-object-switches-and-speech-timing--ne-001j),
+[validation](baselines/native-strip-speech.md). Live/carrier activation remains gated.

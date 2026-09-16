@@ -16,6 +16,11 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('object_current_push', 0x4629e0, 0x462a17, 'ground'),
+    ('object_current_pop', 0x462a20, 0x462a4c, 'ground'),
+    ('speech_delay_scale', 0x48d5e0, 0x48d5f3, 'clock'),
+    ('speech_event_submit', 0x48e950, 0x48ea0f, 'ground'),
+    ('clock_initialize', 0x486a10, 0x486a81, 'clock'),
     ('plane_callback_selector', 0x49fb10, 0x49fb4c, 'ground'),
     ('airport_takeoff_entry_gate', 0x4badb0, 0x4bae24, 'ground'),
     ('airport_landing_entry_gate', 0x4bc270, 0x4bc310, 'ground'),

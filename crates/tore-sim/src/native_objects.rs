@@ -1,6 +1,17 @@
 //! Diagnostic native object state; no world construction or live activation.
 //! Source: docs/formats/native-strip.md.
 
+/// Diagnostic speech delay at FA 0x48d5e0; no clock or event state is changed.
+/// The signed scale gate and x86 five-bit shift count apply even to a word shift.
+/// The producer of `scale` remains outside this diagnostic helper.
+pub fn speech_delay(delay: u16, scale: i16) -> u16 {
+    if scale > 0 {
+        ((delay as u32) << (scale as u32 & 31)) as u16
+    } else {
+        delay
+    }
+}
+
 /// Inputs to the STRIP (kind 0) service tail at FA 0x4630b0.
 /// These are post-callback samples, not permission to skip the service body.
 /// Priority and reference predicates must come from reviewed world producers.
@@ -119,6 +130,28 @@ fn remove_first(ids: &mut Vec<u16>, id: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn speech_delay_preserves_x86_word_shift_and_signed_gate() {
+        for scale in [i16::MIN, -1, 0] {
+            assert_eq!(speech_delay(0x8003, scale), 0x8003);
+        }
+        for (scale, expected) in [
+            (1, 6),
+            (15, 0x8000),
+            (16, 0),
+            (31, 0),
+            (32, 0x8003),
+            (33, 6),
+            (255, 0),
+            (256, 0x8003),
+            (i16::MAX, 0),
+        ] {
+            assert_eq!(speech_delay(0x8003, scale), expected);
+        }
+        assert_eq!(speech_delay(0, 1), 0);
+        assert_eq!(0xfffeu16.wrapping_add(speech_delay(3, 1)), 4);
+    }
 
     #[test]
     fn strip_service_callback_override_and_clock_wrap() {

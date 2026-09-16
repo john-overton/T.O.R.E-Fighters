@@ -597,3 +597,63 @@ Otherwise it resolves the attachment's airport object and tests flag 1 and
 on success. These gates do not establish effect-free suppression. Complete
 callback selection/callers, bodies, device effects and attachment lifetimes remain
 unknown; no autonomous behavior is translated or enabled.
+
+## Current-object switches and speech timing — NE-00.1j
+
+**Native bounded source; only the pure speech-delay arithmetic is translated/
+tested.** [Validation](../baselines/native-strip-speech.md). E019/E020 callback,
+event dispatch and global clock ownership remain incomplete.
+
+`0x4629e0..0x462a16` saves current ID in the word stack at `0x4f6fc8` indexed by
+dword depth `0x4f6fdc`, stores current scratch through `0x462980` only when the
+old ID is nonzero, increments depth, then loads the requested object through
+`0x4628b0`. `0x462a20..0x462a4b` stores the outgoing object first, reads the
+previous ID at depth-1 and decrements depth. A nonzero saved ID reloads its
+instance/type; a zero saved ID only clears current ID, leaving scratch content
+untouched. Scheduler reset `0x462600` resets depth to zero. Neither switch routine
+checks overflow/underflow or lookup validity. Stack capacity is not established
+from adjacency of globals. Host validation and staged scratch/store/stack state
+must prevent partial writes; this is not an immutable context switch.
+
+### Speech submission and two different deadlines
+
+`0x48e950..0x48ea0e` returns AL=0 immediately when both buffer starts `0x552ff0`
+and `0x553050` are zero. Otherwise it copies both NUL-terminated strings into a
+local payload, consecutively **including both terminators**. Payload byte count
+is `len(first)+1+len(second)+1`. It calls event enqueue `0x4180a0` with the two
+caller-supplied low-word IDs, literal arguments 0, 2, 0x8000, 0x24, and the payload
+pointer/length. The enqueue result is not checked here. It then sets global word
+`0x552fdc` to `word(0x5528e0 + scaled_delay(3))` and returns AL=1. It does not
+clear the two global buffers. Payload limits, event copying/lifetime and dispatch
+remain required source closure; do not emit borrowed pointers to stack data.
+There is no direct RNG call in this wrapper; this does not establish its callees'
+RNG behavior or callback-wide draw ordering.
+
+The already reviewed APComment finish calls this wrapper after recording actor
+ID/state/distance. Only AL=0 sets **per-airport** word +0x127 to
+`word(0x5528e0 + scaled_delay(1))`. Successful submission updates the global
+speech deadline instead. Thus global suppression and per-airport retry state
+are different owned fields, not one shared timer.
+
+`scaled_delay`, `0x48d5e0..0x48d5f2`, starts from the input low word. If signed
+word `0x5528f8` is positive it shifts AX left by CL; otherwise it returns the
+input word unchanged. x86 masks this shift count to **five bits**, even for AX:
+counts 16..31 zero the word, 32 leaves it unchanged, 33 shifts by one. This is
+not Rust `u16::wrapping_shl`, whose mask would use four bits. Diagnostic
+`native_objects::speech_delay` shifts a widened dword with the five-bit count,
+then narrows. It owns no clock, event, buffer or RNG state.
+
+### Clock initialization boundary
+
+`0x486a10..0x486a80` writes the first signed dword argument to `0x552928`;
+word `0x5528e0` is its arithmetic shift-right by 8, narrowed, while word
+`0x5528c8` is signed division by 64 truncated toward zero, narrowed. It resets
+scale word `0x5528f8` to zero. The second and third dword arguments are combined
+with wrapping arithmetic as `(second*60 + third)*60`, stored at `0x5528e4` and
+`0x552934`; it copies `0x5528ec` to `0x552940` and sets words `0x55292c` and
+`0x5528e8` to 1. No units for those second/third inputs are inferred here.
+
+This establishes initialization, not all clock/scale producers or the native
+scheduler's connection to the host's fixed 120 Hz clock. Later changes to scale,
+speech reset/deadline producers at `0x48d2b2`/`0x48d5d4`, comment generation and
+event consumers remain open. Existing adapted clock/replay claims are unchanged.

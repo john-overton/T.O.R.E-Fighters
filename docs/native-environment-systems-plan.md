@@ -1,6 +1,6 @@
 # Native environment and systems implementation plan
 
-**Living plan v12 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
+**Living plan v13 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
 **Status: implementing source/query foundation; live land contact remains gated.**
 John explicitly scheduled this pass after the airborne native flight connection.
 This is the governing dependency and delivery plan for that continuation. It can
@@ -90,7 +90,7 @@ baselines above remain inputs, not acceptance of the new contact producer.
 
 | ID | Package | Depends on | Owner / status | Current next action / exit evidence |
 | --- | --- | --- | --- | --- |
-| NE-00 | Source, state and dependency ledger | Current baselines | Codex / researching | NE-00.1a/b/c/d/e/f/g/h/i complete; finish instance/state producers |
+| NE-00 | Source, state and dependency ledger | Current baselines | Codex / researching | NE-00.1a/b/c/d/e/f/g/h/i/j complete; finish instance/state producers |
 | NE-01 | Ground and sea/ocean discovery/import | NE-00 identity rules | Codex / researching | NE-01.1 selected UKR/STRIP lead extracted; full census and closure remain open |
 | NE-02 | Coordinates, placement, materials and collision resources | NE-01 selected closures, NE-00 | Unassigned / planned | Resolve one land and one sea family end to end; expand catalog coverage |
 | NE-03 | Native terrain/object contact producers | NE-00, NE-02 selected land subset | Codex / researching | NE-03.1 waits on world closure and transactional query state |
@@ -115,13 +115,14 @@ baselines above remain inputs, not acceptance of the new contact producer.
 | NE-00.1g | Codex / complete | Service dispatch/tail, priority predicate and shared RNG state | Kind-0 post-callback delay selector and no-draw/word-boundary tests | No | Unavailable | Narrow service-ledger precursor; [evidence](baselines/native-strip-service.md); callback bodies and world producers remain open |
 | NE-00.1h | Codex / complete | Airport lookup/reset, three template predicates, comment selection/exit and actor-list operations | Static extraction/ledger only | No | Unavailable | [Ownership evidence](baselines/native-strip-ownership.md); complete service bodies/producer closure remains open |
 | NE-00.1i | Codex / complete | Plane selector, airport slot ownership, attachment refresh tail, state transition and two callback entry gates | Static extraction/ledger only | No | Unavailable | [Slot evidence](baselines/native-strip-slots.md); full callback/field-update bodies remain open |
-| NE-00.1 | Codex / researching | Partial; see NE-00.1a/b/c/d/e/f/g/h/i | Partial | No | Unavailable | Finish instance initialization; extend transaction ledger |
+| NE-00.1j | Codex / complete | Current-object push/pop, speech enqueue wrapper, delay arithmetic and clock initialization | Pure delay helper and signed/shift-width boundary tests | No | Unavailable | [Speech evidence](baselines/native-strip-speech.md); event, callback and clock update producers remain open |
+| NE-00.1 | Codex / researching | Partial; see NE-00.1a/b/c/d/e/f/g/h/i/j | Partial | No | Unavailable | Finish instance initialization; extend transaction ledger |
 | NE-01.1a | Codex / complete | STRIP/166 header and explicit shape slot from E003/E004 | Bounded metadata reader, unknown-token retention and malformed-input tests | No | Unavailable | [Definition evidence](baselines/native-strip-definition.md); no full importer/world closure |
 | NE-01.1b | Codex / complete | Selected eight-field conversions and post-create exclusion predicates | Bounded isolated placement reader and malformed/width/name tests | No | Unavailable | [Record evidence](baselines/native-strip-record.md); full mission/world closure remains open |
 | NE-01.1 | Codex / researching | UKR.MM → STRIP.OT → RUNWAY.SH / _STRIPProc explicit edges | Five resources extracted across two filtered runs; bounded STRIP metadata reader | No | Unavailable | Complete callback/shape/placement closure, archive census and bounded schemas |
 | NE-03.1 | Codex / researching | Dual ground-query/cache mutation established | Existing diagnostic only; no new producer | No | Unavailable | Land geometry and staged cache/RNG producer, source-order/rollback tests, then both-aircraft connection |
 
-The parent first slice is not complete. NE-00.1a/b/c/d/e/f/g/h/i are dependency-ready diagnostic
+The parent first slice is not complete. NE-00.1a/b/c/d/e/f/g/h/i/j are dependency-ready diagnostic
 precursors, not an accepted runway or live contact branch.
 
 ### Discovered dependency edges
@@ -152,7 +153,7 @@ Owner is Codex; update 2026-09-15. Required edges remain in the denominator.
 | E017 | E003 → map name / converts nationality | 0x4826c7 → 0x483d50; map prefix and byte remap | Diagnostic conversion tested; selected text 137 becomes 138; isolated raw-byte parsing tested; map/world assembly remains open |
 | E018 | E015 → shared scheduler RNG / conditional draws | 0x4630b0..0x4631a9, stopped bound-20 / moving bound-8 | Tail predicates sourced and kind-0 selector tested; shared seed/shuffle state established; callback draws/global interleaving remain open |
 | E019 | E015 → service callback/body closure | 0x462fbc..0x463036 calls 0x436b30, 0x4631f0 and request 7; STRIP resolves APCommentProc | Dispatch and comment selection/exit sourced; speech reset is observable even on early exit; middle bodies/global producers remain unknown |
-| E020 | E019/E016 → NE-07a and staged world / mutable callback state | Actor IDs 0x5713a8/count 0x570ef0; airport +0x127 onward, speech buffers and current-object switches | Plane registration selector, state transition and attachment refresh tail sourced; slot moves can fail after releasing old ownership; full instance/clock/speech producers remain open |
+| E020 | E019/E016 → NE-07a and staged world / mutable callback state | Actor IDs 0x5713a8/count 0x570ef0; airport +0x127 onward, speech buffers and current-object switches | Plane registration selector, state transition and attachment refresh tail sourced; slot moves can fail after releasing old ownership; push/pop, submission/deadline and clock initialization sourced in NE-00.1j; full instance/clock/speech/event producers remain open |
 
 Selected catalog status: UKR.MM/T2, STRIP.OT, RUNWAY.SH and _RUNWAY.PIC are discovered/extracted;
 existing T2, bounded STRIP metadata and F2 box decoding are available; full OT
@@ -185,6 +186,7 @@ flowchart TD
   Y[E020 actor lists speech scratch and current-object ownership] --> P
   Y --> W
   S[E020 airport slot release-before-reserve and attachment refresh] --> Y
+  Z[E020 current-object stores and owned speech event payload] --> Y
   V[E017 map-dependent placement conversion] --> W
   F --> W
   A --> D[NE-04 equipment and fuel producers]
@@ -583,6 +585,7 @@ record its blocked edges and continue independent, already scoped documentation/
 | D18 / 2026-09-15 | Implementation choice: NE-01.1b isolated selected placement | Strict host grammar rejects unknown fields; source conversion does not initialize a world or bypass the initial ground query. Selected optional post-create effects excluded by reviewed reset/kind predicates |
 | D19 / 2026-09-15 | Implementation choice: NE-00.1h bounded ownership source ledger | Comment suppression still clears speech buffers; native airport records and actor lists must have staged lifetime/state. No no-op callback or empty-list assumption from no-AI scope |
 | D20 / 2026-09-15 | Implementation choice: NE-00.1i source ownership refinement | Plane registration is separate from STRIP; airport reservation can clear previous ownership before failure. Preserve staged order and full rollback; entry gates do not accept full takeoff/landing behavior |
+| D21 / 2026-09-15 | Implementation choice: NE-00.1j speech/state boundary | Preserve five-bit x86 word shift, separate global/per-airport deadlines and staged current-object writes. Enqueue wrapper is not accepted event dispatch or full clock ownership |
 
 Future decisions include date, requester/reviewer, evidence, accepted/proposed/
 superseded state, affected IDs, rejected alternatives if relevant and migration
@@ -614,6 +617,7 @@ implementation choices must not be attributed to John.
 
 | Revision | Change | Validation state |
 | --- | --- | --- |
+| v13 / 2026-09-15 | NE-00.1j current-object/speech/clock ledger and D21 | [Delay/source validation](baselines/native-strip-speech.md); no event or live activation |
 | v12 / 2026-09-15 | NE-00.1i slot/attachment/state source ledger and D20 | [Source validation](baselines/native-strip-slots.md); no runtime or autonomous behavior |
 | v11 / 2026-09-15 | NE-00.1h airport/comment ownership and E020/D19 | [Source validation](baselines/native-strip-ownership.md); no callback activation |
 | v10 / 2026-09-15 | NE-01.1b isolated placement, selected post-create exclusions and D18 | [Record validation](baselines/native-strip-record.md); parent world/query gates remain open |
