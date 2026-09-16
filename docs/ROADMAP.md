@@ -26,6 +26,10 @@ weapons range supports manual weapon testing. Ground contact and landing are
 authored behaviour ([opinionated](behavior-provenance.md)); combat AI is not
 started and is not authorized.
 
+John scheduled the shoreline correction and ocean-motion trial on 2026-09-16.
+See [ocean behavior and visual scope](spec/ocean.md). This bounded visual
+work precedes the following order without authorizing additional systems work.
+
 Follow with maneuver audio/rumble and final [flight-response acceptance](research/flight-response-plan.md),
 then F-14, A-4E and X-31 through the [aircraft import gates](aircraft-import.md),
 then the remaining weather work. Where a behaviour came from is recorded per

@@ -105,3 +105,11 @@ Wind/turbulence/attachment continuation: matched calm F18 1280×720/page-3
 after, with simulation/cameras 0.19 ms in both. No paused frames; 14 completed
 asynchronous camera readbacks each. Short-run tail variability and full
 qualification are in [the acceptance record](wind-turbulence-vapor.md#frame-time-evidence).
+
+The [ocean pass](ocean.md#five-statute-mile-transparency-trial) records the
+five-mile revision against its preceding horizon trial: average CPU frame
+intervals 2.39 versus 2.40 ms across three 630-frame Linux/Vulkan pairs, with
+mirrors and asynchronous camera panels active. The final highlight falloff
+adds a scalar fade and was visually checked but not separately benchmarked.
+Presentation tails vary; these are not GPU timings. Earlier ocean measurements
+remain historical evidence.

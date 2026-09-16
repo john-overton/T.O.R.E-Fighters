@@ -17,6 +17,7 @@ pub struct ViewWeather {
 }
 
 pub struct World {
+    pub ocean_motion: crate::ocean::Motion,
     pub theater: Theater,
     pub environment: Environment,
     pub catalog: Vec<(String, String)>,
@@ -205,6 +206,7 @@ impl World {
             cloud_altitude,
         )?);
         let mut out = Self {
+            ocean_motion: crate::ocean::Motion::from_environment()?,
             theater,
             environment,
             catalog,
@@ -557,6 +559,7 @@ pub(crate) mod tests {
             })
             .to_vec();
         World {
+            ocean_motion: crate::ocean::Motion::default(),
             theater: Theater {
                 name: "Synthetic".into(),
                 map: "T.PIC".into(),

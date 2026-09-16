@@ -48,6 +48,7 @@ name, with the numbers a player would notice.
 
 | Spec | Covers | Status |
 | --- | --- | --- |
+| [Ocean](spec/ocean.md) | Short ripples, close pixelation and distance filtering; original textures/colors | Implemented; [acceptance](baselines/ocean.md) |
 | [Terrain shorelines](spec/terrain-shorelines.md) | Beach/water coverage and absence of land-color strips | Implemented; validation in the viewer baseline |
 
 The research to build the first specs from already exists: recovered numbers are

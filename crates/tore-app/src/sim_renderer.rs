@@ -188,7 +188,7 @@ impl SimRenderer {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera and atmosphere"),
-            size: 1312,
+            size: 1328,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -583,6 +583,17 @@ impl SimRenderer {
                     size, roll,
                 )) / 32767.;
         }
+        let ocean = world.weather.sample(camera.position[1] as f64);
+        let ocean_decks = ocean.as_ref().map_or([false; 2], |layer| {
+            std::array::from_fn(|i| layer.decks[i].name.starts_with("OCEAN"))
+        });
+        // Approximate angular width of a pixel, shared by the surface filtering.
+        let pixel_angle = 2. / (1.732_050_8 * camera.zoom * size[1].max(1) as f32);
+        uniform.extend(
+            world
+                .ocean_motion
+                .uniform(world.weather.ticks(), ocean_decks, pixel_angle),
+        );
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         let mut entries = Vec::with_capacity(11 * 1024);
         for row in std::iter::once(&weather.palette).chain(weather.fog_palette.iter()) {

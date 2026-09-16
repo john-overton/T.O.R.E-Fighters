@@ -586,3 +586,18 @@ unavailable here. Existing device/fuel/clock adaptation remains explicit.
 [Commands, restart/failure semantics and acceptance](baselines/native-live-flight.md).
 `cargo run --locked -p tore-sim --example native_live -- SINE ATAN PT [PT]` runs
 both-aircraft live-API replay checks independently of the importer hybrid suite.
+
+## Ocean motion inspection
+
+Ocean decks use the original ocean and sky textures and weather palette, with
+short procedural ripples and angle-dependent reflection. Close detail is
+pixelated and blends to smooth sampling with distance and altitude. Smooth
+reflection and fixed-size ripples blend back into the original water sample
+from 2,700 feet to five statute miles of horizontal distance. Reflection strength
+also follows that fade, reducing distant highlight contrast. Whitecaps
+are removed. `TORE_OCEAN_MOTION=0` restores static ocean sampling for comparison;
+the default is `1`. `TORE_OCEAN_PHASE=SECONDS` freezes motion at a finite phase in
+`0..120` for captures. Ordinary playback uses shared simulation time, including
+pause/restart semantics, in the viewer, flight, mirrors and camera instruments.
+No additional texture import is required.
+[Behavior and provenance](spec/ocean.md), [checks and commands](baselines/ocean.md).

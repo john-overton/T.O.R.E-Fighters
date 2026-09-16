@@ -19,6 +19,7 @@ mod lens_flare;
 mod look;
 mod menu;
 mod mirrors;
+mod ocean;
 mod ordnance;
 mod performance;
 mod preferences;

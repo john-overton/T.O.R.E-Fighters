@@ -305,3 +305,10 @@ and matches its explicit shape filename. Unknown source tokens remain preserved;
 extra shape slots, different selectors/classes and unsupported layouts fail.
 This is metadata inspection, not object placement or full resource resolution.
 [Definition-reader evidence](../baselines/native-strip-definition.md).
+
+## Whitecap shape boundary
+
+WAVE1.SH/WAVE2.SH contain embedded frame-selection code, outside the static SH
+reader. [The ocean contract](ocean.md) records the recovered 16-frame effect.
+The trial runtime effect was removed at the user's request; no imported code
+was executed and the reader's animated-shape coverage is unchanged.

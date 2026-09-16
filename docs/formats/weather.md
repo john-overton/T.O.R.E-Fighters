@@ -886,3 +886,11 @@ remains an authored coupling, not full native movement/display delta parity.
 Cheat → No turbulence? suppresses physical events and survives restart.
 Wind-dependent audio, serialized environment replay and retail response
 comparisons remain open. [Acceptance](../baselines/wind-turbulence-vapor.md).
+
+## Ocean presentation coverage
+
+Original ocean/sky artwork and the live palette supply the user-requested
+short-ripple surface shading. Whitecaps are removed. The LAY wave shape name
+remains parsed source data, with [research evidence](ocean.md), not runtime
+animation support. Ripple normals/filtering/reflection are an authored visual
+layer, not recovered palette or wind behavior. [Acceptance](../baselines/ocean.md).

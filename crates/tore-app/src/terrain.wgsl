@@ -1,5 +1,5 @@
 struct Band { info:vec4<f32>, ramp:vec4<f32> }
-struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32> }
+struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32> }
 @group(0) @binding(0) var<uniform> scene:Scene;
 // Retail terrain and sky artwork is stored as weather-palette indices, so it is
 // uploaded unresolved and the live palette is applied here every frame.
@@ -262,6 +262,105 @@ fn celestial_occluded(ray:vec3<f32>)->bool {
  }
  return ray.y<0.0;
 }
+// User-requested ocean presentation. Resolve indexed art before filtering;
+// wrap every bilinear tap so the repeating water has no tile-edge seams.
+fn ocean_sample(uv:vec2<f32>,layer:i32,distance:f32,passes:i32,core:i32)->vec4<f32>{
+ let size=vec2<i32>(textureDimensions(tiles));
+ let p=fract(uv)*vec2<f32>(size)-vec2<f32>(0.5);
+ let base=vec2<i32>(floor(p));let f=fract(p);
+ var sum=vec4<f32>(0.0);
+ var row=f32(fog_row(distance));
+ if smooth_weather() {row=1.0+clamp(haze(distance)*scene.forward.w,0.0,scene.forward.w-1.0);}
+ for(var y=0;y<2;y++){for(var x=0;x<2;x++){
+  let at=(base+vec2<i32>(x,y)+size)%size;
+  let a=texel(at,layer,i32(floor(row)),passes,core,vec2<f32>(-1.0));
+  var c=a;
+  if fract(row)>0.0 {c=mix(a,texel(at,layer,i32(ceil(row)),passes,core,vec2<f32>(-1.0)),fract(row));}
+  let w=select(1.0-f.x,f.x,x==1)*select(1.0-f.y,f.y,y==1);
+  sum+=vec4<f32>(c.rgb*c.a,c.a)*w;
+ }}
+ return vec4<f32>(sum.rgb/max(sum.a,0.00001),sum.a);
+}
+// Authored short-wave slope field. The reference project's useful separation
+// is surface normals from water/sky lighting; this implementation uses analytic
+// noise gradients rather than importing its FFT, mesh or optical color model.
+fn water_hash(p:vec2<f32>)->f32 {
+ var q=fract(vec3<f32>(p.xyx)*0.1031);
+ q+=dot(q,q.yzx+vec3<f32>(33.33));
+ return fract((q.x+q.y)*q.z);
+}
+fn water_gradient(p:vec2<f32>)->vec2<f32> {
+ let angle=water_hash(p)*6.2831853;
+ return vec2<f32>(cos(angle),sin(angle));
+}
+// Gradient noise and analytic derivatives. Unlike value noise, its slopes do
+// not flatten at every cell boundary and reveal a regular lattice in reflection.
+fn water_noise(p:vec2<f32>)->vec3<f32> {
+ let i=floor(p);let f=fract(p);
+ let u=f*f*f*(f*(f*6.0-vec2<f32>(15.0))+vec2<f32>(10.0));
+ let du=30.0*f*f*(f-vec2<f32>(1.0))*(f-vec2<f32>(1.0));
+ let ga=water_gradient(i);let gb=water_gradient(i+vec2<f32>(1,0));
+ let gc=water_gradient(i+vec2<f32>(0,1));let gd=water_gradient(i+vec2<f32>(1,1));
+ let a=dot(ga,f);let b=dot(gb,f-vec2<f32>(1,0));
+ let c=dot(gc,f-vec2<f32>(0,1));let d=dot(gd,f-vec2<f32>(1,1));
+ let g=mix(mix(ga,gb,u.x),mix(gc,gd,u.x),u.y);
+ return vec3<f32>(mix(mix(a,b,u.x),mix(c,d,u.x),u.y),
+                  g.x+du.x*mix(b-a,d-c,u.y),g.y+du.y*mix(c-a,d-b,u.x));
+}
+fn water_slopes(world:vec2<f32>,footprint:f32)->vec2<f32> {
+ let t=scene.ocean.x*6.2831853;
+ let along=vec2<f32>(0.8,0.6);let across=vec2<f32>(-0.6,0.8);
+ let p=vec2<f32>(dot(world,along),dot(world,across));
+ let n=water_noise(p/vec2<f32>(100.0,40.0)+vec2<f32>(cos(t/12.0),sin(t/12.0))*0.25);
+ let m=water_noise(p/vec2<f32>(52.0,25.0)+vec2<f32>(sin(t/8.0),cos(t/8.0))*0.20+vec2<f32>(17.3));
+ // Gradually reduce unresolved contrast, with no pixel-size cutoff or larger waves.
+ let coarse=inverseSqrt(1.0+footprint/80.0);
+ let fine=inverseSqrt(1.0+footprint/40.0);
+ return (along*n.y*0.16+across*n.z*0.40)*coarse
+       +(along*m.y*0.09+across*m.z*0.18)*fine;
+}
+fn ocean_surface(hit:vec3<f32>,deck:vec4<f32>,distance:f32,passes:i32,core:i32)->vec4<f32>{
+ let ray=normalize(hit-scene.eye.xyz);
+ let footprint=distance*scene.ocean.w/max(abs(ray.y),0.025);
+ let altitude=abs(scene.eye.y-deck.x);
+ // User trial: fade the whole effect across a five-statute-mile ground radius.
+ let ground_distance=length(hit.xz-scene.eye.xz);
+ let opacity=1.0-smoothstep(2700.0,26400.0,ground_distance);
+ let motion=1.0-smoothstep(3500.0,16000.0,altitude);
+ let uv=vec2<f32>(hit.x,-hit.z)/deck.y;
+ if opacity<=0.0 {return ocean_sample(uv,i32(deck.z),distance,passes,core);}
+ // Four-foot world cells are visible nearby, continuously blended to smooth
+ // normals as altitude or the projected size of a pixel increases.
+ let block=(1.0-smoothstep(400.0,2200.0,altitude))*(1.0-smoothstep(1.0,4.0,footprint));
+ var slope=vec2<f32>(0.0);
+ if motion>0.0 {slope=water_slopes(hit.xz,footprint);}
+ if block>0.0 && motion>0.0 {
+  let pixel=water_slopes((floor(hit.xz/4.0)+vec2<f32>(0.5))*4.0,footprint);
+  slope=mix(slope,pixel,block);
+ }
+ slope*=motion;
+ let normal=normalize(vec3<f32>(-slope.x,1.0,-slope.y));
+ let offset=slope*6.0;
+ let tex=ocean_sample(uv+vec2<f32>(offset.x,-offset.y)/deck.y,i32(deck.z),distance,passes,core);
+ // All colors still come from the original ocean and weather-resolved sky.
+ // No synthetic teal, whitecap sheet, replacement texture or new sky model.
+ let reflected=reflect(ray,normal);
+ var sky_color=shade(240u,0).rgb;
+ if scene.deck_a.z>=0.0 && scene.ocean.y==0.0 && reflected.y>0.01 && scene.deck_a.x>hit.y {
+  let sky_hit=hit+reflected*((scene.deck_a.x-hit.y)/reflected.y);
+  let sky_uv=fract(vec2<f32>(sky_hit.x,-sky_hit.z)/scene.deck_a.y);
+  let sky_tex=ocean_sample(sky_uv,i32(scene.deck_a.z),distance,0,-1).rgb;
+  sky_color=mix(sky_color,sky_tex,smoothstep(0.15,0.45,reflected.y));
+ }
+ let facing=clamp(dot(normal,-ray),0.0,1.0);
+ let fresnel=0.02+0.98*pow(1.0-facing,5.0);
+ let visibility=1.0-clamp(haze(distance),0.0,1.0);
+ // Fade reflected contrast as well as whole-effect opacity. The base art
+ // keeps its original brightness; distant highlights receive opacity squared.
+ let shaded=mix(tex.rgb,sky_color,min(fresnel,0.25)*0.75*visibility*opacity);
+ let base=ocean_sample(uv,i32(deck.z),distance,passes,core);
+ return vec4<f32>(mix(base.rgb,shaded,opacity),base.a);
+}
 @fragment fn sky_fragment(in:SkyOut)->@location(0) vec4<f32>{
  let ray=normalize(scene.forward.xyz+scene.right.xyz*in.screen.x*scene.eye.w/(1.7320508*scene.up.w)+scene.up.xyz*in.screen.y/(1.7320508*scene.up.w));
  // Source deck planes: world feet, power-of-two tiling, reversed north axis.
@@ -307,12 +406,17 @@ fn celestial_occluded(ray:vec3<f32>)->bool {
   if distance<=0.0 || distance>=nearest || scanline_distance>=2000000.0 { continue; }
   let hit=scene.eye.xyz+ray*distance;
   let uv=fract(vec2<f32>(hit.x,-hit.z)/deck.y);
-  var tex=weather_tile(uv,i32(deck.z),fog_row(distance),passes,core,vec2<f32>(-1.0));
+  var tex:vec4<f32>;
+  if scene.ocean[i+1]>0.0 {
+   tex=ocean_surface(hit,deck,distance,passes,core);
+  } else {
+  tex=weather_tile(uv,i32(deck.z),fog_row(distance),passes,core,vec2<f32>(-1.0));
   if smooth_weather() {
    let row=1.0+clamp(haze(distance)*scene.forward.w,0.0,scene.forward.w-1.0);
    let a=weather_tile(uv,i32(deck.z),i32(floor(row)),passes,core,vec2<f32>(-1.0));
    let b=weather_tile(uv,i32(deck.z),i32(ceil(row)),passes,core,vec2<f32>(-1.0));
    tex=mix(a,b,fract(row));
+  }
   }
   color=mix(color,tex.rgb,tex.a);
   nearest=distance;

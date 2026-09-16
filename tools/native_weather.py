@@ -58,6 +58,8 @@ REGIONS = (
     ('weather_shape_circles_points', 0x4d17f8, 0x4d1974, 'weather'),
     ('weather_shape_uv', 0x4d4a30, 0x4d4aca, 'weather'),
     ('weather_shape_billboard', 0x4d5644, 0x4d59a1, 'weather'),
+    ('water_initialize', 0x4a8a70, 0x4a8aaf, 'weather'),
+    ('water_repeat_dispatch', 0x4a8ab0, 0x4a8b83, 'weather'),
     ('cloud_initialize', 0x4a7f40, 0x4a7f64, 'weather'),
     ('cloud_repeat_grid', 0x4a8090, 0x4a8125, 'weather'),
     ('cloud_periodic_placement', 0x4a8130, 0x4a83de, 'weather'),

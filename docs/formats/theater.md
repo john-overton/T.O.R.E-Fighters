@@ -58,7 +58,11 @@ The terrain block builder at `0x4a9d00` copies the third byte of four corner cel
 
 Each placement covers four cells per side, or 32,768 feet. Quarter-turn UV selection starts at `0x4aa9ac`; texture scanning around `0x4aa72d` reverses source rows. Rust applies these rotations and a V flip. Index 255 is tested as cutout/water coverage at `0x4aa739`. The runtime now treats those texels as holes exposing the shared ocean/horizon pass; untextured color-255 cells also leave that pass visible. The former land-color fill and palette-223 water fallback caused rectangular green strips beyond beach artwork and have been removed. Bilinear coverage uses a fitted 0.5 cutoff, not a recovered native raster threshold. See [shoreline behavior](../spec/terrain-shorelines.md) and [validation](../baselines/ukraine-viewer.md#shoreline-correction-2026-09-16).
 
-Not yet recovered in the renderer: native adaptive subdivision/LOD, class-dependent material behavior, `tdic` coverage flags, exact shore/water geometry, water animation, native lighting and generic LAND/VLAND fallback mapping. Fixed triangles currently join each four-sample quad; the height query uses those same triangles. `UKR.MM` also contains 257 object placements, which are retained as raw source but not drawn. Texture artwork may depict buildings; there are no imported 3D buildings, airfields or aircraft yet.
+Not yet recovered in the renderer: native adaptive subdivision/LOD, class-dependent material behavior, `tdic` coverage flags, exact shore/water geometry, native lighting and generic LAND/VLAND fallback mapping. Fixed triangles currently join each four-sample quad; the height query uses those same triangles. `UKR.MM` also contains 257 object placements, which are retained as raw source but not drawn. Texture artwork may depict buildings; there are no imported 3D buildings, airfields or aircraft yet.
+
+The ocean now uses user-requested short ripples and distance/altitude filtering,
+retaining the original textures and weather colors. Whitecaps are removed. [Source contract and limits](ocean.md),
+[behavior](../spec/ocean.md), [acceptance](../baselines/ocean.md).
 
 ## Mission environment and weather modules
 

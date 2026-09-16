@@ -233,3 +233,11 @@ STRIP precursor: bounded F2 contact-box list and native signed midpoint arithmet
 are tested. Mission conversion/add-callback ordering is source-established only;
 full OT/placement/callback runtime and drawing closure remain open.
 [Contract](native-strip.md), [evidence](../baselines/native-strip.md).
+
+## Ocean presentation
+
+Ocean motion retains the existing indexed OCEAN/SKY pictures and weather palette.
+No new texture format or SH animation interpreter is required. The trial
+whitecap dependencies and drawing have been removed at the user's request;
+[their source research](ocean.md) remains available through explicit extraction.
+[Current presentation acceptance](../baselines/ocean.md).
