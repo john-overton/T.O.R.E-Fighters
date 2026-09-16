@@ -12,7 +12,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, ubuntu-24.04, windows-2022]
+        # macos-14 is Apple Silicon; macos-15-intel is the last x86_64 macOS image
+        # GitHub will offer, retiring August 2027. After that, Intel Mac coverage
+        # means cross-compiling x86_64-apple-darwin from an arm64 runner.
+        os: [macos-14, macos-15-intel, ubuntu-24.04, windows-2022]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

@@ -248,13 +248,12 @@ impl World {
                     .textures
                     .get(&((x & !3) as i32, (y & !3) as i32));
                 let layer = placement.map_or(-1.0, |p| p.texture as f32);
-                // 0x4aa739 treats 255 as water and draws it with the terrain
-                // ramp's last entry. The index is resolved on the GPU each frame.
-                let index = if c.color == 255 {
-                    223.
-                } else {
-                    f32::from(c.color)
-                };
+                // Untextured water reveals the shared ocean/horizon pass. A
+                // shoreline texture defines coverage even on a water base cell.
+                if placement.is_none() && c.color == 255 {
+                    continue;
+                }
+                let index = f32::from(c.color);
                 for (dx, dy) in [(0, 0), (0, 1), (1, 0), (1, 0), (0, 1), (1, 1)] {
                     let sample = t.cell(x + dx, y + dy);
                     let (mut u, mut v) = (((x % 4 + dx) as f32) / 4.0, ((y % 4 + dy) as f32) / 4.0);
@@ -603,6 +602,43 @@ pub(crate) mod tests {
             fog_palette: vec![[[100; 3]; 256]; 10],
         }
     }
+    #[test]
+    fn water_has_no_opaque_fallback_but_shore_art_keeps_its_geometry() {
+        use tore_formats::theater::TexturePlacement;
+        let mut w = world();
+        w.theater.cells[0].color = 255;
+        let height = w.height(2048., 2048.);
+        w.build_mesh();
+        assert!(
+            w.vertices.is_empty(),
+            "open water must expose the ocean pass"
+        );
+        assert_eq!(w.height(2048., 2048.), height);
+
+        // A water-colored base cell can still contain opaque beach artwork.
+        // All four rotations must retain its geometry and texture identity.
+        for rotation in 0..4 {
+            w.environment.textures.insert(
+                (0, 0),
+                TexturePlacement {
+                    col: 0,
+                    row: 0,
+                    texture: 2,
+                    rotation,
+                },
+            );
+            w.vertices.clear();
+            w.build_mesh();
+            assert_eq!(w.vertices.len(), 6 * 10);
+            assert!(w.vertices.chunks_exact(10).all(|v| v[5] == 2.));
+        }
+        w.environment.textures.clear();
+        w.theater.cells[0].color = 100;
+        w.vertices.clear();
+        w.build_mesh();
+        assert_eq!(w.vertices.len(), 6 * 10, "untextured land stays opaque");
+    }
+
     #[test]
     fn turbulence_surface_uses_class_not_color_or_height() {
         let mut w = world();

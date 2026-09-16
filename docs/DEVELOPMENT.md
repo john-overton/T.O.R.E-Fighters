@@ -104,8 +104,16 @@ the push if any of them fail, so a broken commit never reaches the remote.
 Git hooks live in `.git/hooks/`, which is not version controlled, so every clone
 needs this step. A single push can skip the hook with `git push --no-verify`.
 
-The hook runs everything the CI job runs that a single machine can run. Windows,
-macOS and GPU checks stay in CI.
+The hook runs everything the CI job runs that a single machine can run. Other
+platforms stay in CI, which builds and tests four targets on every push:
+Ubuntu 24.04, Windows 2022, macOS 14 on Apple Silicon, and macOS 15 on Intel.
+The `macos-15-intel` image is the last x86_64 macOS runner GitHub will offer and
+retires in August 2027; after that, Intel coverage means cross-compiling
+`x86_64-apple-darwin` from an Apple Silicon runner.
+
+CI has no display, no GPU, and no retail media, so it proves the code builds and
+the tests pass on each platform. It proves nothing about what appears on screen.
+Run the window smoke test on a display-capable host for rendering changes.
 
 ## Everyday checks
 

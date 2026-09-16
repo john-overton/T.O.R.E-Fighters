@@ -13,6 +13,7 @@ pub struct SimRenderer {
     palette: wgpu::Texture,
     weather_tiles: wgpu::TextureView,
     pipeline: wgpu::RenderPipeline,
+    terrain_pipeline: wgpu::RenderPipeline,
     aircraft: Option<(wgpu::BindGroup, wgpu::Buffer, u32)>,
     bind: wgpu::BindGroup,
     sky_pipeline: wgpu::RenderPipeline,
@@ -40,7 +41,7 @@ impl SimRenderer {
             label: Some("Simulation terrain"),
             source: wgpu::ShaderSource::Wgsl(include_str!("terrain.wgsl").into()),
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let mut surface_descriptor = wgpu::RenderPipelineDescriptor {
             label: Some("Simulation terrain"),
             layout: None,
             vertex: wgpu::VertexState {
@@ -63,7 +64,10 @@ impl SimRenderer {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: true,
@@ -74,12 +78,17 @@ impl SimRenderer {
             multisample: Default::default(),
             multiview: None,
             cache: None,
-        });
+        };
+        let pipeline = device.create_render_pipeline(&surface_descriptor);
         let sky_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Sky layout"),
             bind_group_layouts: &[&pipeline.get_bind_group_layout(0)],
             push_constant_ranges: &[],
         });
+        surface_descriptor.label = Some("Shoreline terrain");
+        surface_descriptor.layout = Some(&sky_layout);
+        surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("terrain_fragment");
+        let terrain_pipeline = device.create_render_pipeline(&surface_descriptor);
         let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Retail sky preview"),
             layout: Some(&sky_layout),
@@ -292,6 +301,7 @@ impl SimRenderer {
             palette,
             weather_tiles: view,
             pipeline,
+            terrain_pipeline,
             aircraft: None,
             sky_pipeline,
             celestial_pipeline,
@@ -655,10 +665,11 @@ impl SimRenderer {
             pass.set_vertex_buffer(0, self.celestial_vertices.slice(..));
             pass.draw(0..celestial_count, 0..1);
         }
-        pass.set_pipeline(&self.pipeline);
+        pass.set_pipeline(&self.terrain_pipeline);
         pass.set_bind_group(0, &self.bind, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.draw(0..self.count, 0..1);
+        pass.set_pipeline(&self.pipeline);
         if let Some((bind, vertices, count)) = &self.aircraft {
             pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, vertices.slice(..));

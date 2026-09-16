@@ -170,6 +170,17 @@ fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec
  if index>=0.0 { var source_index=u32(index)%256u; if out.light_row>=0 {source_index=textureLoad(weather_tiles,vec2<i32>(i32(source_index),out.light_row),i32(scene.deck_a.w),0).r;} out.color=shade(source_index,0).rgb; if fog_enabled {out.color=remap_color(source_index,ray_rows(length(p),position.y));} } else { out.color=linear(color); }
  out.distance=length(p);return out;
 }
+// Terrain cutouts expose the already rendered ocean/horizon, never the T2
+// land color. Keep this separate from aircraft's base-color texture blending.
+@fragment fn terrain_fragment(in:VertexOut)->@location(0) vec4<f32>{
+ if in.layer<0.0 {return vec4<f32>(in.color,1.0);}
+ var remaps=vec2<f32>(-1.0);
+ if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
+ let tex=sample_tile(in.uv,i32(in.layer),0,-1,in.light_row,remaps);
+ // Fitted bilinear coverage boundary; discarded water writes no depth.
+ if tex.a<0.5 {discard;}
+ return vec4<f32>(tex.rgb,1.0);
+}
 @fragment fn fragment(in:VertexOut)->@location(0) vec4<f32>{
  var color=in.color;
  if in.layer>=0.0 || in.layer == -2.0 {
