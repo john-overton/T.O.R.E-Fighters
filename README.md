@@ -155,6 +155,7 @@ This discovers and unpacks all supported archives into ignored `.local/extracted
 - [Frozen archives](docs/research/progress.md): superseded plans and the dated progress log, kept for their research and evidence.
 - [Local references](docs/REFERENCES.md): media and TypeScript reference locations, menu starting points.
 - [Agent instructions](AGENTS.md): the authoritative rules for automated contributors.
+- [Prompting cheat sheet](docs/PROMPT-CHEAT-SHEET.md): phrases that keep a request pointed at player behaviour rather than the original code.
 - [Mods](MODS.md): what the license means for mission, theater, art and sound content.
 - [Third-party notices](THIRD_PARTY_NOTICES.md): upstream attributions for engine code.
 
