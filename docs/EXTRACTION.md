@@ -342,3 +342,9 @@ The hash-gated `extract_native_flight.py` pass also emits `tables/sqrt-seed.bin`
 It is diagnostic input for terrain normals, not a new requirement for the existing
 airborne option. Use a fresh `--out` directory when earlier research manifests
 differ. [Geometry command and evidence](baselines/native-land-geometry.md).
+
+The same reviewed-build pass now exports `tables/strip-template.bin`, the bounded
+0x134-byte static airport template, with source address and hash in the inventory.
+It contains inert pointer words and uninterpreted defaults; it is diagnostic
+data, not an executable callback table or a live-world input. No new requirement
+is added to the airborne option. [Lifecycle evidence](baselines/native-strip-lifecycle.md).

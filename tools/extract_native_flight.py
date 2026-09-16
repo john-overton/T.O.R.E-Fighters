@@ -16,6 +16,18 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('object_type_setup', 0x4a6eb0, 0x4a71dc, 'ground'),
+    ('object_shape_resolve', 0x4a71e0, 0x4a71fc, 'ground'),
+    ('object_creation_finish', 0x4a7806, 0x4a7859, 'ground'),
+    ('object_creation_store', 0x4a7a06, 0x4a7a1a, 'ground'),
+    ('object_release_last_allocation', 0x491490, 0x4914b4, 'ground'),
+    ('object_airport_attachment_gate', 0x4beb90, 0x4bec5c, 'ground'),
+    ('collision_object_unregister', 0x42e5c0, 0x42e679, 'ground'),
+    ('airport_reset', 0x4ba7e0, 0x4ba7fa, 'ground'),
+    ('airport_delete', 0x4ba870, 0x4ba8de, 'ground'),
+    ('resource_setup_notification', 0x4a6df0, 0x4a6e17, 'ground'),
+    ('resource_extension', 0x4a6860, 0x4a686d, 'ground'),
+    ('symbol_call_by_name', 0x46a570, 0x46a63a, 'ground'),
     ('strip_callback_selector', 0x4be640, 0x4be675, 'ground'),
     ('strip_add', 0x4be2a0, 0x4be636, 'ground'),
     ('shape_contact_box_lookup', 0x42e100, 0x42e134, 'ground'),
@@ -379,6 +391,8 @@ def extract(source, output, *, overwrite=False, preview=False, domain='flight'):
         artifacts['tables/atan-pa.bin'] = static_table(exe, rows, 0x515644, 514)
         root_table = static_table(exe, rows, 0x51d624, 1024, 4)
         artifacts['tables/sqrt-seed.bin'] = root_table
+        strip_template = static_table(exe, rows, 0x50ccc8, 0x134 // 2)
+        artifacts['tables/strip-template.bin'] = strip_template
         artifacts['tables/inventory.json'] = json.dumps({
             'schema_version': 1, 'source_exe_sha256': report['exe_sha256'],
             'tables': [{'path': 'sine-q15.bin', 'va': 0x515a48, 'count': 321,
@@ -392,7 +406,11 @@ def extract(source, output, *, overwrite=False, preview=False, domain='flight'):
                        {'path': 'sqrt-seed.bin', 'va': 0x51d624, 'count': 1024,
                         'format': 'little-endian unsigned 32-bit',
                         'sha256': hashlib.sha256(root_table).hexdigest(),
-                        'consumer': '0x4d65c4; seed plus one integer Newton step'}],
+                        'consumer': '0x4d65c4; seed plus one integer Newton step'},
+                       {'path': 'strip-template.bin', 'va': 0x50ccc8, 'size': 0x134,
+                        'format': 'packed inert airport template; pointer words are diagnostic only',
+                        'sha256': hashlib.sha256(strip_template).hexdigest(),
+                        'consumer': '0x4be2a0 mutates; 0x4ba800 copies; unknown fields not runtime accepted'}],
         }, indent=2)+'\n'
     artifacts['inventory.json'] = json.dumps(report,indent=2)+'\n'
     artifacts = {name: content.encode() if isinstance(content, str) else content

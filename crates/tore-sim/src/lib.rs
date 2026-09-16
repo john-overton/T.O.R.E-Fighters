@@ -12,3 +12,4 @@ pub mod vapor;
 pub mod clouds;
 
 pub mod native;
+pub mod native_objects;

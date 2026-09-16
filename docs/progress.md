@@ -1119,9 +1119,14 @@ only the diagnostic precursor; the parent first slice remains researching.
   dispatch and initial mission-position/angle/ground-query order.
 - [x] Test bounded box parsing and native signed midpoint rounding; all 12
   required STRIP IDs exist among 23 RUNWAY.SH boxes. Extract _RUNWAY.PIC.
-- [ ] Complete E003/E005 type/template/creation/cleanup and E004 full drawing
-  closure; stage initial queries before registration (E012).
+- [x] NE-00.1e: recover selected type setup, final store, partial failed-add
+  cleanup and airport reset/removal; translate ordered collision-list operations
+  and test their independent capacities. Extract the inert nonzero template.
+- [ ] Finish E003/E005 full loader/default consumers/scheduling and remaining
+  placement fields, plus E004 full drawing closure. Stage initial queries before
+  registration (E012) and all construction effects across failure (E014).
 - [ ] Connect E001/E002 producer with rollback, then both-aircraft live contact.
   No new runtime branch, AI, carrier activation or retail acceptance.
 
-[Source contract](formats/native-strip.md), [validation](baselines/native-strip.md).
+[Source contract](formats/native-strip.md), [metadata validation](baselines/native-strip.md),
+[lifecycle validation](baselines/native-strip-lifecycle.md).

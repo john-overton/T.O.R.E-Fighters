@@ -1,10 +1,12 @@
 # Native STRIP initialization and shape metadata
 
-2026-09-15, NE-00.1d / E003–E005 under the
+2026-09-15, NE-00.1d/e / E003–E005 under the
 [living plan](../native-environment-systems-plan.md). **Native static source**
-from the exact [reviewed EXE/SMS](native-flight.md). Only the bounded box reader
-and midpoint arithmetic are translated/tested. No runway is runtime-connected;
-retail comparison is unavailable. [Validation](../baselines/native-strip.md).
+from the exact [reviewed EXE/SMS](native-flight.md). The bounded box reader,
+midpoint arithmetic and candidate-list operations are translated/tested.
+No runway is runtime-connected; retail comparison is unavailable.
+[Metadata validation](../baselines/native-strip.md),
+[lifecycle validation](../baselines/native-strip-lifecycle.md).
 
 ## Shape box list
 
@@ -77,8 +79,9 @@ The position inputs are whole feet; first/second/third components feed X/Y/Z.
 ID, overwrites an existing match, or appends if count <40. Each record is 0x134
 bytes. Full capacity returns false. STRIPAddProc returns zero on success and
 one on failure. The creation caller treats a nonzero callback result as failure.
-Template defaults, reset/removal and all registration-failure cleanup remain
-untranslated; a passing box diagnostic is not airport-manager acceptance.
+Template defaults and airport registration remain untranslated; reset/removal
+and failed creation are further bounded below. A passing box diagnostic is not
+airport-manager acceptance.
 
 ## Mission and current-object state
 
@@ -126,9 +129,103 @@ state guards. It skips drawing opcodes/branches; this is **not** proof of comple
 LOD, shadow, palette or resource closure. The named PIC is now extracted with
 archive/hash provenance. Full drawing traversal and visual inspection remain E004.
 
-Next: recover template defaults, type resolution, final creation/store and failed
-registration cleanup; validate all placement fields and collision-channel consumers.
+Next: finish template field consumers, full type-load and scheduling closure;
+validate all placement fields and collision-channel consumers.
 Resolve E004 drawing/texture/palette dependencies independently. Then implement
 transactional world construction and ordered queries, including failures after
 cache/RNG mutation. Neither aircraft's live contact stop changes in this slice;
 carrier remains gated by NE-06 and contact events by NE-07.
+
+## Type setup, final store and cleanup — NE-00.1e
+
+**Source established for the bounded paths below; candidate-list translation
+tested; world construction and live contact remain unconnected.** Same reviewed
+EXE/SMS identities. [Validation](../baselines/native-strip-lifecycle.md).
+
+### Type resolution
+
+`T_AddObj` requests its named type through RMAccess `0x4a6ae0` with mode 0x8000.
+The resource setup notification at `0x4a6df0` forms a symbol name from `_Setup`
+(string VA 0x50a654) and the filename extension returned by `0x4a6860`.
+`SMCallByName` at `0x46a570` concatenates those strings, resolves the symbol,
+and invokes it if present. Thus the OT setup target is `_SetupOT`, 0x4a6eb0.
+This is a source dependency, not permission to execute imported code.
+The complete resource-loader/BRF relocation and lookup lifecycle remains open.
+
+`SetupOT` first obtains type data through `0x4a6b10`, then tests byte 0x50a620.
+Its static default is 1; a separate metadata-loading path at 0x41cae0 temporarily
+sets it to 0 and restores 1 at 0x41caf4. The flag is an explicit dependency;
+setup must not be assumed for every resource inspection.
+
+For STRIP class word **0x0100**, both high-byte masks 0xc0 and 0x3e are clear.
+The generated damage-name branches are skipped. Setup calls `0x4a71e0` on type
+slots **+0x0f, +0x13, +0x17**, in that order. Each nonnull name becomes the
+result of RMAccess(name, 0x8000); a null slot remains null. The selected STRIP
+has only +0x0f (`runway.SH`) populated. This closes the generated-shape-name
+question for this class/path, not SH drawing/LOD/palette closure or arbitrary OT
+classes. Do not synthesize RUNWAY_A or RUNWAY_S from reference naming patterns.
+
+### Template and airport list
+
+The static template at **0x50ccc8 is 0x134 bytes**, and is not zero-filled.
+The hash-gated static pass exports it as `tables/strip-template.bin`; it remains
+inert external diagnostic data. Its first five dwords are callback addresses,
+not host function pointers. Their downstream behavior is outside this slice.
+STRIPAddProc overwrites its local position/orientation inputs, type-derived flag
+bytes and current object ID, then transforms and copies the full record.
+Uninterpreted defaults must be preserved or explicitly unsupported; they cannot
+be replaced with guessed zero values. Full field consumers and template mutation
+ownership are still open.
+
+`APInit` at `0x4ba7e0..0x4ba7fa` clears the active airport count at 0x58b828
+and 0x870 bytes of separate state beginning at 0x58e870. It does **not** clear
+the STRIP template or the record storage at 0x58b850 in this routine.
+`APDelete` at `0x4ba870..0x4ba8de` searches current records for an ID at +0xe6,
+removes the first match, shifts later 0x134-byte records forward in order and
+decrements the count. No match leaves the list unchanged. Neither routine
+establishes complete mission restart or per-object death cleanup.
+
+### Creation completion and failure
+
+After callback 0 returns, `0x4a7801` tests **AX**, not the full return dword.
+Nonzero follows `0x4a7806`: store current state, then call `0x491490`.
+That helper decrements the word allocation count at 0x553838 and subtracts the
+last allocation's stored word size (table 0x553120) from 0x553828. It does not
+clear the object pointer table or unregister collision/airport entries.
+Mode 3 returns zero; other modes call the error path 0x44a420 before the zero
+return sequence. That error handler's downstream recovery is not established.
+The selected object's separately allocated name is another owned resource;
+the bounded failed-add path does not visibly free it.
+
+Consequently, **ordinary removal is not the native failed-add rollback path**.
+Collision registration already ran before the callback. The host must stage
+objects, allocated IDs, owned names, template/airport state, candidates and
+query/cache/RNG changes together and discard failed construction. This atomic
+host failure contract is required by the living plan; it is not a claim that
+retail performs complete rollback. No staged world implementation exists yet.
+
+On success, `0x4a7839` calls `0x4beb90`. STRIP type flags include 0x8000,
+so that helper returns immediately at 0x4bec5a: it does not perform its later
+touching/airport-attachment queries for STRIP. Instance flag mask 0x2 then
+selects scheduling registration at 0x4626b0. The selected placement retains
+this flag; scheduling is still a required, unaccepted edge. With byte 0x5528bc
+clear, creation proceeds directly to `0x4a7a06`, stores current state and returns
+the allocated ID. The special-mode branch when that byte is set remains gated.
+
+### Collision candidate removal and diagnostic translation
+
+`0x42e5c0..0x42e679` requires **type flags & 1**, independently of instance
+flags. It removes the first current-ID match from the primary list, shifting
+following IDs without reordering. It then independently checks the secondary
+list if type flags intersect **0x408000**, even if primary had no match.
+Changed type flags are not automatically reconciled: clearing that mask can
+leave a secondary ID behind. A duplicate primary registration likewise returns
+before retrying secondary insertion, even when secondary capacity is available.
+
+`tore_sim::native_objects::CollisionCandidates` translates only these ordered
+registration/removal operations, with private lists capped at **900 / 450**.
+No parsed object, scheduler, airport callback or live query uses it yet. It is
+caller-owned cloneable diagnostic state for later transactional construction;
+these tests do not prove whole-world rollback or reset. General object removal
+at 0x4627b0 calls collision removal at 0x462835 amid other unresolved lifecycle
+effects; those downstream systems remain outside this translation.
