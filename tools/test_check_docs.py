@@ -1,6 +1,6 @@
 import unittest
 
-from check_docs import HEADER, HEADER_MARKER, apply_header, covered
+from check_docs import HEADER, HEADER_MARKER, HEADER_PREFIX, apply_header, covered
 
 
 TITLE = "# Example document\n"
@@ -21,6 +21,31 @@ class DocumentHeaderTests(unittest.TestCase):
         result = apply_header(outdated)
         self.assertEqual(result.count(HEADER_MARKER), 1)
         self.assertNotIn("An earlier wording.", result)
+
+    def test_reworded_opening_line_is_replaced_not_stacked(self):
+        """Detection matches the prefix, so changing the first line is safe."""
+        previous = f"{HEADER_PREFIX} \u2014 an entirely different opening.**"
+        outdated = f"{TITLE}\n{previous}\n> An earlier wording.\n\n{BODY}"
+        result = apply_header(outdated)
+        self.assertEqual(result.count(HEADER_PREFIX), 1)
+        self.assertNotIn(previous, result)
+        self.assertIn(HEADER, result)
+        self.assertIn(BODY, result)
+
+    def test_repeated_rewording_does_not_accumulate_blank_lines(self):
+        document = TITLE + "\n" + BODY
+        for opening in ("first", "second", "third"):
+            previous = f"{HEADER_PREFIX}: {opening}.**"
+            document = apply_header(document) or document
+            document = document.replace(HEADER.split("\n")[0], previous, 1)
+        final = apply_header(document)
+        self.assertNotIn("\n\n\n", final)
+        self.assertEqual(final, f"{TITLE}\n{HEADER}\n\n{BODY}")
+
+    def test_header_contains_no_links_and_no_em_dash(self):
+        self.assertNotIn("](", HEADER)
+        self.assertNotIn("\u2014", HEADER)
+        self.assertNotIn("user", HEADER.lower())
 
     def test_banner_above_the_title_keeps_its_place(self):
         banner = "> **Frozen as of 2026-09-15.**\n"

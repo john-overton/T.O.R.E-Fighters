@@ -6,7 +6,8 @@ files that are missing it or carrying an older revision. `--fix` writes it.
 
 The header text lives in HEADER below. To reword it, edit HEADER, raise
 HEADER_REVISION, and run `python3 tools/check_docs.py --fix`: the old block is
-recognized by HEADER_MARKER and replaced, never stacked.
+found by HEADER_PREFIX and replaced, never stacked. Rewording the opening line
+is safe, because detection matches the prefix rather than the whole line.
 """
 
 import argparse
@@ -17,19 +18,23 @@ import sys
 
 # Bump whenever HEADER changes, so existing files are rewritten rather than
 # reported as already-headed.
-HEADER_REVISION = 1
+HEADER_REVISION = 2
 
-# The first line is the stable marker. Keep it free of links: the header must be
-# one identical string at every directory depth.
-HEADER_MARKER = "> **T.O.R.E — we trace what the player does, not what the code did.**"
+# An existing block is found by this prefix, not by the exact first line, so
+# rewording the opening sentence replaces the old header instead of stacking a
+# second one beneath it.
+HEADER_PREFIX = "> **T.O.R.E"
+
+# Keep the header free of links: it must be one identical string at every
+# directory depth, and a relative path is not.
+HEADER_MARKER = f"{HEADER_PREFIX}: Tasteful Opinionated Reverse Engineered.**"
 
 HEADER = f"""{HEADER_MARKER}
-> This project reverse-engineers *player interaction*: what you press, see, hear
-> and feel in Fighters Anthology, and the numbers behind it. It does not
-> reproduce the original program byte by byte. Anything here about the original
-> executable is evidence toward a behaviour spec — never a specification for what
-> we build. If a sentence below reads like an instruction to reproduce the
-> original's internals, it is out of date.
+> The thing being reverse engineered is the *experience*, not the executable. We
+> trace what a player does and what the game does back, down to the numbers they
+> would notice. How the original code achieved it is history: useful evidence,
+> never a blueprint. If a sentence below reads like an instruction to reproduce
+> the original's internals, it is out of date.
 > <!-- tore-header v{HEADER_REVISION} -->"""
 
 COVERED_DIRECTORIES = (
@@ -73,11 +78,13 @@ def split_header(text):
     start = title + 1
     while start < len(lines) and not lines[start].strip():
         start += 1
-    if start < len(lines) and lines[start] == HEADER_MARKER:
+    if start < len(lines) and lines[start].startswith(HEADER_PREFIX):
         end = start
         while end < len(lines) and lines[end].startswith(">"):
             end += 1
-        return lines[:start], lines[start:end], lines[end:]
+        # Drop the blank lines between the title and the old block: the caller
+        # re-adds exactly one, so repeated rewording cannot accumulate them.
+        return lines[: title + 1], lines[start:end], lines[end:]
     return lines[: title + 1], None, lines[title + 1 :]
 
 
@@ -86,13 +93,13 @@ def apply_header(text):
     split = split_header(text)
     if split is None:
         return None
-    before, existing, after = split
-    header = HEADER.split("\n")
-    if existing == header:
-        return None
+    before, _existing, after = split
     while after and not after[0].strip():
         after = after[1:]
-    return "\n".join(before + [""] + header + [""] + after)
+    updated = "\n".join(before + [""] + HEADER.split("\n") + [""] + after)
+    # Comparing whole documents, not just the block, also normalizes the spacing
+    # around a header that is otherwise current.
+    return None if updated == text else updated
 
 
 def tracked_documents():
