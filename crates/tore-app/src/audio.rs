@@ -18,7 +18,10 @@ struct Voice {
 struct Mixer {
     music: music::Music,
     engine: Option<Voice>,
+    engine_aircraft: Option<tore_formats::aircraft::AircraftId>,
     burner: Option<Voice>,
+    stall: Option<Voice>,
+    stall_cue: Option<&'static str>,
     flight_on: bool,
     flight_paused: bool,
     engine_gain: f32,
@@ -100,7 +103,10 @@ impl Audio {
         let mixer = Arc::new(Mutex::new(Mixer {
             music,
             engine: None,
+            engine_aircraft: None,
             burner: None,
+            stall: None,
+            stall_cue: None,
             flight_on: false,
             flight_paused: false,
             engine_gain: 0.,
@@ -178,6 +184,8 @@ impl Audio {
         if let Ok(mut m) = self.mixer.lock() {
             m.music.scene(music::Scene::Score(0));
             m.music.restart();
+            m.stall = None;
+            m.stall_cue = None;
             m.engine = None;
             m.burner = None;
             m.engine_gain = 0.;
@@ -193,10 +201,16 @@ impl Audio {
     }
     pub fn flight(
         &self,
-        state: Option<(&tore_formats::aircraft::Aircraft, &crate::flight::State)>,
+        state: Option<(
+            &tore_formats::aircraft::Aircraft,
+            &crate::flight::State,
+            f64,
+        )>,
     ) {
         if let Ok(mut m) = self.mixer.lock() {
             if state.is_none() && m.flight_on {
+                m.stall = None;
+                m.stall_cue = None;
                 m.engine = None;
                 m.burner = None;
                 m.engine_gain = 0.;
@@ -207,8 +221,28 @@ impl Audio {
             if let Some(fault) = m.music.fault.take() {
                 eprintln!("Music stopped: {fault:?}; see import-report.txt for missing resources");
             }
-            if let Some((a, s)) = state {
+            if let Some((a, s, ground)) = state {
                 m.music.scene(music::Scene::Score(0));
+                if m.engine_aircraft != Some(a.id) {
+                    m.stall = None;
+                    m.stall_cue = None;
+                    m.engine = None;
+                    m.burner = None;
+                    m.engine_gain = 0.;
+                    m.burner_gain = 0.;
+                    m.voices.clear();
+                    m.engine_aircraft = Some(a.id);
+                }
+                let alert = stall_cue(s.stall_alert(ground));
+                if m.stall_cue != alert {
+                    m.stall = alert
+                        .and_then(|name| self.clips.get(name))
+                        .map(|clip| Voice {
+                            clip: clip.clone(),
+                            position: 0.,
+                        });
+                    m.stall_cue = alert;
+                }
                 if m.engine.is_none() {
                     m.engine = a
                         .sounds
@@ -324,6 +358,16 @@ fn brake_cue(deployed: bool, on_ground: bool) -> &'static str {
         "&FLAPOPN.5K"
     }
 }
+fn stall_cue(
+    mode: Option<tore_formats::flight_model::departure::DepartureMode>,
+) -> Option<&'static str> {
+    use tore_formats::flight_model::departure::DepartureMode::*;
+    match mode {
+        Some(Warning | ExtendedWarning) => Some("&STALLWR.5K"),
+        Some(Stalled | Spinning) => Some("&STALL.5K"),
+        _ => None,
+    }
+}
 impl Mixer {
     fn sample(&mut self, rate: f64) -> f32 {
         let mut value = 0.;
@@ -331,6 +375,9 @@ impl Mixer {
             value += self.music.next(rate) * 0.16;
         }
         if self.flight_on && !self.flight_paused && self.effects_on {
+            if let Some(v) = &mut self.stall {
+                value += v.next(rate, true) * 0.4;
+            }
             if let Some(v) = &mut self.engine {
                 value += v.next(rate, true) * self.engine_gain;
             }
@@ -378,16 +425,65 @@ fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
 mod tests {
     use super::*;
     #[test]
+    fn stall_cues_and_pause_mute_use_a_dedicated_loop() {
+        use tore_formats::flight_model::departure::DepartureMode::*;
+        assert_eq!(stall_cue(Some(Warning)), Some("&STALLWR.5K"));
+        assert_eq!(stall_cue(Some(ExtendedWarning)), Some("&STALLWR.5K"));
+        assert_eq!(stall_cue(Some(Stalled)), Some("&STALL.5K"));
+        assert_eq!(stall_cue(Some(Spinning)), Some("&STALL.5K"));
+        assert_eq!(stall_cue(Some(Normal)), None);
+        let mut m = Mixer {
+            music: music::Music::new(&BTreeMap::new(), &BTreeMap::new(), 1),
+            engine: None,
+            engine_aircraft: None,
+            burner: None,
+            stall: Some(Voice {
+                clip: Arc::new(Clip {
+                    samples: vec![192; 4],
+                    rate: 4.,
+                }),
+                position: 0.,
+            }),
+            stall_cue: Some("&STALL.5K"),
+            flight_on: true,
+            flight_paused: false,
+            engine_gain: 0.,
+            burner_gain: 0.,
+            voices: Vec::new(),
+            ui_voices: Vec::new(),
+            music_on: false,
+            effects_on: true,
+        };
+        for _ in 0..12 {
+            assert!((m.sample(4.) - 0.2).abs() < 1e-6);
+        }
+        m.flight_paused = true;
+        let position = m.stall.as_ref().unwrap().position;
+        assert_eq!(m.sample(4.), 0.);
+        assert_eq!(m.stall.as_ref().unwrap().position, position);
+        m.flight_paused = false;
+        m.effects_on = false;
+        assert_eq!(m.sample(4.), 0.);
+        m.effects_on = true;
+        m.stall = None;
+        assert_eq!(m.sample(4.), 0.);
+    }
+    #[test]
     fn both_aircraft_emit_brake_cues_only_on_actual_state_changes() {
         use tore_formats::aircraft::AircraftId;
         use tore_input::{PilotCommand, PilotInput, Switch};
         for id in AircraftId::ALL {
             let mut profile = crate::flight::animation_tests::profile();
             profile.id = id;
-            if id == AircraftId::Rafale {
-                profile.name = "RAFALE".into();
-                profile.shape = "RAF.SH".into();
+            profile.name = match id {
+                AircraftId::F18 => "F/A-18D",
+                AircraftId::Rafale => "RAFALE",
+                AircraftId::F14 => "F-14",
+                AircraftId::A4E => "A-4E",
+                AircraftId::X31 => "X-31",
             }
+            .into();
+            profile.shape = format!("{}.SH", id.stem());
             let mut state = crate::flight::State::new(&profile, [0., 10000., 0.]).unwrap();
             let before = state.clone();
             let mut input = PilotInput::default();

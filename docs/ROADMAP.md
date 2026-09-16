@@ -30,13 +30,13 @@ John scheduled the shoreline correction and ocean-motion trial on 2026-09-16.
 See [ocean behavior and visual scope](spec/ocean.md). This bounded visual
 work precedes the following order without authorizing additional systems work.
 
-Follow with maneuver audio/rumble and final [flight-response acceptance](research/flight-response-plan.md),
-then F-14, A-4E and X-31 through the [aircraft import gates](aircraft-import.md),
-then the remaining weather work. Where a behaviour came from is recorded per
-component under [behavior provenance](behavior-provenance.md); no provenance
-label is an acceptance gate. Retail comparison is unavailable and does not block
-progress. No default adapter change, new flyable identity or broader menu work is
-implied here.
+John requested initial F-14, A-4E and X-31 ports on 2026-09-16, then specified
+Fighters Anthology sources throughout. F-14D, A-4E and X-31 EFM now have initial
+ports through the [aircraft import workflow](aircraft-import.md). See
+[acceptance and remaining limitations](baselines/aircraft-fa-expansion.md).
+USNF-ATF is a research guide only. Continue maneuver audio/rumble, remaining
+flight-response and weather work in the [parity plan](parity-plan.md).
+No default adapter change or AI scope is included.
 
 The preceding execution order (2026-09-14) remains a broader gate: finish manual weapons, sensors and damage
 acceptance for F/A-18D and Rafale C before AI work. The only AI authorized for the

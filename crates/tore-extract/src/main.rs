@@ -243,7 +243,10 @@ fn analyze(
             pcm.samples.len() as f64 / pcm.rate as f64
         ));
     }
-    if matches!(name, "F18.PT" | "RAFALE.PT") {
+    if matches!(
+        name,
+        "F18.PT" | "RAFALE.PT" | "F14.PT" | "A4E.PT" | "F31.PT"
+    ) {
         let a = tore_formats::aircraft::Aircraft::parse(bytes)?;
         let envelopes = a
             .envelopes
@@ -664,7 +667,9 @@ fn main() -> Result<()> {
                 options
                     .aircraft
                     .push(tore_formats::aircraft::AircraftId::parse(
-                        &args.next().ok_or("--aircraft needs f18 or rafale")?,
+                        &args
+                            .next()
+                            .ok_or("--aircraft needs f18, rafale, f14, a4e or x31")?,
                     )?);
             }
             "--weapons" => options.weapons = true,
@@ -708,7 +713,7 @@ fn main() -> Result<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--aircraft f18|rafale] [--weapons] [--music] [--creator] [--wav-previews] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and general format conversion are not implemented. --music --wav-previews adds lossless PCM WAV wrappers.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
+                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--aircraft f18|rafale|f14|a4e|x31] [--weapons] [--music] [--creator] [--wav-previews] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and general format conversion are not implemented. --music --wav-previews adds lossless PCM WAV wrappers.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
                 );
                 return Ok(());
             }

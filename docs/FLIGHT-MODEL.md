@@ -1,4 +1,4 @@
-# Shared F/A-18D and Rafale C flight model
+# Shared aircraft flight model
 
 > **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
 > The thing being reverse engineered is the *experience*, not the executable. We
@@ -55,11 +55,15 @@ It requires a full aircraft extraction, not `--include`, preview or
 The source-specific LHX exclusion skips unrelated bundled archives; omit it for
 media without that directory. See [EXTRACTION](EXTRACTION.md) for source paths.
 
-The app still defaults to its legacy adapter. `--researched-flight` selects the
-hybrid model and persists across new free flights in that process. It also works
-with `--headless-flight 7200 --maneuver loop`. Both F/A-18D and Rafale C are rendered aircraft; select Rafale with
+The app defaults to the researched hybrid adapter, requested by John on
+2026-09-16. `--researched-flight` remains an explicit alias; `--legacy-flight`
+selects the previous compatibility model. Selection persists across new free
+flights in that process. It also works
+with `--headless-flight 7200 --maneuver loop`. F/A-18D, Rafale C, F-14D, A-4E and X-31 EFM are rendered aircraft; select Rafale with
 `--aircraft rafale` or Quick Mission. Each uses its own original cockpit and
-separate fitted animation rig. No F18.SH animation addresses are applied to RAF.SH.
+separate fitted animation rig. No F18.SH animation addresses are applied to another shape. The additional
+models own their configurations and use the [documented shared fit](spec/additional-aircraft.md).
+Select them with `--aircraft f14|a4e|x31`; see [validation](baselines/aircraft-fa-expansion.md).
 
 For already-extracted files:
 
@@ -84,7 +88,7 @@ rate independence, wind, mass validation and ground behavior without retail data
 | Envelopes and mass | Original G polygons, empty weight, internal fuel, military/AB thrust, consumption and drag/loading fields. Scalars resolve once when creating state; envelope intersection no longer allocates per update. |
 | Attitude and momentum | Shared orthonormal basis, independent velocity and nose direction, full vertical/inverted flight. Float integration, aerodynamic alignment, trim AoA, atmosphere lapse, response and drag normalization are fitted. |
 | Controls | Original roll-rate maximum in the hybrid path; G authority from aircraft envelopes/loading. Response filtering, pitch/yaw coupling and actuator travel are fitted. |
-| Departure | Native warning/stall transitions, connected severity/control/lift attenuation and spin entry/recovery predicates with explicit clock/RNG. Initial stall classification uses a fitted below-clean-envelope gate. Spin yaw range/intensity comes from PT/native rate arithmetic; continuous spin force/attitude coupling is fitted. The two reviewed aircraft use spinExit −2. |
+| Departure | Source warning/stall transitions and spin entry, with connected severity/control/lift attenuation. Initial stall classification uses a fitted below-clean-envelope gate. Hybrid spin torque, damping, surface response and threshold recovery are fitted; PT maximum yaw rate bounds angular velocity. The original two reviewed aircraft use spinExit −2; X-31 additionally disables spin entry. |
 | Propulsion/fuel/devices | Per-aircraft military/AB thrust and fuel consumption; engine/fuel/throttle gates; gear, flaps, brake, hook and burner state. Lapse, exhaust ramp and three-second actuator travel remain fitted. |
 | Ground contact | Native landing limits classify touchdown. Hybrid accepts only caller-declared landable ground with gear deployed and within limits; water and unsafe touchdowns crash. Eight-foot CG clearance, flat-runway tire scrub, rolling/brake friction, pitch support and crash severity policy are fitted. |
 | Wind | Explicit world wind in ft/s via `research::Surface`; aerodynamic forces use air-relative velocity, position uses ground velocity. Synthetic advection test holds airspeed unchanged and checks 400-foot drift over ten seconds at 40 ft/s. |
@@ -181,9 +185,12 @@ cache or a second copy of aircraft limits in `Research`.
 | `tuning` | Aircraft-owned fitted trim, thrust lapse, roll/pitch response, alignment, rudder and tire/braking coefficients |
 
 Both legacy and research modes consume this configuration. Research mode adds
-recovered departure/contact behavior; legacy mode retains its configured 1.8 rad/s fitted roll cap
-and legacy contact/drag treatment. Existing fitted coefficients and source data
-were retained, preserving the validation baseline.
+recovered departure/contact behavior. Hornet/Rafale legacy mode retains its
+configured 1.8 rad/s fitted roll cap and legacy contact/drag treatment. The three
+new ports use their PT roll response and low-speed auxiliary rotation in both
+host adapters, as specified in [additional aircraft](spec/additional-aircraft.md).
+Auxiliary rotation is separate from aerodynamic control and remains available
+below stall speed when powered. It does not add lift or redirect thrust.
 
 Configure before creating a flight (this Rust API assumes a parsed `Aircraft`):
 
@@ -224,8 +231,8 @@ whole-tick parity. External mod-file serialization/loading remains future work.
 
 The [aircraft import and acceptance guide](aircraft-import.md) joins extraction,
 existing flight/presentation/systems coverage and all per-aircraft acceptance
-gates. F-14, A-4E and X-31 are scheduled after the flight-response slice; they
-are not supported identities yet.
+gates. F-14D, A-4E and X-31 now have initial FA-only ports; see
+[acceptance](baselines/aircraft-fa-expansion.md).
 
 ## Flight response contracts, 2026-09-15
 
@@ -239,7 +246,7 @@ command/filtered deflection/effective control, optional departure mode and sever
 It is not interpolated by presentation; consumers must not combine it with a
 render-interpolated AirData sample as if both represented the same tick.
 The existing `roll_rate`/`pitch_rate` fields are control-response state; use the
-snapshot for actual rotation, including alignment, ground and spin overrides.
+snapshot for actual rotation, including alignment, ground rotation and blended spin motion.
 
 Rudder yaw now consumes the fitted filtered deflection, preserving a smooth
 release. Each aircraft's own tuning includes `sideslip_drag=0.5`: drag/weight is
@@ -248,19 +255,24 @@ This symmetric continuous loss is authored, not the native display-slip drag law
 Roll retains its single response filter and existing source/hybrid versus fitted/
 legacy cap. No new native rudder-to-roll law is asserted.
 
-Hybrid spin predicates consume bounded pilot commands in the native ±256 domain,
-not filtered artwork deflections. Entry precedes departure dispatch and clears
-intensity/recovery progress on each entry. Quantized native bank/rate values
-control tie RNG draws. Ground clears departure. The translated severity ramp
-and distinct roll/rudder versus pitch attenuation now reduce control authority
-and lift; severity samples the timer before advancement. The clean-envelope gate
-and reference speed remain fitted. Supported spinExit −2 recovery requires
-negative pitch, opposite rudder at least 200/256 and speed above clean stall+10
-whole fps for 256 continuous clock units; neutral rudder interrupts the timer.
-Throttle is not a requirement for either supported profile.
+Hybrid spin entry retains the source predicates and direction selection. Spin
+motion and recovery use [input-driven angular dynamics](spec/spin-transitions.md):
+continuous rudder torque, rotation/airflow-dependent control response, direct
+proportional elevator pitch and aerodynamic damping. There is no timed spin
+buildup or recovery ramp. Wrong rudder can increase rotation; early opposite
+rudder can arrest it even below clean stall speed. In that case the spin clears
+but the aircraft remains stalled. Normal flight requires sufficient speed,
+airflow inside the 25-degree cone and residual yaw within normal rudder authority.
+Small remaining angular velocity is retained and damped after clearance.
+
+Analog input remains continuous through torque and elevator response, including
+small deflections. Only the preserved source entry predicates use their integer
+input domain. Source recovery predicates remain unchanged in the restricted
+research adapter. Hybrid normal stall classification remains a fitted
+clean-envelope speed gate; severity and source warning timing are unchanged.
 
 Native pitch/roll fall, tumble, full current-G/difficulty/device classification,
-spin movement/display composition and original scheduling remain open. Legacy
+original spin movement/display composition and scheduling remain open. Legacy
 still has fitted low-speed lift loss with no native warning/spin state machine;
 its maneuver departure channel is `None`. This does not change adapter selection.
 

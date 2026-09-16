@@ -270,6 +270,10 @@ impl SimRenderer {
                     binding: 3,
                     resource: wgpu::BindingResource::TextureView(&view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&palette_view),
+                },
             ],
         });
         // Vapor reads this view's camera and palette, with its own derived layout.
@@ -427,6 +431,10 @@ impl SimRenderer {
             // Remap and the palette worker share the world's indexed palette.
             assert!(pic.palette.is_empty(), "unreviewed aircraft atlas palette");
             let palette_view = self.palette.create_view(&Default::default());
+            let engine_view = hornet
+                .engine_material
+                .as_ref()
+                .map(|image| image.upload(device, queue));
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Aircraft textures"),
                 layout: &self.pipeline.get_bind_group_layout(0),
@@ -446,6 +454,12 @@ impl SimRenderer {
                     wgpu::BindGroupEntry {
                         binding: 3,
                         resource: wgpu::BindingResource::TextureView(&self.weather_tiles),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(
+                            engine_view.as_ref().unwrap_or(&palette_view),
+                        ),
                     },
                 ],
             });

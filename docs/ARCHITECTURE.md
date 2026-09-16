@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-The M0 environment supports the M1a menu slice, the M1b renderer across all 16 theaters, and M1c free flight in two aircraft (F/A-18D and Rafale C) plus a development weapons range. M0's full title census, salvage inventory, parity specification, and AI VM decision remain open.
+The M0 environment supports the M1a menu slice, the M1b renderer across all 16 theaters, and M1c free flight in five aircraft (F/A-18D, Rafale C, F-14D, A-4E and X-31 EFM) plus a development weapons range. M0's full title census, salvage inventory, parity specification, and AI VM decision remain open.
 
 | Component | Choice | Purpose |
 | --- | --- | --- |
@@ -19,7 +19,7 @@ The M0 environment supports the M1a menu slice, the M1b renderer across all 16 t
 | Startup bridge | `pollster` 0.4 | Wait for GPU initialization without a general async runtime |
 | Audio device | `cpal` 0.16 | Native output for the small PCM mixer; [upstream API](https://docs.rs/cpal/0.16.0/cpal/) |
 | Formats | Dependency-free `crates/tore-formats` | Bounded EALIB, raw-literal DCL, PIC/glyphs, a narrow CHOOSEAC DLG reader, BIT2, mission environment fields PL weather palettes, BRF aircraft/equipment, bounded SH projection and compiled FNT glyphs |
-| Simulation | `crates/tore-sim` | Shared 120 Hz state/attitude, selectable hybrid dynamics and headless two-aircraft acceptance |
+| Simulation | `crates/tore-sim` | Shared 120 Hz state/attitude, selectable hybrid dynamics and headless aircraft acceptance |
 | Extraction | `crates/tore-extract` + `tools/extract_assets.py` | Title-independent archive discovery/extraction, safe output paths, provenance |
 | Checks | Cargo, Python standard library, GitHub Actions | Local and CI checks |
 
@@ -133,3 +133,18 @@ fixture commands. Replays validate identity/assets and reproduce combat state,
 including adapter RNG and subsystem failures; version 1 rejects explicitly. This
 is combat-service determinism: it reproduces combat state, not a full application
 replay. See [contracts, validation and limitations](baselines/weapons-systems.md).
+
+## Additional aircraft
+
+The aircraft registry now includes F-14D, A-4E and X-31 EFM. Each owns a typed
+model configuration; presentation rigs remain in tore-app. Shared combat reads
+the selected identity's radar and PT stations. Audio switching clears old
+aircraft voices. See [aircraft behavior](spec/additional-aircraft.md).
+
+The optional user-supplied [engine material](spec/engine-material.md) replaces reviewed burner
+face materials at runtime. Its throttle glow is separate from the retail atlas
+and does not change A-4E presentation or flame geometry.
+
+Researched flight is now the default; `--legacy-flight` preserves the previous
+model. HUD and audio share the [stall warning signal](spec/stall-warnings.md),
+including the original imported warning samples.

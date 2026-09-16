@@ -53,6 +53,19 @@ pub(crate) mod animation_tests {
     }
     pub(crate) fn profile() -> Aircraft {
         let mut a = base_profile();
+        for prefix in ["_brv.x", "puffRot.x", "puffRot.y", "puffRot.z"] {
+            for (suffix, value) in [("min", -90), ("max", 90), ("acc", 200), ("dacc", 400)] {
+                a.fields.insert(
+                    format!("{prefix}.{suffix}"),
+                    Token {
+                        kind: "word".into(),
+                        value: value.to_string(),
+                        scaled: false,
+                    },
+                );
+            }
+        }
+
         for key in [
             "turbulencePercent",
             "rudderDrag",

@@ -127,6 +127,16 @@ pub fn rudder_faces(face: &Face, s: &State) -> Vec<Face> {
     let length = dot(axis, axis).sqrt();
     let axis = axis.map(|x| x / length);
     let distance = |p: [f32; 3]| p[1] + 32. + (p[2] - 4.) * 7. / 26.;
+    split_surface(face, pivot, axis, s.rudder * 0.35, distance)
+}
+
+pub(crate) fn split_surface(
+    face: &Face,
+    pivot: [f32; 3],
+    axis: [f64; 3],
+    angle: f64,
+    distance: impl Fn([f32; 3]) -> f32,
+) -> Vec<Face> {
     let mut result = Vec::new();
     for moving in [false, true] {
         let mut f = face.clone();
@@ -164,15 +174,11 @@ pub fn rudder_faces(face: &Face, s: &State) -> Vec<Face> {
         }
         if moving {
             for p in &mut f.positions {
-                let v = rotate(
-                    std::array::from_fn(|i| p[i] - pivot[i]),
-                    axis,
-                    s.rudder * 0.35,
-                );
+                let v = rotate(std::array::from_fn(|i| p[i] - pivot[i]), axis, angle);
                 *p = std::array::from_fn(|i| pivot[i] + v[i]);
             }
             if let Some(n) = f.normal {
-                let n = rotate([n[0], n[2], n[1]], axis, s.rudder * 0.35);
+                let n = rotate([n[0], n[2], n[1]], axis, angle);
                 f.normal = Some([n[0], n[2], n[1]]);
             }
         }

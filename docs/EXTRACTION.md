@@ -172,7 +172,7 @@ python3 tools/extract_assets.py --theater all --aircraft f18 --weapons --exclude
 
 The aircraft profile automatically includes its default weapons, sensors, tank, shapes, textures, cockpit variants, instrument fonts/chrome and available audio dependencies. `--weapons` expands to all projectiles, sensors, ECM and tanks plus shared combat effects. Profiles combine as a union; optional `--include` globs filter that union. Native Rust readers and the dependency resolver are shared with app startup; no reference checkout, Bun or extra Python packages are needed. Dry-run/list performs dependency reads but writes nothing. Keep the report alongside the extracted files for source hashes and named fields, envelopes and hardpoint evidence.
 
-This preserves/imports data; it does not establish full flight, radar, instrument or weapon behavior. See [aircraft format and runtime coverage](formats/aircraft.md). F/A-18C is a separate variant, not an alias for this F/A-18D profile. The app imports both reviewed aircraft and the armament catalog from FA_1/FA_2 directly into its versioned cache. It does not consume the CLI output directory. Importing the catalog alone does not enable combat: `--live-fire` selects the two-aircraft PT-default manual range. The existing cache supplies the typed ECM and damage fields used by the [systems pass](baselines/weapons-systems.md); extracted alternatives are not automatically playable.
+This preserves/imports data; it does not establish full flight, radar, instrument or weapon behavior. See [aircraft format and runtime coverage](formats/aircraft.md). F/A-18C is a separate variant, not an alias for this F/A-18D profile. The app imports all five reviewed aircraft and the armament catalog from FA_1/FA_2 directly into its versioned cache. It does not consume the CLI output directory. Importing the catalog alone does not enable combat: `--live-fire` enables the selected aircraft's PT-default manual range. The existing cache supplies the typed ECM and damage fields used by the [systems pass](baselines/weapons-systems.md); extracted alternatives are not automatically playable.
 
 
 The cockpit/control follow-up adds mandatory `HUD11.FNT` and `FMENUD.MNU` to `--aircraft f18`, and preserves all available HUD mode fonts. Re-run the same extraction command to extend an existing output; unchanged files remain untouched. The runtime cache detects the newly required font and can refresh itself from the local media. The recovered menu tree is interpreted as data; no native module is executed.
@@ -382,3 +382,12 @@ The optional third argument `ISOLATED-PLACEMENT` reads a single selected STRIP
 provenance when isolating a record locally; do not pass a whole MM file. Unknown
 fields fail, and zero Y is not treated as a placed runway. No extraction profile
 or runtime import changes. [Record-reader evidence](baselines/native-strip-record.md).
+
+## Additional FA profiles
+
+`--aircraft f14`, `--aircraft a4e` and `--aircraft x31` select F-14D, A-4E
+and X-31 EFM, including cockpit, audio and equipment closure through the shared
+resolver. `--validate-flight` runs the same aircraft suite. Preserve archive
+boundaries and explicitly exclude toolkit `swpatch.lib` for base-FA research.
+The app itself imports only FA_1/FA_2 aircraft sources, with no SWPATCH overlay.
+[Commands, identities and limitations](baselines/aircraft-fa-expansion.md).

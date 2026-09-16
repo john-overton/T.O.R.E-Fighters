@@ -103,6 +103,13 @@ preserved. Smoke/capture/performance diagnostics ignore these display preference
 and do not write them, keeping existing visual probes reproducible. Explicit
 instrument layout/page and zoom flags override saved values for normal launches.
 
+Hybrid spin handling uses continuous pitch and rudder axis values for torque
+and nose response, including fine deflections. John requested analog controls
+as the baseline on 2026-09-16. Keyboard values feed the same flight model; they
+do not define a separate all-or-nothing recovery law. Existing calibration,
+deadzones and response curves remain user-configurable. See
+[spin dynamics](spec/spin-transitions.md) for the fitted flight response.
+
 ## Profiles and calibration
 
 Generate an editable profile without importing media or opening a window:
@@ -472,3 +479,17 @@ feedback. Unsupported devices continue silently. A native API failure disables
 feedback on that device until reconnect and reports one explanation. Native
 worker deadlines and bounded requests guard against stuck effects. Actual motor
 strength and comfort still require physical controller acceptance.
+
+## Additional aircraft capabilities
+
+F-14D, A-4E and X-31 EFM use the existing input bindings. Device commands respect
+capabilities: A-4E has no burner, and X-31 has no hook. No thrust-vectoring input
+is implemented. See [aircraft behavior](spec/additional-aircraft.md) and
+[validation](baselines/aircraft-fa-expansion.md).
+
+`--flight-throttle 0..1` sets the initial throttle for engine-material captures;
+see the [engine material contract](spec/engine-material.md).
+
+Researched flight is now the default; `--legacy-flight` preserves the previous
+model. HUD and audio share the [stall warning signal](spec/stall-warnings.md),
+including the original imported warning samples.

@@ -16,7 +16,7 @@
 
 <p align="center">
   <a href="docs/formats/theater.md"><img alt="16 theaters" src="https://img.shields.io/badge/theaters-16-3c7a57"></a>
-  <a href="docs/FLIGHT-MODEL.md"><img alt="F/A-18D and Rafale C" src="https://img.shields.io/badge/aircraft-F%2FA--18D%20%7C%20Rafale%20C-3c7a57"></a>
+  <a href="docs/FLIGHT-MODEL.md"><img alt="Five aircraft" src="https://img.shields.io/badge/aircraft-5%20flyable-3c7a57"></a>
   <a href="docs/baselines/weapons-systems.md"><img alt="135 weapon definitions" src="https://img.shields.io/badge/weapon%20definitions-135-3c7a57"></a>
   <a href="AGENTS.md"><img alt="No retail game data in this repository" src="https://img.shields.io/badge/retail%20game%20data-none%20shipped-6b4fbb"></a>
   <a href="MODS.md"><img alt="Mods keep their own license" src="https://img.shields.io/badge/mods-your%20own%20license-6b4fbb"></a>
@@ -42,7 +42,7 @@ and toggles.
 
 **Create Quick Mission** opens the original-style briefing: click the aircraft
 name in Wing 1 or the theater name in "You are flying over…" to select, then
-**OK** to fly. F/A-18D and Rafale C are available, on any of the 16 imported
+**OK** to fly. F/A-18D, Rafale C, F-14D, A-4E and X-31 EFM are available, on any of the 16 imported
 theaters. All briefing fields are editable and unsupported mission systems are
 validated before launch. Custom weapons opens the original-art Load Ordnance
 screen with compatible weapon and fuel edits. Set enemy Wing 1 to zero for the
@@ -100,6 +100,7 @@ See [development setup](docs/DEVELOPMENT.md) for fresh-machine setup, Linux/Wind
 ```sh
 cargo run --locked -p tore-app -- --free-flight --aircraft f18
 cargo run --locked -p tore-app -- --free-flight --aircraft rafale --theater FRA
+cargo run --locked -p tore-app -- --free-flight --aircraft f14
 ```
 
 Arrows fly; PageUp/PageDown adjusts throttle; Shift-B enables afterburner.
@@ -112,11 +113,12 @@ See the [complete control reference](docs/FLIGHT-CONTROLS.md) and
 [controller setup](docs/INPUT.md).
 
 Two other flight paths exist alongside the default and are selected explicitly:
-`--researched-flight` runs a hybrid adapter, and `--native-flight-tables DIR`
+The default flight model is the researched hybrid adapter (`--researched-flight`);
+`--legacy-flight` preserves the older compatibility model, and `--native-flight-tables DIR`
 runs a restricted research build from statically extracted tables. Both are
 research options, not the default. See [the flight model](docs/FLIGHT-MODEL.md).
 
-The development weapons range is `--live-fire --aircraft f18` (or `rafale`).
+The development weapons range is `--live-fire --aircraft f18` (also `rafale`, `f14`, `a4e`, `x31`).
 Space fires, semicolon selects a weapon, backslash resets the range and T
 designates.
 

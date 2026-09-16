@@ -275,6 +275,9 @@ pub fn draw(
         336,
         291,
     );
+    if s.stall_alert(ground).is_some() {
+        p.text(font, "STALL", 301, 274);
+    }
     if s.crashed {
         p.text(font, "CRASHED - ESC", 277, 306);
     } else if !s.engine {

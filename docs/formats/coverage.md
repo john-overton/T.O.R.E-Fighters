@@ -51,7 +51,7 @@ open. No format status is promoted by this research. [Plan](weapons.md) and
 
 ### F/A-18D slice
 
-FA PT: typed bounded reader for the reviewed F18/660 layout, all source G rows and hardpoints exported; runtime physics is an authored adapter. FA JT/SEE/ECM: named schema decoding and raw data extraction, including transitive shape/texture/audio dependencies; weapon/sensor execution is partial for the ten F18/Rafale default slots, including contact ECM and supported automatic equipment faults. GAS: checked tank configuration and raw preservation. SH: nearest-detail static Hornet geometry and observed device endpoint branches, not a general native VM. FNT: bounded bitmap-writing glyph grammar, WIN11 used in instrument windows. HUD: associated source artwork/data preserved, general native HUD composition not decoded. [Detailed scope](aircraft.md).
+FA PT: typed bounded reader for the reviewed aircraft layouts (identity-specific 612/636/660 type sizes), all source G rows and hardpoints exported; runtime physics is an authored adapter. FA JT/SEE/ECM: named schema decoding and raw data extraction, including transitive shape/texture/audio dependencies; weapon/sensor execution is partial for reviewed default stations of the five registered aircraft, including contact ECM and supported automatic equipment faults. GAS: checked tank configuration and raw preservation. SH: nearest-detail static Hornet geometry and observed device endpoint branches, not a general native VM. FNT: bounded bitmap-writing glyph grammar, WIN11 used in instrument windows. HUD: associated source artwork/data preserved, general native HUD composition not decoded. [Detailed scope](aircraft.md).
 
 ## Native flight research
 
@@ -241,3 +241,10 @@ No new texture format or SH animation interpreter is required. The trial
 whitecap dependencies and drawing have been removed at the user's request;
 [their source research](ocean.md) remains available through explicit extraction.
 [Current presentation acceptance](../baselines/ocean.md).
+
+## Additional aircraft
+
+FA F14.PT (636), A4E.PT (612) and F31.PT (660) share the reviewed 219-field
+BRF layout, with identity-specific size and variant checks. Their own base FA
+shapes project through the existing bounded reader. Extraction, flight and
+partial systems coverage are recorded in [aircraft acceptance](../baselines/aircraft-fa-expansion.md).

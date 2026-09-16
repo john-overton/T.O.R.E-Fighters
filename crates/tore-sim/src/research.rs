@@ -38,12 +38,26 @@ impl Surface {
         }
     }
 }
+/// Fitted flow-dependent spin damping, independent of pilot commands.
+fn forward_stability(speed: f64, stall: f64, airflow_forward: f64) -> f64 {
+    fn smooth(value: f64) -> f64 {
+        let t = value.clamp(0., 1.);
+        t * t * (3. - 2. * t)
+    }
+    let alignment = smooth(
+        (airflow_forward - 45_f64.to_radians().cos())
+            / (25_f64.to_radians().cos() - 45_f64.to_radians().cos()),
+    );
+    let pressure = smooth((speed / stall.max(1.) - 1.1) / 0.4);
+    alignment * pressure
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Research {
     pub departure: StallState,
     pub spinning: i8,
-    pub recovery_ticks: i32,
-    pub spin_intensity_f8: i32,
+    /// Signed uncommanded yaw velocity, rad/s. See docs/spec/spin-transitions.md.
+    pub spin_rate: f64,
     pub on_ground: bool,
     /// Applied this tick, before the native stall timer is advanced.
     pub severity_f8: i32,
@@ -57,8 +71,7 @@ impl Research {
         Ok(Self {
             departure: StallState::default(),
             spinning: 0,
-            recovery_ticks: 0,
-            spin_intensity_f8: 0,
+            spin_rate: 0.,
             on_ground: false,
             severity_f8: 0,
             stall_active: false,
@@ -67,7 +80,7 @@ impl Research {
             elapsed: 0,
         })
     }
-    /// Source stall-state/entry/recovery predicates; continuous spin forces fitted.
+    /// Source stall/entry rules with fitted, input-driven spin dynamics.
     #[allow(clippy::too_many_arguments)] // Explicit independent native inputs.
     pub fn advance(
         &mut self,
@@ -79,6 +92,7 @@ impl Research {
         throttle: f64,
         bank: f64,
         roll_rate: f64,
+        airflow_forward: f64,
     ) {
         let ticks = self.clock.advance(false);
         self.elapsed = self.elapsed.wrapping_add(ticks as i32);
@@ -96,8 +110,7 @@ impl Research {
         if self.on_ground {
             self.departure = StallState::default();
             self.spinning = 0;
-            self.recovery_ticks = 0;
-            self.spin_intensity_f8 = 0;
+            self.spin_rate = 0.;
             return;
         }
         // Native spin entry precedes mode dispatch, using quantized native inputs.
@@ -114,37 +127,40 @@ impl Research {
             let direction = departure::spin_direction(rate, bank, random);
             if departure::spin_entry(&c.native.departure, self.departure.mode, input, direction) {
                 self.spinning = direction;
-                self.spin_intensity_f8 = 0;
-                self.recovery_ticks = 0;
                 self.departure.mode = DepartureMode::Spinning;
             }
         }
+        let q = (speed / stall.max(1.)).powi(2).clamp(0., 4.);
+        let stability = forward_stability(speed, stall, airflow_forward);
+        let damping = q * (0.35 + 2. * stability);
         if self.spinning != 0 {
-            let command = input.rudder * self.spinning as i32;
-            if command.abs() >= 200 {
-                self.spin_intensity_f8 = tore_formats::flight_model::match_f24(
-                    self.spin_intensity_f8,
-                    if command > 0 { 25600 } else { 0 },
-                    25 * 256,
-                    ticks,
-                );
-            }
-            if departure::spin_recovery(&c.native.departure, input, self.spinning, false) {
-                self.recovery_ticks += ticks as i32;
-            } else {
-                self.recovery_ticks = 0;
-            }
-            let delay = if c.native.departure.spin_exit == -2 {
-                256
-            } else {
-                768
-            };
-            if self.recovery_ticks >= delay {
+            let direction = f64::from(self.spinning);
+            let rate = (self.spin_rate * direction).max(0.);
+            let torque = 1.5
+                * Self::maximum_spin_rate(c)
+                * rudder
+                * direction
+                * q.min(1.)
+                * self.surface_effectiveness(c, airflow_forward);
+            let acceleration = torque + (0.2 * q * (1. - stability) - damping) * rate;
+            self.spin_rate =
+                direction * (rate + DT * acceleration).clamp(0., Self::maximum_spin_rate(c));
+            if self.spin_rate.abs() <= c.tuning.rudder_rate * q.min(1.)
+                && airflow_forward >= 25_f64.to_radians().cos()
+                && rudder * direction <= 0.
+            {
                 self.spinning = 0;
-                self.departure = StallState::default();
-                self.recovery_ticks = 0;
+                self.departure = StallState {
+                    mode: if speed < stall {
+                        DepartureMode::Stalled
+                    } else {
+                        DepartureMode::Normal
+                    },
+                    elapsed: 0,
+                };
             }
         } else {
+            self.spin_rate *= (-damping * DT).exp();
             if self.departure.mode == DepartureMode::Stalled {
                 self.stall_active = true;
                 self.severity_f8 = departure::stall_severity(
@@ -170,11 +186,21 @@ impl Research {
                 .expect("positive fixed time");
         }
     }
-    pub fn spin_yaw_rate(&self, c: &crate::models::config::Configuration) -> f64 {
-        let low = c.native.departure.spin_yaw[0] as f64;
-        let high = c.native.departure.spin_yaw[1] as f64;
-        (low + (high - low) * self.spin_intensity_f8 as f64 / 25600.).to_radians()
-            * self.spinning as f64
+    pub fn maximum_spin_rate(c: &crate::models::config::Configuration) -> f64 {
+        (c.native.departure.spin_yaw[1] as f64)
+            .to_radians()
+            .max(0.01)
+    }
+    pub fn spin_blend(&self, c: &crate::models::config::Configuration) -> f64 {
+        (self.spin_rate.abs() / Self::maximum_spin_rate(c)).clamp(0., 1.)
+    }
+    pub fn surface_effectiveness(
+        &self,
+        c: &crate::models::config::Configuration,
+        forward: f64,
+    ) -> f64 {
+        let f = self.spin_blend(c);
+        (1. - f) + f * (0.25 + 0.75 * forward.max(0.).powi(2)) / (1. + 2. * f * f)
     }
     pub fn contact(
         &mut self,
@@ -252,38 +278,89 @@ mod tests {
             .configuration()
             .clone()
     }
+    fn spinning(rate: f64) -> Research {
+        let mut r = Research::new(1).unwrap();
+        r.spinning = if rate < 0. { -1 } else { 1 };
+        r.spin_rate = rate;
+        r.departure.mode = DepartureMode::Spinning;
+        r
+    }
     #[test]
-    fn entry_precedes_dispatch_resets_each_spin_and_recovery_is_continuous() {
-        for entry in [0, 1] {
-            for direction in [-1., 1.] {
-                let mut c = config();
-                c.native.departure.spin_entry = entry;
-                c.native.departure.spin_exit = -2;
-                let mut r = Research::new(1).unwrap();
-                r.spin_intensity_f8 = 25000;
-                // Normal -> warning cannot also enter a spin in the same tick.
-                r.advance(&c, 180., 200., 1., direction, 0., -direction * 0.01, 0.);
-                assert_eq!(r.departure.mode, DepartureMode::Warning);
-                assert_eq!(r.spinning, 0);
-                r.advance(&c, 180., 200., 1., direction, 0., -direction * 0.01, 0.);
-                assert_eq!(r.spinning, direction as i8);
-                assert!(r.spin_intensity_f8 < 100);
-                for _ in 0..100 {
-                    r.advance(&c, 250., 200., -1., -direction, 0., 0., 0.);
+    fn rudder_accelerates_or_arrests_rotation_proportionally_below_stall() {
+        let mut c = config();
+        c.native.departure.spin_yaw = [120, 180];
+        for direction in [-1., 1.] {
+            let mut rates = Vec::new();
+            for rudder in [-1., -0.781, -0.780, -0.001, 0., 0.001, 0.780, 0.781, 1.] {
+                let mut r = spinning(direction);
+                for _ in 0..12 {
+                    r.advance(&c, 180., 200., 0., rudder * direction, 0., 0., 0., 0.5);
                 }
-                assert!(r.recovery_ticks > 0);
-                r.advance(&c, 250., 200., -1., 0., 0., 0., 0.);
-                assert_eq!(r.recovery_ticks, 0);
-                for _ in 0..119 {
-                    r.advance(&c, 250., 200., -1., -direction, 0., 0., 0.);
+                rates.push(r.spin_rate.abs());
+            }
+            assert!(rates.windows(2).all(|p| p[0] < p[1]));
+            assert!(rates[0] < 1. && rates[8] > 1.);
+        }
+    }
+    #[test]
+    fn catching_early_is_faster_and_arrest_does_not_clear_a_stall() {
+        let mut c = config();
+        c.native.departure.spin_yaw = [120, 180];
+        c.tuning.rudder_rate = 0.12;
+        for direction in [-1., 1.] {
+            let mut catches = Vec::new();
+            for wrong_ticks in [5, 120] {
+                let mut r = spinning(0.01 * direction);
+                for _ in 0..wrong_ticks {
+                    r.advance(&c, 180., 200., 1., direction, 0., 0., 0., 1.);
                 }
-                assert_ne!(r.spinning, 0);
-                r.advance(&c, 250., 200., -1., -direction, 0., 0., 0.);
+                let mut ticks = 0;
+                while r.spinning != 0 && ticks < 1200 {
+                    r.advance(&c, 180., 200., -1., -direction, 0., 0., 0., 1.);
+                    ticks += 1;
+                }
                 assert_eq!(r.spinning, 0);
-                assert_eq!(r.departure.mode, DepartureMode::Normal);
+                assert_eq!(r.departure.mode, DepartureMode::Stalled);
+                catches.push(ticks);
+            }
+            assert!(catches[0] < catches[1]);
+        }
+    }
+    #[test]
+    fn recovery_threshold_preserves_residual_velocity_and_checks_alignment() {
+        let mut c = config();
+        c.native.departure.spin_yaw = [120, 180];
+        c.tuning.rudder_rate = 0.12;
+        for direction in [-1., 1.] {
+            for (rate, angle, clears) in [(0.1, 25_f64, true), (0.1, 25.1, false), (0.5, 0., false)]
+            {
+                let mut r = spinning(rate * direction);
+                r.advance(&c, 500., 200., 0., 0., 0., 0., 0., angle.to_radians().cos());
+                assert_eq!(r.spinning == 0, clears);
+                if clears {
+                    assert_eq!(r.departure.mode, DepartureMode::Normal);
+                    assert!(r.spin_rate.abs() > 0.);
+                    let previous = r.spin_rate.abs();
+                    r.advance(&c, 500., 200., 0., 0., 0., 0., 0., 1.);
+                    assert!(r.spin_rate.abs() < previous && r.spin_rate.abs() > 0.);
+                }
             }
         }
     }
+    #[test]
+    fn rotation_reduces_surface_response_without_eliminating_it() {
+        let mut c = config();
+        c.native.departure.spin_yaw = [120, 180];
+        let slow = spinning(0.1);
+        let fast = spinning(3.0);
+        for forward in [-1., 0., 0.5, 1.] {
+            assert!(fast.surface_effectiveness(&c, forward) > 0.);
+            assert!(
+                fast.surface_effectiveness(&c, forward) < slow.surface_effectiveness(&c, forward)
+            );
+        }
+    }
+
     #[test]
     fn severity_uses_preincrement_timer_and_ground_clears_departure() {
         let mut c = config();
@@ -293,11 +370,11 @@ mod tests {
             mode: DepartureMode::Stalled,
             elapsed: 1024,
         };
-        r.advance(&c, 100., 200., 0., 0., 0., 0.1, 0.);
+        r.advance(&c, 100., 200., 0., 0., 0., 0.1, 0., 1.);
         assert!(r.stall_active && r.severity_f8 > 0);
         assert!(r.departure.elapsed > 1024);
         r.on_ground = true;
-        r.advance(&c, 100., 200., 1., 1., 1., 0., 0.);
+        r.advance(&c, 100., 200., 1., 1., 1., 0., 0., 1.);
         assert_eq!(r.departure, StallState::default());
         assert!(!r.stall_active);
         assert_eq!(r.severity_f8, 0);

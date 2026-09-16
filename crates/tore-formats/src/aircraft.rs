@@ -186,50 +186,87 @@ pub struct Hardpoint {
 pub enum AircraftId {
     F18,
     Rafale,
+    F14,
+    A4E,
+    X31,
 }
 impl AircraftId {
-    pub const ALL: [Self; 2] = [Self::F18, Self::Rafale];
+    pub const ALL: [Self; 5] = [Self::F18, Self::Rafale, Self::F14, Self::A4E, Self::X31];
     pub fn parse(name: &str) -> Result<Self> {
         match name.to_ascii_lowercase().as_str() {
             "f18" | "f18.pt" => Ok(Self::F18),
             "rafale" | "rafale.pt" => Ok(Self::Rafale),
-            _ => Err(invalid("supported aircraft: f18, rafale")),
+            "f14" | "f14.pt" => Ok(Self::F14),
+            "a4e" | "a4e.pt" => Ok(Self::A4E),
+            "x31" | "f31.pt" => Ok(Self::X31),
+            _ => Err(invalid("supported aircraft: f18, rafale, f14, a4e, x31")),
         }
     }
     pub fn pt(self) -> &'static str {
         match self {
             Self::F18 => "F18.PT",
             Self::Rafale => "RAFALE.PT",
+            Self::F14 => "F14.PT",
+            Self::A4E => "A4E.PT",
+            Self::X31 => "F31.PT",
         }
     }
     pub fn hud(self) -> &'static str {
         match self {
             Self::F18 => "F18.HUD",
             Self::Rafale => "RAFALE.HUD",
+            Self::F14 => "F14.HUD",
+            Self::A4E => "F4.HUD",
+            Self::X31 => "F31.HUD",
         }
     }
     pub fn stem(self) -> &'static str {
         match self {
             Self::F18 => "F18",
             Self::Rafale => "RAF",
+            Self::F14 => "F14",
+            Self::A4E => "A4",
+            Self::X31 => "F31",
+        }
+    }
+    pub fn cockpit_stem(self) -> &'static str {
+        match self {
+            Self::A4E => "F4",
+            _ => self.stem(),
         }
     }
     pub fn cockpit(self) -> &'static str {
         match self {
             Self::F18 => "~F18H.PIC",
             Self::Rafale => "~RAFH.PIC",
+            Self::F14 => "~F14H.PIC",
+            Self::A4E => "~F4H.PIC",
+            Self::X31 => "~F31H.PIC",
         }
     }
     pub fn label(self) -> &'static str {
         match self {
             Self::F18 => "F/A-18D Hornet",
             Self::Rafale => "Rafale C",
+            Self::F14 => "F-14D Tomcat",
+            Self::A4E => "A-4E Skyhawk",
+            Self::X31 => "X-31 EFM",
+        }
+    }
+    pub fn radar(self) -> &'static str {
+        match self {
+            Self::F14 => "F14R.SEE",
+            Self::A4E => "F4BR.SEE",
+            _ => "F18R.SEE",
         }
     }
     pub fn gun(self) -> &'static str {
         match self {
             Self::F18 => "M61.JT",
             Self::Rafale => "DEFA.JT",
+            Self::F14 => "M61.JT",
+            Self::A4E => "MK12.JT",
+            Self::X31 => "M61.JT",
         }
     }
 }
@@ -256,16 +293,32 @@ impl Aircraft {
         let object = fields(&root[..o], schema::OBJECT)?;
         let npc = fields(&root[o..o + n], schema::NPC)?;
         let plane = fields(&root[o + n..], schema::PLANE)?;
-        if object["structType"].number()? != 5 || object["typeSize"].number()? != 660 {
-            return Err(invalid("expected reviewed FA aircraft layout (660)"));
-        }
         let names = b.strings("ot_names")?;
         if names.len() != 3 {
             return Err(invalid("invalid aircraft identity"));
         }
         let id = AircraftId::parse(&names[2])?;
+        let size = match id {
+            AircraftId::F14 => 636,
+            AircraftId::A4E => 612,
+            _ => 660,
+        };
+        if object["structType"].number()? != 5 || object["typeSize"].number()? != size {
+            return Err(invalid(
+                "unexpected FA aircraft type size for selected identity",
+            ));
+        }
         if !names[2].eq_ignore_ascii_case(id.pt()) {
             return Err(invalid("aircraft identity must name its PT resource"));
+        }
+        let expected_names = match id {
+            AircraftId::F14 => Some(("F-14", "F- 14D Tomcat")),
+            AircraftId::A4E => Some(("A-4E", "A- 4E Skyhawk")),
+            AircraftId::X31 => Some(("X-31", "X-31 EFM")),
+            _ => None,
+        };
+        if expected_names.is_some_and(|(short, long)| names[0] != short || names[1] != long) {
+            return Err(invalid("unreviewed FA aircraft variant"));
         }
         let resolve = |t: &Token| -> Result<Option<String>> {
             if t.kind == "ptr" {
@@ -476,7 +529,7 @@ pub fn dependency_report(
                 || n == "&HOOK.5K"
                 || n == "&WIND.11K"
                 || n == "&SQUEAL.5K"
-                || n.starts_with(&format!("~{}", id.stem()))
+                || n.starts_with(&format!("~{}", id.cockpit_stem()))
                 || n.starts_with(&format!("{}_", id.stem()))
                 || n.starts_with(&format!("_{}", id.stem()))
                 || INSTRUMENT_ART.contains(&n.as_str())
@@ -784,6 +837,31 @@ mod profile_tests {
         for unsupported in ["RAFALEF.PT", "RAFALEE.PT", "F18C.PT", "RAFALE"] {
             assert!(Aircraft::parse(text.replace("RAFALE.PT", unsupported).as_bytes()).is_err());
         }
+    }
+    #[test]
+    fn additional_identities_require_their_own_size_and_variant() {
+        for (id, short, long, size) in [
+            (AircraftId::F14, "F-14", "F- 14D Tomcat", 636),
+            (AircraftId::A4E, "A-4E", "A- 4E Skyhawk", 612),
+            (AircraftId::X31, "X-31", "X-31 EFM", 660),
+        ] {
+            let text = fixture()
+                .replace("F18.PT", id.pt())
+                .replace("\"Synthetic\"", &format!("\"{short}\""))
+                .replace("Synthetic plane", long)
+                .replacen("word 660", &format!("word {size}"), 1);
+            assert_eq!(Aircraft::parse(text.as_bytes()).unwrap().id, id);
+            assert!(Aircraft::parse(text.replace(long, "Unreviewed variant").as_bytes()).is_err());
+            assert!(
+                Aircraft::parse(
+                    text.replacen(&format!("word {size}"), "word 659", 1)
+                        .as_bytes()
+                )
+                .is_err()
+            );
+        }
+        assert!(AircraftId::parse("F31E.PT").is_err());
+        assert!(AircraftId::parse("F14B.PT").is_err());
     }
     #[test]
     fn typed_profile_rejects_misalignment_and_wrong_identity() {

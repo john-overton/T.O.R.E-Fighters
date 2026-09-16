@@ -165,7 +165,7 @@ impl QuickMission {
     pub fn unsupported(&self) -> Option<String> {
         if self.player().is_none() {
             return Some(
-                "This aircraft is available for setup only. Choose F/A-18D or Rafale C to fly."
+                "This aircraft is available for setup only. Choose F/A-18D, Rafale C, F-14D, A-4E or X-31 EFM to fly."
                     .into(),
             );
         }
@@ -292,7 +292,7 @@ impl QuickMission {
                 self.help = !self.help;
             }
             60 => {
-                self.notice=Some("Aircraft era filters are not available yet. The list shows imported aircraft; only F/A-18D and Rafale C can fly.".into());
+                self.notice=Some("Aircraft era filters are not available yet. The list shows imported aircraft; F/A-18D, Rafale C, F-14D, A-4E and X-31 EFM can fly.".into());
             }
             61 => return Action::Exit,
             OK => {

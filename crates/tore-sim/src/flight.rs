@@ -17,6 +17,8 @@ pub struct State {
     pub velocity: [f64; 3],
     pub roll_rate: f64,
     pub pitch_rate: f64,
+    /// Additional body roll/pitch/yaw rates from low-speed powered control.
+    pub auxiliary_rates: [f64; 3],
     pub vertical_speed: f64,
     /// Achieved aerodynamic normal load along aircraft up, excluding gravity/contact.
     pub g: f64,
@@ -51,6 +53,43 @@ impl State {
             position,
         ))
     }
+    /// Shared presentation signal. Legacy has a fitted speed warning, not a spin state.
+    pub fn stall_alert(
+        &self,
+        ground_height: f64,
+    ) -> Option<tore_formats::flight_model::departure::DepartureMode> {
+        use tore_formats::flight_model::departure::DepartureMode;
+        if self.crashed
+            || self.position[1]
+                <= ground_height + self.model.configuration().equipment.ground_clearance_ft
+        {
+            return None;
+        }
+        let mode = if let Some(n) = &self.native {
+            n.state.as_ref().map(|s| s.departure.departure.mode)?
+        } else if let Some(r) = &self.research {
+            if r.on_ground {
+                return None;
+            }
+            r.departure.mode
+        } else {
+            let stall = self
+                .model
+                .configuration()
+                .aerodynamics
+                .envelopes
+                .iter()
+                .find(|e| e.g == 1)?
+                .speeds(self.position[1])?
+                .0;
+            if self.speed < stall {
+                DepartureMode::Warning
+            } else {
+                DepartureMode::Normal
+            }
+        };
+        (mode != DepartureMode::Normal).then_some(mode)
+    }
     pub fn model(&self) -> &crate::models::AircraftModel {
         &self.model
     }
@@ -69,6 +108,7 @@ impl State {
             velocity: Basis::new(0.3, 0., 0.).forward.map(|v| v * 450. * 1.68781),
             roll_rate: 0.,
             pitch_rate: 0.,
+            auxiliary_rates: [0.; 3],
             vertical_speed: 0.,
             g: 1.,
             lift_g: 1.,
@@ -127,14 +167,20 @@ impl State {
     }
     pub fn afterburner_active(&self) -> bool {
         self.engine
+            && self.model.configuration().propulsion.afterburner_thrust_lbf > 0.
             && self.fuel > 0.
             && self.burner
             && self.throttle > self.model.configuration().equipment.afterburner_throttle
             && !self.crashed
     }
-    /// The reviewed Rafale game model has no hook control.
+    /// Hook controls are available on the reviewed carrier aircraft.
     pub fn hook_available(&self) -> bool {
-        matches!(self.model, crate::models::AircraftModel::F18(_))
+        matches!(
+            self.model,
+            crate::models::AircraftModel::F18(_)
+                | crate::models::AircraftModel::F14D(_)
+                | crate::models::AircraftModel::A4E(_)
+        )
     }
     pub fn command(&mut self, command: PilotCommand) {
         let (switch, setting) = match command {
@@ -153,7 +199,10 @@ impl State {
             PilotCommand::Toggle(switch) => (switch, None),
             PilotCommand::Set(switch, value) => (switch, Some(value)),
         };
-        if switch == Switch::Hook && !self.hook_available() {
+        if (switch == Switch::Hook && !self.hook_available())
+            || (switch == Switch::Burner
+                && self.model.configuration().propulsion.afterburner_thrust_lbf == 0.)
+        {
             return;
         }
         let target = match switch {
@@ -328,20 +377,34 @@ impl State {
                 self.throttle,
                 self.bank,
                 self.roll_rate,
+                dot(
+                    Basis::new(self.yaw, self.pitch, self.bank).forward,
+                    unit(self.velocity),
+                ),
             );
-            if r.spinning != 0 {
-                command *= 0.15;
-            }
+            command *= 1. - 0.85 * r.spin_blend(c);
         }
         let severity = self.research.as_ref().map_or(0, |r| r.severity_f8);
         let stalled = self.research.as_ref().is_some_and(|r| r.stall_active);
-        let (control_scale, lift_scale) = if stalled {
+        let (mut control_scale, lift_scale) = if stalled {
             let (controls, lift) =
                 tore_formats::flight_model::departure::stall_authority(severity, [1024; 3], 256);
             (controls.map(|v| v as f64 / 1024.), lift as f64 / 256.)
         } else {
             ([1.; 3], 1.)
         };
+        let spin_fraction = self.research.as_ref().map_or(0., |r| r.spin_blend(c));
+        let spin_controls = self.research.as_ref().map_or(1., |r| {
+            r.surface_effectiveness(
+                c,
+                dot(
+                    Basis::new(self.yaw, self.pitch, self.bank).forward,
+                    unit(self.velocity),
+                ),
+            )
+        });
+        control_scale[0] *= spin_controls;
+        control_scale[2] *= spin_controls;
         self.lift_g += (command - self.lift_g) * (DT * 4.).min(1.);
         let basis = Basis::new(self.yaw, self.pitch, self.bank);
         let roll_limit = if self.research.is_some() {
@@ -351,9 +414,41 @@ impl State {
         };
         let tuning = model.tuning();
         let roll_command = input.roll * roll_limit * authority * control_scale[0];
-        self.roll_rate += (roll_command - self.roll_rate) * (DT / tuning.roll_response_seconds);
-        let pitch_command =
-            (command - basis.up[1]) * control_scale[1] * 32.174 / self.speed.max(60.);
+        // Aircraft-owned source controls for the new ports. Existing adapters remain selected as before.
+        if let Some(profile) = c.controls {
+            use crate::models::handling::{approach, auxiliary_authority};
+            self.roll_rate = approach(
+                self.roll_rate,
+                input.roll,
+                profile.roll,
+                (self.speed / (2. * stall.max(1.))).clamp(0., 1.) * control_scale[0],
+                DT,
+            );
+            let on_ground = self.position[1]
+                <= ground(self.position[0], self.position[2]).height
+                    + c.equipment.ground_clearance_ft;
+            let powered = self.engine && self.fuel > 0.;
+            let scale = auxiliary_authority(self.speed, self.throttle, powered, on_ground);
+            for (i, command) in [input.roll, input.pitch, input.yaw].into_iter().enumerate() {
+                self.auxiliary_rates[i] = if !powered || on_ground {
+                    0.
+                } else {
+                    approach(
+                        self.auxiliary_rates[i],
+                        command * scale,
+                        profile.auxiliary[i],
+                        1.,
+                        DT,
+                    )
+                };
+            }
+        } else {
+            self.roll_rate += (roll_command - self.roll_rate) * (DT / tuning.roll_response_seconds);
+        }
+        let normal_pitch =
+            (requested_g - basis.up[1]) * control_scale[1] * 32.174 / self.speed.max(60.);
+        let spin_pitch = 40_f64.to_radians() * input.pitch * spin_controls * authority;
+        let pitch_command = normal_pitch * (1. - spin_fraction) + spin_pitch * spin_fraction;
         self.pitch_rate += (pitch_command - self.pitch_rate) * (DT / tuning.pitch_response_seconds);
         // Authored trim target, not decoded gpullAOA units. Preserve a positive
         // nose/flight-path separation under load rather than aligning to zero AoA.
@@ -373,9 +468,12 @@ impl State {
         // as the flight path turns. Pitch alone misses this during a banked pull.
         let turn_yaw = -basis.right[1] * 32.174 / self.speed.max(60.);
         let mut rotation = std::array::from_fn(|i| {
-            DT * (-basis.right[i] * self.pitch_rate - basis.forward[i] * self.roll_rate
+            DT * (-basis.right[i] * (self.pitch_rate + self.auxiliary_rates[1])
+                - basis.forward[i] * (self.roll_rate + self.auxiliary_rates[0])
                 + basis.up[i]
-                    * (turn_yaw + self.rudder * control_scale[2] * tuning.rudder_rate * authority)
+                    * (turn_yaw
+                        + self.rudder * control_scale[2] * tuning.rudder_rate * authority
+                        + self.auxiliary_rates[2])
                 + alignment[i] * tuning.alignment_rate * authority)
         });
         if let Some(r) = &self.research {
@@ -384,11 +482,8 @@ impl State {
                     *v += basis.up[i] * self.rudder * 0.3 * (self.speed / 40.).clamp(0., 1.) * DT;
                 }
             }
-            if r.spinning != 0 {
-                // Fitted stable rotating descent coupled to independent momentum.
-                for (i, v) in rotation.iter_mut().enumerate() {
-                    *v = DT * (basis.up[i] * r.spin_yaw_rate(c) + basis.right[i] * 0.15);
-                }
+            for (i, v) in rotation.iter_mut().enumerate() {
+                *v += DT * basis.up[i] * r.spin_rate;
             }
         }
         self.maneuver = crate::telemetry::Maneuver {
@@ -741,6 +836,19 @@ pub(crate) mod integration_tests {
     }
     pub(crate) fn profile() -> Aircraft {
         let mut a = base_profile();
+        for prefix in ["_brv.x", "puffRot.x", "puffRot.y", "puffRot.z"] {
+            for (suffix, value) in [("min", -90), ("max", 90), ("acc", 200), ("dacc", 400)] {
+                a.fields.insert(
+                    format!("{prefix}.{suffix}"),
+                    Token {
+                        kind: "word".into(),
+                        value: value.to_string(),
+                        scaled: false,
+                    },
+                );
+            }
+        }
+
         for key in [
             "turbulencePercent",
             "rudderDrag",
@@ -808,6 +916,128 @@ pub(crate) mod integration_tests {
             );
         }
         a
+    }
+    #[test]
+    fn stall_alert_tracks_adapter_state_and_suppresses_ground_and_crash() {
+        use tore_formats::flight_model::departure::DepartureMode::*;
+        let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
+        s.speed = 1.;
+        assert_eq!(s.stall_alert(0.), Some(Warning));
+        assert_eq!(s.stall_alert(5000.), None);
+        s.enable_research(1).unwrap();
+        assert_eq!(s.stall_alert(0.), None);
+        for mode in [Warning, ExtendedWarning, Stalled, Spinning] {
+            s.research.as_mut().unwrap().departure.mode = mode;
+            assert_eq!(s.stall_alert(0.), Some(mode));
+        }
+        s.research.as_mut().unwrap().on_ground = true;
+        assert_eq!(s.stall_alert(0.), None);
+        s.research.as_mut().unwrap().on_ground = false;
+        s.crashed = true;
+        assert_eq!(s.stall_alert(0.), None);
+    }
+    #[test]
+    fn forward_stick_moves_the_nose_immediately_and_proportionally_in_spin() {
+        use tore_formats::{aircraft::Token, flight_model::departure::DepartureMode};
+        let mut a = profile();
+        a.fields.insert(
+            "spinYawHigh".into(),
+            Token {
+                kind: "word".into(),
+                value: "180".into(),
+                scaled: false,
+            },
+        );
+        for direction in [-1., 1.] {
+            let mut nose_rates = Vec::new();
+            for pitch in [0., -0.001, -0.1, -0.5, -1.] {
+                let mut s = State::new(&a, [0., 15000., 0.]).unwrap();
+                s.enable_research(1).unwrap();
+                s.pitch = 0.;
+                s.yaw = 0.;
+                s.bank = 0.;
+                s.speed = 600.;
+                s.velocity = Basis::new(0., 0., 0.).forward.map(|v| v * s.speed);
+                let r = s.research.as_mut().unwrap();
+                r.spinning = direction as i8;
+                r.spin_rate = direction * std::f64::consts::PI;
+                r.departure.mode = DepartureMode::Spinning;
+                s.step(
+                    &PilotInput {
+                        pitch,
+                        ..Default::default()
+                    },
+                    |_, _| 0.,
+                );
+                assert_eq!(
+                    s.research.as_ref().unwrap().departure.mode,
+                    DepartureMode::Spinning
+                );
+                nose_rates.push(s.maneuver.body_rates_rad_per_second[1]);
+            }
+            assert!(nose_rates.windows(2).all(|p| p[1] < p[0]));
+            assert!((nose_rates[4] - nose_rates[0]).abs() > 0.5_f64.to_radians());
+        }
+    }
+
+    #[test]
+    fn added_aircraft_powered_controls_are_deterministic_and_separate_from_lift() {
+        use tore_formats::aircraft::{AircraftId, Token};
+        for (id, name, shape, max, acc, dec) in [
+            (AircraftId::F14, "F-14", "F14.SH", 225, 286, 571),
+            (AircraftId::A4E, "A-4E", "A4.SH", 180, 214, 427),
+            (AircraftId::X31, "X-31", "F31.SH", 345, 498, 996),
+        ] {
+            let mut a = profile();
+            a.id = id;
+            a.name = name.into();
+            a.shape = shape.into();
+            for prefix in ["_brv.x", "puffRot.x", "puffRot.y", "puffRot.z"] {
+                let bound = if prefix == "_brv.x" { max } else { 90 };
+                for (suffix, value) in
+                    [("min", -bound), ("max", bound), ("acc", acc), ("dacc", dec)]
+                {
+                    a.fields.insert(
+                        format!("{prefix}.{suffix}"),
+                        Token {
+                            kind: "word".into(),
+                            value: value.to_string(),
+                            scaled: false,
+                        },
+                    );
+                }
+            }
+            for researched in [false, true] {
+                let mut s = State::new(&a, [0., 15000., 0.]).unwrap();
+                if researched {
+                    s.enable_research(1).unwrap();
+                }
+                s.speed = 110.;
+                s.velocity = Basis::new(s.yaw, s.pitch, s.bank)
+                    .forward
+                    .map(|v| v * s.speed);
+                s.throttle = 0.5;
+                let input = PilotInput {
+                    roll: 1.,
+                    pitch: 1.,
+                    yaw: 1.,
+                    ..Default::default()
+                };
+                let mut replay = s.clone();
+                s.step(&input, |_, _| 0.);
+                replay.step(&input, |_, _| 0.);
+                assert_eq!(s, replay);
+                for rate in s.auxiliary_rates {
+                    assert!((rate.to_degrees() - f64::from(acc) * 0.5 * DT).abs() < 1e-9);
+                }
+                assert!(s.maneuver.body_rates_rad_per_second[0] > s.roll_rate);
+                let rendered = s.presented(&replay, 0.5);
+                assert_eq!(rendered.auxiliary_rates, s.auxiliary_rates);
+                s.fuel = 0.;
+                s.step(&input, |_, _| 0.);
+                assert_eq!(s.auxiliary_rates, [0.; 3]);
+            }
+        }
     }
     #[test]
     fn telemetry_separates_air_ground_and_altitude_datums() {

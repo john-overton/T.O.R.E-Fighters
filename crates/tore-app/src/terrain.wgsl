@@ -6,6 +6,7 @@ struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, 
 @group(0) @binding(1) var tiles:texture_2d_array<u32>;
 @group(0) @binding(2) var palette:texture_2d<f32>;
 @group(0) @binding(3) var weather_tiles:texture_2d_array<u32>;
+@group(0) @binding(4) var engine_art:texture_2d<f32>;
 // 0x4b3410: haze density is a piecewise-linear ramp between two recovered
 // distances, flat outside them. Imported shade tables supply discrete index
 // remaps before color lookup for terrain; authored-color effects remain separate.
@@ -239,8 +240,27 @@ fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec
  if tex.a<0.5 {discard;}
  return vec4<f32>(aerial_perspective(tex.rgb,in.direction,in.altitude),1.0);
 }
+// User-requested material. Pink is a mask; metal pixels retain their source RGB.
+fn engine_texel(at:vec2<i32>,heat:f32)->vec3<f32> {
+ let size=vec2<i32>(textureDimensions(engine_art));
+ let c=textureLoad(engine_art,clamp(at,vec2<i32>(0),size-vec2<i32>(1)),0).rgb;
+ let mask=smoothstep(0.15,0.5,(min(c.r,c.b)-c.g)/max(max(c.r,c.b),0.001));
+ let cold=vec3<f32>(c.r*0.35);
+ let red=vec3<f32>(c.r,0.025*c.r,0.008*c.r);
+ let core=smoothstep(0.45,0.95,c.r);
+ let hot=mix(red,vec3<f32>(1.0,0.92,0.86),core);
+ let glow=mix(mix(cold,red,min(heat/0.65,1.0)),hot,smoothstep(0.65,1.0,heat));
+ return linear(mix(c,glow,mask));
+}
+fn engine_color(uv:vec2<f32>,heat:f32)->vec3<f32> {
+ let at=uv*vec2<f32>(textureDimensions(engine_art))-vec2<f32>(0.5);
+ let base=vec2<i32>(floor(at));let t=fract(at);
+ return mix(mix(engine_texel(base,heat),engine_texel(base+vec2<i32>(1,0),heat),t.x),
+            mix(engine_texel(base+vec2<i32>(0,1),heat),engine_texel(base+vec2<i32>(1,1),heat),t.x),t.y);
+}
 @fragment fn fragment(in:VertexOut)->@location(0) vec4<f32>{
  var color=in.color;
+ if in.layer<=-3.0 && in.layer>=-4.0 {color=engine_color(in.uv,clamp(-in.layer-3.0,0.0,1.0));}
  if in.layer>=0.0 || in.layer == -2.0 {
   var remaps=vec2<f32>(-1.0);if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
   let tex=sample_tile(in.uv,i32(max(in.layer,0.0)),0,-1,in.light_row,remaps);

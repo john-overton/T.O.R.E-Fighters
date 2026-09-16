@@ -41,6 +41,7 @@ pub struct Equipment {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Configuration {
+    pub(crate) controls: Option<super::handling::Profile>,
     // Resolve once even when the legacy/hybrid subset is the only available data.
     // Failure remains explicit and prevents native activation; no zero defaults.
     joined_native: std::result::Result<
@@ -73,6 +74,16 @@ impl Configuration {
             Ok(token.number()? as f64)
         };
         let result = Self {
+            controls: if matches!(
+                a.id,
+                tore_formats::aircraft::AircraftId::F14
+                    | tore_formats::aircraft::AircraftId::A4E
+                    | tore_formats::aircraft::AircraftId::X31
+            ) {
+                Some(super::handling::Profile::from_aircraft(a)?)
+            } else {
+                None
+            },
             joined_native: tore_formats::flight_model::diagnostic::Configuration::from_aircraft(a)
                 .map(std::sync::Arc::new)
                 .map_err(|e| e.to_string()),

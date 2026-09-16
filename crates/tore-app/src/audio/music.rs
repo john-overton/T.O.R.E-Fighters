@@ -223,7 +223,10 @@ mod tests {
         let mut mixer = super::super::Mixer {
             music: prepared(&[255, b'T', 0, 1, 2, 252]),
             engine: None,
+            engine_aircraft: None,
             burner: None,
+            stall: None,
+            stall_cue: None,
             flight_on: true,
             flight_paused: false,
             engine_gain: 0.,

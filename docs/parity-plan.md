@@ -48,6 +48,7 @@ name, with the numbers a player would notice.
 
 | Spec | Covers | Status |
 | --- | --- | --- |
+| [Additional aircraft](spec/additional-aircraft.md) | F-14D, A-4E and X-31 source flight configuration and fitted presentation | Initial ports implemented; [acceptance](baselines/aircraft-fa-expansion.md) |
 | [Ocean](spec/ocean.md) | Short ripples, close pixelation and distance filtering; original textures/colors | Implemented; [acceptance](baselines/ocean.md) |
 | [Terrain shorelines](spec/terrain-shorelines.md) | Beach/water coverage and absence of land-color strips | Implemented; validation in the viewer baseline |
 
@@ -66,14 +67,14 @@ player-visible numbers out of those files and leaving the byte layouts behind.
 | Load Ordnance screen | Original art, compatible weapon and fuel edits | mixed | [creator/ordnance](baselines/creator-ordnance.md) |
 | Theaters | All 16 selectable, terrain renderer, free camera; shoreline water cutouts corrected | native data, fitted rendering | [viewer](baselines/ukraine-viewer.md) |
 | Weather | Day/night palettes, horizon, sun/moon/stars, cloud sheets, fog maps | mixed | [weather](baselines/weather.md), [review](baselines/weather-review.md) |
-| F/A-18D and Rafale C free flight | Cockpit, HUD, instrument windows, mirrors, external views, animation rigs | fitted flight laws, native-derived components | [flight response](baselines/flight-response.md), [mirrors](baselines/mirrors.md) |
+| Five aircraft in free flight | Cockpit, HUD, instrument windows, mirrors, external views, animation rigs | fitted flight laws, native-derived components | [flight response](baselines/flight-response.md), [additional FA aircraft](baselines/aircraft-fa-expansion.md) |
 | Ground contact and landing | Runway contact, taxi, brakes, touchdown | **opinionated**, authored, not awaiting a recovered producer | [land foundation](baselines/native-land-foundation.md) |
 | Input | Keyboard, gamepad, joystick, profiles, rumble, rebinding | opinionated (authored layer) | [input](baselines/input.md) |
 | Weapons | 135 definitions imported; development range with manual firing, damage fixtures, ECM | mixed | [weapons systems](baselines/weapons-systems.md), [manual weapons](baselines/manual-weapons.md) |
 | Combat AI | Not started, not authorized | n/a | n/a |
 
-Flight has three selectable paths and they stay distinct: the legacy default, the
-hybrid `--researched-flight`, and the restricted `--native-flight-tables`
+Flight has three selectable paths and they stay distinct: the compatibility `--legacy-flight`, the
+default hybrid `--researched-flight`, and the restricted `--native-flight-tables`
 research path. Do not change the default without being asked.
 
 ## Next
@@ -87,7 +88,10 @@ research path. Do not change the default without being asked.
    tests; stop waiting on a recovered contact producer.
 3. **Maneuver audio and rumble**, then the remaining
    [flight-response](research/flight-response-plan.md) items.
-4. **F-14, A-4E and X-31** through the [aircraft import gates](aircraft-import.md).
+4. **Continue F-14D, A-4E and X-31 acceptance.** Initial FA-only ports are implemented,
+   requested by John on 2026-09-16. Resolve the [documented limits](baselines/aircraft-fa-expansion.md),
+   especially original X-31 vector animation schedules and remaining pitch/yaw response
+   tuning. PT roll response and low-speed auxiliary control are implemented.
 5. **Remaining weather work**: wind, turbulence and vapor.
 
 ## Frozen

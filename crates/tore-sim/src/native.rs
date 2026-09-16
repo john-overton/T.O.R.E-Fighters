@@ -274,6 +274,9 @@ pub(crate) fn step(
     s.velocity = std::array::from_fn(|j| air[j] + actual_wind[j]);
     s.speed = dot(air, air).sqrt();
     s.vertical_speed = air[1];
+    s.auxiliary_rates = state
+        .auxiliary_rates_f8
+        .map(|v| (v as f64 / 256.).to_radians());
     s.roll_rate = (state.departure.body_rates_f8[0] as f64 / 256.).to_radians();
     s.pitch_rate = (state.departure.body_rates_f8[1] as f64 / 256.).to_radians();
     // Host acceleration measurement, including the quantized service interval.

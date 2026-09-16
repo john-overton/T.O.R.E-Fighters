@@ -285,3 +285,28 @@ state. That limit belongs to this research option alone: ordinary free flight ha
 working authored ground contact. Legacy/hybrid retain their existing controls and
 behavior.
 [Scope and validation](baselines/native-live-flight.md).
+
+## Additional aircraft
+
+The additional FA aircraft use the same controls. F-14D and A-4E accept hook
+commands; X-31 does not. A-4E ignores burner commands and rejects a nonzero
+burner capture fraction. F-14 visual sweep is automatic and fitted. X-31 thrust
+vectoring controls remain unavailable. See [aircraft behavior](spec/additional-aircraft.md).
+
+F-14D, A-4E and X-31 use their own FA roll response values. Below 220 ft/s,
+ordinary stick and rudder also command the source low-speed auxiliary rotation;
+authority depends on throttle and is removed on the ground or without power.
+There is no separate X-31 nozzle key. See the
+[control contract](spec/additional-aircraft.md) for numbers and fitted components.
+
+Researched flight is now the default; `--legacy-flight` preserves the previous
+model. HUD and audio share the [stall warning signal](spec/stall-warnings.md),
+including the original imported warning samples.
+
+Hybrid [spin dynamics](spec/spin-transitions.md) use continuous axis values.
+Opposite rudder decelerates rotation; wrong rudder can build it. Forward stick
+moves the nose proportionally, with effectiveness reduced by fast rotation and
+poor airflow. There is no fixed recovery ramp. Early intervention can stop a
+spin while the aircraft remains stalled. Recovery uses the 25-degree airflow
+cone and normal-rudder-rate threshold; sufficiently fast, aligned flight clears
+the warning. Idle throttle is supported. TAS includes sideways/downward motion.

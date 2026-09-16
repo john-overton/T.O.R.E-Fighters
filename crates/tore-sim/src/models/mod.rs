@@ -1,7 +1,11 @@
 //! Aircraft-owned flight laws and editable, validated tuning. No renderer types.
+pub mod a4e;
 pub mod config;
+pub mod f14d;
 pub mod f18;
+pub(crate) mod handling;
 pub mod rafale_c;
+pub mod x31;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tuning {
@@ -65,6 +69,9 @@ pub trait FlightModel {
 pub enum AircraftModel {
     F18(f18::F18FlightModel),
     RafaleC(rafale_c::RafaleCFlightModel),
+    F14D(f14d::F14DFlightModel),
+    A4E(a4e::A4EFlightModel),
+    X31(x31::X31FlightModel),
 }
 impl AircraftModel {
     pub fn for_aircraft(a: &tore_formats::aircraft::Aircraft) -> tore_formats::Result<Self> {
@@ -73,6 +80,9 @@ impl AircraftModel {
             ("RAFALE", "RAF.SH") => Ok(Self::RafaleC(rafale_c::RafaleCFlightModel::from_aircraft(
                 a,
             )?)),
+            ("F-14", "F14.SH") => Ok(Self::F14D(f14d::F14DFlightModel::from_aircraft(a)?)),
+            ("A-4E", "A4.SH") => Ok(Self::A4E(a4e::A4EFlightModel::from_aircraft(a)?)),
+            ("X-31", "F31.SH") => Ok(Self::X31(x31::X31FlightModel::from_aircraft(a)?)),
             #[cfg(test)]
             ("Synthetic", "TEST.SH") => Ok(Self::F18(f18::F18FlightModel::from_aircraft(a)?)),
             _ => Err(std::io::Error::other(
@@ -95,6 +105,9 @@ impl AircraftModel {
         match self {
             Self::F18(m) => m.configuration = configuration,
             Self::RafaleC(m) => m.configuration = configuration,
+            Self::F14D(m) => m.configuration = configuration,
+            Self::A4E(m) => m.configuration = configuration,
+            Self::X31(m) => m.configuration = configuration,
         }
         Ok(())
     }
@@ -104,18 +117,27 @@ impl FlightModel for AircraftModel {
         match self {
             Self::F18(m) => m.configuration(),
             Self::RafaleC(m) => m.configuration(),
+            Self::F14D(m) => m.configuration(),
+            Self::A4E(m) => m.configuration(),
+            Self::X31(m) => m.configuration(),
         }
     }
     fn response(&self, c: Conditions) -> Response {
         match self {
             Self::F18(m) => m.response(c),
             Self::RafaleC(m) => m.response(c),
+            Self::F14D(m) => m.response(c),
+            Self::A4E(m) => m.response(c),
+            Self::X31(m) => m.response(c),
         }
     }
     fn tuning(&self) -> Tuning {
         match self {
             Self::F18(m) => m.tuning(),
             Self::RafaleC(m) => m.tuning(),
+            Self::F14D(m) => m.tuning(),
+            Self::A4E(m) => m.tuning(),
+            Self::X31(m) => m.tuning(),
         }
     }
 }
@@ -231,5 +253,44 @@ mod tests {
         assert_eq!(rafale.response(c).trim_aoa_rad, before);
         t.pitch_response_seconds = 0.;
         assert!(hornet.set_tuning(t).is_err());
+    }
+}
+
+#[cfg(test)]
+mod additional_tests {
+    use super::*;
+    use crate::flight::{PilotCommand, State, Switch};
+    use tore_formats::aircraft::AircraftId;
+    #[test]
+    fn independent_models_preserve_identity_and_nonburning_aircraft_controls() {
+        for (id, name, has_hook, ab) in [
+            (AircraftId::F14, "F-14", true, 400.),
+            (AircraftId::A4E, "A-4E", true, 0.),
+            (AircraftId::X31, "X-31", false, 500.),
+        ] {
+            let mut a = crate::flight::integration_tests::profile();
+            a.id = id;
+            a.name = name.into();
+            a.shape = format!("{}.SH", id.stem());
+            a.fields.get_mut("aftThrust").unwrap().value = ab.to_string();
+            let model = AircraftModel::for_aircraft(&a).unwrap();
+            let original = model.clone();
+            let mut tuned = model.clone();
+            let mut tuning = tuned.tuning();
+            tuning.rudder_rate = 0.2;
+            tuned.set_tuning(tuning).unwrap();
+            assert_eq!(model, original);
+            assert_ne!(tuned, original);
+            let mut state = State::from_model(model, [0., 10000., 0.]);
+            state.throttle = 1.;
+            state.command(PilotCommand::Set(Switch::Burner, true));
+            assert_eq!(state.afterburner_active(), ab > 0.);
+            assert_eq!(state.burner, ab > 0.);
+            assert_eq!(state.hook_available(), has_hook);
+            state.command(PilotCommand::Set(Switch::Hook, true));
+            assert_eq!(state.hook_down, has_hook);
+            a.id = AircraftId::F18;
+            assert!(AircraftModel::for_aircraft(&a).is_err());
+        }
     }
 }

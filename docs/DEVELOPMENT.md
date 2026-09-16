@@ -311,7 +311,7 @@ zero: the imported model has no hook. [Animation and cockpit-switch evidence](ba
 
 `tore-sim` has no renderer/audio/platform dependency. It owns flight state and
 attitude math shared by the app and headless tools. Use `--researched-flight` to
-select the hybrid Hornet model; the default remains the legacy adapter. Extract
+explicitly select the default hybrid model; use `--legacy-flight` for the old adapter. Extract
 and validate either reviewed aircraft with `tools/extract_assets.py --aircraft
 f18|rafale --validate-flight` (choose one literal identity).
 See [FLIGHT-MODEL.md](FLIGHT-MODEL.md) for complete commands, surface inputs,

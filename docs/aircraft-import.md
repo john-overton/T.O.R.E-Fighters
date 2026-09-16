@@ -8,29 +8,25 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Updated 2026-09-15. Start here when adding an aircraft. This guide joins the
+Updated 2026-09-16. Start here when adding an aircraft. This guide joins the
 existing extraction, format, simulation, presentation and systems contracts;
 linked research remains authoritative for byte layouts and native behavior.
 “Imported” is not synonymous with “fully implemented” or “retail validated.”
 
 ## Scheduled aircraft and execution order
 
-1. Continue the F/A-18D/Rafale C foundation from behaviour specs; sequence lives in
-   [the parity plan](parity-plan.md). The
-   [environment/systems plan](research/native-environment-systems-plan.md) and the
-   [maneuver audio/rumble slice](research/flight-response-plan.md) are frozen archives:
-   use them for recovered facts and evidence, not for sequencing. No AI scope.
-   Keep [spec-derived, native, fitted and opinionated provenance](behavior-provenance.md)
-   separate.
-2. Add **F-14**, then **A-4E**, then **X-31**, using the per-aircraft gates below.
-3. Resume remaining [weather work](research/weather-plan.md) outside the environment/systems dependencies.
+John requested the F-14, A-4E and X-31 ports on 2026-09-16, using Fighters
+Anthology sources throughout. The registered identities are now **F-14D
+(F14.PT)**, **A-4E (A4E.PT)** and **X-31 EFM (F31.PT)**, alongside F/A-18D and
+Rafale C. The initial ports support extraction, headless/rendered flight,
+cockpits, fitted animation, source audio references and partial manual systems.
+See the [behavior spec](spec/additional-aircraft.md) and
+[acceptance record](baselines/aircraft-fa-expansion.md) for limits and checks.
 
-The new aircraft are scheduled, **not supported yet**. Review each exact FA PT,
-variant, shape/HUD names and resource hashes before registering an identity.
-In particular, “F-14” does not select a specific variant by itself; inventory the
-available FA variants and record the chosen identity before implementation.
-Do not infer resource filenames or copy another aircraft's native metadata.
-Broader AI, new menu screens and the rest of the aircraft roster remain deferred.
+USNF-ATF supplies research guidance only. Its mixed-edition profiles and toolkit
+SWPATCH F-14 exterior are not used. Exact wing-sweep flight effects, X-31 thrust
+vectoring, damage/LOD/shadow shapes and complete systems parity remain open.
+No AI work is included. Existing flight adapter defaults remain unchanged.
 
 ## Current coverage and authoritative references
 
@@ -84,8 +80,9 @@ optional/unresolved references. Extraction success alone does not enable flight.
   provenance label (spec-derived, native, fitted or opinionated).
 - [ ] Review special control/propulsion modes from source. For F-14, investigate
   variable wing geometry and its flight/attachment consequences. For X-31,
-  investigate thrust-vector/control modes and departure behavior. These are
-  research targets, not claims that specific native modes are decoded or present.
+  use the [reviewed low-speed auxiliary controls](spec/additional-aircraft.md)
+  and departure behavior. Source paddle faces now follow the fitted plume demand; original animation
+  schedules remain a research target.
 - [ ] Preserve 120 Hz deterministic state, explicit wind/atmosphere/contact and
   clock/RNG inputs, independent movement/body attitude and both adapter boundaries.
 
@@ -171,12 +168,11 @@ exists; retail comparison is currently unavailable. These describe support, not
 origin: a spec-derived, fitted or opinionated component can be fully supported.
 Record unavailable checks; do not collapse these into a single “complete”
 checkbox. Update this guide,
-`formats/coverage.md`, `FLIGHT-MODEL.md` and `progress.md` with actual results.
+`formats/coverage.md`, `FLIGHT-MODEL.md` and `parity-plan.md` with actual results.
 
 ## Commands and implementation entry points
 
-Current supported extraction/flight validation commands (these do not enable the
-three scheduled aircraft):
+Supported extraction/flight validation commands:
 
 ```sh
 python3 tools/extract_assets.py --aircraft f18 --exclude-archive 'disc1/LHX/*' --out .local/aircraft/f18 --validate-flight
@@ -186,7 +182,9 @@ cargo run --locked -p tore-app -- --free-flight --aircraft rafale --researched-f
 
 The LHX exclusion only skips unrelated bundled media; adapt source selection as
 specified in [EXTRACTION](EXTRACTION.md). Register and document new CLI identities
-only after their source review; do not use speculative F14/A4E/X31 flags today.
+only after source review. The reviewed additions are `f14`, `a4e` and `x31`.
+For FA-only CLI extraction, exclude `swpatch.lib` and unrelated disc archives,
+as shown in the [acceptance record](baselines/aircraft-fa-expansion.md).
 
 Start with `tools/extract_assets.py`, `crates/tore-extract`, the shared
 `tore-formats` aircraft/schema/resource-selection code, `tore-sim::models` and
@@ -194,3 +192,11 @@ its flight-suite example, then the app aircraft/animation/cockpit/system consume
 Keep formats and simulation independent of rendering and preserve the shared
 app/CLI resolver. Detailed commands and host checks live in
 [DEVELOPMENT](DEVELOPMENT.md).
+
+The optional user-supplied [engine material](spec/engine-material.md) replaces reviewed burner
+face materials at runtime. Its throttle glow is separate from the retail atlas
+and does not change A-4E presentation or flame geometry.
+
+Researched flight is now the default; `--legacy-flight` preserves the previous
+model. HUD and audio share the [stall warning signal](spec/stall-warnings.md),
+including the original imported warning samples.

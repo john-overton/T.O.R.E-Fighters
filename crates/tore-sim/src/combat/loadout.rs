@@ -128,6 +128,11 @@ pub fn supported(name: &str) -> bool {
     [
         "M61.JT",
         "DEFA.JT",
+        "MK12.JT",
+        "MK82.JT",
+        "LAU61.JT",
+        "AIM54C.JT",
+        "AIM9X.JT",
         "AIM120.JT",
         "AIM9M.JT",
         "AGM65G.JT",

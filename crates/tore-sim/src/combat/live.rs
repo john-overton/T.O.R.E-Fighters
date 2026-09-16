@@ -194,9 +194,12 @@ impl Configuration {
             };
             let weapon = Weapon::parse(name, &read(name)?)?;
             // Restrict the live adapter to the actual default stations of the
-            // two reviewed aircraft. Catalog import never makes another type flyable.
+            // reviewed aircraft. Catalog import never makes another type flyable.
             let permitted = match a.id {
                 AircraftId::F18 => ["M61.JT", "AIM120.JT", "AGM65G.JT", "AIM9M.JT"].contains(&name),
+                AircraftId::F14 => ["M61.JT", "AIM54C.JT", "AIM120.JT", "AIM9M.JT"].contains(&name),
+                AircraftId::A4E => ["MK12.JT", "MK82.JT", "LAU61.JT"].contains(&name),
+                AircraftId::X31 => ["M61.JT", "AIM120.JT", "AGM65G.JT", "AIM9X.JT"].contains(&name),
                 AircraftId::Rafale => {
                     ["DEFA.JT", "AGM65G.JT", "MICA.JT", "R530.JT", "R550.JT"].contains(&name)
                 }
@@ -232,7 +235,7 @@ impl Configuration {
             .hardpoints
             .iter()
             .filter_map(|h| h.store.as_deref())
-            .find(|n| *n == "F18R.SEE")
+            .find(|n| *n == a.id.radar())
             .ok_or_else(|| super::invalid("missing reviewed radar station"))?;
         let radar = tore_formats::weapons::Seeker::parse(radar_name, &read(radar_name)?)?;
         let visual_name = a

@@ -382,8 +382,9 @@ impl Instruments {
                         &mut r,
                         &format!(
                             "{:.0}",
-                            [10f64, 20., 40., 80., 160.][self.radar_range]
-                                .min(h.equipment["F18R.SEE"].number("zone0.maxRange") / 6076.)
+                            [10f64, 20., 40., 80., 160.][self.radar_range].min(
+                                h.equipment[h.profile.id.radar()].number("zone0.maxRange") / 6076.
+                            )
                         ),
                         126,
                         25,

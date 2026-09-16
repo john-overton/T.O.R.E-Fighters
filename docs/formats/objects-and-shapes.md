@@ -312,3 +312,47 @@ WAVE1.SH/WAVE2.SH contain embedded frame-selection code, outside the static SH
 reader. [The ocean contract](ocean.md) records the recovered 16-frame effect.
 The trial runtime effect was removed at the user's request; no imported code
 was executed and the reader's animated-shape coverage is unchanged.
+
+## Additional FA aircraft rigs
+
+The [additional-aircraft spec](../spec/additional-aircraft.md) owns fitted
+presentation behavior. The base FA shapes project without extending the SH
+reader. CODE lengths and neutral face counts are F14 29462/313, A4 24506/237,
+and F31 21974/225. Header word +6 is 10 for F14 and 8 for A4/F31.
+
+| Shape | Burner word / added faces | Brake word / added faces | Gear word / added faces | Hook |
+| --- | --- | --- | --- | --- |
+| F14 | 0x82e0 / 8 | 0x82e6 / 4 | 0x82ec / 16 | 0x82f8 adds 2 degenerate triangles |
+| A4 | none | 0x6f90 / 12 | 0x6f96 / 18 | 0x6fa2 swaps 2 faces |
+| F31 | 0x65a0 / 4 | 0x65a6 / 4 | 0x65b2 / 22 | none |
+
+F14 flap neutral subcalls are guarded by 0x82fe/0x8304; A4 by
+0x6fa8/0x6fae; F31 by 0x65be/0x65c4. Keep their neutral branches and apply
+fitted hinges. F31's 0x65ca selects a rudder alternative. The rigs validate
+CODE length, state-word sets, face counts and texture names before using their
+own address mappings. Gear/brake/burner groups come from bounded per-word
+projection differences. No old ATF offsets or SWPATCH shapes are substituted.
+
+Inspect user-owned data with `cargo run --locked -p tore-formats --example
+shape_inspect -- FILE.SH HEX_WORD=1`. Raw geometry output stays local.
+[Source identities and evidence](../baselines/aircraft-fa-expansion.md).
+
+The X-31 port's existing afterburner plume now follows live auxiliary pitch/yaw
+rates with a fitted 15-degree maximum cue. The three source paddles also follow this demand about fitted hinges at their
+forward edges, independently of afterburner visibility. See the [aircraft behavior spec](../spec/additional-aircraft.md)
+for the control and animation contract.
+
+FA F31.SH paddle faces are paired at 0x44b2/0x44da (upper),
+0x4406/0x442e (left) and 0x4342/0x4381 (right). Each has two forward
+vertices at source y=-41; these define the fitted hinge. Addresses refer to the
+reviewed base FA shape, not an ATF variant. Face identity, texture coordinates
+and neutral geometry are retained. The cold nozzle face 0x29f7 stays fixed.
+
+A4.SH horizontal-tail faces 0x4345/0x4361/0x44b5/0x44d5 and
+0x4967/0x4982/0x49dd/0x49f8 contain diagonals crossing the fitted elevator
+strip. Clip all eight at y=-54 before rotating the aft portion. Selecting only
+the rear polygon pairs leaves a stationary diagonal section in the elevator.
+
+The optional user-supplied [engine material](../spec/engine-material.md) replaces reviewed burner
+face materials at runtime. Its throttle glow is separate from the retail atlas
+and does not change A-4E presentation or flame geometry.

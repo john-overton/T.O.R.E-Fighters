@@ -1,3 +1,4 @@
+mod additional_animation;
 mod aircraft;
 mod aircraft_animation;
 mod assets;
@@ -9,6 +10,7 @@ mod cockpit_renderer;
 mod combat;
 mod combat_tape;
 mod controls_editor;
+mod engine_material;
 mod flight;
 mod flight_canvas;
 mod flight_ui;
@@ -1442,7 +1444,14 @@ impl ApplicationHandler for App {
                         self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
                         if let Some(audio) = &self.audio {
                             audio.pause_flight(self.flight_ui.frozen());
-                            audio.flight(Some((&self.hornet.profile, &self.flight)));
+                            audio.flight(Some((
+                                &self.hornet.profile,
+                                &self.flight,
+                                f64::from(self.world.height(
+                                    self.flight.position[0] as f32,
+                                    self.flight.position[2] as f32,
+                                )),
+                            )));
                         }
                         true
                     }
@@ -1659,7 +1668,7 @@ fn main() -> AppResult<()> {
     let mut flight_zoom = 1f32;
     let mut flight_menu = false;
     let mut controls_menu = false;
-    let mut researched_flight = false;
+    let mut flight_mode_arg = None;
     let mut native_tables_path: Option<PathBuf> = None;
     let mut window_size = [960, 720];
     let mut instrument_page = None;
@@ -1671,6 +1680,7 @@ fn main() -> AppResult<()> {
     let mut flight_probe_ticks = None;
     let mut flight_devices = None;
     let mut flight_controls = None;
+    let mut flight_throttle = None;
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
     let mut validate_creator = false;
@@ -1771,7 +1781,8 @@ fn main() -> AppResult<()> {
                 );
                 input_seconds.get_or_insert(2);
             }
-            "--researched-flight" => researched_flight = true,
+            "--researched-flight" => flight_mode_arg = Some(true),
+            "--legacy-flight" => flight_mode_arg = Some(false),
             "--native-flight-tables" => native_tables_path = Some(args.next().ok_or("--native-flight-tables needs a directory containing sine-q15.bin and atan-pa.bin")?.into()),
             "--capture-terrain" => {
                 capture_terrain = Some(PathBuf::from(
@@ -1782,7 +1793,7 @@ fn main() -> AppResult<()> {
             }
             "--aircraft" => {
                 aircraft_id = tore_formats::aircraft::AircraftId::parse(
-                    &args.next().ok_or("--aircraft needs f18 or rafale")?,
+                    &args.next().ok_or("--aircraft needs f18, rafale, f14, a4e or x31")?,
                 )?;
             }
             "--theater" => {
@@ -1876,6 +1887,11 @@ fn main() -> AppResult<()> {
                 }
                 flight_probe_ticks = Some(ticks);
             }
+            "--flight-throttle" => {
+                let value: f64 = args.next().ok_or("missing flight throttle")?.parse()?;
+                if !value.is_finite() || !(0. ..=1.).contains(&value) { return Err("--flight-throttle requires 0..1".into()); }
+                flight_throttle = Some(value);
+            }
             "--flight-devices" | "--flight-controls" => {
                 let raw = args
                     .next()
@@ -1900,7 +1916,7 @@ fn main() -> AppResult<()> {
             }
             "--maneuver" => {
                 maneuver = args.next().ok_or(
-                    "--maneuver needs level, pull, loop, roll, stall, bank-left or bank-right",
+                    "--maneuver needs level, pull, loop, roll, stall, spin, bank-left or bank-right",
                 )?;
                 if ![
                     "level",
@@ -1908,6 +1924,7 @@ fn main() -> AppResult<()> {
                     "loop",
                     "roll",
                     "stall",
+                    "spin",
                     "bank-left",
                     "bank-right",
                 ]
@@ -1969,23 +1986,27 @@ fn main() -> AppResult<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Creator: --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks both imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; I launches one incoming selected weapon; Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-2 combat-service inputs; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Creator: --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; I launches one incoming selected weapon; Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-2 combat-service inputs; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
                 );
                 println!(
-                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D and Rafale C assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight enables the hybrid flight/contact model (not native parity).\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E and X-31 EFM assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale|f14|a4e|x31 selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
             }
             _ => return Err(format!("Unknown argument: {arg}").into()),
         }
     }
+    let researched_flight = flight_mode_arg.unwrap_or(native_tables_path.is_none());
     let native_tables = if let Some(path) = native_tables_path {
-        if researched_flight || live_fire || combat_probe.is_some() || combat_smoke {
-            return Err("native research flight cannot combine with hybrid or combat modes".into());
+        if flight_mode_arg.is_some() || live_fire || combat_probe.is_some() || combat_smoke {
+            return Err(
+                "native research flight cannot combine with explicit hybrid/legacy or combat modes"
+                    .into(),
+            );
         }
         use std::io::Read;
         let read = |name: &str, limit: u64| -> AppResult<Vec<u8>> {
@@ -2030,7 +2051,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             || capture_terrain.is_some()
             || flight_probe_ticks.is_some()
             || flight_devices.is_some()
-            || flight_controls.is_some())
+            || flight_controls.is_some()
+            || flight_throttle.is_some())
     {
         return Err("--record-input requires direct --free-flight without headless/capture/probe/pose overrides".into());
     }
@@ -2127,6 +2149,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             "roll" => {
                 keys.roll = 1.;
             }
+            "spin" => {
+                state.speed = 180.;
+                state.engine = false;
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
+                keys.pitch = 1.;
+                keys.yaw = 1.;
+            }
             "stall" => {
                 state.engine = false;
                 state.pitch = 0.2;
@@ -2203,6 +2234,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.bank.to_degrees()
         );
         println!("vertical={vertical} inverted={inverted} loop_completed={completed}");
+        println!(
+            "departure_alert={:?} spin_direction={}",
+            state.stall_alert(0.),
+            state.research.as_ref().map_or(0, |r| r.spinning)
+        );
 
         println!(
             "ticks={} speed_kt={:.3} altitude_ft={:.3} fuel_lb={:.3} crashed={}",
@@ -2350,7 +2386,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         )?);
     }
     let animation_capture = capture_terrain.is_some()
-        && (flight_devices.is_some() || flight_controls.is_some() || flight_probe_ticks.is_some());
+        && (flight_devices.is_some()
+            || flight_controls.is_some()
+            || flight_throttle.is_some()
+            || flight_probe_ticks.is_some());
     let mut flight = hornet.start(&world);
     if let Ok(value) = std::env::var("TORE_FLIGHT_AGL") {
         let agl = value.parse::<f64>()?;
@@ -2375,7 +2414,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let mut probe_turbulence_rng = tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?;
     if let Some(ticks) = flight_probe_ticks {
         let keys = setup_maneuver(&mut flight);
-        if maneuver == "stall" {
+        if matches!(maneuver.as_str(), "stall" | "spin") {
             for (v, wind) in flight.velocity.iter_mut().zip(world.wind()) {
                 *v += wind;
             }
@@ -2468,9 +2507,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         return Ok(());
     }
     if let Some(v) = flight_devices {
+        if v[4] > 0. && aircraft_id == tore_formats::aircraft::AircraftId::A4E {
+            return Err("A-4E has no afterburner; set the fifth device fraction to 0".into());
+        }
         if v[3] > 0. && !flight.hook_available() {
             return Err(
-                "the imported Rafale model has no hook; set the fourth device fraction to 0".into(),
+                "the selected aircraft has no hook; set the fourth device fraction to 0".into(),
             );
         }
         flight.gear = v[0];
@@ -2486,6 +2528,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         if flight.burner {
             flight.throttle = 1.;
         }
+    }
+    if let Some(value) = flight_throttle {
+        flight.throttle = value;
     }
     if let Some(v) = flight_controls {
         flight.elevator = v[0];

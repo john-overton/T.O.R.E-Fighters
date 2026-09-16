@@ -97,7 +97,8 @@ not have to be replaced by a `native` one before acceptance. See
 - **Retail comparison is unavailable** and is not a blocker. Do not turn that
   limitation into a claim of retail parity either.
 - **Do not silently change default adapters or remove compatibility modes.**
-  The legacy default, the hybrid `--researched-flight` path and the restricted
+  The legacy `--legacy-flight` path, the hybrid `--researched-flight` default
+  (requested by John on 2026-09-16) and the restricted
   `--native-flight-tables` research path stay distinct.
 - **Report to Jeeves at milestones.** The PM control file was retired on
   2026-09-16 and is being rebuilt; until it exists, report milestones in the

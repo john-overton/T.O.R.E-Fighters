@@ -106,6 +106,8 @@ impl Assets {
         }
         for name in [
             "&GEARUP.5K",
+            "&STALLWR.5K",
+            "&STALL.5K",
             "WIN11.FNT",
             "HUDSYM11.FNT",
             "HUD11.FNT",
@@ -138,7 +140,21 @@ impl Assets {
             return Err("cache missing Vietnam textures; re-import media".into());
         }
         for id in tore_formats::aircraft::AircraftId::ALL {
-            tore_formats::aircraft::Aircraft::parse(&resources[id.pt()])?;
+            for name in [
+                id.hud().to_string(),
+                id.cockpit().to_string(),
+                format!("{}.SH", id.stem()),
+                format!("_{}.PIC", id.stem()),
+            ] {
+                if !resources.contains_key(&name) {
+                    return Err(format!("cache missing {name}; re-import media").into());
+                }
+            }
+            tore_formats::aircraft::Aircraft::parse(
+                resources
+                    .get(id.pt())
+                    .ok_or_else(|| format!("cache missing {}; re-import media", id.pt()))?,
+            )?;
         }
         tore_formats::font::Font::parse(&resources["WIN11.FNT"])?;
         let mut pics = BTreeMap::new();

@@ -570,7 +570,7 @@ Hornet spinEntry is 0, so the second aircraft exercises different native thresho
 This changes the earlier diagnostic-only boundary **for selected helper rules**:
 `--researched-flight` uses native departure/recovery rules and source spin yaw
 ranges in an explicitly fitted continuous adapter. The exact integer force/
-matrix/scheduler model is still incomplete. The legacy app default remains intact.
+matrix/scheduler model is still incomplete. The legacy adapter remains selectable with `--legacy-flight`; hybrid is now the app default.
 See [FLIGHT-MODEL](../FLIGHT-MODEL.md) for component provenance and remaining gates.
 
 Lessons from integrated tests: constant drag must not reverse a stopped wheel

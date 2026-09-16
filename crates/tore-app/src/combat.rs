@@ -504,7 +504,14 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
         .stations
         .iter()
         .position(|s| s.weapon.source == "AGM65G.JT")
-        .ok_or("missing reviewed AGM65G fixture")?;
+        .or_else(|| {
+            damaged
+                .configuration()
+                .stations
+                .iter()
+                .position(|s| s.weapon.seeker.signature != 0)
+        })
+        .unwrap_or(0);
     damaged.command(live::Command::Incoming, l);
     let mut replica = damaged.clone();
     let mut systems = 0;
@@ -544,7 +551,15 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             .filter(|e| matches!(e, Event::PlayerDestroyed))
             .count();
     }
-    if systems == 0 || destroyed != 1 || damaged.player_hp != 0 {
+    if (systems == 0
+        && damaged
+            .configuration()
+            .stations
+            .iter()
+            .any(|s| s.weapon.seeker.signature != 0))
+        || destroyed != 1
+        || damaged.player_hp != 0
+    {
         return Err(format!("source automatic damage/destruction failed faults={systems} kills={destroyed} HP={} damage={} counts={:?} source={:?}",damaged.player_hp,damaged.player_damage,damaged.subsystem_counts,damaged.configuration().system_damage).into());
     }
     println!(
@@ -552,6 +567,10 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
         h.profile.id, damaged.subsystem_counts
     );
     for index in 0..combat.state.ammo.len() {
+        let station = &combat.state.configuration().stations[index];
+        if !station.internal && station.weapon.seeker.signature == 0 {
+            continue;
+        }
         for jammer in [false, true] {
             let mut state = live::State::new(combat.state.configuration().clone(), true)?;
             state.selected = index;
@@ -606,6 +625,11 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
         }
     }
     for index in 0..combat.state.ammo.len() {
+        let station = &combat.state.configuration().stations[index];
+        if !station.internal && station.weapon.seeker.signature == 0 {
+            ballistic_smoke(combat.state.configuration(), index)?;
+            continue;
+        }
         for (class, category) in [
             combat.state.configuration().target_category,
             0x2000,
@@ -890,6 +914,70 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// Unguided external stores have release/contact checks, not a missile lock or
+/// same-altitude interception requirement. Does not claim blast-radius parity.
+fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> {
+    let mut state = live::State::new(config.clone(), true)?;
+    state.selected = index;
+    let l = Launcher {
+        position: [0., 500., 0.],
+        basis: Basis::new(0., -0.3, 0.),
+        speed_fps: 500.,
+        radar: false,
+        jammer: false,
+        alive: true,
+    };
+    let initial = state.ammo[index];
+    let mut safe = state.clone();
+    safe.command(live::Command::ToggleArm, l);
+    safe.step(true, l, |_, _| 0.);
+    if safe.ammo[index] != initial {
+        return Err("safe unguided store released".into());
+    }
+    let mut failed = state.clone();
+    failed.command(live::Command::FailStation, l);
+    failed.step(true, l, |_, _| 0.);
+    if failed.rounds(index) != initial {
+        return Err("failed unguided station released".into());
+    }
+    let mut replay = state.clone();
+    let mut ground = false;
+    let mut fired = false;
+    for tick in 0..7200 {
+        let events = state.step(tick == 0, l, |_, _| 0.);
+        if events != replay.step(tick == 0, l, |_, _| 0.)
+            || format!("{state:?}") != format!("{replay:?}")
+        {
+            return Err("unguided release replay diverged".into());
+        }
+        fired |= events.iter().any(|e| matches!(e, Event::Fired(_)));
+        ground |= events.contains(&Event::Ground);
+        if ground {
+            break;
+        }
+    }
+    if !fired
+        || !ground
+        || state.ammo[index] >= initial
+        || state.projectiles.iter().any(|p| p.target.is_some())
+    {
+        return Err(format!(
+            "unguided release/contact failed {}",
+            config.stations[index].weapon.source
+        )
+        .into());
+    }
+    state.command(live::Command::Jettison, l);
+    if state.rounds(index) != 0 {
+        return Err("unguided jettison failed".into());
+    }
+    println!(
+        "ballistic smoke {:?} {}: safe/failure inhibition, no-lock release, deterministic ground contact and jettison PASS",
+        config.aircraft, config.stations[index].weapon.source
+    );
     Ok(())
 }
 

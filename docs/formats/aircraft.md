@@ -190,5 +190,13 @@ HUD geometry remains authored. Source brightness and palette ordering are in
 
 The [aircraft import and acceptance guide](../aircraft-import.md) joins extraction,
 existing flight/presentation/systems coverage and all per-aircraft acceptance
-gates. F-14, A-4E and X-31 are scheduled after the flight-response slice; they
-are not supported identities yet.
+gates. F-14D, A-4E and X-31 EFM now have initial FA-only ports; see
+[acceptance](../baselines/aircraft-fa-expansion.md). Their roots contain the same
+219 typed fields as the existing profiles. Type sizes are identity-specific:
+F14.PT 636, A4E.PT 612 and F31.PT 660. The short/long source names are checked
+before admitting these variants. F31's null hudName is accepted as an existing
+nullable pointer grammar; its player HUD resource is F31.HUD. A4E uses F4.HUD
+and the F4 cockpit family. F14's PT controller HUD reference is F14CC.HUD;
+its selected player presentation uses F14.HUD and the F14 cockpit family.
+The F14 radar is F14R.SEE; A4E uses F4BR.SEE; F31 uses F18R.SEE.
+All three use their own PT-selected sound and station references.

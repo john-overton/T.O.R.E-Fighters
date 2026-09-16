@@ -14,6 +14,9 @@ pub fn masks(source: &Sprite, id: AircraftId) -> Option<Masks> {
     }
     let seeds = match id {
         AircraftId::F18 => [[640, 40], [110, 380], [1170, 380]],
+        AircraftId::F14 => [[640, 40], [140, 250], [1140, 250]],
+        AircraftId::A4E => [[640, 40], [200, 300], [1080, 300]],
+        AircraftId::X31 => return None,
         AircraftId::Rafale => [[640, 40], [190, 360], [1090, 360]],
     };
     flood(source, seeds)

@@ -4,6 +4,7 @@ use tore_formats::aircraft::Aircraft;
 use tore_sim::{
     attitude::{Basis, dot, unit},
     flight::{PilotInput, State},
+    models::{AircraftModel, FlightModel},
     research::Surface,
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -74,7 +75,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 "landing" | "gear-up" | "taxi" | "takeoff" | "water" | "hard-landing" => {
-                    s.position[1] = 8.;
+                    s.position[1] = AircraftModel::for_aircraft(&a)?
+                        .configuration()
+                        .equipment
+                        .ground_clearance_ft;
                     s.yaw = 0.;
                     s.pitch = 0.;
                     s.gear = 1.;
@@ -202,6 +206,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "banked AoA"
                 ),
                 "stall" => assert!(departed, "stall acceptance"),
+                "spin" if a.number("spinEntry") == 2. => {
+                    assert!(!spun, "source disables spin entry")
+                }
                 "spin" => assert!(
                     spun && s.research.as_ref().unwrap().spinning == 0,
                     "spin entry/recovery acceptance"

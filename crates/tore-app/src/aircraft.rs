@@ -7,6 +7,9 @@ use crate::{
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::{Pic, aircraft::Aircraft, font::Font, shape::Shape};
 pub struct Airframe {
+    pub engine_material: Option<crate::engine_material::Image>,
+    nozzle_bounds: [[f32; 4]; 2],
+    rig: Option<crate::additional_animation::Rig>,
     /// Wing vapor attachment, from the shape's own streamer definition.
     pub streamer: Option<tore_formats::shape::StreamerDef>,
     model: tore_sim::models::AircraftModel,
@@ -67,9 +70,9 @@ impl Airframe {
         let mut sprites = BTreeMap::new();
         let cockpit_art = [
             id.cockpit().to_string(),
-            format!("~{}_LH.PIC", id.stem()),
-            format!("~{}_CH.PIC", id.stem()),
-            format!("~{}_RH.PIC", id.stem()),
+            format!("~{}_LH.PIC", id.cockpit_stem()),
+            format!("~{}_CH.PIC", id.cockpit_stem()),
+            format!("~{}_RH.PIC", id.cockpit_stem()),
         ];
         for name in tore_formats::aircraft::INSTRUMENT_ART
             .iter()
@@ -77,6 +80,11 @@ impl Airframe {
             .chain(cockpit_art.iter().map(String::as_str))
         {
             {
+                if id == tore_formats::aircraft::AircraftId::X31
+                    && cockpit_art[1..].iter().any(|n| n == name)
+                {
+                    continue;
+                }
                 let p = Pic::parse(get(name)?)?;
                 sprites.insert(
                     name.into(),
@@ -104,6 +112,7 @@ impl Airframe {
             }
         }
         let mut poses = Vec::new();
+        let mut rig = None;
         if id == tore_formats::aircraft::AircraftId::F18 {
             for mask in 0..16 {
                 let words = [
@@ -146,7 +155,7 @@ impl Airframe {
                 .into());
                 }
             }
-        } else {
+        } else if id == tore_formats::aircraft::AircraftId::Rafale {
             if tore_formats::module::code(get(&profile.shape)?)?.0.len() != 19334
                 || shape.state_words != [0x5b50, 0x5b56, 0x5b62, 0x5b6e, 0x5b74, 0x5b7a].into()
                 || shape
@@ -165,6 +174,10 @@ impl Airframe {
                 )?);
             }
             crate::rafale_animation::validate(&poses)?;
+        } else {
+            let (new_rig, pose) = crate::additional_animation::Rig::load(id, get(&profile.shape)?)?;
+            poses.push(pose);
+            rig = Some(new_rig);
         }
         println!(
             "Aircraft: {} — {} exterior faces, {} G rows, {} hardpoints; atlas {}x{}, instrument font {}px",
@@ -188,7 +201,49 @@ impl Airframe {
         {
             return Err("unreviewed FA in-flight menu structure".into());
         }
+        let engine_material = if id != tore_formats::aircraft::AircraftId::A4E {
+            crate::engine_material::Image::load()?
+        } else {
+            None
+        };
+        let mut nozzle_bounds = [[
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+        ]; 2];
+        for face in &poses[0].faces {
+            if crate::engine_material::nozzle(id, face.address) {
+                let group = usize::from(
+                    id != tore_formats::aircraft::AircraftId::X31
+                        && face.positions.iter().map(|p| p[0]).sum::<f32>() > 0.,
+                );
+                for p in &face.positions {
+                    let b = &mut nozzle_bounds[group];
+                    b[0] = b[0].min(p[0]);
+                    b[1] = b[1].max(p[0]);
+                    b[2] = b[2].min(p[2]);
+                    b[3] = b[3].max(p[2]);
+                }
+            }
+        }
+        if engine_material.is_some() {
+            let count = if id == tore_formats::aircraft::AircraftId::X31 {
+                1
+            } else {
+                2
+            };
+            if nozzle_bounds[..count]
+                .iter()
+                .any(|b| !b.iter().all(|v| v.is_finite()) || b[1] <= b[0] || b[3] <= b[2])
+            {
+                return Err("unreviewed engine face projection".into());
+            }
+        }
         Ok(Self {
+            engine_material,
+            nozzle_bounds,
+            rig,
             model: tore_sim::models::AircraftModel::for_aircraft(&profile)?,
             profile,
             atlas,
@@ -253,6 +308,31 @@ impl Airframe {
     /// Both retain the host's one-third-foot model scale.
     pub fn streamer_points(&self, s: &flight::State) -> Option<[[f64; 3]; 2]> {
         let def = self.streamer.as_ref()?;
+        if self.profile.id == tore_formats::aircraft::AircraftId::F14 {
+            // FA CE points do not match the quantized base F14 mesh. This
+            // fitted attachment uses its reviewed wing tips and rig pivots.
+            let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
+            return Some(std::array::from_fn(|side| {
+                let (tip, pivot, sign) = if side == 0 {
+                    ([-23., -4., 1.], [-4., -1., 1.], -1.)
+                } else {
+                    ([24., -4., 1.], [5., -1., 1.], 1.)
+                };
+                let offset = crate::aircraft_animation::rotate(
+                    std::array::from_fn(|i| tip[i] - pivot[i]),
+                    [0., 0., 1.],
+                    -sign * crate::additional_animation::sweep(s),
+                );
+                let p: [f64; 3] =
+                    std::array::from_fn(|i| f64::from(pivot[i] + offset[i]) * 4. / 3.);
+                std::array::from_fn(|i| {
+                    s.position[i]
+                        + basis.right[i] * p[0]
+                        + basis.up[i] * p[2]
+                        + basis.forward[i] * p[1]
+                })
+            }));
+        }
         streamer_world_points(def, s.position, [s.yaw, s.pitch, s.bank])
     }
 
@@ -329,9 +409,12 @@ impl Airframe {
                 );
                 direction.map(|v| (v * 32767.).round().clamp(-32767., 32767.) as i16)
             });
+        let model_scale = self.rig.as_ref().map_or(1. / 3., |r| r.scale());
         let hornet_rig = self.profile.id == tore_formats::aircraft::AircraftId::F18;
         for source in self.poses[if hornet_rig {
             15
+        } else if self.rig.is_some() {
+            0
         } else {
             usize::from(s.gear > 0.)
         }]
@@ -340,12 +423,16 @@ impl Airframe {
         .flat_map(|f| {
             if hornet_rig {
                 crate::aircraft_animation::rudder_faces(f, s)
+            } else if let Some(rig) = &self.rig {
+                rig.faces(f, s)
             } else {
                 vec![f.clone()]
             }
         }) {
             let Some(f) = (if hornet_rig {
                 crate::aircraft_animation::animate(&source, s)
+            } else if let Some(rig) = &self.rig {
+                rig.animate(&source, s)
             } else {
                 crate::rafale_animation::animate(&source, s)
             }) else {
@@ -354,7 +441,7 @@ impl Airframe {
             if let Some(n) = f.normal {
                 let normal = orient(n);
                 let p = f.positions[0];
-                let p = orient([p[0] / 3., p[2] / 3., p[1] / 3.]);
+                let p = orient([p[0] * model_scale, p[2] * model_scale, p[1] * model_scale]);
                 let dot: f32 = (0..3)
                     .map(|i| normal[i] * (camera.position[i] - s.position[i] as f32 - p[i]))
                     .sum();
@@ -381,15 +468,24 @@ impl Airframe {
             } else {
                 0.
             };
+            let engine_face = self.engine_material.is_some()
+                && crate::engine_material::nozzle(self.profile.id, f.address);
+            let engine_group = usize::from(
+                self.profile.id != tore_formats::aircraft::AircraftId::X31
+                    && f.positions.iter().map(|p| p[0]).sum::<f32>() > 0.,
+            );
             for i in 1..f.positions.len() - 1 {
                 for j in [0, i, i + 1] {
                     let p = f.positions[j];
-                    let scale = 1. / 3.;
+                    let scale = model_scale;
                     let (x, y, z) = (p[0] * scale, p[2] * scale, p[1] * scale);
                     let (x, y) = (x * cb + y * sb, -x * sb + y * cb);
                     let (y, z) = (y * cp + z * sp, -y * sp + z * cp);
                     let pos = [x * cy + z * sy, y, -x * sy + z * cy];
-                    let uv = if f.uv.is_empty() {
+                    let uv = if engine_face {
+                        let b = self.nozzle_bounds[engine_group];
+                        [(p[0] - b[0]) / (b[1] - b[0]), (b[3] - p[2]) / (b[3] - b[2])]
+                    } else if f.uv.is_empty() {
                         [0.; 2]
                     } else {
                         [
@@ -398,10 +494,13 @@ impl Airframe {
                                 / self.atlas.height as f32,
                         ]
                     };
-                    let cold_nozzle = s.exhaust <= 0.
+                    let cold_nozzle = !engine_face
+                        && s.exhaust <= 0.
                         && if hornet_rig {
                             crate::aircraft_animation::part(f.address)
                                 == crate::aircraft_animation::Part::Nozzle
+                        } else if let Some(rig) = &self.rig {
+                            rig.cold_nozzle(f.address)
                         } else {
                             crate::rafale_animation::part(f.address)
                                 == crate::rafale_animation::Part::Nozzle
@@ -412,7 +511,9 @@ impl Airframe {
                         self.palette[f.colors[j] as usize]
                     };
                     let textured = !f.uv.is_empty() && !cold_nozzle;
-                    let layer = if textured {
+                    let layer = if engine_face {
+                        -3. - crate::engine_material::heat(s)
+                    } else if textured {
                         if matches!(f.subtype, 0x4c | 0x5c | 0x6c | 0x7c) {
                             -2.
                         } else {
@@ -433,7 +534,7 @@ impl Airframe {
                         color[2] as f32 / 255.,
                         // Preserve source indices for native weather remapping.
                         // The cold-nozzle material remains an authored exception.
-                        if cold_nozzle {
+                        if cold_nozzle || engine_face {
                             -1.
                         } else {
                             f.colors[j] as f32 + 256. * f.fog as u8 as f32 + 1024. * light_row
@@ -454,7 +555,7 @@ fn streamer_world_points(
     let basis = tore_sim::attitude::Basis::new(attitude[0], attitude[1], attitude[2]);
     let mut points = [[0.; 3]; 2];
     for (side, out) in points.iter_mut().enumerate() {
-        // Neither reviewed aircraft has a swing wing, so the hinge is static.
+        // Non-swing-wing aircraft use the source CE neutral hinge.
         let p = def.attachment(side, 0).ok()?;
         let (x, up, forward) = (p[0] / 3., p[1] / 3., p[2] / 3.);
         *out = std::array::from_fn(|k| {
