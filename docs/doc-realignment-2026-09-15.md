@@ -711,9 +711,8 @@ The link check was written for this pass and verified against the repository
 before any edits: the documentation had zero broken relative links at the start,
 and has zero now. Seven file moves repointed 67 inbound links.
 
-Clippy, the workspace test suite and the executable asset guards were not re-run:
-no code changed, and they require a build. GPU, Windows and macOS checks were not
-run.
+Clippy, the workspace test suite and the build were run on 2026-09-16; results
+are in the follow-up section. GPU, Windows and macOS checks were not run.
 
 ---
 
@@ -791,3 +790,12 @@ thing without leaning on the overloaded word.
 | `cargo fmt --all -- --check` | pass — no source file touched |
 | `python3 -m unittest discover -s tools -p 'test_*.py'` | 26 tests, pass |
 | `python3 tools/check_assets.py` | pass, 268 files |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | pass, no warnings |
+| `cargo test --workspace --locked` | 366 tests, all pass |
+| `cargo build --workspace --locked` | pass |
+| `python3 tools/check_assets.py target/debug/tore-app` | pass |
+| `python3 tools/check_assets.py target/debug/tore-extract` | pass |
+
+The Rust checks completed from cache, which is the expected result: Cargo keys its
+artifacts on source content, so an up-to-date `Finished` means the committed tree
+compiles and passes as it stands. GPU, Windows and macOS checks were not run.
