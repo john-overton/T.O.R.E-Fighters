@@ -1,12 +1,14 @@
 # Native STRIP initialization and shape metadata
 
-2026-09-15, NE-00.1d/e / E003–E005 under the
+2026-09-15, NE-00.1d/e/f / E003–E005 under the
 [living plan](../native-environment-systems-plan.md). **Native static source**
 from the exact [reviewed EXE/SMS](native-flight.md). The bounded box reader,
-midpoint arithmetic and candidate-list operations are translated/tested.
+midpoint arithmetic, mission nationality conversion and candidate-list operations
+are translated/tested.
 No runway is runtime-connected; retail comparison is unavailable.
 [Metadata validation](../baselines/native-strip.md),
-[lifecycle validation](../baselines/native-strip-lifecycle.md).
+[lifecycle validation](../baselines/native-strip-lifecycle.md),
+[placement validation](../baselines/native-strip-placement.md).
 
 ## Shape box list
 
@@ -229,3 +231,64 @@ caller-owned cloneable diagnostic state for later transactional construction;
 these tests do not prove whole-world rollback or reset. General object removal
 at 0x4627b0 calls collision removal at 0x462835 amid other unresolved lifecycle
 effects; those downstream systems remain outside this translation.
+
+## Remaining selected placement fields — NE-00.1f
+
+The mission scratch record begins at stack +0xb8 in MISSIONTextProc. Field
+conversion below is **native source established**, with only nationality
+conversion translated/tested. Full token/placement loading remains unimplemented.
+All inputs still need bounded parsing before use.
+
+| Text field | Source path / representation | Remaining boundary |
+| --- | --- | --- |
+| type | 0x4824b1..0x482583 reads a token, rewrites leading `$` to `~`, uppercases ASCII lowercase letters | Special named substitution and full type loading remain open; selected STRIP.OT does not use substitution |
+| alias | 0x4825b5 reads an integer and keeps AX in a separate temporary; 0x482e3d writes it to instance +0x74 **after** T_AddObj succeeds | Not the allocated object ID; default is zero at 0x48249e |
+| nationality | 0x4826c7 narrows the integer to a byte; preserves bit 7, increments the low seven-bit value when >=8, recombines, then calls 0x483d50 | Map-name-dependent conversion below; do not copy text nationality directly |
+| flags | 0x4827eb stores the integer unchanged at scratch +1 | T_AddObj applies its documented mask/initial bit before registration |
+| speed | 0x48282e shifts integer left eight into scratch +0x34 | Zero for selected STRIP; no inferred knot/velocity conversion beyond reviewed fixed8 storage |
+| name | 0x483bbd scans between byte-1 delimiters, copies at most 40 bytes, NUL-terminates at min(length,40), advances beyond closing delimiter | Host must bound both delimiter scans; native missing-delimiter behavior is not a safe parser specification |
+
+Nationality remap `0x483d50..0x483dd5` tests the **first byte of the native map
+name at 0x4fb1c8**. The map-token path at 0x481fbb supplies that string. Only
+`T/t/U/u/K/k` enables the remap; it does not strip a leading tilde. After the
+initial increment, low seven-bit IDs map **5→23, 6→24, 13→22, 14→20, 15→21**;
+others pass through, with bit 7 preserved. The selector at 0x483df0 has 11
+bytes and six target addresses at 0x483dd8; both were checked against consumers.
+Raw 127 becomes 128 during increment/recombination, rather than wrapping the
+seven-bit portion independently. `mission_nationality` preserves this boundary.
+
+For the selected `map ukr.T2`, textual nationality **137 becomes 138**, then
+T_AddObj copies it from scratch +9 to instance +9. The distinct controller byte
+at +0x10 remains zero in the selected scratch record. This distinction matters
+for later scheduling predicates. No alliance or autonomous behavior is inferred.
+
+Mission post-creation is not finished when T_AddObj returns. The loader reloads
+the object, applies separately parsed fields (including alias), then stores again
+at **0x482ee5**. For static kind 0 it bypasses the kind-2/4 loadout branch.
+Conditional controller/multiplayer and other optional post-create effects are
+unaccepted; selected construction must establish their predicates rather than
+executing them implicitly.
+
+## Scheduling ownership discovered from creation
+
+**Source only; scheduler translation/runtime not accepted.** `0x462600` clears
+the two queue heads and separate current-object stack/auxiliary state.
+`0x4626b0` removes current membership, sets instance word +0x68 to zero, and
+inserts into the primary queue. `0x4626d0` writes the low word of time 0x552928
+to +0x66, sets instance flag mask 2 and links through +0x64.
+
+With byte 0x4f6fc0 clear, insertion is at the head. Its static default is 1;
+when set, traversal compares +0x68 as **unsigned** and passes existing values
+<= the new value before insertion. Kind-6's additional path is outside STRIP.
+`0x462620` removes from both queue heads when flag mask 2 is set. Linked-list
+ownership, current scratch versus stored instance state, bounded traversal and
+restart require a shared staged owner, not unrelated copies of queue vectors.
+
+The already sourced due-service call at 0x462abc enters 0x462e70. Exploratory
+review of its final delay selection at 0x4630b0..0x4631a9 exposes a further
+conditional RNG edge: a stopped ordinary object can use **2 + bound-20 draw**;
+positive speed uses **2 + bound-8 draw**. Other actor/controller/visibility and
+deadline gates can avoid those draws. This does **not** establish that every
+STRIP service draws RNG. The complete predicates and callback effects remain
+unreviewed; do not implement or activate autonomous branches. This unresolved
+ownership edge must be reconciled with E002 before claiming native replay.

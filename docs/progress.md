@@ -1122,11 +1122,15 @@ only the diagnostic precursor; the parent first slice remains researching.
 - [x] NE-00.1e: recover selected type setup, final store, partial failed-add
   cleanup and airport reset/removal; translate ordered collision-list operations
   and test their independent capacities. Extract the inert nonzero template.
-- [ ] Finish E003/E005 full loader/default consumers/scheduling and remaining
-  placement fields, plus E004 full drawing closure. Stage initial queries before
+- [x] NE-00.1f: recover remaining selected text conversions and post-create
+  alias/store; test map-dependent nationality conversion (137 becomes 138 in UKR).
+  Scheduling insertion is sourced; conditional service RNG is a new open edge.
+- [ ] Finish E003/E005 bounded loader/default consumers and scheduling/service
+  RNG ownership, plus E004 full drawing closure. Stage initial queries before
   registration (E012) and all construction effects across failure (E014).
 - [ ] Connect E001/E002 producer with rollback, then both-aircraft live contact.
   No new runtime branch, AI, carrier activation or retail acceptance.
 
 [Source contract](formats/native-strip.md), [metadata validation](baselines/native-strip.md),
-[lifecycle validation](baselines/native-strip-lifecycle.md).
+[lifecycle validation](baselines/native-strip-lifecycle.md),
+[placement validation](baselines/native-strip-placement.md).

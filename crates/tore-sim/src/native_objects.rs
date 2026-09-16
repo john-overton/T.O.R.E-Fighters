@@ -1,5 +1,25 @@
-//! Diagnostic native object-list state; no world construction or live activation.
-//! Source: FA 0x42e540 / 0x42e5c0, docs/formats/native-strip.md.
+//! Diagnostic native object state; no world construction or live activation.
+//! Source: docs/formats/native-strip.md.
+
+/// Mission nationality conversion at FA 0x4826c7 and 0x483d50.
+/// `raw` is the parsed integer's low byte; `map_prefix` is the first byte
+/// of the native map name, without stripping a leading `~` or `$`.
+pub fn mission_nationality(raw: u8, map_prefix: u8) -> u8 {
+    let low = raw & 0x7f;
+    let adjusted = if low >= 8 { low + 1 } else { low } | (raw & 0x80);
+    if !matches!(map_prefix, b'T' | b't' | b'U' | b'u' | b'K' | b'k') {
+        return adjusted;
+    }
+    let mapped = match adjusted & 0x7f {
+        5 => 23,
+        6 => 24,
+        13 => 22,
+        14 => 20,
+        15 => 21,
+        other => other,
+    };
+    mapped | (adjusted & 0x80)
+}
 
 /// Ordered candidate IDs, independently bounded by the two native capacities.
 /// Callers own object lifetime and must stage this state with construction/query
@@ -57,6 +77,27 @@ fn remove_first(ids: &mut Vec<u16>, id: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mission_nationality_preserves_high_bit_and_theater_mapping() {
+        for prefix in [b'T', b't', b'U', b'u', b'K', b'k'] {
+            for (raw, expected) in [(5, 23), (6, 24), (12, 22), (13, 20), (14, 21)] {
+                assert_eq!(mission_nationality(raw, prefix), expected);
+                assert_eq!(mission_nationality(raw | 0x80, prefix), expected | 0x80);
+            }
+            assert_eq!(mission_nationality(137, prefix), 138);
+            assert_eq!(mission_nationality(127, prefix), 128);
+            assert_eq!(mission_nationality(255, prefix), 128);
+        }
+        for prefix in [b'A', b'P', b'~', b'$', 0] {
+            assert_eq!(mission_nationality(5, prefix), 5);
+            assert_eq!(mission_nationality(12, prefix), 13);
+            assert_eq!(mission_nationality(137, prefix), 138);
+        }
+        assert_eq!(mission_nationality(7, b'U'), 7);
+        assert_eq!(mission_nationality(8, b'U'), 9);
+        assert_eq!(mission_nationality(15, b'U'), 16);
+    }
 
     #[test]
     fn gates_and_stable_removal_preserve_native_order() {
