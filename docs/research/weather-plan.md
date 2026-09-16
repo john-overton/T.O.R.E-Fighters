@@ -1,9 +1,11 @@
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D27) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its recovered weather facts, dated implementation checkpoints and evidence links. Its sequencing, gates and status columns are no longer authoritative.
+
 # Retail weather parity plan
 
 Requested 2026-09-14. This is a code and existing-evidence review plus an
 implementation plan. The initial planning pass established no new native behavior
 or runtime parity.
-Follow-up: [clock/turbulence research](formats/weather.md) now establishes
+Follow-up: [clock/turbulence research](../formats/weather.md) now establishes
 continuous time and distinguishes physical turbulence from maneuver sound.
 Contrails and vapor trails are user-confirmed scope, including broader
 wing-induced vapor beyond wingtips; their native contracts remain to recover.
@@ -14,7 +16,7 @@ resolution and pixel-identical rasterization are not acceptance requirements.
 ## Scheduling update — 2026-09-15
 
 The next continuation is now governed by the
-[living native environment/systems plan](native-environment-systems-plan.md).
+[living native environment/systems plan](../research/native-environment-systems-plan.md).
 Its NE-01/02 sea/ocean asset discovery and NE-09 native environmental coupling
 advance the dependencies needed by restricted native flight; this supersedes
 the earlier blanket deferral of all weather work until after new aircraft.
@@ -29,8 +31,8 @@ Updated 2026-09-15 after the continuation through steps 1–3. The ordinary
 flight weather path now includes recovered horizon branches, glare, aircraft
 lighting, HUD palette handling and cloud preferences/visibility. Matched retail
 acceptance remains open; retail now runs through dgVoodoo, and host captures
-do not establish retail acceptance. [Current evidence](baselines/weather-foundation.md#final-weather-sampling-and-batch-checkpoint--2026-09-15),
-[earlier review](baselines/weather-review.md).
+do not establish retail acceptance. [Current evidence](../baselines/weather-foundation.md#final-weather-sampling-and-batch-checkpoint--2026-09-15),
+[earlier review](../baselines/weather-review.md).
 
 ## Numbered dependency sequence — 2026-09-15
 
@@ -100,7 +102,7 @@ palette handling are implemented for ordinary full-detail views. Indexed point
 sampling preserves original weather texels; sky projection uses GPU rays instead
 of the native intermediate raster. The 60 ms palette cadence, separate RNG
 streams, float orientation and GPU rasterization remain explicit adaptations.
-[Evidence](baselines/weather-foundation.md).
+[Evidence](../baselines/weather-foundation.md).
 
 ## Existing implementation coverage
 
@@ -120,9 +122,9 @@ streams, float orientation and GPU rasterization remain explicit adaptations.
 | Turbulence | Reviewed event generator, with corrected duration/priority, driving authored coupling | Nearby-aircraft wake strength; the daytime ground-query flag |
 | Wing vapor | Shape-supplied attachment, position history, trigger, roll shortening and night suppression | Patterned fills, roll gate, scale and integer sample rounding remain open |
 
-Source foundations: [theater format](formats/theater.md),
-[creator contract](formats/quick-mission.md),
-[native flight research](formats/native-flight.md). SUN.SH has no identified
+Source foundations: [theater format](../formats/theater.md),
+[creator contract](../formats/quick-mission.md),
+[native flight research](../formats/native-flight.md). SUN.SH has no identified
 literal PIC dependency; do not assume a missing sun texture or author replacement
 art. Cloud imagery in SKY0 does not establish a cloud system.
 
@@ -165,7 +167,7 @@ reviewed aircraft shapes. The new static aircraft-code pass resolves device
 imports and afterburner branches, but finds no additional contrail or broad
 wing-vapor trigger in those blocks. Whole-game absence remains unproved. Recover
 the patterned fills, roll-rate gate, native scale and sample rounding before
-calling the port exact. See [review findings](baselines/weather-review.md).
+calling the port exact. See [review findings](../baselines/weather-review.md).
 
 Create matched retail scenarios recording build, theater, condition, mission
 time, position, altitude, heading, settings and elapsed time. Start with Ukraine
@@ -276,7 +278,7 @@ trail heads follow interpolated aircraft poses.
 The gate remains partial: native whole-tick angular coupling, exact wake
 geometry, object/carrier surface producers, audio dispatch, serialized replay
 and retail response comparisons are open.
-[Validation and scope](baselines/wind-turbulence-vapor.md).
+[Validation and scope](../baselines/wind-turbulence-vapor.md).
 
 ## W6 — Creator integration and parity acceptance
 
@@ -299,10 +301,10 @@ Acceptance matrix:
 - Wide/tall flight captures, cockpit/exterior, mirrors and camera panels;
   creator and viewer GPU smoke tests after rendering changes.
 - Repeatable frame-time measurements using
-  [existing bounded diagnostics](baselines/flight-performance.md), with matched
+  [existing bounded diagnostics](../baselines/flight-performance.md), with matched
   clear and dense-weather runs. No live blocking readback or post-render sleeps.
 - Formatting, warnings-denied Clippy, locked tests/build, Python checks and asset
-  guards per [development instructions](DEVELOPMENT.md); real Linux, macOS and
+  guards per [development instructions](../DEVELOPMENT.md); real Linux, macOS and
   Windows checks recorded separately from compilation or headless success.
 
 **Exit:** every in-scope weather matrix row has source evidence, implementation
@@ -396,7 +398,7 @@ supersedes this batch's camera implementation status.
 - [ ] Confirm fitted celestial projection against an exactly matched retail pose
   and complete the existing cloud/fog/theater/platform acceptance scenarios.
 
-[Follow-up evidence and fitted/native boundaries](baselines/weather-smoothing.md).
+[Follow-up evidence and fitted/native boundaries](../baselines/weather-smoothing.md).
 The user now has retail running through dgVoodoo: the earlier Windows-box-ready
 prerequisite is superseded. Windows/macOS rebuild checks remain separate.
 
@@ -421,4 +423,4 @@ not recovered native multi-camera palette-thread scheduling. Instrument imagery
 retains the existing asynchronous 10 Hz update and may lag the current main
 image; every submitted scene uses one coherent weather instant. Unimplemented
 target/missile cameras and special sensor/INFO2 displays are not newly enabled.
-[Implementation and acceptance evidence](baselines/weather-cameras.md).
+[Implementation and acceptance evidence](../baselines/weather-cameras.md).

@@ -1,6 +1,14 @@
 # Native land-contact foundation
 
-2026-09-15, NE-00.1a/b/c under the [living plan](../native-environment-systems-plan.md).
+> **Research notes — research mode.** Recovered facts about the original
+> game's data and code, kept as evidence. Requirements, gates and remaining
+> work described here are research-mode scope; they are not acceptance gates
+> for gameplay. Parity is measured by expression of feature — see
+> [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
+> [docs/spec/](../spec/).
+
+
+2026-09-15, NE-00.1a/b/c under the [living plan](../research/native-environment-systems-plan.md).
 **Native static source**, with diagnostic translations only where identified.
 Uses the exact reviewed FA EXE/SMS hashes in [native flight](native-flight.md).
 No imported code executes. [Validation](../baselines/native-land-foundation.md).

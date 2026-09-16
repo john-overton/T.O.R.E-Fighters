@@ -1,53 +1,168 @@
 # Agent instructions
 
-Read [docs/ROADMAP.md](docs/ROADMAP.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), and [docs/formats/menu.md](docs/formats/menu.md) before changing the project. Current work includes the first M1a menu slice, all-theater M1b preview and partial M1c Hornet free flight; M0 research and the rest of M1a remain open.
+This is the authoritative rules file for automated contributors. Agent behaviour
+rules live here and nowhere else. Anything longer than a sentence or two belongs
+in a linked document.
 
-- Keep documentation in lowercase `docs/`; validation evidence in `docs/baselines/`; format coverage in `docs/formats/coverage.md` when importer work starts.
-- Maintain [docs/progress.md](docs/progress.md) with completed substeps, remaining parity work and acceptance evidence. The remaining menu screens are deferred until explicitly scheduled.
-- Read [the living native environment/systems plan](docs/native-environment-systems-plan.md) before the next contact, ground/sea asset, lifecycle/event, decoy/guidance or environmental coupling slice. Maintain its stable work/dependency IDs, status columns, decision log and evidence links; a catalog entry or imported mesh does not establish runtime/collision support.
-- Keep the main guides current in the same change that alters their documented behavior, coverage, commands or priorities. Read the relevant guide before implementation: [aircraft import and acceptance](docs/aircraft-import.md), [flight model](docs/FLIGHT-MODEL.md), [flight response and maneuver buffet](docs/flight-response-plan.md), [weather](docs/weather-plan.md), [extraction](docs/EXTRACTION.md), and [objects and shapes](docs/formats/objects-and-shapes.md). Creator/loadout work also uses [quick mission](docs/quick-mission-plan.md) and [ordnance](docs/ordnance-plan.md).
-- When completing a substep, update the applicable guide's current coverage and remaining gates, link acceptance evidence in `docs/baselines/`, and reconcile `docs/progress.md`. Update `docs/ROADMAP.md` and affected plans when execution order changes. Correct or explicitly supersede stale current-status claims; do not leave contradictory summaries beneath appended follow-ups. Keep format facts in `docs/formats/`, implementation/sequence in the guides, and measured results in baselines rather than duplicating detailed specifications.
-- Follow [behavior provenance and acceptance](docs/behavior-provenance.md) for all behavior documentation. Label each component as **native**, **fitted**, **user-directed opinionated**, or **unknown**. Native claims require reviewed source/build evidence and a linked contract; fitted choices require their authored rules/constants and limitations; opinionated choices require the user's explicit request/date and intended deviation. Do not attribute agent-chosen approximations to the user.
-- Track native work as separate **source established**, **translated/tested**, **runtime connected**, and **retail compared** steps. Diagnostic helpers, imported assets, fitted substitutes and passing replay tests do not close native runtime/parity gates. Mixed systems need component-level provenance, not a blanket native label. Correct misleading completed checkboxes and current summaries in the same change.
-- Current implementation focus is native FA features. Do not invent flight laws or effects to fill gaps in native research, or add fitted gameplay behavior merely because it seems plausible. Recover the contract or document it as unknown. Preserve existing fitted behavior explicitly until its replacement or a user-directed change is scheduled. User-requested opinionated changes remain a separate, clearly documented scope.
-- Distinguish source review, extraction support, headless flight, rendered flight, systems support and retail acceptance in aircraft documentation. Extraction success does not close runtime or parity gates. Keep translated, fitted and unavailable behavior explicit, including platform checks that could not be run.
-- Current scheduled order (2026-09-15): after the restricted F18/Rafale native airborne connection, the next environment/systems continuation is governed by [the living native environment/systems plan](docs/native-environment-systems-plan.md): ground/sea asset discovery, native contact/handling, lifecycle/event and environmental dependencies, with no AI work or scope. John authorized autonomous implementation and coherent tested local commits on 2026-09-15, starting with NE-00.1/NE-01.1/NE-03.1; do not push. Follow with maneuver audio/rumble and acceptance, then F-14, A-4E and X-31 through aircraft-import gates, then remaining weather work outside the new plan. Retail comparison is unavailable and does not block source-backed implementation. Review exact FA identities before enabling aircraft; F-14 variant selection remains open. New user scheduling takes precedence; reconcile these instructions and linked plans when it changes.
-- Read [docs/formats/theater.md](docs/formats/theater.md) before terrain/weather changes; its native T2 byte layout supersedes the reference reader. Keep the shared theater definition table, extraction profiles and sky/celestial dependencies aligned between app and CLI. Validate both creator and viewer smoke tests for rendering changes.
-- Recover terrain and environment systems from retail assets and verified native behavior. Do not port USNF-ATF's custom terrain system or substitute its DEM-based theaters for original terrain; its partial T2 research is reference evidence only.
-- This is a native Rust rebuild. `USNF-ATF/` is an ignored reference checkout: use recovered specifications and baselines, not its engine or TypeScript runtime.
-- `gameassets/`, `USNF-ATF/`, `.local/`, and `target/` are local only. Never force-add retail media, extracted art/audio/fonts, generated retail derivatives, or reference checkout contents. Use synthetic fixtures in committed tests.
-- The importer reads user-owned media at runtime and writes selected decompressed resources to platform application data. Never embed retail bytes with `include_bytes!` or build scripts. Keep snapshots, inventories, and comparison outputs in ignored `.local/`.
-- Preserve the user's fidelity requirement: reuse original art, button pieces, and fonts. The USNF-ATF menu has custom controls and is not the visual specification. Prefer Fighters Anthology media plus the user's reference photos. Document authored hover/press behavior and submenu stubs instead of calling them decoded retail behavior.
-- Keep dependencies small and purposeful. Platform dependencies are `winit`, `wgpu`, `pollster`, and `cpal` for audio output. `tore-formats` has no dependencies and owns bounded binary readers. Formats, simulation, and synthesis stay independent of the renderer.
-- `tools/extract_assets.py` is the cross-platform extraction entry point; it invokes `tore-extract`, which shares `tore-formats` with the app. Keep extraction independent of the reference checkout and title-specific filenames. Preserve archive boundaries, safe paths, size limits, conflict checks, and provenance reports. See `docs/EXTRACTION.md`.
-- Menu startup selects randomly among the five original backgrounds; respect their different palettes and menu-bar origins. Hover/focus changes are silent. Sounds are for actual clicks/toggles. Use `--background` and `--snapshot-state` for reproducible visual checks.
-- Use `rust-toolchain.toml` and retain `Cargo.lock`. Validate with `--locked`; update dependencies deliberately.
-- Preserve Linux, Windows, and macOS support. Avoid machine-specific paths and GPU/display requirements in unit tests. Future simulation must support deterministic headless execution.
-- Run formatting, Clippy with warnings denied, tests, and a build as listed in `docs/DEVELOPMENT.md`. For rendering changes, run the window smoke test on a display-capable host. Run the asset guard when files or artifacts change. Report unavailable platform checks honestly.
-- Keep README, setup docs, and baseline evidence aligned with actual behavior. Record open decisions instead of silently choosing AI behavior, menu fidelity, or import formats.
-- Summarize in plain English: outcome, validation, and material limitations. Do not commit or push unless asked.
-- Read [docs/formats/aircraft.md](docs/formats/aircraft.md) before aircraft, equipment or instrument changes. F18.PT is the reviewed FA F/A-18D; do not silently alias F18C or borrow another aircraft's native metadata. Keep the CLI/app dependency resolver shared, PT/JT/SEE/ECM fields bounded, and external stores clean for free flight until loadout is implemented.
-- Instrument windows refer to the small raster RWR/radar/systems/target displays, separate from cockpit frame artwork. Use the supplied `gameassets/reference-photos/` captures, not the custom reference app's layout. Keep source facts, fitted rendering and missing native behavior explicit; never fabricate contacts or system readings to fill gaps.
-- Simulation advances in fixed 120 Hz ticks independently of rendering. Preserve headless probes, matching input/release behavior, and flight/camera-window GPU checks. Never execute imported native modules; readers only interpret reviewed bounded data/glyph/shape grammars.
+## Project intent
 
-- Read [docs/FLIGHT-CONTROLS.md](docs/FLIGHT-CONTROLS.md) before changing flight input/UI. Preserve the full-canvas world/cockpit with independent instrument overlays; do not restore a half-height world viewport. Recover menu labels/shortcuts through the bounded FMENUD reader, and distinguish source bindings, provisional mappings and unavailable systems. Test modifier/release isolation and pause/resume without hidden tick catch-up.
+T.O.R.E-Fighters is a ground-up rebuild of Jane's Fighters Anthology in Rust.
+The target is 1:1 gameplay parity **by expression of feature**: a player must
+experience the same behaviour they experience in the original game. It is not a
+recreation of the original program's code, control flow or internal structure.
+Players bring their own retail copy; no retail bytes are committed to this
+repository, and original modules are never executed — readers only interpret
+reviewed, bounded data grammars. Sequencing lives in
+[docs/ROADMAP.md](docs/ROADMAP.md); current parity status lives in
+[docs/parity-plan.md](docs/parity-plan.md).
 
-- Flight overlays use the responsive `flight_canvas` path, independently of 640×480 menu letterboxing. Keep cockpit cover-fit, screen-edge instrument anchoring, pointer transforms and HUD projection aligned when resizing. Do not downscale small instrument text through an intermediate menu canvas or reintroduce opaque HUD number backgrounds. Capture wide and tall layouts after composition changes.
+## The two modes of work
 
-- Flight performance changes require repeatable frame-time evidence; use the bounded diagnostics in `docs/baselines/flight-performance.md`. Keep render interpolation out of authoritative 120 Hz state, avoid post-render sleeps in active simulation, and never introduce blocking readback into live camera panels. Distinguish CPU frame intervals/presentation backpressure from GPU timing or verified displayed FPS.
+Every task is either research or implementation. Know which one you are in and
+say so in your report.
 
-- Keep aircraft attitude separate from velocity, and test complete loops through both vertical attitudes when changing flight response. Do not restore pitch clamps or nose-locked travel. Cockpit head-look limits apply to the view only; project cockpit artwork and HUD together in aircraft coordinates during head-look. Keep instruments screen-anchored; do not hide the HUD simply because pan is nonzero or repeat forward art behind the pilot. Document the source plane’s limited coverage. Avoid latitude/longitude pole collapse when mapping the square sky artwork.
+### Research mode
 
-- Native flight research is documented in `docs/formats/native-flight.md`. Use the repeatable static extraction pass; keep executable hashes and source-build distinctions explicit. Pure helper translations do not establish whole-tick parity. Preserve independent movement/body attitude and the authored adapter until the complete native state/update contract is verified. The separate `--native-flight-tables` option is a restricted airborne research connection, not a promotion of the default adapter.
+Recovering behaviour from the original executable and media.
 
-- Native flight component profiles resolve PT names at import time; update kernels use typed values and caller-owned state. Do not use raw `_bv.x.max` as the loaded speed limit (Hornet stores zero). Preserve ordered drag/force updates, movement/body separation, explicit RNG/contact inputs, and fitted-versus-translated provenance. Unrestricted native activation still requires whole-tick acceptance. The user-authorized airborne research option may run the joined service with explicit host producers and enforced unsupported-branch boundaries.
+- Output is a **prose specification** in [docs/spec/](docs/spec/) describing what
+  the game does, with the numbers a player would notice.
+- Provenance is strict: record the build identity, the evidence and the
+  unresolved branches. Naming patterns, screenshots and real-world aircraft
+  knowledge do not establish original behaviour on their own.
+- Do not guess. A missing fact is recorded as unknown with the next research
+  step, never filled in with something plausible.
+- Stop when a spec can be written. Full byte-level closure of a routine is not
+  required, and is not the goal.
 
-- Joined native flight diagnostics must enforce reviewed branch restrictions, including the environmental-turbulence bypass until its producer is connected. Document caller-supplied lifecycle/query samples and returned-but-unexecuted events; recurrent replay does not establish live or retail acceptance.
+### Implementation mode
 
-- Native matrix/contact/clock helpers are diagnostic. Preserve extracted sine/atan rounding and separate display-angle composition from movement. Contact queries must remain explicit until native terrain/carrier producers are verified. The 120 Hz-to-256-unit remainder clock is authored; do not describe it or seeded helper draws as native scheduler/replay parity.
+Turning a spec into working game behaviour.
 
-- Shared dynamics live in `tore-sim`; rendering and separate F18/Rafale animation mappings stay in the app. `--researched-flight` explicitly selects a hybrid adapter with fitted coupling; the legacy default and native-parity research are separate. RAFALE.PT is reviewed for extraction, headless flight and its own rendered cockpit/animation rig; RAFALEE/RAFALEF and F18C remain unsupported. Use the same `--validate-flight` suite for both identities and preserve explicit runway/water/wind inputs; never mark arbitrary theater height samples as validated runways.
+- Read the spec first. Implement the described behaviour idiomatically in the
+  existing crates, the way good Rust in this repository is already written.
+- Test against the spec's numbers.
+- Do **not** translate the original's control flow, call ordering, caches or RNG
+  ordering. Those are implementation details of a 1990s DOS program, not
+  player-visible behaviour.
+- If the spec is missing a number you need, that is a research task. Say so,
+  choose a documented value, and label it `fitted` or `opinionated`.
 
-- Keep F18 and Rafale C fitted laws/tuning in their respective `tore-sim::models` modules. Do not merge them into one mutable aircraft tuning profile. Use `telemetry::AirData` for new instrument integrations, with explicit wind/terrain/atmosphere inputs; never substitute TAS for unavailable IAS/CAS or geometric MSL for pressure/indicated altitude.
+## Terms
 
-- Each aircraft model owns its complete typed `models::config::Configuration`. Resolve source fields at model construction, validate edits before replacement, and pass no raw aircraft/profile to simulation ticks or research activation. Keep mutable fuel, controls, departure/contact state and clock/RNG outside configuration. Do not restore a separate string parameter cache or silently default missing source fields to zero.
+- **Original behaviour** / **game behaviour** — what a player experiences in
+  Fighters Anthology, described in prose in `docs/spec/`. This is the parity
+  target.
+- **Native** — a code path reconstructed from the original executable's control
+  flow. This is a **provenance label only**. It is never a requirement, an
+  acceptance gate, or a reason to block or revert working behaviour.
+- When John says "match the original", "do what the game does", or "native
+  functionality", he means **original behaviour**, not native provenance.
+- If an instruction is ambiguous between the two, assume original behaviour and
+  say so in your report.
+
+## Spec granularity test
+
+> Would a player notice if this were different?
+
+Yes means it belongs in the spec, with numbers. No means it is a source-notes
+footnote, or it is omitted.
+
+## Provenance categories
+
+Label components, not whole features; a feature may mix several origins.
+
+- **spec-derived** — implemented from a behaviour spec in `docs/spec/`. **This is
+  the default for gameplay code from now on.**
+- **native** — reconstructed from the original executable's control flow. A
+  description of where the behaviour came from, nothing more.
+- **fitted** — an approximation authored because a behaviour is not yet
+  specified, or because the host needs something the original did not have.
+  Record the rule, the constants and the known difference.
+- **opinionated** — a deliberate design choice, either requested by John or
+  chosen by an agent. Record which, and the date if it was requested.
+- **unknown** — insufficient evidence. Record the missing evidence and the next
+  research step.
+
+A `fitted` or `opinionated` component is acceptable as shipped behaviour. It does
+not have to be replaced by a `native` one before acceptance. See
+[behaviour provenance](docs/behavior-provenance.md).
+
+## Standing constraints
+
+- **No AI or autonomous behaviour work** unless John explicitly requests it.
+- **Exact aircraft identities:** `F18.PT` is the F/A-18D and `RAFALE.PT` is the
+  Rafale C. Never alias `F18C`, `RAFALEE` or `RAFALEF`, and never substitute a
+  variant to make a test pass.
+- **Retail comparison is unavailable** and is not a blocker. Do not turn that
+  limitation into a claim of retail parity either.
+- **Do not silently change default adapters or remove compatibility modes.**
+  The legacy default, the hybrid `--researched-flight` path and the restricted
+  `--native-flight-tables` research path stay distinct.
+- **Report to Jeeves at milestones**, in the format that control file specifies.
+- **Agent decisions are recorded as agent decisions.** Never attribute an
+  implementation choice to John because he requested the broader feature.
+- Keep dependencies small: `winit`, `wgpu`, `pollster`, `cpal`. `tore-formats`
+  has no dependencies. Formats, simulation and synthesis stay independent of the
+  renderer.
+- Preserve Linux, Windows and macOS support, deterministic headless execution,
+  and fixed 120 Hz simulation independent of rendering.
+- Never commit retail media, extracted art/audio/fonts or generated retail
+  derivatives. `gameassets/`, `USNF-ATF/`, `.local/` and `target/` are local
+  only. Use synthetic fixtures in committed tests.
+- Never embed retail bytes with `include_bytes!` or build scripts. The importer
+  reads user-owned media at runtime.
+- `USNF-ATF/` is an ignored reference checkout. Use its recovered specifications
+  and baselines, never its engine, its TypeScript runtime or its custom terrain
+  system.
+- Reuse original art, button pieces and fonts. The USNF-ATF menu has custom
+  controls and is not the visual specification.
+- Report honestly: state what was validated, what was not run, and what is still
+  approximate. Do not commit or push unless asked.
+- Summarize in plain English for a smart product manager: short sentences, no
+  unexplained jargon, lead with what it means rather than how it works.
+
+## Documentation rules
+
+| Content | Home |
+| --- | --- |
+| Research facts: formats, byte layouts, decoded contracts | `docs/formats/` |
+| Measured evidence: what was run, on what, with what result | `docs/baselines/` |
+| Behaviour specs: what a player experiences, with numbers | `docs/spec/` |
+| Planning: milestones | `docs/ROADMAP.md` |
+| Planning: current parity status and next feature (one page) | `docs/parity-plan.md` |
+| Frozen research archives, kept for their evidence | `docs/research/` |
+
+- **Nothing else grows a revision log.** `docs/research/` holds the frozen ones.
+- **No per-predicate baseline files.** One baseline per feature or per validation
+  pass, not one per recovered routine.
+- **Link, do not duplicate.** A fact has one home; everything else points at it.
+- Keep the guides current in the same change that alters the behaviour they
+  document: [aircraft import](docs/aircraft-import.md),
+  [flight model](docs/FLIGHT-MODEL.md), [flight controls](docs/FLIGHT-CONTROLS.md),
+  [input](docs/INPUT.md), [extraction](docs/EXTRACTION.md),
+  [weather formats](docs/formats/weather.md),
+  [objects and shapes](docs/formats/objects-and-shapes.md),
+  [theater](docs/formats/theater.md), [architecture](docs/ARCHITECTURE.md).
+- Correct stale status claims in place. Do not append a success note beneath a
+  contradictory summary.
+
+## Development checks
+
+Run these before finishing, from the repository root. Full details and
+platform-specific setup are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo build --workspace --locked
+python3 -m unittest discover -s tools -p 'test_*.py'
+python3 tools/check_assets.py
+python3 tools/check_assets.py target/debug/tore-app
+python3 tools/check_assets.py target/debug/tore-extract
+```
+
+Use `rust-toolchain.toml` and keep `Cargo.lock`; always validate with `--locked`.
+For rendering changes also run `cargo run --locked -p tore-app -- --smoke-test`
+on a display-capable host. Report any check you could not run.

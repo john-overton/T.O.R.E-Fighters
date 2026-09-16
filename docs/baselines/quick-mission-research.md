@@ -1,5 +1,12 @@
 # Quick Mission Creator planning evidence — 2026-09-14
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 Read-only code/media review plus selective local extraction; no runtime behavior
 changed. Reference photo inspected: `gameassets/reference-photos/quick-mission-creator-screen.jpg`.
 It shows three wings on each side, nationalities, theater, altitude, conditions,
@@ -45,4 +52,4 @@ The offsets below are raw file offsets, not virtual addresses.
 
 No native game code was executed. No creator handler disassembly, complete option
 mapping, new UI captures or runtime acceptance was performed in this planning pass.
-See the [implementation plan](../quick-mission-plan.md) for remaining gates.
+See the [implementation plan](../research/quick-mission-plan.md) for remaining gates.

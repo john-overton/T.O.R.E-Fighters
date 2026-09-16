@@ -1,5 +1,13 @@
 # Load Ordnance screen contract
 
+> **Research notes — research mode.** Recovered facts about the original
+> game's data and code, kept as evidence. Requirements, gates and remaining
+> work described here are research-mode scope; they are not acceptance gates
+> for gameplay. Parity is measured by expression of feature — see
+> [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
+> [docs/spec/](../spec/).
+
+
 Static research against the hash-identified FA.EXE/SMS pair recorded in
 [menu evidence](../baselines/menu-contract-pass.md). Addresses below are virtual
 addresses in that executable. No imported instructions are executed. This is a
@@ -150,7 +158,7 @@ Remaining source work: mode/menu visibility, complete card text offsets and art
 closure, full event/repeat timing, stock
 rollback on cancel, accepted fuel/weight serialization, start/task generation,
 and original-game visual/interaction acceptance. Use this contract alongside
-[the implementation plan](../ordnance-plan.md), not as proof that its gates pass.
+[the implementation plan](../research/ordnance-plan.md), not as proof that its gates pass.
 
 ## Additional card recovery and implementation
 

@@ -7,13 +7,15 @@ linked research remains authoritative for byte layouts and native behavior.
 
 ## Scheduled aircraft and execution order
 
-1. Continue the F/A-18D/Rafale C native foundation through the
-   [living environment/systems plan](native-environment-systems-plan.md), then
-   resume the [maneuver audio/rumble and acceptance slice](flight-response-plan.md).
-   The new plan is documentation only in its creation turn; no AI scope.
-   Keep [native, fitted and user-directed provenance](behavior-provenance.md) separate.
+1. Continue the F/A-18D/Rafale C foundation from behaviour specs; sequence lives in
+   [the parity plan](parity-plan.md). The
+   [environment/systems plan](research/native-environment-systems-plan.md) and the
+   [maneuver audio/rumble slice](research/flight-response-plan.md) are frozen archives:
+   use them for recovered facts and evidence, not for sequencing. No AI scope.
+   Keep [spec-derived, native, fitted and opinionated provenance](behavior-provenance.md)
+   separate.
 2. Add **F-14**, then **A-4E**, then **X-31**, using the per-aircraft gates below.
-3. Resume remaining [weather work](weather-plan.md) outside the environment/systems dependencies.
+3. Resume remaining [weather work](research/weather-plan.md) outside the environment/systems dependencies.
 
 The new aircraft are scheduled, **not supported yet**. Review each exact FA PT,
 variant, shape/HUD names and resource hashes before registering an identity.
@@ -28,14 +30,14 @@ Broader AI, new menu screens and the rest of the aircraft roster remain deferred
 | --- | --- | --- |
 | Identity and extraction | Reviewed F18.PT = F/A-18D and RAFALE.PT = Rafale C; shared app/CLI dependency closure, source hashes, bounded readers | Other variants/layouts need review. [Extraction](EXTRACTION.md), [aircraft formats](formats/aircraft.md), [format coverage](formats/coverage.md) |
 | Flight configuration | Separate models own validated typed configuration; source mass, engines, envelopes, controls/equipment and departure fields resolve at construction | Unresolved source fields stay explicit; no per-tick raw PT access. [Model contract](FLIGHT-MODEL.md) |
-| Flight dynamics | Fixed 120 Hz shared integration, independent attitude/velocity, fuel/devices, legacy and selectable hybrid paths; hybrid departure/spin/contact helpers | Fitted response/coupling remains; exact whole-tick native parity is open. [Native research](formats/native-flight.md) |
-| G / roll / rudder / departure | Supported response/telemetry and hybrid stall attenuation/spin recovery validated for both identities/adapters | Restricted airborne native coupling is tested; contact/lifecycle producers are next under the environment/systems plan. [Flight-response plan](flight-response-plan.md) |
+| Flight dynamics | Fixed 120 Hz shared integration, independent attitude/velocity, fuel/devices, legacy and selectable hybrid paths; hybrid departure/spin/contact helpers | Response and coupling components are fitted and acceptable as shipped; whole-tick native reconstruction is research, not an acceptance bar. [Native research](formats/native-flight.md) |
+| G / roll / rudder / departure | Supported response/telemetry and hybrid stall attenuation/spin recovery validated for both identities/adapters | Restricted airborne native coupling is tested. Ground, terrain and object contact is opinionated authored behaviour, not a pending native producer; lifecycle work is sequenced in [the parity plan](parity-plan.md). [Flight-response plan](research/flight-response-plan.md) |
 | Exterior and animation | Both original shapes/cockpits; separate aircraft animation mappings and fitted device travel | General native SH execution, exact hinges/schedules, LOD/shadow/damage and store-placement acceptance remain incomplete. [Shapes](formats/objects-and-shapes.md) |
 | Cockpit / HUD / instruments | Original art/fonts, full flight canvas, responsive overlays, rear mirror and asynchronous camera windows; supported live instrument channels | Full native HUD/window composition and unmodeled system readings remain open. [Aircraft formats](formats/aircraft.md), [controls](FLIGHT-CONTROLS.md) |
 | Environment / air data | Shared resolved wind, terrain/standard-atmosphere AirData, camera-local weather, physical turbulence and corrected own-shape vapor attachments | Native atmosphere, wake/contact/coupling, broader vapor and weather acceptance remain partial. [Wind/turbulence evidence](baselines/wind-turbulence-vapor.md) |
-| Audio / feedback | Original engine/device audio, weapon/damage feedback, afterburner rumble, strong environmental turbulence rumble | Maneuver buffet and verified original dispatch are next; audibility/hardware acceptance is distinct from event tests. [Flight-response plan](flight-response-plan.md) |
+| Audio / feedback | Original engine/device audio, weapon/damage feedback, afterburner rumble, strong environmental turbulence rumble | Maneuver buffet and verified original dispatch are next; audibility/hardware acceptance is distinct from event tests. [Flight-response plan](research/flight-response-plan.md) |
 | Weapons / sensors / damage | PT-default manual range, supported weapon/sensor/ECM/damage behavior; source stations and partial custom-load creator flow | Not full JT catalog or aircraft-system parity. [Systems](baselines/weapons-systems.md), [creator/loadout](baselines/creator-ordnance.md) |
-| Validation | Same aircraft flight suite, deterministic same-host probes, rendering and documented Linux checks | Retail trajectory, complete systems and unavailable platform checks remain separate gates. [Flight baseline](baselines/shared-flight-model.md), [progress](progress.md) |
+| Validation | Same aircraft flight suite, deterministic same-host probes, rendering and documented Linux checks | Retail trajectory, complete systems and unavailable platform checks remain separate gates. [Flight baseline](baselines/shared-flight-model.md), [progress](research/progress.md) |
 
 Older first-pass sections in individual docs describe historical limitations.
 Use their dated follow-ups and the current evidence above when assessing runtime
@@ -70,7 +72,8 @@ optional/unresolved references. Extraction success alone does not enable flight.
   engine count/thrust/fuel, devices, departure/spin and contact limits.
 - [ ] Apply the completed flight-response contracts to this identity and verify
   its own behavior. Shared helper code is reusable; aircraft calibration and
-  configuration remain independently owned and explicitly source-based or fitted.
+  configuration remain independently owned, each component carrying its own
+  provenance label (spec-derived, native, fitted or opinionated).
 - [ ] Review special control/propulsion modes from source. For F-14, investigate
   variable wing geometry and its flight/attachment consequences. For X-31,
   investigate thrust-vector/control modes and departure behavior. These are
@@ -154,9 +157,12 @@ For each aircraft, create `docs/baselines/aircraft-<reviewed-id>.md` with:
   aircraft-switch state isolation and failures without stale mutable state.
 
 Use the terms **source reviewed**, **extraction supported**, **headless flight
-supported**, **rendered flight supported**, **systems partially supported**, and
-**retail validated for named cases** independently. Record unavailable checks;
-do not collapse these into a single “complete” checkbox. Update this guide,
+supported**, **rendered flight supported** and **systems partially supported**
+independently. Add **retail validated for named cases** only where that evidence
+exists; retail comparison is currently unavailable. These describe support, not
+origin: a spec-derived, fitted or opinionated component can be fully supported.
+Record unavailable checks; do not collapse these into a single “complete”
+checkbox. Update this guide,
 `formats/coverage.md`, `FLIGHT-MODEL.md` and `progress.md` with actual results.
 
 ## Commands and implementation entry points

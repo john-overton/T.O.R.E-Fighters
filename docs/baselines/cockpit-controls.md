@@ -1,5 +1,12 @@
 # Full-canvas cockpit, HUD and desktop controls checkpoint
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 2026-09-13, Apple Silicon M3/macOS, Rust 1.91.1, wgpu Metal. This follows the [initial F/A-18D slice](f18-free-flight.md) and replaces its provisional split cockpit layout. No new dependency, retail bytes or derived pictures are tracked.
 
 ## Outcome

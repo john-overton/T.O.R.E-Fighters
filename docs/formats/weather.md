@@ -1,5 +1,13 @@
 # FA clock, turbulence and aircraft vapor research
 
+> **Research notes — research mode.** Recovered facts about the original
+> game's data and code, kept as evidence. Requirements, gates and remaining
+> work described here are research-mode scope; they are not acceptance gates
+> for gameplay. Parity is measured by expression of feature — see
+> [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
+> [docs/spec/](../spec/).
+
+
 Static follow-up, 2026-09-14. Addresses refer only to the reviewed FA.EXE/SMS
 pair in [native flight research](native-flight.md). No original routine is
 executed. [Reproduction and validation](../baselines/weather-research.md).
@@ -46,7 +54,7 @@ advancing clock UI. Native callbacks must be translated, never loaded.
 
 ### Fog tint consumer follow-up — 2026-09-15
 
-Source tracing for [dependency step 1](../weather-plan.md#numbered-dependency-sequence--2026-09-15)
+Source tracing for [dependency step 1](../research/weather-plan.md#numbered-dependency-sequence--2026-09-15)
 rechecked the reviewed executable/symbol hashes and followed the existing static
 disassembly. The implementation checkpoint below distinguishes live callback state
 from the diagnostic palette helpers.
@@ -511,7 +519,7 @@ This pass covers these two supplied aircraft shapes and their named imports;
 other aircraft, all indirect paths and retail visual comparison remain open.
 Broader wing-induced vapor is **not found in these inspected blocks**, not
 proven absent throughout the game. Future optional contrails are planned in
-[W7](../weather-plan.md#w7--optional-engine-contrails-after-retail-weather).
+[W7](../research/weather-plan.md#w7--optional-engine-contrails-after-retail-weather).
 
 ### Corrections and remaining gaps
 

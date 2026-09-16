@@ -1,5 +1,12 @@
 # Native flight research baseline — 2026-09-13
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 Host: macOS, Apple M3, pinned Rust 1.91.1. This baseline records static analysis
 and translated-helper validation; no original executable was run or emulated.
 See [source provenance, coverage and commands](../formats/native-flight.md).

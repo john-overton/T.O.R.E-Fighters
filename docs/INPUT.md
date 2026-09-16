@@ -298,8 +298,9 @@ accepted, so connection/reconnection alone never replays an effect.
 | Damage | 25% / 18% | 167 ms | Hook only; combat damage unavailable |
 | Crash | 35% / 20% | 183 ms | Actual transition into crashed state |
 
-These are provisional tactile designs, not recovered native effects or directional
-flight-stick forces. The dependency-free `tore_input::feedback` mixer has eight
+These are opinionated tactile designs, chosen by the implementation rather than
+recovered from the original. They are not directional flight-stick forces. The
+dependency-free `tore_input::feedback` mixer has eight
 fixed slots and combines motor strengths by maximum, capped by these designs,
 rather than adding overlapping effects. Gun/rocket repeats are admitted at most
 20 Hz, turbulence/missile/bomb/damage at 10 Hz, afterburner at 2 Hz and crash at 1 Hz.

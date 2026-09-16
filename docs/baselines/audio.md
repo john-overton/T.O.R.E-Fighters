@@ -1,5 +1,12 @@
 # Recorded audio acceptance — 2026-09-14
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 Host: Linux x86_64, Rust 1.91.1, NVIDIA RTX 4070 / Vulkan / Wayland.
 This is recorded-PCM readiness and the first NORMAL free-flight music slice,
 not full native situation/mixer parity. The user explicitly excluded MIDI and

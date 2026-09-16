@@ -1,3 +1,5 @@
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D27) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept as a record of menu source-recovery status; it measured coverage by source evidence, not by what a player experiences. Its sequencing, gates and status columns are no longer authoritative.
+
 # Creator / ordnance mapping ledger
 
 This ledger covers the mapping scope in the two implementation plans. **Mapped**
@@ -27,9 +29,9 @@ question. Every planned control group has an entry; full 1:1 recovery is open.
 | Original-game acceptance | Open | Supplied screenshots constrain appearance; popup, gestures, restart and cross-platform comparisons still required |
 
 Detailed contracts and source addresses:
-[creator](formats/quick-mission.md), [ordnance](formats/ordnance-menu.md),
-[validation](baselines/menu-behavior-mapping.md).
+[creator](../formats/quick-mission.md), [ordnance](../formats/ordnance-menu.md),
+[validation](../baselines/menu-behavior-mapping.md).
 
 Do not fill unresolved entries with the custom reference app's behavior. The next
 acceptance gate is hands-on creator/ordnance/flight testing and original-game
-comparison; source gaps above remain explicit. See [implementation evidence](baselines/creator-ordnance.md).
+comparison; source gaps above remain explicit. See [implementation evidence](../baselines/creator-ordnance.md).

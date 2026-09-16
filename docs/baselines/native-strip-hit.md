@@ -1,9 +1,16 @@
 # STRIP collision dispatch and death marking checkpoint
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 2026-09-15, following `9baf9fa`. **NE-00.1o completes bounded source recovery and
 a diagnostic collision predicate**, not native collision damage or removal.
 [Contract](../formats/native-strip.md#collision-hit-dispatch-and-death-marking--ne-001o),
-[living plan](../native-environment-systems-plan.md).
+[living plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-hit-source

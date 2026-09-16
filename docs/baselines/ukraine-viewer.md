@@ -1,5 +1,12 @@
 # Ukraine viewer baseline
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 Date: 2026-09-13. Host: Apple Silicon MacBook Air M3, macOS, pinned Rust 1.91.1, `aarch64-apple-darwin`. This records the first implementation working tree; no commit was created for this slice. Source identity and native addresses are in [theater recovery](../formats/theater.md).
 
 ## Working slice
@@ -44,4 +51,4 @@ Captures remain ignored at `.local/theater-research/terrain.ppm` and `quick.ppm`
 
 The fixed full-resolution mesh, water palette fallback, spherical SKY0 projection and distance fog are initial rendering choices. Native adaptive subdivision, shoreline coverage, fallback terrain materials, 3D objects and native lighting remain open. DAY2 keyframe 2 supplies source colors, but time/altitude interpolation and weather simulation remain unimplemented. Sun/moon/star/cloud shapes are **extracted, not rendered**. No aircraft physics or mission generation is present.
 
-Next: recover sky/cloud SH commands and native weather scheduling, native terrain coverage/LOD, ground-object dependencies and a second theater; compare identifiable original landmarks and controlled weather scenarios. Track these separately in [progress](../progress.md); this baseline does not close M1b.
+Next: recover sky/cloud SH commands and native weather scheduling, native terrain coverage/LOD, ground-object dependencies and a second theater; compare identifiable original landmarks and controlled weather scenarios. Track these separately in [progress](../research/progress.md); this baseline does not close M1b.

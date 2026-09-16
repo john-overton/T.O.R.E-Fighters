@@ -1,5 +1,12 @@
 # Weather foundation implementation — 2026-09-15
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 First bounded implementation slice of dependency step 1. Steps 1–3 are not
 complete. Existing uncommitted review changes were preserved; nothing was
 committed or pushed. Source identity is the reviewed FA.EXE/SMS pair in

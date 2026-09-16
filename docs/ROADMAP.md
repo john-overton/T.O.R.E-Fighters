@@ -4,34 +4,36 @@ T.O.R.E-Fighters in the Repo - Tasteful Opinionated Reverse Engineered
 
 Development baseline: see [DEVELOPMENT.md](DEVELOPMENT.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [recorded validation](baselines/environment.md). The first M1a [main-menu slice](baselines/main-menu.md) now imports original menu assets and runs natively. M0 research and the remaining M1a screens/audio work remain in progress.
 
-Track concrete steps, substeps and acceptance gates in [progress.md](progress.md). Further menu screens are deferred until explicitly scheduled. Original terrain and environment systems will be recovered from retail assets and native behavior; USNF-ATF's custom terrain system and DEM-based theaters are not being ported.
+This is the sequencing document for the ground-up rebuild in Rust. Current status
+and the next feature are tracked on one page in [the parity plan](parity-plan.md).
+The behaviour being rebuilt is described in prose in [docs/spec/](spec/); how
+agents work from those specs is in [AGENTS.md](../AGENTS.md).
 
-This is the sequencing document for the ground-up rebuild in Rust.  The existing TypeScript repo /USNF-ATF is the guide, not the gospel: its format docs, decoders, recovered geometry, audio recovery, and baselines are the reference material.  Its engine is not being ported.
+The existing TypeScript repo /USNF-ATF is the guide, not the gospel: its format docs, decoders, recovered geometry, audio recovery, and baselines are the reference material. Its engine is not being ported. Original terrain and environment systems are rebuilt from retail assets and from the game's observed behaviour; USNF-ATF's custom terrain system and DEM-based theaters are not being ported. Further menu screens are deferred until explicitly scheduled.
 
-Current user priority (2026-09-15): the restricted F18/Rafale native airborne
-connection is implemented and [validated](baselines/native-live-flight.md).
-The next continuation is the [living native environment/systems plan](native-environment-systems-plan.md):
-full ground and sea/ocean asset discovery/import, native contact and land/deck
-handling, equipment/fuel/damage lifecycles, event dispatch, decoy/guidance
-intersections and environmental coupling. John authorized implementation on 2026-09-15, starting with the land-query
-foundation NE-00.1/NE-01.1/NE-03.1 and tested local commits. **No AI work or scope is included.**
+Current state (2026-09-15): original menus, the quick-mission creator and
+ordnance screen, all 16 theaters, and F/A-18D and Rafale C free flight with
+cockpit, HUD, instrument windows, weather and controller support. A development
+weapons range supports manual weapon testing. Ground contact and landing are
+authored behaviour ([opinionated](behavior-provenance.md)); combat AI is not
+started and is not authorized.
 
-Follow that dependency-led continuation with maneuver audio/rumble and final
-[flight-response acceptance](flight-response-plan.md), then F-14, A-4E and X-31
-through the [aircraft import gates](aircraft-import.md), then weather work outside
-the new plan. Native/fitted/runtime/retail evidence remains separate under
-[behavior provenance](behavior-provenance.md). Retail flight comparison is
-unavailable and does not block source-backed progress. No default adapter change,
-new flyable identity or broader menu work is implied by this implementation pass.
+Follow with maneuver audio/rumble and final [flight-response acceptance](research/flight-response-plan.md),
+then F-14, A-4E and X-31 through the [aircraft import gates](aircraft-import.md),
+then the remaining weather work. Where a behaviour came from is recorded per
+component under [behavior provenance](behavior-provenance.md); no provenance
+label is an acceptance gate. Retail comparison is unavailable and does not block
+progress. No default adapter change, new flyable identity or broader menu work is
+implied here.
 
 The preceding execution order (2026-09-14) remains a broader gate: finish manual weapons, sensors and damage
 acceptance for F/A-18D and Rafale C before AI work. The only AI authorized for the
 later weapon-testing phase is a basic fly-forward target. The broader future AI
 milestone below is not authorization to implement combat AI now. See
 [current systems evidence and remaining gates](baselines/weapons-systems.md).
-The manual range covers both aircraft’s ten PT-default weapon slots, partial
+The manual range covers both aircraft's ten PT-default weapon slots, partial
 ECM/player-damage integration and controller feedback. This does not close the
-M1d/M1f native acceptance gates or authorize additional aircraft/loadouts.
+M1d/M1f acceptance gates or authorize additional aircraft/loadouts.
 
 ## Principles
 
@@ -45,6 +47,12 @@ M1d/M1f native acceptance gates or authorize additional aircraft/loadouts.
 
 ## What "1:1" means
 
+Parity is measured **by expression of feature**: the player must experience what
+they experience in Fighters Anthology. It is not a recreation of the original
+program's code, control flow or internal structure. The test for whether
+something belongs in a behaviour spec is "would a player notice if this were
+different?"
+
 In scope for parity:
 - Aircraft flight envelopes from retail PT data
 - Weapon, sensor, and object stats from retail OT, JT, and NT data
@@ -57,8 +65,11 @@ Out of scope for parity:
 - Pixel-accurate rendering
 - Original resolution, frame timing, or integer clock artifacts
 - Bugs that are not load-bearing for gameplay
+- The original program's control flow, call ordering, caches and RNG ordering
 
-Open decision (see bottom): whether the retail AI VM is reimplemented from the recovered bytecode or the behaviors are recreated from observation.  This is decided in M0 and shapes M1e.
+AI behavior is recreated from a behaviour spec, like every other feature; the
+retail AI bytecode VM is not reimplemented. This follows from parity by
+expression of feature and shapes M1e.
 
 ---
 
@@ -69,8 +80,10 @@ Open decision (see bottom): whether the retail AI VM is reimplemented from the r
 Work:
 - Inventory the TS repo and mark every artifact as *spec* (format docs, byte layouts, recovered DLG geometry, MUS scripts, PT field maps, baselines) or *implementation* (engine code, React shell, Three.js render).  Spec carries forward.  Implementation is reference only.
 - Inventory the full Fighters Anthology disc layout: USNF '97, ATF Gold, NATO Fighters, Marine Fighters, and the Pro Mission Creator.  Produce a format-by-title census.
-- Write the 1:1 definition above into `docs/` and get it settled.
-- Decide the AI VM question.
+- Write the 1:1 definition above into `docs/` and get it settled. **Done:** see
+  "What 1:1 means" above and [AGENTS.md](../AGENTS.md).
+- Decide the AI VM question. **Settled 2026-09-15:** behaviors are recreated from
+  a spec, not reimplemented from the recovered bytecode.
 - Set up the Rust workspace, three-platform build, and the retail signature scan.
 
 Deliverable: an app on all three platforms that opens a window, prints its renderer, and passes the scan.
@@ -250,7 +263,7 @@ Formats: ESA, LIB, DCL, PAL, PIC, FNT, DLG, MNU, LAY, XMI, MUS, 5K, 11K, T2, PT,
 
 | Decision | Where it is made |
 | --- | --- |
-| Retail AI VM reimplemented or behaviors recreated | M0 |
+| ~~Retail AI VM reimplemented or behaviors recreated~~ | Settled 2026-09-15: behaviors recreated from a spec |
 | Working title | Whenever, before M1 tag |
 | TS repo stays runnable as reference or is archived at M0 | M0 |
 | Multiplayer in 1.0 or after | Before M2 tag |

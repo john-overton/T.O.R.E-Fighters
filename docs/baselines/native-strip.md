@@ -1,10 +1,17 @@
 # STRIP source and box-metadata checkpoint
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 2026-09-15, following clean `3714c72`. NE-00.1d metadata precursor complete;
 parent NE-00.1 / NE-01.1 / NE-03.1 remain researching.
 **Native source/diagnostic translation tested; no new runtime contact branch;
 retail comparison unavailable.** [Contract](../formats/native-strip.md),
-[living dependency register](../native-environment-systems-plan.md).
+[living dependency register](../research/native-environment-systems-plan.md).
 
 ## Reproduction and scope
 

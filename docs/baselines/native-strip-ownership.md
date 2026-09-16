@@ -1,9 +1,16 @@
 # Airport and callback ownership source checkpoint
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 2026-09-15, following `535d227`. **NE-00.1h completes a bounded source ledger
 only**; E016/E019/E020 and the parent producer remain open.
 [Contract](../formats/native-strip.md#airport-ownership-and-comment-preflight--ne-001h),
-[living plan](../native-environment-systems-plan.md).
+[living plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-ownership-final

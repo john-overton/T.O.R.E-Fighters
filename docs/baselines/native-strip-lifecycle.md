@@ -1,9 +1,16 @@
 # STRIP candidate lifetime and source completion checkpoint
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 2026-09-15, following `ad92851`. **NE-00.1e complete only as a diagnostic
 candidate-lifetime/source precursor.** Parent NE-00.1 / NE-01.1 / NE-03.1 remain
 researching. No new runtime contact branch; retail comparison unavailable.
-[Contract](../formats/native-strip.md), [living plan](../native-environment-systems-plan.md).
+[Contract](../formats/native-strip.md), [living plan](../research/native-environment-systems-plan.md).
 
 ## Reproduction and source evidence
 

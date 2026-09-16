@@ -1,7 +1,9 @@
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D27) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its recovered facts, dated checkpoints and evidence links. Its sequencing, gates and status columns are no longer authoritative.
+
 # Flight response and maneuver buffet plan
 
 Requested 2026-09-15. **Remaining native dependencies now follow the
-[living environment/systems plan](native-environment-systems-plan.md).**
+[living environment/systems plan](../research/native-environment-systems-plan.md).**
 This is an implementation and acceptance plan; unchecked items claim no new
 native behavior. Scope is the reviewed F/A-18D (`F18.PT`) and Rafale C
 (`RAFALE.PT`), preserving the legacy default and explicit hybrid selection.
@@ -20,36 +22,36 @@ control/force/movement coupling, with source-derived expected behavior. A useful
 retail comparison is unavailable; continue implementation using source contracts
 and tests, without claiming retail trajectory parity. Resume audio/rumble
 afterward. Follow
-[behavior provenance](behavior-provenance.md): separate native implementation
+[behavior provenance](../behavior-provenance.md): separate native implementation
 steps, existing fitted choices, and explicitly user-directed additions.
 
 The earlier “steps 1–3 complete” summary overstated native coverage. The
-[adapter baseline](baselines/flight-response.md) records completed component and
+[adapter baseline](../baselines/flight-response.md) records completed component and
 regression work; native steps 2–3 remain open where fitted laws or missing
 coupling remain. Legacy is still the default. Native-derived warning/stall/spin
 components retain fitted hybrid boundaries; a separate restricted airborne native
-option now runs the joined service. [Live scope](baselines/native-live-flight.md).
+option now runs the joined service. [Live scope](../baselines/native-live-flight.md).
 
 ### Native continuation before step 4
 
 - [x] Establish native warning-transition tumble scheduling and movement-fall
-  source branches; record [contracts and translation status](formats/native-flight.md#native-tumble-continuation--2026-09-15).
+  source branches; record [contracts and translation status](../formats/native-flight.md#native-tumble-continuation--2026-09-15).
 - [x] Join native tumble/fall/spin dispatch and movement composition; validate
-  synthetic contracts and both PTs with imported tables. [Evidence](baselines/native-departure-stage.md).
+  synthetic contracts and both PTs with imported tables. [Evidence](../baselines/native-departure-stage.md).
   This is diagnostic component acceptance; no live activation or retail comparison is implied.
 - [x] Resolve initial/bounded/current-G envelope roles and the non-VTOL gate
   for both supported profiles; translate/test the departure force-G override
   and ordered force/velocity stage. These remain diagnostic components.
 - [x] Join primary G/pitch/AoA/roll consumers and movement through explicit
   post-query contact settling; validate component tests and both PT snapshot
-  probes. [Evidence](baselines/native-movement-control.md).
+  probes. [Evidence](../baselines/native-movement-control.md).
 - [x] Finish the joined diagnostic: loaded G/control/drag consumers, passive fall,
   auxiliary rates, full rudder/steering, ordered forces/movement/contact and
   returned events. Both PTs pass recurrent state/replay probes.
-  [Evidence and explicit native turbulence bypass](baselines/native-flight-diagnostic.md).
+  [Evidence and explicit native turbulence bypass](../baselines/native-flight-diagnostic.md).
 - [x] Connect the joined service to an explicit airborne live research path, with
   caller-owned clock/RNG, output projection, restart and error rollback. Validate
-  both aircraft headlessly and on the GPU. [Evidence](baselines/native-live-flight.md).
+  both aircraft headlessly and on the GPU. [Evidence](../baselines/native-live-flight.md).
 - [ ] Connect terrain/carrier queries, equipment/fuel/damage lifecycle producers,
   event execution and complete native runtime ownership before unrestricted
   activation. The airborne path consumes adapted samples and rejects contact;
@@ -59,8 +61,8 @@ option now runs the joined service. [Live scope](baselines/native-live-flight.md
 
 ## Current coverage and remaining gates
 
-[FLIGHT-MODEL](FLIGHT-MODEL.md) describes the working adapters and their fitted
-parts. [Native flight research](formats/native-flight.md) records translated
+[FLIGHT-MODEL](../FLIGHT-MODEL.md) describes the working adapters and their fitted
+parts. [Native flight research](../formats/native-flight.md) records translated
 components and unresolved whole-tick contracts. Those are the existing backlog;
 this plan orders the next flight-response slice.
 
@@ -77,7 +79,7 @@ The sound routine reads G, roll rate, rudder, departure, speed and device/state
 flags. That establishes maneuver-responsive sound logic, **not an aerodynamic
 buffet-force equation or a verified rumble mapping**. Do not translate its sound
 intensity into forces. Do not trigger feedback merely from stick deflection.
-[Source boundaries](formats/weather.md#maneuver-effects-and-sound-are-separate).
+[Source boundaries](../formats/weather.md#maneuver-effects-and-sound-are-separate).
 
 ## 1. Trace producers and establish a baseline
 
@@ -145,7 +147,7 @@ fuel producer has been promoted to native acceptance.
 The requested remaining diagnostic is complete: native departure attenuation,
 tumble, recovery dispatch and downstream control/force/movement/contact order
 are joined. Restricted airborne live activation is now tested; external lifecycle/query
-producers and event execution remain open. See the [joined baseline](baselines/native-flight-diagnostic.md).
+producers and event execution remain open. See the [joined baseline](../baselines/native-flight-diagnostic.md).
 
 **Gate:** deterministic warning → stall/spin → recovery traces, threshold-boundary
 and timer-interruption tests, no hidden RNG draws from audio, rumble or cameras.
@@ -192,7 +194,7 @@ that only exercise the mixer. Record hardware/platform availability honestly.
   turns; left/right roll and rudder; warning/stall/spin entry and recovery;
   gear/flap/airbrake and supported mass cases where relevant to traced consumers.
 - [ ] Run formatting, warnings-denied Clippy, tests and build with `--locked`,
-  Python checks and asset guards as listed in [DEVELOPMENT](DEVELOPMENT.md).
+  Python checks and asset guards as listed in [DEVELOPMENT](../DEVELOPMENT.md).
   Use synthetic fixtures for committed tests.
 - [ ] Run flight/camera GPU checks and creator/viewer smoke tests for rendering
   changes. Capture wide/tall composition if feedback changes the view; preserve
@@ -203,7 +205,7 @@ that only exercise the mixer. Record hardware/platform availability honestly.
   synthetic invariants, host regression results and retail parity evidence.
 - [ ] Update `FLIGHT-MODEL.md`, native research, progress and the acceptance record
   with completed substeps and unresolved gates. Next add F-14, A-4E and X-31
-  using the [aircraft import guide](aircraft-import.md), then return to remaining
+  using the [aircraft import guide](../aircraft-import.md), then return to remaining
   weather work. Carry unavailable retail/platform evidence explicitly.
 
 ## Broader flight-model backlog retained
@@ -212,6 +214,6 @@ This slice does not close native full-tick trajectory parity, integer scheduling
 and global RNG order, terrain/object collision/cache and carrier producers,
 remaining equipment/damage/fuel-transfer coupling, pitot/static calibration,
 indicated instruments or new-aircraft acceptance. These stay in
-[flight-model status](FLIGHT-MODEL.md) and [progress](progress.md). Broader weather,
+[flight-model status](../FLIGHT-MODEL.md) and [progress](progress.md). Broader weather,
 AI and remaining menu screens are outside this scheduled slice. New aircraft
 follow it as a separate scheduled pass through the import guide.

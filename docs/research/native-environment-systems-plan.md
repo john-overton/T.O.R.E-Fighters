@@ -1,3 +1,5 @@
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D27) — see [AGENTS.md](../../AGENTS.md) and [docs/parity-plan.md](../parity-plan.md).** Kept for its recovered facts, evidence links and decision record. Its work-package gates, status columns and sequencing are no longer authoritative.
+
 # Native environment and systems implementation plan
 
 **Living plan v21 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
@@ -10,22 +12,22 @@ must survive those splits. No AI work is included or scheduled.
 ## 1. Starting point and evidence
 
 Source baseline: reviewed Fighters Anthology media/build identities recorded in
-[native flight research](formats/native-flight.md), [theater formats](formats/theater.md)
-and [weapons research](formats/weapons.md). Do not apply addresses or asset rules
+[native flight research](../formats/native-flight.md), [theater formats](../formats/theater.md)
+and [weapons research](../formats/weapons.md). Do not apply addresses or asset rules
 from another executable edition without a new identity review.
 
 | Area | Current state | Evidence / unresolved boundary |
 | --- | --- | --- |
-| Native flight | `ed50aba` connects the joined service for F18.PT and RAFALE.PT using `--native-flight-tables DIR`; legacy remains default, hybrid remains separate | [Airborne live baseline](baselines/native-live-flight.md): 28 cases/33,600 replayed updates, spin recovery, loops, GPU checks; no unrestricted native flight claim |
-| Contact | Diagnostic query masks, candidate selection, classification, retained height and settling exist; live native flight pauses at unsupported contact | [Joined diagnostic](baselines/native-flight-diagnostic.md), [movement/contact checkpoint](baselines/native-movement-control.md); terrain/object/carrier producers and callbacks remain open |
-| World assets | Shared theater profiles and bounded terrain/weather readers; object placement/type resolution is incomplete | [Theater](formats/theater.md), [shapes](formats/objects-and-shapes.md), [coverage](formats/coverage.md); a visible mesh or terrain height is not a validated contact surface |
-| Extraction | Shared app/CLI resolver, bounded EALIB/DCL extraction and provenance reports; archive boundaries preserved | [Extraction](EXTRACTION.md); each report describes its invocation, not a cumulative world catalog; full ground/sea dependency discovery remains to do |
-| Equipment/fuel | Native live bridge uses existing host actuator/visual travel, 0.5 device-fraction threshold, engine switch and fuel-burn laws | [Flight model](FLIGHT-MODEL.md), [live baseline](baselines/native-live-flight.md); these are fitted bridges, not recovered native timing |
-| Damage/systems | Manual systems path has partial native amount/selection/ECM/equipment translations and explicit unknown effects | [Systems baseline](baselines/weapons-systems.md); native live mode excludes combat, complete subsystem effects/death/global RNG remain open |
-| Stores/guidance/decoys | Partial manual weapons and creator loadout support; decoy inventory is distinct from deployment and seeker response | [Weapons](formats/weapons.md), [manual acceptance](baselines/manual-weapons.md), [ordnance](ordnance-plan.md); guidance, tanks, decoys and custom-load replay have remaining gates |
-| Events | Native departure/contact/high-G outputs retained; complete callbacks are not executed | [Native contracts](formats/native-flight.md); sound, damage, death and lifecycle effects need owned dispatch |
-| Environment | Ordinary flight has weather/wind/turbulence components; native live mode forces the native environmental-turbulence bypass | [Weather plan](weather-plan.md), [wind/turbulence](baselines/wind-turbulence-vapor.md); do not apply both turbulence paths |
-| Acceptance | Last flight change passed 336 Rust tests, 24 Python tests, Clippy/build/asset checks and Linux Vulkan cockpit/camera/mirror checks | [Live evidence](baselines/native-live-flight.md); these are historical results, not validation of this unimplemented pass. Windows/macOS, manual handling and retail comparisons remain unvalidated |
+| Native flight | `ed50aba` connects the joined service for F18.PT and RAFALE.PT using `--native-flight-tables DIR`; legacy remains default, hybrid remains separate | [Airborne live baseline](../baselines/native-live-flight.md): 28 cases/33,600 replayed updates, spin recovery, loops, GPU checks; no unrestricted native flight claim |
+| Contact | Diagnostic query masks, candidate selection, classification, retained height and settling exist; live native flight pauses at unsupported contact | [Joined diagnostic](../baselines/native-flight-diagnostic.md), [movement/contact checkpoint](../baselines/native-movement-control.md); terrain/object/carrier producers and callbacks remain open |
+| World assets | Shared theater profiles and bounded terrain/weather readers; object placement/type resolution is incomplete | [Theater](../formats/theater.md), [shapes](../formats/objects-and-shapes.md), [coverage](../formats/coverage.md); a visible mesh or terrain height is not a validated contact surface |
+| Extraction | Shared app/CLI resolver, bounded EALIB/DCL extraction and provenance reports; archive boundaries preserved | [Extraction](../EXTRACTION.md); each report describes its invocation, not a cumulative world catalog; full ground/sea dependency discovery remains to do |
+| Equipment/fuel | Native live bridge uses existing host actuator/visual travel, 0.5 device-fraction threshold, engine switch and fuel-burn laws | [Flight model](../FLIGHT-MODEL.md), [live baseline](../baselines/native-live-flight.md); these are fitted bridges, not recovered native timing |
+| Damage/systems | Manual systems path has partial native amount/selection/ECM/equipment translations and explicit unknown effects | [Systems baseline](../baselines/weapons-systems.md); native live mode excludes combat, complete subsystem effects/death/global RNG remain open |
+| Stores/guidance/decoys | Partial manual weapons and creator loadout support; decoy inventory is distinct from deployment and seeker response | [Weapons](../formats/weapons.md), [manual acceptance](../baselines/manual-weapons.md), [ordnance](ordnance-plan.md); guidance, tanks, decoys and custom-load replay have remaining gates |
+| Events | Native departure/contact/high-G outputs retained; complete callbacks are not executed | [Native contracts](../formats/native-flight.md); sound, damage, death and lifecycle effects need owned dispatch |
+| Environment | Ordinary flight has weather/wind/turbulence components; native live mode forces the native environmental-turbulence bypass | [Weather plan](weather-plan.md), [wind/turbulence](../baselines/wind-turbulence-vapor.md); do not apply both turbulence paths |
+| Acceptance | Last flight change passed 336 Rust tests, 24 Python tests, Clippy/build/asset checks and Linux Vulkan cockpit/camera/mirror checks | [Live evidence](../baselines/native-live-flight.md); these are historical results, not validation of this unimplemented pass. Windows/macOS, manual handling and retail comparisons remain unvalidated |
 
 Supported identities remain **F18.PT = F/A-18D** and **RAFALE.PT = Rafale C**.
 Rafale C currently has no hook control. Deck contact, carrier eligibility,
@@ -71,7 +73,7 @@ Do not silently change the default adapter or remove compatibility modes.
 
 ## 3. Status model and durable records
 
-Apply [behavior provenance](behavior-provenance.md) per component:
+Apply [behavior provenance](../behavior-provenance.md) per component:
 **native / fitted / user-directed opinionated / unknown**. Track these completion
 columns independently: **source established / translated-tested / runtime connected /
 retail compared**. Asset rows additionally track **discovered / extracted / decoded /
@@ -106,27 +108,27 @@ baselines above remain inputs, not acceptance of the new contact producer.
 
 | ID | Owner / status | Source established | Translated/tested | Runtime connected | Retail compared | Gate / next action |
 | --- | --- | --- | --- | --- | --- | --- |
-| NE-00.1a | Codex / complete | Query/cache ordering, preference and expiry predicates | Two pure helpers and boundary tests | No | Unavailable | Narrow precursor gate: reproducible source slices and tested predicate arithmetic; [evidence](baselines/native-land-foundation.md) |
-| NE-00.1b | Codex / complete | Vertical cell planes/normals and shape offset link | Pure geometry, table/offset readers and synthetic tests | No | Unavailable | [Geometry evidence](baselines/native-land-geometry.md); angles followed in NE-00.1c; world assembly remains open |
-| NE-00.1c | Codex / complete | Candidate angles and requested-heading slope projection | Typed helpers, synthetic/source-boundary tests and imported-table replay | No | Unavailable | [Angle evidence](baselines/native-land-angles.md); proceed to world closure |
-| NE-00.1d | Codex / complete | STRIP add callback, box list, initial placement/query order | Bounded box reader, midpoint tests and original-resource diagnostic | No | Unavailable | Narrow metadata precursor; [evidence](baselines/native-strip.md); full initialization/cleanup and visual closure remain open |
-| NE-00.1e | Codex / complete | STRIP setup branch, ordinary final store, failed-add allocation release, ordered candidate removal | Candidate-list operations and capacity/order tests; inert template extracted | No | Unavailable | Narrow lifecycle precursor; [evidence](baselines/native-strip-lifecycle.md); scheduling, full defaults/loader and placement remain open |
-| NE-00.1f | Codex / complete | Remaining selected field conversions, post-create alias/store and scheduling insertion | Nationality conversion tested, including map-prefix and byte boundaries | No | Unavailable | Narrow placement precursor; [evidence](baselines/native-strip-placement.md); bounded loader and service effects/RNG still open |
-| NE-00.1g | Codex / complete | Service dispatch/tail, priority predicate and shared RNG state | Kind-0 post-callback delay selector and no-draw/word-boundary tests | No | Unavailable | Narrow service-ledger precursor; [evidence](baselines/native-strip-service.md); callback bodies and world producers remain open |
-| NE-00.1h | Codex / complete | Airport lookup/reset, three template predicates, comment selection/exit and actor-list operations | Static extraction/ledger only | No | Unavailable | [Ownership evidence](baselines/native-strip-ownership.md); complete service bodies/producer closure remains open |
-| NE-00.1i | Codex / complete | Plane selector, airport slot ownership, attachment refresh tail, state transition and two callback entry gates | Static extraction/ledger only | No | Unavailable | [Slot evidence](baselines/native-strip-slots.md); full callback/field-update bodies remain open |
-| NE-00.1j | Codex / complete | Current-object push/pop, speech enqueue wrapper, delay arithmetic and clock initialization | Pure delay helper and signed/shift-width boundary tests | No | Unavailable | [Speech evidence](baselines/native-strip-speech.md); event, callback and clock update producers remain open |
-| NE-00.1k | Codex / complete | Kind-0 event-service caller, consuming queue lookup, interception and enqueue RNG/payload/wakeup slices | Static extraction/ledger only | No | Unavailable | [Event-service evidence](baselines/native-strip-events.md); complete movement/event consumers remain open |
-| NE-00.1l | Codex / complete | Initial command fields, condition/timer contract and default event replacement | Pure saturated-deadline helper and width/boundary tests | No | Unavailable | [Command evidence](baselines/native-strip-commands.md); full movement and event consumers remain open |
-| NE-00.1m | Codex / complete | Selected stationary intermediate movement, type-input offsets and angle-step contract | Pure angle helper and signed/wrapping/zero-step tests | No | Unavailable | [Movement evidence](baselines/native-strip-movement.md); query, loader and full service ownership remain open |
-| NE-00.1n | Codex / complete | Queue reset/routing caller, sender-scoped observer, default speech, sample sequence and interceptor selection | Static extraction/ledger only | No | Unavailable | [Observer evidence](baselines/native-strip-observer.md); expansion, output/resource and full lifecycle consumers remain open |
-| NE-00.1o | Codex / complete | Other-object hit dispatch, generic type-HP threshold, death marking and zero-crater exclusion | Pure signed collision predicate with boundary/zero-denominator tests | No | Unavailable | [Hit evidence](baselines/native-strip-hit.md); notification, later dead-object service and full removal remain open |
-| NE-00.1p | Codex / complete | Complete scheduler caller/merge, frame baseline/scale/pause gates and clock ownership | Extend existing clock helper to five-bit word shifts; elapsed/scale/narrowing tests | No | Unavailable | [Clock evidence](baselines/native-strip-clock.md); trailing special services, notification and full clock producers remain open |
-| NE-00.1q | Codex / complete | Trailing event consumers, STRIP score exclusion, death counter caller and attribution prefix | Static extraction/ledger only | No | Unavailable | [Accounting evidence](baselines/native-strip-accounting.md); downstream notifications/effects and full removal remain open |
-| NE-00.1r | Codex / complete | Removal call order, future-event invalidation, retained-record expiry and single-count notification gates | Static extraction/ledger only | No | Unavailable | [Removal evidence](baselines/native-strip-removal.md); remaining cleanup callees/resource lifetime and world producers stay open |
+| NE-00.1a | Codex / complete | Query/cache ordering, preference and expiry predicates | Two pure helpers and boundary tests | No | Unavailable | Narrow precursor gate: reproducible source slices and tested predicate arithmetic; [evidence](../baselines/native-land-foundation.md) |
+| NE-00.1b | Codex / complete | Vertical cell planes/normals and shape offset link | Pure geometry, table/offset readers and synthetic tests | No | Unavailable | [Geometry evidence](../baselines/native-land-geometry.md); angles followed in NE-00.1c; world assembly remains open |
+| NE-00.1c | Codex / complete | Candidate angles and requested-heading slope projection | Typed helpers, synthetic/source-boundary tests and imported-table replay | No | Unavailable | [Angle evidence](../baselines/native-land-angles.md); proceed to world closure |
+| NE-00.1d | Codex / complete | STRIP add callback, box list, initial placement/query order | Bounded box reader, midpoint tests and original-resource diagnostic | No | Unavailable | Narrow metadata precursor; [evidence](../baselines/native-strip.md); full initialization/cleanup and visual closure remain open |
+| NE-00.1e | Codex / complete | STRIP setup branch, ordinary final store, failed-add allocation release, ordered candidate removal | Candidate-list operations and capacity/order tests; inert template extracted | No | Unavailable | Narrow lifecycle precursor; [evidence](../baselines/native-strip-lifecycle.md); scheduling, full defaults/loader and placement remain open |
+| NE-00.1f | Codex / complete | Remaining selected field conversions, post-create alias/store and scheduling insertion | Nationality conversion tested, including map-prefix and byte boundaries | No | Unavailable | Narrow placement precursor; [evidence](../baselines/native-strip-placement.md); bounded loader and service effects/RNG still open |
+| NE-00.1g | Codex / complete | Service dispatch/tail, priority predicate and shared RNG state | Kind-0 post-callback delay selector and no-draw/word-boundary tests | No | Unavailable | Narrow service-ledger precursor; [evidence](../baselines/native-strip-service.md); callback bodies and world producers remain open |
+| NE-00.1h | Codex / complete | Airport lookup/reset, three template predicates, comment selection/exit and actor-list operations | Static extraction/ledger only | No | Unavailable | [Ownership evidence](../baselines/native-strip-ownership.md); complete service bodies/producer closure remains open |
+| NE-00.1i | Codex / complete | Plane selector, airport slot ownership, attachment refresh tail, state transition and two callback entry gates | Static extraction/ledger only | No | Unavailable | [Slot evidence](../baselines/native-strip-slots.md); full callback/field-update bodies remain open |
+| NE-00.1j | Codex / complete | Current-object push/pop, speech enqueue wrapper, delay arithmetic and clock initialization | Pure delay helper and signed/shift-width boundary tests | No | Unavailable | [Speech evidence](../baselines/native-strip-speech.md); event, callback and clock update producers remain open |
+| NE-00.1k | Codex / complete | Kind-0 event-service caller, consuming queue lookup, interception and enqueue RNG/payload/wakeup slices | Static extraction/ledger only | No | Unavailable | [Event-service evidence](../baselines/native-strip-events.md); complete movement/event consumers remain open |
+| NE-00.1l | Codex / complete | Initial command fields, condition/timer contract and default event replacement | Pure saturated-deadline helper and width/boundary tests | No | Unavailable | [Command evidence](../baselines/native-strip-commands.md); full movement and event consumers remain open |
+| NE-00.1m | Codex / complete | Selected stationary intermediate movement, type-input offsets and angle-step contract | Pure angle helper and signed/wrapping/zero-step tests | No | Unavailable | [Movement evidence](../baselines/native-strip-movement.md); query, loader and full service ownership remain open |
+| NE-00.1n | Codex / complete | Queue reset/routing caller, sender-scoped observer, default speech, sample sequence and interceptor selection | Static extraction/ledger only | No | Unavailable | [Observer evidence](../baselines/native-strip-observer.md); expansion, output/resource and full lifecycle consumers remain open |
+| NE-00.1o | Codex / complete | Other-object hit dispatch, generic type-HP threshold, death marking and zero-crater exclusion | Pure signed collision predicate with boundary/zero-denominator tests | No | Unavailable | [Hit evidence](../baselines/native-strip-hit.md); notification, later dead-object service and full removal remain open |
+| NE-00.1p | Codex / complete | Complete scheduler caller/merge, frame baseline/scale/pause gates and clock ownership | Extend existing clock helper to five-bit word shifts; elapsed/scale/narrowing tests | No | Unavailable | [Clock evidence](../baselines/native-strip-clock.md); trailing special services, notification and full clock producers remain open |
+| NE-00.1q | Codex / complete | Trailing event consumers, STRIP score exclusion, death counter caller and attribution prefix | Static extraction/ledger only | No | Unavailable | [Accounting evidence](../baselines/native-strip-accounting.md); downstream notifications/effects and full removal remain open |
+| NE-00.1r | Codex / complete | Removal call order, future-event invalidation, retained-record expiry and single-count notification gates | Static extraction/ledger only | No | Unavailable | [Removal evidence](../baselines/native-strip-removal.md); remaining cleanup callees/resource lifetime and world producers stay open |
 | NE-00.1 | Codex / researching | Partial; see NE-00.1a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r | Partial | No | Unavailable | Finish instance initialization; extend transaction ledger |
-| NE-01.1a | Codex / complete | STRIP/166 header and explicit shape slot from E003/E004 | Bounded metadata reader, unknown-token retention and malformed-input tests | No | Unavailable | [Definition evidence](baselines/native-strip-definition.md); no full importer/world closure |
-| NE-01.1b | Codex / complete | Selected eight-field conversions and post-create exclusion predicates | Bounded isolated placement reader and malformed/width/name tests | No | Unavailable | [Record evidence](baselines/native-strip-record.md); full mission/world closure remains open |
+| NE-01.1a | Codex / complete | STRIP/166 header and explicit shape slot from E003/E004 | Bounded metadata reader, unknown-token retention and malformed-input tests | No | Unavailable | [Definition evidence](../baselines/native-strip-definition.md); no full importer/world closure |
+| NE-01.1b | Codex / complete | Selected eight-field conversions and post-create exclusion predicates | Bounded isolated placement reader and malformed/width/name tests | No | Unavailable | [Record evidence](../baselines/native-strip-record.md); full mission/world closure remains open |
 | NE-01.1 | Codex / researching | UKR.MM → STRIP.OT → RUNWAY.SH / _STRIPProc explicit edges | Five resources extracted across two filtered runs; bounded STRIP metadata reader | No | Unavailable | Complete callback/shape/placement closure, archive census and bounded schemas |
 | NE-03.1 | Codex / researching | Dual ground-query/cache mutation established | Existing diagnostic only; no new producer | No | Unavailable | Land geometry and staged cache/RNG producer, source-order/rollback tests, then both-aircraft connection |
 
@@ -135,9 +137,9 @@ precursors, not an accepted runway or live contact branch.
 
 ### Discovered dependency edges
 
-All rows use the reviewed FA EXE/SMS pair in [the contract](formats/native-land-contact.md)
-and the FA_2 archive/resource hashes in [evidence](baselines/native-land-foundation.md).
-Geometry/table checks: [NE-00.1b](baselines/native-land-geometry.md).
+All rows use the reviewed FA EXE/SMS pair in [the contract](../formats/native-land-contact.md)
+and the FA_2 archive/resource hashes in [evidence](../baselines/native-land-foundation.md).
+Geometry/table checks: [NE-00.1b](../baselines/native-land-geometry.md).
 Owner is Codex; update 2026-09-15. Required edges remain in the denominator.
 
 | Edge | Parent → child / relation | Predicate / field / units | Status / blocked consumer / next action |
@@ -174,7 +176,7 @@ Selected catalog status: UKR.MM/T2, STRIP.OT, RUNWAY.SH and _RUNWAY.PIC are disc
 existing T2, bounded STRIP metadata and F2 box decoding are available; full OT
 semantics, world placement and native drawing closure remain unaccepted. Isolated selected placement inputs are decoded by NE-01.1b. No visual or collision acceptance and no runtime eligibility yet.
 No missing-resource absence is asserted from these two filtered extraction passes.
-[STRIP callback/metadata contract](formats/native-strip.md) records E003/E005/E010–E012;
+[STRIP callback/metadata contract](../formats/native-strip.md) records E003/E005/E010–E012;
 its source discovery does not close full world initialization.
 
 NE-07's event envelope is an early interface dependency, not a requirement to
@@ -279,7 +281,7 @@ providers. Revisit affected edges when new media or a dynamic naming rule is fou
   prior reference research. Extend repeatable static extraction only for reviewed ranges.
 - [ ] Trace contact entry points (`GetGround`, `MovePlane`, collision and landing
   surface queries) from caller setup through caches, filters, callbacks and writes.
-  Existing helper addresses are leads in [native flight](formats/native-flight.md), not a complete producer contract.
+  Existing helper addresses are leads in [native flight](../formats/native-flight.md), not a complete producer contract.
 - [ ] Build a typed state ledger: configuration versus mutable instance state;
   exact widths/units, initialization/reset, tick ownership, read/write order,
   cache invalidation, and player/type/difficulty predicates.
@@ -527,14 +529,14 @@ and input routing in the app. Do not move world behavior into UI code.
 
 | Area | Existing touchpoints | Intended responsibility |
 | --- | --- | --- |
-| Extraction/catalog | [Python entry](../tools/extract_assets.py), [inventory](../tools/explore_assets.py), [extractor](../crates/tore-extract/src/main.rs), [app assets](../crates/tore-app/src/assets.rs) | Shared resolution, safe extraction, cache and provenance; extend catalog/profile facilities after schema review |
-| Formats/world geometry | [theater reader](../crates/tore-formats/src/theater.rs), [module reader](../crates/tore-formats/src/module.rs), [shape reader](../crates/tore-formats/src/shape.rs), [aircraft](../crates/tore-formats/src/aircraft.rs), [weapons](../crates/tore-formats/src/weapons.rs) | Bounded placement/type/material/contact references; new object schema modules only when reviewed |
-| Native research | [static flight pass](../tools/extract_native_flight.py), [query helpers](../crates/tore-formats/src/flight_model/queries.rs), [ground helpers](../crates/tore-formats/src/flight_model/ground.rs), [joined service](../crates/tore-formats/src/flight_model/diagnostic.rs) | Recover producer/callback contracts without executing modules |
-| Simulation/ownership | [native runtime](../crates/tore-sim/src/native.rs), [flight state](../crates/tore-sim/src/flight.rs), [configuration](../crates/tore-sim/src/models/config.rs), [models](../crates/tore-sim/src/models/mod.rs), [telemetry](../crates/tore-sim/src/telemetry.rs) | Typed source configuration and caller-owned contact/equipment/fuel state; proposed shared world/contact services |
-| Systems/events | [systems helpers](../crates/tore-sim/src/combat/systems.rs), [live systems](../crates/tore-sim/src/combat/live.rs), [loadout](../crates/tore-sim/src/combat/loadout.rs), [app combat](../crates/tore-app/src/combat.rs), [combat tape](../crates/tore-app/src/combat_tape.rs) | Decoy/guidance/damage lifecycle, source event dispatch, recording and accepted launch state |
-| Environment/rendering | [sim environment](../crates/tore-sim/src/environment.rs), [turbulence](../crates/tore-sim/src/turbulence.rs), [terrain app](../crates/tore-app/src/terrain.rs), [weather app](../crates/tore-app/src/weather.rs), [main](../crates/tore-app/src/main.rs) | Native world producers versus camera-local draw/sampling, lifecycle hookup and restrictions |
-| Presentation/input | [flight UI](../crates/tore-app/src/flight_ui.rs), [animation](../crates/tore-app/src/aircraft_animation.rs), [Rafale animation](../crates/tore-app/src/rafale_animation.rs), [input crate](../crates/tore-input/src/lib.rs), [performance](../crates/tore-app/src/performance.rs) | Actual-state display, matching release/pause, separate aircraft rigs, bounded measurements |
-| Validation | [native live probe](../crates/tore-sim/examples/native_live.rs), [adapter probe](../crates/tore-sim/examples/response_probe.rs), [diagnostic probe](../crates/tore-formats/examples/native_flight.rs) | Extend accepted scenarios without weakening existing assertions |
+| Extraction/catalog | [Python entry](../../tools/extract_assets.py), [inventory](../../tools/explore_assets.py), [extractor](../../crates/tore-extract/src/main.rs), [app assets](../../crates/tore-app/src/assets.rs) | Shared resolution, safe extraction, cache and provenance; extend catalog/profile facilities after schema review |
+| Formats/world geometry | [theater reader](../../crates/tore-formats/src/theater.rs), [module reader](../../crates/tore-formats/src/module.rs), [shape reader](../../crates/tore-formats/src/shape.rs), [aircraft](../../crates/tore-formats/src/aircraft.rs), [weapons](../../crates/tore-formats/src/weapons.rs) | Bounded placement/type/material/contact references; new object schema modules only when reviewed |
+| Native research | [static flight pass](../../tools/extract_native_flight.py), [query helpers](../../crates/tore-formats/src/flight_model/queries.rs), [ground helpers](../../crates/tore-formats/src/flight_model/ground.rs), [joined service](../../crates/tore-formats/src/flight_model/diagnostic.rs) | Recover producer/callback contracts without executing modules |
+| Simulation/ownership | [native runtime](../../crates/tore-sim/src/native.rs), [flight state](../../crates/tore-sim/src/flight.rs), [configuration](../../crates/tore-sim/src/models/config.rs), [models](../../crates/tore-sim/src/models/mod.rs), [telemetry](../../crates/tore-sim/src/telemetry.rs) | Typed source configuration and caller-owned contact/equipment/fuel state; proposed shared world/contact services |
+| Systems/events | [systems helpers](../../crates/tore-sim/src/combat/systems.rs), [live systems](../../crates/tore-sim/src/combat/live.rs), [loadout](../../crates/tore-sim/src/combat/loadout.rs), [app combat](../../crates/tore-app/src/combat.rs), [combat tape](../../crates/tore-app/src/combat_tape.rs) | Decoy/guidance/damage lifecycle, source event dispatch, recording and accepted launch state |
+| Environment/rendering | [sim environment](../../crates/tore-sim/src/environment.rs), [turbulence](../../crates/tore-sim/src/turbulence.rs), [terrain app](../../crates/tore-app/src/terrain.rs), [weather app](../../crates/tore-app/src/weather.rs), [main](../../crates/tore-app/src/main.rs) | Native world producers versus camera-local draw/sampling, lifecycle hookup and restrictions |
+| Presentation/input | [flight UI](../../crates/tore-app/src/flight_ui.rs), [animation](../../crates/tore-app/src/aircraft_animation.rs), [Rafale animation](../../crates/tore-app/src/rafale_animation.rs), [input crate](../../crates/tore-input/src/lib.rs), [performance](../../crates/tore-app/src/performance.rs) | Actual-state display, matching release/pause, separate aircraft rigs, bounded measurements |
+| Validation | [native live probe](../../crates/tore-sim/examples/native_live.rs), [adapter probe](../../crates/tore-sim/examples/response_probe.rs), [diagnostic probe](../../crates/tore-formats/examples/native_flight.rs) | Extend accepted scenarios without weakening existing assertions |
 
 ## 6. Test and evidence matrix
 
@@ -560,12 +562,12 @@ archive/build and selected variants. Start all new-pass results as **not run**.
 | T14 | Windows and macOS build/tests, importer/path behavior, native runtime/GPU/input/audio | Separate per-platform evidence; cross-compilation is not runtime acceptance; unavailable hardware remains open |
 | T15 | Retail source/recording/reference comparison when obtainable | Matched aircraft/loadout/environment/input; distinguish static contract, host replay, visual reference and actual retail trajectory evidence |
 
-Use [development checks](DEVELOPMENT.md) with `--locked` for code changes and
-[performance methodology](baselines/flight-performance.md) for repeatable bounded
+Use [development checks](../DEVELOPMENT.md) with `--locked` for code changes and
+[performance methodology](../baselines/flight-performance.md) for repeatable bounded
 runs. Future evidence belongs in `docs/baselines/`; future source specifications
 belong in `docs/formats/`. Link actual artifacts/methods only when produced.
 Repository regressions and the first selected discovery are recorded in the
-[new baseline](baselines/native-land-foundation.md). T01–15 remain open for the
+[new baseline](../baselines/native-land-foundation.md). T01–15 remain open for the
 end-to-end producer; diagnostic helpers and repeated cell geometry do not close those matrix rows.
 
 ## 7. Research questions and risks
@@ -655,26 +657,26 @@ implementation choices must not be attributed to John.
 
 | Revision | Change | Validation state |
 | --- | --- | --- |
-| v21 / 2026-09-15 | NE-00.1r removal/notification order and D29 | [Source validation](baselines/native-strip-removal.md); full lifetime/runtime gates remain open |
-| v20 / 2026-09-15 | NE-00.1q trailing events/accounting and D28 | [Source validation](baselines/native-strip-accounting.md); downstream effects and runtime gates remain open |
-| v19 / 2026-09-15 | NE-00.1p scheduler/clock ownership and D27 | [Clock validation](baselines/native-strip-clock.md); no live scheduling activation |
-| v18 / 2026-09-15 | NE-00.1o hit/death source ledger and D26 | [Predicate/source validation](baselines/native-strip-hit.md); no contact damage activation |
-| v17 / 2026-09-15 | NE-00.1n reset/routing/observer ledger, E022 and D25 | [Source validation](baselines/native-strip-observer.md); output and service activation remain gated |
-| v16 / 2026-09-15 | NE-00.1m selected intermediate movement, type-field mapping and D24 | [Angle/source validation](baselines/native-strip-movement.md); no service activation |
-| v15 / 2026-09-15 | NE-00.1l command/default-event ledger and D23 | [Deadline/source validation](baselines/native-strip-commands.md); no service activation |
-| v14 / 2026-09-15 | NE-00.1k event-service ledger, consuming queue, E021/D22 | [Source validation](baselines/native-strip-events.md); runtime and parent gates remain open |
-| v13 / 2026-09-15 | NE-00.1j current-object/speech/clock ledger and D21 | [Delay/source validation](baselines/native-strip-speech.md); no event or live activation |
-| v12 / 2026-09-15 | NE-00.1i slot/attachment/state source ledger and D20 | [Source validation](baselines/native-strip-slots.md); no runtime or autonomous behavior |
-| v11 / 2026-09-15 | NE-00.1h airport/comment ownership and E020/D19 | [Source validation](baselines/native-strip-ownership.md); no callback activation |
-| v10 / 2026-09-15 | NE-01.1b isolated placement, selected post-create exclusions and D18 | [Record validation](baselines/native-strip-record.md); parent world/query gates remain open |
-| v9 / 2026-09-15 | NE-00.1g service dispatch/delay, E019 and D17 | [Service validation](baselines/native-strip-service.md); full service/world closure remains gated |
-| v8 / 2026-09-15 | NE-01.1a bounded STRIP definition; D15 push authorization and D16 metadata scope | [Definition validation](baselines/native-strip-definition.md); full closure and live contact remain gated |
-| v7 / 2026-09-15 | NE-00.1f placement conversion; E017/E018 and D14 | [Placement validation](baselines/native-strip-placement.md); staged world/query dependencies remain open |
-| v6 / 2026-09-15 | NE-00.1e lifecycle precursor; E013–E016 and D13 | [Lifecycle validation](baselines/native-strip-lifecycle.md); loader/default consumers/scheduling and E004 remain open |
-| v5 / 2026-09-15 | NE-00.1d STRIP metadata/source precursor; E010–E012 and D12 | [STRIP validation](baselines/native-strip.md); full initialization, drawing and live queries remain open |
-| v4 / 2026-09-15 | NE-00.1c closes E008 arithmetic; next action advances to STRIP world closure | [Angle validation](baselines/native-land-angles.md); live queries remain open |
-| v3 / 2026-09-15 | NE-00.1b geometry/offset precursor, E008/E009, D11 | [Geometry validation](baselines/native-land-geometry.md); first live slice remains open |
-| v2 / 2026-09-15 | Start authorized implementation; NE-00.1a diagnostic precursor, selected UKR/STRIP discovery, E001–E007 and D09–D10 | [Current checks](baselines/native-land-foundation.md); full first slice still researching |
+| v21 / 2026-09-15 | NE-00.1r removal/notification order and D29 | [Source validation](../baselines/native-strip-removal.md); full lifetime/runtime gates remain open |
+| v20 / 2026-09-15 | NE-00.1q trailing events/accounting and D28 | [Source validation](../baselines/native-strip-accounting.md); downstream effects and runtime gates remain open |
+| v19 / 2026-09-15 | NE-00.1p scheduler/clock ownership and D27 | [Clock validation](../baselines/native-strip-clock.md); no live scheduling activation |
+| v18 / 2026-09-15 | NE-00.1o hit/death source ledger and D26 | [Predicate/source validation](../baselines/native-strip-hit.md); no contact damage activation |
+| v17 / 2026-09-15 | NE-00.1n reset/routing/observer ledger, E022 and D25 | [Source validation](../baselines/native-strip-observer.md); output and service activation remain gated |
+| v16 / 2026-09-15 | NE-00.1m selected intermediate movement, type-field mapping and D24 | [Angle/source validation](../baselines/native-strip-movement.md); no service activation |
+| v15 / 2026-09-15 | NE-00.1l command/default-event ledger and D23 | [Deadline/source validation](../baselines/native-strip-commands.md); no service activation |
+| v14 / 2026-09-15 | NE-00.1k event-service ledger, consuming queue, E021/D22 | [Source validation](../baselines/native-strip-events.md); runtime and parent gates remain open |
+| v13 / 2026-09-15 | NE-00.1j current-object/speech/clock ledger and D21 | [Delay/source validation](../baselines/native-strip-speech.md); no event or live activation |
+| v12 / 2026-09-15 | NE-00.1i slot/attachment/state source ledger and D20 | [Source validation](../baselines/native-strip-slots.md); no runtime or autonomous behavior |
+| v11 / 2026-09-15 | NE-00.1h airport/comment ownership and E020/D19 | [Source validation](../baselines/native-strip-ownership.md); no callback activation |
+| v10 / 2026-09-15 | NE-01.1b isolated placement, selected post-create exclusions and D18 | [Record validation](../baselines/native-strip-record.md); parent world/query gates remain open |
+| v9 / 2026-09-15 | NE-00.1g service dispatch/delay, E019 and D17 | [Service validation](../baselines/native-strip-service.md); full service/world closure remains gated |
+| v8 / 2026-09-15 | NE-01.1a bounded STRIP definition; D15 push authorization and D16 metadata scope | [Definition validation](../baselines/native-strip-definition.md); full closure and live contact remain gated |
+| v7 / 2026-09-15 | NE-00.1f placement conversion; E017/E018 and D14 | [Placement validation](../baselines/native-strip-placement.md); staged world/query dependencies remain open |
+| v6 / 2026-09-15 | NE-00.1e lifecycle precursor; E013–E016 and D13 | [Lifecycle validation](../baselines/native-strip-lifecycle.md); loader/default consumers/scheduling and E004 remain open |
+| v5 / 2026-09-15 | NE-00.1d STRIP metadata/source precursor; E010–E012 and D12 | [STRIP validation](../baselines/native-strip.md); full initialization, drawing and live queries remain open |
+| v4 / 2026-09-15 | NE-00.1c closes E008 arithmetic; next action advances to STRIP world closure | [Angle validation](../baselines/native-land-angles.md); live queries remain open |
+| v3 / 2026-09-15 | NE-00.1b geometry/offset precursor, E008/E009, D11 | [Geometry validation](../baselines/native-land-geometry.md); first live slice remains open |
+| v2 / 2026-09-15 | Start authorized implementation; NE-00.1a diagnostic precursor, selected UKR/STRIP discovery, E001–E007 and D09–D10 | [Current checks](../baselines/native-land-foundation.md); full first slice still researching |
 | v1 / 2026-09-15 | Initial comprehensive plan after `ed50aba`; NE-00–10, dependency/catalog templates, matrix and decisions | Scope/dependency/link review and repository checks passed; implementation work packages remain planned |
 
 Historical v1 planning validation: local file/heading links in the changed Markdown set were

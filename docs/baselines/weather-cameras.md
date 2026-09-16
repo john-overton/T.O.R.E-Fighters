@@ -1,5 +1,12 @@
 # Weather in flight cameras — 2026-09-15
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 ## Behavior
 
 The imported FMENUD label **No sun whiteout?** now works under Escape → Cheat.
@@ -85,5 +92,5 @@ not accepted by these representative captures. CPDraw's alternate display map
 selection still needs its actual branch/view contract; it is not inferred from
 the host page name “Other View”. INFO2 and unavailable target/missile/sensor
 views remain separate work. No new contacts or sensor visibility rules were
-invented. See [weather plan](../weather-plan.md) for later wind, turbulence,
+invented. See [weather plan](../research/weather-plan.md) for later wind, turbulence,
 vapor, replay and whole-system gates.

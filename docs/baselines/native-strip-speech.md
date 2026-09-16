@@ -1,9 +1,16 @@
 # Current-object and speech timing checkpoint
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 2026-09-15, following `2a7708b`. **NE-00.1j completes bounded source recovery
 and one diagnostic arithmetic helper**, not full E019/E020.
 [Contract](../formats/native-strip.md#current-object-switches-and-speech-timing--ne-001j),
-[living plan](../native-environment-systems-plan.md).
+[living plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-speech-source

@@ -1,7 +1,15 @@
 # Native STRIP initialization and shape metadata
 
+> **Research notes — research mode.** Recovered facts about the original
+> game's data and code, kept as evidence. Requirements, gates and remaining
+> work described here are research-mode scope; they are not acceptance gates
+> for gameplay. Parity is measured by expression of feature — see
+> [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
+> [docs/spec/](../spec/).
+
+
 2026-09-15, NE-00.1d/e/f / E003–E005 under the
-[living plan](../native-environment-systems-plan.md). **Native static source**
+[living plan](../research/native-environment-systems-plan.md). **Native static source**
 from the exact [reviewed EXE/SMS](native-flight.md). The bounded box reader,
 midpoint arithmetic, mission nationality conversion and candidate-list operations
 are translated/tested. NE-01.1a adds bounded STRIP definition metadata below.

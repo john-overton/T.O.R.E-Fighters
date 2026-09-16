@@ -1,5 +1,13 @@
 # Fighters Anthology recorded music and actuator audio
 
+> **Research notes — research mode.** Recovered facts about the original
+> game's data and code, kept as evidence. Requirements, gates and remaining
+> work described here are research-mode scope; they are not acceptance gates
+> for gameplay. Parity is measured by expression of feature — see
+> [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
+> [docs/spec/](../spec/).
+
+
 ## Playback decision
 
 On 2026-09-14 the user selected original recorded PCM playback, without MIDI

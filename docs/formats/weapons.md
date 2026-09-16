@@ -1,5 +1,13 @@
 # Aircraft weapons: FA research and implementation plan
 
+> **Research notes — research mode.** Recovered facts about the original
+> game's data and code, kept as evidence. Requirements, gates and remaining
+> work described here are research-mode scope; they are not acceptance gates
+> for gameplay. Parity is measured by expression of feature — see
+> [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
+> [docs/spec/](../spec/).
+
+
 Research date: 2026-09-14. This schedules aircraft armament research and subsequent
 importer/simulation work. It does not mark combat or vanilla parity complete.
 [Measured extraction and code evidence](../baselines/weapons-research.md).

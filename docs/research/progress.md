@@ -1,13 +1,15 @@
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D27) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept as the dated record of completed substeps and the evidence linked to each. Its sequencing, gates and status columns are no longer authoritative.
+
 # Parity progress
 
-Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.md), covering menus, original flight environments and aircraft. Checked items describe work in this Rust repository, not work completed in USNF-ATF. An unchecked item remains open even when a reference decoder or prototype exists. Keep format status in [coverage](formats/coverage.md) and acceptance evidence in [baselines](baselines/).
+Updated 2026-09-15. This is the actionable checklist for the [roadmap](../ROADMAP.md), covering menus, original flight environments and aircraft. Checked items describe work in this Rust repository, not work completed in USNF-ATF. An unchecked item remains open even when a reference decoder or prototype exists. Keep format status in [coverage](../formats/coverage.md) and acceptance evidence in [baselines](../baselines/).
 
-**Current scope:** Original Choose Activity and Quick Mission briefing lead to all-theater previews and F/A-18D/Rafale C free flight. The explicit manual range now connects the ten PT-default weapon slots, sensors, damage, stores and combat-service replay. Full native environment/flight/combat parity and the remaining menu screens stay open. AI is deferred until manual acceptance. See [current systems evidence](baselines/weapons-systems.md), [earlier manual weapons evidence](baselines/manual-weapons.md) and the dated checklists below.
+**Current scope:** Original Choose Activity and Quick Mission briefing lead to all-theater previews and F/A-18D/Rafale C free flight. The explicit manual range now connects the ten PT-default weapon slots, sensors, damage, stores and combat-service replay. Full native environment/flight/combat parity and the remaining menu screens stay open. AI is deferred until manual acceptance. See [current systems evidence](../baselines/weapons-systems.md), [earlier manual weapons evidence](../baselines/manual-weapons.md) and the dated checklists below.
 
 ## Flight response and maneuver buffet — 2026-09-15
 
 - [x] Review existing flight-model/native-research coverage and write the
-  [ordered implementation plan](flight-response-plan.md).
+  [ordered implementation plan](../research/flight-response-plan.md).
 - [x] 1. Trace G, body rates, rudder and departure producers/consumers; record baselines.
 - [ ] 2. Complete native G/roll/rudder response; typed adapter telemetry is implemented.
 - [ ] 3. Complete native departure coupling; selected timer/attenuation/spin helpers are implemented.
@@ -15,12 +17,12 @@ Updated 2026-09-15. This is the actionable checklist for the [roadmap](ROADMAP.m
 - [ ] 5. Validate both aircraft/adapters, record evidence and hand off to aircraft imports.
 
 Further weather work follows this slice and the scheduled aircraft additions below. Existing weather work is retained.
-The [adapter response evidence](baselines/flight-response.md) closes component
+The [adapter response evidence](../baselines/flight-response.md) closes component
 and regression work, not native steps 2–3. Their earlier completed status is
 corrected. Current user priority is the native environment/systems continuation below,
 following the restricted airborne control/force/movement connection and before
 audio/rumble.
-Follow [provenance policy](behavior-provenance.md); no new fitted flight laws
+Follow [provenance policy](../behavior-provenance.md); no new fitted flight laws
 are scheduled. Existing fitted choices remain identified in the model guide.
 
 ### Native departure continuation
@@ -29,13 +31,13 @@ are scheduled. Existing fitted choices remain identified in the model guide.
   tumble composition and spin recovery in a diagnostic native stage.
 - [x] Exercise both PTs and imported trig/atan tables with deterministic replay;
   keep movement, display offsets, native G and measured adapter G distinct.
-  [Conditions, results and limitations](baselines/native-departure-stage.md).
+  [Conditions, results and limitations](../baselines/native-departure-stage.md).
 - [ ] Connect normal control/force producers and the full movement/event update
   before claiming native live flight or matched retail trajectories.
 
 ## Scheduled aircraft additions — 2026-09-15
 
-- [x] Consolidate the [full aircraft import/acceptance guide](aircraft-import.md),
+- [x] Consolidate the [full aircraft import/acceptance guide](../aircraft-import.md),
   including current implementation coverage and subsystem-specific gates.
 - [ ] After the flight-response slice, review the exact FA F-14 variant and add it
   through extraction, model, exterior/cockpit, effects/systems and acceptance gates.
@@ -50,10 +52,10 @@ Existing F18/Rafale support and remaining native-parity gaps are unchanged.
 
 - [x] Review the local Plurry v2.01 guides, annotated workbooks and F18C
   examples; document object resource ownership, component transforms, materials,
-  attachments and editing constraints in [objects and shapes](formats/objects-and-shapes.md).
+  attachments and editing constraints in [objects and shapes](../formats/objects-and-shapes.md).
 - [x] Verify corrected CSV byte coverage, sample connection targets and OBJ
   inventories; distinguish reference hypotheses from existing reader behavior.
-  [Evidence and reproduction](baselines/shape-reference-review.md).
+  [Evidence and reproduction](../baselines/shape-reference-review.md).
 - [x] Correct F18/Rafale vapor CE axes using each aircraft's own records; all
   four attachments match neutral mesh vertices exactly. See below.
 - [ ] Validate exterior-store placement against each supported aircraft's own
@@ -74,7 +76,7 @@ Existing F18/Rafale support and remaining native-parity gaps are unchanged.
   heads to interpolated aircraft attachments. Own-shape checks for both aircraft.
 - [ ] Native angular coupling, exact wake rounding, object/carrier collision
   producers, wind audio, environment replay and retail/platform comparisons.
-  [Acceptance evidence](baselines/wind-turbulence-vapor.md).
+  [Acceptance evidence](../baselines/wind-turbulence-vapor.md).
 
 ## Weather camera slice — 2026-09-15
 
@@ -87,7 +89,7 @@ Existing F18/Rafale support and remaining native-parity gaps are unchanged.
   asynchronous panel and bounded CPU frame-time evidence.
 - [ ] Retail camera comparisons, CP alternate display-map consumer recovery and
   Windows/macOS runtime checks. Instrument feeds retain asynchronous 10 Hz latency.
-  [Evidence and qualifications](baselines/weather-cameras.md).
+  [Evidence and qualifications](../baselines/weather-cameras.md).
 
 ## Weather smoothing follow-up — 2026-09-15
 
@@ -98,12 +100,12 @@ Existing F18/Rafale support and remaining native-parity gaps are unchanged.
   proportional viewport/zoom sizing and bank-independent moon geometry.
 - [ ] Matched retail celestial size/pose acceptance and remaining platform gates.
   Retail now runs through dgVoodoo; Windows/macOS rebuilds remain untested here.
-  [Implementation, validation and limitations](baselines/weather-smoothing.md).
+  [Implementation, validation and limitations](../baselines/weather-smoothing.md).
 
 ## Weather review — 2026-09-15
 
 - [x] Number the remaining work by dependency in the
-  [weather plan](weather-plan.md#numbered-dependency-sequence--2026-09-15).
+  [weather plan](../research/weather-plan.md#numbered-dependency-sequence--2026-09-15).
   First batch: fog/palette/sky foundation → celestial rendering → cloud geometry.
 - [x] Step 1 ordinary-view implementation: persistent callbacks/tint, ordered
   indexed fog, horizon transitions/above-sky branches, aircraft light maps and
@@ -114,7 +116,7 @@ Existing F18/Rafale support and remaining native-parity gaps are unchanged.
   detail and sector/range gates, cutout sampling and altitude crossings.
 - [ ] Steps 1–3 retail acceptance and CLOUDS.SH active-producer identification;
   alternate display/terrain-detail consumers and Windows/macOS checks remain.
-  [Current batch evidence](baselines/weather-foundation.md#final-weather-sampling-and-batch-checkpoint--2026-09-15)
+  [Current batch evidence](../baselines/weather-foundation.md#final-weather-sampling-and-batch-checkpoint--2026-09-15)
   supersedes older unchecked implementation substeps in this chronological log.
 - [x] Step 4 ordinary-camera implementation; retail/special-display acceptance
   remains open as recorded in the camera slice above.
@@ -130,31 +132,31 @@ Existing F18/Rafale support and remaining native-parity gaps are unchanged.
 - [ ] Close matched horizon/glare/cloud acceptance, default wind, per-camera
   behavior, aircraft coupling and serialized replay before whole-system acceptance.
 
-[Findings, aircraft-file evidence and validation](baselines/weather-review.md).
+[Findings, aircraft-file evidence and validation](../baselines/weather-review.md).
 
 ## Weather parity planning — 2026-09-14
 
 - [x] Review existing environment readers, static renderer, creator launch gate,
   wind/telemetry paths and native turbulence research leads.
-- [x] Record the [weather parity plan](weather-plan.md), including source recovery,
+- [x] Record the [weather parity plan](../research/weather-plan.md), including source recovery,
   deterministic state, visual weather, aircraft coupling and retail acceptance.
 - [ ] W1: recover complete weather contracts and collect matched retail baselines.
 - [x] Confirm continuous native time, weather-record time selection, physical
   turbulence branches and separate maneuver sound through static disassembly.
   Add repeatable weather research with hash-gated regions.
-  [Evidence](baselines/weather-research.md), [contracts](formats/weather.md).
+  [Evidence](../baselines/weather-research.md), [contracts](../formats/weather.md).
 - [ ] Recover contrails, wingtip vapor and broader wing-induced vapor contracts;
   all are included in the weather plan following the user's clarification.
 - [x] Decode the reviewed LAY record fields and confirm it against all 24 imported
   retail modules; recover the day/night windows, altitude bands and effect
-  selectors. [Contracts](formats/weather.md).
+  selectors. [Contracts](../formats/weather.md).
 - [x] Recover the wing vapor streamer subsystem: shape opcodes, attachment
   geometry, position-history sampling, G trigger and night suppression.
 - [x] Statically inspect both aircrafts’ embedded device/afterburner code and
   streamer draw sites. The previous whole-game contrail/vapor absence claim is
   withdrawn: no additional trigger found within this bounded scope.
-  [Full commit/code review](baselines/weather-review.md).
-- [ ] Future optional engine contrails, per [W7](weather-plan.md#w7--optional-engine-contrails-after-retail-weather).
+  [Full commit/code review](../baselines/weather-review.md).
+- [ ] Future optional engine contrails, per [W7](../research/weather-plan.md#w7--optional-engine-contrails-after-retail-weather).
 - [x] W2: bounded `tore-formats::weather` records and deterministic
   `tore-sim::environment` clock, selection and queries, with `--validate-weather`
   exercising every imported module over a full simulated day.
@@ -191,7 +193,7 @@ Existing F18/Rafale support and remaining native-parity gaps are unchanged.
 
 Weather now runs in the engine: the day and night cycle, visibility, mission
 wind, physical turbulence and wing vapor all come from recovered source data.
-[Implementation evidence](baselines/weather-foundation.md). Original celestial
+[Implementation evidence](../baselines/weather-foundation.md). Original celestial
 and cloud geometry render; retail comparison and the remaining acceptance matrix
 stay open, as
 do existing manual systems acceptance and unrelated menu deferrals.
@@ -200,22 +202,22 @@ do existing manual systems acceptance and unrelated menu deferrals.
 
 - [x] Review creator state/launch code, supplied retail photo and extracted
   creator dialogs/menu; identify stale embedded lists and active-table research gaps.
-- [x] Record the [implementation plan](quick-mission-plan.md) and
-  [planning evidence](baselines/quick-mission-research.md).
+- [x] Record the [implementation plan](../research/quick-mission-plan.md) and
+  [planning evidence](../baselines/quick-mission-research.md).
 - [x] Expand scope to a working Load Ordnance screen; review both retail images,
   ArmPlane/loading code references and existing weapons integration. Record the
-  [ordnance plan](ordnance-plan.md) and [evidence](baselines/ordnance-research.md).
+  [ordnance plan](../research/ordnance-plan.md) and [evidence](../baselines/ordnance-research.md).
 - [ ] Recover complete active FA option/default/filter/geometry contracts.
-  [Full scope ledger](menu-parity-matrix.md) tracks each group and remaining source gaps.
+  [Full scope ledger](../research/menu-parity-matrix.md) tracks each group and remaining source gaps.
 - [x] Recover 60 active option dispatch entries, 16 theater target lists and
   29 native briefing rectangles; decode static controls in 26 DLG resources.
   Initialization, theater nationalities, selector dependencies and input semantics
   are mapped; dynamic catalog flag construction and final text/art hit geometry
-  remain open. See [behavior evidence](baselines/menu-behavior-mapping.md).
-  [Source specification](formats/quick-mission.md), [validation](baselines/menu-options-geometry.md).
+  remain open. See [behavior evidence](../baselines/menu-behavior-mapping.md).
+  [Source specification](../formats/quick-mission.md), [validation](../baselines/menu-options-geometry.md).
 - [x] Add repeatable `--native-menus` extraction with hash-gated regions/string
   references; validate QM_MENU/ARMPLANE trees through the shared bounded reader.
-  [First implementation evidence](baselines/menu-contract-pass.md).
+  [First implementation evidence](../baselines/menu-contract-pass.md).
 - [x] Add bounded imports, typed setup and explicit capability validation.
 - [ ] Build all recovered controls and faithful downstream placeholders.
 - [x] Build ordnance catalog/station cards, category/page controls, fuel/weight,
@@ -228,7 +230,7 @@ do existing manual systems acceptance and unrelated menu deferrals.
 
 Implemented all 30 editable briefing fields and supported custom-load flight/restart.
 Full native filters, auxiliary equipment, replay and original-game interaction
-acceptance remain open. [Implementation, validation and testing gate](baselines/creator-ordnance.md).
+acceptance remain open. [Implementation, validation and testing gate](../baselines/creator-ordnance.md).
 Unrelated menus and combat AI remain deferred.
 
 ## Manual systems continuation — 2026-09-14
@@ -249,7 +251,7 @@ Unrelated menus and combat AI remain deferred.
 - [ ] Physical controller/haptic acceptance and Windows/macOS runtime checks.
   AI remains deferred.
 
-[Current evidence, captures, limitations](baselines/weapons-systems.md).
+[Current evidence, captures, limitations](../baselines/weapons-systems.md).
 
 
 ## Two-aircraft live-fire pass — 2026-09-14
@@ -271,7 +273,7 @@ Unrelated menus and combat AI remain deferred.
   finish store textures/racks, source-specific drag and countermeasures. AI is deferred.
 - [ ] Obtain matched original-game evidence before claiming W3–W5 or 1:1 parity.
 
-[Capabilities, exact loadouts, captures, approximations and validation](baselines/live-fire.md).
+[Capabilities, exact loadouts, captures, approximations and validation](../baselines/live-fire.md).
 Remaining menu screens are still deferred.
 
 ## Aircraft weapons research and initial implementation — 2026-09-14
@@ -283,7 +285,7 @@ Remaining menu screens are still deferred.
 - [x] Confirm missing shared smoke/fire/crater/debris/chaff/flare graphics roots;
   inspect FA launch-speed arithmetic and ammunition-field offsets.
 - [x] Plan ordnance movement, sensor/guidance/ECM coupling, loadouts, graphics,
-  damage and vanilla acceptance: [weapons plan](formats/weapons.md).
+  damage and vanilla acceptance: [weapons plan](../formats/weapons.md).
 - [x] Commit and push the plan (`457c85b`), then implement shared combat roots,
   repeated aircraft selection, dependency/provider reports and cache invalidation.
 - [x] Parse all 135 JT, 51 SEE, 30 ECM and 4 GAS configurations; preserve rear
@@ -297,8 +299,8 @@ Remaining menu screens are still deferred.
 - [ ] Implement deterministic gun/rocket/bomb/missile lifecycles, sensor logic,
   original effects and matched retail acceptance before claiming 1:1 performance.
 
-Evidence and limitations: [initial research](baselines/weapons-research.md) and
-[combat implementation](baselines/combat-components.md).
+Evidence and limitations: [initial research](../baselines/weapons-research.md) and
+[combat implementation](../baselines/combat-components.md).
 Further menu screens remain deferred; clean external free flight is preserved.
 
 ## Fidelity and evidence rules
@@ -314,11 +316,11 @@ Further menu screens remain deferred; clean external free flight is preserved.
 ## 0. Shared foundation and recovery workflow — M0 and ongoing
 
 - [x] Establish pinned Rust workspace, native window/GPU/audio dependencies and macOS Apple M3 development instructions.
-- [x] Configure macOS, Linux and Windows CI and retail-data guards. Local interactive acceptance covers macOS; Linux now has real Wayland/Vulkan startup and shutdown evidence for the menu, creator, viewer and flight, but manual sound/input acceptance and Windows runtime checks remain open. See [Linux setup](baselines/linux-setup.md).
-- [x] Set up the Linux development host, copy and checksum-verify user-owned media, import the runtime cache, and fix renderer/window cleanup ordering before the event loop releases its display connection. See [acceptance evidence](baselines/linux-setup.md).
-- [x] Correct Linux desktop GPU selection: prefer the high-performance compatible adapter, and verify a visible menu on the RTX 4070. The initial AMD frame-submission smoke tests did not detect the blank on-screen window; see [follow-up evidence](baselines/linux-setup.md#visible-window-follow-up).
+- [x] Configure macOS, Linux and Windows CI and retail-data guards. Local interactive acceptance covers macOS; Linux now has real Wayland/Vulkan startup and shutdown evidence for the menu, creator, viewer and flight, but manual sound/input acceptance and Windows runtime checks remain open. See [Linux setup](../baselines/linux-setup.md).
+- [x] Set up the Linux development host, copy and checksum-verify user-owned media, import the runtime cache, and fix renderer/window cleanup ordering before the event loop releases its display connection. See [acceptance evidence](../baselines/linux-setup.md).
+- [x] Correct Linux desktop GPU selection: prefer the high-performance compatible adapter, and verify a visible menu on the RTX 4070. The initial AMD frame-submission smoke tests did not detect the blank on-screen window; see [follow-up evidence](../baselines/linux-setup.md#visible-window-follow-up).
 - [x] Provide independent, documented extraction through `tools/extract_assets.py` and shared Rust EALIB/DCL readers, preserving archive boundaries and provenance reports.
-- [x] Extract the supplied five Fighters Anthology archives: 7,520 unique resources. See the [main-menu baseline](baselines/main-menu.md); resource counts do not establish decoded terrain or flyable-aircraft coverage.
+- [x] Extract the supplied five Fighters Anthology archives: 7,520 unique resources. See the [main-menu baseline](../baselines/main-menu.md); resource counts do not establish decoded terrain or flyable-aircraft coverage.
 - [ ] **F1 — Complete source inventory.** Inventory editions/discs and missing dependencies per title; identify base assets, optional media and overrides. Record extraction success separately from format interpretation.
 - [ ] **F2 — Extend extraction when required.** Track ISO disc-image access, ESA containers and coded-literal DCL independently. These are input-format gaps, not prerequisites for using the already supported loose LIB installation. Add bounded readers, malformed-input checks and provenance before claiming support.
 - [ ] **F3 — Build an evidence index.** Associate recovered fields/routines with exact source hashes, addresses where applicable, confidence and reproducible commands. Preserve unknown fields instead of assigning convenient meanings.
@@ -333,10 +335,10 @@ Further menu screens remain deferred; clean external free flight is preserved.
 - [x] Choose a background randomly at startup, respecting its palette and menu-bar position. Native setup evidence supports this selection; a timed background slideshow and the original random sequence are not implemented.
 - [x] Render enabled/disabled actions and provide mouse/keyboard interaction, authored hover/press animations and placeholder responses.
 - [x] Stub `?`, `Pref` and `Multi`; implement exit and session-only music/effects toggles. Hover/focus is silent; activation/toggles play sounds.
-- [x] Provide deterministic background/state snapshots and record [menu recovery](formats/menu.md) and [validation](baselines/main-menu.md).
+- [x] Provide deterministic background/state snapshots and record [menu recovery](../formats/menu.md) and [validation](../baselines/main-menu.md).
 - [ ] Recover original hover/pressed/disabled state semantics and timing. Current brightness, press displacement, focus outline, hit-area assumptions and placeholder messages are authored.
 - [ ] Decode the actual MNU tree and general DLG controls, including separators, accelerators, nested menus, modal behavior and enabled-state rules. Current dropdown entries/chrome are not a recovered complete tree.
-- [ ] Complete audible acceptance of menu music transitions and remaining cue mappings. Native main/briefing playlists now replace the AIR003 preview; context resets/gains remain authored. See [audio evidence](baselines/audio.md).
+- [ ] Complete audible acceptance of menu music transitions and remaining cue mappings. Native main/briefing playlists now replace the AIR003 preview; context resets/gains remain authored. See [audio evidence](../baselines/audio.md).
 
 ### MENU1b — Quick Mission Creator investigation shell
 
@@ -380,10 +382,10 @@ These are flow categories to inventory, not a claim that every title has identic
 
 ### ENV1 — Recover theater data before designing the renderer
 
-- [x] Extend extraction to all 16 defined profiles, source aliases and shared atmosphere assets: 1,129 resources / 75 MM layouts; added retail discs inventoried. See [validation](baselines/all-theaters.md) and [extraction guide](EXTRACTION.md#all-defined-theaters-and-the-retail-discs). This does not enable the other theaters in the renderer.
+- [x] Extend extraction to all 16 defined profiles, source aliases and shared atmosphere assets: 1,129 resources / 75 MM layouts; added retail discs inventoried. See [validation](../baselines/all-theaters.md) and [extraction guide](../EXTRACTION.md#all-defined-theaters-and-the-retail-discs). This does not enable the other theaters in the renderer.
 
 - [x] Parse all 16 supplied T2 grids with bounded Rust readers; export dimensions, elevation range and resource names through the shared Ukraine extraction profile.
-- [x] Verify packed header offsets, color/class/elevation triples, 8,192-foot cell spacing, 256-foot height steps and fine/coarse lookup against FA.EXE. See [addresses and corrections](formats/theater.md).
+- [x] Verify packed header offsets, color/class/elevation triples, 8,192-foot cell spacing, 256-foot height steps and fine/coarse lookup against FA.EXE. See [addresses and corrections](../formats/theater.md).
 - [x] Recover UKR.MM's 697 texture placements and UKR0–28 texture naming/quarter-turn mapping; preserve raw `tdic` and object data for further work.
 
 - [ ] Inventory all local T2 resources and their dependencies: briefing maps, tile/material data, palettes/textures, object shapes and mission/layout references. Record duplicate/variant names and verify alias resolution per title.
@@ -393,7 +395,7 @@ These are flow categories to inventory, not a claim that every title has identic
 - [ ] Calibrate axes, handedness, origin, horizontal/vertical units and mission placement against native landmarks. Verify across titles instead of assuming the reference coordinate conversion applies universally.
 - [ ] Write a retail terrain specification with confirmed rules, unknowns and fixtures. **Gate:** do not substitute real-world elevation or USNF-ATF terrain where recovery is incomplete.
 
-The reference [T2 notes](../USNF-ATF/Docs/formats/t2.md) used a misaligned cell offset and left elevation unresolved. Native executable analysis now establishes the packed layout and real height samples; our [corrected specification](formats/theater.md) supersedes that interpretation. Remaining research concerns exact adaptive geometry, classification, shorelines, variants and native comparisons.
+The reference [T2 notes](../../USNF-ATF/Docs/formats/t2.md) used a misaligned cell offset and left elevation unresolved. Native executable analysis now establishes the packed layout and real height samples; our [corrected specification](../formats/theater.md) supersedes that interpretation. Remaining research concerns exact adaptive geometry, classification, shorelines, variants and native comparisons.
 
 ### ENV2 — Reconstruct and render original theaters
 
@@ -428,7 +430,7 @@ The reference [T2 notes](../USNF-ATF/Docs/formats/t2.md) used a misaligned cell 
 
 ## 3. Aircraft and original simulation systems — M1c–M2
 
-Use the local [aircraft-porting guide](../USNF-ATF/Docs/aircraft-porting.md) and [worksheet](../USNF-ATF/Docs/templates/aircraft-port.md) as research starting points. Its helper exports reviewed bundles; successful export is explicitly not full native flight acceptance. Bun/Electron commands in that guide are reference-project commands, not commands for this Rust app.
+Use the local [aircraft-porting guide](../../USNF-ATF/Docs/aircraft-porting.md) and [worksheet](../../USNF-ATF/Docs/templates/aircraft-port.md) as research starting points. Its helper exports reviewed bundles; successful export is explicitly not full native flight acceptance. Bun/Electron commands in that guide are reference-project commands, not commands for this Rust app.
 
 The checklist below tracks full roster/native parity. The implemented F/A-18D subset and its evidence are itemized at the end of this document; partial progress does not check off full-parity rows.
 
@@ -484,7 +486,7 @@ The checklist below tracks full roster/native parity. The implemented F/A-18D su
 | F-14 | Reviewed recipe; recovered native helpers; model/rig differs by source and override | Not started; choose and document actual FA variant before reusing findings |
 | A-4E | Reviewed FA model recipe; reference flight integration retains authored behavior | Not started; intake, SH/PT and capability checks |
 | X-31 | Reviewed recipe; vectoring/control-law fidelity remains a specific concern | Not started; intake and device/flight evidence |
-| F/A-18D | Supplied FA F18.PT / F18.SH | Development free-flight slice implemented; full native parity open; see [evidence](formats/aircraft.md) |
+| F/A-18D | Supplied FA F18.PT / F18.SH | Development free-flight slice implemented; full native parity open; see [evidence](../formats/aircraft.md) |
 | Remaining aircraft | Inventory per title, model and profile variant | Not started; M2 batches after shared pipeline acceptance |
 
 ## 4. Sequencing and open gates
@@ -503,11 +505,11 @@ Local links below require the ignored `USNF-ATF/` checkout; it is not a build/ru
 
 | Area | Starting sources | Boundary |
 | --- | --- | --- |
-| Menu | [Rust menu findings](formats/menu.md), [baseline](baselines/main-menu.md), [reference MNU](../USNF-ATF/Docs/formats/mnu.md) | Retail art/native behavior prevail over custom reference controls |
-| Terrain | [T2](../USNF-ATF/Docs/formats/t2.md), [mission formats](../USNF-ATF/Docs/formats/mission.md) | Partial recovery; custom terrain implementation is excluded |
-| Aircraft conversion | [Port guide](../USNF-ATF/Docs/aircraft-porting.md), [SH](../USNF-ATF/Docs/formats/sh.md), [PT](../USNF-ATF/Docs/formats/pt.md) | Reviewed conversion is not complete aircraft parity |
-| Flight systems | [Flight dynamics](../USNF-ATF/Docs/formats/flight-dynamics.md), [native flight](../USNF-ATF/Docs/formats/native-flight-code.md), [native performance](../USNF-ATF/Docs/formats/native-performance.md) | Preserve verified title/helper scope and authored-integration gaps |
-| Cockpit/combat/audio | [HUD](../USNF-ATF/Docs/formats/hud.md), [native guns](../USNF-ATF/Docs/formats/native-guns.md), [audio](../USNF-ATF/Docs/formats/audio.md), [music](../USNF-ATF/Docs/formats/music.md) | Recover dependency mappings and runtime behavior separately |
+| Menu | [Rust menu findings](../formats/menu.md), [baseline](../baselines/main-menu.md), [reference MNU](../../USNF-ATF/Docs/formats/mnu.md) | Retail art/native behavior prevail over custom reference controls |
+| Terrain | [T2](../../USNF-ATF/Docs/formats/t2.md), [mission formats](../../USNF-ATF/Docs/formats/mission.md) | Partial recovery; custom terrain implementation is excluded |
+| Aircraft conversion | [Port guide](../../USNF-ATF/Docs/aircraft-porting.md), [SH](../../USNF-ATF/Docs/formats/sh.md), [PT](../../USNF-ATF/Docs/formats/pt.md) | Reviewed conversion is not complete aircraft parity |
+| Flight systems | [Flight dynamics](../../USNF-ATF/Docs/formats/flight-dynamics.md), [native flight](../../USNF-ATF/Docs/formats/native-flight-code.md), [native performance](../../USNF-ATF/Docs/formats/native-performance.md) | Preserve verified title/helper scope and authored-integration gaps |
+| Cockpit/combat/audio | [HUD](../../USNF-ATF/Docs/formats/hud.md), [native guns](../../USNF-ATF/Docs/formats/native-guns.md), [audio](../../USNF-ATF/Docs/formats/audio.md), [music](../../USNF-ATF/Docs/formats/music.md) | Recover dependency mappings and runtime behavior separately |
 
 When updating this tracker, check only the completed substep, link its evidence and update format coverage if applicable. A milestone remains open until its acceptance gate is met; no percentage estimate substitutes for evidence.
 
@@ -528,7 +530,7 @@ When updating this tracker, check only the completed substep, link its evidence 
 - [ ] Native flight helpers, continuous SH articulation, control surfaces, scale acceptance, ground support, takeoff/landing, mirror rendering and full cockpit/HUD behavior.
 - [ ] Native side-by-side flight/instrument and audible acceptance; Linux/Windows runtime checks.
 
-See [format evidence and per-page coverage](formats/aircraft.md) and [validation baseline](baselines/f18-free-flight.md). Imported data and a runnable flight do not close the full M1c/1f parity gates.
+See [format evidence and per-page coverage](../formats/aircraft.md) and [validation baseline](../baselines/f18-free-flight.md). Imported data and a runnable flight do not close the full M1c/1f parity gates.
 
 
 ### Cockpit, HUD and desktop controls follow-up
@@ -544,7 +546,7 @@ See [format evidence and per-page coverage](formats/aircraft.md) and [validation
 - [ ] Recover native F18 HUD caller/symbol layout, mirrors, ILS/weapon/corner-speed cues and full cockpit panel composition; compare against retail flight.
 - [ ] Validate Windows/Linux input, rendering and audio; perform manual native-game parity acceptance.
 
-Current behavior and binding provenance: [FLIGHT-CONTROLS.md](FLIGHT-CONTROLS.md). Follow-up evidence: [cockpit/control baseline](baselines/cockpit-controls.md).
+Current behavior and binding provenance: [FLIGHT-CONTROLS.md](../FLIGHT-CONTROLS.md). Follow-up evidence: [cockpit/control baseline](../baselines/cockpit-controls.md).
 
 
 ### Instrument layout follow-up
@@ -555,7 +557,7 @@ Current behavior and binding provenance: [FLIGHT-CONTROLS.md](FLIGHT-CONTROLS.md
 - [x] Share layout rectangles between rendering and inverse-scaled button hit testing; cancel pending clicks when pages/layouts change.
 - [x] Test capacity/selection restoration, non-overlap/margins and matching button release at both sizes; validate both layouts on Metal.
 
-Exact native placement and independent high-resolution instrument typography remain open. Small mode currently scales the existing source-font raster. See [layout validation](baselines/instrument-layouts.md).
+Exact native placement and independent high-resolution instrument typography remain open. Small mode currently scales the existing source-font raster. See [layout validation](../baselines/instrument-layouts.md).
 
 
 ### Responsive flight UI follow-up
@@ -566,7 +568,7 @@ Exact native placement and independent high-resolution instrument typography rem
 - [x] Shrink HUD presentation 15%, preserve attitude projection, remove opaque TAS/MSL readout backings and avoid overlapping tape labels.
 - [x] Add repeatable `--window-size WIDTHxHEIGHT` captures and aspect/alpha/pointer regression coverage.
 
-See [responsive-flight validation](baselines/responsive-flight-ui.md). Native HUD symbol mapping, mirror rendering, dynamic native instrument typography and cross-platform acceptance remain open.
+See [responsive-flight validation](../baselines/responsive-flight-ui.md). Native HUD symbol mapping, mirror rendering, dynamic native instrument typography and cross-platform acceptance remain open.
 
 ## 2026-09-13: In-game performance follow-up
 
@@ -577,7 +579,7 @@ See [responsive-flight validation](baselines/responsive-flight-ui.md). Native HU
 - [x] Interpolate render-only poses between deterministic 120 Hz ticks, including wrapped headings/bank.
 - [x] Make live camera instrument readbacks asynchronous and retain display/preview depth targets.
 - [x] Confirm exterior aircraft renders in chase/oblique views; explain F2/F3 native look-back/up versus F10 exterior bindings.
-- [x] Record local Metal comparisons and regression evidence in [flight-performance baseline](baselines/flight-performance.md).
+- [x] Record local Metal comparisons and regression evidence in [flight-performance baseline](../baselines/flight-performance.md).
 - [ ] Sustained thermal/battery and high-refresh-display profiling; Windows/Linux runtime measurements.
 - [ ] Full GPU UI/instrument composition, terrain LOD/streaming, native flight-response acceptance and input-latency measurement.
 
@@ -589,7 +591,7 @@ See [responsive-flight validation](baselines/responsive-flight-ui.md). Native HU
 - [x] Add Shift-/ recenter and retain F1 forward/reset; document evidence and add repeatable look-angle captures.
 - [ ] Recover FA-specific non-menu pan bindings and map side/rear/up cockpit artwork; full 3D cockpit remains deferred.
 
-Evidence and validation: [look-around baseline](baselines/look-around.md).
+Evidence and validation: [look-around baseline](../baselines/look-around.md).
 
 ## 2026-09-13: Flight response, vertical sky and retained cockpit
 
@@ -601,7 +603,7 @@ Evidence and validation: [look-around baseline](baselines/look-around.md).
 - [x] Retain the cockpit frame during head-look; rotate look in aircraft coordinates.
 - [ ] Native force/control law, stall/spin recovery, full 3D cockpit geometry and native weather projection remain open.
 
-See [flight-response and sky evidence](baselines/flight-response-sky.md). That fixed-screen cockpit placeholder is superseded by the directional projection below; rear/up geometry is still not recovered.
+See [flight-response and sky evidence](../baselines/flight-response-sky.md). That fixed-screen cockpit placeholder is superseded by the directional projection below; rear/up geometry is still not recovered.
 
 ## 2026-09-13: Directional forward cockpit and HUD
 
@@ -611,7 +613,7 @@ See [flight-response and sky evidence](baselines/flight-response-sky.md). That f
 - [x] Check centered, small-turn, side, up, rear and tall-window captures on Metal; verify live camera panels and frame timing.
 - [ ] Recover full side/rear/overhead geometry, native view mapping and working mirrors; compare against retail flight.
 
-See [directional cockpit evidence](baselines/directional-cockpit.md). This completes the authored directional projection of available forward art, not native 360-degree cockpit parity.
+See [directional cockpit evidence](../baselines/directional-cockpit.md). This completes the authored directional projection of available forward art, not native 360-degree cockpit parity.
 
 ## 2026-09-13: F/A-18 exterior animation follow-up
 
@@ -622,7 +624,7 @@ See [directional cockpit evidence](baselines/directional-cockpit.md). This compl
 - [x] Add repeatable pose captures and regression tests for reversal, interpolation, control release and source endpoint preservation.
 - [ ] Recover native schedules and remaining leading-edge/outboard surfaces, nozzle mechanics, ground devices, canopy and damage/store animation.
 
-See [animation evidence and limitations](baselines/f18-animations.md). This is original geometry with fitted motion, not complete native animation parity.
+See [animation evidence and limitations](../baselines/f18-animations.md). This is original geometry with fitted motion, not complete native animation parity.
 
 ## 2026-09-13: Banked pull / AoA correction
 
@@ -632,7 +634,7 @@ See [animation evidence and limitations](baselines/f18-animations.md). This is o
 - [x] Retain lateral transient lag, deterministic ticks and full loops; add probe telemetry and rendered capture support.
 - [ ] Recover native gpullAOA/lowAOA consumers, force and rotational response, wind-relative air data, and stall/spin behavior.
 
-See [measurements, source fields and limitations](baselines/banked-pull-aoa.md).
+See [measurements, source fields and limitations](../baselines/banked-pull-aoa.md).
 
 ## Native flight model decoding pass
 
@@ -648,8 +650,8 @@ See [measurements, source fields and limitations](baselines/banked-pull-aoa.md).
 - [ ] Integrate a complete native model; replace fitted adapter only after trajectory acceptance.
 - [ ] Compare original-game level flight, banked pulls, loops, stalls/recovery and device transients.
 
-See [addresses, lessons and coverage](formats/native-flight.md) and
-[validation record](baselines/native-flight.md). Pure-helper tests are not proof
+See [addresses, lessons and coverage](../formats/native-flight.md) and
+[validation record](../baselines/native-flight.md). Pure-helper tests are not proof
 of full native flight parity.
 
 ### Native flight follow-up: reusable components
@@ -666,7 +668,7 @@ of full native flight parity.
 - [ ] Audit timer scheduling and RNG ownership; implement deterministic whole-tick probes before enabling native dynamics in free flight.
 - [ ] Compare original-game trajectories and approve any explicitly fitted substitutes per aircraft.
 
-Evidence and component boundaries: [format research](formats/native-flight.md#second-pass-departure-ground-and-integration-components), [baseline](baselines/native-flight.md#component-follow-up).
+Evidence and component boundaries: [format research](../formats/native-flight.md#second-pass-departure-ground-and-integration-components), [baseline](../baselines/native-flight.md#component-follow-up).
 
 ### Native flight: table, force and movement follow-up
 
@@ -677,7 +679,7 @@ Evidence and component boundaries: [format research](formats/native-flight.md#se
 - [x] Add imported-table headless probes and synthetic rotation/force/loading/position checks.
 - [ ] Complete world matrix and cockpit-angle composition, loaded control/equipment state, contact and clock/RNG contracts before enabling native dynamics.
 
-[Research](formats/native-flight.md#third-pass-extracted-trigonometry-forces-and-loading) and [validation](baselines/native-flight.md#trigonometry-and-force-follow-up).
+[Research](../formats/native-flight.md#third-pass-extracted-trigonometry-forces-and-loading) and [validation](../baselines/native-flight.md#trigonometry-and-force-follow-up).
 
 ### Native flight fourth research pass
 
@@ -690,7 +692,7 @@ Evidence and component boundaries: [format research](formats/native-flight.md#se
 - [ ] Resolve remaining loaded field semantics/producers and equipment pointer-to-profile mapping.
 - [ ] Establish original scheduling, RNG seed/consumption order and full-tick trajectories before enabling a native flight adapter.
 
-Details and limitations: [native format research](formats/native-flight.md).
+Details and limitations: [native format research](../formats/native-flight.md).
 
 ### Native flight fifth research pass
 
@@ -702,7 +704,7 @@ Details and limitations: [native format research](formats/native-flight.md).
 - [ ] Decode collision dispatcher geometry/cache production, remaining seed sources and queue rescheduling, and event consumers.
 - [ ] Connect remaining loaded-state producers and verify whole-tick trajectories before enabling native flight.
 
-See [fifth-pass findings](formats/native-flight.md) and [validation](baselines/native-flight.md).
+See [fifth-pass findings](../formats/native-flight.md) and [validation](../baselines/native-flight.md).
 
 
 ## Rafale C and original-style Quick Mission follow-up — 2026-09-14
@@ -717,10 +719,10 @@ See [fifth-pass findings](formats/native-flight.md) and [validation](baselines/n
   not open the other deferred menu screens.
 - [x] Verify extraction/provenance, synthetic identity/dependency/selector tests,
   Rafale/Hornet loops, and Rafale exterior/cockpit plus wide/tall layouts. See
-  [acceptance evidence](baselines/rafale-quick-mission.md).
+  [acceptance evidence](../baselines/rafale-quick-mission.md).
 - [x] Fix cockpit texture replacement on aircraft selection and add an independent
   Rafale presentation rig for original moving parts; gate the unsupported hook.
-  See [follow-up evidence](baselines/rafale-animations.md).
+  See [follow-up evidence](../baselines/rafale-animations.md).
 - [ ] Translate exact Rafale animation hinges/schedules, continuous gear-well
   topology and native HUD callers; current motion is explicitly fitted.
 - [ ] Complete native flight tick/contact/scheduler acceptance, mission generation,
@@ -739,7 +741,7 @@ See [fifth-pass findings](formats/native-flight.md) and [validation](baselines/n
 - [x] Integrate the separate Rafale cockpit, instruments, rendering and fitted
   animation rig with the shared kernel; native visual parity remains open.
 
-Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
+Contracts and commands: [shared flight model](../FLIGHT-MODEL.md).
 
 ### Separate aircraft laws and instrument data — 2026-09-14
 
@@ -756,7 +758,7 @@ Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
 - [x] Remove the string scalar cache and duplicated research configuration; resolve PT fields once and fail on missing required data.
 - [x] Wire startup, fuel/forces, payload checks, devices, departure/spin and ground contact to the selected model; remove alternate-aircraft update arguments.
 - [x] Add validated configuration replacement before flight, preserving independent model instances and cheap presentation clones.
-- [x] Preserve both aircraft's 26-scenario baseline; test configuration effects and rejected invalid edits. See [evidence](baselines/shared-flight-model.md).
+- [x] Preserve both aircraft's 26-scenario baseline; test configuration effects and rejected invalid edits. See [evidence](../baselines/shared-flight-model.md).
 - [ ] Native parity, unresolved PT fields and an external mod-file loader remain open; this is an ownership refactor, not additional native decoding.
 
 ### Integrate parallel flight-model and Rafale visual work — 2026-09-14
@@ -769,7 +771,7 @@ Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
   workflow. Both extracted identities pass all 13 scenarios each.
 - [x] Validate the combined tree: 122 Rust tests, 11 Python tests, formatting,
   warnings-denied Clippy, locked build, source/debug-binary guards and GPU checks.
-  See [integration evidence](baselines/rafale-animations.md#shared-simulation-integration).
+  See [integration evidence](../baselines/rafale-animations.md#shared-simulation-integration).
 
 ## Cockpit sliding and zoom follow-up — 2026-09-14
 
@@ -780,7 +782,7 @@ Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
 - Reference yaw/pitch fade thresholds are fitted presentation, not native
   parity. Rear/overhead interior remains unavailable.
 - Added bounded `--flight-zoom` and wide/tall, zoom, side/up validation in
-  [the baseline](baselines/cockpit-slide.md).
+  [the baseline](../baselines/cockpit-slide.md).
 
 ## Live cockpit mirrors and uncapped rendering — 2026-09-14
 
@@ -792,7 +794,7 @@ Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
 - Select Immediate/Mailbox presentation where supported and remove Wayland
   refresh callbacks in those modes; retain portable FIFO fallback and 120 Hz physics.
 - Validate synthetic mask/camera tests, wide/tall GPU captures, camera previews,
-  view cycling and measured mirror render counts. [Evidence](baselines/mirrors.md).
+  view cycling and measured mirror render counts. [Evidence](../baselines/mirrors.md).
 - Remaining parity: native mirror optics/eye location, curved reflection and
   complete interior geometry. No contacts or targets are fabricated.
 
@@ -806,7 +808,7 @@ Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
 - [x] Detect the user's powered-on Ultimate 2, inspect its axes/buttons/rumble capability, derive serial/interface identity and load its generated profile in a real window.
 - [x] Add instrument focus/direct button actions through existing stock scope controls; no MFD screen manipulation, new raster content or fabricated systems.
 - [x] Add opt-in bounded authored crash rumble, explicit rumble diagnostic, per-device expiry and pause/focus/overflow/shutdown cancellation.
-- [x] Validate 149 Rust / 11 Python tests, all 26 F18/Rafale flight-suite cases, six real window smoke tests, live camera readback, input-tape replay, asset guards and short matched frame-time evidence. See [input acceptance](baselines/input.md) and [setup/design](INPUT.md).
+- [x] Validate 149 Rust / 11 Python tests, all 26 F18/Rafale flight-suite cases, six real window smoke tests, live camera readback, input-tape replay, asset guards and short matched frame-time evidence. See [input acceptance](../baselines/input.md) and [setup/design](../INPUT.md).
 - [ ] User physical Ultimate 2 flight handling and unplug/reconnect acceptance; real HOTAS/pedals/button boxes and Windows/macOS runtime checks.
 - [ ] Generic macOS HID rumble and hardware-tested directional flight-stick forces; further device defaults, radial calibration and reviewed multi-contact switch composition.
 - [ ] Retail controller dispatch parity, long-stall wall-clock sampling guarantees and whole-mission replay remain separate gates. Further menu screens remain deferred.
@@ -817,14 +819,14 @@ Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
 - [x] Stop Windows Gamepad vibration on endpoint removal/read failure, in addition to context/expiry/shutdown stops.
 - [x] Add macOS 11+ GameController/CoreHaptics using exact retained input/haptic endpoints, explicit two-handle/default-locality routing and finite/cancellable effects; keep generic equipment on HID.
 - [x] Document Apple gamepad session identity/shared-binding limits; add `--test-rumble only` with ambiguity rejection and native completion wait.
-- [x] Revalidate workspace and both native cross-targets; see [input evidence](baselines/input.md).
+- [x] Revalidate workspace and both native cross-targets; see [input evidence](../baselines/input.md).
 - [ ] Windows/macOS linked app and hardware acceptance, Apple multi-controller/disconnect/haptic recovery and a persistent per-player assignment flow. Generic HID feedback and directional stick forces remain separate work.
 
 ### Event-driven rumble impulses — 2026-09-14
 
 - [x] Add typed gun, missile, bomb, rocket, turbulence, afterburner, damage and crash cues with a fixed-slot, 120 Hz mixer; cap overlapping amplitudes, repeat rates and native submissions.
 - [x] Wire actual afterburner activation and crash transitions; route to assigned capable devices even at rest, respecting opt-in/context and clearing pending effects on interruption.
-- [x] Cover repeated fire, overlap/expiry, invalid turbulence severity, pause clearing and idle-device eligibility with synthetic tests. See [feedback contract](INPUT.md).
+- [x] Cover repeated fire, overlap/expiry, invalid turbulence severity, pause clearing and idle-device eligibility with synthetic tests. See [feedback contract](../INPUT.md).
 - [ ] Connect weapon/turbulence/damage producers when those systems exist. Space remains unavailable; no effects imply a successful shot or invented weather response.
 - [ ] User afterburner tactile tuning and Windows/macOS hardware validation of overlapping/repeated effects.
 
@@ -834,7 +836,7 @@ Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
 - [x] Validate/canonically serialize profiles and replace files through a synced temporary file plus rename; leave invalid edits/live profiles unchanged. Preserve automatic mappings for newly connected gamepads when desired.
 - [x] Persist normal-session instrument page sets for both layouts, selection/ranges/mode, cockpit/HUD/ladder/brightness/zoom and music/effects; retain them across aircraft changes and flight restarts. Keep visual diagnostics independent of user preferences.
 - [x] Add a low continuous afterburner rumble beneath the ignition impulse, with finite renewable leases and explicit disengagement/context cancellation.
-- [x] Validate synthetic capture/cancellation, profile save/reload/failure, preference round-trips/layout restoration and sustained-effect expiry; inspect wide/tall editor captures and creator/viewer/menu smoke checks. [Evidence](baselines/input.md).
+- [x] Validate synthetic capture/cancellation, profile save/reload/failure, preference round-trips/layout restoration and sustained-effect expiry; inspect wide/tall editor captures and creator/viewer/menu smoke checks. [Evidence](../baselines/input.md).
 - [ ] User tactile tuning and full Windows/macOS app/hardware tests; persistent per-player Apple assignment, radial/wizard calibration and physical HOTAS/MFD/button-box validation remain open.
 
 
@@ -849,7 +851,7 @@ Contracts and commands: [shared flight model](FLIGHT-MODEL.md).
 - [ ] Bind AIR/DANGER/DECK/LAUNCH/HOME/EJECT/SUCC/VALK only as their real systems arrive; complete native host priority, trigger, missing-media and audible transition acceptance.
 - [ ] Finish hook/flap cue-polarity audit and native wheel-brake behavior; verify actual sound output/listening parity on Windows and macOS.
 
-Validation and material limits: [audio baseline](baselines/audio.md). Further menu screens remain deferred. No retail/generated audio is committed.
+Validation and material limits: [audio baseline](../baselines/audio.md). Further menu screens remain deferred. No retail/generated audio is committed.
 
 ## Two-aircraft manual weapons integration — 2026-09-14
 
@@ -874,20 +876,20 @@ Validation and material limits: [audio baseline](baselines/audio.md). Further me
 - [ ] Original-game differential acceptance and Windows/macOS runtime/hardware
   checks. Combat AI remains explicitly deferred until full manual acceptance.
 
-Exact validation, captures, limitations and commands: [manual weapons baseline](baselines/manual-weapons.md).
+Exact validation, captures, limitations and commands: [manual weapons baseline](../baselines/manual-weapons.md).
 
 ### Weather foundation continuation — 2026-09-15
 
 Live smoothed fog tint, bounded original shade remaps and world-anchored sky/ocean
 decks implemented. Shared importer includes ocean art. Source/host distinctions,
 263-test evidence and remaining cross-layer/horizon acceptance are recorded in
-[weather foundation](baselines/weather-foundation.md). Celestial/cloud work follows.
+[weather foundation](../baselines/weather-foundation.md). Celestial/cloud work follows.
 
 ### Original celestial rendering — 2026-09-15
 
 Bounded weather SH primitives, sun arc/glow remap, original moon texture and
 94 source stars integrated. Linux captures visually inspected; retail clipping,
-glare and platform parity remain open. See [weather foundation](baselines/weather-foundation.md).
+glare and platform parity remain open. See [weather foundation](../baselines/weather-foundation.md).
 
 ### Cloud geometry and source placement — 2026-09-15
 
@@ -895,14 +897,14 @@ Runtime-imported cloud descriptors, pure periodic placement, native generated
 altitude choice and original two-sided CLOUD1 sheets now render. Explicit MM
 altitude zero remains clear of scattered sheets. Linux Ukraine/Egypt and
 wide F18/tall Rafale captures passed. Source, renderer adaptations and remaining
-low-detail/CLOUDS-producer/parity work: [weather foundation](baselines/weather-foundation.md).
+low-detail/CLOUDS-producer/parity work: [weather foundation](../baselines/weather-foundation.md).
 
 ### Ordered cross-layer fog integration — 2026-09-15
 
 Pure CPU ray queries and GPU indexed terrain/cloud rendering now apply the
 target remap before the view remap, including adjacent-band distance splitting
 and overlap restrictions. Synthetic order/rounding/state checks and Linux
-crossing captures are recorded in [weather foundation](baselines/weather-foundation.md).
+crossing captures are recorded in [weather foundation](../baselines/weather-foundation.md).
 Special horizon branches and matched retail acceptance remain open.
 
 ### Horizon and indexed aircraft continuation — 2026-09-15
@@ -912,7 +914,7 @@ Special horizon branches and matched retail acceptance remain open.
 - [x] Keep cockpit art indexed and apply selective palette tint with its original prefix.
 - [ ] Textured horizon transition polygons, special flags/light masks, source HUD
   color mapping, filtering comparison and matched retail acceptance remain open.
-[Current evidence](baselines/weather-foundation.md).
+[Current evidence](../baselines/weather-foundation.md).
 
 ### Weather celestial continuation (2026-09-15)
 
@@ -1006,7 +1008,7 @@ Special horizon branches and matched retail acceptance remain open.
 - [x] Replace the preceding numeric bank line with the user's requested curved
   scale: 10-degree ticks, labels every 30 degrees and a fixed triangle index.
   Rotation follows aircraft attitude and wraps through inverted flight.
-  [Layout and validation](baselines/hud-bank-scale.md).
+  [Layout and validation](../baselines/hud-bank-scale.md).
 
 
 ### Native departure force continuation — 2026-09-15
@@ -1015,7 +1017,7 @@ Special horizon branches and matched retail acceptance remain open.
   G or attenuated lift; connect native force assembly and ordered scalar velocity.
 - [x] Verify low-speed lift floor/cutoff, mode distinction, ground clamp and
   invalid inputs; evaluate 7,200 separate force snapshots across both aircraft's
-  eight departure cases. [Evidence](baselines/native-departure-stage.md#force-connection-follow-up).
+  eight departure cases. [Evidence](../baselines/native-departure-stage.md#force-connection-follow-up).
 - [x] Complete the control/force/movement diagnostic continuation below.
   Live activation and external lifecycle/query producers remain open.
 - Retail flight comparison is unavailable per user clarification; continue native
@@ -1029,7 +1031,7 @@ Special horizon branches and matched retail acceptance remain open.
   travel pitch, world velocity, position/wind and explicit post-query settling.
 - [x] Test repeated loops in both directions and contact/display ordering; both
   PTs pass 7,200 paired force→movement snapshot replay checks.
-  [Evidence](baselines/native-movement-control.md).
+  [Evidence](../baselines/native-movement-control.md).
 - [x] Complete sampled loading/damage, auxiliary rates and rudder/steering in
   the joined diagnostic below. Query producers, event/lifecycle and live
   activation remain open; native runtime steps 2–3 are partially complete.
@@ -1044,7 +1046,7 @@ Special horizon branches and matched retail acceptance remain open.
   controls on spin recovery and temporary rate subtraction after contact.
 - [x] Validate 42 F18/Rafale cases, 37,800 updates with state/RNG/event replay,
   synthetic boundary/rollback tests and prior departure snapshot regressions.
-  [Acceptance and commands](baselines/native-flight-diagnostic.md).
+  [Acceptance and commands](../baselines/native-flight-diagnostic.md).
 - [x] Enforce the source environmental-turbulence bypass; reject unsupported
   airborne enabled input. Document source translations separately from scripted
   clock, input and contact fixtures. No new fitted gameplay law or live mode.
@@ -1065,7 +1067,7 @@ Special horizon branches and matched retail acceptance remain open.
 - [x] Validate 28 cases/33,600 replayed live-API updates, fresh restart, full app
   loops for both aircraft, coordinate mapping and atomic late-contact failure.
   Both aircraft pass active Vulkan camera/mirror runs and inspected captures;
-  creator/viewer smoke checks pass. [Evidence](baselines/native-live-flight.md).
+  creator/viewer smoke checks pass. [Evidence](../baselines/native-live-flight.md).
 - [ ] Complete native terrain/object/carrier producers, lifecycle/event execution,
   refresh cadence and environmental turbulence before unrestricted native flight.
   The airborne option rejects contact and suppresses the separate fitted turbulence
@@ -1076,7 +1078,7 @@ Special horizon branches and matched retail acceptance remain open.
 
 - [x] Verify clean `main` and fast-forward-push the seven completed native-flight
   commits through `ed50aba` to `origin/main`; no remote commits were displaced.
-- [x] Create the [living implementation plan](native-environment-systems-plan.md),
+- [x] Create the [living implementation plan](../research/native-environment-systems-plan.md),
   covering ground/sea asset discovery and provenance, contact/land/deck handling,
   lifecycle/event/damage/death/RNG work, decoys/guidance and environmental coupling.
 - [x] Define NE-00–10 dependencies, child/asset/edge record templates, concrete
@@ -1092,7 +1094,7 @@ Special horizon branches and matched retail acceptance remain open.
 - [x] Extract UKR.MM/T2, STRIP.OT and RUNWAY.SH with archive/hash evidence.
 - [ ] Complete the original runway closure, terrain/collision producer and
   transactional cache/RNG integration, then both-aircraft live contact evidence.
-  [Source and validation checkpoint](baselines/native-land-foundation.md).
+  [Source and validation checkpoint](../baselines/native-land-foundation.md).
 - This continuation includes no AI. Live contact/carrier activation remains gated;
   full asset coverage and Windows/macOS/retail acceptance remain open.
 
@@ -1104,13 +1106,13 @@ Special horizon branches and matched retail acceptance remain open.
 - [x] Synthetic seam, diagonal, rounding, degenerate and malformed-input tests;
   166,400 imported UKR cell cases repeated identically in the diagnostic.
 - [x] NE-00.1c / E008 candidate angle conversion and heading projection.
-  [Synthetic and imported-table replay evidence](baselines/native-land-angles.md).
+  [Synthetic and imported-table replay evidence](../baselines/native-land-angles.md).
 - [ ] E003/E005 placement/callback closure,
   full visual resources and collision record semantics.
 - [ ] E001/E002 staged query/cache/RNG and late-failure rollback, then reviewed
   both-aircraft live contact. Carrier remains gated; no AI or default changes.
 
-[Validation and limitations](baselines/native-land-geometry.md). This completes
+[Validation and limitations](../baselines/native-land-geometry.md). This completes
 only the diagnostic precursor; the parent first slice remains researching.
 
 ## STRIP metadata and initialization precursor — 2026-09-15
@@ -1131,9 +1133,9 @@ only the diagnostic precursor; the parent first slice remains researching.
 - [ ] Connect E001/E002 producer with rollback, then both-aircraft live contact.
   No new runtime branch, AI, carrier activation or retail acceptance.
 
-[Source contract](formats/native-strip.md), [metadata validation](baselines/native-strip.md),
-[lifecycle validation](baselines/native-strip-lifecycle.md),
-[placement validation](baselines/native-strip-placement.md).
+[Source contract](../formats/native-strip.md), [metadata validation](../baselines/native-strip.md),
+[lifecycle validation](../baselines/native-strip-lifecycle.md),
+[placement validation](../baselines/native-strip-placement.md).
 
 
 ## Bounded STRIP definition — 2026-09-15
@@ -1145,7 +1147,7 @@ only the diagnostic precursor; the parent first slice remains researching.
 - [ ] Complete full placement/resource/template/scheduler/query integration. This
   reader adds no runtime eligibility or general OT/NT support.
 
-[Contract](formats/native-strip.md), [validation](baselines/native-strip-definition.md).
+[Contract](../formats/native-strip.md), [validation](../baselines/native-strip-definition.md).
 
 ## STRIP service dependency refinement — 2026-09-15
 
@@ -1158,7 +1160,7 @@ only the diagnostic precursor; the parent first slice remains researching.
 - [ ] Finish template ownership and E004, then
   staged world/query state and both-aircraft contact. No AI or carrier activation.
 
-[Source contract](formats/native-strip.md), [validation](baselines/native-strip-service.md).
+[Source contract](../formats/native-strip.md), [validation](../baselines/native-strip-service.md).
 
 ## Isolated STRIP placement inputs — 2026-09-15
 
@@ -1169,7 +1171,7 @@ only the diagnostic precursor; the parent first slice remains researching.
 - [ ] Full mission/resource/template/service ownership and staged queries remain
   required before world placement or either aircraft's live contact connection.
 
-[Contract](formats/native-strip.md), [validation](baselines/native-strip-record.md).
+[Contract](../formats/native-strip.md), [validation](../baselines/native-strip-record.md).
 
 ## Airport and callback ownership ledger — 2026-09-15
 
@@ -1181,7 +1183,7 @@ only the diagnostic precursor; the parent first slice remains researching.
   E016 remaining defaults and E004 before staged query/world integration.
   No native callback execution or autonomous behavior is enabled.
 
-[Contract](formats/native-strip.md), [source validation](baselines/native-strip-ownership.md).
+[Contract](../formats/native-strip.md), [source validation](../baselines/native-strip-ownership.md).
 
 ## Airport slot and attachment ownership — 2026-09-15
 
@@ -1192,8 +1194,8 @@ only the diagnostic precursor; the parent first slice remains researching.
 - [ ] Complete E016/E019/E020 bodies and E004 closure before staged E001/E002;
   no live contact or autonomous behavior is activated by this source-only slice.
 
-[Contract](formats/native-strip.md#airport-slot-and-attachment-producers--ne-001i),
-[validation and remaining boundaries](baselines/native-strip-slots.md).
+[Contract](../formats/native-strip.md#airport-slot-and-attachment-producers--ne-001i),
+[validation and remaining boundaries](../baselines/native-strip-slots.md).
 
 ## Speech timing and current-object state — 2026-09-15
 
@@ -1204,8 +1206,8 @@ only the diagnostic precursor; the parent first slice remains researching.
 - [ ] Finish E019 static-object service branches, E020 payload/clock/speech
   producers and remaining E016/E004 closure before staged query integration.
 
-[Contract](formats/native-strip.md#current-object-switches-and-speech-timing--ne-001j),
-[validation](baselines/native-strip-speech.md). Live/carrier activation remains gated.
+[Contract](../formats/native-strip.md#current-object-switches-and-speech-timing--ne-001j),
+[validation](../baselines/native-strip-speech.md). Live/carrier activation remains gated.
 
 
 ## Static-object event service and queue ownership — 2026-09-15
@@ -1218,8 +1220,8 @@ only the diagnostic precursor; the parent first slice remains researching.
 - [ ] Complete movement commands, queue reset/routing, observer/interceptor and
   OBJEventProc consumers, plus E016/E004 before staged E001/E002 integration.
 
-[Source contract](formats/native-strip.md#static-object-service-and-consuming-event-lookup--ne-001k),
-[validation](baselines/native-strip-events.md). Source ledger only; no runtime,
+[Source contract](../formats/native-strip.md#static-object-service-and-consuming-event-lookup--ne-001k),
+[validation](../baselines/native-strip-events.md). Source ledger only; no runtime,
 AI, carrier or new aircraft activation.
 
 
@@ -1232,8 +1234,8 @@ AI, carrier or new aircraft activation.
 - [ ] Finish full type-load ownership and E021 queue/interceptor/
   observer/damage consumers before staged E001/E002; E016/E004 remain open.
 
-[Source contract](formats/native-strip.md#initial-commands-and-default-event-response--ne-001l),
-[validation](baselines/native-strip-commands.md). No service or live activation.
+[Source contract](../formats/native-strip.md#initial-commands-and-default-event-response--ne-001l),
+[validation](../baselines/native-strip-commands.md). No service or live activation.
 
 
 ## Selected stationary STRIP movement — 2026-09-15
@@ -1245,8 +1247,8 @@ AI, carrier or new aircraft activation.
 - [ ] Finish E021 queue/observer/interceptor ownership and E003/E005 typed
   construction, retaining E016/E004 and staged E001/E002 gates.
 
-[Source contract](formats/native-strip.md#selected-stationary-movement-path--ne-001m),
-[validation](baselines/native-strip-movement.md). Ground sampling and flag-1 Y
+[Source contract](../formats/native-strip.md#selected-stationary-movement-path--ne-001m),
+[validation](../baselines/native-strip-movement.md). Ground sampling and flag-1 Y
 assignment remain required at zero speed; no runtime service or contact activation.
 
 
@@ -1259,8 +1261,8 @@ assignment remain required at zero speed; no runtime service or contact activati
 - [ ] Complete damage/cleanup, selected service/clock producers, comment middle
   and owned output interfaces before staged world/query and runtime activation.
 
-[Source contract](formats/native-strip.md#queue-routing-and-speech-observation--ne-001n),
-[validation](baselines/native-strip-observer.md). Source ledger only; no runtime
+[Source contract](../formats/native-strip.md#queue-routing-and-speech-observation--ne-001n),
+[validation](../baselines/native-strip-observer.md). Source ledger only; no runtime
 callback, audio, networking, AI or carrier activation.
 
 
@@ -1273,8 +1275,8 @@ callback, audio, networking, AI or carrier activation.
 - [ ] Close notification/field producers, dead-object service, comment/output
   and world/query ownership before native contact activation.
 
-[Source contract](formats/native-strip.md#collision-hit-dispatch-and-death-marking--ne-001o),
-[validation](baselines/native-strip-hit.md). Both-aircraft crash behavior remains
+[Source contract](../formats/native-strip.md#collision-hit-dispatch-and-death-marking--ne-001o),
+[validation](../baselines/native-strip-hit.md). Both-aircraft crash behavior remains
 open; no live damage, service, carrier or AI activation.
 
 
@@ -1287,8 +1289,8 @@ open; no live damage, service, carrier or AI activation.
 - [ ] Close trailing special services, notifications, comment/output and world
   ownership before staged queries and live contact.
 
-[Source contract](formats/native-strip.md#clock-and-scheduler-ownership--ne-001p),
-[validation](baselines/native-strip-clock.md). No scheduler or clock replacement,
+[Source contract](../formats/native-strip.md#clock-and-scheduler-ownership--ne-001p),
+[validation](../baselines/native-strip-clock.md). No scheduler or clock replacement,
 AI, carrier or contact activation; fixed 120 Hz adaptation remains authored.
 
 
@@ -1301,8 +1303,8 @@ AI, carrier or contact activation; fixed 120 Hz adaptation remains authored.
 - [ ] Close downstream notification, effect resources, removal, comment and
   world/query ownership before runtime contact or damage activation.
 
-[Source contract](formats/native-strip.md#trailing-events-and-death-accounting--ne-001q),
-[validation](baselines/native-strip-accounting.md). Source only; no AI, carrier,
+[Source contract](../formats/native-strip.md#trailing-events-and-death-accounting--ne-001q),
+[validation](../baselines/native-strip-accounting.md). Source only; no AI, carrier,
 new combat behavior or native runtime claim.
 
 
@@ -1315,6 +1317,6 @@ new combat behavior or native runtime claim.
 - [ ] Resolve remaining cleanup callees, resource/pool lifetime and world/global
   producers before transactional construction/query/runtime acceptance.
 
-[Source contract](formats/native-strip.md#removal-caller-and-notification-exclusions--ne-001r),
-[validation](baselines/native-strip-removal.md). Source only; no AI, carrier,
+[Source contract](../formats/native-strip.md#removal-caller-and-notification-exclusions--ne-001r),
+[validation](../baselines/native-strip-removal.md). Source only; no AI, carrier,
 contact, damage or runtime deletion activation.

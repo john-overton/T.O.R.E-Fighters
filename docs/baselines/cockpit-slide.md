@@ -1,5 +1,12 @@
 # Sliding cockpit and zoom — Linux, 2026-09-14
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 Replaces the perspective-plane presentation in directional-cockpit.md at the
 user's request. Reviewed ignored reference files:
 `engine/src/flight/RetailCockpit.ts::cockpitLook` and `cockpit-layout.ts`.

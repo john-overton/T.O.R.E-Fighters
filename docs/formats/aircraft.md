@@ -1,5 +1,13 @@
 # Aircraft recovery and free-flight adapters
 
+> **Research notes — research mode.** Recovered facts about the original
+> game's data and code, kept as evidence. Requirements, gates and remaining
+> work described here are research-mode scope; they are not acceptance gates
+> for gameplay. Parity is measured by expression of feature — see
+> [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
+> [docs/spec/](../spec/).
+
+
 The 2026-09-13 port uses the supplied Fighters Anthology `F18.PT`, not the distinct `F18C.PT`. Its retail name is F/A-18D. The reference checkout's `docs/aircraft-porting.md`, `formats/{pt,jt,sh,hud,instrument-windows}.md` and bounded Python readers were research guides. No TypeScript runtime, terrain engine, converted reference bundle, external font or retail bytes are required by the Rust application or extractor.
 
 This is a development port with recovered data and a playable adapter, **not completed native flight, cockpit, instrument or weapon parity**. In particular, extracting executable modules does not implement all their behavior. The user clarified that 1:1 instrument rendering means the separate RWR/radar/systems/target windows; cockpit-frame resolution is a different question.

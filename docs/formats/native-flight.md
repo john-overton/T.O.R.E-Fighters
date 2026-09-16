@@ -1,5 +1,13 @@
 # Fighters Anthology native flight research
 
+> **Research notes — research mode.** Recovered facts about the original
+> game's data and code, kept as evidence. Requirements, gates and remaining
+> work described here are research-mode scope; they are not acceptance gates
+> for gameplay. Parity is measured by expression of feature — see
+> [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
+> [docs/spec/](../spec/).
+
+
 This is a static reverse-engineering pass against the local retail **FA** executable,
 not a port of the reference application's custom flight engine. The Rust helper
 translations are available in `tore-formats::flight_model`; the playable simulation

@@ -1,5 +1,12 @@
 # Creator and ordnance behavior mapping — 2026-09-14
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 Continues [active tables and geometry](menu-options-geometry.md) against the same
 hash-verified FA.EXE/SMS pair. Research only; no native modules were executed and
 no application rendering or simulation behavior changed.
@@ -47,5 +54,5 @@ custom-load `armplane` directive/parser, ordnance exit codes, menu availability,
 pickup/keyboard input branches and half-open rectangle test. Static tracing
 confirms separate pickup/drop rectangles, source and catalog drag deltas,
 fixed-point fuel serialization, and multiplayer/fort menu restrictions.
-See the [complete scope ledger](../menu-parity-matrix.md) for mapped and open work.
+See the [complete scope ledger](../research/menu-parity-matrix.md) for mapped and open work.
 These findings extend static evidence; they do not close original-game acceptance.

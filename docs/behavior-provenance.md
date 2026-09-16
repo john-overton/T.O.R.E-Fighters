@@ -1,5 +1,10 @@
 # Behavior provenance and acceptance
 
+Provenance answers **where a behaviour came from**. It does not decide whether a
+behaviour is acceptable. Acceptance is decided by the parity target in
+[AGENTS.md](../AGENTS.md): does a player experience what they experience in
+Fighters Anthology?
+
 User direction, 2026-09-15: prioritize recovering and implementing features that
 exist in Fighters Anthology. A plausible simulator feature is not evidence that
 FA contains it. This policy applies to implementation plans, coverage summaries,
@@ -9,80 +14,95 @@ format research and acceptance reports.
 
 | Origin | Meaning | Required documentation |
 | --- | --- | --- |
-| Native | Behavior established from the reviewed original executable/resources or a controlled observation of retail | Source build/hash or linked source identity; routine/field/caller or recording; trigger, inputs, units, ordering and outputs; unresolved branches |
-| Fitted | An implementation approximation we authored because a native contract is missing or because of host integration | Exact rule/constants, reason, known difference or uncertainty, runtime scope, and the native work it cannot close |
-| User-directed opinionated | An intentional addition or change explicitly requested by the user | Request/date, intended departure from native behavior, scope/default and acceptance criteria; retain the native reference separately |
-| Unknown | Insufficient evidence to establish existence, meaning or behavior | Missing evidence and next research step; keep unavailable/unimplemented where required |
+| **Spec-derived** (default) | Implemented from a behaviour spec in [`spec/`](spec/) that describes what the player experiences | The spec file, the numbers tested against, and anything the spec left unknown |
+| Native | A code path reconstructed from the reviewed original executable's control flow | Source build/hash or linked source identity; routine/field/caller; trigger, inputs, units, ordering and outputs; unresolved branches |
+| Fitted | An implementation approximation authored because a behaviour is not yet specified, or because the host needs something the original did not have | Exact rule/constants, reason, known difference or uncertainty, and runtime scope |
+| Opinionated | A deliberate design choice. Say whether John requested it (with request and date) or an agent chose it | Intended departure from original behaviour, scope/default and acceptance criteria |
+| Unknown | Insufficient evidence to establish existence, meaning or behaviour | Missing evidence and next research step; keep unavailable/unimplemented where required |
 
-“Authored” alone is ambiguous: say whether the choice is fitted or user-directed
-opinionated. An implementation choice made by an agent is **not** user-directed
-merely because the user requested the broader feature. Do not retroactively
-attribute a fitted constant or design to the user. A user request to investigate
-a feature is not permission to invent its native behavior.
+**Spec-derived is the default for gameplay code.** "Native" is a label that
+records where a behaviour came from. It is not a requirement, not an acceptance
+gate, and not a reason to block, revert or withhold working behaviour. A
+`fitted` or `opinionated` component is acceptable as shipped behaviour and does
+**not** have to be replaced by a `native` one before acceptance. Replace it when
+a spec shows the player would notice the difference.
+
+“Authored” alone is ambiguous: say whether the choice is fitted or opinionated,
+and for opinionated say who chose it. An implementation choice made by an agent
+is **not** user-directed merely because the user requested the broader feature.
+Do not retroactively attribute a fitted constant or design to the user. A user
+request to investigate a feature is not permission to invent its behaviour.
 
 A feature may contain several origins. Split the feature into components rather
-than applying one “native” label to an entire hybrid system. Native assets or PT
+than applying one label to an entire hybrid system. Native assets or PT
 parameters do not make the equations consuming them native. Native Rust code
 means the host technology; it does not establish original-game provenance.
 
-## Native implementation steps
+## Research-mode recovery steps
 
-Track these independently; a later step must not be implied by an earlier one:
+These steps apply **in research mode only**, when recovering behaviour from the
+original executable. They track how far a recovery has progressed. They are
+**not** completion columns for a gameplay feature — a gameplay feature is
+complete when it matches its spec, whatever its provenance.
 
-1. **Source established:** identify the behavior, conditions, producers, consumers
-   and exact build. State whether evidence is static code, resource data or retail
-   observation. A symbol name alone is not a behavioral specification.
-2. **Translated and tested:** implement the reviewed contract with explicit inputs,
+1. **Source established:** identify the behaviour, conditions, producers,
+   consumers and exact build. State whether evidence is static code, resource
+   data or retail observation. A symbol name alone is not a behavioural
+   specification.
+2. **Translated and tested:** confirm the reviewed contract with explicit inputs,
    state, time and randomness. Test source-derived expected outputs and boundary
    conditions. Label diagnostic helpers as diagnostic.
-3. **Runtime connected:** connect verified producers and consumers in the correct
-   order. Record any fitted boundary that remains; keep movement, body attitude
-   and presentation offsets distinct.
-4. **Retail compared:** compare matched aircraft/loadout, inputs, conditions and
-   outcomes with the original game; report differences and unavailable checks.
+3. **Specified:** write the player-visible behaviour and its numbers into
+   [`spec/`](spec/). This is where research ends and implementation begins.
 
-Synthetic tests can validate arithmetic and invariants. Deterministic replay
-can validate repeatability. Neither establishes retail trajectory parity.
-For the F18/Rafale departure work, the user confirmed on 2026-09-15 that a
-useful retail flight comparison is unavailable. This is a recorded evidence
-limitation, not a prerequisite for continuing source-backed implementation.
-Do not turn that limitation into a claim of retail trajectory parity.
+Two former columns are retired. **"Runtime connected"** described wiring a
+translated code path into the running game; under parity by expression of
+feature, implementation works from the spec instead, so it is no longer tracked
+for gameplay. **"Retail compared"** remains unavailable: John confirmed on
+2026-09-15 that a useful retail flight comparison cannot be run. That is a
+recorded evidence limitation, not a prerequisite and not a claim of parity.
 
-Static source recovery can establish expected branch behavior without running
-native modules; it does not automatically establish a complete flight tick.
+Synthetic tests can validate arithmetic and invariants. Deterministic replay can
+validate repeatability. Neither establishes retail trajectory parity.
 
 ## Planning and reporting rules
 
-- Current work focuses on native feature recovery. Do not add new fitted flight
-  laws or gameplay effects to fill unknown behavior. Research the missing contract
-  or list the gap. Existing fitted behavior remains explicitly identified; do not
-  silently remove it, expand it or promote it to native acceptance.
-- Keep native tasks and fitted/user-directed tasks separately labeled. A fitted
-  substitute cannot close a native checklist item. Separate completed component
-  work from incomplete end-to-end integration.
-- Use `docs/formats/` for source contracts, the relevant guide/plan for integration
-  and sequence, and `docs/baselines/` for methods and measured evidence. Link
-  between them rather than duplicating specifications.
+- Work from specs. When a spec is missing a number, that is a research task:
+  say so, choose a documented value, and label the component `fitted` or
+  `opinionated`. Do not invent a *feature* Fighters Anthology does not have.
+- Existing fitted behaviour stays explicitly identified. Do not silently remove
+  it or expand it, and do not relabel it `native` without the evidence — but it
+  needs no replacement to be acceptable.
+- Research-mode labels and implementation status are tracked separately. A
+  fitted substitute does not close a *research* item; it can perfectly well close
+  a gameplay one.
+- Use [`formats/`](formats/) for recovered source facts, [`spec/`](spec/) for
+  player-visible behaviour, [`baselines/`](baselines/) for methods and measured
+  evidence, and [`parity-plan.md`](parity-plan.md) for sequence. Link between
+  them rather than duplicating specifications.
 - Correct stale status claims in place. Historical measurements remain valid as
   measurements, but supersede misleading completion/acceptance descriptions.
-- Scope “parity”: name the feature and remaining mismatch. Separate missing
-  implementation from missing original-game comparison. Do not make exact legacy
-  clock artifacts or cross-platform bit identity new product requirements when
-  the roadmap excludes them; document numerical differences that affect behavior.
+- Scope “parity”: name the feature and the remaining mismatch a player would
+  notice. Separate missing implementation from missing original-game comparison.
+  Exact legacy clock artifacts and cross-platform bit identity are not product
+  requirements; document numerical differences that affect behaviour.
 
 ## Current flight examples
 
-| Component | Origin | Current completion boundary |
+Labels describe origin only. None of these is a blocker.
+
+| Component | Origin | Notes |
 | --- | --- | --- |
-| Warning/stall timers, spin entry/recovery predicates | Native | Translated/tested; selected hybrid connections, with fitted initial stall classification |
-| Stall control/lift attenuation | Native arithmetic | Connected in hybrid; clean-envelope reference speed and later force integration remain fitted |
-| Timed warning-transition rotation (“tumble”) and stalled movement fall | Native source-backed research | Joined stage tested with both PTs/imported tables and connected in the explicit airborne native option; legacy/hybrid unchanged |
-| Loaded normal controls, rudder/auxiliary rates, departure→force→movement/contact | Native translations with authored diagnostic driver | Joined diagnostic and restricted airborne live connection tested for both PTs; explicit turbulence bypass and adapted clock/device/fuel producers, no contact/lifecycle or retail acceptance |
-| Clean-envelope stall-entry gate | Fitted | Runtime; does not close native current-G/difficulty/device classification |
-| Response filters, trim/alignment, continuous spin coupling | Fitted | Runtime; not original force/control-law acceptance |
-| `sideslip_drag=0.5` in both aircraft models | Fitted | Added by the implementation, not requested as an opinionated change and not extracted from FA |
-| Achieved G/applied-rate diagnostic snapshot | Authored diagnostic instrumentation | Measures our adapter; does not prove that retail exposes equivalent measured channels |
-| Sustained controller rumble requested in the response plan | User-directed addition; mapping remains to be designed | Deferred while native behavior is recovered; native sound triggers and any authored haptic mapping need separate acceptance |
+| Warning/stall timers, spin entry/recovery predicates | Native | Translated and tested; initial stall classification is fitted |
+| Stall control/lift attenuation | Native arithmetic | Connected in hybrid; clean-envelope reference speed and later force integration are fitted |
+| Timed warning-transition rotation (“tumble”) and stalled movement fall | Native | Tested with both PTs and imported tables; legacy/hybrid unchanged |
+| Loaded normal controls, rudder/auxiliary rates, departure→force→movement | Native translations with authored driver | Tested for both PTs; turbulence bypass and host clock/device/fuel producers are fitted |
+| Ground, terrain and object contact | **Opinionated** | Reclassified 2026-09-15. Contact behaviour is authored to match what a player experiences on a runway and deck; it is no longer waiting on a recovered native producer |
+| Clean-envelope stall-entry gate | Fitted | Runtime behaviour; acceptable as shipped |
+| Response filters, trim/alignment, continuous spin coupling | Fitted | Runtime behaviour; acceptable as shipped |
+| `sideslip_drag=0.5` in both aircraft models | Fitted | Chosen by the implementation, not requested by John and not extracted from FA |
+| Achieved G/applied-rate diagnostic snapshot | Diagnostic instrumentation | Measures our adapter; does not prove retail exposes equivalent channels |
+| Sustained controller rumble | Opinionated, requested by John | Mapping still to be designed |
 
 Diagnostic tooling is not a new gameplay feature. Document its purpose and limits
 without pretending it is recovered retail behavior or a user-chosen flight law.

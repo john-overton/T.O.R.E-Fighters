@@ -1,5 +1,12 @@
 # Main-menu baseline — 2026-09-13
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 ## Result
 
 The Rust app imports original menu resources from the user's Fighters Anthology installation, randomly selects one of five original Choose Activity backgrounds, composites original enabled/disabled action pieces and proportional fonts, and supports animated placeholder buttons and top-bar dropdowns. The user's photo matches `CHOOSEV.PIC`. No custom TypeScript menu controls were carried over. Hover/focus is silent; sounds play on clicks/toggles.

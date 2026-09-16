@@ -1,5 +1,12 @@
 # Shared F/A-18D / Rafale C hybrid acceptance — 2026-09-13
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 Host: macOS arm64, Apple M3, pinned Rust 1.91.1. No imported executable was run.
 This baseline covers the working **hybrid free-flight model**, not original-game
 trajectory parity. See [component provenance](../FLIGHT-MODEL.md).

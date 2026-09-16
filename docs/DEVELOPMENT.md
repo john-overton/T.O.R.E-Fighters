@@ -511,9 +511,10 @@ Use `cargo test --locked -p tore-formats tumble` for initial synthetic
 native tumble/fall branch checks. The existing static extraction command now
 includes their scheduling/movement slices. This diagnostic component is not
 called by either live adapter. [Evidence and open gates](baselines/native-tumble.md).
-Apply [behavior provenance](behavior-provenance.md) when interpreting results:
-native source, translation tests, runtime connection and retail comparison are
-separate milestones.
+Apply [behavior provenance](behavior-provenance.md) when interpreting results.
+In research mode, identifying the source, testing the translation and writing the
+spec are separate steps. "Runtime connection" is retired as a completion column,
+and retail comparison is unavailable.
 
 The `native_departure` example joins warning/stall/spin/tumble branches with
 native movement composition. Pass extracted sine table, atan table and one or
@@ -546,8 +547,9 @@ disabled and explicit caller samples; it adds no live adapter or terrain produce
 DIR supplies bounded `sine-q15.bin` and `atan-pa.bin` files from the static native
 extraction pass. Use it with either `--aircraft f18` or `--aircraft rafale`, and
 with `--headless-flight`/`--flight-probe-ticks` for repeatable checks. It is mutually
-exclusive with hybrid and combat modes. Contact stops the run; environmental
-turbulence is unavailable. Existing device/fuel/clock adaptation remains explicit.
+exclusive with hybrid and combat modes. Two limits belong to this restricted
+research path only: contact stops the run, and environmental turbulence is
+unavailable here. Existing device/fuel/clock adaptation remains explicit.
 [Commands, restart/failure semantics and acceptance](baselines/native-live-flight.md).
 `cargo run --locked -p tore-sim --example native_live -- SINE ATAN PT [PT]` runs
 both-aircraft live-API replay checks independently of the importer hybrid suite.

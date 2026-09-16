@@ -3,27 +3,32 @@
 `tore-sim` is a renderer-independent, deterministic 120 Hz flight kernel. The
 working **hybrid** path combines recovered aircraft data and native helper rules
 with fitted continuous dynamics where the original engine contract is still
-incomplete. It is a usable free-flight model, not a claim of byte-for-byte native
-trajectory parity or a real-aircraft engineering model.
+incomplete. It is a usable free-flight model, not a reproduction of the original
+program's internal trajectory arithmetic or a real-aircraft engineering model.
 
 The opt-in **airborne native research** path now connects the joined native
-service to the live loop for both aircraft. It retains explicitly authored
-clock/device/fuel boundaries and stops at unsupported contact. This is separate
-from legacy and hybrid. [Acceptance and limits](baselines/native-live-flight.md).
+service to the live loop for both aircraft. Inside that research path only, the
+clock, device and fuel boundaries are explicitly authored and the flight stops at
+unsupported contact; ordinary free flight has working authored ground contact.
+This is separate from legacy and hybrid.
+[Acceptance and limits](baselines/native-live-flight.md).
 
 ## Next scheduled work
 
-The [living native environment/systems plan](native-environment-systems-plan.md)
-now governs the next contact/handling, ground/sea asset, lifecycle/event,
-decoy/guidance and environmental dependency pass. Implementation is now authorized, beginning with the land-contact source and
-query foundation; no AI scope is included. The first
+Sequencing lives in [the parity plan](parity-plan.md). The
+[environment/systems plan](research/native-environment-systems-plan.md) is a
+frozen archive as of 2026-09-15: use it for its recovered contact, asset,
+lifecycle/event and environmental research, not for sequencing. No AI scope is
+included. The first
 [cache/preference checkpoint](baselines/native-land-foundation.md) and
 [vertical geometry checkpoint](baselines/native-land-geometry.md) are diagnostic
-only and do not remove the live contact stop. Maneuver audio/rumble and final
-[flight-response acceptance](flight-response-plan.md) follow that continuation.
-[Provenance policy](behavior-provenance.md) keeps native contracts, fitted choices
-and user-directed changes distinct; airborne acceptance does not close the
-remaining lifecycle/contact gates.
+only; the restricted research path still stops at unsupported contact.
+Maneuver audio/rumble and final
+[flight-response acceptance](research/flight-response-plan.md) follow that continuation.
+[Provenance policy](behavior-provenance.md) records where each component came
+from — spec-derived, native, fitted or opinionated — and keeps user-directed
+changes distinct. Those labels describe origin; none of them is an acceptance
+gate. Lifecycle and contact work inside the research path continues.
 
 ## Run and reproduce
 
@@ -86,20 +91,23 @@ those helpers are not falsely presented as a complete native integrator.
 
 Both aircraft complete the same tested free-flight and ground scenarios using
 their own extracted data. The suite is an engineering regression gate, not an
-original-game trajectory oracle. To claim native parity still requires original
-trajectory comparison, terrain/object collision geometry and cache producers,
-carrier/arresting dynamics, remaining damage/equipment state, exact integer
-update scheduling and RNG consumption order. Fitted behavior is localized in
+original-game trajectory oracle. Behavior a player would still find missing
+includes carrier and arresting-gear dynamics and the remaining damage/equipment
+state. Terrain and object contact is authored rather than recovered, and exact
+integer update scheduling and RNG consumption order are original implementation
+details rather than parity targets. Fitted behavior is localized in
 `tore-sim`, separate from bounded readers and static native translations.
 
 Current theaters supply height only through the app's existing callback; they do
 not yet identify validated runway surfaces for the hybrid model. Consequently,
 landing acceptance is demonstrated headlessly on explicit runways, and arbitrary
-app terrain is not silently treated as a safe runway. This boundary is intentional
-until source airfield/object collision mapping is ported.
+app terrain is not silently treated as a safe runway. That boundary is a
+deliberate design choice (opinionated), not a hold waiting on recovered source
+airfield/object collision mapping; ground, terrain and object contact was
+reclassified opinionated on 2026-09-15.
 
 See [acceptance evidence](baselines/shared-flight-model.md),
-[native research](formats/native-flight.md), and [remaining work](progress.md).
+[native research](formats/native-flight.md), and [remaining work](research/progress.md).
 
 ## Independent aircraft models and future gauges
 
@@ -268,7 +276,7 @@ Native tumble/fall/spin now has a joined diagnostic stage in
 `tore-formats::flight_model::departure_stage`, with explicit envelope roles and
 source movement composition. Both reviewed PTs pass its imported-table probes.
 Neither live adapter calls it. The native
-movement-state and whole-tick connection gates remain open; see the
+movement-state and whole-tick connection research steps remain open; see the
 [source continuation](formats/native-flight.md#native-tumble-continuation--2026-09-15).
 
 The [departure-stage evidence](baselines/native-departure-stage.md) and
@@ -283,9 +291,11 @@ The next continuation now provides restricted airborne live activation with
 `--native-flight-tables DIR`, where DIR contains extracted sine/atan tables.
 The translated control/departure/force/movement service is authoritative; the
 existing host clock, input, device and fuel producers remain explicit adaptations.
-Terrain contact stops the research flight and environmental turbulence is disabled.
-Native query producers, engine/device/fuel/damage lifecycles, setup refresh cadence,
-event execution and scheduler/RNG parity remain open. Legacy and hybrid retain
+Terrain contact stops this restricted research path and environmental turbulence
+is disabled inside it; ordinary free flight has working authored ground contact.
+Native query producers, engine/device/fuel/damage lifecycles, setup refresh cadence
+and event execution remain open research items; scheduler and RNG ordering are
+original implementation details, not parity targets. Legacy and hybrid retain
 their existing behavior. [Live commands and validation](baselines/native-live-flight.md).
 Retail comparison remains an unavailable evidence item, not an implementation
 prerequisite. Audio/rumble follows the scheduled native work.

@@ -1,6 +1,6 @@
 # Desktop flight controls and Escape menu
 
-The F/A-18D cockpit now covers the full flight canvas. The world renders behind transparent cockpit artwork and independently toggled instrument windows. There is no half-height viewport or opaque lower PANEL fill. Menus retain the proportional 640×480 canvas. This is still a development flight adapter, not accepted native flight/system parity.
+The F/A-18D cockpit now covers the full flight canvas. The world renders behind transparent cockpit artwork and independently toggled instrument windows. There is no half-height viewport or opaque lower PANEL fill. Menus retain the proportional 640×480 canvas. This is still a development flight adapter; [behaviour provenance](behavior-provenance.md) records which flight and system components are spec-derived, native, fitted or opinionated.
 
 Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity → Create Quick Mission → OK. Free flight skips loadout and starts with clean external stations. On a MacBook, use **Fn/Globe with the function keys** when macOS assigns those keys to system actions. Fn-Up/Down supplies PageUp/PageDown on compact keyboards. The physical US key positions are used in flight, including shifted numbers and Option combinations.
 
@@ -88,7 +88,7 @@ The HUD uses imported `HUD11.FNT`; instrument/menu text uses `WIN11.FNT`. It sho
 
 Layout, line symbology, frame scaling, pan, zoom and camera placement are authored. `~F18H.PIC` is uniformly scaled to cover the actual flight aspect ratio, showing more side artwork on wider screens and cropping only what is required to avoid stretching. Mirrors render live rear views every visible frame. Native F18 HUD callers, HUDSYM glyph meanings, full cockpit composition, corner-speed/ILS/weapon modes and native pixel parity remain open. The HUD remains aligned with the aircraft-forward datum and pans opposite head-look with the cockpit. External views omit it.
 
-See [recovery details](formats/aircraft.md), [progress](progress.md), and [validation](baselines/cockpit-controls.md).
+See [recovery details](formats/aircraft.md), [progress](research/progress.md), and [validation](baselines/cockpit-controls.md).
 
 
 The flight overlay is independent of the fixed menu canvas and tracks the window aspect. It is composed at the physical drawable size, proportionally capped at 1920×1080 for bounded CPU/GPU work. At centered forward view, cockpit art covers that entire overlay; menus remain centered at their original proportions. The HUD is 15% smaller, with projection compensation keeping the pitch ladder aligned with the camera. TAS and MSL primary numbers have transparent backgrounds; nearby tape labels are suppressed instead of drawing dark backing rectangles. Static cockpit artwork and unchanged instrument rasters are cached.
@@ -273,5 +273,7 @@ airborne service. Existing device animation/threshold and fuel timing are host
 adaptations. The **No turbulence?** setting stays on in this mode; enabling it
 reports that environmental turbulence is unavailable. Reaching terrain contact
 pauses with an explicit unsupported-contact message; restart resets the native
-state. Legacy/hybrid retain their existing controls and behavior.
+state. That limit belongs to this research option alone: ordinary free flight has
+working authored ground contact. Legacy/hybrid retain their existing controls and
+behavior.
 [Scope and validation](baselines/native-live-flight.md).

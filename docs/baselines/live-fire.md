@@ -1,5 +1,12 @@
 # Two-aircraft development live-fire baseline
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 Follow-up: [manual weapons integration](manual-weapons.md) supersedes the earlier
 class-0-only fixtures, all-radar tracking dependency, missing carried geometry
 and combat-service recording gaps described below. This document preserves the

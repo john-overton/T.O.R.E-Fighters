@@ -1,5 +1,12 @@
 # Native tumble diagnostic start — 2026-09-15
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 **Origin:** static native FA source recovery. **Runtime scope:** diagnostic only.
 The live F18/Rafale legacy and hybrid adapters do not call this new component.
 No retail execution, trajectory comparison or live tumble acceptance is claimed.

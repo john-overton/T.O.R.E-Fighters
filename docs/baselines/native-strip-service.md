@@ -1,9 +1,16 @@
 # STRIP service and RNG dependency checkpoint
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 2026-09-15, following `031c31c`. **NE-00.1g is complete only as a dispatcher
 source ledger and diagnostic kind-0 delay selector.** Parent land/world/contact
 and scheduler acceptance remain open. [Contract](../formats/native-strip.md),
-[living plan](../native-environment-systems-plan.md).
+[living plan](../research/native-environment-systems-plan.md).
 
 ```sh
 python3 tools/extract_native_flight.py --source gameassets/fighters-anthology --out .local/native-environment/strip-service-source

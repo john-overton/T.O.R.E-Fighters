@@ -1,5 +1,12 @@
 # Graphical HUD bank scale — 2026-09-15
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 The user clarified the bank display with an F-16 HUD reference image, requesting
 an arc and selective numeric labels. This supersedes the earlier `BANK ±N DEG`
 line. The authored scale uses 10-degree ticks, longer ticks and numeric labels

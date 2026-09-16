@@ -1,5 +1,12 @@
 # F/A-18D animation pass — 2026-09-13
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 ## Implemented presentation
 
 The exterior now uses continuous device fractions instead of switching between endpoint shapes at 50% travel. Source textures, UVs and fully deployed device geometry remain in use. Animation runs from fixed 120 Hz state and interpolates for presentation; it does not feed fitted visual deflections back into flight dynamics.

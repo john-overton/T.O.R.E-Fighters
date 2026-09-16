@@ -1,5 +1,13 @@
 # Fighters Anthology main-menu extraction
 
+> **Research notes — research mode.** Recovered facts about the original
+> game's data and code, kept as evidence. Requirements, gates and remaining
+> work described here are research-mode scope; they are not acceptance gates
+> for gameplay. Parity is measured by expression of feature — see
+> [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
+> [docs/spec/](../spec/).
+
+
 This is the first native menu slice, researched against the user's local media on 2026-09-13. The TypeScript project's menu contained authored controls and is **not** the visual specification. Its format notes/decoders were reference material; the supplied `gameassets/reference-photos/Main-Screen.jpeg` is the visual target.
 
 ## Assets actually used
@@ -97,7 +105,7 @@ Run `python3 tools/explore_assets.py` for a fresh inventory with archive hashes/
 
 Choose Activity's Create Quick Mission action now opens the creator mock. Native setup at FA.EXE `0x42eb20–0x42eb33` chooses `QUIKMIS3.PIC` versus `QUIKMISS.PIC`; the former carries the Fighters Anthology logo matching the supplied reference photo. Bar placement around `0x42eb3c` uses an 84-pixel origin. The mock uses QUIKMIS3's own palette, original PIC font strips and button pieces, plus the original Ukraine briefing map.
 
-The fields, Aircraft stub, theater dropdown, temporary Terrain Viewer button and help entries are authored for the requested investigation workflow. They do not establish recovered general DLG/MNU support. Click activation requires press/release on the same control; hover and focus stay silent. Escape dismisses the dropdown before returning to the previous screen. See [viewer baseline](../baselines/ukraine-viewer.md) and [parity backlog](../progress.md).
+The fields, Aircraft stub, theater dropdown, temporary Terrain Viewer button and help entries are authored for the requested investigation workflow. They do not establish recovered general DLG/MNU support. Click activation requires press/release on the same control; hover and focus stay silent. Escape dismisses the dropdown before returning to the previous screen. See [viewer baseline](../baselines/ukraine-viewer.md) and [parity backlog](../research/progress.md).
 
 ### Typography correction
 

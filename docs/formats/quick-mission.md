@@ -1,5 +1,13 @@
 # Active Quick Mission tables and dialog geometry
 
+> **Research notes — research mode.** Recovered facts about the original
+> game's data and code, kept as evidence. Requirements, gates and remaining
+> work described here are research-mode scope; they are not acceptance gates
+> for gameplay. Parity is measured by expression of feature — see
+> [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
+> [docs/spec/](../spec/).
+
+
 Recovered from the reviewed FA.EXE/SMS pair on 2026-09-14. This specifies source
 data and consumers; it does not implement mission generation. Full extracted
 catalogs remain ignored, not embedded in the application or tests.

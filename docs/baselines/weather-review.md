@@ -1,5 +1,12 @@
 # Weather implementation and aircraft effects review — 2026-09-15
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 The working tree was clean at the start. Eleven local commits were ahead of the
 local upstream tracking reference, from `0e81b38` through `21b5823`. This review
 does not fetch, rewrite, commit or push them. It reviews their code and claims;
@@ -95,7 +102,7 @@ Other aircraft and all indirect runtime paths remain outside this bounded result
 **Conclusion:** wingtip vapor is confirmed. Dedicated engine contrails and broader
 wing vapor remain unconfirmed, not proven absent game-wide. The “never execute”
 rule permits this static inspection and later bounded translation. Future optional
-engine contrails are now explicitly scheduled in [W7](../weather-plan.md#w7--optional-engine-contrails-after-retail-weather).
+engine contrails are now explicitly scheduled in [W7](../research/weather-plan.md#w7--optional-engine-contrails-after-retail-weather).
 
 ## Remaining findings and acceptance limits
 

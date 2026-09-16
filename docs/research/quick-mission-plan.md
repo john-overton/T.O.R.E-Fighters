@@ -1,3 +1,5 @@
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D27) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its creator field research, resource inventory and dated checkpoints. Its sequencing, gates and status columns are no longer authoritative.
+
 # Quick Mission Creator and Load Ordnance implementation plan
 
 Requested 2026-09-14: schedule the full creator setup, faithful to Fighters
@@ -6,7 +8,7 @@ as explicit placeholders. First playable target: airborne BARCAP setup.
 This document plans the work; it does not claim implementation or mission parity.
 Scope expanded 2026-09-14: implement the Load Ordnance screen and connect supported
 loadouts to the existing weapons service. It is no longer a deferred screen stub.
-See the [ordnance review and implementation steps](ordnance-plan.md).
+See the [ordnance review and implementation steps](../research/ordnance-plan.md).
 
 ## Review findings
 
@@ -24,7 +26,7 @@ See the [ordnance review and implementation steps](ordnance-plan.md).
   QM_MENU.MNU and QUICK.MT. Embedded dialog lists can be stale; the photo,
   executable tables and handler references must determine the active FA values.
 
-See [research evidence](baselines/quick-mission-research.md).
+See [research evidence](../baselines/quick-mission-research.md).
 
 ## 1. Recover the active creator contract
 
@@ -161,8 +163,8 @@ combat loop, M1e AI, or native mission-generation parity.
 
 ## Mapping checkpoint — 2026-09-14
 
-See the [defaults and input contract](formats/quick-mission.md) and
-[validation evidence](baselines/menu-behavior-mapping.md). Verified source rules
+See the [defaults and input contract](../formats/quick-mission.md) and
+[validation evidence](../baselines/menu-behavior-mapping.md). Verified source rules
 are recorded separately from unresolved behavior. Implementation and original-game
 acceptance gates above remain open.
 
@@ -171,6 +173,6 @@ Track remaining source questions in the [mapping ledger](menu-parity-matrix.md).
 ## Implementation checkpoint — 2026-09-14
 
 Bounded imports, editable briefing, original-art ordnance and supported armed
-airborne launch/restart are implemented. [Validation and remaining gates](baselines/creator-ordnance.md).
+airborne launch/restart are implemented. [Validation and remaining gates](../baselines/creator-ordnance.md).
 Full original-game parity and custom-load replay remain open; the checklist above
 is the full target, not a claim that every acceptance gate passed.

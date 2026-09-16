@@ -1,5 +1,12 @@
 # Live mirrors and uncapped presentation
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 2026-09-14, Linux/Wayland, NVIDIA RTX 4070 / Vulkan, Rust 1.91.1 dev profile
 (app opt-level 2). User-owned FA media, Ukraine, clean free flight, no audio.
 

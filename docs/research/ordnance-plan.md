@@ -1,3 +1,5 @@
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D27) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its Load Ordnance screen description, source research and dated checkpoints. Its sequencing, gates and status columns are no longer authoritative.
+
 # Load Ordnance implementation plan
 
 Scope added 2026-09-14 to the [Quick Mission pass](quick-mission-plan.md).
@@ -50,7 +52,7 @@ First implementation pass: shared MNU decoding confirms Unload All and Cheat
 whose quick-mission visibility remains unresolved. Recover the native cheat's
 scope and keep normal compatibility distinct from that explicit option; its
 presence does not make unsupported projectile execution available. See
-[menu contract evidence](baselines/menu-contract-pass.md).
+[menu contract evidence](../baselines/menu-contract-pass.md).
 
 ## B. Build a shared typed loadout model
 
@@ -130,8 +132,8 @@ menus, combat AI and complete native mission/projectile parity stay open.
 
 ## Mapping checkpoint — 2026-09-14
 
-See the [controls, eligibility and geometry contract](formats/ordnance-menu.md) and
-[validation evidence](baselines/menu-behavior-mapping.md). Verified source rules
+See the [controls, eligibility and geometry contract](../formats/ordnance-menu.md) and
+[validation evidence](../baselines/menu-behavior-mapping.md). Verified source rules
 are recorded separately from unresolved behavior. Implementation and original-game
 acceptance gates above remain open.
 
@@ -140,6 +142,6 @@ Track remaining source questions in the [mapping ledger](menu-parity-matrix.md).
 ## Implementation checkpoint — 2026-09-14
 
 Bounded imports, editable briefing, original-art ordnance and supported armed
-airborne launch/restart are implemented. [Validation and remaining gates](baselines/creator-ordnance.md).
+airborne launch/restart are implemented. [Validation and remaining gates](../baselines/creator-ordnance.md).
 Full original-game parity and custom-load replay remain open; the checklist above
 is the full target, not a claim that every acceptance gate passed.

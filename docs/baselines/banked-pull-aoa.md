@@ -1,5 +1,12 @@
 # Banked pull and angle of attack — 2026-09-13
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 The reported maneuver is banking while pulling up. The previous adapter drove the nose toward the velocity vector with a zero-AoA alignment target. Its pitch-rate calculation included gravity in aircraft-up but omitted the complementary gravity term in aircraft-right/body-yaw during a banked turn. A sustained pull could therefore lose its nose/flight-path separation while retaining uncommanded sideslip.
 
 The HUD projection was checked independently against dot products with the aircraft's right/up/forward axes. It already includes bank and horizontal velocity. No artificial sideways offset or screen-space lag was added. In a settled coordinated turn, positive AoA projects below the nose; during roll-in/pull, lateral lag can occur and must change sign between left/right maneuvers.

@@ -1,5 +1,12 @@
 # Combat exporter and component baseline
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 Date: 2026-09-14. Subsequent [live-fire work](live-fire.md) supersedes the
 no-live-weapons status below and fixes the expanded-cache reload cap. Plan commit `457c85b` was pushed to `origin/main` before this
 implementation. This records partial W0/W1/W2 work, not completion of the

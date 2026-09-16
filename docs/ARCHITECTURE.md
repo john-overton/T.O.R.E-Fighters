@@ -1,11 +1,11 @@
 # Initial architecture
 
-The M0 environment supports the first M1a menu slice, partial M1b all-theater renderer and partial M1c Hornet free flight. M0's full title census, salvage inventory, parity specification, and AI VM decision remain open.
+The M0 environment supports the M1a menu slice, the M1b renderer across all 16 theaters, and M1c free flight in two aircraft (F/A-18D and Rafale C) plus a development weapons range. M0's full title census, salvage inventory, parity specification, and AI VM decision remain open.
 
 | Component | Choice | Purpose |
 | --- | --- | --- |
 | Language | Rust 2024, compiler 1.91.1 | Reproducible native builds |
-| Workspace | `crates/tore-app` | Application entry point and desktop shell |
+| Workspace | `crates/tore-app`, `tore-formats`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native` | Desktop shell and entry point, plus the format, extraction, simulation and input crates |
 | Window/input | `winit` 0.30 | Native window lifecycle and input |
 | Graphics | `wgpu` 27 | Metal on macOS; native backends for Windows/Linux |
 | Startup bridge | `pollster` 0.4 | Wait for GPU initialization without a general async runtime |
@@ -43,7 +43,7 @@ The initial implementation uses full-resolution fixed triangles and an authored 
 
 The creator selects among all 16 base theaters. Scene replacement rebuilds the GPU vertex/texture buffers for that world; a variable texture-array layer count also supplies the sky shader's layer index. Only the active world mesh is built, while the bounded source bundle remains cached. Maps and fonts stay in the menu compositor. Source text shading is preserved when tinting; ARMFont/SMLFONT replace the unsuitable BODYFONT in the investigation UI and notices.
 
-The Hornet slice adds dependency resolution and bounded BRF/SH/FNT readers to `tore-formats`. `tore-sim::flight` contains fixed-tick state/integration without wgpu/winit dependencies; the app re-exports its interface; `aircraft.rs` adapts imported geometry and camera poses. `instruments.rs` renders independent small rasters from flight/equipment state. The GPU terrain pass now accepts an aircraft vertex stream and original rectangular atlas with shared depth; front/other instrument cameras render offscreen. CLI extraction and cache import share the same dependency resolver. These adapters do not execute imported x86 modules. See [aircraft evidence and open native parity](formats/aircraft.md).
+The Hornet slice adds dependency resolution and bounded BRF/SH/FNT readers to `tore-formats`. `tore-sim::flight` contains fixed-tick state/integration without wgpu/winit dependencies; the app re-exports its interface; `aircraft.rs` adapts imported geometry and camera poses. `instruments.rs` renders independent small rasters from flight/equipment state. The GPU terrain pass now accepts an aircraft vertex stream and original rectangular atlas with shared depth; front/other instrument cameras render offscreen. CLI extraction and cache import share the same dependency resolver. These adapters do not execute imported x86 modules. See [aircraft evidence and open questions](formats/aircraft.md).
 
 
 `flight_ui.rs` owns desktop command dispatch, imported menu navigation, session presentation settings and pause state. `hud.rs` draws the forward-flight HUD from state and source font glyphs, projecting the ladder/path through the renderer's 60-degree camera convention. Simulation remains independent of both. The full-canvas cockpit is transparent art over the world; instrument windows are independent rasters. Menu/focus pauses stop fixed ticks and engine loops, and input transitions clear held controls. Shader zoom is shared by terrain and sky projection; camera previews restore the main camera before drawing.
@@ -109,7 +109,8 @@ configuration resolves each supported PT’s loadout, SEE/ECM equipment and dama
 table once; mutable ammo, contacts, projectiles, player HP, subsystem counts and
 adapter RNG remain in state. `combat::systems` contains bounded translations of
 reviewed ECM probability and damage-selection helpers. Unknown native subsystem
-side effects remain explicit gaps; this is not a complete native combat tick.
+side effects remain explicit gaps; the service reproduces combat behaviour rather
+than reconstructing the original executable's combat tick.
 
 The app merges independent keyboard/controller trigger holds, dispatches explicit
 commands and consumes confirmed events for instruments, graphics, audio and the
@@ -122,5 +123,5 @@ ticks, so pause does not age them or expand overlay composition work.
 Version-2 combat tapes record service inputs including jammer state and explicit
 fixture commands. Replays validate identity/assets and reproduce combat state,
 including adapter RNG and subsystem failures; version 1 rejects explicitly. This
-is combat-service determinism, not native scheduler or full application replay
-parity. See [contracts, validation and limitations](baselines/weapons-systems.md).
+is combat-service determinism: it reproduces combat state, not a full application
+replay. See [contracts, validation and limitations](baselines/weapons-systems.md).

@@ -1,9 +1,16 @@
 # Native land-contact foundation checkpoint
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 2026-09-15. NE-00.1a complete; NE-00.1 / NE-01.1 / NE-03.1 remain researching.
 **Native static predicates translated/tested; no new runtime contact branch.**
 [Source contract](../formats/native-land-contact.md),
-[living dependencies and next action](../native-environment-systems-plan.md).
+[living dependencies and next action](../research/native-environment-systems-plan.md).
 
 ## Source and selected discovery
 

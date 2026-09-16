@@ -4,13 +4,17 @@
 
 ## Ground and sea/ocean pass
 
-NE-01/02 in the [living environment/systems plan](native-environment-systems-plan.md)
-define the next full discovery/catalog/import pass, including conditional/dynamic
+NE-01/02 in the [frozen environment/systems plan](research/native-environment-systems-plan.md)
+describe a full discovery/catalog/import pass, including conditional/dynamic
 references, missing-asset reason chains and separate visual/collision acceptance.
+That archive is kept for its recovered facts; sequencing lives in
+[the parity plan](parity-plan.md).
 Implementation research has started: the selected Ukraine/STRIP discovery
 extracts five resources across two filtered runs with provenance, including
-_RUNWAY.PIC. STRIP callback/box metadata is partly recovered; full initialization,
-shape and contact closure remain unresolved. This is not a full census or new OT/runtime support.
+_RUNWAY.PIC. STRIP callback/box metadata is partly recovered; in research mode,
+full initialization, shape and contact closure remain unresolved. Ground, terrain
+and object contact in the game is opinionated authored behaviour and does not wait
+on that research. This is not a full census or new OT/runtime support.
 [First evidence](baselines/native-land-foundation.md),
 [STRIP continuation](baselines/native-strip.md).
 
@@ -293,8 +297,8 @@ it does not evaluate native visibility, check-state or action callbacks. Keep
 output and source resources ignored. [First-pass evidence](baselines/menu-contract-pass.md).
 
 The menu pass also emits `creator-options.json`: all 60 selector dispatch entries,
-16 theater-specific target lists and 29 briefing geometry rows. Dynamic aircraft
-producers are identified rather than replaced with guessed lists. Three aligned
+16 theater-specific target lists and 29 briefing geometry rows. In research mode, dynamic
+aircraft producers are identified rather than replaced with guessed lists. Three aligned
 consumer disassemblies are emitted separately from the full linear disassembly.
 
 Inspect extracted static dialog geometry with:

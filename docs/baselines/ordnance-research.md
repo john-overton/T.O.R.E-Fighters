@@ -1,5 +1,12 @@
 # Ordnance planning review — 2026-09-14
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 Reviewed the [user-linked retail screenshot](https://www.old-games.com/screenshot/6252-5-jane-s-fighters-anthology.jpg)
 and local F-14D ordnance photo. The linked image shows an F-22A with a two-column,
 eight-card catalog, station groups, fuel/weight controls and Select Plane/Fly.
@@ -48,4 +55,4 @@ geometry and callbacks still require bounded record/handler recovery.
 
 This pass changes planning documentation only. No new screen, loadout runtime,
 native execution, GPU acceptance or full workspace test run is claimed.
-Implementation and validation gates are in the [ordnance plan](../ordnance-plan.md).
+Implementation and validation gates are in the [ordnance plan](../research/ordnance-plan.md).

@@ -1,5 +1,13 @@
 # Working with objects and SH shapes
 
+> **Research notes — research mode.** Recovered facts about the original
+> game's data and code, kept as evidence. Requirements, gates and remaining
+> work described here are research-mode scope; they are not acceptance gates
+> for gameplay. Parity is measured by expression of feature — see
+> [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
+> [docs/spec/](../spec/).
+
+
 Research checkpoint: 2026-09-15. This guide adds practical object/shape guidance
 from Plurry's **The Explanation of FA Shape files, v2.01 (2026/09)** in the
 user-supplied `.local/fa-shape-file-explination/` folder. It combines that

@@ -1,5 +1,13 @@
 # Original theaters and atmosphere: first recovery pass
 
+> **Research notes — research mode.** Recovered facts about the original
+> game's data and code, kept as evidence. Requirements, gates and remaining
+> work described here are research-mode scope; they are not acceptance gates
+> for gameplay. Parity is measured by expression of feature — see
+> [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
+> [docs/spec/](../spec/).
+
+
 Checkpoint: 2026-09-13, supplied Fighters Anthology installation. This is partial M1b recovery and an executable Ukraine preview, not accepted 1:1 environment parity. No USNF-ATF terrain, DEM, satellite imagery or engine code supplies this surface. The original executable was inspected as data and disassembly; it is never loaded or executed by the importer.
 
 ## Reproduce and identify the inputs

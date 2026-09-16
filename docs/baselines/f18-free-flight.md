@@ -1,5 +1,12 @@
 # F/A-18D free-flight development checkpoint
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 Host: Apple M3/macOS, pinned Rust 1.91.1, wgpu Metal. Work started from the committed all-theater/menu baseline on 2026-09-13. No retail bytes or derivatives are tracked. This is an incremental development port; native 1:1 acceptance remains pending.
 
 ## Reproduce

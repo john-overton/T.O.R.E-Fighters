@@ -1,5 +1,12 @@
 # Linux setup — 2026-09-14
 
+> **Measured evidence — research mode.** A record of what was run and what it
+> produced, kept as evidence. Provenance labels and any remaining gates named
+> here are research-mode scope; they are not acceptance gates for gameplay.
+> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Player-visible behaviour is specified in [docs/spec/](../spec/).
+
+
 Base source revision: `c7347b5b751f314114176eeb3380cf84f79b05c2`, plus the
 renderer shutdown fix recorded here. Host: Omarchy 4.0.2, x86_64, Ryzen 9 7900X,
 61 GiB reported RAM, Wayland desktop. Python 3.14.7 and native C, ALSA,
@@ -63,7 +70,7 @@ Smoke tests establish frame presentation and successful shutdown, not sustained
 performance, visual parity, manual controls or audio acceptance. No composition
 or flight response changed. Windows and macOS were not retested during this
 Linux setup. Remaining menu, environment, and native flight parity work stays
-open in [progress](../progress.md).
+open in [progress](../research/progress.md).
 
 ## Visible-window follow-up
 
