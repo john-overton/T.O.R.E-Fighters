@@ -1347,3 +1347,75 @@ prefix is the only writer. Existing fitted combat remains separate. Future
 transactional state must own counters/attribution and any notification effects
 alongside object scratch, queue and RNG. Full removal, APComment middle,
 output/effect resource closure and initial world ownership remain gated.
+
+## Removal caller and notification exclusions — NE-00.1r
+
+**Native bounded source ledger only.**
+[Validation](../baselines/native-strip-removal.md). A reviewed removal caller is
+not proof that every downstream resource/list is released or that the host can
+roll back by calling native-style deletion.
+
+### Ordered logical removal
+
+`0x4627b0..0x4628a9` performs this order on current scratch:
+
+1. Remove scheduling through 0x462620; clear instance live/scheduled bits 1/2.
+   Nonnull instance +0x5e calls 0x436040, then becomes zero. Imported script
+   contents remain unsupported; the deallocator contract is not accepted here.
+2. Repeatedly consume due events for the current ID with mask 0xffff until lookup
+   returns null. Observer effects can run during this loop. This is not an
+   unconditional purge: future events are handled later.
+3. Release airport slots through 0x4bd490; call 0x44baa0; call 0x442da0 with
+   controller low seven bits; then call 0x4c3ca0, 0x45e520, 0x45f250, 0x469960,
+   0x43e780(current ID), 0x438520(0), in that exact order. These unreviewed
+   callees remain open ownership edges, not inferred harmless notifications.
+4. Unregister collision candidates through 0x42e5c0. Then invalidate remaining
+   queued recipient records through 0x4189e0, then notify through 0x46fdb0.
+5. Call 0x412030 on current type pointer +5 with argument 2 and compare its
+   returned string through 0x4d9660 against 0x4f6ff0, then 0x4f6fe8. Either zero
+   comparison sets byte 0x552810 to 1. The string/classification producer remains
+   open; no filename meaning is invented from those addresses.
+6. Call death marking 0x473c10 after the preceding cleanup; kind 4 tail-calls
+   0x4a04f0, other kinds return. Selected kind 0 excludes that final tail-call.
+
+No direct final scratch store, allocation release or APDelete call occurs in this
+bounded caller. That observation does not prove absence inside unresolved
+callees. The selected scheduler caller stores scratch afterward; other invocation
+contexts must establish their own store ordering. Logical removal remains
+separate from the failed-construction last-allocation release at 0x491490.
+
+### Future-event invalidation and retained records
+
+`0x4189e0..0x418a0c` scans all 120 event slots in order, stride 0xd5, starting
+0x522d40. For each non-0xffff deadline whose **recipient** +4 equals current ID,
+it writes deadline +6 =0xffff. It does not compare current time/mask, compact,
+clear payload/sender, run an observer or consume RNG. This second phase removes
+future recipient events left by the earlier consuming loop. Sender references
+in other recipients' events are not invalidated by this routine.
+
+`0x44baa0..0x44bae0` searches the first matching current-ID word in 175 ten-byte
+records starting 0x5445a0. It writes record +6 = word(0x5528e0 +5); if current
+ID equals player ID 0x520a1c it instead writes 0x7fff. It returns after the first
+match and leaves other record bytes and later duplicates intact. This is expiry
+marking, not record compaction/freeing. The pool's producer and expiry consumer
+remain open; its count is established by the end pointer 0x544c76.
+
+### Single-count notification gates
+
+Death notification `0x471400..0x47144a` immediately exits when global count
+0x4eb604 ==1. Otherwise it constructs a five-byte message: literal 0x2d and two
+words obtained by calling 0x4914c0 with each supplied ID and argument 1, then
+calls 0x46c0a0 with -1, message pointer, length 5 and argument 1. This closes the
+single-count exclusion of the 0x485820 downstream call; ID mapping/transport
+remain unsupported outside that gate.
+
+Removal notification `0x46fdb0..0x46fdf2` also exits for count==1, or when current
+controller low seven bits differs from local controller 0x4eb608. Otherwise it
+sends literal 0x13 plus instance **alias +0x74**, length 3, through 0x46c0a0 with
+the same -1/1 arguments. The alias is not allocated ID or damage attribution.
+Neither wrapper executes imported code in the host. A selected single-count
+world can exclude these calls' effects only after its count producer is accepted.
+
+E019/E021 now have a full bounded removal-call order and separate due-event versus
+future-event handling. Remaining callees, pool/resource lifetime, global setup,
+APComment, effects and world assembly still gate staged queries/runtime support.

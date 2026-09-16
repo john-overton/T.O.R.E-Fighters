@@ -1304,3 +1304,17 @@ AI, carrier or contact activation; fixed 120 Hz adaptation remains authored.
 [Source contract](formats/native-strip.md#trailing-events-and-death-accounting--ne-001q),
 [validation](baselines/native-strip-accounting.md). Source only; no AI, carrier,
 new combat behavior or native runtime claim.
+
+
+## STRIP removal and notification ownership — 2026-09-15
+
+- [x] NE-00.1r: establish removal caller order, due-event drain followed by
+  future-recipient invalidation, retained-record expiry and notification gates.
+- [x] Keep logical removal, death marking and failed-allocation release separate;
+  document selected single-count exclusions without activating transport.
+- [ ] Resolve remaining cleanup callees, resource/pool lifetime and world/global
+  producers before transactional construction/query/runtime acceptance.
+
+[Source contract](formats/native-strip.md#removal-caller-and-notification-exclusions--ne-001r),
+[validation](baselines/native-strip-removal.md). Source only; no AI, carrier,
+contact, damage or runtime deletion activation.
