@@ -1124,7 +1124,7 @@ only the diagnostic precursor; the parent first slice remains researching.
   and test their independent capacities. Extract the inert nonzero template.
 - [x] NE-00.1f: recover remaining selected text conversions and post-create
   alias/store; test map-dependent nationality conversion (137 becomes 138 in UKR).
-  Scheduling insertion is sourced; conditional service RNG is a new open edge.
+  Scheduling insertion is sourced; service/RNG refinement follows below.
 - [ ] Finish E003/E005 bounded loader/default consumers and scheduling/service
   RNG ownership, plus E004 full drawing closure. Stage initial queries before
   registration (E012) and all construction effects across failure (E014).
@@ -1146,3 +1146,15 @@ only the diagnostic precursor; the parent first slice remains researching.
   reader adds no runtime eligibility or general OT/NT support.
 
 [Contract](formats/native-strip.md), [validation](baselines/native-strip-definition.md).
+
+## STRIP service dependency refinement — 2026-09-15
+
+- [x] NE-00.1g: recover service dispatch, priority predicate, kind-0 delay gates
+  and the shared native RNG state; test callback override, no-draw conditions,
+  signed speed and unsigned word/clock boundaries.
+- [ ] E019 callback bodies and global/instance producers remain required. The
+  diagnostic selector consumes no RNG and does not run a scheduler or callbacks.
+- [ ] Finish selected post-create predicates, template ownership and E004, then
+  staged world/query state and both-aircraft contact. No AI or carrier activation.
+
+[Source contract](formats/native-strip.md), [validation](baselines/native-strip-service.md).

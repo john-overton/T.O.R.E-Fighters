@@ -1,6 +1,6 @@
 # Native environment and systems implementation plan
 
-**Living plan v8 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
+**Living plan v9 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
 **Status: implementing source/query foundation; live land contact remains gated.**
 John explicitly scheduled this pass after the airborne native flight connection.
 This is the governing dependency and delivery plan for that continuation. It can
@@ -90,7 +90,7 @@ baselines above remain inputs, not acceptance of the new contact producer.
 
 | ID | Package | Depends on | Owner / status | Current next action / exit evidence |
 | --- | --- | --- | --- | --- |
-| NE-00 | Source, state and dependency ledger | Current baselines | Codex / researching | NE-00.1a/b/c/d/e/f complete; finish instance/state producers |
+| NE-00 | Source, state and dependency ledger | Current baselines | Codex / researching | NE-00.1a/b/c/d/e/f/g complete; finish instance/state producers |
 | NE-01 | Ground and sea/ocean discovery/import | NE-00 identity rules | Codex / researching | NE-01.1 selected UKR/STRIP lead extracted; full census and closure remain open |
 | NE-02 | Coordinates, placement, materials and collision resources | NE-01 selected closures, NE-00 | Unassigned / planned | Resolve one land and one sea family end to end; expand catalog coverage |
 | NE-03 | Native terrain/object contact producers | NE-00, NE-02 selected land subset | Codex / researching | NE-03.1 waits on world closure and transactional query state |
@@ -112,12 +112,13 @@ baselines above remain inputs, not acceptance of the new contact producer.
 | NE-00.1d | Codex / complete | STRIP add callback, box list, initial placement/query order | Bounded box reader, midpoint tests and original-resource diagnostic | No | Unavailable | Narrow metadata precursor; [evidence](baselines/native-strip.md); full initialization/cleanup and visual closure remain open |
 | NE-00.1e | Codex / complete | STRIP setup branch, ordinary final store, failed-add allocation release, ordered candidate removal | Candidate-list operations and capacity/order tests; inert template extracted | No | Unavailable | Narrow lifecycle precursor; [evidence](baselines/native-strip-lifecycle.md); scheduling, full defaults/loader and placement remain open |
 | NE-00.1f | Codex / complete | Remaining selected field conversions, post-create alias/store and scheduling insertion | Nationality conversion tested, including map-prefix and byte boundaries | No | Unavailable | Narrow placement precursor; [evidence](baselines/native-strip-placement.md); bounded loader and service effects/RNG still open |
-| NE-00.1 | Codex / researching | Partial; see NE-00.1a/b/c/d/e/f | Partial | No | Unavailable | Finish instance initialization; extend transaction ledger |
+| NE-00.1g | Codex / complete | Service dispatch/tail, priority predicate and shared RNG state | Kind-0 post-callback delay selector and no-draw/word-boundary tests | No | Unavailable | Narrow service-ledger precursor; [evidence](baselines/native-strip-service.md); callback bodies and world producers remain open |
+| NE-00.1 | Codex / researching | Partial; see NE-00.1a/b/c/d/e/f/g | Partial | No | Unavailable | Finish instance initialization; extend transaction ledger |
 | NE-01.1a | Codex / complete | STRIP/166 header and explicit shape slot from E003/E004 | Bounded metadata reader, unknown-token retention and malformed-input tests | No | Unavailable | [Definition evidence](baselines/native-strip-definition.md); no full importer/world closure |
 | NE-01.1 | Codex / researching | UKR.MM → STRIP.OT → RUNWAY.SH / _STRIPProc explicit edges | Five resources extracted across two filtered runs; bounded STRIP metadata reader | No | Unavailable | Complete callback/shape/placement closure, archive census and bounded schemas |
 | NE-03.1 | Codex / researching | Dual ground-query/cache mutation established | Existing diagnostic only; no new producer | No | Unavailable | Land geometry and staged cache/RNG producer, source-order/rollback tests, then both-aircraft connection |
 
-The parent first slice is not complete. NE-00.1a/b/c/d/e/f are dependency-ready diagnostic
+The parent first slice is not complete. NE-00.1a/b/c/d/e/f/g are dependency-ready diagnostic
 precursors, not an accepted runway or live contact branch.
 
 ### Discovered dependency edges
@@ -143,10 +144,11 @@ Owner is Codex; update 2026-09-15. Required edges remain in the denominator.
 | E012 | E003 → E001/E002 / samples before registration | 0x4a7530 initial ground query before 0x4a77f9 callback 0 | Source established; staged world construction must preserve order and rollback failure |
 | E013 | E005 → collision candidate lifetime / mutates ordered lists | 0x42e540 register, 0x42e5c0 remove; 900/450 capacities | Translated/tested diagnostic state; stage with world and queries; no automatic type-flag reconciliation |
 | E014 | E003/E005 → failed creation / partial cleanup | 0x4a7806 stores then 0x491490 releases last allocation | Source established; no candidate/name cleanup in bounded path; host atomic construction required |
-| E015 | E003 → scheduling / registers service | Instance flags & 2, 0x4a7847 → 0x4626b0 | Selected placement requires it; Insertion/removal sourced; service predicates/callbacks and E018 RNG ownership remain open, without autonomous behavior work |
+| E015 | E003 → scheduling / registers service | Instance flags & 2, 0x4a7847 → 0x4626b0 | Selected placement requires it; dispatch/priority/tail sourced in NE-00.1g; callback bodies and global producers remain open, without autonomous behavior work |
 | E016 | E005 → airport template / supplies defaults | VA 0x50ccc8, 0x134-byte record | Inert template extracted/hash-gated; nonzero unknown defaults/callback fields remain unsupported |
 | E017 | E003 → map name / converts nationality | 0x4826c7 → 0x483d50; map prefix and byte remap | Diagnostic conversion tested; selected text 137 becomes 138; bounded mission assembly remains open |
-| E018 | E015 → shared scheduler RNG / conditional draws | 0x4630b0..0x4631a9, stopped bound-20 / moving bound-8 | Exploratory source lead; complete predicates and stream ownership unresolved; blocks native scheduler/replay claim |
+| E018 | E015 → shared scheduler RNG / conditional draws | 0x4630b0..0x4631a9, stopped bound-20 / moving bound-8 | Tail predicates sourced and kind-0 selector tested; shared seed/shuffle state established; callback draws/global interleaving remain open |
+| E019 | E015 → service callback/body closure | 0x462fbc..0x463036 calls 0x436b30, 0x4631f0 and request 7; STRIP resolves APCommentProc | Dispatch sourced; bodies/global producers remain unknown; no silent no-op or autonomous activation |
 
 Selected catalog status: UKR.MM/T2, STRIP.OT, RUNWAY.SH and _RUNWAY.PIC are discovered/extracted;
 existing T2, bounded STRIP metadata and F2 box decoding are available; full OT
@@ -173,6 +175,7 @@ flowchart TD
   R --> W[Staged world construction E012]
   T[E015 scheduling and E016 template ownership] --> W
   U[E018 scheduler RNG ownership] --> T
+  P[E019 service callbacks and producers] --> T
   V[E017 map-dependent placement conversion] --> W
   F --> W
   A --> D[NE-04 equipment and fuel producers]
@@ -567,6 +570,7 @@ record its blocked edges and continue independent, already scoped documentation/
 | D14 / 2026-09-15 | Implementation choice: NE-00.1f placement conversion precursor | Raw nationality differs from loaded byte; selected construction also has post-create alias/store and scheduling state. Keep full loader/service/RNG ownership explicit |
 | D15 / 2026-09-15 | Accepted: push existing tested commits, then continue implementation | John explicitly authorized push; origin/main advanced through 4447e90. Continue coherent local slices; no AI or carrier gate change |
 | D16 / 2026-09-15 | Implementation choice: NE-01.1a bounded definition metadata | Reuse reviewed OBJECT grammar, reject extra shape slots and preserve unknown tokens. Metadata success does not establish full resource/runtime closure |
+| D17 / 2026-09-15 | Implementation choice: NE-00.1g service ledger and kind-0 delay selector | Make shared RNG and request-7 dependency explicit; diagnostic samples do not authorize skipping callbacks or native lookup ordering |
 
 Future decisions include date, requester/reviewer, evidence, accepted/proposed/
 superseded state, affected IDs, rejected alternatives if relevant and migration
@@ -598,6 +602,7 @@ implementation choices must not be attributed to John.
 
 | Revision | Change | Validation state |
 | --- | --- | --- |
+| v9 / 2026-09-15 | NE-00.1g service dispatch/delay, E019 and D17 | [Service validation](baselines/native-strip-service.md); full service/world closure remains gated |
 | v8 / 2026-09-15 | NE-01.1a bounded STRIP definition; D15 push authorization and D16 metadata scope | [Definition validation](baselines/native-strip-definition.md); full closure and live contact remain gated |
 | v7 / 2026-09-15 | NE-00.1f placement conversion; E017/E018 and D14 | [Placement validation](baselines/native-strip-placement.md); staged world/query dependencies remain open |
 | v6 / 2026-09-15 | NE-00.1e lifecycle precursor; E013–E016 and D13 | [Lifecycle validation](baselines/native-strip-lifecycle.md); loader/default consumers/scheduling and E004 remain open |

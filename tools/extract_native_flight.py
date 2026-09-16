@@ -16,6 +16,9 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('object_service_dispatch', 0x462e70, 0x4631a9, 'ground'),
+    ('object_service_priority', 0x464550, 0x464637, 'ground'),
+    ('rng_word_bound', 0x4562f0, 0x4562fb, 'clock'),
     ('object_schedule_reset', 0x462600, 0x462619, 'ground'),
     ('object_schedule_remove', 0x462620, 0x4626ae, 'ground'),
     ('object_schedule_insert', 0x4626b0, 0x4627a6, 'ground'),

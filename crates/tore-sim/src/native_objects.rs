@@ -1,6 +1,48 @@
 //! Diagnostic native object state; no world construction or live activation.
 //! Source: docs/formats/native-strip.md.
 
+/// Inputs to the STRIP (kind 0) service tail at FA 0x4630b0.
+/// These are post-callback samples, not permission to skip the service body.
+/// Priority and reference predicates must come from reviewed world producers.
+#[derive(Clone, Copy, Debug)]
+pub struct StripServiceTail {
+    pub callback_delay: u16,
+    pub deadline: u16,
+    pub clock: u16,
+    pub controller: u8,
+    pub priority: bool,
+    pub referenced: bool,
+    pub speed: i32,
+}
+
+/// Explicit draw request; no hidden RNG or scheduler state is changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StripServiceSchedule {
+    At(u16),
+    Draw { base: u16, upper_bound: u16 },
+}
+
+impl StripServiceTail {
+    /// Native word comparisons/addition and signed speed test for kind 0 only.
+    /// A callback override takes precedence over every default-delay predicate.
+    pub fn schedule(self) -> StripServiceSchedule {
+        if self.callback_delay != 0x7fff {
+            StripServiceSchedule::At(self.clock.wrapping_add(self.callback_delay))
+        } else if self.deadline >= self.clock
+            || self.controller & 0x80 != 0
+            || self.priority
+            || self.referenced
+        {
+            StripServiceSchedule::At(self.clock)
+        } else {
+            StripServiceSchedule::Draw {
+                base: self.clock.wrapping_add(2),
+                upper_bound: if self.speed > 0 { 8 } else { 20 },
+            }
+        }
+    }
+}
+
 /// Mission nationality conversion at FA 0x4826c7 and 0x483d50.
 /// `raw` is the parsed integer's low byte; `map_prefix` is the first byte
 /// of the native map name, without stripping a leading `~` or `$`.
@@ -77,6 +119,96 @@ fn remove_first(ids: &mut Vec<u16>, id: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_service_callback_override_and_clock_wrap() {
+        let tail = StripServiceTail {
+            callback_delay: 3,
+            deadline: u16::MAX,
+            clock: u16::MAX,
+            controller: 0x80,
+            priority: true,
+            referenced: true,
+            speed: 0,
+        };
+        assert_eq!(tail.schedule(), StripServiceSchedule::At(2));
+        assert_eq!(
+            StripServiceTail {
+                callback_delay: 0,
+                ..tail
+            }
+            .schedule(),
+            StripServiceSchedule::At(u16::MAX)
+        );
+    }
+
+    #[test]
+    fn strip_service_draw_gates_and_unsigned_deadline_boundary() {
+        let tail = StripServiceTail {
+            callback_delay: 0x7fff,
+            deadline: 0x7fff,
+            clock: 0x8000,
+            controller: 0,
+            priority: false,
+            referenced: false,
+            speed: 0,
+        };
+        assert_eq!(
+            tail.schedule(),
+            StripServiceSchedule::Draw {
+                base: 0x8002,
+                upper_bound: 20
+            }
+        );
+        for blocked in [
+            StripServiceTail {
+                deadline: 0x8000,
+                ..tail
+            },
+            StripServiceTail {
+                deadline: 0xffff,
+                ..tail
+            },
+            StripServiceTail {
+                controller: 0x80,
+                ..tail
+            },
+            StripServiceTail {
+                priority: true,
+                ..tail
+            },
+            StripServiceTail {
+                referenced: true,
+                ..tail
+            },
+        ] {
+            assert_eq!(blocked.schedule(), StripServiceSchedule::At(0x8000));
+        }
+        for (speed, bound) in [(i32::MIN, 20), (-1, 20), (0, 20), (1, 8), (i32::MAX, 8)] {
+            assert_eq!(
+                StripServiceTail {
+                    clock: 0xffff,
+                    controller: 0x7f,
+                    speed,
+                    ..tail
+                }
+                .schedule(),
+                StripServiceSchedule::Draw {
+                    base: 1,
+                    upper_bound: bound
+                }
+            );
+        }
+        assert_eq!(
+            StripServiceTail {
+                clock: 0,
+                deadline: 0xffff,
+                ..tail
+            }
+            .schedule(),
+            StripServiceSchedule::At(0)
+        );
+    }
 
     #[test]
     fn mission_nationality_preserves_high_bit_and_theater_mapping() {

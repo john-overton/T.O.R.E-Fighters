@@ -284,14 +284,10 @@ when set, traversal compares +0x68 as **unsigned** and passes existing values
 ownership, current scratch versus stored instance state, bounded traversal and
 restart require a shared staged owner, not unrelated copies of queue vectors.
 
-The already sourced due-service call at 0x462abc enters 0x462e70. Exploratory
-review of its final delay selection at 0x4630b0..0x4631a9 exposes a further
-conditional RNG edge: a stopped ordinary object can use **2 + bound-20 draw**;
-positive speed uses **2 + bound-8 draw**. Other actor/controller/visibility and
-deadline gates can avoid those draws. This does **not** establish that every
-STRIP service draws RNG. The complete predicates and callback effects remain
-unreviewed; do not implement or activate autonomous branches. This unresolved
-ownership edge must be reconciled with E002 before claiming native replay.
+The due-service call at 0x462abc enters 0x462e70. NE-00.1g below now establishes
+the dispatcher and final delay predicates and translates the kind-0 delay selector.
+Callback bodies, world/global producers and complete RNG interleaving remain open;
+the diagnostic does not establish that every STRIP service draws RNG.
 
 ## Bounded STRIP definition metadata — NE-01.1a
 
@@ -319,3 +315,73 @@ Full OT field semantics, resource-manager behavior, shared app/CLI profile
 resolution, placement, templates, scheduling and E004 drawing closure remain
 separate gates. No definition token or symbol executes code.
 [Validation](../baselines/native-strip-definition.md).
+
+## Service dispatch and delay ownership — NE-00.1g
+
+**Native source established for the dispatcher and priority predicate; only the
+kind-0 post-callback delay selector is translated/tested.** No scheduler or
+callback is runtime-connected. [Validation](../baselines/native-strip-service.md).
+The static extractor now includes aligned `0x462e70..0x4631a9`,
+`0x464550..0x464637` and the word-bound RNG wrapper `0x4562f0..0x4562fb`.
+
+The dispatcher has an early special-current-ID branch (word 0x4eb6f0), with
+controller-high-bit/kind-4 gates and a call to 0x4164b0. It is outside the selected
+STRIP path. Otherwise it snapshots position/orientation and sets instance +0x68
+to 0x7fff before callbacks. If controller low seven bits differ from dword
+0x4eb608 and type flags lack bit 8, it calls 0x46c520 and skips the ordinary
+callback body. The ownership/producer of that global remains required; nationality
++9 must not substitute for controller +0x10.
+
+The ordinary path tests controller bit 0x80 and instance flag 0x80000, otherwise
+calls 0x4631b0, then, while instance flag 1 survives, requests callback 2 with
+argument 1, calls 0x436b30, requests callback 2 with argument 0, requests callback
+5, calls 0x4631f0 with the earlier byte result, and requests callback 7. Flag 1
+is rechecked between these operations. STRIP's type selector returns null for
+2 and 5 but **returns APCommentProc for 7**. An instance selector could override
+these results and is not accepted here. The bodies of 0x436b30, 0x4631f0,
+0x46c520 and APCommentProc remain unresolved service dependencies. Their names
+or static-object status cannot justify dropping them. No autonomous behavior
+is translated or enabled by this ledger.
+
+Kind 0 skips the kind-2 orientation-change test and clears flag 0x800. At the
+service tail the following ordered rules apply:
+
+1. If the post-callback word +0x68 differs from 0x7fff, retain that delay.
+2. Otherwise, set delay zero if unsigned word +0x6a >= word clock 0x5528c8,
+   or controller bit 0x80 is set, or priority helper 0x464550 returns true,
+   or nonzero object ID 0x520a1c resolves to an object whose word +0xee equals
+   the current ID. Native evaluation short-circuits in this order.
+3. For kind 0 only, remaining speed +0x34 >0 (signed dword) requests bound 8;
+   zero/negative speed requests bound 20. Add 2 to the returned word.
+4. Add word clock 0x5528c8 to the selected delay with 16-bit wrapping and store
+   +0x68. This clock is a distinct input from the dword time used by E002.
+
+Kinds 2/4 have additional byte +0xe3 ==0x20/0x21 delay-1 cases; kind 6 has a
+delay-2 case. They are not translated by `StripServiceTail`. The diagnostic
+accepts post-callback samples and emits either a final `At(word)` or explicit
+`Draw { base, upper_bound }`. It makes no object lookup or RNG call and cannot
+replace the unresolved service body. Boolean predicate samples do not establish
+native short-circuit lookup/failure ordering; a future producer must preserve it.
+
+### Priority helper and shared RNG
+
+`0x464550` returns true when the ID matches word 0x4eb64c or 0x4eb64e, or the
+stored instance controller has bit 0x80. It also checks the sum of absolute X/Z
+differences from globals 0x4eb650/0x4eb658 against **0x753000 inclusive** using
+wrapping 32-bit arithmetic and signed comparison. Y is not used. It then visits
+eight ID slots at 0x4eb610..0x4eb61f in order, skipping zero slots. Each can pass
+the same X/Z distance test; kind 2/4 entries also pass if their word +0xee equals
+the tested ID. The global/ID-table producers remain open. This is not established
+as a renderer visibility or Euclidean-distance predicate.
+
+Both delay calls enter wrapper 0x4562f0, which masks the bound to 16 bits and
+jumps to the existing shuffled generator 0x4561d0. It mutates the same seed at
+0x4f6bc8, shuffle output at 0x4f6bcc and 32-entry table at 0x546838 used by the
+previously reviewed native RNG helpers. A separate per-STRIP seed would break
+this source sharing. Initial seed, complete service callback draws and global
+interleaving remain open, so source sharing does not close replay acceptance.
+
+Next: finish selected post-create optional-field predicates and service-body
+closure, trace required airport template consumers, and independently close E004.
+Stage E001/E002 only after the required ownership paths are accepted or explicitly
+excluded with evidence. Carrier and unsupported callback branches remain gated.
