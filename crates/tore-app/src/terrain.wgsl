@@ -14,6 +14,44 @@ fn haze(distance:f32)->f32{
  if distance>=scene.fog.y { return scene.fog.w; }
  return scene.fog.z+(scene.fog.w-scene.fog.z)*(distance-scene.fog.x)/(scene.fog.y-scene.fog.x);
 }
+// Opinionated aerial perspective, docs/spec/atmospheric-distance.md.
+// Integral of a 500-foot smoothstep, including its constant tail.
+fn air_step_integral(height:f32)->f32 {
+ let t=clamp(height/500.0,0.0,1.0);
+ return 500.0*(t*t*t-0.5*t*t*t*t)+max(height-500.0,0.0);
+}
+fn air_band_weight(height:f32,lo:f32,hi:f32)->f32 {
+ return smoothstep(lo-250.0,lo+250.0,height)-smoothstep(hi-250.0,hi+250.0,height);
+}
+fn air_band_integral(height:f32,lo:f32,hi:f32)->f32 {
+ return air_step_integral(height-lo+250.0)-air_step_integral(height-hi+250.0);
+}
+fn air_opacity(distance:f32,altitude:f32)->f32 {
+ let a=max(scene.eye.y,0.0);let b=max(altitude,0.0);
+ let low=min(a,b);let high=max(a,b);let span=high-low;
+ var density=exp(-(a+b)*0.5/18000.0);
+ if span>1.0 {density=18000.0*(exp(-low/18000.0)-exp(-high/18000.0))/span;}
+ var moisture_rate=0.0;
+ for(var i=0;i<i32(scene.ray.x);i++) {
+  let band=scene.bands[i];
+  // Strong source visibility ramps add moisture; clear-day ramps add none.
+  let source=clamp(band.ramp.w/256.0,0.0,1.0)/max(band.ramp.z*256.0,1000.0);
+  let moisture=min(max(source-0.8/182283.0,0.0)*0.20,1.0/12000.0);
+  if moisture<=0.0 {continue;}
+  var weight=air_band_weight((a+b)*0.5,band.info.x,band.info.y);
+  if span>1.0 {weight=(air_band_integral(high,band.info.x,band.info.y)-air_band_integral(low,band.info.x,band.info.y))/span;}
+  moisture_rate+=moisture*clamp(weight,0.0,1.0);
+ }
+ let optical_depth=max(distance-264000.0,0.0)*density/900000.0
+     +max(distance-3000.0,0.0)*moisture_rate;
+ return 1.0-exp(-optical_depth);
+}
+fn aerial_perspective(color:vec3<f32>,direction:vec3<f32>,altitude:f32)->vec3<f32> {
+ if !smooth_weather() {return color;}
+ let horizontal=vec3<f32>(direction.x,0.0,direction.z);
+ let horizon=horizon_color(horizon_index(horizontal),0,-1);
+ return mix(color,horizon,air_opacity(length(direction),altitude));
+}
 struct VertexOut {
  @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
  @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>, @location(7) @interpolate(flat) fog_enabled:u32, @location(8) @interpolate(flat) light_row:i32
@@ -173,13 +211,13 @@ fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec
 // Terrain cutouts expose the already rendered ocean/horizon, never the T2
 // land color. Keep this separate from aircraft's base-color texture blending.
 @fragment fn terrain_fragment(in:VertexOut)->@location(0) vec4<f32>{
- if in.layer<0.0 {return vec4<f32>(in.color,1.0);}
+ if in.layer<0.0 {return vec4<f32>(aerial_perspective(in.color,in.direction,in.altitude),1.0);}
  var remaps=vec2<f32>(-1.0);
  if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
  let tex=sample_tile(in.uv,i32(in.layer),0,-1,in.light_row,remaps);
  // Fitted bilinear coverage boundary; discarded water writes no depth.
  if tex.a<0.5 {discard;}
- return vec4<f32>(tex.rgb,1.0);
+ return vec4<f32>(aerial_perspective(tex.rgb,in.direction,in.altitude),1.0);
 }
 @fragment fn fragment(in:VertexOut)->@location(0) vec4<f32>{
  var color=in.color;
@@ -190,6 +228,7 @@ fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec
   color=mix(color,tex.rgb,tex.a);
  }
  if textureDimensions(palette).y<=1u || (in.own_color>0.0 && in.layer<0.0 && in.layer != -2.0) { color=mix(color,linear(scene.sky.rgb),haze(in.distance)); }
+ if in.fog_enabled!=0u {color=aerial_perspective(color,in.direction,in.altitude);}
  return vec4<f32>(color,1.0);
 }
 struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32> }
@@ -208,6 +247,11 @@ fn horizon_height(ray:vec3<f32>)->f32 {
 fn horizon_index(ray:vec3<f32>)->f32 {
  let y=horizon_height(ray);
  let flags=i32(scene.ray.w);
+ if smooth_weather() {
+  if y>=0.0 && (flags&1)!=0 {return mix(240.0,229.0,smoothstep(0.0,130.0,y));}
+  if y<0.0 && (flags&2)!=0 {return mix(240.0,252.0,smoothstep(0.0,max(scene.ray.z,1.0),-y));}
+  return 240.0;
+ }
  if (flags&2)!=0 && y<=5.0 {return clamp(mix(237.0,252.0,clamp((5.0-y)/(5.0+scene.ray.z),0.0,1.0)),0.0,254.0);}
  if (flags&1)!=0 && y>=0.0 {return mix(236.0,229.0,clamp(y/130.0,0.0,1.0));}
  return 240.0;
@@ -409,7 +453,7 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
   }
  }
  var background=horizon_index(ray);
- if scene.deck_a.z>=0.0 && scene.eye.y>=scene.deck_a.x {
+ if !smooth_weather() && scene.deck_a.z>=0.0 && scene.eye.y>=scene.deck_a.x {
   // Empty-name, mode-1 above-sky call at 0x4ab00c writes only a transition.
   let virtual_index=deck_transition(ray,25600000.0,243.0);
   if virtual_index>=0 && horizon_height(ray)<0.0 {background=virtual_index;}
@@ -422,7 +466,7 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
   let upper=select(243.0,241.0,scene.deck_a.z<0.0);
   let lower=select(244.0,241.0,scene.deck_b.z<0.0);
   let index=deck_transition(ray,deck.x,select(upper,lower,scene.eye.y>deck.x));
-  if index>=0 {background=index;}
+  if index>=0 && !smooth_weather() {background=index;}
  }
  var color=solar_glow(horizon_color(background,passes,core),ray);
  let decks=array<vec4<f32>,2>(scene.deck_a,scene.deck_b);
@@ -440,6 +484,7 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
   var tex:vec4<f32>;
   if scene.ocean[i+1]>0.0 {
    tex=ocean_surface(hit,deck,distance,passes,core);
+   tex=vec4<f32>(aerial_perspective(tex.rgb,ray*distance,deck.x),tex.a);
   } else {
   tex=weather_tile(uv,i32(deck.z),fog_row(distance),passes,core,vec2<f32>(-1.0));
   if smooth_weather() {
@@ -450,6 +495,13 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
   }
   }
   if scene.ocean[i+1]<=0.0 {tex=vec4<f32>(solar_glow(cloud_solar_glow(tex.rgb,ray,1.0),ray),tex.a);}
+  // Fade to the actual backdrop before the source plane cutoff. Using the
+  // same destination for RGB and coverage avoids a separate blue horizon seam.
+  if smooth_weather() {
+   let fade=smoothstep(264000.0,2000000.0,max(length(hit.xz-scene.eye.xz),scanline_distance));
+   if scene.ocean[i+1]<=0.0 {tex=vec4<f32>(mix(tex.rgb,color,fade*0.5),tex.a);}
+   tex.a*=1.0-fade;
+  }
   color=mix(color,tex.rgb,tex.a);
   nearest=distance;
  }
@@ -488,5 +540,6 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
 @fragment fn cloud_fragment(in:VertexOut)->@location(0) vec4<f32>{
  let tex=weather_tile(in.uv,i32(in.layer),0,-1,-1,ray_rows(in.distance,in.altitude));
  if tex.a<0.5 {discard;}
- return vec4<f32>(cloud_solar_glow(tex.rgb,normalize(in.direction),1.0-clamp(haze(length(in.direction)),0.0,1.0)),1.0);
+ let lit=cloud_solar_glow(tex.rgb,normalize(in.direction),1.0-clamp(haze(length(in.direction)),0.0,1.0));
+ return vec4<f32>(aerial_perspective(lit,in.direction,in.altitude),1.0);
 }

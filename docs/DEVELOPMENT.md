@@ -504,6 +504,10 @@ Smooth weather also adds an opinionated directional sun halo, dawn/dusk wash,
 and per-pixel angular lighting on sky-deck textures and cloud sheets.
 See [sun glow specification](spec/sun-glow.md).
 
+Smooth weather also adds gentle distance and altitude-dependent horizon blending,
+with extra haze along sightlines through moist weather bands. See the
+[atmospheric distance specification](spec/atmospheric-distance.md).
+
 ### Wind, turbulence and attachment probes
 
 `TORE_WIND=heading,speed` supplies whole degrees (0..360) and feet/second
