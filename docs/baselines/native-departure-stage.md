@@ -1,4 +1,4 @@
-# Joined native departure stage — 2026-09-15
+# Joined native departure stage, 2026-09-15
 
 > **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
 > The thing being reverse engineered is the *experience*, not the executable. We
@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Measured evidence — research mode.** A record of what was run and what it
+> **Measured evidence, research mode.** A record of what was run and what it
 > produced, kept as evidence. Provenance labels and any remaining gates named
 > here are research-mode scope; they are not acceptance gates for gameplay.
-> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Parity is measured by expression of feature; see [AGENTS.md](../../AGENTS.md).
 > Player-visible behaviour is specified in [docs/spec/](../spec/).
 
 
@@ -86,7 +86,7 @@ and tested as described below.
 Matched retail flight recordings are unavailable. Their absence is a comparison
 gap, separate from the known missing implementation. The user confirmed that
 a useful retail comparison is unavailable; it does not block implementation. No fitted law or gameplay
-addition is used to bridge these gaps. See [native contracts](../formats/native-flight.md#joined-native-departure-stage--2026-09-15).
+addition is used to bridge these gaps. See [native contracts](../formats/native-flight.md#joined-native-departure-stage-2026-09-15).
 
 ## Validation
 

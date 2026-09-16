@@ -1,4 +1,4 @@
-# Shared F/A-18D / Rafale C hybrid acceptance — 2026-09-13
+# Shared F/A-18D / Rafale C hybrid acceptance, 2026-09-13
 
 > **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
 > The thing being reverse engineered is the *experience*, not the executable. We
@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Measured evidence — research mode.** A record of what was run and what it
+> **Measured evidence, research mode.** A record of what was run and what it
 > produced, kept as evidence. Provenance labels and any remaining gates named
 > here are research-mode scope; they are not acceptance gates for gameplay.
-> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Parity is measured by expression of feature; see [AGENTS.md](../../AGENTS.md).
 > Player-visible behaviour is specified in [docs/spec/](../spec/).
 
 
@@ -91,7 +91,7 @@ and exact native scheduling/RNG consumption. Rafale visual/cockpit/animation
 porting remains separate. The app only declares ordinary theater height samples,
 so safe runway contact is currently demonstrated through the headless surface API.
 
-## Independent models and telemetry follow-up — 2026-09-14
+## Independent models and telemetry follow-up, 2026-09-14
 
 F18FlightModel and RafaleCFlightModel now own separate fitted-law implementations
 and per-instance tuning. The previous coefficients were retained to isolate the
@@ -106,7 +106,7 @@ No rendering behavior changed in this follow-up; GPU checks were not repeated.
 IAS/CAS and pressure/barometric altitude remain unavailable sensor channels;
 telemetry atmosphere is an engineering approximation, not native weather parity.
 
-## Complete typed configuration follow-up — 2026-09-14
+## Complete typed configuration follow-up, 2026-09-14
 
 Each aircraft model now owns mass, propulsion, envelope/loading, native
 limits, fitted equipment response and tuning in a validated `Configuration`.

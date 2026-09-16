@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Research notes — research mode.** Recovered facts about the original
+> **Research notes, research mode.** Recovered facts about the original
 > game's data and code, kept as evidence. Requirements, gates and remaining
 > work described here are research-mode scope; they are not acceptance gates
-> for gameplay. Parity is measured by expression of feature — see
+> for gameplay. Parity is measured by expression of feature, see
 > [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
 > [docs/spec/](../spec/).
 
@@ -29,7 +29,7 @@ No runway is runtime-connected; retail comparison is unavailable.
 ## Shape box list
 
 `COLGetBox` at `0x42e100..0x42e134` calls the
-[F2 record resolver](native-land-contact.md#shape-relative-contact-offset--e007).
+[F2 record resolver](native-land-contact.md#shape-relative-contact-offset-e007).
 Starting at record +16, each subrecord has:
 
 | Offset | Width | Meaning established by consumers |
@@ -154,7 +154,7 @@ transactional world construction and ordered queries, including failures after
 cache/RNG mutation. Neither aircraft's live contact stop changes in this slice;
 carrier remains gated by NE-06 and contact events by NE-07.
 
-## Type setup, final store and cleanup — NE-00.1e
+## Type setup, final store and cleanup, NE-00.1e
 
 **Source established for the bounded paths below; candidate-list translation
 tested; world construction and live contact remain unconnected.** Same reviewed
@@ -249,7 +249,7 @@ these tests do not prove whole-world rollback or reset. General object removal
 at 0x4627b0 calls collision removal at 0x462835 amid other unresolved lifecycle
 effects; those downstream systems remain outside this translation.
 
-## Remaining selected placement fields — NE-00.1f
+## Remaining selected placement fields, NE-00.1f
 
 The mission scratch record begins at stack +0xb8 in MISSIONTextProc. Field
 conversion below is **native source established**, with only nationality
@@ -313,7 +313,7 @@ the dispatcher and final delay predicates and translates the kind-0 delay select
 Callback bodies, world/global producers and complete RNG interleaving remain open;
 the diagnostic does not establish that every STRIP service draws RNG.
 
-## Bounded STRIP definition metadata — NE-01.1a
+## Bounded STRIP definition metadata, NE-01.1a
 
 `strip::Definition::parse` reuses the bounded BRF grammar and packed OBJECT field
 order from [aircraft formats](aircraft.md), requiring a complete root layout,
@@ -340,7 +340,7 @@ resolution, placement, templates, scheduling and E004 drawing closure remain
 separate gates. No definition token or symbol executes code.
 [Validation](../baselines/native-strip-definition.md).
 
-## Service dispatch and delay ownership — NE-00.1g
+## Service dispatch and delay ownership, NE-00.1g
 
 **Native source established for the dispatcher and priority predicate; only the
 kind-0 post-callback delay selector is translated/tested.** No scheduler or
@@ -410,7 +410,7 @@ closure, trace required airport template consumers, and independently close E004
 Stage E001/E002 only after the required ownership paths are accepted or explicitly
 excluded with evidence. Carrier and unsupported callback branches remain gated.
 
-## Bounded isolated placement — NE-01.1b
+## Bounded isolated placement, NE-01.1b
 
 `strip::Placement::parse` reads one isolated `obj` through `.` record. It requires
 exactly one each of `type`, `pos`, `angle`, `nationality`, `flags`, `speed`,
@@ -441,7 +441,7 @@ resolver. Zero Y remains an input to the initial native ground query; no world,
 airport, candidate, scheduler or query state is constructed by this reader.
 [Validation](../baselines/native-strip-record.md).
 
-## Airport ownership and comment preflight — NE-00.1h
+## Airport ownership and comment preflight, NE-00.1h
 
 **Source established for the bounded routines below; no translation or live
 callback activation.** These refinements of E016/E019 add E020 (ordered actor
@@ -523,7 +523,7 @@ the plane selector and bounded state/attachment producers. Complete creation
 and refresh callers remain open. No autonomous behavior or
 aircraft service is translated by recording this list's storage contract.
 
-## Airport slot and attachment producers — NE-00.1i
+## Airport slot and attachment producers, NE-00.1i
 
 **Native source established for the bounded slices below; untranslated and not
 runtime-connected.** [Validation](../baselines/native-strip-slots.md). This
@@ -614,7 +614,7 @@ on success. These gates do not establish effect-free suppression. Complete
 callback selection/callers, bodies, device effects and attachment lifetimes remain
 unknown; no autonomous behavior is translated or enabled.
 
-## Current-object switches and speech timing — NE-00.1j
+## Current-object switches and speech timing, NE-00.1j
 
 **Native bounded source; only the pure speech-delay arithmetic is translated/
 tested.** [Validation](../baselines/native-strip-speech.md). E019/E020 callback,
@@ -675,7 +675,7 @@ speech reset/deadline producers at `0x48d2b2`/`0x48d5d4`, comment generation and
 event consumers remain open. Existing adapted clock/replay claims are unchanged.
 
 
-## Static-object service and consuming event lookup — NE-00.1k
+## Static-object service and consuming event lookup, NE-00.1k
 
 **Native bounded source established; no new runtime translation or activation.**
 Same reviewed EXE/SMS identities; [validation](../baselines/native-strip-events.md).
@@ -808,7 +808,7 @@ as well as the queue and RNG. Special recipients skip this wakeup path.
 NE-00.1n below establishes queue reset, routing caller order and the speech
 observer. Expansion helpers, remote transport and output consumers remain open. No event emitter or scheduler is enabled.
 
-## Initial commands and default event response — NE-00.1l
+## Initial commands and default event response, NE-00.1l
 
 **Native source ledger, with only command-deadline arithmetic translated/tested.**
 [Validation](../baselines/native-strip-commands.md). No command interpreter or
@@ -902,7 +902,7 @@ other event values reach the true tail; that does not authorize dropping their
 upstream payload/state effects. Complete movement, command overrides, event
 interceptor and damage/speech consumers remain prerequisites for live service.
 
-## Selected stationary movement path — NE-00.1m
+## Selected stationary movement path, NE-00.1m
 
 **Native source ledger; only the angle-approach helper is translated/tested.**
 [Validation](../baselines/native-strip-movement.md). This closes the intermediate
@@ -984,7 +984,7 @@ not a runtime result or permission to use a flat height/skip service callbacks.
 Nonzero speed/rates, other commands, mutated type state, and full service entry/
 exit ownership require their own accepted contracts. Live contact stays gated.
 
-## Queue routing and speech observation — NE-00.1n
+## Queue routing and speech observation, NE-00.1n
 
 **Native source ledger only.** [Validation](../baselines/native-strip-observer.md).
 This extends E020/E021 and adds E022 for owned speech output/resource requests.
@@ -1088,7 +1088,7 @@ absence must be established from the chosen world input and reset lifecycle,
 not inferred from STRIP identity or the no-AI scope. This does not establish a
 full MM parser or complete mission lifecycle.
 
-## Collision hit dispatch and death marking — NE-00.1o
+## Collision hit dispatch and death marking, NE-00.1o
 
 **Native source ledger and diagnostic collision predicate.**
 [Validation](../baselines/native-strip-hit.md). This refines E019/E021 and the
@@ -1163,7 +1163,7 @@ selected STRIP resource's craterSize is zero, excluding that effect under the
 reviewed unchanged type input. Nonzero crater creation remains unsupported.
 Event mask still becomes 0xc000 at the established return tail.
 
-## Clock and scheduler ownership — NE-00.1p
+## Clock and scheduler ownership, NE-00.1p
 
 **Native source ledger; diagnostic arithmetic only.**
 [Validation](../baselines/native-strip-clock.md). Existing `object_service_age`,
@@ -1263,7 +1263,7 @@ Clock/scheduler state, object scratch, links, callback effects and RNG must shar
 the future transaction. E015/E019/E021 remain open for trailing special services,
 notifications, dead-object behavior and event/output ownership before E001/E002.
 
-## Trailing events and death accounting — NE-00.1q
+## Trailing events and death accounting, NE-00.1q
 
 **Native source ledger only; no new runtime behavior.**
 [Validation](../baselines/native-strip-accounting.md). This closes bounded
@@ -1364,7 +1364,7 @@ transactional state must own counters/attribution and any notification effects
 alongside object scratch, queue and RNG. Full removal, APComment middle,
 output/effect resource closure and initial world ownership remain gated.
 
-## Removal caller and notification exclusions — NE-00.1r
+## Removal caller and notification exclusions, NE-00.1r
 
 **Native bounded source ledger only.**
 [Validation](../baselines/native-strip-removal.md). A reviewed removal caller is

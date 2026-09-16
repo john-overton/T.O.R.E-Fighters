@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Research notes — research mode.** Recovered facts about the original
+> **Research notes, research mode.** Recovered facts about the original
 > game's data and code, kept as evidence. Requirements, gates and remaining
 > work described here are research-mode scope; they are not acceptance gates
-> for gameplay. Parity is measured by expression of feature — see
+> for gameplay. Parity is measured by expression of feature, see
 > [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
 > [docs/spec/](../spec/).
 
@@ -135,7 +135,7 @@ fuel helpers. This supersedes their earlier wholly unresolved status. Pure Rust
 translations and repeatable probes exist; the full native tick and its integration
 remain open. Visual device animation remains separate from native physics schedules.
 
-## Rafale C import and runtime selection — 2026-09-14
+## Rafale C import and runtime selection, 2026-09-14
 
 The shared `AircraftId` catalog now admits reviewed FA `F18.PT` and `RAFALE.PT`
 identities with the same bounded 660-byte BRF schema. `RAFALE.PT` names itself
@@ -184,7 +184,7 @@ The bounded HUD reader consumes CODE+0x72 after requiring the native 0x2b2-byte
 copied root. F18.HUD and RAFALE.HUD both select private cockpit palette index 40.
 The app shares weather/sunlight/brightness palette resolution with cockpit art;
 HUD geometry remains authored. Source brightness and palette ordering are in
-[weather.md](weather.md#hud-palette-consumer--continuation-2026-09-15).
+[weather.md](weather.md#hud-palette-consumer-continuation-2026-09-15).
 
 ## End-to-end aircraft guide
 

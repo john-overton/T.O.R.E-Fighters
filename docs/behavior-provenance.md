@@ -50,7 +50,7 @@ means the host technology; it does not establish original-game provenance.
 
 These steps apply **in research mode only**, when recovering behaviour from the
 original executable. They track how far a recovery has progressed. They are
-**not** completion columns for a gameplay feature — a gameplay feature is
+**not** completion columns for a gameplay feature, a gameplay feature is
 complete when it matches its spec, whatever its provenance.
 
 1. **Source established:** identify the behaviour, conditions, producers,
@@ -79,7 +79,7 @@ validate repeatability. Neither establishes retail trajectory parity.
   say so, choose a documented value, and label the component `fitted` or
   `opinionated`. Do not invent a *feature* Fighters Anthology does not have.
 - Existing fitted behaviour stays explicitly identified. Do not silently remove
-  it or expand it, and do not relabel it `native` without the evidence — but it
+  it or expand it, and do not relabel it `native` without the evidence, but it
   needs no replacement to be acceptable.
 - Research-mode labels and implementation status are tracked separately. A
   fitted substitute does not close a *research* item; it can perfectly well close

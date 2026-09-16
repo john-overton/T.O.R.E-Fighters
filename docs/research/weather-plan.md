@@ -1,4 +1,4 @@
-> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its recovered weather facts, dated implementation checkpoints and evidence links. Its sequencing, gates and status columns are no longer authoritative.
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30); see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its recovered weather facts, dated implementation checkpoints and evidence links. Its sequencing, gates and status columns are no longer authoritative.
 
 # Retail weather parity plan
 
@@ -21,7 +21,7 @@ Target the supplied Fighters Anthology build first, then validate every supporte
 base theater. Follow the roadmap's behavioral/asset fidelity definition; original
 resolution and pixel-identical rasterization are not acceptance requirements.
 
-## Scheduling update — 2026-09-15
+## Scheduling update, 2026-09-15
 
 The next continuation is now governed by the
 [living native environment/systems plan](../research/native-environment-systems-plan.md).
@@ -39,10 +39,10 @@ Updated 2026-09-15 after the continuation through steps 1–3. The ordinary
 flight weather path now includes recovered horizon branches, glare, aircraft
 lighting, HUD palette handling and cloud preferences/visibility. Matched retail
 acceptance remains open; retail now runs through dgVoodoo, and host captures
-do not establish retail acceptance. [Current evidence](../baselines/weather-foundation.md#final-weather-sampling-and-batch-checkpoint--2026-09-15),
+do not establish retail acceptance. [Current evidence](../baselines/weather-foundation.md#final-weather-sampling-and-batch-checkpoint-2026-09-15),
 [earlier review](../baselines/weather-review.md).
 
-## Numbered dependency sequence — 2026-09-15
+## Numbered dependency sequence, 2026-09-15
 
 This is the internal weather dependency order; the scheduling update above
 governs when its remaining work runs.
@@ -136,7 +136,7 @@ Source foundations: [theater format](../formats/theater.md),
 literal PIC dependency; do not assume a missing sun texture or author replacement
 art. Cloud imagery in SKY0 does not establish a cloud system.
 
-## W1 — Recover the environment contract and retail baselines
+## W1, Recover the environment contract and retail baselines
 
 Build a repeatable weather static-extraction pass using the existing PE/SMS
 research infrastructure. Gate fixed addresses on reviewed executable/symbol
@@ -187,7 +187,7 @@ ignored `.local/weather/`; publish procedures and conclusions in
 unresolved contracts remain explicit. No generic weather algorithm substitutes
 for missing native evidence.
 
-## W2 — Bounded records and deterministic environment state
+## W2, Bounded records and deterministic environment state
 
 Extend `tore-formats` with typed reviewed weather records and narrow sky/cloud SH
 support. Validate RVAs, sections, record/sentinel counts, arithmetic, resource
@@ -210,7 +210,7 @@ behavior without catch-up, and permit headless operation without an aircraft.
 inputs, independent of rendering rate, camera count and query order. Compare
 translated arithmetic against reviewed source expectations at boundaries.
 
-## W3 — Time, palettes, sky, sun, moon and stars
+## W3, Time, palettes, sky, sun, moon and stars
 
 Recover and implement record selection, altitude/time interpolation and native
 sky mapping. Replace static midday construction with dynamic palette evaluation.
@@ -230,7 +230,7 @@ at and after every recovered transition; full clock-wrap test if supported.
 Verify front/back/up/exterior views, mirrors and camera instruments share the
 same environment instant.
 
-## W4 — Clouds, horizon and visibility
+## W4, Clouds, horizon and visibility
 
 Implement recovered cloud geometry/layers, coverage and distribution, movement,
 altitude, clipping, transparency and draw ordering. Distinguish sky-image cloud
@@ -245,7 +245,7 @@ universal sensor-blocking rule.
 or fog layers; horizon and land/water distance comparisons; deterministic
 evolution and identical main/mirror/panel behavior at matching viewpoints.
 
-## W5 — Wind and turbulence, separate from aircraft movement
+## W5, Wind and turbulence, separate from aircraft movement
 
 Resolve raw mission wind into explicit world-space units using recovered native
 semantics. Give flight and `telemetry::AirData` a consistent environment sample;
@@ -273,7 +273,7 @@ complete loops, restart/pause/replay; independent generator tests and retail
 response comparisons. Aircraft count, camera changes and haptic/audio enablement
 must not accidentally alter weather random sequencing.
 
-### W5 integration checkpoint — 2026-09-15
+### W5 integration checkpoint, 2026-09-15
 
 Typed generated/explicit wind now reaches both adapters and live AirData.
 Synthetic checks cover calm/cardinal drift, preserved starting TAS and complete
@@ -288,7 +288,7 @@ geometry, object/carrier surface producers, audio dispatch, serialized replay
 and retail response comparisons are open.
 [Validation and scope](../baselines/wind-turbulence-vapor.md).
 
-## W6 — Creator integration and parity acceptance
+## W6, Creator integration and parity acceptance
 
 Pass recovered conditions into one validated launch environment shared by creator,
 direct diagnostics, viewer, flight and restart. Remove each clear-only launch
@@ -326,7 +326,7 @@ Use the numbered dependency sequence above for remaining work. W1 source
 recovery, W2 state ownership and W6 acceptance apply within every numbered
 step; they are not separate phases to postpone until rendering is finished.
 
-## W7 — Optional engine contrails after retail weather
+## W7, Optional engine contrails after retail weather
 
 Scheduled as future work at the user’s request, not implemented by this review.
 If further retail shape/caller research or matched captures establishes a native
@@ -394,7 +394,7 @@ batch has landed. The open rows above prevent whole-batch retail acceptance;
 steps 4–9 retain their existing scope. The later step-4 checkpoint below
 supersedes this batch's camera implementation status.
 
-## Requested smoothing and size follow-up — 2026-09-15
+## Requested smoothing and size follow-up, 2026-09-15
 
 - [x] Smooth source palette colors through fractional mission time and altitude;
   retain pure queries, fixed ticks and original callback scheduling.
@@ -410,7 +410,7 @@ supersedes this batch's camera implementation status.
 The user now has retail running through dgVoodoo: the earlier Windows-box-ready
 prerequisite is superseded. Windows/macOS rebuild checks remain separate.
 
-## Step 4 camera implementation checkpoint — 2026-09-15
+## Step 4 camera implementation checkpoint, 2026-09-15
 
 - [x] Connect the original **No sun whiteout?** cheat to immediate suppression
   of whitening and lens flare across all views, retaining original sun geometry.

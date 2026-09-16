@@ -1,4 +1,4 @@
-> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Split out of [weapons research](../formats/weapons.md) on 2026-09-16, which keeps the recovered facts. Its sequencing, W0–W5 gates and status columns are no longer authoritative.
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30); see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Split out of [weapons research](../formats/weapons.md) on 2026-09-16, which keeps the recovered facts. Its sequencing, W0–W5 gates and status columns are no longer authoritative.
 
 # Aircraft weapons: implementation plan and status log
 
@@ -10,7 +10,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-## Implementation status — 2026-09-14
+## Implementation status, 2026-09-14
 
 The plan was committed and pushed as `457c85b` before implementation. W0/W1
 have substantial completed substeps; W2 has diagnostic arithmetic components.
@@ -62,7 +62,7 @@ required before those hooks can meet the vanilla fidelity gate.
 
 ## Ordered implementation plan
 
-### W0 — Complete the native contract and catalog
+### W0, Complete the native contract and catalog
 
 - Inventory every JT and PT/PTS reference, with SEE/ECM/GAS, shapes, textures,
   palettes, audio, effects and native callbacks. Separate supported aircraft
@@ -82,7 +82,7 @@ Gate: every definition has a reviewed family or explicit unsupported reason;
 every gameplay field has a consumer/status entry. Never replace unknown behavior
 with modern specifications.
 
-### W1 — Complete extraction and provenance
+### W1, Complete extraction and provenance
 
 - Extend the shared Rust resolver with reviewed combat-effect roots and typed
   dependency edges; follow aliases/generated-name tables, stores/pod geometry,
@@ -101,7 +101,7 @@ unchanged), including mandatory shared effects. Synthetic tests cover missing
 textures/audio, cycles, bounds, filtering, duplicate builds and conflicts.
 No raw/generated retail resources become committed fixtures.
 
-### W2 — Headless ordnance and sensor foundation
+### W2, Headless ordnance and sensor foundation
 
 Use dedicated renderer-independent combat modules in `tore-sim`, immutable typed
 configuration and caller-owned ammo, target IDs, seeker state, timers and RNG.
@@ -137,7 +137,7 @@ Gate: exact arithmetic/branch tests and complete lifecycle probes with explicit
 targets, terrain, wind, clocks and RNG. Synthetic targets belong to test fixtures,
 not populated free flight. Unknown coupling stays diagnostic until accepted.
 
-### W3 — First complete playable gun slice
+### W3, First complete playable gun slice
 
 - Connect F18/M61 and Rafale/DEFA independently: source mounts, ammunition,
   trigger/release, movement, collision, damage, original bullet art and audio.
@@ -152,7 +152,7 @@ not populated free flight. Unknown coupling stays diagnostic until accepted.
 Gate: matched retail traces/captures for both guns: bursts, empty ammo, different
 launch speeds, hits/misses and lifetime. Determinism alone is not vanilla parity.
 
-### W4 — Stores, sensors and remaining ordnance
+### W4, Stores, sensors and remaining ordnance
 
 - Implement compatible loadout state, mass/drag, release and jettison. Preserve
   clean external free flight until loadout behavior exists. Full loadout-menu
@@ -170,7 +170,7 @@ Gate: each aircraft-compatible store has extraction, configuration, movement,
 sensor, effect and acceptance status. Complete both reviewed identities before
 widening flyable aircraft. Inventorying 145 PTs does not make them flyable.
 
-### W5 — Vanilla acceptance and regression
+### W5, Vanilla acceptance and regression
 
 - Establish original-game baselines per family/branch: speed/altitude/aspect,
   launch/motor/coast/range/lifetime, turn/lock loss, countermeasures, arming

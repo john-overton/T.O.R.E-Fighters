@@ -1,4 +1,4 @@
-> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its recovered facts, dated checkpoints and evidence links. Its sequencing, gates and status columns are no longer authoritative.
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30); see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its recovered facts, dated checkpoints and evidence links. Its sequencing, gates and status columns are no longer authoritative.
 
 # Flight response and maneuver buffet plan
 
@@ -43,7 +43,7 @@ option now runs the joined service. [Live scope](../baselines/native-live-flight
 ### Native continuation before step 4
 
 - [x] Establish native warning-transition tumble scheduling and movement-fall
-  source branches; record [contracts and translation status](../formats/native-flight.md#native-tumble-continuation--2026-09-15).
+  source branches; record [contracts and translation status](../formats/native-flight.md#native-tumble-continuation-2026-09-15).
 - [x] Join native tumble/fall/spin dispatch and movement composition; validate
   synthetic contracts and both PTs with imported tables. [Evidence](../baselines/native-departure-stage.md).
   This is diagnostic component acceptance; no live activation or retail comparison is implied.

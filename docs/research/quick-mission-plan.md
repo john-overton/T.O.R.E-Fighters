@@ -1,4 +1,4 @@
-> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its creator field research, resource inventory and dated checkpoints. Its sequencing, gates and status columns are no longer authoritative.
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30); see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its creator field research, resource inventory and dated checkpoints. Its sequencing, gates and status columns are no longer authoritative.
 
 # Quick Mission Creator and Load Ordnance implementation plan
 
@@ -169,7 +169,7 @@ mission/loadout setup → both screens → armed airborne launch wiring → acce
 Full creator setup does not close M1d's
 combat loop, M1e AI, or native mission-generation parity.
 
-## Mapping checkpoint — 2026-09-14
+## Mapping checkpoint, 2026-09-14
 
 See the [defaults and input contract](../formats/quick-mission.md) and
 [validation evidence](../baselines/menu-behavior-mapping.md). Verified source rules
@@ -178,7 +178,7 @@ acceptance gates above remain open.
 
 Track remaining source questions in the [mapping ledger](menu-parity-matrix.md).
 
-## Implementation checkpoint — 2026-09-14
+## Implementation checkpoint, 2026-09-14
 
 Bounded imports, editable briefing, original-art ordnance and supported armed
 airborne launch/restart are implemented. [Validation and remaining gates](../baselines/creator-ordnance.md).

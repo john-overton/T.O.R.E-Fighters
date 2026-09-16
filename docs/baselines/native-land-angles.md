@@ -8,16 +8,16 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Measured evidence — research mode.** A record of what was run and what it
+> **Measured evidence, research mode.** A record of what was run and what it
 > produced, kept as evidence. Provenance labels and any remaining gates named
 > here are research-mode scope; they are not acceptance gates for gameplay.
-> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Parity is measured by expression of feature; see [AGENTS.md](../../AGENTS.md).
 > Player-visible behaviour is specified in [docs/spec/](../spec/).
 
 
 2026-09-15. NE-00.1c / E008, following `66a7999`.
 **Native source and diagnostic translation/tested; runtime unconnected; retail unavailable.**
-[Contract](../formats/native-land-contact.md#candidate-and-requested-heading-angles--ne-001c),
+[Contract](../formats/native-land-contact.md#candidate-and-requested-heading-angles-ne-001c),
 [frozen plan](../research/native-environment-systems-plan.md).
 
 Two aligned slices (`0x411a40..0x411aec`, `0x4c6c30..0x4c6d5f`) extend the

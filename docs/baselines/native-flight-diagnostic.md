@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Measured evidence — research mode.** A record of what was run and what it
+> **Measured evidence, research mode.** A record of what was run and what it
 > produced, kept as evidence. Provenance labels and any remaining gates named
 > here are research-mode scope; they are not acceptance gates for gameplay.
-> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Parity is measured by expression of feature; see [AGENTS.md](../../AGENTS.md).
 > Player-visible behaviour is specified in [docs/spec/](../spec/).
 
 
@@ -62,7 +62,7 @@ movement and contact. Contact clears combined rates before auxiliary subtraction
 ## Explicit scope and provenance
 
 **Native:** arithmetic and branch order come from the reviewed FA executable.
-The [source contract](../formats/native-flight.md#joined-flight-diagnostic--2026-09-15)
+The [source contract](../formats/native-flight.md#joined-flight-diagnostic-2026-09-15)
 identifies the translated consumers. Exact tumble composition PA words are kept
 for subsequent forces instead of round-tripping through degree angles.
 

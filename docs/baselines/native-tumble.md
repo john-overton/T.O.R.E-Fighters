@@ -1,4 +1,4 @@
-# Native tumble diagnostic start — 2026-09-15
+# Native tumble diagnostic start, 2026-09-15
 
 > **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
 > The thing being reverse engineered is the *experience*, not the executable. We
@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Measured evidence — research mode.** A record of what was run and what it
+> **Measured evidence, research mode.** A record of what was run and what it
 > produced, kept as evidence. Provenance labels and any remaining gates named
 > here are research-mode scope; they are not acceptance gates for gameplay.
-> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Parity is measured by expression of feature; see [AGENTS.md](../../AGENTS.md).
 > Player-visible behaviour is specified in [docs/spec/](../spec/).
 
 
@@ -21,7 +21,7 @@ No retail execution, trajectory comparison or live tumble acceptance is claimed.
 
 The source EXE/SMS identity is unchanged from the
 [flight-response baseline](flight-response.md#source-identity). Expected branch
-behavior and state offsets are in the [native contract](../formats/native-flight.md#native-tumble-continuation--2026-09-15).
+behavior and state offsets are in the [native contract](../formats/native-flight.md#native-tumble-continuation-2026-09-15).
 The initial translation is `tore-formats::flight_model::tumble`; native movement
 composition uses the existing imported-table helpers. Full coupling remains open.
 

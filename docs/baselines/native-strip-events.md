@@ -8,15 +8,15 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Measured evidence — research mode.** A record of what was run and what it
+> **Measured evidence, research mode.** A record of what was run and what it
 > produced, kept as evidence. Provenance labels and any remaining gates named
 > here are research-mode scope; they are not acceptance gates for gameplay.
-> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Parity is measured by expression of feature; see [AGENTS.md](../../AGENTS.md).
 > Player-visible behaviour is specified in [docs/spec/](../spec/).
 
 
 2026-09-15, following `1a0f95d`. **NE-00.1k completes a bounded source ledger**,
-not E019/E020/E021 or live contact. [Contract](../formats/native-strip.md#static-object-service-and-consuming-event-lookup--ne-001k),
+not E019/E020/E021 or live contact. [Contract](../formats/native-strip.md#static-object-service-and-consuming-event-lookup-ne-001k),
 [frozen plan](../research/native-environment-systems-plan.md).
 
 ```sh

@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Research notes — research mode.** Recovered facts about the original
+> **Research notes, research mode.** Recovered facts about the original
 > game's data and code, kept as evidence. Requirements, gates and remaining
 > work described here are research-mode scope; they are not acceptance gates
-> for gameplay. Parity is measured by expression of feature — see
+> for gameplay. Parity is measured by expression of feature, see
 > [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
 > [docs/spec/](../spec/).
 
@@ -132,7 +132,7 @@ This recovers the supplied FA tree including `?`, Control, Pref, View, Window, C
 
 `flight_ui.rs` provides keyboard/mouse traversal and action dispatch, with matching press/release and silent hover. Native actions without a port show explicit feedback. The paused overlay's placement, submenu presentation, and bottom Resume/Restart/Keyboard Shortcuts actions are authored. Portable Exit to Desktop wording replaces the source Exit to Windows label. Source labels/accelerators remain external imported data. See [controls](../FLIGHT-CONTROLS.md).
 
-## Briefing text selectors — 2026-09-14
+## Briefing text selectors, 2026-09-14
 
 The creator now follows `gameassets/reference-photos/quick-mission-creator-screen.jpg`:
 Friendly Situation at left, Enemy Situation at right, selectable aircraft in
@@ -161,7 +161,7 @@ unchanged. Other source roots and the keyboard-help reference remain available.
 Normal-session music/effects and flight display/instrument preferences persist;
 the earlier session-only behavior is superseded. See [input settings](../INPUT.md).
 
-## Creator and ordnance menu-tree recovery — 2026-09-14
+## Creator and ordnance menu-tree recovery, 2026-09-14
 
 The existing bounded FMENUD grammar also reads QM_MENU.MNU and ARMPLANE.MNU.
 It is exposed as `ui::menu_tree`; `flight_menu` remains a compatible wrapper.

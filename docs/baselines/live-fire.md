@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Measured evidence — research mode.** A record of what was run and what it
+> **Measured evidence, research mode.** A record of what was run and what it
 > produced, kept as evidence. Provenance labels and any remaining gates named
 > here are research-mode scope; they are not acceptance gates for gameplay.
-> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Parity is measured by expression of feature; see [AGENTS.md](../../AGENTS.md).
 > Player-visible behaviour is specified in [docs/spec/](../spec/).
 
 
@@ -208,7 +208,7 @@ presentation backpressure, not GPU time or verified displayed FPS. No blocking
 live readback or post-render sleep was introduced. Logs are
 `.local/live-fire/{clean-f18,live-f18,live-rafale}-performance.log`.
 
-## Attached ordnance hidden — 2026-09-15
+## Attached ordnance hidden, 2026-09-15
 
 At the user's request, the shared combat render path no longer emits attached
 external store meshes. Loadout/ammunition/mass state and launched projectiles
@@ -221,7 +221,7 @@ smokes and loaded F18/Rafale exterior captures at 1280×720 and 720×960 passed;
 the captured aircraft were visually checked without attached weapons. Evidence
 is ignored under `.local/ordnance-hidden/`. Windows/macOS were not exercised.
 
-## Combat debug overlay removed — 2026-09-15
+## Combat debug overlay removed, 2026-09-15
 
 The user requested only the main HUD in flight. The persistent weapon/target/HP/
 ECM diagnostic line and range hints are removed, along with timed damage/tracking

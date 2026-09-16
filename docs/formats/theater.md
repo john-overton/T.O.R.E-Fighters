@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Research notes — research mode.** Recovered facts about the original
+> **Research notes, research mode.** Recovered facts about the original
 > game's data and code, kept as evidence. Requirements, gates and remaining
 > work described here are research-mode scope; they are not acceptance gates
-> for gameplay. Parity is measured by expression of feature — see
+> for gameplay. Parity is measured by expression of feature, see
 > [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
 > [docs/spec/](../spec/).
 
@@ -122,11 +122,11 @@ The viewer now uses the selected T2/MM, its referenced DAY2 variant and a variab
 
 Signed out-of-grid border placements remain preserved; the mesh only queries patches intersecting actual fine-grid quads. Camera starts and fixed triangles are authored investigation behavior. All 16 passed Metal startup/render checks; native landmark/shoreline/atmosphere parity remains open. See [runtime validation](../baselines/all-theaters.md#runtime-and-typography-follow-up).
 
-## Diagnostic native contact geometry — 2026-09-15
+## Diagnostic native contact geometry, 2026-09-15
 
 The vertical cell diagnostic now preserves the native diagonal, word normals,
 integer intersection and imported square-root table rounding. It does not change
 the preview renderer or its height sampling. Native fine lookup returns a zero-
 elevation/class-1 fallback for out-of-grid corners; it does not clamp to the last
-sample. [Contract](native-land-contact.md#vertical-terrain-arithmetic--ne-001b),
+sample. [Contract](native-land-contact.md#vertical-terrain-arithmetic-ne-001b),
 [measured decoder/replay coverage](../baselines/native-land-geometry.md).

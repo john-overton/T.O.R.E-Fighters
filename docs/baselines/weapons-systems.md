@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Measured evidence — research mode.** A record of what was run and what it
+> **Measured evidence, research mode.** A record of what was run and what it
 > produced, kept as evidence. Provenance labels and any remaining gates named
 > here are research-mode scope; they are not acceptance gates for gameplay.
-> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Parity is measured by expression of feature; see [AGENTS.md](../../AGENTS.md).
 > Player-visible behaviour is specified in [docs/spec/](../spec/).
 
 
@@ -95,7 +95,7 @@ IR deception 40, radar/IR signature additions 100, noise distances 0/0.
 - Confirmed player damage/destruction uses existing original explosion audio
   and distinct haptic cues. Gun and missile cues come from actual own releases.
   Incoming launches and distant target hits cannot produce player-damage rumble.
-  [Controller mapping and bounded haptic envelopes](../INPUT.md#manual-combat-layer--2026-09-14).
+  [Controller mapping and bounded haptic envelopes](../INPUT.md#manual-combat-layer-2026-09-14).
 
 New commands are development mappings, not recovered retail shortcuts. I and Y
 replace previously unavailable IR/history shortcuts only in this development

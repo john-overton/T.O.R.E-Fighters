@@ -1,4 +1,4 @@
-# Weather foundation implementation — 2026-09-15
+# Weather foundation implementation, 2026-09-15
 
 > **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
 > The thing being reverse engineered is the *experience*, not the executable. We
@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Measured evidence — research mode.** A record of what was run and what it
+> **Measured evidence, research mode.** A record of what was run and what it
 > produced, kept as evidence. Provenance labels and any remaining gates named
 > here are research-mode scope; they are not acceptance gates for gameplay.
-> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Parity is measured by expression of feature; see [AGENTS.md](../../AGENTS.md).
 > Player-visible behaviour is specified in [docs/spec/](../spec/).
 
 
@@ -92,7 +92,7 @@ treating those unrelated formats as EALIB resources.
 No matched retail capture, Windows runtime or macOS runtime check was available
 in this pass. None of the numbered weather parity gates is marked complete.
 
-## Live palette and deck foundation — 2026-09-15
+## Live palette and deck foundation, 2026-09-15
 
 - Bounded root `+0x6c` reader decodes 48-byte shade headers and up to ten
   256-entry index remaps. FA `0x4b3ad0` chooses the first minimum Manhattan RGB
@@ -120,7 +120,7 @@ in this pass. None of the numbered weather parity gates is marked complete.
   1.53 ms, simulation/cameras 0.13 ms. CPU intervals include presentation;
   this is not a matched before/after performance claim. Artifact guards passed.
 
-## Celestial slice — 2026-09-15
+## Celestial slice, 2026-09-15
 
 - Separate bounded, straight-line weather SH reader: source vertex slots/axes,
   fill changes, circles, point stars, UVs and textured billboards. It rejects
@@ -147,7 +147,7 @@ in this pass. None of the numbered weather parity gates is marked complete.
   guards passed. Night active sample: 330 frames/300 measured, zero paused;
   mean 1.38 ms, p95 1.57 ms. No matched retail or Windows/macOS runtime check.
 
-## Cloud geometry slice — 2026-09-15
+## Cloud geometry slice, 2026-09-15
 
 - Reviewed EXE hash-gated reader imports nine 26-byte cloud descriptors from
   `0x50c298`; only inert placement/rotation/mask fields enter `TORE_CLOUDS_V1`.
@@ -188,7 +188,7 @@ in this pass. None of the numbered weather parity gates is marked complete.
   writes opaque depth after a half-coverage cutout test, preventing farther
   vapor from drawing through cloud pixels; its GPU smoke passed.
 
-## Ordered cross-layer fog — 2026-09-15
+## Ordered cross-layer fog, 2026-09-15
 
 - Translated `0x4b31f0` into pure CPU ray queries and the indexed terrain/cloud
   shader. Both preserve target-before-view remap ordering, adjacent-boundary
@@ -222,7 +222,7 @@ The merged starting head was `a43db12`, with a clean tree and no unpushed commit
 Normal full-detail background bands and above-sky selection now use the recovered
 Gouraud contract. Exterior indices share live weather/fog; cockpit indices retain
 their 64-color prefix and receive the selective native tint. Original art remains
-runtime imported. See [contract and limits](../formats/weather.md#horizon-and-shared-aircraft-palettes--continuation-2026-09-15).
+runtime imported. See [contract and limits](../formats/weather.md#horizon-and-shared-aircraft-palettes-continuation-2026-09-15).
 
 The user confirmed that the retail Windows comparison machine is still being
 built. Matched retail captures are unavailable; local GPU captures cannot close
@@ -238,7 +238,7 @@ ms**, p95 **2.57 ms**. The earlier recorded 1.54 ms was not rerun as a paired
 measurement; no unchanged-frame-time or regression-isolation claim is made.
 Windows/macOS runtime and matched retail acceptance remain unavailable.
 
-### Celestial continuation — 2026-09-15
+### Celestial continuation, 2026-09-15
 
 - Fixed the reported moon bank distortion: both textured-quad axes now use the
   world celestial rotation. The old mixed camera-right/world-up basis sheared
@@ -285,7 +285,7 @@ A head-look sunward run measured 1.54 / 1.82 ms with mirrors outside the view;
 these differ in workload and are CPU frame intervals, not GPU timings or a
 paired performance comparison. Retail/platform parity is not closed.
 
-### Cloud visibility continuation — 2026-09-15
+### Cloud visibility continuation, 2026-09-15
 
 FA `0x4a8bd0` dispatches detail >=2 through the 4x4 repeat helper; lower detail
 passes the base period directly, yielding nine candidates rather than 144.
@@ -334,7 +334,7 @@ producer-audit JSON and captures are in `.local/weather-continuation/`. The
 broad extraction reported five unrelated non-EALIB installer archives; the
 FA_2 resource inventory above completed and its provenance is retained.
 
-### Horizon transition and shape fog continuation — 2026-09-15
+### Horizon transition and shape fog continuation, 2026-09-15
 
 Recovered `0x447f2f` / `0x4481a0` / `0x448585`: the texture boundary uses deck
 height at two million feet along the unrolled view direction, while the other
@@ -379,7 +379,7 @@ mean / 12.29 p95); a 630-frame repeat measured 2.09 / 2.34 ms, max 5.21, with
 comparison and Windows/macOS execution remain unavailable in this session.
 
 
-### Per-normal aircraft lighting — 2026-09-15
+### Per-normal aircraft lighting, 2026-09-15
 
 LAY root +14/+18 supplies shade count/pointers; +40/+44 supplies highlight
 count/pointers. All 24 reviewed modules contain seven shade and six highlight
@@ -412,7 +412,7 @@ A 630-frame active F18 run measured 2.17 ms mean / 2.56 p95, max 5.38, with
 Matched retail and Windows/macOS checks remain pending external access.
 
 
-### HUD palette consumer — continuation 2026-09-15
+### HUD palette consumer, continuation 2026-09-15
 
 FA `_HUDDraw` at 0x406ad6 reads 0x5213d2 and sends the byte directly to the
 indexed raster color setter (0x497680); there is no object distance/light remap
@@ -444,7 +444,7 @@ dawn tall cockpit captures pass and were inspected (`hud-*.ppm` in ignored
 1.76 p95, max 5.98, with 630 mirrors and no paused/readback frames. This short
 CPU interval sample does not establish a causal performance improvement.
 
-### Final weather sampling and batch checkpoint — 2026-09-15
+### Final weather sampling and batch checkpoint, 2026-09-15
 
 The reviewed ordinary flight/viewer implementation for batch 1–3 has landed.
 This is **implementation evidence, not retail or all-platform acceptance**.

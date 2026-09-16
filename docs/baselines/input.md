@@ -1,4 +1,4 @@
-# Shared controller input acceptance — 2026-09-14
+# Shared controller input acceptance, 2026-09-14
 
 > **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
 > The thing being reverse engineered is the *experience*, not the executable. We
@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Measured evidence — research mode.** A record of what was run and what it
+> **Measured evidence, research mode.** A record of what was run and what it
 > produced, kept as evidence. Provenance labels and any remaining gates named
 > here are research-mode scope; they are not acceptance gates for gameplay.
-> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Parity is measured by expression of feature; see [AGENTS.md](../../AGENTS.md).
 > Player-visible behaviour is specified in [docs/spec/](../spec/).
 
 
@@ -225,7 +225,7 @@ disconnected in those images; captures validate geometry, not device handling.
 Windows/macOS linked runtime, tactile tuning and physical capture still require
 user/hardware acceptance.
 
-## Manual combat systems continuation — 2026-09-14
+## Manual combat systems continuation, 2026-09-14
 
 The [systems baseline](weapons-systems.md) supersedes the earlier weapon-hook
 and test-count status above: 14 isolated standard controller chords, independent

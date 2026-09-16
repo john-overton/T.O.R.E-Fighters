@@ -25,7 +25,7 @@
 T.O.R.E-Fighters is a ground-up rebuild of Jane's Fighters Anthology in Rust. The
 target is 1:1 gameplay parity **by expression of feature**: you should experience
 what you experience in the original game. It is not a recreation of the original
-program's code. Bring your own retail copy — no retail game data ships in this
+program's code. Bring your own retail copy, no retail game data ships in this
 repository, and the original executable is never run.
 
 Where the project is going is in [the roadmap](docs/ROADMAP.md). What is built

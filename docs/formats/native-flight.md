@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Research notes — research mode.** Recovered facts about the original
+> **Research notes, research mode.** Recovered facts about the original
 > game's data and code, kept as evidence. Requirements, gates and remaining
 > work described here are research-mode scope; they are not acceptance gates
-> for gameplay. Parity is measured by expression of feature — see
+> for gameplay. Parity is measured by expression of feature, see
 > [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
 > [docs/spec/](../spec/).
 
@@ -580,7 +580,7 @@ hold a loop-producing high-G pull. Wind must be subtracted for air-relative
 forces and added back for position, not change TAS merely through advection.
 These are fitted integration decisions, not newly decoded native instructions.
 
-## Response producer/consumer ledger — 2026-09-15
+## Response producer/consumer ledger, 2026-09-15
 
 The repeatable flight extraction now includes bounded setup (`0x47b020..0x47b250`),
 control (`0x47ba8c..0x47c682`), finish (`0x47c682..0x47c860`) and maneuver-sound
@@ -621,9 +621,9 @@ filled in by adding noise or applying sound intensity to aerodynamic forces.
 Hybrid uses native yaw endpoints with fitted continuous coupling;
 movement pitch/roll, speed slew and display AoA/bank offsets are now connected
 in the restricted airborne native path; unrestricted lifecycle/contact remains open.
-See [current runtime contracts](../FLIGHT-MODEL.md#flight-response-contracts--2026-09-15).
+See [current runtime contracts](../FLIGHT-MODEL.md#flight-response-contracts-2026-09-15).
 
-## Native tumble continuation — 2026-09-15
+## Native tumble continuation, 2026-09-15
 
 **Origin: native, established by static code in the reviewed FA EXE/SMS pair.**
 **Historical checkpoint: initial diagnostic translation and synthetic branch tests; no live
@@ -672,7 +672,7 @@ loadout, inputs and conditions. That is separate from the missing implementation
 above. Static branch expectations can be established now; whole-trajectory
 agreement cannot yet be claimed. [Checks and limits](../baselines/native-tumble.md).
 
-## Joined native departure stage — 2026-09-15
+## Joined native departure stage, 2026-09-15
 
 **Origin: native static contracts. Status: joined diagnostic stage tested with
 synthetic inputs and both reviewed PTs/imported trig tables. Live integration
@@ -734,7 +734,7 @@ existing hybrid is unchanged; no body-Euler shortcut connects this stage to it.
 [Native-data checks and reproduction](../baselines/native-departure-stage.md).
 
 
-### Departure force/velocity connection — 2026-09-15
+### Departure force/velocity connection, 2026-09-15
 
 **Native, translated/tested diagnostically:** `force_stage::advance` joins the
 previously reviewed force helpers with `velocity_step`. Source/build identity
@@ -758,7 +758,7 @@ snapshots from departure outputs independently; it does not feed their velocity
 back into a trajectory with the intervening normal controls and later movement
 still absent. This is not a new live adapter. [Evidence](../baselines/native-departure-stage.md#force-connection-follow-up).
 
-### Normal-control and movement/contact composition — 2026-09-15
+### Normal-control and movement/contact composition, 2026-09-15
 
 **Native, diagnostic translation:** `normal_control` joins the reviewed primary
 G/pitch/AoA and roll consumers (`0x47c0a2..0x47c12b`, `0x47c18c..0x47c1e5`,
@@ -798,7 +798,7 @@ The normal branch's auxiliary rates and damage effects remain upstream; neither
 live adapter is switched. [Acceptance scope](../baselines/native-movement-control.md).
 
 
-### Joined flight diagnostic — 2026-09-15
+### Joined flight diagnostic, 2026-09-15
 
 **Native, diagnostic connection:** `flight_model::diagnostic` now joins the
 previously separate components into recurrent state updates. The component-only
@@ -864,7 +864,7 @@ the cockpit attitude. Source branch order is unchanged. Runtime adaptation,
 provenance and open gates are in the [flight guide](../FLIGHT-MODEL.md) and
 [live baseline](../baselines/native-live-flight.md).
 
-### Land-query foundation — 2026-09-15
+### Land-query foundation, 2026-09-15
 
 [The land-contact contract](native-land-contact.md) now establishes GetGround
 dual-query ordering, collision cache mutations/deadlines and landing preference.
@@ -875,7 +875,7 @@ extraction now includes 94 reviewed regions and the external square-root seed ta
 before the current read-only diagnostic interface can host native queries.
 
 
-Clock/scheduler ownership continuation: [NE-00.1p](native-strip.md#clock-and-scheduler-ownership--ne-001p)
+Clock/scheduler ownership continuation: [NE-00.1p](native-strip.md#clock-and-scheduler-ownership-ne-001p)
 extends the diagnostic frame shift domain to the full signed word with x86
 five-bit counts, and establishes scheduler merge/timestamp ordering. Existing
 120 Hz adaptation and runtime restrictions remain unchanged.

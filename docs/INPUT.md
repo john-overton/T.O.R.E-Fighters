@@ -392,7 +392,7 @@ Native API references: [Linux event protocol](https://docs.kernel.org/input/even
 [Windows vibration](https://learn.microsoft.com/en-us/uwp/api/windows.gaming.input.gamepad.vibration).
 See [acceptance and open hardware checks](baselines/input.md).
 
-## Manual combat layer — 2026-09-14
+## Manual combat layer, 2026-09-14
 
 New standard Linux gamepad profiles reserve **Select as a held combat modifier**.
 Press Select first, then the action control. Release the action before switching

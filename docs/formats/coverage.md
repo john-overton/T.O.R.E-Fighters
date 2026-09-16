@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Research notes — research mode.** Recovered facts about the original
+> **Research notes, research mode.** Recovered facts about the original
 > game's data and code, kept as evidence. Requirements, gates and remaining
 > work described here are research-mode scope; they are not acceptance gates
-> for gameplay. Parity is measured by expression of feature — see
+> for gameplay. Parity is measured by expression of feature, see
 > [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
 > [docs/spec/](../spec/).
 
@@ -83,7 +83,7 @@ loose-media closure. RAF.SH neutral geometry, original atlas/cockpit and source
 equipment/audio are consumed in selectable free flight. Other Rafale variants,
 native Rafale animation laws and whole native dynamics remain unimplemented;
 a reviewed-part presentation rig is now available. This is
-not general SH/HUD or full aircraft-system parity. [Scope](aircraft.md#rafale-c-import-and-runtime-selection--2026-09-14).
+not general SH/HUD or full aircraft-system parity. [Scope](aircraft.md#rafale-c-import-and-runtime-selection-2026-09-14).
 
 The shared BRF aircraft reader now reviews F18.PT and RAFALE.PT (Rafale C), both
 FA plane type 5/size 660, with named extraction reports and transitive dependencies.
@@ -98,7 +98,7 @@ preserves the source rims and rejects empty/overlapping/oversized regions. Live
 GPU rear views are fitted presentation, not decoded native mirror optics.
 [Validation](../baselines/mirrors.md).
 
-## Combat import and diagnostic components — 2026-09-14
+## Combat import and diagnostic components, 2026-09-14
 
 All 135 JT, 51 SEE, 30 ECM and 4 GAS configurations now have bounded typed reads.
 The shared app/CLI resolver retains reviewed shared effect roots, both aircraft's
@@ -133,7 +133,7 @@ creator/default/input and ordnance fuel/quantity/compatibility spans.
 [Contracts and evidence](../baselines/menu-behavior-mapping.md). These are static
 research outputs, not a runtime dialog interpreter or accepted loadout flow.
 
-## Creator runtime import — 2026-09-14
+## Creator runtime import, 2026-09-14
 
 The shared `ui::creator` reader verifies the reviewed FA.EXE SHA-256 before
 reading inert active selector lists. The app stores only bounded `TOREQM01`
@@ -148,7 +148,7 @@ store catalogs and other executable builds remain open.
 fuel and weight before constructing live combat state. See
 [implementation evidence](../baselines/creator-ordnance.md).
 
-## Weather and aircraft-effect review — 2026-09-15
+## Weather and aircraft-effect review, 2026-09-15
 
 The [weather audit](../baselines/weather-review.md) corrects the earlier static-midday
 coverage description and reviews the 11 local weather commits. SH streamer
@@ -172,7 +172,7 @@ Weather continuation: normal full-detail horizon bands and above-sky selection,
 shared indexed aircraft fog/palette and indexed cockpit selective tint now render.
 Cockpit prefix and exterior no-palette contracts are validated at import. Later continuation entries below supersede its horizon/HUD gaps;
 retail comparisons remain open. See
-[weather contract](weather.md#horizon-and-shared-aircraft-palettes--continuation-2026-09-15).
+[weather contract](weather.md#horizon-and-shared-aircraft-palettes-continuation-2026-09-15).
 
 Weather continuation: bounded `TORE_FLARE_V1` import recovers the nine reviewed
 FA circle descriptors; LAY remaps 265/266 drive lens-flare composition. Source
@@ -217,7 +217,7 @@ right/forward heading hinges, verified against native consumers and exact
 F18/Rafale neutral mesh vertices. No new aircraft or format coverage is implied.
 [Evidence](../baselines/wind-turbulence-vapor.md).
 
-## Land-contact foundation — 2026-09-15
+## Land-contact foundation, 2026-09-15
 
 Static FA slices, tested preference/cache helpers and vertical cell geometry/angle projection;
 a bounded shape F2 contact-offset reader and external square-root table reader.

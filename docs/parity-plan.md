@@ -12,20 +12,20 @@ One page. What is specified, what is built, what is next. Milestones live in
 [ROADMAP.md](ROADMAP.md); how agents work is in [AGENTS.md](../AGENTS.md).
 
 Parity is measured by **expression of feature**: does the player experience what
-they experience in Fighters Anthology? A behaviour's provenance — `spec-derived`,
-`native`, `fitted`, `opinionated` — records where it came from and never gates
+they experience in Fighters Anthology? A behaviour's provenance, `spec-derived`,
+`native`, `fitted`, `opinionated`, records where it came from and never gates
 acceptance.
 
 ## The decision this plan follows
 
-**D30 — 2026-09-15. Parity by expression of feature.** Recorded from John's
+**D30, 2026-09-15. Parity by expression of feature.** Recorded from John's
 direction after eighteen plan revisions were built on a misreading of "replicate
 only native functionality":
 
 1. Parity is 1:1 gameplay parity by expression of feature, not a recreation of
    the original program's code, control flow, caches or RNG ordering.
 2. "Native" is a provenance label only. It is never a requirement or a gate.
-3. Ground, terrain and object contact is reclassified as **opinionated** —
+3. Ground, terrain and object contact is reclassified as **opinionated**,
    authored behaviour, no longer waiting on a recovered native producer. In
    practice this means both things: the ground contact that exists today is
    accepted as shipped, and contact is now a feature to design deliberately
@@ -37,7 +37,7 @@ only native functionality":
 
 > John first referred to this as D27. That ID was already taken by "NE-00.1p
 > scheduler/clock ownership" in the frozen environment plan, whose log ends at
-> D29, so the strategy was renumbered **D30** on 2026-09-16 — the next free ID,
+> D29, so the strategy was renumbered **D30** on 2026-09-16, the next free ID,
 > which leaves every existing link and reference intact. See
 > [the realignment report](doc-realignment-2026-09-15.md).
 
@@ -48,7 +48,7 @@ name, with the numbers a player would notice.
 
 | Spec | Covers | Status |
 | --- | --- | --- |
-| — | — | None written yet |
+| n/a | n/a | None written yet |
 
 The research to build the first specs from already exists: recovered numbers are
 in [`formats/`](formats/) (weather, native flight, quick mission, ordnance menu,
@@ -66,10 +66,10 @@ player-visible numbers out of those files and leaving the byte layouts behind.
 | Theaters | All 16 selectable, terrain renderer, free camera | native data, fitted rendering | [viewer](baselines/ukraine-viewer.md) |
 | Weather | Day/night palettes, horizon, sun/moon/stars, cloud sheets, fog maps | mixed | [weather](baselines/weather.md), [review](baselines/weather-review.md) |
 | F/A-18D and Rafale C free flight | Cockpit, HUD, instrument windows, mirrors, external views, animation rigs | fitted flight laws, native-derived components | [flight response](baselines/flight-response.md), [mirrors](baselines/mirrors.md) |
-| Ground contact and landing | Runway contact, taxi, brakes, touchdown | **opinionated** — authored, not awaiting a recovered producer | [land foundation](baselines/native-land-foundation.md) |
+| Ground contact and landing | Runway contact, taxi, brakes, touchdown | **opinionated**, authored, not awaiting a recovered producer | [land foundation](baselines/native-land-foundation.md) |
 | Input | Keyboard, gamepad, joystick, profiles, rumble, rebinding | opinionated (authored layer) | [input](baselines/input.md) |
 | Weapons | 135 definitions imported; development range with manual firing, damage fixtures, ECM | mixed | [weapons systems](baselines/weapons-systems.md), [manual weapons](baselines/manual-weapons.md) |
-| Combat AI | Not started, not authorized | — | — |
+| Combat AI | Not started, not authorized | n/a | n/a |
 
 Flight has three selectable paths and they stay distinct: the legacy default, the
 hybrid `--researched-flight`, and the restricted `--native-flight-tables`

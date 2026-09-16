@@ -22,11 +22,11 @@ The granularity test is:
 
 > Would a player notice if this were different?
 
-**Yes** — it belongs here, with numbers: speeds, rates, angles, times, ranges,
+**Yes**, it belongs here, with numbers: speeds, rates, angles, times, ranges,
 thresholds, what appears on screen, what the player hears, what the controls do,
 what makes the difference between success and failure.
 
-**No** — it is a source-notes footnote at the bottom of the file, or it is left
+**No**, it is a source-notes footnote at the bottom of the file, or it is left
 out. Call ordering, cache layout, RNG draw ordering, fixed-point rounding and
 internal state machines are not player-visible and do not belong in the body of
 a spec.
@@ -35,17 +35,17 @@ a spec.
 
 One file per feature a player would name. Suggested sections:
 
-1. **What the player sees and does** — the behaviour in plain prose.
-2. **Numbers** — a table of every value, with units and the conditions each
+1. **What the player sees and does**, the behaviour in plain prose.
+2. **Numbers**, a table of every value, with units and the conditions each
    applies under.
-3. **Edge cases** — what happens at the boundaries, and what the player sees
+3. **Edge cases**, what happens at the boundaries, and what the player sees
    when something fails.
-4. **Unknown** — what is not yet established, and the next research step.
-5. **Source notes** — where the facts came from: build identity, routine or
+4. **Unknown**, what is not yet established, and the next research step.
+5. **Source notes**, where the facts came from: build identity, routine or
    resource, and any branch that could not be resolved. Footnote, not the spec.
 
 A spec describes **Fighters Anthology's** behaviour. A subsystem that is
-deliberately ours — the input layer, for instance — is an opinionated design
+deliberately ours, the input layer, for instance, is an opinionated design
 and belongs in its own guide, not here. Record the departure from original
 behaviour in that guide and label the component `opinionated`.
 

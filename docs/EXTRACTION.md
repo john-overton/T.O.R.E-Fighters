@@ -224,7 +224,7 @@ to scan disc archives too. `--aircraft f18` remains supported. The Rust CLI acce
 repeated `--aircraft` flags to form a union; the app imports both profiles through
 the same resolver. `RAFALEF.PT` and `RAFALEE.PT` are not aliases. Extraction is
 complete for the selected dependency closure, not native flight/animation/system
-parity. See [profile coverage](formats/aircraft.md#rafale-c-import-and-runtime-selection--2026-09-14).
+parity. See [profile coverage](formats/aircraft.md#rafale-c-import-and-runtime-selection-2026-09-14).
 
 Reviewed aircraft selection now supports `--aircraft rafale` as well as `f18`.
 Rafale C starts from RAFALE.PT, RAFALE.HUD, RAF.SH and ~RAFH.PIC and follows the
@@ -356,7 +356,7 @@ existing flight/presentation/systems coverage and all per-aircraft acceptance
 gates. F-14, A-4E and X-31 are scheduled after the flight-response slice; they
 are not supported identities yet.
 
-### Native geometry research data — 2026-09-15
+### Native geometry research data, 2026-09-15
 
 The hash-gated `extract_native_flight.py` pass also emits `tables/sqrt-seed.bin`
 (1024 little-endian unsigned dwords) and its hash/consumer in the table inventory.

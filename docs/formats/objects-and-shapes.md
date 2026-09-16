@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Research notes — research mode.** Recovered facts about the original
+> **Research notes, research mode.** Recovered facts about the original
 > game's data and code, kept as evidence. Requirements, gates and remaining
 > work described here are research-mode scope; they are not acceptance gates
-> for gameplay. Parity is measured by expression of feature — see
+> for gameplay. Parity is measured by expression of feature, see
 > [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
 > [docs/spec/](../spec/).
 
@@ -43,7 +43,7 @@ investigating or eventually editing it:
 
 Our M/MM reader currently reads environment/tmap fields and skips indented
 object fields. The separate bounded STRIP reader can inspect one isolated
-eight-field placement record ([contract](native-strip.md#bounded-isolated-placement--ne-011b));
+eight-field placement record ([contract](native-strip.md#bounded-isolated-placement-ne-011b));
 it does not extend the mission reader. Importing a theater or finding its object names does not place
 those objects in the world. An eventual object integration must resolve the
 type, its visual dependencies, placement and mutable simulation state separately.
@@ -274,7 +274,7 @@ its presence does not mean arbitrary retail PT bytes can be edited as text.
 This review schedules no new aircraft, ground-object renderer, editor, AI or
 mission systems. Those remain subject to their existing roadmap gates.
 
-### Supported-aircraft vapor correction — 2026-09-15
+### Supported-aircraft vapor correction, 2026-09-15
 
 Native CE attachment vectors use **right/up/forward**, while mesh vertices use
 right/forward/up. Applying this distinction to F18.SH and RAFALE.SH gives exact
@@ -283,15 +283,15 @@ Heading hinges rotate the right/forward plane, preserving up. This fixes vapor
 placement; exterior-store placement remains a separate open investigation.
 [Evidence](../baselines/wind-turbulence-vapor.md).
 
-### Contact-offset reader — 2026-09-15
+### Contact-offset reader, 2026-09-15
 
 The bounded `shape::contact_offset` reader follows the F2 relative link used by
 FA 0x42e0c0 and reads only its signed word +8. Absent F2 and malformed links
 remain distinct. This does not decode full collision bounds or establish a
-contact surface from mesh faces. [Source contract](native-land-contact.md#shape-relative-contact-offset--e007),
+contact surface from mesh faces. [Source contract](native-land-contact.md#shape-relative-contact-offset-e007),
 [validation](../baselines/native-land-geometry.md).
 
-### STRIP contact boxes — 2026-09-15
+### STRIP contact boxes, 2026-09-15
 
 `shape::contact_boxes` bounds the F2 subrecord list used by COLGetBox. STRIP
 initialization uses ten midpoint positions and two orientation records; these

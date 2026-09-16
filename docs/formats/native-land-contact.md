@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Research notes — research mode.** Recovered facts about the original
+> **Research notes, research mode.** Recovered facts about the original
 > game's data and code, kept as evidence. Requirements, gates and remaining
 > work described here are research-mode scope; they are not acceptance gates
-> for gameplay. Parity is measured by expression of feature — see
+> for gameplay. Parity is measured by expression of feature, see
 > [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
 > [docs/spec/](../spec/).
 
@@ -103,7 +103,7 @@ size 166, flags 0x208021 (including 0x8000), shape pointer RUNWAY.SH and symbol
 producer is claimed. The SH import/re-entry byte-pattern inspection reports no
 candidates; it does not prove the absence of visual/dynamic dependencies.
 
-## Vertical terrain arithmetic — NE-00.1b
+## Vertical terrain arithmetic, NE-00.1b
 
 Aligned static ranges: `0x42bdc0..0x42bfb9` traversal,
 `0x42bfc0..0x42c1a0` cell, `0x42c1a0..0x42c413` plane,
@@ -165,7 +165,7 @@ It returns a point and normal, **not** a complete ground sample. The downstream
 candidate reducer converts normals through `0x411a40` (which calls `0x4c6c30`,
 square root and atan) and subtracts PA `0x3ffc`. That angle producer and heading projection are translated as described below.
 
-## Shape-relative contact offset — E007
+## Shape-relative contact offset, E007
 
 `0x42e0c0..0x42e0f4` takes the resolved type pointer. It reads the shape pointer
 at type+0x0f. A null shape or a non-F2 word at shape+0x0e returns the zero fallback
@@ -185,7 +185,7 @@ placement and drawing dependencies, then integrate staged query state with
 source-order traces and late-failure rollback. Carrier stays gated.
 
 
-## Candidate and requested-heading angles — NE-00.1c
+## Candidate and requested-heading angles, NE-00.1c
 
 `0x42de60` passes zero origin (`0x4eb710`) and `normal<<16` to
 `0x411a40..0x411aec`. The difference reducer at `0x4c6c30..0x4c6d5f` ORs

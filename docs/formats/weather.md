@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Research notes — research mode.** Recovered facts about the original
+> **Research notes, research mode.** Recovered facts about the original
 > game's data and code, kept as evidence. Requirements, gates and remaining
 > work described here are research-mode scope; they are not acceptance gates
-> for gameplay. Parity is measured by expression of feature — see
+> for gameplay. Parity is measured by expression of feature, see
 > [AGENTS.md](../../AGENTS.md). Player-visible behaviour is specified in
 > [docs/spec/](../spec/).
 
@@ -60,9 +60,9 @@ at `0x4b4170` and celestial draw gating around `0x4ab205` also consume current
 time and active-layer fields. This establishes environment evolution beyond an
 advancing clock UI. Native callbacks must be translated, never loaded.
 
-### Fog tint consumer follow-up — 2026-09-15
+### Fog tint consumer follow-up, 2026-09-15
 
-Source tracing for [dependency step 1](../research/weather-plan.md#numbered-dependency-sequence--2026-09-15)
+Source tracing for [dependency step 1](../research/weather-plan.md#numbered-dependency-sequence-2026-09-15)
 rechecked the reviewed executable/symbol hashes and followed the existing static
 disassembly. The implementation checkpoint below distinguishes live callback state
 from the diagnostic palette helpers.
@@ -116,7 +116,7 @@ diagnostic pending view-state integration, palette-pass scheduling and the
 other ordered palette effects. Existing rendered palette expansion still
 ignores the tint scalar, so the callback alone does not finish visible fog.
 
-### Celestial dispatch trace — 2026-09-15
+### Celestial dispatch trace, 2026-09-15
 
 Static region `0x4aaca0..0x4aacdd` loads STARS, MOON and SUN into pointers
 `0x580ba8`, `0x580bb0` and `0x57cd08`. The draw-list builder at
@@ -167,7 +167,7 @@ dusk and night again. Exactly the two night records carry flags `0x72`, which
 sets bit `0x40`; the three daylight records carry `0x2e`. That is the day/night
 cycle, and it is the same bit that suppresses wing vapor.
 
-Adjacent records deliberately overlap — 300 seconds at dawn, 240 at dusk, 500
+Adjacent records deliberately overlap, 300 seconds at dawn, 240 at dusk, 500
 feet between every cloud and fog band. Those overlaps are the interpolation
 windows: `0x4b37ab` only interpolates when two adjacent records agree on
 `+0x0a`, and passes quarter-scaled signed word time differences into `0x4b3820`.
@@ -268,7 +268,7 @@ The source mission writer at `0x495fa0` emits `map %s`, `layer %s %d`,
 `clouds %d` and `wind %d %d`, which settles three previously unverified fields:
 
 - the `layer` line's second value is the **weather choice index** itself;
-- `clouds` is a **cloud deck altitude in feet**, not a count — `0x42a8f9` gives
+- `clouds` is a **cloud deck altitude in feet**, not a count, `0x42a8f9` gives
   choices 0, 3 and 4 a fifty percent chance of a deck between 7,000 and 20,000
   feet, and zero otherwise, which is why `UKR.MM` reads `clouds 0`;
 - `wind` is whole degrees and feet per second, as `0x495ff2` divides the stored
@@ -291,8 +291,8 @@ per-theater letter when the map name begins with B, E, F, T or V, after skipping
 a `~` or `$` campaign prefix; every other theater uses the unsuffixed module.
 That is exactly why the archive ships six variants of each.
 
-The creator offers **seven** labels — dawn, clear, cloudy, overcast, foggy,
-sunset and night — against these six choices, and no table joining the two lists
+The creator offers **seven** labels, dawn, clear, cloudy, overcast, foggy,
+sunset and night, against these six choices, and no table joining the two lists
 was found. The editor now omits overcast per the user’s clarification that it
 duplicates cloudy; cloudy selects `CLOUD1`. Imported source lists remain intact.
 The six editor rows map by label, not by assuming their indices equal the native
@@ -446,8 +446,8 @@ blend the streamers use.
 | `0x49febf–0x49ff76` | builds six `0x20` vertex records and five `0x2e` line records with colors `0x10d` down to `0x109` and constant `0x96` |
 | `0x49ff7d–0x49fff5` | `_NeedClip`, `_ulineSkipLastPixel = 1`, `@GRExec@4`, then restores the clip and shift buffers |
 
-Because `g_f8` stores 1 G as `0x100`, the trigger is `abs(G - 1) > 3` — roughly
-above 4 G or below -2 G — reaching full length at `abs(G - 1) = 6`. Full length
+Because `g_f8` stores 1 G as `0x100`, the trigger is `abs(G - 1) > 3`, roughly
+above 4 G or below -2 G, reaching full length at `abs(G - 1) = 6`. Full length
 looks back 64 clock units, a quarter second of flight path. The five decreasing
 color indices are the only fade; there is no particle lifetime, no growth and no
 drift. The trail is recomputed every frame from the shared position history, so
@@ -458,8 +458,8 @@ it is attached to the aircraft's recent path rather than emitted into the world.
 `F18.SH` and `RAF.SH` both match `FindStreamerDef` exactly: the word at shape
 offset `+0x0e` is `0xf2`, so it skips four bytes, and the word at `+0x12` is
 `0xce`. The 38-byte record therefore starts at shape offset `0x14`. Neither has
-a hinge — the pivot is all zero and the scale is zero, which is right for two
-fixed-wing aircraft — and the attachment points are plain wingtips:
+a hinge, the pivot is all zero and the scale is zero, which is right for two
+fixed-wing aircraft, and the attachment points are plain wingtips:
 
 | Aircraft | Side 0 | Side 1 |
 | --- | --- | --- |
@@ -498,7 +498,7 @@ limit on all aircraft effects. No dedicated engine contrail producer has been
 confirmed in the inspected FA paths. This is **unconfirmed**, not proof that the
 whole game lacks contrails.
 
-#### Aircraft-embedded code inspected statically — 2026-09-15
+#### Aircraft-embedded code inspected statically, 2026-09-15
 
 Not executing imported modules does **not** prohibit disassembling their code or
 translating reviewed contracts. `tools/inspect_shape_effects.py` now inventories
@@ -527,7 +527,7 @@ This pass covers these two supplied aircraft shapes and their named imports;
 other aircraft, all indirect paths and retail visual comparison remain open.
 Broader wing-induced vapor is **not found in these inspected blocks**, not
 proven absent throughout the game. Future optional contrails are planned in
-[W7](../research/weather-plan.md#w7--optional-engine-contrails-after-retail-weather).
+[W7](../research/weather-plan.md#w7-optional-engine-contrails-after-retail-weather).
 
 ### Corrections and remaining gaps
 
@@ -543,7 +543,7 @@ which axis of the body-rate triple `+0x17f` selects, both remain UNRESOLVED.
 `?wasAfterburn@@3DA` has no reference anywhere in the image and appears to be
 dead.
 
-## Palette remap and deck consumer contract — 2026-09-15
+## Palette remap and deck consumer contract, 2026-09-15
 
 - Bounded root `+0x6c` reader decodes 48-byte shade headers and up to ten
   256-entry index remaps. FA `0x4b3ad0` chooses the first minimum Manhattan RGB
@@ -602,7 +602,7 @@ cloud deck is not established by these primitives. The LAY whiteout bands are
 separate. `CLOUDS.SH` decodes but remains unplaced pending a verified producer.
 See [cloud evidence](../baselines/weather-foundation.md).
 
-## Ordered line-of-sight haze — 2026-09-15
+## Ordered line-of-sight haze, 2026-09-15
 
 FA `0x4b31f0` selects original active view and target records. An overlapping
 view restricts both records' ramps against the blended view ramp: minimum
@@ -629,7 +629,7 @@ Layer RGB fields. `0x4c942c` writes a background geometry program around
 `0x50fda2`, temporarily zeroing camera translation. The program's complete
 geometry contract and above-sky dispatch are not yet translated.
 
-## Horizon and shared aircraft palettes — continuation 2026-09-15
+## Horizon and shared aircraft palettes, continuation 2026-09-15
 
 `0x4c942c` writes two indexed Gouraud quads: upper colors E5/EC at
 Y=130/0; lower colors ED/FC at Y=5/-extent in normal full-detail rendering.
@@ -664,7 +664,7 @@ colors with premultiplied coverage; mirror feeds remain independently composed.
 The HUD is still an authored RGBA raster with no verified source index mapping;
 no invented fog response is applied to its green text.
 
-### Celestial continuation — 2026-09-15
+### Celestial continuation, 2026-09-15
 
 - Fixed the reported moon bank distortion: both textured-quad axes now use the
   world celestial rotation. The old mixed camera-right/world-up basis sheared
@@ -700,7 +700,7 @@ preference defaults on and has a diagnostic override; the native preference UI
 is not implemented. Matched retail captures remain unavailable while the user
 builds the Windows test machine.
 
-### Cloud visibility continuation — 2026-09-15
+### Cloud visibility continuation, 2026-09-15
 
 FA `0x4a8bd0` dispatches detail >=2 through the 4x4 repeat helper; lower detail
 passes the base period directly, yielding nine candidates rather than 144.
@@ -738,7 +738,7 @@ The host's filtered alpha cutoff is an adaptation, not source pixel acceptance.
 `TORE_CLOUD_DETAIL=0|1|2` exposes cloud preference behavior (default 2) without
 claiming the deferred graphics menu or lower-detail terrain raster is complete.
 
-### Horizon transition and shape fog continuation — 2026-09-15
+### Horizon transition and shape fog continuation, 2026-09-15
 
 Recovered `0x447f2f` / `0x4481a0` / `0x448585`: the texture boundary uses deck
 height at two million feet along the unrolled view direction, while the other
@@ -772,7 +772,7 @@ remaps and other display-mode effect masks remain separate work; this does not
 claim complete native shape execution or authored HUD parity.
 
 
-### Original per-normal light maps — continuation 2026-09-15
+### Original per-normal light maps, continuation 2026-09-15
 
 LAY CODE root +0x14/+0x18 is shade count/pointer array; +0x40/+0x44 is highlight
 count/pointer array. Counts are bounded 1..10 and every pointer resolves a full
@@ -792,7 +792,7 @@ Neutral imported F18/RAF/CLOUD1 lit-face counts are 275/201/0. Special sensor or
 display color maps remain outside this reviewed ordinary world path.
 
 
-### HUD palette consumer — continuation 2026-09-15
+### HUD palette consumer, continuation 2026-09-15
 
 FA `_HUDDraw` at 0x406ad6 reads 0x5213d2 and sends the byte directly to the
 indexed raster color setter (0x497680); there is no object distance/light remap
@@ -817,7 +817,7 @@ control saturation and preference migration. The complete ordered native palette
 pipeline still includes non-weather effects beyond this slice.
 
 
-### Weather sampling and special display audit — 2026-09-15
+### Weather sampling and special display audit, 2026-09-15
 
 Sky scanline 0x449cea..0x449e68 takes integer texture coordinates and copies
 one source index per output pixel (e.g. 0x449de5); 0x449f2d..0x44a04d applies
@@ -848,7 +848,7 @@ current ordinary full-detail view takes ED/FC. Lower-detail terrain/sky and
 INFO2/alternate-map integration are separate display work; cloud-only detail
 selection does not pretend to implement them.
 
-### Optional stepped rendering versus smooth presentation — 2026-09-15
+### Optional stepped rendering versus smooth presentation, 2026-09-15
 
 The app now defaults to authored spatial/temporal interpolation of original
 palette colors (`TORE_WEATHER_SMOOTH=0` restores stepped color/fog rendering).
@@ -858,7 +858,7 @@ common fitted ×4 projection calibration against the user's default-zoom retail
 captures, with viewport-relative scale. This factor is not decoded native math.
 See [smoothing evidence and limitations](../baselines/weather-smoothing.md).
 
-## Wind/turbulence integration follow-up — 2026-09-15
+## Wind/turbulence integration follow-up, 2026-09-15
 
 Mission initialization at `0x4808fb..0x480921` draws heading then speed even
 when `0x481e6b..0x481e85` subsequently overrides them. The app now retains a

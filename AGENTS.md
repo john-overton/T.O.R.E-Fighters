@@ -11,7 +11,7 @@ The target is 1:1 gameplay parity **by expression of feature**: a player must
 experience the same behaviour they experience in the original game. It is not a
 recreation of the original program's code, control flow or internal structure.
 Players bring their own retail copy; no retail bytes are committed to this
-repository, and original modules are never executed — readers only interpret
+repository, and original modules are never executed, readers only interpret
 reviewed, bounded data grammars. Sequencing lives in
 [docs/ROADMAP.md](docs/ROADMAP.md); current parity status lives in
 [docs/parity-plan.md](docs/parity-plan.md).
@@ -50,10 +50,10 @@ Turning a spec into working game behaviour.
 
 ## Terms
 
-- **Original behaviour** / **game behaviour** — what a player experiences in
+- **Original behaviour** / **game behaviour**, what a player experiences in
   Fighters Anthology, described in prose in `docs/spec/`. This is the parity
   target.
-- **Native** — a code path reconstructed from the original executable's control
+- **Native**, a code path reconstructed from the original executable's control
   flow. This is a **provenance label only**. It is never a requirement, an
   acceptance gate, or a reason to block or revert working behaviour.
 - When John says "match the original", "do what the game does", or "native
@@ -72,16 +72,16 @@ footnote, or it is omitted.
 
 Label components, not whole features; a feature may mix several origins.
 
-- **spec-derived** — implemented from a behaviour spec in `docs/spec/`. **This is
+- **spec-derived**, implemented from a behaviour spec in `docs/spec/`. **This is
   the default for gameplay code from now on.**
-- **native** — reconstructed from the original executable's control flow. A
+- **native**, reconstructed from the original executable's control flow. A
   description of where the behaviour came from, nothing more.
-- **fitted** — an approximation authored because a behaviour is not yet
+- **fitted**, an approximation authored because a behaviour is not yet
   specified, or because the host needs something the original did not have.
   Record the rule, the constants and the known difference.
-- **opinionated** — a deliberate design choice, either requested by John or
+- **opinionated**, a deliberate design choice, either requested by John or
   chosen by an agent. Record which, and the date if it was requested.
-- **unknown** — insufficient evidence. Record the missing evidence and the next
+- **unknown**, insufficient evidence. Record the missing evidence and the next
   research step.
 
 A `fitted` or `opinionated` component is acceptable as shipped behaviour. It does
@@ -123,6 +123,9 @@ not have to be replaced by a `native` one before acceptance. See
   approximate. Do not commit or push unless asked.
 - Summarize in plain English for a smart product manager: short sentences, no
   unexplained jargon, lead with what it means rather than how it works.
+- **No em dashes.** Use a comma, a colon, or a new sentence. This applies to
+  documentation, commit messages, and reports. `tools/check_docs.py` does not
+  enforce it; keep to it anyway.
 
 ## Documentation rules
 

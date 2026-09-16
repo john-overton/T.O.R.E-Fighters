@@ -1,4 +1,4 @@
-> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its Load Ordnance screen description, source research and dated checkpoints. Its sequencing, gates and status columns are no longer authoritative.
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30); see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept for its Load Ordnance screen description, source research and dated checkpoints. Its sequencing, gates and status columns are no longer authoritative.
 
 # Load Ordnance implementation plan
 
@@ -138,7 +138,7 @@ Delivery gate: creator → supported Load Ordnance edits → Fly → correct arm
 airborne state → restart/return without losing the accepted setup. Unrelated
 menus, combat AI and complete native mission/projectile parity stay open.
 
-## Mapping checkpoint — 2026-09-14
+## Mapping checkpoint, 2026-09-14
 
 See the [controls, eligibility and geometry contract](../formats/ordnance-menu.md) and
 [validation evidence](../baselines/menu-behavior-mapping.md). Verified source rules
@@ -147,7 +147,7 @@ acceptance gates above remain open.
 
 Track remaining source questions in the [mapping ledger](menu-parity-matrix.md).
 
-## Implementation checkpoint — 2026-09-14
+## Implementation checkpoint, 2026-09-14
 
 Bounded imports, editable briefing, original-art ordnance and supported armed
 airborne launch/restart are implemented. [Validation and remaining gates](../baselines/creator-ordnance.md).

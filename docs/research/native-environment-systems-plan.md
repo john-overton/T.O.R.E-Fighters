@@ -1,4 +1,4 @@
-> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30) — see [AGENTS.md](../../AGENTS.md) and [docs/parity-plan.md](../parity-plan.md).** Kept for its recovered facts, evidence links and decision record. Its work-package gates, status columns and sequencing are no longer authoritative.
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30); see [AGENTS.md](../../AGENTS.md) and [docs/parity-plan.md](../parity-plan.md).** Kept for its recovered facts, evidence links and decision record. Its work-package gates, status columns and sequencing are no longer authoritative.
 
 # Native environment and systems implementation plan
 
@@ -10,7 +10,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-**Living plan v21 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
+**Living plan v21, 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
 **Status: implementing source/query foundation; live land contact remains gated.**
 John explicitly scheduled this pass after the airborne native flight connection.
 This is the governing dependency and delivery plan for that continuation. It can
@@ -112,7 +112,7 @@ baselines above remain inputs, not acceptance of the new contact producer.
 | NE-09 | Environmental turbulence/weather interaction | NE-03, NE-06 deck interface, NE-04/07 | Unassigned / planned | Reviewed surface/state/time inputs; one authoritative turbulence coupling |
 | NE-10 | Combined replay, compatibility, performance and platforms | Accepted branches of NE-01–09 | Unassigned / planned | Versioned replay and integrated acceptance; retain explicit unavailable cells |
 
-### Active children — updated 2026-09-15
+### Active children, updated 2026-09-15
 
 | ID | Owner / status | Source established | Translated/tested | Runtime connected | Retail compared | Gate / next action |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -283,7 +283,7 @@ providers. Revisit affected edges when new media or a dynamic naming rule is fou
 
 ## 4. Phased work packages
 
-### NE-00 — Contract and ownership foundation
+### NE-00, Contract and ownership foundation
 
 - [ ] Pin executable, symbol-file and media identities; distinguish FA builds and
   prior reference research. Extend repeatable static extraction only for reviewed ranges.
@@ -303,7 +303,7 @@ synthetic expected query scenarios and a minimal event interface proposal.
 **Gate:** every input needed for the first land query has a reviewed producer or
 an explicitly excluded branch. Unknowns have owners and next research actions.
 
-### NE-01 — Full ground and sea/ocean discovery and import
+### NE-01, Full ground and sea/ocean discovery and import
 
 - [ ] Inventory available FA base/patch archives and all supported theater roots;
   record edition boundaries, duplicate records and unresolved precedence. Inventory
@@ -334,7 +334,7 @@ edge schema, bounded format fixtures, importer tests, coverage/missing-family re
 closure failures block that runtime family. Known missing assets do not disappear
 from the denominator. No fabricated totals or blanket “all ground/sea supported.”
 
-### NE-02 — Placement, scale, materials and collision representation
+### NE-02, Placement, scale, materials and collision representation
 
 - [ ] Recover nested object placement/type resolution in M/MM and any actual MT
   dependency, instance identity, parent attachments and spawn/reset rules.
@@ -357,7 +357,7 @@ mapping, synthetic transforms and imported visual/collision overlays in local ev
 **Gate:** one resolved land surface and one resolved sea/ship family have independent
 visual and collision validation; catalog-wide unsupported cases remain explicit.
 
-### NE-03 — Terrain and object contact producers
+### NE-03, Terrain and object contact producers
 
 - [ ] Recover terrain interpolation/tessellation, class/water interpretation,
   elevation/normal/slope queries, borders, masks and cache invalidation.
@@ -377,7 +377,7 @@ per-query trace and one end-to-end contact baseline for both aircraft.
 **Gate:** producer → classification → settling → state commit passes boundary tests;
 no arbitrary triangle becomes a validated runway. Rollback and event commit ordering hold.
 
-### NE-04 — Equipment, engine and fuel lifecycles
+### NE-04, Equipment, engine and fuel lifecycles
 
 - [ ] Inventory every currently adapted rule: throttle slew, control-surface visual
   filtering, gear/flap/brake/hook travel, 0.5 activation threshold, exhaust response,
@@ -397,7 +397,7 @@ extensions, caller-owned lifecycle state and replacement evidence for each bridg
 **Gate:** timing, reversal/interruption, empty/full/transfer/jettison and restart tests
 pass for both aircraft; unknown subsystem/device behavior stays unavailable.
 
-### NE-05 — Landing, takeoff and ground handling
+### NE-05, Landing, takeoff and ground handling
 
 - [ ] Use verified runway/type/placement roots, explicit wind and slope/contact
   inputs, and native aircraft eligibility; no arbitrary theater start point is a runway.
@@ -415,7 +415,7 @@ F/A-18D and Rafale C, plus instrument/animation/event traces and Linux captures.
 **Gate:** both-aircraft land matrix passes with no adapted force secretly replacing
 an unknown branch; fatal/nonfatal outcomes agree with the accepted event/damage contract.
 
-### NE-06 — Sea, carrier and deck handling
+### NE-06, Sea, carrier and deck handling
 
 - [ ] Identify exact carrier/ship definitions and their deck, hull, island, collision,
   attachment and material dependencies. Do not choose a carrier from appearance alone.
@@ -436,7 +436,7 @@ producer/attachment state, supported handling tests and sea/deck visual baseline
 **Gate:** no hull/deck/sea ambiguity, double motion or attachment leak; unsupported
 per-aircraft operations are explicitly rejected with evidence rather than aliased.
 
-### NE-07 — Event dispatch, damage, subsystem effects and death
+### NE-07, Event dispatch, damage, subsystem effects and death
 
 - [ ] Define immutable event records and a single ordered commit/dispatch boundary:
   source trigger, actor/object ID, tick, payload units, repeat/edge semantics and owner.
@@ -462,7 +462,7 @@ subsystem-effect/death mapping, original dependency closure and RNG ledger.
 **Gate:** deterministic fault injection covers simultaneous contact/damage/fuel-out,
 repeat hits, failure rollback, once-only death and cleanup; unverified effects stay excluded.
 
-### NE-08 — Decoys and guidance intersections
+### NE-08, Decoys and guidance intersections
 
 - [ ] Map dispenser command → eligibility/inventory → spawn position/velocity →
   geometry/signature → lifetime → seeker evaluation → diversion/reacquisition → cleanup.
@@ -483,7 +483,7 @@ chain, source-based seeker cases and isolated live/manual integration evidence.
 **Gate:** inventory/launch/lifetime/mass effects are consistent; failed or removed
 contacts cannot leave stale locks; identical seeds/events reproduce accepted outcomes.
 
-### NE-09 — Environmental turbulence and weather interaction
+### NE-09, Environmental turbulence and weather interaction
 
 - [ ] Trace `_FMTurbulence` and all setup/reset/call sites against the actual joined
   tick; connect accepted surface/daylight/speed/altitude/device/deck inputs.
@@ -502,7 +502,7 @@ no-double-application tests, both-aircraft loop/contact/weather evidence.
 **Gate:** enabling/disabling presentation, changing camera count/order or muting
 feedback cannot alter authoritative RNG/flight state; only source-authorized gates do.
 
-### NE-10 — Replay, compatibility, performance and final acceptance
+### NE-10, Replay, compatibility, performance and final acceptance
 
 - [ ] Version recorded configuration/media identities, accepted start/loadout,
   source tables, schema, adapter selection, clocks/remainders, RNG streams, instance

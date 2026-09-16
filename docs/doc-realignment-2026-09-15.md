@@ -1,4 +1,4 @@
-# Documentation realignment — 2026-09-15
+# Documentation realignment, 2026-09-15
 
 A single pass to make the repository's documentation say what the project
 actually is: a rebuild targeting **1:1 gameplay parity by expression of feature**,
@@ -8,8 +8,8 @@ not a reconstruction of the original program's code.
 
 Earlier today John said "replicate only native functionality". He meant the
 game's player-visible behaviour. The agent read "native" as the repository's
-provenance label — byte-faithful reconstruction of the original executable's
-control flow — and built eighteen plan revisions on that reading. Documentation
+provenance label, byte-faithful reconstruction of the original executable's
+control flow, and built eighteen plan revisions on that reading. Documentation
 across the repo had hardened that misreading into acceptance gates: features
 could not be considered done until their native code path was recovered and
 connected, and authored behaviour was treated as a debt to be repaid.
@@ -22,7 +22,7 @@ code, tests or build configuration were changed.**
 Stated in [AGENTS.md](../AGENTS.md) and recorded in
 [the parity plan](parity-plan.md):
 
-1. Parity is measured by expression of feature — what a player experiences.
+1. Parity is measured by expression of feature, what a player experiences.
 2. "Native" is a provenance label only, never a requirement or a gate.
 3. Ground, terrain and object contact is reclassified as **opinionated**.
 4. Research mode produces prose specs under `docs/spec/`; implementation mode
@@ -30,7 +30,7 @@ Stated in [AGENTS.md](../AGENTS.md) and recorded in
 5. `spec-derived` is the default provenance for gameplay code. Fitted and
    opinionated components need no replacement before acceptance.
 
-### The D27 label — resolved 2026-09-16 as D30
+### The D27 label, resolved 2026-09-16 as D30
 
 The task named this strategy "D27 in docs/native-environment-systems-plan.md".
 That decision ID was already taken. The repository's actual D27 reads:
@@ -43,7 +43,7 @@ by expression of feature, contact as opinionated, or specs under `docs/spec/`.
 instruction itself, not read out of the repository.
 
 The strategy was first written up as D27, which briefly gave two decisions one
-ID. **On 2026-09-16 it was renumbered D30** — the next free ID — which leaves the
+ID. **On 2026-09-16 it was renumbered D30**, the next free ID, which leaves the
 scheduler decision and every existing link untouched. References to "D27" below
 are historical: read them as D30.
 
@@ -60,54 +60,54 @@ is discussed under unresolved conflicts below.
 
 | Path | Purpose | Classification | Conflicted with D27 |
 | --- | --- | --- | --- |
-| `AGENTS.md` | Authoritative agent rules | agent rules | **Yes** — made native provenance the work target and tracked "runtime connected" as a completion column |
+| `AGENTS.md` | Authoritative agent rules | agent rules | **Yes**, made native provenance the work target and tracked "runtime connected" as a completion column |
 | `CLAUDE.md` | Pointer plus reporting-style preference | agent rules | No |
-| `README.md` | Project front page | other | **Yes** — described the project through native-recovery progress; had accreted 20 dated paragraphs |
+| `README.md` | Project front page | other | **Yes**, described the project through native-recovery progress; had accreted 20 dated paragraphs |
 | `MODS.md` | GPL/modding policy: what counts as a mod, who owns it, retail-asset rules | other (policy) | No |
 | `THIRD_PARTY_NOTICES.md` | Attribution for the blast-derived DCL decoder | other (legal) | No |
-| `docs/ROADMAP.md` | Milestones M0–M6, principles, the 1:1 definition | roadmap or plan | **Yes** — current-priority block pointed at native recovery; the AI VM question left open |
-| `docs/ARCHITECTURE.md` | Module-by-module map of what each crate and file owns | other (design notes) | Framing only — plus a stale workspace table listing one crate of six |
-| `docs/DEVELOPMENT.md` | Setup, toolchain, everyday checks, CLI flag and diagnostic reference | agent rules (handbook) | **Yes** — "runtime connection" named as a completion milestone |
-| `docs/EXTRACTION.md` | How to run the extractor: profiles, filters, reports, caps | format reference | Minor — research-mode statements needing scope |
-| `docs/INPUT.md` | Contract for the controller/input layer | spec | Minor — authored effects called "provisional" |
-| `docs/FLIGHT-CONTROLS.md` | Player-facing binding table, HUD/look/mirror behaviour | spec | **Yes** — "not accepted native flight/system parity" |
-| `docs/FLIGHT-MODEL.md` | Flight kernel contract, adapters, telemetry, model ownership | spec | **Yes** — listed what is "still required to claim native parity" |
-| `docs/behavior-provenance.md` | Provenance categories and acceptance rules | agent rules | **Yes** — the root of the misreading. A four-step native ladder was the acceptance model |
-| `docs/aircraft-import.md` | Per-aircraft playbook, gates A–F, coverage table | roadmap or plan (playbook) | **Yes** — "exact whole-tick native parity is open"; no vocabulary for spec-derived |
+| `docs/ROADMAP.md` | Milestones M0–M6, principles, the 1:1 definition | roadmap or plan | **Yes**, current-priority block pointed at native recovery; the AI VM question left open |
+| `docs/ARCHITECTURE.md` | Module-by-module map of what each crate and file owns | other (design notes) | Framing only, plus a stale workspace table listing one crate of six |
+| `docs/DEVELOPMENT.md` | Setup, toolchain, everyday checks, CLI flag and diagnostic reference | agent rules (handbook) | **Yes**, "runtime connection" named as a completion milestone |
+| `docs/EXTRACTION.md` | How to run the extractor: profiles, filters, reports, caps | format reference | Minor, research-mode statements needing scope |
+| `docs/INPUT.md` | Contract for the controller/input layer | spec | Minor, authored effects called "provisional" |
+| `docs/FLIGHT-CONTROLS.md` | Player-facing binding table, HUD/look/mirror behaviour | spec | **Yes**, "not accepted native flight/system parity" |
+| `docs/FLIGHT-MODEL.md` | Flight kernel contract, adapters, telemetry, model ownership | spec | **Yes**, listed what is "still required to claim native parity" |
+| `docs/behavior-provenance.md` | Provenance categories and acceptance rules | agent rules | **Yes**, the root of the misreading. A four-step native ladder was the acceptance model |
+| `docs/aircraft-import.md` | Per-aircraft playbook, gates A–F, coverage table | roadmap or plan (playbook) | **Yes**, "exact whole-tick native parity is open"; no vocabulary for spec-derived |
 | `docs/REFERENCES.md` | Where the user's media and reference checkouts live | format reference | No |
 | `docs/CHEAT-CODES.md` | Four original FA cheat-key sequences | baseline evidence | No |
-| `docs/progress.md` | Dated append-only substep log plus milestone checklist | roadmap or plan + revision log | **Yes** — "replace fitted adapter only after trajectory acceptance" |
-| `docs/flight-response-plan.md` | Ordered work plan and gates for G/roll/rudder/departure response | roadmap or plan | **Yes** — native runtime ownership and contact as an activation gate |
-| `docs/weather-plan.md` | Nine-step weather sequence with dated checkpoints | roadmap or plan + research archive | **Yes** — "Replace authored distance fog with the native recovered visibility and horizon rules" |
-| `docs/ordnance-plan.md` | Load Ordnance screen description, research, build steps | roadmap or plan + spec | **Yes** — screen behaviour gated on handler recovery |
-| `docs/quick-mission-plan.md` | Creator build plan: field groups, imports, UI, launch wiring | roadmap or plan | **Yes** — options held "unavailable pending recovery" |
-| `docs/menu-parity-matrix.md` | Status ledger of creator/ordnance controls | research archive (tracker) | **Yes** — "**Mapped** means static source evidence exists"; measures parity by source recovery |
+| `docs/progress.md` | Dated append-only substep log plus milestone checklist | roadmap or plan + revision log | **Yes**, "replace fitted adapter only after trajectory acceptance" |
+| `docs/flight-response-plan.md` | Ordered work plan and gates for G/roll/rudder/departure response | roadmap or plan | **Yes**, native runtime ownership and contact as an activation gate |
+| `docs/weather-plan.md` | Nine-step weather sequence with dated checkpoints | roadmap or plan + research archive | **Yes**, "Replace authored distance fog with the native recovered visibility and horizon rules" |
+| `docs/ordnance-plan.md` | Load Ordnance screen description, research, build steps | roadmap or plan + spec | **Yes**, screen behaviour gated on handler recovery |
+| `docs/quick-mission-plan.md` | Creator build plan: field groups, imports, UI, launch wiring | roadmap or plan | **Yes**, options held "unavailable pending recovery" |
+| `docs/menu-parity-matrix.md` | Status ledger of creator/ordnance controls | research archive (tracker) | **Yes**, "**Mapped** means static source evidence exists"; measures parity by source recovery |
 | `docs/parity-plan.md` | **New.** One-page parity status and next feature | roadmap or plan | n/a |
 | `docs/spec/README.md` | **New.** What a behaviour spec is and how to write one | spec | n/a |
 | `docs/doc-realignment-2026-09-15.md` | **New.** This report | other | n/a |
 
-### `docs/formats/` — recovered format and code facts
+### `docs/formats/`, recovered format and code facts
 
 All 13 are research material to be preserved. A conflict here means the file
 stated a **policy**, not that its facts are wrong.
 
 | Path | Purpose | Classification | Conflicted with D27 |
 | --- | --- | --- | --- |
-| `formats/aircraft.md` | F18/RAFALE PT, SH, cockpit and instrument facts plus adapter status | research archive | **Yes** — a "Next parity gates" list |
+| `formats/aircraft.md` | F18/RAFALE PT, SH, cockpit and instrument facts plus adapter status | research archive | **Yes**, a "Next parity gates" list |
 | `formats/coverage.md` | Per-format import/decode status matrix | research archive | No |
 | `formats/menu.md` | Menu resource inventory, EALIB/DCL/PIC/DLG/MNU/PCM rules, button layout | format reference | No |
-| `formats/music.md` | Recorded-PCM decision, MUS opcode grammar, playlists, cue mapping | format reference | Minor — a player-audible cue gated on non-fitted contact |
-| `formats/native-flight.md` | Static decode of FA flight code, pass-by-pass ledger | research archive | **Yes** — "Remaining implementation/acceptance" column |
-| `formats/native-land-contact.md` | Ground-contact contracts: queries, cache, cell arithmetic, offsets | research archive | **Yes** — "It must not be replaced with the adapter's eight-foot clearance" |
-| `formats/native-strip.md` | STRIP/runway ledger: callbacks, placement, scheduler, events, speech | research archive | **Yes** — "No runway is runtime-connected"; "Live contact stays gated" |
-| `formats/objects-and-shapes.md` | SH shape/object structure, LOD, encodings, investigation workflow | format reference | Minor — "Recover native branch conditions/order before claiming software visibility parity" |
-| `formats/ordnance-menu.md` | Load Ordnance source contract: dispatch, geometry, eligibility, fuel rules | research archive | Minor — one acceptance clause |
-| `formats/quick-mission.md` | Creator option tables, theater/nationality maps, DLG geometry, defaults | research archive | **Yes** — "Wire verified data into state and rendering before claiming screen parity" |
+| `formats/music.md` | Recorded-PCM decision, MUS opcode grammar, playlists, cue mapping | format reference | Minor, a player-audible cue gated on non-fitted contact |
+| `formats/native-flight.md` | Static decode of FA flight code, pass-by-pass ledger | research archive | **Yes**, "Remaining implementation/acceptance" column |
+| `formats/native-land-contact.md` | Ground-contact contracts: queries, cache, cell arithmetic, offsets | research archive | **Yes**, "It must not be replaced with the adapter's eight-foot clearance" |
+| `formats/native-strip.md` | STRIP/runway ledger: callbacks, placement, scheduler, events, speech | research archive | **Yes**, "No runway is runtime-connected"; "Live contact stays gated" |
+| `formats/objects-and-shapes.md` | SH shape/object structure, LOD, encodings, investigation workflow | format reference | Minor, "Recover native branch conditions/order before claiming software visibility parity" |
+| `formats/ordnance-menu.md` | Load Ordnance source contract: dispatch, geometry, eligibility, fuel rules | research archive | Minor, one acceptance clause |
+| `formats/quick-mission.md` | Creator option tables, theater/nationality maps, DLG geometry, defaults | research archive | **Yes**, "Wire verified data into state and rendering before claiming screen parity" |
 | `formats/theater.md` | T2/BIT2 layout, tmap placement, MM fields, LAY palettes, sky inventory | format reference | No |
-| `formats/weapons.md` | Weapons scope contract, exporter audit, ordered W0–W5 plan with gates | roadmap or plan | **Yes** — roughly half the file is scheduling and acceptance policy |
-| `formats/weather.md` | FA clock, LAY weather records, visibility numbers, turbulence, vapor | research archive | Minor — wording only |
+| `formats/weapons.md` | Weapons scope contract, exporter audit, ordered W0–W5 plan with gates | roadmap or plan | **Yes**, roughly half the file is scheduling and acceptance policy |
+| `formats/weather.md` | FA clock, LAY weather records, visibility numbers, turbulence, vapor | research archive | Minor, wording only |
 
-### `docs/baselines/` — measured evidence
+### `docs/baselines/`, measured evidence
 
 69 files. All preserved unchanged apart from a scope header. "Yes" marks
 research-mode gate language that a reader could mistake for a product gate.
@@ -189,16 +189,16 @@ research-mode gate language that a reader could mistake for a product gate.
 Found while reading; not fixed in this pass, because renaming breaks inbound
 links and the constraint was to preserve evidence files as they are.
 
-- `baselines/environment.md` — reads as game environment; is the macOS dev-host
+- `baselines/environment.md`, reads as game environment; is the macOS dev-host
   and toolchain baseline.
-- `baselines/native-flight.md` — a research log sharing a filename with the
+- `baselines/native-flight.md`, a research log sharing a filename with the
   actual contract file `formats/native-flight.md`.
-- `baselines/weather-foundation.md` — not a foundation slice; the entire weather
+- `baselines/weather-foundation.md`, not a foundation slice; the entire weather
   implementation history, 514 lines.
-- `baselines/weather.md` — reads as the weather baseline; is the superseded first
+- `baselines/weather.md`, reads as the weather baseline; is the superseded first
   pass. The current record is `weather-foundation.md`.
-- `baselines/live-fire.md` — last two sections are unrelated HUD/render changes.
-- `baselines/flight-performance.md` and `baselines/input.md` — both carry
+- `baselines/live-fire.md`, last two sections are unrelated HUD/render changes.
+- `baselines/flight-performance.md` and `baselines/input.md`, both carry
   appended notes belonging to later, unrelated passes.
 
 ## 2. Files rewritten
@@ -236,7 +236,7 @@ one level and all inbound links across the repo were repointed.
 | From | To | Why |
 | --- | --- | --- |
 | `docs/native-environment-systems-plan.md` | `docs/research/` | Named in the task. 717 lines, v21, decision log D01–D29, the plan the misreading was built into. |
-| `docs/progress.md` | `docs/research/` | An append-only per-substep log — 334 lines added and 22 deleted across the last 25 commits that touched it. Exactly the revision log the new rules forbid. Its evidence links are its value. |
+| `docs/progress.md` | `docs/research/` | An append-only per-substep log, 334 lines added and 22 deleted across the last 25 commits that touched it. Exactly the revision log the new rules forbid. Its evidence links are its value. |
 | `docs/weather-plan.md` | `docs/research/` | Half research archive: address lists, LAY inventories, six dated checkpoints. Half sequencing now covered by the roadmap and parity plan. |
 | `docs/flight-response-plan.md` | `docs/research/` | Sequencing now covered; kept for the turbulence routine evidence and the authored rumble mapping. |
 | `docs/ordnance-plan.md` | `docs/research/` | Kept for the Load Ordnance screen description and `HARDLoad` research. Its screen-specification table is the best raw material in the repo for a first behaviour spec. |
@@ -255,8 +255,8 @@ correct statements about **research mode** that read as product gates. The
 constraint was not to rewrite those files beyond adding scope headers, so every
 file in both directories got one, immediately under its title.
 
-- **13 files in `docs/formats/`** — "Research notes — research mode. … Requirements, gates and remaining work described here are research-mode scope; they are not acceptance gates for gameplay."
-- **69 files in `docs/baselines/`** — "Measured evidence — research mode. … Provenance labels and any remaining gates named here are research-mode scope; they are not acceptance gates for gameplay."
+- **13 files in `docs/formats/`**, "Research notes, research mode. … Requirements, gates and remaining work described here are research-mode scope; they are not acceptance gates for gameplay."
+- **69 files in `docs/baselines/`**, "Measured evidence, research mode. … Provenance labels and any remaining gates named here are research-mode scope; they are not acceptance gates for gameplay."
 
 Both headers point at `AGENTS.md` for the parity definition and at `docs/spec/`
 for player-visible behaviour. No other content in either directory was touched.
@@ -271,7 +271,7 @@ Before:
 
 After:
 
-> **Native** — a code path reconstructed from the original executable's control flow. This is a **provenance label only**. It is never a requirement, an acceptance gate, or a reason to block or revert working behaviour.
+> **Native**, a code path reconstructed from the original executable's control flow. This is a **provenance label only**. It is never a requirement, an acceptance gate, or a reason to block or revert working behaviour.
 
 Before:
 
@@ -343,7 +343,7 @@ After:
 
 > ## Research-mode recovery steps
 >
-> These steps apply **in research mode only** … They are **not** completion columns for a gameplay feature — a gameplay feature is complete when it matches its spec, whatever its provenance.
+> These steps apply **in research mode only** … They are **not** completion columns for a gameplay feature, a gameplay feature is complete when it matches its spec, whatever its provenance.
 >
 > 1. **Source established:** … 2. **Translated and tested:** … 3. **Specified:** write the player-visible behaviour and its numbers into `spec/`. This is where research ends and implementation begins.
 >
@@ -602,29 +602,29 @@ After:
 The task named several phrases to hunt. Searched with whitespace normalised, so
 hard-wrapped sentences were matched across line breaks. Results:
 
-- **"native source recovery is the implementation specification"** — one hit, in
+- **"native source recovery is the implementation specification"**, one hit, in
   `native-environment-systems-plan.md`, now frozen. Left intact inside the
   archive; the freeze header supersedes it.
-- **"reference knowledge alone does not establish native behavior"** — one hit,
+- **"reference knowledge alone does not establish native behavior"**, one hit,
   same frozen file, as "Reference naming patterns, screenshots and real-world
   aircraft knowledge alone do not establish native gameplay behavior." This one
   is **correct in research mode** and is preserved as a research-mode rule in the
   new AGENTS.md.
-- **"retain the live stop"** — in the frozen plan's decision log (D10) and, as
+- **"retain the live stop"**, in the frozen plan's decision log (D10) and, as
   "The live stop … remain[s] unchanged", in `baselines/native-land-geometry.md`,
   which now carries a research-mode scope header.
-- **"do not replace with guessed physics"** — no literal match. The nearest is
+- **"do not replace with guessed physics"**, no literal match. The nearest is
   "Unrecovered native coupling remains listed rather than filled with assumed
   physics" in the now-frozen flight-response plan.
-- **"replicate only native functionality"** — **no occurrence anywhere in the
+- **"replicate only native functionality"**, **no occurrence anywhere in the
   repository.** The phrase was spoken, not written; the documentation encoded its
   consequences instead.
-- **"runtime connected" as a completion column** — retired in
+- **"runtime connected" as a completion column**, retired in
   `behavior-provenance.md`, `AGENTS.md` and `DEVELOPMENT.md`. Remaining
   occurrences are inside frozen archives or inside `formats/` and `baselines/`
   files, all of which now carry research-mode scope headers.
 
-## 8. Conflicts not resolved here — these need John
+## 8. Conflicts not resolved here, these need John
 
 Listed rather than decided, because each is a real scope question.
 
@@ -647,7 +647,7 @@ state, not documentation, so the choice is John's.
 
 **3. The AI VM decision was settled by implication, not by John.** M0 carried an
 open decision: reimplement the retail AI bytecode VM, or recreate the behaviours.
-Parity by expression of feature answers it — behaviours, from a spec. The roadmap
+Parity by expression of feature answers it, behaviours, from a spec. The roadmap
 was updated to say so and the open-decisions table marks it settled. If that
 inference is wrong, revert those two edits. Nothing else depends on it; no AI
 work is scheduled or authorized either way.
@@ -660,7 +660,7 @@ designed and improved. The parity plan's next-steps list assumes the second
 ("make takeoff, landing, taxi and deck behaviour feel right"). Separately, the
 restricted `--native-flight-tables` research path really does still stop at
 unsupported contact in the code. That behaviour was documented accurately and
-scoped to that one option — it was not changed, because this pass changed no
+scoped to that one option, it was not changed, because this pass changed no
 code. Whether that research path should keep the stop, or be retired, is open.
 
 **5. Sixteen per-predicate baseline files now violate a rule they predate.**
@@ -679,7 +679,7 @@ not to rewrite `docs/formats/` content. Splitting the plan half into
 `docs/research/` is the tidier answer if you want it.
 
 **7. `docs/INPUT.md` may already be a spec.** It reads as a complete,
-player-facing contract for an explicitly authored subsystem — closer to what
+player-facing contract for an explicitly authored subsystem, closer to what
 `docs/spec/` is for than to a guide. Moving it would break inbound links from the
 README and the baselines, so it stayed put.
 
@@ -703,7 +703,7 @@ Documentation-only pass; no Rust source, test or build file was touched.
 | --- | --- |
 | Relative link and heading-anchor check across all tracked Markdown | 108 files, 0 problems |
 | `git diff --check` (whitespace errors) | clean |
-| `cargo fmt --all -- --check` | pass — confirms no source file was modified |
+| `cargo fmt --all -- --check` | pass, confirms no source file was modified |
 | `python3 -m unittest discover -s tools -p 'test_*.py'` | 26 tests, pass |
 | `python3 tools/check_assets.py` | pass, 267 files |
 
@@ -716,7 +716,7 @@ are in the follow-up section. GPU, Windows and macOS checks were not run.
 
 ---
 
-# Follow-up — 2026-09-16
+# Follow-up, 2026-09-16
 
 John reviewed the pass, approved it, deleted the Jeeves PM control file and asked
 for the open items to be worked through. All nine are closed. Still documentation
@@ -727,7 +727,7 @@ D27 (NE-00.1p scheduler/clock ownership) keeps its name and every existing link
 resolves. Applied to the seven freeze headers and to `docs/parity-plan.md`, which
 now records the renumber and why.
 
-**2. The Jeeves PM control file is gone.** John deleted it — his words: he is
+**2. The Jeeves PM control file is gone.** John deleted it, his words: he is
 rebuilding it. `docs/native-environment-pm.md` was removed along with its
 `.git/info/exclude` entry, so the path is no longer specially ignored. Nothing
 tracked referenced it except the AGENTS.md reporting rule, which now reads:
@@ -743,7 +743,7 @@ and is now confirmed. No AI work is scheduled or authorized either way.
 explicitly: the ground contact that exists today is accepted as shipped, *and*
 contact is a feature to design deliberately rather than a gap waiting on
 recovery. The restricted `--native-flight-tables` research path keeps its
-unsupported-contact stop — it is a research diagnostic, it is documented as a
+unsupported-contact stop, it is a research diagnostic, it is documented as a
 limit of that one option, and removing it would be a code change.
 
 **5. The per-predicate baselines stay.** The sixteen `baselines/native-strip-*`
@@ -752,9 +752,9 @@ was never on the table. The AGENTS.md rule is now explicitly forward-looking:
 "This governs new baselines; the existing `baselines/native-strip-*` set predates
 the rule and is kept as evidence."
 
-**6. `docs/formats/weapons.md` split.** Its "Implementation status — 2026-09-14"
-log and the ordered W0–W5 plan — 180 lines, and the half of the file carrying
-acceptance-gate language — moved to
+**6. `docs/formats/weapons.md` split.** Its "Implementation status, 2026-09-14"
+log and the ordered W0–W5 plan, 180 lines, and the half of the file carrying
+acceptance-gate language, moved to
 [`docs/research/weapons-plan.md`](research/weapons-plan.md), frozen like the
 others. The formats file keeps the recovered facts and now carries a pointer;
 its title changed from "FA research and implementation plan" to "FA research".
@@ -763,7 +763,7 @@ The one inbound anchor in use,
 the moved block and still resolves.
 
 **7. `docs/INPUT.md` stays a guide.** `docs/spec/` holds specifications of
-*Fighters Anthology's* behaviour — that is the parity target. The input layer is
+*Fighters Anthology's* behaviour, that is the parity target. The input layer is
 deliberately ours, not the original's, so a spec is the wrong home for it. The
 spec README now states the rule: an opinionated subsystem is documented in its
 own guide and its components labelled `opinionated`.
@@ -777,7 +777,7 @@ plan"; they now say "the frozen plan", plus one sentence in
 `crates/tore-sim/src/models/config.rs:53` documents the field group as
 "Recovered departure, landing, device drag, velocity bounds and flags", and the
 model reads `n.departure.warning_delay`, `stall_delay` and `severity`. These are
-genuine recovered source values, so the sentence was accurate — it is now worded
+genuine recovered source values, so the sentence was accurate, it is now worded
 "recovered departure/contact limits" rather than "native", which says the same
 thing without leaning on the overloaded word.
 
@@ -787,7 +787,7 @@ thing without leaning on the overloaded word.
 | --- | --- |
 | Relative link and heading-anchor check | 109 files, 0 problems |
 | `git diff --check` | clean |
-| `cargo fmt --all -- --check` | pass — no source file touched |
+| `cargo fmt --all -- --check` | pass, no source file touched |
 | `python3 -m unittest discover -s tools -p 'test_*.py'` | 26 tests, pass |
 | `python3 tools/check_assets.py` | pass, 268 files |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | pass, no warnings |

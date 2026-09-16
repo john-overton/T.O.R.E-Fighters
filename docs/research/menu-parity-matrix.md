@@ -1,4 +1,4 @@
-> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30) — see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept as a record of menu source-recovery status; it measured coverage by source evidence, not by what a player experiences. Its sequencing, gates and status columns are no longer authoritative.
+> **Frozen as of 2026-09-15. Superseded by the parity strategy (D30); see [AGENTS.md](../../AGENTS.md) and [the parity plan](../parity-plan.md).** Kept as a record of menu source-recovery status; it measured coverage by source evidence, not by what a player experiences. Its sequencing, gates and status columns are no longer authoritative.
 
 # Creator / ordnance mapping ledger
 

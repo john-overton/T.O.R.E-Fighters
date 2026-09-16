@@ -136,7 +136,7 @@ The local USNF manual's “View Panning & Zooming” section specifies Ctrl+arro
 
 The development adapter now carries an independent world-space velocity vector. Thrust, drag, lift and gravity accelerate that vector rather than setting it to the nose direction each tick. Pitch/roll controls have finite response, and the HUD flight-path marker uses both lateral and vertical velocity. The nose and actual travel direction can differ. These response constants are authored, not recovered native FA control laws.
 
-Attitude rotates as an orthonormal basis and is interpolated in that basis. The old ±1.5-radian flight pitch clamp is removed; flight can pass through vertical/inverted attitudes and complete loops with sufficient energy. Cockpit head-look still cannot look below its forward eye line—this separate viewing restriction does not limit aircraft pitch. [Evidence and limitations](baselines/flight-response-sky.md).
+Attitude rotates as an orthonormal basis and is interpolated in that basis. The old ±1.5-radian flight pitch clamp is removed; flight can pass through vertical/inverted attitudes and complete loops with sufficient energy. Cockpit head-look still cannot look below its forward eye line, this separate viewing restriction does not limit aircraft pitch. [Evidence and limitations](baselines/flight-response-sky.md).
 
 ## Exterior animations
 
@@ -231,7 +231,7 @@ the desktop exposes Guide. These suppress the corresponding base flight/menu
 bindings. Release before switching layers. Unmodified Start pauses. F10/custom
 `view-external` replaces Select's old default exterior action. Exact mappings,
 profile migration/editor behavior, unsupported controllers and haptic limits are
-in [INPUT.md](INPUT.md#manual-combat-layer--2026-09-14).
+in [INPUT.md](INPUT.md#manual-combat-layer-2026-09-14).
 
 Weapons page V/R/E reports visual availability, radar and ECM: `+` available/on,
 `-` off, `!` failed. Automatic source-index faults are separate from the manual

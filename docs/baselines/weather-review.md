@@ -1,4 +1,4 @@
-# Weather implementation and aircraft effects review — 2026-09-15
+# Weather implementation and aircraft effects review, 2026-09-15
 
 > **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
 > The thing being reverse engineered is the *experience*, not the executable. We
@@ -8,10 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-> **Measured evidence — research mode.** A record of what was run and what it
+> **Measured evidence, research mode.** A record of what was run and what it
 > produced, kept as evidence. Provenance labels and any remaining gates named
 > here are research-mode scope; they are not acceptance gates for gameplay.
-> Parity is measured by expression of feature — see [AGENTS.md](../../AGENTS.md).
+> Parity is measured by expression of feature; see [AGENTS.md](../../AGENTS.md).
 > Player-visible behaviour is specified in [docs/spec/](../spec/).
 
 
@@ -104,19 +104,19 @@ byte match. The inspected native blocks use imported aircraft device state and
 return to `do_start_interp`. Afterburner guards and two-sided streamer draws are
 identified in both shapes, including multiple detail paths. No additional
 contrail or broad wing-vapor trigger was found in these inspected blocks.
-[Offsets and imports](../formats/weather.md#aircraft-embedded-code-inspected-statically--2026-09-15).
+[Offsets and imports](../formats/weather.md#aircraft-embedded-code-inspected-statically-2026-09-15).
 Other aircraft and all indirect runtime paths remain outside this bounded result.
 
 **Conclusion:** wingtip vapor is confirmed. Dedicated engine contrails and broader
 wing vapor remain unconfirmed, not proven absent game-wide. The “never execute”
 rule permits this static inspection and later bounded translation. Future optional
-engine contrails are now explicitly scheduled in [W7](../research/weather-plan.md#w7--optional-engine-contrails-after-retail-weather).
+engine contrails are now explicitly scheduled in [W7](../research/weather-plan.md#w7-optional-engine-contrails-after-retail-weather).
 
 ## Remaining findings and acceptance limits
 
 **Reconciled after the 2026-09-15 continuation.** The commit audit above and
 validation below describe the earlier review. Current implementation/evidence is
-in [weather-foundation.md](weather-foundation.md#final-weather-sampling-and-batch-checkpoint--2026-09-15).
+in [weather-foundation.md](weather-foundation.md#final-weather-sampling-and-batch-checkpoint-2026-09-15).
 
 - Callbacks, mutable fog state, tint smoothing/application and ordered indexed
   fog now run. Sky/ocean use source world planes and horizon branches. Aircraft

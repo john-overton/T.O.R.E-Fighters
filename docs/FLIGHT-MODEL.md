@@ -34,7 +34,7 @@ only; the restricted research path still stops at unsupported contact.
 Maneuver audio/rumble and final
 [flight-response acceptance](research/flight-response-plan.md) follow that continuation.
 [Provenance policy](behavior-provenance.md) records where each component came
-from — spec-derived, native, fitted or opinionated — and keeps user-directed
+from, spec-derived, native, fitted or opinionated, and keeps user-directed
 changes distinct. Those labels describe origin; none of them is an acceptance
 gate. Lifecycle and contact work inside the research path continues.
 
@@ -162,7 +162,7 @@ Mach uses temperature-dependent sound speed, following
 This telemetry atmosphere is separate from aircraft-specific fitted engine lapse;
 it does not silently replace retail weather or claim precision ISA altimetry.
 
-## Complete typed model ownership — 2026-09-14
+## Complete typed model ownership, 2026-09-14
 
 `models/f18.rs` and `models/rafale_c.rs` each construct and own a validated,
 immutable `Arc<Configuration>` from their own reviewed PT. The shared type and
@@ -227,7 +227,7 @@ existing flight/presentation/systems coverage and all per-aircraft acceptance
 gates. F-14, A-4E and X-31 are scheduled after the flight-response slice; they
 are not supported identities yet.
 
-## Flight response contracts — 2026-09-15
+## Flight response contracts, 2026-09-15
 
 The adapter response pass has [component/regression evidence](baselines/flight-response.md);
 native steps 2–3 remain open.
@@ -285,7 +285,7 @@ Native tumble/fall/spin now has a joined diagnostic stage in
 source movement composition. Both reviewed PTs pass its imported-table probes.
 Neither live adapter calls it. The native
 movement-state and whole-tick connection research steps remain open; see the
-[source continuation](formats/native-flight.md#native-tumble-continuation--2026-09-15).
+[source continuation](formats/native-flight.md#native-tumble-continuation-2026-09-15).
 
 The [departure-stage evidence](baselines/native-departure-stage.md) and
 [primary-control/movement evidence](baselines/native-movement-control.md) record
