@@ -361,6 +361,37 @@ fn ocean_surface(hit:vec3<f32>,deck:vec4<f32>,distance:f32,passes:i32,core:i32)-
  let base=ocean_sample(uv,i32(deck.z),distance,passes,core);
  return vec4<f32>(mix(base.rgb,shaded,opacity),base.a);
 }
+// Opinionated directional scattering approximation, docs/spec/sun-glow.md.
+fn solar_glow(color:vec3<f32>,ray:vec3<f32>)->vec3<f32> {
+ if !smooth_weather() || scene.sun.w<=0.0 || celestial_occluded(ray) {return color;}
+ let cosine=clamp(dot(ray,scene.sun.xyz),-1.0,1.0);
+ if cosine<=0.0 {return color;}
+ let angle=acos(cosine);
+ let low=1.0-smoothstep(0.104528,0.422618,scene.sun.y);
+ let narrow=exp(-pow(angle/0.122173,2.0));
+ let wide=exp(-pow(angle/0.314159,2.0));
+ let azimuth=acos(clamp(dot(ray.xz,scene.sun.xz)/max(length(ray.xz)*length(scene.sun.xz),0.00001),-1.0,1.0));
+ let elevation=asin(clamp(ray.y,-1.0,1.0))-asin(clamp(scene.sun.y,-1.0,1.0));
+ let wash=exp(-pow(azimuth/0.785398,2.0)-pow(elevation/0.244346,2.0));
+ let strength=(mix(0.30,0.85,low)*narrow+mix(0.06,0.24,low)*wide+0.16*low*wash)
+     *smoothstep(0.0,0.2,cosine)*scene.circles[0].z;
+ let emission=mix(vec3<f32>(1.0,0.88,0.65),vec3<f32>(1.0,0.32,0.075),low)*strength;
+ return color+(vec3<f32>(1.0)-color)*(vec3<f32>(1.0)-exp(-emission));
+}
+// Per-pixel angular cloud lighting. World direction avoids per-tile seams;
+// texture modulation retains the original cloud detail and transparent holes.
+fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
+ if !smooth_weather() || scene.sun.w<=0.0 {return color;}
+ let cosine=clamp(dot(ray,scene.sun.xyz),-1.0,1.0);
+ if cosine<=0.0 {return color;}
+ let low=1.0-smoothstep(0.104528,0.422618,scene.sun.y);
+ let rising=smoothstep(-0.087156,0.034899,scene.sun.y);
+ let angular=exp(-pow(acos(cosine)/0.610865,2.0))*smoothstep(0.0,0.2,cosine);
+ let strength=0.90*low*rising*angular*scene.circles[0].z*visibility;
+ let tint=mix(vec3<f32>(1.0,0.88,0.65),vec3<f32>(1.0,0.32,0.075),low);
+ let emission=color*tint*strength;
+ return color+(vec3<f32>(1.0)-color)*(vec3<f32>(1.0)-exp(-emission));
+}
 @fragment fn sky_fragment(in:SkyOut)->@location(0) vec4<f32>{
  let ray=normalize(scene.forward.xyz+scene.right.xyz*in.screen.x*scene.eye.w/(1.7320508*scene.up.w)+scene.up.xyz*in.screen.y/(1.7320508*scene.up.w));
  // Source deck planes: world feet, power-of-two tiling, reversed north axis.
@@ -393,7 +424,7 @@ fn ocean_surface(hit:vec3<f32>,deck:vec4<f32>,distance:f32,passes:i32,core:i32)-
   let index=deck_transition(ray,deck.x,select(upper,lower,scene.eye.y>deck.x));
   if index>=0 {background=index;}
  }
- var color=horizon_color(background,passes,core);
+ var color=solar_glow(horizon_color(background,passes,core),ray);
  let decks=array<vec4<f32>,2>(scene.deck_a,scene.deck_b);
  var nearest=1e30;
  for(var i=0;i<2;i++){
@@ -418,6 +449,7 @@ fn ocean_surface(hit:vec3<f32>,deck:vec4<f32>,distance:f32,passes:i32,core:i32)-
    tex=mix(a,b,fract(row));
   }
   }
+  if scene.ocean[i+1]<=0.0 {tex=vec4<f32>(solar_glow(cloud_solar_glow(tex.rgb,ray,1.0),ray),tex.a);}
   color=mix(color,tex.rgb,tex.a);
   nearest=distance;
  }
@@ -456,5 +488,5 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
 @fragment fn cloud_fragment(in:VertexOut)->@location(0) vec4<f32>{
  let tex=weather_tile(in.uv,i32(in.layer),0,-1,-1,ray_rows(in.distance,in.altitude));
  if tex.a<0.5 {discard;}
- return vec4<f32>(tex.rgb,1.0);
+ return vec4<f32>(cloud_solar_glow(tex.rgb,normalize(in.direction),1.0-clamp(haze(length(in.direction)),0.0,1.0)),1.0);
 }

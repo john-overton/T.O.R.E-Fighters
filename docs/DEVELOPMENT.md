@@ -500,6 +500,9 @@ shades. It uses fractional mission time, freezes on pause and does not change
 simulation/callback scheduling. `--validate-weather` also reports native/smooth
 palette change counts and maximum channel steps over a minute of dawn.
 [Evidence and celestial sizing qualifications](baselines/weather-smoothing.md).
+Smooth weather also adds an opinionated directional sun halo, dawn/dusk wash,
+and per-pixel angular lighting on sky-deck textures and cloud sheets.
+See [sun glow specification](spec/sun-glow.md).
 
 ### Wind, turbulence and attachment probes
 

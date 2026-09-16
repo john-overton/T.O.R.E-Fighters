@@ -146,15 +146,24 @@ impl Celestial {
         })
     }
     pub fn sun_uniform(&self, world: &World, altitude: f32) -> Vec<f32> {
-        let angle = world
-            .weather
-            .sample(altitude as f64)
-            .and_then(|l| tore_sim::environment::sun_angles(&l, world.weather.seconds_of_day()));
+        let layer = world.weather.sample(altitude as f64);
+        let seconds = world.weather.seconds_of_day();
+        let angle = layer
+            .as_ref()
+            .and_then(|l| tore_sim::environment::sun_angles(l, seconds));
         let mut out = vec![0.; 36];
         if let Some(angle) = angle {
             let direction = rotate([0., 0., 1.], angle);
             out[..3].copy_from_slice(&direction);
             out[3] = self.sun.primitives.len() as f32;
+            if let Some(layer) = &layer {
+                // Opinionated presentation fade, docs/spec/sun-glow.md.
+                let edge = (seconds - layer.sunrise_seconds).min(layer.sunset_seconds - seconds)
+                    as f32
+                    / 120.;
+                let t = edge.clamp(0., 1.);
+                out[6] = t * t * (3. - 2. * t);
+            }
             for (i, p) in self.sun.primitives.iter().enumerate() {
                 if let Primitive::Circle {
                     center,

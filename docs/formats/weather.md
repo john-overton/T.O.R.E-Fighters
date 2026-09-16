@@ -857,6 +857,9 @@ shape art and index cutouts remain intact. Sun/moon geometry additionally has a
 common fitted ×4 projection calibration against the user's default-zoom retail
 captures, with viewport-relative scale. This factor is not decoded native math.
 See [smoothing evidence and limitations](../baselines/weather-smoothing.md).
+Smooth weather also adds an opinionated directional sun halo, dawn/dusk wash,
+and per-pixel angular lighting on sky-deck textures and cloud sheets.
+See [sun glow specification](../spec/sun-glow.md).
 
 ## Wind/turbulence integration follow-up, 2026-09-15
 
