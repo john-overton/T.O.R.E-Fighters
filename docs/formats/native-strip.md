@@ -624,8 +624,8 @@ is `len(first)+1+len(second)+1`. It calls event enqueue `0x4180a0` with the two
 caller-supplied low-word IDs, literal arguments 0, 2, 0x8000, 0x24, and the payload
 pointer/length. The enqueue result is not checked here. It then sets global word
 `0x552fdc` to `word(0x5528e0 + scaled_delay(3))` and returns AL=1. It does not
-clear the two global buffers. Payload limits, event copying/lifetime and dispatch
-remain required source closure; do not emit borrowed pointers to stack data.
+clear the two global buffers. NE-00.1k below establishes the ordinary event-record copy and its 200-byte
+clamp; complete routing/lifetime and dispatch remain required source closure; do not emit borrowed pointers to stack data.
 There is no direct RNG call in this wrapper; this does not establish its callees'
 RNG behavior or callback-wide draw ordering.
 
@@ -657,3 +657,137 @@ This establishes initialization, not all clock/scale producers or the native
 scheduler's connection to the host's fixed 120 Hz clock. Later changes to scale,
 speech reset/deadline producers at `0x48d2b2`/`0x48d5d4`, comment generation and
 event consumers remain open. Existing adapted clock/replay claims are unchanged.
+
+
+## Static-object service and consuming event lookup — NE-00.1k
+
+**Native bounded source established; no new runtime translation or activation.**
+Same reviewed EXE/SMS identities; [validation](../baselines/native-strip-events.md).
+This closes the kind-0 event-service caller ledger, not its query/event consumers,
+movement body, command producers or complete E019/E020 ownership.
+
+### Movement/query ordering
+
+`0x4631b0..0x4631e4` snapshots current XYZ to `0x546bb0` and instance word
++0xee to `0x546ba4`. The movement prefix `0x436b30..0x436c6f` clears byte
+`0x546b88`, samples ground through `0x4abab0` request 1 with angle output and
+null water output, then copies the 32-byte command block at instance +0x38.
+Only kind 4 makes the additional touching call here. It snapshots XYZ to
+`0x538278`, calls `0x4780d0`, computes word body-minus-movement angle deltas,
+and adjusts the local command copy from its +0x1e flags before command dispatch.
+Neither zero speed nor kind 0 bypasses this prefix. The command table and body
+beyond `0x436c70`, command initialization/updates and `0x4780d0` remain open.
+No autonomous command behavior is implemented.
+
+### Kind-0 event service at 0x4631f0
+
+The complete caller range ends at `0x463721`; only its kind-0 path is accepted
+as the selected STRIP ledger. Other kinds' branches remain unsupported.
+
+1. Save instance event mask word +0x58. Consume an event for current ID with
+   mask 0x8000 using `0x4185a0`; if present, dispatch `0x463980(0x8000, record)`.
+   A nonzero callback byte ends service. Otherwise consume with mask 0x7fff.
+2. If that record's +8 equals 0x4000, copy its 34-byte payload at +0x0d into
+   local storage, dispatch 0x4000, then run the preference/notification path
+   at `0x463275..0x4632d9` before testing the saved callback result. This path
+   can call `0x4432d0`; it remains an unaccepted downstream effect.
+3. Kind 0 resolves the current type's F2 record with `0x42e0c0`. The first
+   signed dword divided by two, truncating toward zero, supplies the query
+   radius; the separate word argument is zero. It is not the F2 +8 height offset.
+   Build query mask **0x22**, add bit 0x8 if saved event mask has 0x4000 and
+   type flags have bit 2; add bit 1 when instance +0x56 bit 1 is clear; add
+   bit 0x10 when type flags bit 4 is clear. Kind-4 and kind-6 additions do not apply.
+4. Call `0x42b800` with current ID/instance/nationality, the earlier snapshot
+   XYZ and current XYZ, radius/word/mask and output pointers. This is a swept
+   service query dependency even for a static type, not another GetGround call.
+5. Output ID 0xffff enters `0x4635d0`: ground request **0**, without angle/water
+   outputs, raises Y only if below the returned height, then dispatches 0x2000.
+   Nonzero/non-ffff output plus saved event bit 0x4000 forms a 34-byte hit payload:
+   first byte 100 for kind 0, target ID and its type string, final two bytes zero.
+   It dispatches 0x4000; a surviving nonzero payload ID is rewritten to current
+   ID with current type string and enqueued to the hit ID before the saved
+   callback result is tested. Payload mutation and notification ordering matter.
+6. The shared tail repeats the ground/event path if Y <0. Byte `0x546b88`
+   requests event 0x1000. Kind 0 bypasses kind-2/4 proximity/attachment events.
+   A previously consumed 0x400 record requests event 0x400 with its +2 word.
+   Finally a nonzero input byte calls `0x463d40`; false dispatches 0x80 through
+   `0x4639c0` directly, bypassing the event-mask gate.
+
+The event mask saved at entry and live mask read by the dispatcher are distinct.
+Callbacks may change live state. Do not replace this sequence with an unordered
+set of event kinds or assume static placement makes every event impossible.
+Full query outputs, preference/notification, hit strings, callback mutation and
+final command predicate remain dependencies. The query can mutate E002 state;
+its effects and event queue effects require one host transaction.
+
+### Event gate and interception
+
+`0x463980..0x4639b2` returns AL=0 unless current instance flags include 1 and
+current event mask +0x58 intersects the supplied low-word mask. Otherwise it
+calls `0x4639c0` and retains the returned byte.
+
+`0x4639c0..0x463a11` first tries global interceptor `0x4f6fb8` if nonnull,
+passing addresses of mask, payload argument and output byte. True interceptor
+return uses that output byte immediately. False proceeds with the possibly
+modified mask/payload to request-3 callback resolution (`0x463f60`). STRIP's
+request 3 resolves OBJEventProc, not a no-op. Scheduler reset clears the global;
+mission setup writes it at `0x480ac2`, so reset alone cannot prove absence during
+service. Imported function pointers remain inert. Interceptor initialization,
+OBJEventProc and reentrant mutation remain unknown/unsupported.
+
+### Event lookup consumes state, including on a null return
+
+`0x4185a0..0x4186d4` scans **120 records of 0xd5 bytes**, starting `0x522d40`.
+It skips deadline +6 ==0xffff, nonintersecting mask +8 and unsigned deadline
+> word time `0x5528c8`. Ordinary recipient ID must equal record +4. Special
+recipient 0x800b additionally accepts nonspecial object IDs whose instance flag
+2 is clear; that path needs object lookup and is not an ordinary-ID alias.
+
+On a match it copies the whole record to shared scratch `0x522c60`, requests
+forward compaction through `0x4d78d0` with destination=current record,
+source=next record and remaining byte count, then marks the final slot's +6
+(`0x529049`) 0xffff. The forward-copy path was inspected separately; the whole
+C-runtime helper is not added as one code region across its embedded jump table.
+
+Unless record flag 1 suppresses it, selected player/controller predicates call
+speech observer `0x48d350` **after removal**. If scratch flag 4 is clear, return
+the shared scratch pointer. If flag 4 is set, advance to the next physical
+record and continue, even though compaction shifted a record into the removed
+slot. A null result therefore does not imply no queue mutation or speech effect.
+Scratch ownership/reentrancy must be recovered before retaining a result across
+another callback or lookup. Queue reset, observer and full routing remain open.
+
+### Enqueue RNG, copied payload and wakeup boundaries
+
+The prefix `0x4180a0..0x418189` always calls the shared word-bound RNG with
+**bound 100** at `0x41815f`, before recipient expansion, filtering or local queue
+capacity checks. Its byte becomes event +1. Thus even a full queue or empty
+recipient expansion consumes that draw; speech wrapper submission is not RNG-free.
+There may be additional draws in downstream consumers, still unreviewed.
+
+The ordinary record writer `0x4182e8..0x418381` establishes this packed layout:
+
+| Offset | Width | Established value |
+| --- | --- | --- |
+| +0 / +1 | bytes | Flags / shared bound-100 draw |
+| +2 / +4 | words | Sender / expanded recipient |
+| +6 | word | Word clock 0x5528c8 plus supplied delay, wrapping |
+| +8 / +0xa | word / byte | Event mask / subtype |
+| +0xb | word | Payload length |
+| +0xd | up to 200 bytes | Copied payload |
+
+Length is compared as a **signed word** and clamped only above 200; nonpositive
+length skips copying but is still stored. A future host envelope must reject
+negative/invalid lengths and own its bytes, not reproduce an unsafe pointer.
+This clamp is inside recipient processing; it does not establish bounds for
+all fallback paths in the unaccepted complete enqueue routine.
+
+`0x418433..0x4184b5` searches local slots in order for deadline 0xffff; a full
+queue skips this recipient. After writing a local ordinary-object event, an
+instance with flag 1 clear invalidates the slot again. A live scheduled object (flag 2) whose
+unsigned +0x68 exceeds **widened word-clock +1** is switched in, reinserted through
+`0x4626b0`, then switched out. At clock 0xffff that comparison uses 65536, not
+word zero. Enqueue can consequently mutate current scratch/stores and scheduling
+as well as the queue and RNG. Special recipients skip this wakeup path.
+Full recipient expansion, remote routing `0x470640`, speech observer and queue
+reset are not closed by these slices. No event emitter or scheduler is enabled.

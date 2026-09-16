@@ -1206,3 +1206,18 @@ only the diagnostic precursor; the parent first slice remains researching.
 
 [Contract](formats/native-strip.md#current-object-switches-and-speech-timing--ne-001j),
 [validation](baselines/native-strip-speech.md). Live/carrier activation remains gated.
+
+
+## Static-object event service and queue ownership — 2026-09-15
+
+- [x] NE-00.1k: establish the kind-0 event-service caller and movement query
+  prefix, consuming event lookup, interception, and ordinary enqueue payload,
+  shared RNG and recipient wakeup boundaries.
+- [x] Add E021: queue lookup can mutate state even when it returns no event;
+  enqueue draws before filtering/capacity checks and may reschedule a recipient.
+- [ ] Complete movement commands, queue reset/routing, observer/interceptor and
+  OBJEventProc consumers, plus E016/E004 before staged E001/E002 integration.
+
+[Source contract](formats/native-strip.md#static-object-service-and-consuming-event-lookup--ne-001k),
+[validation](baselines/native-strip-events.md). Source ledger only; no runtime,
+AI, carrier or new aircraft activation.
