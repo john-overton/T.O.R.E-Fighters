@@ -1262,3 +1262,17 @@ assignment remain required at zero speed; no runtime service or contact activati
 [Source contract](formats/native-strip.md#queue-routing-and-speech-observation--ne-001n),
 [validation](baselines/native-strip-observer.md). Source ledger only; no runtime
 callback, audio, networking, AI or carrier activation.
+
+
+## STRIP collision and death marking — 2026-09-15
+
+- [x] NE-00.1o: recover other-object hit callback ownership, generic collision
+  type-HP threshold, death-state writes and selected zero-crater exclusion.
+- [x] Translate/test only the signed ratio predicate, with explicit failure for
+  zero victim type HP. Distinguish death marking from full removal.
+- [ ] Close notification/field producers, dead-object service, comment/output
+  and world/query ownership before native contact activation.
+
+[Source contract](formats/native-strip.md#collision-hit-dispatch-and-death-marking--ne-001o),
+[validation](baselines/native-strip-hit.md). Both-aircraft crash behavior remains
+open; no live damage, service, carrier or AI activation.

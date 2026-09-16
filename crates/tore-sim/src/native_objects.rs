@@ -1,6 +1,14 @@
 //! Diagnostic native object state; no world construction or live activation.
 //! Source: docs/formats/native-strip.md.
 
+/// Diagnostic generic object collision predicate at FA 0x473b84..0x473b9e.
+/// These are type hit-point words, not the event's amount or current health.
+/// The protection gate and notification/death effects belong to the caller.
+/// Zero victim type hit points would divide by zero natively; report no result.
+pub fn collision_is_lethal(other_type_hp: i16, victim_type_hp: i16) -> Option<bool> {
+    (victim_type_hp != 0).then(|| i32::from(other_type_hp) * 100 / i32::from(victim_type_hp) >= 25)
+}
+
 /// Diagnostic FA 0x411950: move a word angle by at most the supplied step.
 /// Difference wraps as a word; magnitude is widened, including -32768.
 /// Step normalization retains native dword wrapping, even for i32::MIN.
@@ -153,6 +161,21 @@ fn remove_first(ids: &mut Vec<u16>, id: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collision_ratio_uses_signed_type_words_and_exact_threshold() {
+        assert_eq!(collision_is_lethal(249, 1000), Some(false));
+        assert_eq!(collision_is_lethal(250, 1000), Some(true));
+        assert_eq!(collision_is_lethal(1, 4), Some(true));
+        assert_eq!(collision_is_lethal(1, 5), Some(false));
+        assert_eq!(collision_is_lethal(0, 1), Some(false));
+        assert_eq!(collision_is_lethal(-1, 4), Some(false));
+        assert_eq!(collision_is_lethal(-1, -4), Some(true));
+        assert_eq!(collision_is_lethal(i16::MIN, -1), Some(true));
+        assert_eq!(collision_is_lethal(i16::MAX, 1), Some(true));
+        assert_eq!(collision_is_lethal(1, i16::MIN), Some(false));
+        assert_eq!(collision_is_lethal(1, 0), None);
+    }
 
     #[test]
     fn angle_approach_preserves_zero_rates_and_word_crossings() {

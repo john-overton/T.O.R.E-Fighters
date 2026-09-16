@@ -1071,3 +1071,78 @@ that clears the pointer. A nonempty code resource stays unsupported/inert;
 absence must be established from the chosen world input and reset lifecycle,
 not inferred from STRIP identity or the no-AI scope. This does not establish a
 full MM parser or complete mission lifecycle.
+
+## Collision hit dispatch and death marking — NE-00.1o
+
+**Native source ledger and diagnostic collision predicate.**
+[Validation](../baselines/native-strip-hit.md). This refines E019/E021 and the
+NE-07 boundary; it does not connect contact damage or object removal.
+
+### The other object's callback operates on the current victim
+
+`0x463ec0..0x463f23` reads payload word +1. A nonzero ID resolves that object's
+request-4 callback through 0x463f30; zero resolves the type resource named at
+payload +3 and asks its selector for request 4. It invokes the resulting callback
+with the payload if nonnull. **It does not switch the current victim.** Instance
+overrides and unresolved type resources remain explicit boundaries; imported
+selectors are inert in the host.
+
+After the callback, current victim flag 1, current health word +0xe ==0 and victim
+type flag 0x400 together call full removal 0x4627b0. The selected STRIP type flags
+0x208021 exclude that last predicate. This does not prove removal is unnecessary
+for all objects or all later lifecycle paths.
+
+The plane selector's delegation through `0x473db0..0x473dd7` overrides requests
+3/5 and otherwise delegates to `0x473be0..0x473c09`. That base selector maps
+request 4 to `0x473b40`; request 3 to OBJEventProc; request 6 to 0x48e8d0; other
+requests return null. STRIP has its own selector and returns null for request 4.
+Do not confuse the other object's selector with the current victim's event handler.
+
+### Generic collision threshold
+
+`0x473b40..0x473bdc` first suppresses the hit when current victim controller bit
+0x80 and global preference bit 1 are both set. Otherwise it resolves the other
+object/type exactly as above, reads **signed type hitPoints word +0x49**, and
+computes `other_type_hp * 100 / victim_type_hp` with signed division toward zero.
+Victim type is the current type at 0x50d268. A result <25 exits; a result >=25
+sets current health word +0xe to zero, after two 0x486580 notification calls when
+the other ID is nonzero. It does not subtract payload byte +0 or current health
+from this ratio. Those notification consumers remain unresolved.
+
+`native_objects::collision_is_lethal` translates only the ratio predicate with
+explicit signed words. A zero denominator returns `None` instead of executing
+the native divide fault; future staging must reject it before effects. Negative
+inputs retain source signed arithmetic for diagnostics, not new runtime eligibility.
+Protection, lookup, callback choice, notification and health writes are not part
+of the helper. The aircraft's own event handler is separately selected, so this
+contract alone establishes neither aircraft crash damage nor runway immunity.
+
+### Death marking is distinct from removal
+
+The already reviewed OBJEventProc 0x4000 branch skips a victim whose current health
+is already zero, dispatches the hit, and checks health again. If it became zero,
+it calls `0x473c10..0x473d99`. Earlier descriptions calling this routine “cleanup”
+were incomplete: it **marks death state**, without removing this STRIP's airport,
+collision candidates, scheduling entry or allocation in the selected kind-0 path.
+
+For a locally controlled victim lacking instance flag 0x2000, it first calls
+0x486580 and 0x485820 using current ID and the separate instance +0x76 field;
+negative +0x76 indexes the native word table near 0x4eb6d8. That field's producer
+and notification consumers remain open. A player-ID match lacking flag 0x2000
+also performs player-specific notification and a shared bound-4 draw for output;
+this branch is not implied for the selected nonplayer STRIP. The embedded
+0x473d9c table is data, excluded from the reviewed code range.
+
+The common tail sets current health to zero, ORs instance flag 0x2000, and ORs
+0x100000 unless the type's first byte is 5. Kind 0 then returns, bypassing the
+kind-2/4 equipment loop. It does **not** clear live/scheduled flags 1/2 here.
+Do not replace that state with immediate generic deletion or ordinary candidate
+unregister. Full removal and later dead-object service ownership remain open.
+
+Back in OBJEventProc, payload +0x20 becomes the unsigned maximum of its old byte
+and victim type expType +0x55; payload XYZ at +0x14 receives current position.
+Then 0x443d00 receives victim type craterSize +0x56. Its reviewed zero-size entry
+`0x443d00..0x443d20` returns zero before any query, RNG draw or allocation. The
+selected STRIP resource's craterSize is zero, excluding that effect under the
+reviewed unchanged type input. Nonzero crater creation remains unsupported.
+Event mask still becomes 0xc000 at the established return tail.

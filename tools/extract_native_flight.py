@@ -16,6 +16,12 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('object_hit_dispatch', 0x463ec0, 0x463f24, 'ground'),
+    ('object_collision_hit', 0x473b40, 0x473bdd, 'ground'),
+    ('object_base_selector', 0x473be0, 0x473c0a, 'ground'),
+    ('object_npc_selector', 0x473db0, 0x473dd8, 'ground'),
+    ('object_death_mark', 0x473c10, 0x473d9a, 'ground'),
+    ('object_crater_zero_gate', 0x443d00, 0x443d21, 'ground'),
     ('event_queue_reset', 0x418070, 0x418098, 'ground'),
     ('event_enqueue_recipients', 0x41818a, 0x4182e8, 'ground'),
     ('event_enqueue_observers', 0x418382, 0x418433, 'ground'),
