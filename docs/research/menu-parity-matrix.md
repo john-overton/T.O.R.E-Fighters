@@ -2,6 +2,15 @@
 
 # Creator / ordnance mapping ledger
 
+> **T.O.R.E — we trace what the player does, not what the code did.**
+> This project reverse-engineers *player interaction*: what you press, see, hear
+> and feel in Fighters Anthology, and the numbers behind it. It does not
+> reproduce the original program byte by byte. Anything here about the original
+> executable is evidence toward a behaviour spec — never a specification for what
+> we build. If a sentence below reads like an instruction to reproduce the
+> original's internals, it is out of date.
+> <!-- tore-header v1 -->
+
 This ledger covers the mapping scope in the two implementation plans. **Mapped**
 means static source evidence exists, not that the app implements it or that a
 retail interaction comparison passed. **Partial** names the remaining source

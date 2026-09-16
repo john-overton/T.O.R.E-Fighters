@@ -1,5 +1,14 @@
 # Extracting local game archives
 
+> **T.O.R.E — we trace what the player does, not what the code did.**
+> This project reverse-engineers *player interaction*: what you press, see, hear
+> and feel in Fighters Anthology, and the numbers behind it. It does not
+> reproduce the original program byte by byte. Anything here about the original
+> executable is evidence toward a behaviour spec — never a specification for what
+> we build. If a sentence below reads like an instruction to reproduce the
+> original's internals, it is out of date.
+> <!-- tore-header v1 -->
+
 `tools/extract_assets.py` is the shared, cross-platform extraction entry point. It runs the repository's Rust `tore-extract` tool and adds SHA-256 provenance to its report. It requires Python 3.10+ and the pinned Rust toolchain. There is no dependency on USNF-ATF, Bun/Node, graphics drivers, an audio device, or third-party Python packages.
 
 ## Ground and sea/ocean pass

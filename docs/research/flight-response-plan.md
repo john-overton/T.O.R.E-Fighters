@@ -2,6 +2,15 @@
 
 # Flight response and maneuver buffet plan
 
+> **T.O.R.E — we trace what the player does, not what the code did.**
+> This project reverse-engineers *player interaction*: what you press, see, hear
+> and feel in Fighters Anthology, and the numbers behind it. It does not
+> reproduce the original program byte by byte. Anything here about the original
+> executable is evidence toward a behaviour spec — never a specification for what
+> we build. If a sentence below reads like an instruction to reproduce the
+> original's internals, it is out of date.
+> <!-- tore-header v1 -->
+
 Requested 2026-09-15. **Remaining native dependencies now follow the
 [living environment/systems plan](../research/native-environment-systems-plan.md).**
 This is an implementation and acceptance plan; unchecked items claim no new

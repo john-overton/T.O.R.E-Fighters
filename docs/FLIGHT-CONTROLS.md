@@ -1,5 +1,14 @@
 # Desktop flight controls and Escape menu
 
+> **T.O.R.E — we trace what the player does, not what the code did.**
+> This project reverse-engineers *player interaction*: what you press, see, hear
+> and feel in Fighters Anthology, and the numbers behind it. It does not
+> reproduce the original program byte by byte. Anything here about the original
+> executable is evidence toward a behaviour spec — never a specification for what
+> we build. If a sentence below reads like an instruction to reproduce the
+> original's internals, it is out of date.
+> <!-- tore-header v1 -->
+
 The F/A-18D cockpit now covers the full flight canvas. The world renders behind transparent cockpit artwork and independently toggled instrument windows. There is no half-height viewport or opaque lower PANEL fill. Menus retain the proportional 640×480 canvas. This is still a development flight adapter; [behaviour provenance](behavior-provenance.md) records which flight and system components are spec-derived, native, fitted or opinionated.
 
 Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity → Create Quick Mission → OK. Free flight skips loadout and starts with clean external stations. On a MacBook, use **Fn/Globe with the function keys** when macOS assigns those keys to system actions. Fn-Up/Down supplies PageUp/PageDown on compact keyboards. The physical US key positions are used in flight, including shifted numbers and Option combinations.

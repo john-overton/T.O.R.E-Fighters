@@ -1,5 +1,14 @@
 # Bounded STRIP definition checkpoint
 
+> **T.O.R.E — we trace what the player does, not what the code did.**
+> This project reverse-engineers *player interaction*: what you press, see, hear
+> and feel in Fighters Anthology, and the numbers behind it. It does not
+> reproduce the original program byte by byte. Anything here about the original
+> executable is evidence toward a behaviour spec — never a specification for what
+> we build. If a sentence below reads like an instruction to reproduce the
+> original's internals, it is out of date.
+> <!-- tore-header v1 -->
+
 > **Measured evidence — research mode.** A record of what was run and what it
 > produced, kept as evidence. Provenance labels and any remaining gates named
 > here are research-mode scope; they are not acceptance gates for gameplay.

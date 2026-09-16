@@ -164,7 +164,13 @@ python3 -m unittest discover -s tools -p 'test_*.py'
 python3 tools/check_assets.py
 python3 tools/check_assets.py target/debug/tore-app
 python3 tools/check_assets.py target/debug/tore-extract
+python3 tools/check_docs.py
 ```
+
+Every Markdown file under `docs/` carries the T.O.R.E header under its title.
+`tools/check_docs.py` reports files missing it; `--fix` writes them. To reword it,
+edit `HEADER` in that script, raise `HEADER_REVISION`, and run `--fix`: the old
+block is replaced, never stacked.
 
 Use `rust-toolchain.toml` and keep `Cargo.lock`; always validate with `--locked`.
 For rendering changes also run `cargo run --locked -p tore-app -- --smoke-test`

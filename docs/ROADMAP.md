@@ -1,5 +1,14 @@
 # Fighters Anthology Rebuild: Roadmap
 
+> **T.O.R.E — we trace what the player does, not what the code did.**
+> This project reverse-engineers *player interaction*: what you press, see, hear
+> and feel in Fighters Anthology, and the numbers behind it. It does not
+> reproduce the original program byte by byte. Anything here about the original
+> executable is evidence toward a behaviour spec — never a specification for what
+> we build. If a sentence below reads like an instruction to reproduce the
+> original's internals, it is out of date.
+> <!-- tore-header v1 -->
+
 T.O.R.E-Fighters in the Repo - Tasteful Opinionated Reverse Engineered
 
 Development baseline: see [DEVELOPMENT.md](DEVELOPMENT.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [recorded validation](baselines/environment.md). The first M1a [main-menu slice](baselines/main-menu.md) now imports original menu assets and runs natively. M0 research and the remaining M1a screens/audio work remain in progress.
