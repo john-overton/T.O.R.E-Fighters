@@ -791,3 +791,96 @@ word zero. Enqueue can consequently mutate current scratch/stores and scheduling
 as well as the queue and RNG. Special recipients skip this wakeup path.
 Full recipient expansion, remote routing `0x470640`, speech observer and queue
 reset are not closed by these slices. No event emitter or scheduler is enabled.
+
+## Initial commands and default event response — NE-00.1l
+
+**Native source ledger, with only command-deadline arithmetic translated/tested.**
+[Validation](../baselines/native-strip-commands.md). No command interpreter or
+object service is runtime-connected. This refines E019/E021 without implementing
+autonomous behavior; unknown commands remain unsupported.
+
+### Creation establishes a command, not an empty service
+
+The already reviewed `0x4a73b0` creation path clears its 0x37f-byte scratch before
+allocation, then `0x4a7597..0x4a7608` copies body heading/pitch to movement
+heading/pitch and initializes the command block at instance +0x38:
+
+- Heading, pitch and bank mode bytes at command +0/+5/+0xa are zero.
+- Speed mode +0xf is 1; its dword value remains zero from reset.
+- Both condition bytes +0x18/+0x19 are 7, both thresholds +0x1a/+0x1c zero.
+- Command flags +0x1e remain zero; instance event mask +0x58 becomes 0xffff.
+  The script pointer +0x5e remains zero in this selected creation path.
+
+`0x436eca..0x436eda` handles heading mode 0 by copying the movement heading to
+`0x53826c`, then entering the shared movement body. The bounded helpers at
+`0x478090`, `0x4780d0` and `0x477d10` return signed type words +0x5f, +0x5d and
++0x67 respectively for kind 0; kind-4/6 paths are outside this selected contract.
+Resolving these type fields and the intermediate pitch/bank body remains open.
+
+`0x43805e..0x438226` first adjusts speed toward its selected target; **only then**
+does zero speed skip position integration. Command flag 1 can still replace Y
+with the earlier ground sample. It evaluates condition 0, then condition 1 only
+if the first is false; either true sets the return byte. Kind 0 skips the final
+kind-4 field clears/update. Zero motion alone does not suppress query, command
+completion or event service.
+
+### Condition evaluation and saturated command time
+
+`0x4382d0..0x438453` chooses a sampled value from condition low nibble. The
+nine-entry table at `0x438454` was read as inert dwords, separately from code.
+Values 0/1/2 select movement heading/pitch/body bank; 3 uses speed with threshold
+shifted eight; 4 uses altitude crossing; 5/6 call the point/path helper; 7/8 use
+**unsigned word clock 0x5528c8**. Additional type/avoidance/crossing effects remain
+unsupported; the selected timer branch requires none of those calls.
+
+Thresholds are signed words widened to dwords. The comparison bits are 0x10
+for sampled >= threshold and 0x20 for sampled <= threshold. Return true when
+all requested bits from condition byte &0x30 are present. No requested bits
+therefore returns true, including the initial byte 7/threshold 0. Equality can
+satisfy both bits. This is a predicate contract, not approval to execute other
+command branches or imported scripts.
+
+`0x463b90..0x463bbb` widens the low words of delay and clock, adds them, and
+returns **min(sum, 0x7fff)**. This differs from service/speech word wrapping;
+clock >=0x8000 saturates even for delay zero. Diagnostic
+`native_objects::command_deadline` preserves that rule without owning any clock
+or scheduler state.
+
+### Default event changes subsequent services
+
+The current-object script gate `0x463d40..0x463d62` returns false for a null
+script pointer +0x5e or word cursor +0x62 ==0xffff. The nonnull script body can
+invoke embedded function pointers and is explicitly unsupported/inert. In the
+selected initial null-script state, true command completion reaches the direct
+0x80 event dispatch established in NE-00.1k, subject to the global interceptor.
+
+STRIP's OBJEventProc (`0x473a40..0x473b36`) handles 0x80, 0x400, 0x800, 0x1000
+and 0x2000 by constructing a replacement command through `0x463a20`:
+flags 1, heading/pitch/bank modes 0, speed mode 1/value 0, first condition mode
+8/comparison 0x10/value 60. Its final condition is mode 8/comparison 0x10/value
+0x7fff. It returns true and sets instance event mask to **0xc000**. Thus initial
+command completion changes command flags/deadlines and the event mask; it is
+not an ignored event. The ground-following flag now affects later services.
+
+The constructor (`0x463a20..0x463ae5`) first resets current commands when its
+destination is the current command buffer, then zeros all 32 command bytes,
+writes flags/modes/values and both conditions. Mode-specific value conversions
+are source-established but not translated here. Its reset at `0x463e50` sets
+script cursor and event mask to 0xffff, condition bytes to 7 and thresholds to
+zero; kind 0 returns without the kind-2/4 continuation. The script pointer is
+not cleared by this reset.
+
+The condition writer `0x463af0..0x463b73` uses a separate five-dword table at
+`0x463b74`. Mode 8 becomes mode 7: values other than dword 0x7fff shift left two,
+then current-buffer destinations convert the low word through the saturated
+deadline helper. Mode 7 also uses that helper for current-buffer destinations.
+The above 60 becomes a **240-clock-unit delay**, not 60 seconds or a wrapping
+word deadline. A noncurrent destination retains relative values. The comparison
+byte is ORed into the mode; thresholds are stored as words.
+
+OBJEventProc's 0x4000 branch can apply damage (`0x463ec0`), cleanup (`0x473c10`),
+payload mutation and notification (`0x443d00`); those consumers remain open.
+0x8000 returns false. Both return tails still write event mask 0xc000. Unknown
+other event values reach the true tail; that does not authorize dropping their
+upstream payload/state effects. Complete movement, command overrides, event
+interceptor and damage/speech consumers remain prerequisites for live service.

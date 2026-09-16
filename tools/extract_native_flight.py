@@ -16,6 +16,18 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('object_command_initialize', 0x463a20, 0x463ae6, 'ground'),
+    ('object_command_condition', 0x463af0, 0x463b74, 'ground'),
+    ('object_command_deadline', 0x463b90, 0x463bbc, 'clock'),
+    ('object_command_reset', 0x463e50, 0x463e95, 'ground'),
+    ('object_script_entry_gate', 0x463d40, 0x463d63, 'ground'),
+    ('object_command_predicate', 0x4382d0, 0x438454, 'ground'),
+    ('object_default_event', 0x473a40, 0x473b37, 'ground'),
+    ('object_movement_heading_hold', 0x436eca, 0x436edb, 'ground'),
+    ('object_movement_finish', 0x43805e, 0x438227, 'ground'),
+    ('object_movement_roll_rate', 0x478090, 0x4780cc, 'ground'),
+    ('object_movement_turn_rate', 0x4780d0, 0x478143, 'ground'),
+    ('object_movement_speed_reference', 0x477d10, 0x477d29, 'ground'),
     ('object_service_snapshot', 0x4631b0, 0x4631e5, 'ground'),
     ('object_movement_query_prefix', 0x436b30, 0x436c70, 'ground'),
     ('object_event_service', 0x4631f0, 0x463721, 'ground'),
@@ -205,7 +217,7 @@ REVIEWED_STATE = (
 )
 
 
-def reviewed_regions(exe, rows, instructions, regions=REVIEWED_REGIONS):
+def reviewed_regions(exe, rows, instructions, regions=REVIEWED_REGIONS, decode_region=None):
     """Explicit bounded slices. Caller must gate on BOTH reviewed source hashes."""
     addresses = [a for a, _ in instructions]
     artifacts, manifest = {}, []
@@ -218,10 +230,16 @@ def reviewed_regions(exe, rows, instructions, regions=REVIEWED_REGIONS):
     for name, start, end, component in regions:
         section = next((r for r in rows if r['executable'] and
                         r['va'] <= start < end <= r['va']+r['size']), None)
-        if section is None or start not in addresses:
-            raise ValueError(f'reviewed region outside decoded executable: {name}')
+        if section is None:
+            raise ValueError(f'reviewed region outside executable: {name}')
         raw = section['raw'] + start-section['va']
-        lines = instructions[bisect.bisect_left(addresses, start):bisect.bisect_left(addresses, end)]
+        lines = (decode_region(start, end) if decode_region else
+                 instructions[bisect.bisect_left(addresses, start):bisect.bisect_left(addresses, end)])
+        decoded_addresses = [a for a, _ in lines]
+        if (not lines or decoded_addresses[0] != start or
+                decoded_addresses != sorted(set(decoded_addresses)) or
+                any(not start <= a < end for a in decoded_addresses)):
+            raise ValueError(f'invalid aligned reviewed disassembly: {name}')
         edges = []
         for address, line in lines:
             match = re.search(r'\b(call|j[a-z]+)\s+0x([0-9a-fA-F]+)', line)
@@ -235,7 +253,9 @@ def reviewed_regions(exe, rows, instructions, regions=REVIEWED_REGIONS):
         artifacts[f'reviewed/{start:08x}-{name}.txt'] = '\n'.join(l for _, l in lines)+'\n'
     artifacts['reviewed-components.json'] = json.dumps({
         'schema_version': 2, 'complete_model': False,
-        'method': 'manual static boundaries; direct edges only, no native execution',
+        'method': ('manual static boundaries; independently aligned regions; '
+                   'global linear entry-reference inventory; no native execution' if decode_region else
+                   'manual static boundaries; direct edges only, no native execution'),
         'regions': manifest,
         'instance_state': [{'name': n, 'va': va, 'cp_offset': va-0x50ce80, 'width': w}
                            for n, va, w in REVIEWED_STATE],
@@ -430,7 +450,17 @@ def extract(source, output, *, overwrite=False, preview=False, domain='flight'):
         for field in fields:
             field['direct_references'] = references.get(field['va'], [])
         artifacts['pt-field-references.json'] = json.dumps(fields,indent=2)
-        artifacts.update(reviewed_regions(exe, rows, instructions))
+        def decode_region(start, end):
+            output = subprocess.run(
+                [objdump, '-d', '--x86-asm-syntax=intel',
+                 f'--start-address={start:#x}', f'--stop-address={end:#x}', str(files['FA.EXE'])],
+                capture_output=True, text=True, check=True, timeout=120).stdout
+            if len(output) > 1024*1024:
+                raise ValueError('aligned flight disassembly exceeds bound')
+            return [(int(match[1], 16), line) for line in output.splitlines()
+                    if (match := re.match(r'\s*([0-9a-fA-F]+):\s', line))]
+
+        artifacts.update(reviewed_regions(exe, rows, instructions, decode_region=decode_region))
         table = static_table(exe, rows, 0x515a48, 321)
         artifacts['tables/sine-q15.bin'] = table
         artifacts['tables/atan-pa.bin'] = static_table(exe, rows, 0x515644, 514)

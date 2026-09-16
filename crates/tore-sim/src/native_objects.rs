@@ -1,6 +1,13 @@
 //! Diagnostic native object state; no world construction or live activation.
 //! Source: docs/formats/native-strip.md.
 
+/// Diagnostic command deadline at FA 0x463b90, distinct from wrapping service
+/// and speech deadlines. Both source operands are widened unsigned words.
+/// No command execution, scheduler state or clock producer is connected here.
+pub fn command_deadline(clock: u16, delay: u16) -> u16 {
+    (u32::from(clock) + u32::from(delay)).min(0x7fff) as u16
+}
+
 /// Diagnostic speech delay at FA 0x48d5e0; no clock or event state is changed.
 /// The signed scale gate and x86 five-bit shift count apply even to a word shift.
 /// The producer of `scale` remains outside this diagnostic helper.
@@ -130,6 +137,24 @@ fn remove_first(ids: &mut Vec<u16>, id: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_deadline_saturates_before_word_wrap() {
+        for (clock, delay, expected) in [
+            (0, 0, 0),
+            (100, 240, 340),
+            (0x7ffe, 0, 0x7ffe),
+            (0x7ffe, 1, 0x7fff),
+            (0x7ffe, 2, 0x7fff),
+            (0x8000, 0, 0x7fff),
+            (0, 0xffff, 0x7fff),
+            (0xffff, 1, 0x7fff),
+            (0xffff, 0xffff, 0x7fff),
+        ] {
+            assert_eq!(command_deadline(clock, delay), expected);
+            assert_eq!(command_deadline(delay, clock), expected);
+        }
+    }
 
     #[test]
     fn speech_delay_preserves_x86_word_shift_and_signed_gate() {

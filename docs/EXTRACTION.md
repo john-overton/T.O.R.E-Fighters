@@ -175,6 +175,15 @@ Rust helper probe are documented in [native flight research](formats/native-flig
 
 The reviewed native-flight research mode also emits `reviewed-components.json` and explicit `reviewed/*.txt` slices for departure, contact and integration routines. These include direct outgoing branches/calls and partial instance offsets; they do not extract a runnable engine. Both reviewed EXE/SMS hashes are required. Use a new output directory for expanded research versions, then repeat the same command to check unchanged output. [Details](formats/native-flight.md#second-pass-departure-ground-and-integration-components).
 
+Flight `reviewed/*.txt` regions now disassemble independently from their reviewed
+start/end addresses. This prevents an embedded jump table in a global linear
+sweep from misaligning the next code entry. Empty, wrong-entry, duplicate,
+unordered or out-of-range decoded addresses fail validation. The global
+`fa-disassembly.txt`, symbol spans and incoming-reference inventory remain a
+linear exploratory view, not a complete code/data or indirect-call graph.
+Use a fresh output directory after this extractor change; prior manifests have
+a different method label. [STRIP command evidence](baselines/native-strip-commands.md).
+
 The reviewed native-flight pass now also extracts `tables/sine-q15.bin` (321 signed little-endian words) and its source/table hashes. Probe it with `cargo run --locked -p tore-app -- --native-flight-trig PATH`. This is inert lookup data, not executable code; table extraction is unavailable for unreviewed builds. [Third-pass notes](formats/native-flight.md#third-pass-extracted-trigonometry-forces-and-loading).
 
 Native-flight fourth pass also exports `tables/atan-pa.bin` (514 unsigned words)

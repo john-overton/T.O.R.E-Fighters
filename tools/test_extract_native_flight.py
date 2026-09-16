@@ -145,6 +145,28 @@ class NativeResearchTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             native.reviewed_regions(pe(), native.sections(pe()), [], regions)
 
+    def test_reviewed_regions_align_after_embedded_data(self):
+        # A linear sweep missed this proven entry; region decoding supplies it.
+        regions = [('synthetic', 0x401000, 0x401001, 'test')]
+        incoming = [(0x400fff, '400fff: call 0x401000')]
+        decoded = [(0x401000, '401000: ret')]
+        artifacts = native.reviewed_regions(
+            pe(), native.sections(pe()), incoming, regions,
+            decode_region=lambda start, end: decoded)
+        self.assertEqual(artifacts['reviewed/00401000-synthetic.txt'], '401000: ret\n')
+        row = json.loads(artifacts['reviewed-components.json'])['regions'][0]
+        self.assertEqual(row['entry_references'], [{'at': 0x400fff, 'kind': 'call'}])
+        self.assertEqual(row['edges'], [])
+
+    def test_reviewed_regions_reject_invalid_aligned_output(self):
+        regions = [('synthetic', 0x401000, 0x401001, 'test')]
+        for decoded in [[], [(0x401001, '401001: ret')],
+                        [(0x401000, '401000: ret'), (0x401000, '401000: ret')],
+                        [(0x401000, '401000: ret'), (0x401001, '401001: ret')]]:
+            with self.assertRaises(ValueError):
+                native.reviewed_regions(pe(), native.sections(pe()), [], regions,
+                                        decode_region=lambda start, end: decoded)
+
     def test_repeatable_static_output_and_conflicts(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

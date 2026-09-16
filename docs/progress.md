@@ -1221,3 +1221,16 @@ only the diagnostic precursor; the parent first slice remains researching.
 [Source contract](formats/native-strip.md#static-object-service-and-consuming-event-lookup--ne-001k),
 [validation](baselines/native-strip-events.md). Source ledger only; no runtime,
 AI, carrier or new aircraft activation.
+
+
+## Initial STRIP commands and default response — 2026-09-15
+
+- [x] NE-00.1l: establish initial command fields, condition/timer semantics and
+  default event replacement; translate the saturated command-deadline helper.
+- [x] Preserve initial completion and subsequent ground-following/mask changes;
+  keep script execution unsupported and timing distinct from wrapping deadlines.
+- [ ] Finish intermediate movement/type fields and E021 queue/interceptor/
+  observer/damage consumers before staged E001/E002; E016/E004 remain open.
+
+[Source contract](formats/native-strip.md#initial-commands-and-default-event-response--ne-001l),
+[validation](baselines/native-strip-commands.md). No service or live activation.
