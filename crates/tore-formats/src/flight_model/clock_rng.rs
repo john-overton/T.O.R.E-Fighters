@@ -64,7 +64,7 @@ pub fn counter_ticks(elapsed: u64, frequency: u64) -> Result<u32> {
     }
     Ok((elapsed.wrapping_shl(8) / frequency) as u32)
 }
-/// FA TIMEUpdate 0x486aa0, after platform wait. Supported source shift domain +/-15.
+/// FA TIMEUpdate 0x486aa0, after platform wait; x86 five-bit shift count on a word.
 /// Pause skips simulation time; native display elapsed is a separate clock.
 pub fn frame_ticks(
     raw_elapsed: i16,
@@ -75,13 +75,10 @@ pub fn frame_ticks(
     if paused || time_shift == i16::MAX {
         return Ok(0);
     }
-    if !(-15..=15).contains(&time_shift) {
-        return Err(invalid("native time shift outside reviewed domain"));
-    }
     let mut scaled = if time_shift > 0 {
-        raw_elapsed.wrapping_shl(time_shift as u32)
+        ((raw_elapsed as u16 as u32) << (time_shift as u32 & 31)) as i16
     } else {
-        raw_elapsed >> (time_shift.wrapping_neg() as u32)
+        (i32::from(raw_elapsed) >> ((time_shift as u8).wrapping_neg() & 31)) as i16
     };
     if four_thirds {
         scaled = (scaled as i32 * 4 / 3) as i16;
@@ -111,6 +108,51 @@ impl FixedClock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn service_elapsed_retains_word_wrap_and_signed_floor() {
+        for (clock, last, expected) in [
+            (10, 10, 2),
+            (11, 10, 2),
+            (12, 10, 2),
+            (15, 10, 5),
+            (0x10002, 0xfffe, 4),
+            (0x17fff, 0, 32767),
+            (0x18000, 0, 2),
+            (0, 1, 2),
+            (u32::MAX, 0xfff0, 15),
+        ] {
+            assert_eq!(service_ticks(clock as i32, last as i16), expected);
+        }
+    }
+
+    #[test]
+    fn frame_deltas_keep_pause_raw_scale_and_narrowing_order() {
+        let check = |raw, scale, paused, ratio, simulation| {
+            assert_eq!(frame_ticks(raw, scale, paused, ratio).unwrap(), simulation);
+        };
+        check(4, 1, false, false, 8); // Scale raw, not the floored delta.
+        check(200, -1, false, false, 100);
+        check(-1, 0, false, false, 5);
+        check(127, 0, false, false, 127);
+        check(128, 0, false, false, 128);
+        check(129, 0, false, false, 128);
+        check(100, 0x7fff, false, true, 0);
+        check(100, 1, true, true, 0);
+        check(7, 0, false, true, 9); // Signed division toward zero.
+        check(30000, 0, false, true, 5); // Narrow 40000 before clamp.
+        check(i16::MIN, 0, false, true, 128); // Narrow -43690 to 21846.
+        for count in [16, 31, 48, 255] {
+            check(7, count, false, false, 5);
+        }
+        check(7, 32, false, false, 7);
+        check(7, 33, false, false, 14);
+        check(7, 256, false, false, 7);
+        check(100, -32, false, false, 100);
+        check(100, -33, false, false, 50);
+        check(-100, -16, false, false, 5);
+        check(100, i16::MIN, false, false, 100);
+    }
+
     #[test]
     fn rng_matches_modular_reference_and_replays() {
         // Independent wide modular arithmetic, same specified shuffle schedule.

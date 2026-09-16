@@ -857,3 +857,9 @@ diagnostic translations;
 no complete world producer or live contact activation is implied. The repeatable
 extraction now includes 94 reviewed regions and the external square-root seed table. Query-cache mutation and conditional RNG require transactional ownership
 before the current read-only diagnostic interface can host native queries.
+
+
+Clock/scheduler ownership continuation: [NE-00.1p](native-strip.md#clock-and-scheduler-ownership--ne-001p)
+extends the diagnostic frame shift domain to the full signed word with x86
+five-bit counts, and establishes scheduler merge/timestamp ordering. Existing
+120 Hz adaptation and runtime restrictions remain unchanged.

@@ -1,6 +1,6 @@
 # Native environment and systems implementation plan
 
-**Living plan v18 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
+**Living plan v19 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
 **Status: implementing source/query foundation; live land contact remains gated.**
 John explicitly scheduled this pass after the airborne native flight connection.
 This is the governing dependency and delivery plan for that continuation. It can
@@ -90,7 +90,7 @@ baselines above remain inputs, not acceptance of the new contact producer.
 
 | ID | Package | Depends on | Owner / status | Current next action / exit evidence |
 | --- | --- | --- | --- | --- |
-| NE-00 | Source, state and dependency ledger | Current baselines | Codex / researching | NE-00.1a/b/c/d/e/f/g/h/i/j/k/l/m/n/o complete; finish instance/state producers |
+| NE-00 | Source, state and dependency ledger | Current baselines | Codex / researching | NE-00.1a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p complete; finish instance/state producers |
 | NE-01 | Ground and sea/ocean discovery/import | NE-00 identity rules | Codex / researching | NE-01.1 selected UKR/STRIP lead extracted; full census and closure remain open |
 | NE-02 | Coordinates, placement, materials and collision resources | NE-01 selected closures, NE-00 | Unassigned / planned | Resolve one land and one sea family end to end; expand catalog coverage |
 | NE-03 | Native terrain/object contact producers | NE-00, NE-02 selected land subset | Codex / researching | NE-03.1 waits on world closure and transactional query state |
@@ -121,13 +121,14 @@ baselines above remain inputs, not acceptance of the new contact producer.
 | NE-00.1m | Codex / complete | Selected stationary intermediate movement, type-input offsets and angle-step contract | Pure angle helper and signed/wrapping/zero-step tests | No | Unavailable | [Movement evidence](baselines/native-strip-movement.md); query, loader and full service ownership remain open |
 | NE-00.1n | Codex / complete | Queue reset/routing caller, sender-scoped observer, default speech, sample sequence and interceptor selection | Static extraction/ledger only | No | Unavailable | [Observer evidence](baselines/native-strip-observer.md); expansion, output/resource and full lifecycle consumers remain open |
 | NE-00.1o | Codex / complete | Other-object hit dispatch, generic type-HP threshold, death marking and zero-crater exclusion | Pure signed collision predicate with boundary/zero-denominator tests | No | Unavailable | [Hit evidence](baselines/native-strip-hit.md); notification, later dead-object service and full removal remain open |
-| NE-00.1 | Codex / researching | Partial; see NE-00.1a/b/c/d/e/f/g/h/i/j/k/l/m/n/o | Partial | No | Unavailable | Finish instance initialization; extend transaction ledger |
+| NE-00.1p | Codex / complete | Complete scheduler caller/merge, frame baseline/scale/pause gates and clock ownership | Extend existing clock helper to five-bit word shifts; elapsed/scale/narrowing tests | No | Unavailable | [Clock evidence](baselines/native-strip-clock.md); trailing special services, notification and full clock producers remain open |
+| NE-00.1 | Codex / researching | Partial; see NE-00.1a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p | Partial | No | Unavailable | Finish instance initialization; extend transaction ledger |
 | NE-01.1a | Codex / complete | STRIP/166 header and explicit shape slot from E003/E004 | Bounded metadata reader, unknown-token retention and malformed-input tests | No | Unavailable | [Definition evidence](baselines/native-strip-definition.md); no full importer/world closure |
 | NE-01.1b | Codex / complete | Selected eight-field conversions and post-create exclusion predicates | Bounded isolated placement reader and malformed/width/name tests | No | Unavailable | [Record evidence](baselines/native-strip-record.md); full mission/world closure remains open |
 | NE-01.1 | Codex / researching | UKR.MM → STRIP.OT → RUNWAY.SH / _STRIPProc explicit edges | Five resources extracted across two filtered runs; bounded STRIP metadata reader | No | Unavailable | Complete callback/shape/placement closure, archive census and bounded schemas |
 | NE-03.1 | Codex / researching | Dual ground-query/cache mutation established | Existing diagnostic only; no new producer | No | Unavailable | Land geometry and staged cache/RNG producer, source-order/rollback tests, then both-aircraft connection |
 
-The parent first slice is not complete. NE-00.1a/b/c/d/e/f/g/h/i/j/k/l/m/n/o are dependency-ready diagnostic
+The parent first slice is not complete. NE-00.1a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p are dependency-ready diagnostic
 precursors, not an accepted runway or live contact branch.
 
 ### Discovered dependency edges
@@ -153,11 +154,11 @@ Owner is Codex; update 2026-09-15. Required edges remain in the denominator.
 | E012 | E003 → E001/E002 / samples before registration | 0x4a7530 initial ground query before 0x4a77f9 callback 0 | Source established; staged world construction must preserve order and rollback failure |
 | E013 | E005 → collision candidate lifetime / mutates ordered lists | 0x42e540 register, 0x42e5c0 remove; 900/450 capacities | Translated/tested diagnostic state; stage with world and queries; no automatic type-flag reconciliation |
 | E014 | E003/E005 → failed creation / partial cleanup | 0x4a7806 stores then 0x491490 releases last allocation | Source established; no candidate/name cleanup in bounded path; host atomic construction required |
-| E015 | E003 → scheduling / registers service | Instance flags & 2, 0x4a7847 → 0x4626b0 | Selected placement requires it; dispatch/priority/tail sourced in NE-00.1g; callback bodies and global producers remain open, without autonomous behavior work |
+| E015 | E003 → scheduling / registers service | Instance flags & 2, 0x4a7847 → 0x4626b0 | Selected placement requires it; dispatch/priority/tail sourced in NE-00.1g; NE-00.1p establishes caller/merge and timestamp ordering; trailing services and global producers remain open, without autonomous behavior work |
 | E016 | E005 → airport template / supplies defaults | VA 0x50ccc8, 0x134-byte record | Inert template preserved; record lookup/reset and three predicate consumers sourced in NE-00.1h; slot lookup/reserve/release and two callback entry gates sourced in NE-00.1i; full callbacks/defaults and attachment lifetime unsupported |
 | E017 | E003 → map name / converts nationality | 0x4826c7 → 0x483d50; map prefix and byte remap | Diagnostic conversion tested; selected text 137 becomes 138; isolated raw-byte parsing tested; map/world assembly remains open |
 | E018 | E015 → shared scheduler RNG / conditional draws | 0x4630b0..0x4631a9, stopped bound-20 / moving bound-8 | Tail predicates sourced and kind-0 selector tested; shared seed/shuffle state established; callback draws/global interleaving remain open |
-| E019 | E015 → service callback/body closure | 0x462fbc..0x463036 calls 0x436b30, 0x4631f0 and request 7; STRIP resolves APCommentProc | Kind-0 event-service caller and movement query prefix sourced in NE-00.1k; NE-00.1l establishes initial commands/default event replacement; NE-00.1m closes the selected zero-speed intermediate movement path; NE-00.1o establishes generic hit/death-marking caller and zero-crater gate; full query, loader, notification/removal and comment middle bodies remain open |
+| E019 | E015 → service callback/body closure | 0x462fbc..0x463036 calls 0x436b30, 0x4631f0 and request 7; STRIP resolves APCommentProc | Kind-0 event-service caller and movement query prefix sourced in NE-00.1k; NE-00.1l establishes initial commands/default event replacement; NE-00.1m closes the selected zero-speed intermediate movement path; NE-00.1o establishes generic hit/death-marking caller and zero-crater gate; NE-00.1p refines service-time and scheduler ownership; full query, loader, notification/removal and comment middle bodies remain open |
 | E020 | E019/E016 → NE-07a and staged world / mutable callback state | Actor IDs 0x5713a8/count 0x570ef0; airport +0x127 onward, speech buffers and current-object switches | Plane registration selector, state transition and attachment refresh tail sourced; slot moves can fail after releasing old ownership; push/pop, submission/deadline and clock initialization sourced in NE-00.1j; NE-00.1k establishes consuming event lookup and ordinary copied payload/wakeup; full instance/clock/speech/event producers remain open |
 | E021 | E019/E020 → E002/E018 and NE-07a / consumes and mutates | 0x4180a0 bound-100 draw before filtering/full queue; 0x4185a0 removes before observer/return | Source ledger NE-00.1k; stage queue, scratch, observer effects, scheduler and shared RNG together; command reset/default response sourced in NE-00.1l; NE-00.1n establishes reset, routing/observer caller and interceptor selection; expansion, transport, output and full lifecycle consumers remain open |
 | E022 | E020/E021 → NE-07a and NE-01 / emits output and resolves sound | 0x48d470 deadline even with empty buffers; 0x48d610 ordered sample names/returned handle | Source ledger NE-00.1n; stage authoritative state and ordered output requests separately; speech formatting, playback/resource closure and commit interface remain open |
@@ -203,6 +204,8 @@ flowchart TD
   CM[E019 zero rates retain angles but flag 1 still updates Y from query] --> CC
   DH[E019 hit callback retains victim and death marking retains lists] --> P
   DH --> E
+  SC[E015/E019 load before due test and secondary-first merge ties] --> P
+  SC --> W
   V[E017 map-dependent placement conversion] --> W
   F --> W
   A --> D[NE-04 equipment and fuel producers]
@@ -607,6 +610,7 @@ record its blocked edges and continue independent, already scoped documentation/
 | D24 / 2026-09-15 | Implementation choice: NE-00.1m selected stationary path | Source zero rates retain attitude while ground-following still samples and updates Y. Do not replace service with a no-op or treat resource observations as complete loader ownership; other commands remain unsupported |
 | D25 / 2026-09-15 | Implementation choice: NE-00.1n observer/output boundary | Queue-full and empty-speech paths can still have effects. Require bounded payloads and owned output requests; mission code stays inert, with absence proven per world input rather than assumed |
 | D26 / 2026-09-15 | Implementation choice: NE-00.1o hit/death distinction | Dispatch the other type’s hit callback against current victim; generic collision uses type hit-point ratio. Death marking is not immediate removal; stage notifications and preserve selected zero-crater exclusion |
+| D27 / 2026-09-15 | Implementation choice: NE-00.1p scheduler/clock ownership | Reuse existing clock translations, extend only reviewed shift widths and preserve load-before-due and merge tie ordering. The fixed 120 Hz host bridge remains authored; no live scheduler replacement |
 
 Future decisions include date, requester/reviewer, evidence, accepted/proposed/
 superseded state, affected IDs, rejected alternatives if relevant and migration
@@ -638,6 +642,7 @@ implementation choices must not be attributed to John.
 
 | Revision | Change | Validation state |
 | --- | --- | --- |
+| v19 / 2026-09-15 | NE-00.1p scheduler/clock ownership and D27 | [Clock validation](baselines/native-strip-clock.md); no live scheduling activation |
 | v18 / 2026-09-15 | NE-00.1o hit/death source ledger and D26 | [Predicate/source validation](baselines/native-strip-hit.md); no contact damage activation |
 | v17 / 2026-09-15 | NE-00.1n reset/routing/observer ledger, E022 and D25 | [Source validation](baselines/native-strip-observer.md); output and service activation remain gated |
 | v16 / 2026-09-15 | NE-00.1m selected intermediate movement, type-field mapping and D24 | [Angle/source validation](baselines/native-strip-movement.md); no service activation |
@@ -678,8 +683,9 @@ Its deliverable is a tested producer contract and narrow live contact connection
 not takeoff/landing acceptance from a flat height sample. This resolves the current
 hard runtime boundary and supplies the foundation for NE-05 and later deck work.
 
-**Current next action:** recover E019/E021 selected local-service entry/clock
-producers, notification consumers 0x486580/0x485820 and later dead-object service. Continue
+**Current next action:** recover E019/E021 trailing special services 0x462c91/0x462d40,
+notification consumers 0x486580/0x485820 and later dead-object service. Current-object elapsed
+and frame arithmetic are established; full platform/scale producers remain open. Continue
 E020 APComment middle and E022 speech formatting/output ownership; event routing
 expansion and transport remain explicit unsupported branches until source-closed. Build on the tested definition and
 isolated placement readers to finish E003/E005 type-load/world assembly, E016 template consumers

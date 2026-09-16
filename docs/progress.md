@@ -1276,3 +1276,17 @@ callback, audio, networking, AI or carrier activation.
 [Source contract](formats/native-strip.md#collision-hit-dispatch-and-death-marking--ne-001o),
 [validation](baselines/native-strip-hit.md). Both-aircraft crash behavior remains
 open; no live damage, service, carrier or AI activation.
+
+
+## STRIP scheduler and clock ownership — 2026-09-15
+
+- [x] NE-00.1p: recover full due-service caller, secondary-list merge, clock
+  baseline/scale/pause gates; preserve load-before-due and equal-deadline order.
+- [x] Extend existing diagnostic frame arithmetic to five-bit word shifts;
+  test elapsed wrap, pause, raw scaling and ratio narrowing before clamping.
+- [ ] Close trailing special services, notifications, comment/output and world
+  ownership before staged queries and live contact.
+
+[Source contract](formats/native-strip.md#clock-and-scheduler-ownership--ne-001p),
+[validation](baselines/native-strip-clock.md). No scheduler or clock replacement,
+AI, carrier or contact activation; fixed 120 Hz adaptation remains authored.

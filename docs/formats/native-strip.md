@@ -1146,3 +1146,103 @@ Then 0x443d00 receives victim type craterSize +0x56. Its reviewed zero-size entr
 selected STRIP resource's craterSize is zero, excluding that effect under the
 reviewed unchanged type input. Nonzero crater creation remains unsupported.
 Event mask still becomes 0xc000 at the established return tail.
+
+## Clock and scheduler ownership — NE-00.1p
+
+**Native source ledger; diagnostic arithmetic only.**
+[Validation](../baselines/native-strip-clock.md). Existing `object_service_age`,
+`frame_clock` and `counter_clock` reviewed regions already establish the central
+arithmetic; this continuation reuses them and adds the complete scheduler caller,
+merge, frame baseline setter, scale setter and peer-pause predicate. It does not
+replace the authored 120 Hz bridge or activate object services.
+
+### Load, service, requeue and merge
+
+The tail `0x462930..0x46295e` belongs to current-object load at 0x4628b0, not an
+independent callable entry. After copying instance/type scratch it writes signed
+word 0x546ba0 = `max(2, signed_word(low_word(0x552928) - instance[+0x66]))`.
+The subtraction wraps before its signed comparison. A difference of 0x8000
+therefore becomes two, not 32768. Kind 4 then refreshes aircraft fields through
+0x452140; selected kind 0 bypasses that call. Existing `clock_rng::service_ticks`
+implements this arithmetic; new tests cover signed half-range and dword/word wrap.
+The jump table at 0x462960 remains inert data outside that reviewed tail.
+
+The complete caller `0x462a50..0x462b63`:
+
+1. Clears secondary scheduler head 0x546ba8, then loads primary head 0x546b90.
+   Loading precedes testing whether unsigned instance deadline +0x68 is greater
+   than word 0x5528c8. A future head ends traversal with that object's scratch
+   still loaded; it is not an effect-free peek.
+2. For a due head, replaces the primary head with +0x64 and clears instance
+   scheduling bit 2. Calls 0x462e70 only when live bit 1 is set.
+3. Writes last-service +0x66 from the current low word of 0x552928 after the
+   callback (also for an inactive object). For a still-live object, health zero
+   plus type flag 0x400 calls removal 0x4627b0; STRIP's 0x208021 excludes this
+   automatic-removal predicate, not every possible later removal.
+4. If still live, removes any scheduling entry and inserts into the secondary
+   list through 0x4626d0, retaining the callback's deadline. That insertion also
+   stamps +0x66. Stores current scratch through 0x462980, then repeats.
+5. Merges the secondary list with primary through 0x462b70, clears secondary
+   head, calls 0x462c91 then 0x462d40, and conditionally invokes nonnull mission
+   interceptor 0x4f6fb8. These trailing consumers remain required open edges;
+   mission code stays unsupported/inert.
+
+`0x462b70..0x462c90` merges by zero-extended deadline words. It advances past a
+primary node only when its deadline is **strictly less** than the secondary
+node's; equal deadlines put secondary nodes first. Within either list existing
+order is retained. This differs from inserting a new node after existing equal
+deadlines in 0x4626d0. It directly changes stored +0x64 links and the primary
+head without loading each node into current scratch. IDs, cycles and stale
+references need host bounds/validation before staged mutation. The native merge
+has no such validation. Neither merge nor the scheduler is translated here.
+
+A separate exploratory writer at 0x442f1d copies frame delta 0x55292c into the
+same service-time global 0x546ba0. Its surrounding effect-service body remains
+unaccepted. Do not give each object an independent global-time replacement or
+claim a complete writer census from the linear reference index.
+
+### Frame clock, scale and different word domains
+
+Existing reviewed TIMEUpdate `0x486aa0..0x486be9` repeatedly refreshes the platform
+counter until signed `saved_counter + 4 < current_counter` (dword arithmetic).
+It narrows the counter difference to a word. Word 0x5528e8 receives that raw
+signed difference clamped to 5..128. Simulation delta 0x55292c instead starts
+from the **unclamped raw word**:
+
+- A true 0x46ff70 result or scale word 0x5528f8 ==0x7fff sets simulation delta
+  zero. The unscaled delta and saved counter still update.
+- Positive scale shifts AX left; negative scale negates CL and shifts AX
+  arithmetically right. Both use the x86 five-bit count, even for word operands.
+  Counts 16..31 zero a left shift and sign-fill a right shift; count 32 is zero.
+- Preference bit 0x400000 applies signed `scaled * 4 / 3`, toward zero,
+  **narrows to a word**, then clamps signed to 5..128. Narrowing can reverse the
+  sign before clamping; clamping a widened ratio would differ.
+
+`clock_rng::frame_ticks` now accepts the full signed scale-word domain with
+explicit five-bit shifts. Its previous +/-15 rejection was a diagnostic support
+limit, not native validation. The existing Result API is retained. Tests exercise
+pause, raw-before-clamp order, shift counts, negative scale and ratio narrowing;
+no live clock or platform timer is changed.
+
+The routine adds the sign-extended final simulation delta to dword 0x552928 with
+wrapping arithmetic. It writes word 0x5528e0 = arithmetic shift-right by 8 and
+word 0x5528c8 = arithmetic shift-right by 6. Initialization used signed division
+by 64 for the latter, so negative values can differ. Before writing those new
+words, it computes 0x552934 from base 0x5528e4 plus the **previous unsigned** word
+0x5528e0; a signed result >=86400 is reduced by unsigned division/remainder.
+This ordering retains the previous second-word sample. Finally it saves the
+sampled counter into 0x552940. `0x486a90..0x486a9a` independently sets that saved
+counter to 0x5528ec. Full clock-state translation remains open.
+
+Scale setter `0x486c60..0x486c7b` forces scale zero when signed global 0x4eb604 >1,
+except the 0x7fff sentinel; otherwise it stores CX unchanged. Other direct scale
+writers exist in UI paths and are not accepted by this setter alone.
+`0x46ff70..0x46ffbb` immediately returns false when 0x4eb604 ==1. Otherwise it
+visits indices 0..count-1 in order, obtains 0x494cb0's record, and returns true on
+an enabled bit in its dword +0x158 together with nonzero byte 0x547328[index].
+Record/list producers and multiplayer paths remain unsupported; the single-count
+exclusion is source-backed, not an assumption from the no-AI scope.
+
+Clock/scheduler state, object scratch, links, callback effects and RNG must share
+the future transaction. E015/E019/E021 remain open for trailing special services,
+notifications, dead-object behavior and event/output ownership before E001/E002.
