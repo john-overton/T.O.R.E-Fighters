@@ -598,7 +598,7 @@ impl SimRenderer {
             .visual_bands
             .iter()
             .find(|band| band.fog_far_density >= 256 && band.fog_far * 256 <= 8000);
-        let reflection = match (&world.clouds, dense) {
+        let mut reflection = match (&world.clouds, dense) {
             (Some(clouds), Some(band)) if world.smooth_weather => [
                 clouds.reflection_texture() as f32,
                 (band.low_feet as f32 + 250.).max(500.),
@@ -609,6 +609,11 @@ impl SimRenderer {
             ],
             _ => [-1., 0., 0., 0.],
         };
+        reflection[2] =
+            world
+                .ocean_motion
+                .uniform(world.weather.ticks(), [true, false], pixel_angle)[1];
+        reflection[3] = world.ocean_motion.environment_reflection;
         uniform.extend(reflection);
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         let mut entries = Vec::with_capacity(11 * 1024);

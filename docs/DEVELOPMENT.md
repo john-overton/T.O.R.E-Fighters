@@ -616,3 +616,10 @@ the default is `1`. `TORE_OCEAN_PHASE=SECONDS` freezes motion at a finite phase 
 pause/restart semantics, in the viewer, flight, mirrors and camera instruments.
 No additional texture import is required.
 [Behavior and provenance](spec/ocean.md), [checks and commands](baselines/ocean.md).
+
+Smooth water reflections separate an 85% sun peak from the sky/cloud peak.
+`TORE_WATER_ENV_REFLECTION=0..1` overrides the selected sky/cloud default of 0.3; viewing angle, distance and weather reduce actual contributions. See [reflection validation](baselines/reflection-luminosity.md).
+
+The sun reflection has independent long-range angular scatter and follows the
+visible fraction of the sun disc. Its reach no longer uses the five-mile
+sky/cloud reflection fade; dense weather still obscures it.

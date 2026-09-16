@@ -5,21 +5,31 @@ use crate::AppResult;
 pub struct Motion {
     enabled: bool,
     phase: Option<f32>,
+    pub environment_reflection: f32,
 }
 impl Default for Motion {
     fn default() -> Self {
         Self {
             enabled: true,
             phase: None,
+            environment_reflection: 0.3,
         }
     }
 }
 impl Motion {
     pub fn from_environment() -> AppResult<Self> {
-        Self::parse(
+        let mut motion = Self::parse(
             std::env::var("TORE_OCEAN_MOTION").ok().as_deref(),
             std::env::var("TORE_OCEAN_PHASE").ok().as_deref(),
-        )
+        )?;
+        if let Ok(value) = std::env::var("TORE_WATER_ENV_REFLECTION") {
+            let peak: f32 = value.parse()?;
+            if !peak.is_finite() || !(0.0..=1.0).contains(&peak) {
+                return Err("TORE_WATER_ENV_REFLECTION must be finite in 0..1".into());
+            }
+            motion.environment_reflection = peak;
+        }
+        Ok(motion)
     }
     fn parse(enabled: Option<&str>, phase: Option<&str>) -> AppResult<Self> {
         let enabled = match enabled {
@@ -31,7 +41,11 @@ impl Motion {
         if phase.is_some_and(|v| !v.is_finite() || !(0.0..120.0).contains(&v)) {
             return Err("TORE_OCEAN_PHASE must be finite seconds in 0..120".into());
         }
-        Ok(Self { enabled, phase })
+        Ok(Self {
+            enabled,
+            phase,
+            environment_reflection: 0.3,
+        })
     }
     /// Bounded phase shared by every camera. 120 seconds contains whole periods
     /// of the fitted ripple animation.

@@ -385,9 +385,41 @@ fn water_slopes(world:vec2<f32>,footprint:f32)->vec2<f32> {
  return (along*n.y*0.16+across*n.z*0.40)*coarse
        +(along*m.y*0.09+across*m.z*0.18)*fine;
 }
+// Sun energy spans the visible water, independent of the short-ripple fade.
+fn water_sun(color:vec3<f32>,ray:vec3<f32>,hit:vec3<f32>,distance:f32)->vec3<f32> {
+ if !smooth_weather() || scene.sun.w<=0.0 {return color;}
+ for(var i=0;i<i32(scene.ray.x);i++) {
+  let band=scene.bands[i];
+  if band.info.y>hit.y && band.ramp.w>=256.0 && band.ramp.z*256.0<=8000.0 {return color;}
+ }
+ var radius=0.0;var index=254u;
+ for(var i=0;i<i32(scene.sun.w);i++) {
+  if scene.circles[i].y!=267.0 && scene.circles[i].x>radius {
+   radius=scene.circles[i].x;index=u32(scene.circles[i].y);
+  }
+ }
+ if radius<=0.0 {return color;}
+ let angular_radius=atan(radius);
+ let elevation=asin(clamp(scene.sun.y,-1.0,1.0));
+ let q=clamp(elevation/angular_radius,-1.0,1.0);
+ let visible=(acos(-q)+q*sqrt(max(0.0,1.0-q*q)))/3.14159265;
+ if visible<=0.0 {return color;}
+ let footprint=distance*scene.ocean.w/max(abs(ray.y),0.025);
+ let slope=water_slopes(hit.xz,footprint);
+ let reflected=reflect(ray,normalize(vec3<f32>(-slope.x,1.0,-slope.y)));
+ let angle=acos(clamp(dot(reflected,scene.sun.xyz),-1.0,1.0));
+ let direct=(1.0-smoothstep(angular_radius*0.8,angular_radius*1.2,angle))*smoothstep(0.0,0.01,reflected.y);
+ let flat=vec3<f32>(ray.x,-ray.y,ray.z);
+ let azimuth=acos(clamp(dot(flat.xz,scene.sun.xz)/max(length(flat.xz)*length(scene.sun.xz),0.00001),-1.0,1.0));
+ let vertical=asin(clamp(flat.y,-1.0,1.0))-max(elevation,0.0);
+ let scatter=0.55*exp(-pow(azimuth/(angular_radius+0.026180),2.0)-pow(vertical/(angular_radius+0.104720),2.0));
+ let coverage=mix(direct,scatter,smoothstep(40.0,800.0,footprint));
+ let transmission=1.0-air_opacity(distance,hit.y);
+ return mix(color,shade(index,0).rgb,0.85*coverage*visible*transmission);
+}
 // CLOUD weather has palette water rather than a named OCEAN plane.
 fn overcast_water(color:vec3<f32>,ray:vec3<f32>)->vec3<f32> {
- if !smooth_weather() || scene.cloud_reflection.z<=0.0 || ray.y>=-0.000001 || scene.eye.y<=0.0 {return color;}
+ if !smooth_weather() || scene.cloud_reflection.z<=0.0 || scene.cloud_reflection.x<0.0 || ray.y>=-0.000001 || scene.eye.y<=0.0 {return color;}
  let distance=-scene.eye.y/ray.y;
  let hit=scene.eye.xyz+ray*distance;
  let opacity=1.0-smoothstep(2700.0,26400.0,length(hit.xz-scene.eye.xz));
@@ -405,7 +437,7 @@ fn overcast_water(color:vec3<f32>,ray:vec3<f32>)->vec3<f32> {
   sky=mix(sky,cloud.rgb,cloud.a*smoothstep(0.02,0.15,reflected.y));
  }
  let facing=clamp(dot(normal,-ray),0.0,1.0);
- let strength=(0.08+0.47*pow(1.0-facing,3.0))*0.75;
+ let strength=(0.08+0.47*pow(1.0-facing,3.0))*(scene.cloud_reflection.w/0.55);
  let visibility=1.0-clamp(haze(distance),0.0,1.0);
  return mix(color,sky,strength*visibility*opacity*opacity);
 }
@@ -447,7 +479,8 @@ fn ocean_surface(hit:vec3<f32>,deck:vec4<f32>,distance:f32,passes:i32,core:i32)-
  let visibility=1.0-clamp(haze(distance),0.0,1.0);
  // Fade reflected contrast as well as whole-effect opacity. The base art
  // keeps its original brightness; distant highlights receive opacity squared.
- let shaded=mix(tex.rgb,sky_color,min(fresnel,0.25)*0.75*visibility*opacity);
+ let peak_scale=select(0.75,scene.cloud_reflection.w/0.25,smooth_weather());
+ let shaded=mix(tex.rgb,sky_color,min(fresnel,0.25)*peak_scale*visibility*opacity);
  let base=ocean_sample(uv,i32(deck.z),distance,passes,core);
  return vec4<f32>(mix(base.rgb,shaded,opacity),base.a);
 }
@@ -531,6 +564,7 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
   if scene.ocean[i+1]>0.0 {
    tex=ocean_surface(hit,deck,distance,passes,core);
    tex=vec4<f32>(aerial_perspective(tex.rgb,ray*distance,deck.x),tex.a);
+   tex=vec4<f32>(water_sun(tex.rgb,ray,hit,distance),tex.a);
   } else {
   tex=weather_tile(uv,i32(deck.z),fog_row(distance),passes,core,vec2<f32>(-1.0));
   if smooth_weather() {
@@ -554,7 +588,16 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
  // Source lower Gouraud is drawn after the sky and celestial primitives when
  // there is no visible ocean plane. Its upper edge may cover sky texture too.
  if (i32(scene.ray.w)&2)!=0 && horizon_height(ray)<=5.0 {color=horizon_color(horizon_index(ray),0,-1);}
- if scene.deck_a.z<0.0 && scene.deck_b.z<0.0 {color=overcast_water(color,ray);}
+ if scene.deck_a.z<0.0 && scene.deck_b.z<0.0 {
+  color=overcast_water(color,ray);
+  if scene.cloud_reflection.z>0.0 && ray.y< -0.000001 && scene.eye.y>0.0 {
+   let distance=-scene.eye.y/ray.y;
+   if distance<2000000.0 {
+    let reflected=water_sun(color,ray,scene.eye.xyz+ray*distance,distance);
+    color=mix(reflected,color,smoothstep(1800000.0,2000000.0,distance));
+   }
+  }
+ }
  var cloud_distance=2000000.0;
  if ray.y< -0.000001 {cloud_distance=min(cloud_distance,max(scene.eye.y,0.0)/(-ray.y));}
  color=cloud_occlusion(color,ray*cloud_distance,scene.eye.y+ray.y*cloud_distance);

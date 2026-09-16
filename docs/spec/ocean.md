@@ -41,20 +41,24 @@ blends back into the unmodified retail ocean sample with opacity
 `1 - smoothstep(2700, 26400, ground_distance_feet)`. The start approximates the
 former short-ripple cutoff at 500 feet/720p/zoom 1; it is intentionally a fixed
 radius rather than changing with resolution. Water itself remains opaque.
-Beyond five miles the unmodified ocean sample is used. The earlier
+Beyond five miles the unmodified ocean sample is used beneath the independent
+long-range sun reflection. The earlier
 horizon-angle reflection fade is superseded by this trial. This interpretation
 and contrast constants are agent-selected tuning, not source facts.
 
-Angle-dependent reflection uses a Schlick approximation with 0.02 normal-incidence
-reflectance, capped at 25% then scaled by 0.75 (18.75% maximum contribution)
-to retain the ocean artwork. John requested this 25% reflection-strength reduction
-on 2026-09-16. It reduces the reflection blend, not the underlying texture
-brightness or palette. On 2026-09-16 John approved the five-mile appearance and
-requested matching luminosity falloff to soften the distant grain. Reflection
-strength now receives the same distance-opacity factor before the final
-whole-effect blend, so reflected contrast falls with opacity squared. Nearby
-reflection is unchanged; the original water sample is never multiplied toward
-black. This is an authored interpretation of the requested luminosity fade,
+John selected an 85% sun peak and a 30% sky/cloud peak on 2026-09-16. Peak contribution means
+`water * (1 - peak) + reflected_source * peak` before distance and weather
+attenuation. It is not a fixed 85% brightness applied to the whole water surface.
+
+In smooth mode, angle-dependent reflection uses a Schlick approximation with
+0.02 normal-incidence reflectance, capped at 0.25 and scaled by `environment_peak / 0.25`.
+The peak is therefore the selected environment value, with 8% of that peak at normal incidence. Stepped compatibility
+mode retains its previous `min(fresnel, 0.25) * 0.75` response. These angular
+curve choices are agent-selected tuning; the requested comparison peaks are user-directed.
+Reflection strength receives the same distance-opacity factor before the final
+whole-effect blend, so reflected contrast falls with opacity squared. Haze
+further reduces the contribution. The original water sample is never multiplied
+toward black. This is an authored interpretation of the requested luminosity,
 not a complete antialiasing solution. Reflection samples the original sky deck or palette entry 240,
 with weather haze reducing its influence. The reflected sky texture blends into
 its palette fallback for reflected-ray Y components 0.45 down to 0.15, suppressing
@@ -92,9 +96,44 @@ Reflection uses original `_CLOUD1.PIC` artwork projected onto an authored
 32,768-foot repeating plane at the dense band's lower edge plus 250 feet.
 It is an approximate cloud environment, not a mirrored copy of individual cloud
 sheet placements. Cloud cutouts reveal a palette 240-to-229 sky gradient.
-Reflection weight is `(0.08 + 0.47 * (1 - facing)^3) * 0.75`, with the existing
+Reflection weight is `(0.08 + 0.47 * (1 - facing)^3) * (environment_peak / 0.55)`,
+normalizing the existing angular curve to the selected environment peak with the existing
 distance opacity applied twice and haze reducing visibility. Nearby ripple
 normals therefore remain visible under diffuse overcast lighting. Sampling fades
 from reflected elevation 0.02 to 0.15 to avoid grazing-angle texture noise.
 All constants are agent-selected opinionated tuning. No new bitmap or daylight
 city-light behavior is introduced.
+
+## Separate sun and environment reflection trial
+
+John requested comparison captures with sun reflection at 85% and sky/cloud
+reflection at 30% or 50%. These are peak linear-light source contributions,
+reduced by the existing distance fade and haze. `TORE_WATER_ENV_REFLECTION`
+accepts 0..1 and defaults to the selected 0.3. Stepped mode keeps its
+prior reflection behavior. The sky/cloud angular curves retain their shapes,
+normalized to the selected environment peak.
+
+A separate smooth-mode sun glint uses the original solid sun radius and palette
+color, with a maximum contribution of 0.85. John requested on 2026-09-16 that
+this extend across visible water independently of the five-mile detail fade.
+The sun reflection is applied after ordinary water shading and haze, with only
+the added atmospheric extinction attenuating it; the palette fog ramp and
+sky/cloud reflection fade do not truncate it. Dense weather still occludes it,
+and source plane coverage fades at the existing maximum render boundary.
+Palette-only water also keeps the sun path when dusk removes the named ocean
+deck, tapering over 1,800,000..2,000,000 feet. Motion-off mode still bypasses it.
+
+Visible sun fraction uses the circular-disc area above the flat horizon:
+`(acos(-q) + q * sqrt(1-q*q)) / pi`, where q is center elevation divided by
+angular radius and clamped to -1..1. Thus a half-set sun supplies half peak
+energy, and reflection vanishes only when the disc has fully set.
+
+Resolved ripple normals supply the nearby specular pattern. As pixel footprint
+grows from 40 to 800 feet, blend toward an angular scatter envelope around the
+flat-water reflection. The envelope has Gaussian widths of disc radius plus
+1.5 degrees in azimuth and disc radius plus 6 degrees in elevation. Its peak
+is 0.55 of the direct reflection peak, avoiding an overly bright solid stripe.
+These are agent-selected approximation constants, not a physical scattering
+solution. Cloud sheet silhouettes and terrain shadows are not traced; visibility
+fraction describes the flat horizon, not terrain covering part of the sun.
+Sky/cloud reflection remains at the selected 30% peak with its existing fade.
