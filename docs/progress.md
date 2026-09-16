@@ -1182,3 +1182,15 @@ only the diagnostic precursor; the parent first slice remains researching.
   No native callback execution or autonomous behavior is enabled.
 
 [Contract](formats/native-strip.md), [source validation](baselines/native-strip-ownership.md).
+
+## Airport slot and attachment ownership — 2026-09-15
+
+- [x] NE-00.1i: source the separate plane selector, slot lookup/reserve/release,
+  state transition, attachment refresh tail and first two template callback gates.
+- [x] Record release-before-failure and duplicate destination behavior; retain
+  full host staging as a required gate rather than claiming native rollback.
+- [ ] Complete E016/E019/E020 bodies and E004 closure before staged E001/E002;
+  no live contact or autonomous behavior is activated by this source-only slice.
+
+[Contract](formats/native-strip.md#airport-slot-and-attachment-producers--ne-001i),
+[validation and remaining boundaries](baselines/native-strip-slots.md).

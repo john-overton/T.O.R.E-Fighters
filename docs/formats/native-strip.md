@@ -502,6 +502,98 @@ duplicate returns 0 unchanged even when full; count >=60 returns 1; otherwise
 append and increment count, return 0. `0x49d520` removes the first supplied-ID
 match and compacts in forward order. `0x49d510` resets count only. These are
 separate from the 900/450 collision candidates and 40 airport records. The
-registration function address is selected at 0x49fb2e; full selector/caller and
-instance +0xe3/+0x231 producers remain to trace. No autonomous behavior or
+registration function address is selected at 0x49fb2e; NE-00.1i below resolves
+the plane selector and bounded state/attachment producers. Complete creation
+and refresh callers remain open. No autonomous behavior or
 aircraft service is translated by recording this list's storage contract.
+
+## Airport slot and attachment producers — NE-00.1i
+
+**Native source established for the bounded slices below; untranslated and not
+runtime-connected.** [Validation](../baselines/native-strip-slots.md). This
+refines E016/E020; it does not close the full takeoff/landing callback bodies.
+
+### Separate plane registration
+
+The SMS identifies `0x49fb10` as `_PLANEProc`. Its eight-entry dword jump table
+at `0x49fb4c` selects request 0 → `0x49fa50` (the ordered actor-list registration),
+2 → `0x49f840`, 3 → `0x49df40`, 6 → `0x48d780`, and 7 → `0x48ec40`.
+Requests 1/4/5 and unsigned byte values >7 delegate to `0x473db0`; they are not
+proven null. The selector's reviewed code ends before the table, at `0x49fb4c`.
+This establishes which selector registers the actor list, not all definitions
+that use that selector or the complete plane creation lifecycle. In particular,
+STRIP's request-0 airport registration is distinct. No empty actor-list assumption
+or new aircraft activation follows from this discovery.
+
+### Airport slots and partial failure
+
+Three complete routines use current instance +0x231 (global `0x50d0b1`), current
+ID `0x4f6fbc`, airport signed word +0xe0, and word slots beginning +0x111:
+
+- `0x4bd3d0..0x4bd418`: null attachment returns -1; otherwise scan the first
+  +0xe0 slots, return the first matching current-ID index, or -1. Nonpositive
+  signed counts produce no match.
+- `0x4bd420..0x4bd48e`: null attachment returns -1 without releasing anything.
+  An existing matching destination slot returns immediately. Otherwise call
+  release **before** scanning the destination's slots for the first zero word;
+  store the current ID there and return its index, or return -1 if none is free.
+- `0x4bd490..0x4bd509`: visit every airport record in order and zero **every**
+  matching current-ID slot within each signed +0xe0 count. Leave holes in place;
+  do not compact slots. This is distinct from airport-record or actor-list removal.
+
+The reviewed STRIP template's +0xe0 word is **9**, matching the 18-byte reset
+at +0x111..+0x122. The selected add/transform path preserves that count. Other
+templates/counts are not accepted by this observation. Native code does not
+validate these counts against record bounds; a host reader must do so.
+
+A full destination can therefore return failure **after clearing old ownership**.
+An existing destination match can leave duplicates in other airports untouched.
+Neither behavior is a transactional move or a globally deduplicating operation.
+Staged world construction/update must preserve source order within staged state,
+and discard the entire staged change on a host failure. Calling release as
+rollback would erase more state. No host allocator is connected in this slice.
+
+### Attachment refresh and state transitions
+
+`0x452594..0x452627` is the bounded attachment tail inside SMS
+`_FMUpdatePlaneFields@0` (entry `0x452140`), not a complete field-update routine.
+It saves the previous attachment, calls `0x45e710` for the current ID, and on
+byte result 2 obtains an ID through `0x45e630`, resolves it with `0x491240`, and
+copies that instance's +0x231. A nonnull attachment is retained if current +0xe3
+is in 1..0x12 or 0x13..0x1e. Otherwise it calls `0x4ba8e0` with current instance,
+position, null optional outputs and final argument 1, then stores the result.
+If the attachment differs from the saved pointer, it calls slot reserve above;
+the return value is not tested here. Group lookup, earlier field updates and
+safe attachment lifetime remain required dependencies; this tail cannot be
+called independently or treated as full producer acceptance.
+
+SMS `@EnterState@4`, `0x464300..0x46441b`, writes the requested low byte to current
+instance +0xe3 after its pre-transition notification. Entering state 0x16 from a
+different state, when controller low 7 bits match dword `0x4eb608`, first calls
+`0x485a40` with that controller, current ID and instance byte +0x273. For kind 4,
+nonnull attachment plus new state in 1..0x12 or 0x13..0x1e reserves a slot;
+otherwise release scans all airports. These operations precede the remaining
+controller/device effects. With controller bit 0x80 clear, new states 7/0xa/0xd/
+0x11 call `0x451b60(1,0)`; leaving range 1..0x12 calls `0x451b60(0,0)` and
+`0x451e00(0,0)`. Those device consumers are not accepted by their call addresses.
+New state zero additionally calls `0x45e520`, clears word +0x11a and bits 0x30
+of dword +0xde, conditionally calls `0x473c10` when byte `0x4f6fe4` is nonzero,
+and calls `0x4a04f0` for kind 4. It is not merely an assignment to +0xe3.
+
+### Remaining template callback boundaries
+
+SMS names the first two pointer targets **APTakeoff** (`0x4badb0`) and
+**APLanding** (`0x4bc270`). Only their entry gates are reviewed here. Both clear
+instance byte +0x215 before examining later conditions. Takeoff resolves the
+attached airport's object ID, requires a nonnull object with flag 1 and a true
+`0x4747c0` preference result; failing that validation while +0xe3 is 1..8 writes
+state 0x1f directly, calls `0x473c10`, zeroes speed +0x34 and returns AL=1.
+Other cases continue to the unaccepted body at `0x4bae24`.
+
+Landing first calls `0x463d00` and group lookup `0x45e710`. Group result 2,
+false `0x45e8f0`, and state 0x13 or 0x14 call `0x4bbfe0` then return AL=0.
+Otherwise it resolves the attachment's airport object and tests flag 1 and
+`0x4747c0`, branching to unaccepted exit `0x4bd170` on failure or body `0x4bc310`
+on success. These gates do not establish effect-free suppression. Complete
+callback selection/callers, bodies, device effects and attachment lifetimes remain
+unknown; no autonomous behavior is translated or enabled.

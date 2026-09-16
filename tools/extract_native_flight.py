@@ -16,6 +16,14 @@ REVIEWED_FA = 'e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c'
 # Manually reviewed FA address boundaries, including helpers hidden inside SMS spans.
 # These are static research slices, not executable modules or a complete call graph.
 REVIEWED_REGIONS = (
+    ('plane_callback_selector', 0x49fb10, 0x49fb4c, 'ground'),
+    ('airport_takeoff_entry_gate', 0x4badb0, 0x4bae24, 'ground'),
+    ('airport_landing_entry_gate', 0x4bc270, 0x4bc310, 'ground'),
+    ('airport_slot_lookup', 0x4bd3d0, 0x4bd419, 'ground'),
+    ('airport_slot_reserve', 0x4bd420, 0x4bd48f, 'ground'),
+    ('airport_slot_release', 0x4bd490, 0x4bd50a, 'ground'),
+    ('object_enter_state', 0x464300, 0x46441c, 'ground'),
+    ('plane_airport_refresh_tail', 0x452594, 0x452628, 'ground'),
     ('airport_comment_selection', 0x48f6a0, 0x48f7a6, 'ground'),
     ('airport_comment_finish', 0x490041, 0x4900a0, 'ground'),
     ('speech_buffer_reset', 0x48d410, 0x48d41d, 'ground'),
