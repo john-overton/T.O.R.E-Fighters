@@ -21,5 +21,5 @@ struct Flare { settings:vec4<f32>, circles:array<vec4<f32>,16> }
   let remap=textureLoad(maps,vec2(index,0),0).rg;index=i32(remap[i32(c.w)]);
  }
  if index<0 {return color;}
- return vec4(textureLoad(palette,vec2(index,0),0).rgb,color.a);
+ return vec4(mix(color.rgb,textureLoad(palette,vec2(index,0),0).rgb,flare.settings.y),color.a);
 }

@@ -854,16 +854,22 @@ The app now defaults to authored spatial/temporal interpolation of original
 palette colors (`TORE_WEATHER_SMOOTH=0` restores stepped color/fog rendering).
 This adds no format grammar. Source callback scheduling, discrete selection,
 shape art and index cutouts remain intact. Sun/moon geometry additionally has a
-common fitted ×4 projection calibration against the user's default-zoom retail
-captures, with viewport-relative scale. This factor is not decoded native math.
+common opinionated ×2 projection scale, halved from the previous ×4 at John's
+request on 2026-09-16. See [size specification](../spec/sun-glow.md).
+This factor is not decoded native math.
 See [smoothing evidence and limitations](../baselines/weather-smoothing.md).
 Smooth weather also adds an opinionated directional sun halo, dawn/dusk wash,
-and per-pixel angular lighting on sky-deck textures and cloud sheets.
+and per-pixel angular lighting on sky-deck textures and cloud sheets. Its visual
+sun arc runs continuously through the day, with symmetric dawn/dusk twilight
+gradients rather than a 19:00 drawing cutoff. The Sunset preset remains 19:01.
 See [sun glow specification](../spec/sun-glow.md).
 
 Smooth weather also adds gentle distance and altitude-dependent horizon blending,
 with extra haze along sightlines through moist weather bands. See the
 [atmospheric distance specification](../spec/atmospheric-distance.md).
+Dense cloud layers now suppress residual surface colors, and cloudy weather
+without an ocean deck receives original-art ripple reflections. See
+[cloudy presentation checks](../baselines/cloudy-presentation.md).
 
 ## Wind/turbulence integration follow-up, 2026-09-15
 

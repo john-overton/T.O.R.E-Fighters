@@ -208,7 +208,7 @@ identified display consumers, deferred with their actual views. See weather.md.
 2026-09-15 presentation follow-up adds no binary grammar: original LAY/SH/PIC
 coverage is unchanged. Fractional-time palette/altitude interpolation and spatial
 shade blending are authored GPU presentation, with stepped diagnostics retained.
-Sun/moon use a common fitted ×4 projection calibration against user-supplied
+Sun/moon use a common opinionated ×2 projection scale, reduced from the previous ×4 fit against user-supplied
 retail default-zoom captures; native projection acceptance remains open.
 See [smoothing and size evidence](../baselines/weather-smoothing.md).
 

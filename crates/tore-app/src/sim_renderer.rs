@@ -188,7 +188,7 @@ impl SimRenderer {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera and atmosphere"),
-            size: 1328,
+            size: 1344,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -594,6 +594,22 @@ impl SimRenderer {
                 .ocean_motion
                 .uniform(world.weather.ticks(), ocean_decks, pixel_angle),
         );
+        let dense = weather
+            .visual_bands
+            .iter()
+            .find(|band| band.fog_far_density >= 256 && band.fog_far * 256 <= 8000);
+        let reflection = match (&world.clouds, dense) {
+            (Some(clouds), Some(band)) if world.smooth_weather => [
+                clouds.reflection_texture() as f32,
+                (band.low_feet as f32 + 250.).max(500.),
+                world
+                    .ocean_motion
+                    .uniform(world.weather.ticks(), [true, false], pixel_angle)[1],
+                0.,
+            ],
+            _ => [-1., 0., 0., 0.],
+        };
+        uniform.extend(reflection);
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         let mut entries = Vec::with_capacity(11 * 1024);
         for row in std::iter::once(&weather.palette).chain(weather.fog_palette.iter()) {

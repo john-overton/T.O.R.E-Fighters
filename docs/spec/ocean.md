@@ -71,9 +71,30 @@ color model. Reviewed commit: `416d31648ed19fb12077bd7ee20ae0f6257a9a1a`.
 ## Shared behavior and scope
 
 Beach outlines stay fixed. All views share one simulation clock; pause freezes
-motion and restart resets it. Only named OCEAN decks use the effect. No collision,
+motion and restart resets it. Named OCEAN decks use the textured effect; dense cloudy weather without a named
+ocean deck uses the palette-water reflection described below. No collision,
 buoyancy or wind/sea-state model changes. Runtime no longer imports/uploads wave
 atlases; the [retail whitecap research](../formats/ocean.md) is retained as evidence.
 
 [Acceptance](../baselines/ocean.md) records visual checks, performance and platform
 limits. Original-game side-by-side comparison remains unavailable.
+
+## Overcast water without an ocean deck
+
+Implementation mode, requested on 2026-09-16. CLOUD1 has no named ocean deck,
+so the earlier ripple shader did not run on its water background. Smooth mode
+now shades the exposed sea-level background in dense cloudy weather using the
+same short ripple slopes, five-mile fade and altitude attenuation. The original
+background remains the base color and terrain still covers land. Motion-off
+and stepped compatibility modes bypass this addition.
+
+Reflection uses original `_CLOUD1.PIC` artwork projected onto an authored
+32,768-foot repeating plane at the dense band's lower edge plus 250 feet.
+It is an approximate cloud environment, not a mirrored copy of individual cloud
+sheet placements. Cloud cutouts reveal a palette 240-to-229 sky gradient.
+Reflection weight is `(0.08 + 0.47 * (1 - facing)^3) * 0.75`, with the existing
+distance opacity applied twice and haze reducing visibility. Nearby ripple
+normals therefore remain visible under diffuse overcast lighting. Sampling fades
+from reflected elevation 0.02 to 0.15 to avoid grazing-angle texture noise.
+All constants are agent-selected opinionated tuning. No new bitmap or daylight
+city-light behavior is introduced.

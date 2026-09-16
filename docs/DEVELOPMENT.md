@@ -501,12 +501,20 @@ simulation/callback scheduling. `--validate-weather` also reports native/smooth
 palette change counts and maximum channel steps over a minute of dawn.
 [Evidence and celestial sizing qualifications](baselines/weather-smoothing.md).
 Smooth weather also adds an opinionated directional sun halo, dawn/dusk wash,
-and per-pixel angular lighting on sky-deck textures and cloud sheets.
+and per-pixel angular lighting on sky-deck textures and cloud sheets. Its visual
+sun arc runs continuously through the day, with symmetric dawn/dusk twilight
+gradients rather than a 19:00 drawing cutoff. The Sunset preset remains 19:01.
+The sun and moon use half their previous apparent diameter (shared scale 2).
+The trial orange-rim grade is removed; the earlier atmospheric glow remains. Smooth-mode glare
+is gentler near the horizon and drops rapidly to zero by 0.5 degrees below it.
 See [sun glow specification](spec/sun-glow.md).
 
 Smooth weather also adds gentle distance and altitude-dependent horizon blending,
 with extra haze along sightlines through moist weather bands. See the
 [atmospheric distance specification](spec/atmospheric-distance.md).
+Dense cloud layers now suppress residual surface colors, and cloudy weather
+without an ocean deck receives original-art ripple reflections. See
+[cloudy presentation checks](baselines/cloudy-presentation.md).
 
 ### Wind, turbulence and attachment probes
 

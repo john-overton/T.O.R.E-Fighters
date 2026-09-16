@@ -59,3 +59,28 @@ it. There is no new weather simulator, physical cloud volume or scattering model
 The tint follows the existing time-dependent palette, including night.
 
 See [validation and limitations](../baselines/atmospheric-distance.md).
+
+## Dense cloud and fog occlusion
+
+Implementation correction requested on 2026-09-16. The previous palette remaps
+left surface-color differences visible through the overcast layer. Opinionated
+extinction now applies consistently to surfaces and the sky background.
+A dense-band weight is smoothstep of far density from 0.9 to 1, multiplied by
+one minus smoothstep of far distance from 8,000 to 16,000 feet. Thus clear-day
+and ordinary night-distance haze do not become opaque cloud layers.
+Integrate dense-band path length using the same softened altitude bounds.
+John requested only a few hundred feet of visibility within cloud/fog and
+opaque ground cover from above on 2026-09-16. Agent-selected tuning uses optical
+depth equal to weighted path length divided by 150 feet. Transmittance is
+`exp(-depth) * (1 - smoothstep(3, 4, depth))`. At full density, remaining surface
+contrast is 51 percent at 100 feet, 14 percent at 300 feet, 5 percent at 450 feet,
+and exactly zero at 600 feet. This smooth extinction also applies to FOG1's
+0..8,000-foot dense layer; a view through the full cloud/fog layer is opaque
+regardless of camera height. The 500-foot soft altitude edges remain, so optical
+path length, rather than camera membership in a band, controls the transition. There is no
+3,000-foot exemption inside cloud. Resolve a common cloud color from the current weather horizon at palette
+index 240, matching the sky at the horizon to avoid a new boundary seam. Apply after ordinary haze to surfaces and sky. Dense-layer occlusion also
+applies to object faces exempt from ordinary palette fog, preventing them from
+showing through an opaque weather layer.
+Sky paths end at sea level for downward rays or 2,000,000 feet for other rays.
+These constants are agent-selected presentation rules, not recovered physics.

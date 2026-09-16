@@ -8,54 +8,50 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation-mode validation of the [opinionated sun glow](../spec/sun-glow.md).
-Build: `02c7711` plus this working change, Linux, NVIDIA RTX 4070, Vulkan.
+Implementation-mode validation of the [sun glow specification](../spec/sun-glow.md).
+Build: `d7c64a4` plus working cloud/fog, overcast-water and continuous-sun changes.
+Linux, NVIDIA RTX 4070, Vulkan, 2026-09-16.
 
-Passed formatting, warnings-denied workspace/all-target Clippy, locked workspace
-build and all 369 Rust tests, 40 Python tests, source and both binary asset
-guards, documentation headers, and `git diff --check`. The required
-`cargo run --locked -p tore-app -- --smoke-test` passed on the display.
-An initial shader validation failure from an incorrectly placed edit was fixed
-before the successful GPU captures and final checks.
+Passed formatting, warnings-denied all-target Clippy, locked workspace tests
+and build, 40 Python tests, source/binary asset guards, documentation headers,
+and the display smoke test. A new synthetic regression checks horizon crossings
+at 07:00 and 19:00, continued positioning with the source sun flag disabled,
+0.25-degree elevations a minute before/after crossings, normalized directions,
+and midnight wrap continuity. Glare checks cover 35% at the horizon, 17.5%
+at -0.25 degrees and zero at -0.5 degrees. The all-day synthetic fixture
+initially exposed a rejected 24-hour daylight span in the visual arc; it is now
+supported and the existing glare-toggle regression passes. Simulation sun-angle tests remain unchanged.
 
-Ignored captures live in `.local/sun-glow/`. Each used `TORE_SUN_GLARE=0`,
-`--free-flight --smoke-test --no-audio --capture-flight PATH`, and:
+Captures use `--weather-condition 4 --capture-terrain PATH --no-audio`,
+`TORE_WEATHER_VIEW=1070000,5000,590000,YAW,0` and explicit time overrides:
 
-| Capture | TORE_WEATHER_TIME | --flight-look |
+| Time | Yaw | Result |
 | --- | --- | --- |
-| dawn.ppm | 07:30 | 100,5 |
-| dusk-1830.ppm | 18:30 | -100,5 |
-| opposite.ppm | 07:30 | -80,5 |
-| dusk.ppm | 19:00 | -100,5 |
+| 07:01 | 100 | Rising sun and warm directional glow |
+| 19:01 | -100 | Sunset preset now shows the sun's remaining visible portion with a warm sky wash |
+| 19:10 | -100 | Below-horizon center retains twilight scattering and a small visible edge of the enlarged original sun art |
+| 00:00 | -100 | GPU capture passed with the sun below the horizon |
 
-All four GPU captures passed. Visual inspection found warm light around the
-visible dawn and 18:30 sunset discs, and a cooler opposite-facing sky. At 19:00
-the disc was not visible, so that capture does not validate its halo.
-These are authored presentation checks, not retail comparisons. The original
-sun rings remain visibly stepped inside the soft halo. Other theaters, fog,
-individual cloud-sheet occlusion, noon, bank/zoom combinations and Windows/macOS
-execution were not visually checked in this pass. Twilight outside the source sun interval
-remains outside this implementation's scope.
+Local comparison: `.local/atmosphere/sunset-review.png`, sunrise, sunset preset,
+then twilight. These earlier captures predate the current half-size sun/moon.
+Current size validation uses `.local/atmosphere/half-sunset.ppm` and
+`half-moon.ppm`. The moon projection regression now expects half the former
+screen diameter and one quarter of the squared billboard edge length. The
+smaller sun now uses its earlier color treatment without the trial orange rim.
+Final sunset capture: `.local/atmosphere/half-sunset-no-grade.ppm`. Original-art captures remain ignored.
+Different
+source sky palettes make dawn and dusk differ in overall brightness even though
+the angular/elevation scattering rules are symmetric. The original enlarged sun
+art remains stylized; this is not a calibrated solar angular diameter.
 
-## Angular cloud-lighting validation
+The dense-layer cloud/fog occlusion checks are recorded in
+[cloudy presentation](cloudy-presentation.md). No continuous full-day recording,
+Windows/macOS validation, frame-time benchmark or exhaustive weather/altitude
+matrix was run. This is authored presentation, not measured retail parity or
+astronomical accuracy. Terrain is still flat and there is no refraction model.
 
-The same working build and host passed all checks listed above after adding
-per-pixel cloud lighting. Ignored artifacts are in `.local/cloud-glow/`; all
-captures used the same base flags as above. `before.ppm` uses the sun-halo-only
-build; `after.ppm` uses angular cloud lighting, both at 07:30 with look 100,15.
-`comparison.png` places before on the left and after on the right. Inspection
-shows a broader warm gradient while retaining the original texture detail.
-
-`early.ppm` uses 07:05 and look 100,15; `sunset.ppm` uses 18:30 and look -100,15.
-Both rendered successfully and were inspected. The early sky has no visible
-cloud texture in this source weather record, so it establishes early-sun
-rendering, not cloud lighting at that time. The sunset cloud texture shows the
-same directional warm gradient. The source's discrete texture schedule is
-unchanged; this change does not blend between different weather textures.
-
-`opposite.ppm` uses 07:30 and look -80,5. ImageMagick absolute-error comparison
-against `.local/sun-glow/opposite.ppm` reports zero changed pixels. All captures
-used disabled lens flare/whiteout so those effects cannot explain the glow.
-Finite cloud-sheet lighting and distance-haze attenuation are implemented, but
-these captures visually establish sky-deck lighting only. No full-day animation
-or frame-time benchmark was run.
+Glare captures use 18:58 and 19:03 with yaw -100/pitch 4. These check visible
+lens artifacts before sunset and their absence after the half-degree cutoff.
+Files: `.local/atmosphere/glare-before.ppm`, `glare-after.ppm`. Palette-whiteout
+timing is covered by unit tests; one-frame captures do not measure its settling
+time. Final required checks and the display smoke test passed after these changes.

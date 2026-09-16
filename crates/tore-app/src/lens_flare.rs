@@ -44,14 +44,27 @@ pub fn circles(world: &World, camera: &Camera, size: [u32; 2]) -> Vec<[f32; 4]> 
     let Some(layer) = world.weather.sample(camera.position[1] as f64) else {
         return vec![];
     };
-    let Some(angles) = tore_sim::environment::sun_angles(&layer, world.weather.seconds_of_day())
-    else {
-        return vec![];
+    let sun = if world.smooth_weather {
+        let Some(sun) =
+            crate::celestial::continuous_sun_direction(&layer, world.weather.seconds_of_day())
+        else {
+            return vec![];
+        };
+        if crate::celestial::glare_strength(world, f64::from(camera.position[1]), sun) <= 0. {
+            return vec![];
+        }
+        sun
+    } else {
+        let Some(angles) =
+            tore_sim::environment::sun_angles(&layer, world.weather.seconds_of_day())
+        else {
+            return vec![];
+        };
+        if angles[1] < 182 {
+            return vec![];
+        }
+        crate::celestial::rotate([0., 0., 1.], angles)
     };
-    if angles[1] < 182 {
-        return vec![];
-    }
-    let sun = crate::celestial::rotate([0., 0., 1.], angles);
     let basis = camera.uniform(1., [0.; 4], [0; 3]);
     let dot = |i: usize| (0..3).map(|j| sun[j] * basis[i + j]).sum::<f32>();
     let z = dot(12);
@@ -191,7 +204,23 @@ impl LensFlare {
             });
             self.backing = Some((source, bind));
         }
-        let mut values = vec![circles.len() as f32, 0., 0., 0.];
+        let strength = if world.smooth_weather {
+            world
+                .weather
+                .sample(f64::from(camera.position[1]))
+                .and_then(|layer| {
+                    crate::celestial::continuous_sun_direction(
+                        &layer,
+                        world.weather.seconds_of_day(),
+                    )
+                })
+                .map_or(0., |sun| {
+                    crate::celestial::glare_strength(world, f64::from(camera.position[1]), sun)
+                })
+        } else {
+            1.
+        };
+        let mut values = vec![circles.len() as f32, strength, 0., 0.];
         values.extend(circles.into_iter().flatten());
         values.resize(68, 0.);
         let bytes: Vec<u8> = values.into_iter().flat_map(f32::to_le_bytes).collect();

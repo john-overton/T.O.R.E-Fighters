@@ -354,12 +354,41 @@ impl World {
         } else {
             -1.
         };
+        let visual_target = if self.smooth_weather && self.glare_enabled() {
+            self.weather
+                .sample(altitude)
+                .and_then(|layer| {
+                    crate::celestial::continuous_sun_direction(
+                        &layer,
+                        self.weather.seconds_of_day(),
+                    )
+                })
+                .map_or(0., |sun| {
+                    let view = camera.uniform(1., [0.; 4], [0; 3]);
+                    let alignment: f64 = (0..3)
+                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
+                        .sum();
+                    let response = (((alignment.clamp(-1., 1.) * (32767. * 32767. / 65536.))
+                        .floor()
+                        - 15564.)
+                        / 3.)
+                        .clamp(0., 255.);
+                    response * f64::from(crate::celestial::glare_strength(self, altitude, sun))
+                })
+        } else {
+            0.
+        };
         let presentation = if camera.weather_slot == 0 {
             &mut self.weather_presentation
         } else {
             &mut self.auxiliary_presentations[camera.weather_slot - 1]
         };
+        let previous_visual = presentation.visual_sun;
         presentation.step_with_alignment(&self.weather, altitude, speed_fps, alignment);
+        if self.smooth_weather {
+            presentation.visual_sun =
+                previous_visual + (visual_target - previous_visual).clamp(-16. / 7.2, 16. / 7.2);
+        }
     }
 
     /// Presentation only: resolves the palette for one camera altitude without

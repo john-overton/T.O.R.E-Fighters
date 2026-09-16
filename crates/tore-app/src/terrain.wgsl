@@ -1,5 +1,5 @@
 struct Band { info:vec4<f32>, ramp:vec4<f32> }
-struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32> }
+struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32> }
 @group(0) @binding(0) var<uniform> scene:Scene;
 // Retail terrain and sky artwork is stored as weather-palette indices, so it is
 // uploaded unresolved and the live palette is applied here every frame.
@@ -46,11 +46,31 @@ fn air_opacity(distance:f32,altitude:f32)->f32 {
      +max(distance-3000.0,0.0)*moisture_rate;
  return 1.0-exp(-optical_depth);
 }
+// Dense weather must hide surface contrast, including palette light pixels.
+fn cloud_occlusion(color:vec3<f32>,direction:vec3<f32>,altitude:f32)->vec3<f32> {
+ if !smooth_weather() {return color;}
+ let a=max(scene.eye.y,0.0);let b=max(altitude,0.0);
+ let low=min(a,b);let high=max(a,b);let span=high-low;
+ var depth=0.0;
+ for(var i=0;i<i32(scene.ray.x);i++) {
+  let band=scene.bands[i];
+  let dense=smoothstep(0.9,1.0,band.ramp.w/256.0)
+      *(1.0-smoothstep(8000.0,16000.0,band.ramp.z*256.0));
+  if dense<=0.0 {continue;}
+  var weight=air_band_weight((a+b)*0.5,band.info.x,band.info.y);
+  if span>1.0 {weight=(air_band_integral(high,band.info.x,band.info.y)-air_band_integral(low,band.info.x,band.info.y))/span;}
+  let d=length(direction)*clamp(weight,0.0,1.0)*dense/150.0;
+  depth+=d;
+ }
+ if depth<=0.0 {return color;}
+ let transmission=exp(-depth)*(1.0-smoothstep(3.0,4.0,depth));
+ return mix(horizon_color(240.0,0,-1),color,transmission);
+}
 fn aerial_perspective(color:vec3<f32>,direction:vec3<f32>,altitude:f32)->vec3<f32> {
  if !smooth_weather() {return color;}
  let horizontal=vec3<f32>(direction.x,0.0,direction.z);
  let horizon=horizon_color(horizon_index(horizontal),0,-1);
- return mix(color,horizon,air_opacity(length(direction),altitude));
+ return cloud_occlusion(mix(color,horizon,air_opacity(length(direction),altitude)),direction,altitude);
 }
 struct VertexOut {
  @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
@@ -229,6 +249,7 @@ fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec
  }
  if textureDimensions(palette).y<=1u || (in.own_color>0.0 && in.layer<0.0 && in.layer != -2.0) { color=mix(color,linear(scene.sky.rgb),haze(in.distance)); }
  if in.fog_enabled!=0u {color=aerial_perspective(color,in.direction,in.altitude);}
+ else {color=cloud_occlusion(color,in.direction,in.altitude);}
  return vec4<f32>(color,1.0);
 }
 struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32> }
@@ -292,6 +313,7 @@ fn horizon_color(index:f32,passes:i32,core:i32)->vec3<f32>{
 // Celestial primitives precede the lower horizon/deck draw in 0x4aacf0.
 // Clip against those consumers rather than an invented zero-elevation cutoff.
 fn celestial_occluded(ray:vec3<f32>)->bool {
+ if smooth_weather() {return ray.y<0.0;}
  if (i32(scene.ray.w)&2)!=0 {return horizon_height(ray)<=5.0;}
  if scene.deck_a.z>=0.0 && scene.eye.y>=scene.deck_a.x {
   // SolidHorizon adds the size/inversion offset to its half-Q15 plane.
@@ -362,6 +384,30 @@ fn water_slopes(world:vec2<f32>,footprint:f32)->vec2<f32> {
  let fine=inverseSqrt(1.0+footprint/40.0);
  return (along*n.y*0.16+across*n.z*0.40)*coarse
        +(along*m.y*0.09+across*m.z*0.18)*fine;
+}
+// CLOUD weather has palette water rather than a named OCEAN plane.
+fn overcast_water(color:vec3<f32>,ray:vec3<f32>)->vec3<f32> {
+ if !smooth_weather() || scene.cloud_reflection.z<=0.0 || ray.y>=-0.000001 || scene.eye.y<=0.0 {return color;}
+ let distance=-scene.eye.y/ray.y;
+ let hit=scene.eye.xyz+ray*distance;
+ let opacity=1.0-smoothstep(2700.0,26400.0,length(hit.xz-scene.eye.xz));
+ if opacity<=0.0 {return color;}
+ let motion=1.0-smoothstep(3500.0,16000.0,scene.eye.y);
+ let footprint=distance*scene.ocean.w/max(abs(ray.y),0.025);
+ let slope=water_slopes(hit.xz,footprint)*motion;
+ let normal=normalize(vec3<f32>(-slope.x,1.0,-slope.y));
+ let reflected=reflect(ray,normal);
+ var sky=mix(shade(240u,0).rgb,shade(229u,0).rgb,smoothstep(0.0,0.6,reflected.y));
+ if reflected.y>0.02 && scene.cloud_reflection.x>=0.0 {
+  let cloud_hit=hit+reflected*(scene.cloud_reflection.y/reflected.y);
+  let uv=fract(vec2<f32>(cloud_hit.x,-cloud_hit.z)/32768.0);
+  let cloud=sample_tile(uv,i32(scene.cloud_reflection.x),0,-1,-1,vec2<f32>(-1.0));
+  sky=mix(sky,cloud.rgb,cloud.a*smoothstep(0.02,0.15,reflected.y));
+ }
+ let facing=clamp(dot(normal,-ray),0.0,1.0);
+ let strength=(0.08+0.47*pow(1.0-facing,3.0))*0.75;
+ let visibility=1.0-clamp(haze(distance),0.0,1.0);
+ return mix(color,sky,strength*visibility*opacity*opacity);
 }
 fn ocean_surface(hit:vec3<f32>,deck:vec4<f32>,distance:f32,passes:i32,core:i32)->vec4<f32>{
  let ray=normalize(hit-scene.eye.xyz);
@@ -508,6 +554,10 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
  // Source lower Gouraud is drawn after the sky and celestial primitives when
  // there is no visible ocean plane. Its upper edge may cover sky texture too.
  if (i32(scene.ray.w)&2)!=0 && horizon_height(ray)<=5.0 {color=horizon_color(horizon_index(ray),0,-1);}
+ if scene.deck_a.z<0.0 && scene.deck_b.z<0.0 {color=overcast_water(color,ray);}
+ var cloud_distance=2000000.0;
+ if ray.y< -0.000001 {cloud_distance=min(cloud_distance,max(scene.eye.y,0.0)/(-ray.y));}
+ color=cloud_occlusion(color,ray*cloud_distance,scene.eye.y+ray.y*cloud_distance);
  return vec4<f32>(color,1.0);
 }
 struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32>, @location(1) distance:f32 }

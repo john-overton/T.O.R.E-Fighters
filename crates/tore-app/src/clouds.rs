@@ -78,6 +78,9 @@ impl Clouds {
             exponent,
         })
     }
+    pub fn reflection_texture(&self) -> usize {
+        self.texture
+    }
     pub fn vertices(&self, camera: &Camera) -> Vec<f32> {
         // Host radians to native binary-angle words; exact native matrix rounding
         // is not implied. Normalize before converting so long-running turns wrap.

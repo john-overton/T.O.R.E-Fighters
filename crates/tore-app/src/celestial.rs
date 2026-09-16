@@ -9,11 +9,9 @@ use tore_formats::{
     weather::shape::{Primitive, WeatherShape},
 };
 
-// Authored projection calibration against the user's default-zoom retail
-// dgVoodoo sun/moon captures (2026-09-15). Shared for both original shapes;
-// this is not a recovered native matrix factor. Angular geometry automatically
-// scales with viewport height and camera zoom, without fixed pixel diameters.
-const RETAIL_CELESTIAL_SCALE: f32 = 4.;
+// Opinionated shared apparent-size scale, halved at John's request on
+// 2026-09-16. See docs/spec/sun-glow.md. Not a recovered source calibration.
+const CELESTIAL_SCALE: f32 = 2.;
 
 pub struct Celestial {
     pub sun: WeatherShape,
@@ -148,22 +146,21 @@ impl Celestial {
     pub fn sun_uniform(&self, world: &World, altitude: f32) -> Vec<f32> {
         let layer = world.weather.sample(altitude as f64);
         let seconds = world.weather.seconds_of_day();
-        let angle = layer
-            .as_ref()
-            .and_then(|l| tore_sim::environment::sun_angles(l, seconds));
+        let direction = layer.as_ref().and_then(|layer| {
+            if world.smooth_weather {
+                continuous_sun_direction(layer, seconds)
+            } else {
+                tore_sim::environment::sun_angles(layer, seconds)
+                    .map(|angle| rotate([0., 0., 1.], angle))
+            }
+        });
         let mut out = vec![0.; 36];
-        if let Some(angle) = angle {
-            let direction = rotate([0., 0., 1.], angle);
+        if let Some(direction) = direction {
             out[..3].copy_from_slice(&direction);
             out[3] = self.sun.primitives.len() as f32;
-            if let Some(layer) = &layer {
-                // Opinionated presentation fade, docs/spec/sun-glow.md.
-                let edge = (seconds - layer.sunrise_seconds).min(layer.sunset_seconds - seconds)
-                    as f32
-                    / 120.;
-                let t = edge.clamp(0., 1.);
-                out[6] = t * t * (3. - 2. * t);
-            }
+            let t = ((direction[1] + 6_f32.to_radians().sin()) / 6_f32.to_radians().sin())
+                .clamp(0., 1.);
+            out[6] = t * t * (3. - 2. * t);
             for (i, p) in self.sun.primitives.iter().enumerate() {
                 if let Primitive::Circle {
                     center,
@@ -172,7 +169,7 @@ impl Celestial {
                 } = p
                 {
                     // Native circle radius is half the projected diameter.
-                    out[4 + i * 4] = *diameter as f32 * RETAIL_CELESTIAL_SCALE / (2. * center[2]);
+                    out[4 + i * 4] = *diameter as f32 * CELESTIAL_SCALE / (2. * center[2]);
                     out[5 + i * 4] = *fill as f32;
                 }
             }
@@ -218,8 +215,8 @@ impl Celestial {
                 quad(
                     &mut vertices,
                     center,
-                    horizontal.map(|v| v * size[0] as f32 * 0.5 * RETAIL_CELESTIAL_SCALE),
-                    vertical.map(|v| v * size[1] as f32 * 0.5 * RETAIL_CELESTIAL_SCALE),
+                    horizontal.map(|v| v * size[0] as f32 * 0.5 * CELESTIAL_SCALE),
+                    vertical.map(|v| v * size[1] as f32 * 0.5 * CELESTIAL_SCALE),
                     self.moon_texture as f32,
                     0.,
                     self.moon_uv,
@@ -228,6 +225,61 @@ impl Celestial {
         }
         vertices
     }
+}
+pub(crate) fn glare_strength(world: &World, altitude: f64, sun: [f32; 3]) -> f32 {
+    if !world.smooth_weather {
+        return 1.;
+    }
+    let smooth = |lo: f32, hi: f32, value: f32| {
+        let t = ((value - lo) / (hi - lo)).clamp(0., 1.);
+        t * t * (3. - 2. * t)
+    };
+    let elevation = sun[1].clamp(-1., 1.).asin().to_degrees();
+    let mut strength = smooth(-0.5, 0., elevation) * (0.35 + 0.65 * smooth(3., 15., elevation));
+    for band in world.weather.active() {
+        if band.fog_far_density < 256 || i64::from(band.fog_far) * 256 > 8000 {
+            continue;
+        }
+        let path = if sun[1] > 0. {
+            (f64::from(band.high_feet) - altitude.max(f64::from(band.low_feet))).max(0.)
+                / f64::from(sun[1])
+        } else {
+            (altitude.min(f64::from(band.high_feet)) - f64::from(band.low_feet)).max(0.)
+                / f64::from(-sun[1]).max(1e-6)
+        };
+        strength *= 1. - smooth(0., 600., path as f32);
+    }
+    strength
+}
+
+// Authored visual arc; source simulation lighting keeps its existing rules.
+pub(crate) fn continuous_sun_direction(
+    layer: &tore_formats::weather::Layer,
+    seconds: i32,
+) -> Option<[f32; 3]> {
+    let day = (layer.sunset_seconds - layer.sunrise_seconds) as f64;
+    if day <= 0.0 || day > 86400.0 {
+        return None;
+    }
+    let elapsed = (f64::from(seconds) - f64::from(layer.sunrise_seconds)).rem_euclid(86400.0);
+    let phase = if elapsed <= day {
+        std::f64::consts::PI * elapsed / day
+    } else {
+        std::f64::consts::PI * (1.0 + (elapsed - day) / (86400.0 - day))
+    };
+    let evening = phase > std::f64::consts::FRAC_PI_2 && phase < 3.0 * std::f64::consts::FRAC_PI_2;
+    let azimuth = f64::from(if evening {
+        layer.sun_azimuth_evening
+    } else {
+        layer.sun_azimuth_morning
+    }) * std::f64::consts::TAU
+        / 65536.0;
+    let horizontal = phase.cos().abs();
+    Some([
+        (horizontal * azimuth.sin()) as f32,
+        phase.sin() as f32,
+        (horizontal * azimuth.cos()) as f32,
+    ])
 }
 pub fn rotate(p: [f32; 3], angle: [i16; 2]) -> [f32; 3] {
     let [az, el] = angle.map(|v| v as f32 * std::f32::consts::TAU / 65536.);
@@ -271,6 +323,49 @@ fn quad(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sunset_glare_is_soft_then_drops_below_the_horizon() {
+        let mut world = crate::terrain::tests::world();
+        world.smooth_weather = true;
+        // Above all finite dense fixture bands, so this checks the solar envelope.
+        let at = |degrees: f32| {
+            glare_strength(
+                &world,
+                400000.,
+                [degrees.to_radians().cos(), degrees.to_radians().sin(), 0.],
+            )
+        };
+        assert!((at(15.) - 1.).abs() < 1e-5);
+        assert!((at(0.) - 0.35).abs() < 1e-5);
+        assert!((at(-0.25) - 0.175).abs() < 1e-5);
+        assert_eq!(at(-0.5), 0.);
+        assert_eq!(at(-5.), 0.);
+    }
+    #[test]
+    fn continuous_sun_crosses_both_horizons_without_time_or_flag_cutoff() {
+        let module =
+            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
+                .unwrap();
+        let mut layer = module.layers[0].clone();
+        layer.sunrise_seconds = 25200;
+        layer.sunset_seconds = 68400;
+        layer.flags = 0;
+        for (time, sign) in [(25140, -1.), (25260, 1.), (68340, 1.), (68460, -1.)] {
+            let d = continuous_sun_direction(&layer, time).unwrap();
+            assert!(d[1] * sign > 0.);
+            assert!((d[1].abs() - 0.25_f32.to_radians().sin()).abs() < 1e-6);
+            assert!((d.iter().map(|x| x * x).sum::<f32>() - 1.).abs() < 1e-6);
+        }
+        assert_eq!(
+            continuous_sun_direction(&layer, 0),
+            continuous_sun_direction(&layer, 86400)
+        );
+        for boundary in [25200, 68400] {
+            let a = continuous_sun_direction(&layer, boundary - 1).unwrap();
+            let b = continuous_sun_direction(&layer, boundary + 1).unwrap();
+            assert!(a.iter().zip(b).all(|(x, y)| (x - y).abs() < 0.001));
+        }
+    }
     #[test]
     fn lunar_geometry_is_independent_of_camera_bank_and_translation() {
         let mut world = crate::terrain::tests::world();
@@ -344,7 +439,7 @@ mod tests {
             let a = projected(0);
             let b = projected(2);
             assert!(((b[0] - a[0]) - (b[1] - a[1])).abs() < 0.001);
-            assert!(((b[1] - a[1]) / height / zoom - 0.08660254).abs() < 0.00001);
+            assert!(((b[1] - a[1]) / height / zoom - 0.04330127).abs() < 0.00001);
         }
         let edge = |a: usize, b: usize| -> Vec<f32> {
             (0..3)
@@ -353,7 +448,7 @@ mod tests {
         };
         let right = edge(1, 0);
         let up = edge(2, 1);
-        assert!((right.iter().map(|x| x * x).sum::<f32>() - 256.).abs() < 0.001);
+        assert!((right.iter().map(|x| x * x).sum::<f32>() - 64.).abs() < 0.001);
         assert!((right.iter().zip(up).map(|(a, b)| a * b).sum::<f32>()).abs() < 0.001);
     }
 }
