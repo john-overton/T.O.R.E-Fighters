@@ -4,8 +4,21 @@ use tore_formats::shape::{self, Shape};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = env::args().skip(1).collect();
-    if !(1..=2).contains(&args.len()) {
-        return Err("usage: native_strip RUNWAY.SH [STRIP.OT]".into());
+    if !(1..=3).contains(&args.len()) {
+        return Err("usage: native_strip RUNWAY.SH [STRIP.OT [ISOLATED-PLACEMENT]]".into());
+    }
+    if let Some(path) = args.get(2) {
+        let placement = tore_formats::strip::Placement::parse(&fs::read(path)?)?;
+        println!(
+            "{path}: fixed8={:?}, PA={:?}, raw_nationality={}, source_flags={:#x}, speed_fixed8={}, alias={}, native_name_bytes={:?}; placement inputs only",
+            placement.position_fixed8(),
+            placement.angles_pa(),
+            placement.nationality,
+            placement.flags,
+            placement.speed_fixed8(),
+            placement.alias,
+            placement.native_name()
+        );
     }
     if let Some(path) = args.get(1) {
         let definition = tore_formats::strip::Definition::parse(&fs::read(path)?)?;

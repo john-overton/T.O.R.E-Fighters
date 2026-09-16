@@ -1,10 +1,12 @@
 //! Bounded metadata for the reviewed static STRIP definition.
 //! See docs/formats/native-strip.md. No callbacks or world initialization run.
+mod placement;
 use crate::{
     Result,
     aircraft::{Brf, fields, schema},
     invalid,
 };
+pub use placement::Placement;
 
 #[derive(Debug)]
 pub struct Definition {

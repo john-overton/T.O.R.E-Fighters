@@ -1,6 +1,6 @@
 # Native environment and systems implementation plan
 
-**Living plan v9 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
+**Living plan v10 — 2026-09-15. Owner: John; implementer/reviewer assigned per work package.**
 **Status: implementing source/query foundation; live land contact remains gated.**
 John explicitly scheduled this pass after the airborne native flight connection.
 This is the governing dependency and delivery plan for that continuation. It can
@@ -115,6 +115,7 @@ baselines above remain inputs, not acceptance of the new contact producer.
 | NE-00.1g | Codex / complete | Service dispatch/tail, priority predicate and shared RNG state | Kind-0 post-callback delay selector and no-draw/word-boundary tests | No | Unavailable | Narrow service-ledger precursor; [evidence](baselines/native-strip-service.md); callback bodies and world producers remain open |
 | NE-00.1 | Codex / researching | Partial; see NE-00.1a/b/c/d/e/f/g | Partial | No | Unavailable | Finish instance initialization; extend transaction ledger |
 | NE-01.1a | Codex / complete | STRIP/166 header and explicit shape slot from E003/E004 | Bounded metadata reader, unknown-token retention and malformed-input tests | No | Unavailable | [Definition evidence](baselines/native-strip-definition.md); no full importer/world closure |
+| NE-01.1b | Codex / complete | Selected eight-field conversions and post-create exclusion predicates | Bounded isolated placement reader and malformed/width/name tests | No | Unavailable | [Record evidence](baselines/native-strip-record.md); full mission/world closure remains open |
 | NE-01.1 | Codex / researching | UKR.MM → STRIP.OT → RUNWAY.SH / _STRIPProc explicit edges | Five resources extracted across two filtered runs; bounded STRIP metadata reader | No | Unavailable | Complete callback/shape/placement closure, archive census and bounded schemas |
 | NE-03.1 | Codex / researching | Dual ground-query/cache mutation established | Existing diagnostic only; no new producer | No | Unavailable | Land geometry and staged cache/RNG producer, source-order/rollback tests, then both-aircraft connection |
 
@@ -132,7 +133,7 @@ Owner is Codex; update 2026-09-15. Required edges remain in the denominator.
 | --- | --- | --- | --- |
 | E001 | NE-00.1 → NE-03.1 / query order | GetGround 0x47af20 calls touching then height/slope; fixed8 feet / PA | Source established; implement two calls inside ground producer |
 | E002 | NE-00.1 → NE-03.1 and NE-10 / mutates state, consumes RNG | 0x42b800 expired-cache branch, +0x27/2b/2d/2f/33; conditional bound-4 draw | Expiry helper tested; stage cache/RNG and test late failure before live connection |
-| E003 | NE-01.1 → NE-02 land subset / places | UKR.MM → STRIP.OT; textual pos/angle/flags | Position/angle and final store sourced; selected setup branch recovered; full loader/default consumers/scheduling and placement remain open |
+| E003 | NE-01.1 → NE-02 land subset / places | UKR.MM → STRIP.OT; textual pos/angle/flags | Position/angle and final store sourced; selected setup branch recovered; isolated placement reader tested; full loader/default consumers/scheduling and world assembly remain open |
 | E004 | STRIP.OT → RUNWAY.SH / visual reference | Explicit shape pointer, FA_2.LIB | Partial projector finds _RUNWAY.PIC (extracted); full drawing/LOD/palette closure and visual inspection remain open |
 | E005 | STRIP.OT → _STRIPProc / callback | Explicit utilProc symbol, VA 0x4be640 | Selector/add and airport list reset/removal sourced; candidate operations tested; failed-add release is not complete rollback; event/speech effects open |
 | E006 | NE-03.1 → collision terrain / supplies contact | 0x42bdc0 → 0x42bfc0 → 0x42c1a0; 0x42dda0 fallback | Vertical cell arithmetic translated/tested; general traversal unconnected; E008 arithmetic accepted, world assembly remains open |
@@ -146,13 +147,13 @@ Owner is Codex; update 2026-09-15. Required edges remain in the denominator.
 | E014 | E003/E005 → failed creation / partial cleanup | 0x4a7806 stores then 0x491490 releases last allocation | Source established; no candidate/name cleanup in bounded path; host atomic construction required |
 | E015 | E003 → scheduling / registers service | Instance flags & 2, 0x4a7847 → 0x4626b0 | Selected placement requires it; dispatch/priority/tail sourced in NE-00.1g; callback bodies and global producers remain open, without autonomous behavior work |
 | E016 | E005 → airport template / supplies defaults | VA 0x50ccc8, 0x134-byte record | Inert template extracted/hash-gated; nonzero unknown defaults/callback fields remain unsupported |
-| E017 | E003 → map name / converts nationality | 0x4826c7 → 0x483d50; map prefix and byte remap | Diagnostic conversion tested; selected text 137 becomes 138; bounded mission assembly remains open |
+| E017 | E003 → map name / converts nationality | 0x4826c7 → 0x483d50; map prefix and byte remap | Diagnostic conversion tested; selected text 137 becomes 138; isolated raw-byte parsing tested; map/world assembly remains open |
 | E018 | E015 → shared scheduler RNG / conditional draws | 0x4630b0..0x4631a9, stopped bound-20 / moving bound-8 | Tail predicates sourced and kind-0 selector tested; shared seed/shuffle state established; callback draws/global interleaving remain open |
 | E019 | E015 → service callback/body closure | 0x462fbc..0x463036 calls 0x436b30, 0x4631f0 and request 7; STRIP resolves APCommentProc | Dispatch sourced; bodies/global producers remain unknown; no silent no-op or autonomous activation |
 
 Selected catalog status: UKR.MM/T2, STRIP.OT, RUNWAY.SH and _RUNWAY.PIC are discovered/extracted;
 existing T2, bounded STRIP metadata and F2 box decoding are available; full OT
-semantics, placement and native drawing closure remain unaccepted. No visual or collision acceptance and no runtime eligibility yet.
+semantics, world placement and native drawing closure remain unaccepted. Isolated selected placement inputs are decoded by NE-01.1b. No visual or collision acceptance and no runtime eligibility yet.
 No missing-resource absence is asserted from these two filtered extraction passes.
 [STRIP callback/metadata contract](formats/native-strip.md) records E003/E005/E010–E012;
 its source discovery does not close full world initialization.
@@ -169,6 +170,8 @@ flowchart TD
   A[NE-00 source and state ledger] --> B[NE-01 ground and sea asset catalog]
   B --> C[NE-02 placement materials collision resources]
   B --> O[NE-01.1a bounded STRIP definition]
+  O --> Q[NE-01.1b bounded isolated placement]
+  Q --> W
   O --> C
   C --> S[NE-00.1d STRIP metadata]
   S --> R[NE-00.1e candidate lifetime E013/E014]
@@ -572,6 +575,8 @@ record its blocked edges and continue independent, already scoped documentation/
 | D16 / 2026-09-15 | Implementation choice: NE-01.1a bounded definition metadata | Reuse reviewed OBJECT grammar, reject extra shape slots and preserve unknown tokens. Metadata success does not establish full resource/runtime closure |
 | D17 / 2026-09-15 | Implementation choice: NE-00.1g service ledger and kind-0 delay selector | Make shared RNG and request-7 dependency explicit; diagnostic samples do not authorize skipping callbacks or native lookup ordering |
 
+| D18 / 2026-09-15 | Implementation choice: NE-01.1b isolated selected placement | Strict host grammar rejects unknown fields; source conversion does not initialize a world or bypass the initial ground query. Selected optional post-create effects excluded by reviewed reset/kind predicates |
+
 Future decisions include date, requester/reviewer, evidence, accepted/proposed/
 superseded state, affected IDs, rejected alternatives if relevant and migration
 impact. User-directed deviations need the exact user request; ordinary agent
@@ -602,6 +607,7 @@ implementation choices must not be attributed to John.
 
 | Revision | Change | Validation state |
 | --- | --- | --- |
+| v10 / 2026-09-15 | NE-01.1b isolated placement, selected post-create exclusions and D18 | [Record validation](baselines/native-strip-record.md); parent world/query gates remain open |
 | v9 / 2026-09-15 | NE-00.1g service dispatch/delay, E019 and D17 | [Service validation](baselines/native-strip-service.md); full service/world closure remains gated |
 | v8 / 2026-09-15 | NE-01.1a bounded STRIP definition; D15 push authorization and D16 metadata scope | [Definition validation](baselines/native-strip-definition.md); full closure and live contact remain gated |
 | v7 / 2026-09-15 | NE-00.1f placement conversion; E017/E018 and D14 | [Placement validation](baselines/native-strip-placement.md); staged world/query dependencies remain open |
@@ -633,14 +639,15 @@ Its deliverable is a tested producer contract and narrow live contact connection
 not takeoff/landing acceptance from a flat height sample. This resolves the current
 hard runtime boundary and supplies the foundation for NE-05 and later deck work.
 
-**Current next action:** build on the tested NE-01.1a STRIP metadata reader to
-finish E003/E005 full type-load/placement closure, template field
-consumers/ownership and E015/E018 service predicates/RNG; then bounded complete
-placement assembly using E017 conversion and post-create alias/store ordering. Ordinary final store, partial failed-add cleanup and
-candidate removal are now sourced; E014 still requires atomic host construction.
-E004 full drawing/LOD/palette closure remains open despite the extracted named
-texture. E010 metadata is tested; E012 requires initial ground queries before
-registration. E008 angle arithmetic is tested.
-E006 vertical cell geometry and E007 offset readers are tested diagnostic inputs. Implement E001/E002 staged queries
-before enabling NE-03.1 for either aircraft. No external blocker or user decision
-is currently required; carrier remains behind NE-06 prerequisites.
+**Current next action:** build on the tested definition and isolated placement
+readers to finish E003/E005 type-load/world assembly, E016 template consumers
+and ownership, and E019 service bodies/global producers with E015/E018 shared
+scheduling/RNG state. Selected optional post-create effects are now excluded by
+reviewed reset/controller/kind predicates; alias and final store still belong
+inside atomic construction. E014 requires host rollback, not an assumption of
+native complete cleanup. Independently finish E004 drawing/LOD/palette closure.
+E010 metadata and E006/E007/E008 arithmetic are tested; E012 requires initial
+ground sampling before registration. Implement E001/E002 staged queries only
+after required ownership closure, then enable the reviewed branch for both
+aircraft. No external blocker or user decision is currently required; carrier
+remains behind NE-06 prerequisites.

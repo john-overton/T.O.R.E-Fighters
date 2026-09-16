@@ -236,8 +236,9 @@ effects; those downstream systems remain outside this translation.
 
 The mission scratch record begins at stack +0xb8 in MISSIONTextProc. Field
 conversion below is **native source established**, with only nationality
-conversion translated/tested. Full token/placement loading remains unimplemented.
-All inputs still need bounded parsing before use.
+conversion initially translated/tested. NE-01.1b below now parses the isolated
+selected record and translates its remaining width/scale conversions. Full mission
+loading and world construction remain unimplemented.
 
 | Text field | Source path / representation | Remaining boundary |
 | --- | --- | --- |
@@ -265,9 +266,15 @@ for later scheduling predicates. No alliance or autonomous behavior is inferred.
 Mission post-creation is not finished when T_AddObj returns. The loader reloads
 the object, applies separately parsed fields (including alias), then stores again
 at **0x482ee5**. For static kind 0 it bypasses the kind-2/4 loadout branch.
-Conditional controller/multiplayer and other optional post-create effects are
-unaccepted; selected construction must establish their predicates rather than
-executing them implicitly.
+For the selected eight-field record, the reviewed `obj` reset at 0x48248f
+sets optional words stack +0x1c/+0x20 to 0xffff, alias +0x18 to zero and the
+name first byte to zero. The cleared controller bit 0x80 skips 0x4918d0 at
+0x482dfe independently of global 0x4eb604. The two 0xffff words skip
+0x45e490/0x45f1c0. After alias storage, kind 0 bypasses the kind-4 fuel and
+kind-2/4 loadout branches and reaches the final store at 0x482ee5. Thus these
+optional effects are excluded for the selected record by source predicates.
+Their enabled branches remain unsupported; this does not close earlier creation
+callbacks, scheduling or query ownership.
 
 ## Scheduling ownership discovered from creation
 
@@ -385,3 +392,34 @@ Next: finish selected post-create optional-field predicates and service-body
 closure, trace required airport template consumers, and independently close E004.
 Stage E001/E002 only after the required ownership paths are accepted or explicitly
 excluded with evidence. Carrier and unsupported callback branches remain gated.
+
+## Bounded isolated placement — NE-01.1b
+
+`strip::Placement::parse` reads one isolated `obj` through `.` record. It requires
+exactly one each of `type`, `pos`, `angle`, `nationality`, `flags`, `speed`,
+`name` and `alias`; type must equal STRIP.OT ignoring ASCII case. Field order
+may vary. Unknown, duplicate, missing, nested or trailing records fail. Special
+type substitution, optional post-create fields and general mission parsing are
+unsupported. Requiring all eight fields is a host restriction, not native syntax.
+
+The host grammar accepts LF/CRLF, space/tab indentation and blank lines, signed
+decimal i32 or `$` followed by one to eight hex digits interpreted as dword bits.
+It rejects comments, plus signs, expressions, other numeric encodings and NUL.
+The 4096-byte whole-record cap bounds both scans and allocations. These are
+explicit safety/subset rules, not a reconstruction of the full native tokenizer.
+
+Source integers and the exact input bytes remain available. Position/speed
+conversion wraps a dword shift by eight; angle conversion multiplies the low
+word by 182 with word wrapping. Nationality narrows to the raw byte only; the
+separate map-dependent `mission_nationality` operation is still required. Flags
+remain source bits before T_AddObj's mask. Alias narrows to a word for the later
+post-create write, never an object ID. Names require byte-1 delimiters and retain
+all payload bytes, including non-UTF-8 and suffixes beyond 40 bytes. Control bytes
+inside names are unsupported. `native_name()` exposes at most 40 bytes before
+the native trailing NUL. It does not split or reinterpret a source character set.
+
+`native_strip RUNWAY.SH STRIP.OT ISOLATED-PLACEMENT` inspects these inputs.
+Selecting a record from a larger MM is a research step, not a full mission
+resolver. Zero Y remains an input to the initial native ground query; no world,
+airport, candidate, scheduler or query state is constructed by this reader.
+[Validation](../baselines/native-strip-record.md).

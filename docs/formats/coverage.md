@@ -21,7 +21,7 @@ Status is for this **Rust rebuild**, not the reference project's decoders. The a
 | JT / SEE / ECM | Partial | Named schemas, dependency closure and 135 JT definitions extracted; combat/sensor execution not complete |
 | OT | Partial | Bounded STRIP/166 metadata and explicit main shape reference; other classes, placement, callbacks and runtime absent |
 | NT | Not started | Directory inventory only |
-| M / MM | Partial | All 75 selected MM layouts plus named mission environment/tmap fields decoded; missions and object execution absent |
+| M / MM | Partial | All 75 selected MM layouts plus named mission environment/tmap fields decoded; isolated eight-field STRIP placement inputs decoded separately; missions and object execution absent |
 | MT / campaigns / saves / Pro Mission Creator | Not started | Raw Ukraine resources preserved; runtime remains absent |
 | CB8 / VDO / FBC / INF | Not started | No video/reference playback |
 

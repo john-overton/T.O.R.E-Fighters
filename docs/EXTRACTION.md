@@ -355,3 +355,9 @@ The shared formats reader validates the reviewed static STRIP/166 metadata;
 the diagnostic checks the shape basename against its explicit reference. It does
 not extend app/CLI extraction profiles, resolve the full drawing program or place
 an airport. [Definition-reader scope](baselines/native-strip-definition.md).
+
+The optional third argument `ISOLATED-PLACEMENT` reads a single selected STRIP
+`obj`/`.` record and prints native-width placement inputs. Preserve extraction
+provenance when isolating a record locally; do not pass a whole MM file. Unknown
+fields fail, and zero Y is not treated as a placed runway. No extraction profile
+or runtime import changes. [Record-reader evidence](baselines/native-strip-record.md).

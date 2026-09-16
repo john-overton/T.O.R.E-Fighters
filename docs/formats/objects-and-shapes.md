@@ -26,7 +26,9 @@ investigating or eventually editing it:
 | Wing vapor attachment | SH CE record plus streamer consumers | Emission conditions and trail lifetime from coordinates alone |
 
 Our M/MM reader currently reads environment/tmap fields and skips indented
-object fields. Importing a theater or finding its object names does not place
+object fields. The separate bounded STRIP reader can inspect one isolated
+eight-field placement record ([contract](native-strip.md#bounded-isolated-placement--ne-011b));
+it does not extend the mission reader. Importing a theater or finding its object names does not place
 those objects in the world. An eventual object integration must resolve the
 type, its visual dependencies, placement and mutable simulation state separately.
 This is a proposed development workflow, not a recovered native object manager.

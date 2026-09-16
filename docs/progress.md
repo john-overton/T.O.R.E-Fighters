@@ -1154,7 +1154,19 @@ only the diagnostic precursor; the parent first slice remains researching.
   signed speed and unsigned word/clock boundaries.
 - [ ] E019 callback bodies and global/instance producers remain required. The
   diagnostic selector consumes no RNG and does not run a scheduler or callbacks.
-- [ ] Finish selected post-create predicates, template ownership and E004, then
+- [x] Selected eight-field post-create exclusions established in NE-01.1b below.
+- [ ] Finish template ownership and E004, then
   staged world/query state and both-aircraft contact. No AI or carrier activation.
 
 [Source contract](formats/native-strip.md), [validation](baselines/native-strip-service.md).
+
+## Isolated STRIP placement inputs — 2026-09-15
+
+- [x] NE-01.1b: bounded eight-field record reader, native-width position/angle/
+  speed/alias conversions, raw nationality and byte-preserving name truncation.
+- [x] Source reset/controller/kind predicates exclude selected optional
+  post-create effects; original isolated UKR record inspected.
+- [ ] Full mission/resource/template/service ownership and staged queries remain
+  required before world placement or either aircraft's live contact connection.
+
+[Contract](formats/native-strip.md), [validation](baselines/native-strip-record.md).
