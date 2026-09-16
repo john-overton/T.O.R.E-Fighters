@@ -4,6 +4,7 @@ use tore_formats::flight_model::normal_control::LoadedAxis;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Profile {
     pub roll: LoadedAxis,
+    pub hybrid_roll: Option<LoadedAxis>,
     pub auxiliary: [LoadedAxis; 3],
 }
 impl Profile {
@@ -31,6 +32,7 @@ impl Profile {
         };
         Ok(Self {
             roll: axis("_brv.x")?,
+            hybrid_roll: None,
             auxiliary: [axis("puffRot.x")?, axis("puffRot.y")?, axis("puffRot.z")?],
         })
     }

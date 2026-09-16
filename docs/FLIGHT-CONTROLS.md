@@ -310,3 +310,8 @@ poor airflow. There is no fixed recovery ramp. Early intervention can stop a
 spin while the aircraft remains stalled. Recovery uses the 25-degree airflow
 cone and normal-rudder-rate threshold; sufficiently fast, aligned flight clears
 the warning. Idle throttle is supported. TAS includes sideways/downward motion.
+
+Spin entry torque begins gently at the clean-stall boundary, increasing with
+speed deficit and back-stick. No fixed rudder percentage suddenly enables full
+spin torque in hybrid flight. A-4 researched flight also uses a faster fitted
+roll response; see [A-4 roll tuning](spec/additional-aircraft.md#a-4-roll-tuning).

@@ -45,8 +45,9 @@ Primary roll now follows each PT's signed limits and acceleration/deceleration,
 with speed authority rising linearly to full authority at twice the clean stall
 speed. F-14D: 225 degrees/s, acceleration 286 degrees/s², release 571 degrees/s².
 A-4E: 180, 214, 427 respectively. X-31: 345, 498, 996 respectively.
-These **spec-derived** values apply to the three new planes in legacy and hybrid
-flight. Existing Hornet/Rafale handling and adapter selection are unchanged.
+These **spec-derived** values apply in legacy flight and to F-14/X-31 hybrid
+flight. A-4 hybrid uses the [requested roll override](#a-4-roll-tuning) below.
+Existing Hornet/Rafale handling and adapter selection are unchanged.
 The host uses a continuous rate limiter: full-stick acceleration uses the PT
 rate, partial stick scales it with a quarter-rate floor, reversal adds half the
 release rate. This continuous approximation omits source integer quantization.
@@ -136,3 +137,23 @@ real-aircraft expectations do not establish these behaviors. Shape-specific
 fitted presentation choices must be recorded before use. Full damage shapes,
 LOD, shadows, original instrument composition and retail comparisons remain
 outside the current established evidence.
+
+## A-4 roll tuning
+
+John requested 90% of a researched real-world roll rate on 2026-09-16. The
+[Marine Flight School Primer](https://skyhawk.org/article-readyroom/marine-primer),
+written by Marine flight-school graduates and hosted by the Skyhawk Association,
+reports 720 degrees/s for a clean A-4 in its TA-4J training section. It supplies
+no test speed, weight, load factor or A-4E-specific test results. It supports a
+reported Skyhawk-family figure, not a measured A-4E envelope or FA behavior.
+
+Use 648 degrees/s (90% of 720) as an opinionated hybrid A-4E peak target. Agent
+fitted acceleration is 1296 degrees/s², release 2592 degrees/s², reaching peak
+in 0.5 seconds and releasing from peak in 0.25 seconds at full authority.
+Retain continuous stick scaling and the existing fitted speed authority
+clamp(speed/(2*clean-stall-speed),0,1), plus stall/spin control attenuation.
+At clean stall speed this permits half the peak before departure attenuation;
+it does not assert full real-world roll capability at arbitrarily low speed.
+Retain FA's 180/214/427 rate/acceleration/release values in legacy mode and leave
+the restricted research adapter unchanged. No other aircraft receives this
+roll override. Real A-4E speed/load-dependent roll curves remain unknown.

@@ -12,10 +12,34 @@
 
 John requested input-driven spin dynamics, proportional elevator response and
 recovery by threshold rather than elapsed time on 2026-09-16. Apply this fitted
-agent-authored model only to the hybrid adapter. Source entry predicates, PT
-maximum spin yaw rates and warning timers remain source-derived. The restricted
+agent-authored model only to the hybrid adapter. PT maximum spin yaw rates,
+spin-disable flags and warning timers remain source-derived. Hybrid entry is
+fitted for a continuous onset, as requested by John after the checkpoint. The restricted
 research adapter is unchanged. No real-aircraft stability derivatives or retail
 spin trajectories are asserted.
+
+## Soft entry
+
+While airborne and below clean stall speed, positive back-stick and rudder into
+the source-selected departure direction can begin incipient rotation. Preserve
+the source warning/stalled eligibility and direction selection, including the
+X-31 spin-disable flag. Replace the hybrid's old 46.9%/93.8% rudder switches with
+continuous inputs. The restricted research adapter retains those source gates.
+
+For torque that drives the spin, multiply by a fitted departure factor:
+smoothstep((1-speed/clean-stall)/0.25) * smoothstep(back-stick/0.5).
+Each smoothstep clamps its argument to 0..1 and returns 3t²-2t³. Thus torque
+starts at zero at stall speed and at neutral pitch, reaching its full scale
+25% below stall with at least 50% back-stick. Rudder remains linear. For
+spinEntry=1 (Rafale), additionally multiply driving torque by 0.5 as an agent
+fit for reduced susceptibility. spinEntry=2 still disables entry.
+
+At zero initial rotation and full back-stick/rudder, the A-4/F-14 driving
+acceleration is about 25 degrees/s² at 95% of stall speed and 77 degrees/s² at
+90%, versus about 244 and 219 before this adjustment. Deeper departure can
+still build stronger rotation. No elapsed-time gate is added. Opposite-rudder
+braking keeps its previous strength; the soft-onset factor only affects torque
+that drives the current spin. These are fitted values, not aircraft measurements.
 
 ## Rotation and controls
 
@@ -34,6 +58,7 @@ it zero. All coefficients in this paragraph are fitted agent decisions.
 
 During active spin, angular acceleration along the spin direction is
 1.5*maximum-spin-rate*rudder-in-spin-direction*min(q,1)*effectiveness,
+multiplied by the soft-entry departure factor when rudder drives the spin,
 plus 0.2*q*(1-stability)*current-spin-rate for fitted autorotation, minus
 q*(0.35+2*stability)*current-spin-rate for damping. Integrate at 120 Hz and
 clamp between zero and maximum rate. Stability is the product of smoothstep

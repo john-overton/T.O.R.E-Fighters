@@ -420,7 +420,11 @@ impl State {
             self.roll_rate = approach(
                 self.roll_rate,
                 input.roll,
-                profile.roll,
+                if self.research.is_some() {
+                    profile.hybrid_roll.unwrap_or(profile.roll)
+                } else {
+                    profile.roll
+                },
                 (self.speed / (2. * stall.max(1.))).clamp(0., 1.) * control_scale[0],
                 DT,
             );
@@ -936,6 +940,53 @@ pub(crate) mod integration_tests {
         s.crashed = true;
         assert_eq!(s.stall_alert(0.), None);
     }
+    #[test]
+    fn a4_hybrid_roll_is_fast_proportional_and_preserves_legacy_cap() {
+        use tore_formats::aircraft::{AircraftId, Token};
+        let mut a = profile();
+        a.id = AircraftId::A4E;
+        a.name = "A-4E".into();
+        a.shape = "A4.SH".into();
+        for (suffix, value) in [("min", -180), ("max", 180), ("acc", 214), ("dacc", 427)] {
+            a.fields.insert(
+                format!("_brv.x.{suffix}"),
+                Token {
+                    kind: "word".into(),
+                    value: value.to_string(),
+                    scaled: false,
+                },
+            );
+        }
+        for hybrid in [false, true] {
+            for command in [-1_f64, -0.25, 0.25, 1.] {
+                let mut s = State::new(&a, [0., 15000., 0.]).unwrap();
+                if hybrid {
+                    s.enable_research(1).unwrap();
+                }
+                s.speed = 800.;
+                s.velocity = Basis::new(s.yaw, s.pitch, s.bank)
+                    .forward
+                    .map(|v| v * s.speed);
+                let mut replay = s.clone();
+                let input = PilotInput {
+                    roll: command,
+                    ..Default::default()
+                };
+                for _ in 0..120 {
+                    s.step(&input, |_, _| 0.);
+                    replay.step(&input, |_, _| 0.);
+                }
+                assert_eq!(s, replay);
+                let peak = if hybrid { 648. } else { 180. };
+                assert!((s.roll_rate.to_degrees() - peak * command).abs() < 1e-8);
+                for _ in 0..60 {
+                    s.step(&PilotInput::default(), |_, _| 0.);
+                }
+                assert_eq!(s.roll_rate, 0.);
+            }
+        }
+    }
+
     #[test]
     fn forward_stick_moves_the_nose_immediately_and_proportionally_in_spin() {
         use tore_formats::{aircraft::Token, flight_model::departure::DepartureMode};

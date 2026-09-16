@@ -41,8 +41,19 @@ impl A4EFlightModel {
             afterburner_throttle: 0.95,
             ground_clearance_ft: 26. / 3.,
         };
+        let mut configuration = Configuration::from_aircraft(a, tuning, equipment)?;
+        if let Some(controls) = &mut configuration.controls {
+            // User-requested 90% Skyhawk-family peak; acceleration/release are fitted.
+            // See docs/spec/additional-aircraft.md for evidence and variant limits.
+            controls.hybrid_roll = Some(tore_formats::flight_model::normal_control::LoadedAxis {
+                minimum: -648,
+                maximum: 648,
+                acceleration: 1296,
+                deceleration: 2592,
+            });
+        }
         Ok(Self {
-            configuration: Arc::new(Configuration::from_aircraft(a, tuning, equipment)?),
+            configuration: Arc::new(configuration),
         })
     }
 }

@@ -255,7 +255,10 @@ This symmetric continuous loss is authored, not the native display-slip drag law
 Roll retains its single response filter and existing source/hybrid versus fitted/
 legacy cap. No new native rudder-to-roll law is asserted.
 
-Hybrid spin entry retains the source predicates and direction selection. Spin
+Hybrid spin entry retains source warning eligibility, direction selection and
+the X-31 disable flag, with continuous fitted torque onset replacing the old
+rudder/pitch switches. Speed deficit and back-stick smoothly increase driving
+torque; opposite-rudder braking remains unchanged. Spin
 motion and recovery use [input-driven angular dynamics](spec/spin-transitions.md):
 continuous rudder torque, rotation/airflow-dependent control response, direct
 proportional elevator pitch and aerodynamic damping. There is no timed spin
@@ -266,8 +269,7 @@ airflow inside the 25-degree cone and residual yaw within normal rudder authorit
 Small remaining angular velocity is retained and damped after clearance.
 
 Analog input remains continuous through torque and elevator response, including
-small deflections. Only the preserved source entry predicates use their integer
-input domain. Source recovery predicates remain unchanged in the restricted
+small deflections. Source direction selection still uses its integer input domain. Source recovery predicates remain unchanged in the restricted
 research adapter. Hybrid normal stall classification remains a fitted
 clean-envelope speed gate; severity and source warning timing are unchanged.
 
@@ -319,3 +321,7 @@ original implementation details, not parity targets. Legacy and hybrid retain
 their existing behavior. [Live commands and validation](baselines/native-live-flight.md).
 Retail comparison remains an unavailable evidence item, not an implementation
 prerequisite. Audio/rumble follows the scheduled native work.
+
+A-4 hybrid roll now uses the [90% reported Skyhawk peak target](spec/additional-aircraft.md#a-4-roll-tuning).
+The evidence, variant limits, fitted acceleration and low-speed scaling are
+specified there. Legacy A-4 retains the FA control values.

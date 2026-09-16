@@ -24,3 +24,13 @@ owns source flight values and fitted response/animation choices. Dependency
 edges, unresolved executable symbols and archive hashes are retained locally in
 `.local/aircraft-fa/extraction-report.json`. These hashes establish resource
 identity; they do not establish retail gameplay parity.
+
+## Requested roll-response validation
+
+On 2026-09-16 John requested roughly 90% of a researched roll rate. The
+[evidence and fitted rule](../spec/additional-aircraft.md#a-4-roll-tuning) record
+why the hybrid peak is 648 degrees/s and why this is not an A-4E test-data claim.
+Synthetic aircraft integration tests verify both roll directions, quarter/full
+stick scaling, deterministic replay and neutral release. The same test verifies
+legacy remains at 180 degrees/s. The 65-scenario aircraft flight suite passes.
+Physical controller handling has not been playtested by the agent.
