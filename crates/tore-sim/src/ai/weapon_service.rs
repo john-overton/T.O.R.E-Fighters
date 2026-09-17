@@ -26,7 +26,7 @@
 //! - The relative-altitude and signature checks sit under B45's range
 //!   checking flag together with the range limits.
 
-use super::{AiError, DecisionRandom, QUARTER_SECOND_TICKS, Result};
+use super::{AiError, DecisionRandom, QUARTER_SECOND_TICKS, Result, ScalarSpeed};
 use tore_formats::aircraft::AircraftId;
 
 /// Opaque actor identity supplied by the host.
@@ -818,6 +818,408 @@ fn angles_inside(profile: &SeekerEnvelope, geometry: &SeekerGeometry) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// B45: two envelopes per store
+// ---------------------------------------------------------------------------
+
+/// B45: which of a store's two envelopes a check is made against. Zone 0 is
+/// what the seeker can acquire (sensor and target search); zone 1 is what the
+/// store may be employed against (lock, launch, store choice and in-flight
+/// support). Callers state the role so the two are never mixed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EnvelopeRole {
+    /// Zone 0: acquisition.
+    Acquisition,
+    /// Zone 1: employment.
+    Employment,
+}
+
+/// B45: the two envelopes carried by every store, each with its own range,
+/// relative altitude and angular limits. The values come from the imported
+/// weapon records, not from this module.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StoreEnvelopes {
+    pub acquisition: SeekerEnvelope,
+    pub employment: SeekerEnvelope,
+}
+impl StoreEnvelopes {
+    pub fn envelope(&self, role: EnvelopeRole) -> &SeekerEnvelope {
+        match role {
+            EnvelopeRole::Acquisition => &self.acquisition,
+            EnvelopeRole::Employment => &self.employment,
+        }
+    }
+    /// [`envelope_check`] against the envelope named by `role`.
+    pub fn check(&self, role: EnvelopeRole, geometry: &SeekerGeometry) -> EnvelopeResult {
+        envelope_check(self.envelope(role), geometry)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// B45: signature and detection range
+// ---------------------------------------------------------------------------
+//
+// Only the stated pieces are implemented. The starting stored signatures, the
+// radar attitude/configuration model, the hot-engine heat window, the weather
+// scale and the "lit target" state are host/sensor inputs.
+
+/// B45: a signature above this percentage does not extend reach beyond the
+/// profile maximum.
+pub const SIGNATURE_FULL_PERCENT: u32 = 100;
+/// B45: rear cone elevation half-angle, degrees off the target's tail.
+pub const REAR_CONE_ELEVATION_DEG: f64 = 40.0;
+/// B45: rear cone azimuth half-angle, degrees off the target's tail.
+pub const REAR_CONE_AZIMUTH_DEG: f64 = 140.0;
+/// B45: an observer pointing within this many degrees of vertical bypasses
+/// the aspect penalty.
+pub const VERTICAL_POINTING_TOLERANCE_DEG: f64 = 30.0;
+/// B45: an infrared sensor sees at least double the stored signature while
+/// the target is hot, and never below this percentage.
+pub const INFRARED_HOT_FLOOR_PERCENT: u32 = 200;
+/// B45: first radar configuration bonus, points.
+pub const RADAR_BONUS_A_PERCENT: u32 = 33;
+/// B45: second radar configuration bonus, points.
+pub const RADAR_BONUS_B_PERCENT: u32 = 25;
+/// B45: each radar bonus is floored at this percentage after adding.
+pub const RADAR_BONUS_FLOOR_PERCENT: u32 = 100;
+/// B45: a lit target's visual and laser signature divides by 1 at or inside
+/// this range at night.
+pub const NIGHT_DIVISOR_START_FT: f64 = 1500.0;
+/// B45: the night divisor reaches its full value at this range.
+pub const NIGHT_DIVISOR_END_FT: f64 = 4500.0;
+/// B45: the full night divisor.
+pub const NIGHT_DIVISOR_MAX: f64 = 5.0;
+/// B45: the naked eye is lifted to at least this percentage inside
+/// [`VISUAL_FLOOR_FULL_FT`].
+pub const VISUAL_FLOOR_PERCENT: u32 = 75;
+/// B45: range inside which the visual floor applies in full.
+pub const VISUAL_FLOOR_FULL_FT: f64 = 200.0;
+/// B45: range at which the visual floor has blended back to the weather value.
+pub const VISUAL_FLOOR_BLEND_END_FT: f64 = 1500.0;
+/// B45: look-down rejection reaches full strength at this down angle.
+pub const LOOK_DOWN_FULL_ANGLE_DEG: f64 = 45.0;
+/// B45: look-down rejection vanishes at this height above ground.
+pub const LOOK_DOWN_VANISH_AGL_FT: f64 = 5000.0;
+
+/// B45: detection range is the profile maximum times the final signature
+/// percentage over 100; a signature above 100 does not extend reach. A
+/// `None` maximum is the unbounded sentinel and stays unbounded.
+pub fn detection_range_feet(
+    profile_max_range: Option<f64>,
+    final_signature_percent: u32,
+) -> Option<f64> {
+    let scale = f64::from(final_signature_percent.min(SIGNATURE_FULL_PERCENT))
+        / f64::from(SIGNATURE_FULL_PERCENT);
+    profile_max_range.map(|max| max * scale)
+}
+
+/// B45: the observer is inside the target's rear cone when its elevation off
+/// the tail is within 40 degrees and its azimuth off the tail within 140
+/// degrees, both inclusive.
+pub fn in_rear_cone(elevation_off_tail_deg: f64, azimuth_off_tail_deg: f64) -> bool {
+    elevation_off_tail_deg.abs() <= REAR_CONE_ELEVATION_DEG
+        && azimuth_off_tail_deg.abs() <= REAR_CONE_AZIMUTH_DEG
+}
+
+/// B45: the observer is pointing within 30 degrees of straight up or straight
+/// down (pitch magnitude at least 60 degrees, inclusive).
+pub fn pointing_vertical(pitch_deg: f64) -> bool {
+    90.0 - pitch_deg.abs() <= VERTICAL_POINTING_TOLERANCE_DEG
+}
+
+/// B45: the seeker's aspect penalty is subtracted unless the observer is
+/// inside the rear cone or pointing near vertical.
+pub fn aspect_penalty_applies(
+    observer_in_rear_cone: bool,
+    observer_pointing_vertical: bool,
+) -> bool {
+    !observer_in_rear_cone && !observer_pointing_vertical
+}
+
+/// B45: subtract the seeker's aspect penalty (saturating at zero) when it
+/// applies. A 100 percent penalty (the AA-2) cannot see a target from the
+/// front; the Sidewinder family carries 30 or 20 and radar missiles 0.
+pub fn apply_aspect_penalty(signature_percent: u32, penalty_percent: u32, applies: bool) -> u32 {
+    if applies {
+        signature_percent.saturating_sub(penalty_percent)
+    } else {
+        signature_percent
+    }
+}
+
+/// B45: an infrared sensor sees at least double, never below 200 percent,
+/// while the target is in the hot-engine state or its recent heat window.
+/// Whether the target is hot is a host input.
+pub fn infrared_boost(signature_percent: u32, hot_engine: bool) -> u32 {
+    if hot_engine {
+        signature_percent
+            .saturating_mul(2)
+            .max(INFRARED_HOT_FLOOR_PERCENT)
+    } else {
+        signature_percent
+    }
+}
+
+/// B45: two radar configuration bonuses of 33 and 25 points, each floored at
+/// 100 after adding. The bonus conditions are host inputs; the attitude and
+/// configuration model that produces the starting percentage is not stated.
+pub fn radar_configuration_bonus(signature_percent: u32, bonus_a: bool, bonus_b: bool) -> u32 {
+    let mut signature = signature_percent;
+    if bonus_a {
+        signature = signature
+            .saturating_add(RADAR_BONUS_A_PERCENT)
+            .max(RADAR_BONUS_FLOOR_PERCENT);
+    }
+    if bonus_b {
+        signature = signature
+            .saturating_add(RADAR_BONUS_B_PERCENT)
+            .max(RADAR_BONUS_FLOOR_PERCENT);
+    }
+    signature
+}
+
+/// B45: a passive emitter seeker ignores stored signatures: 100 percent while
+/// the target radiates, otherwise 0.
+pub fn emitter_signature(target_emitting: bool) -> u32 {
+    if target_emitting {
+        SIGNATURE_FULL_PERCENT
+    } else {
+        0
+    }
+}
+
+/// B45: at night a lit target's visual and laser signature divides by up to
+/// 5 between 1500 and 4500 ft: 1 at or inside 1500 ft, rising linearly to 5
+/// at 4500 ft, 5 beyond. The caller applies it only at night to lit targets.
+pub fn night_visual_divisor(range_feet: f64) -> f64 {
+    let span = NIGHT_DIVISOR_END_FT - NIGHT_DIVISOR_START_FT;
+    let fraction = ((range_feet - NIGHT_DIVISOR_START_FT) / span).clamp(0.0, 1.0);
+    1.0 + (NIGHT_DIVISOR_MAX - 1.0) * fraction
+}
+
+/// B45: the naked eye is lifted to at least 75 percent within 200 ft and
+/// blended back to the weather-scaled value by 1500 ft. Between those ranges
+/// the floor falls linearly from 75 to the weather value; the result is never
+/// below the weather value itself.
+pub fn visual_close_range_floor(range_feet: f64, weather_percent: u32) -> u32 {
+    let weather = f64::from(weather_percent);
+    let span = VISUAL_FLOOR_BLEND_END_FT - VISUAL_FLOOR_FULL_FT;
+    let fraction = ((range_feet - VISUAL_FLOOR_FULL_FT) / span).clamp(0.0, 1.0);
+    let floor =
+        f64::from(VISUAL_FLOOR_PERCENT) + (weather - f64::from(VISUAL_FLOOR_PERCENT)) * fraction;
+    floor.max(weather).round() as u32
+}
+
+/// B45: look-down rejection strength in `0..=1`. It reaches full strength at
+/// 45 degrees down and on the deck, and vanishes at 5000 ft above ground:
+/// the larger of the angle term (down angle over 45, capped at 1) and the
+/// height term (1 minus height over 5000, floored at 0). An upward angle
+/// contributes nothing.
+pub fn look_down_rejection(down_angle_deg: f64, target_agl_feet: f64) -> f64 {
+    let angle_term = (down_angle_deg / LOOK_DOWN_FULL_ANGLE_DEG).clamp(0.0, 1.0);
+    let height_term = (1.0 - target_agl_feet / LOOK_DOWN_VANISH_AGL_FT).clamp(0.0, 1.0);
+    angle_term.max(height_term)
+}
+
+// ---------------------------------------------------------------------------
+// B45: target-class eligibility and store selection
+// ---------------------------------------------------------------------------
+
+/// B45: the one class bit a target falls under for store eligibility.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TargetClass {
+    Air,
+    Surface,
+}
+
+/// B45: which target classes a store may be used against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct StoreCapability {
+    pub air: bool,
+    pub surface: bool,
+}
+impl StoreCapability {
+    /// Air-to-air missiles: aircraft only.
+    pub const AIR_TO_AIR_MISSILE: Self = Self {
+        air: true,
+        surface: false,
+    };
+    /// Bombs, rockets and ground missiles: surface targets only.
+    pub const SURFACE_STORE: Self = Self {
+        air: false,
+        surface: true,
+    };
+    /// Guns: both.
+    pub const GUN: Self = Self {
+        air: true,
+        surface: true,
+    };
+}
+
+/// B45: a store is eligible against a target when its class bit is set.
+pub fn store_eligible(capability: StoreCapability, class: TargetClass) -> bool {
+    match class {
+        TargetClass::Air => capability.air,
+        TargetClass::Surface => capability.surface,
+    }
+}
+
+/// B45: guided angular term base, points minus pointing error in degrees.
+pub const GUIDED_ANGLE_BASE: f64 = 100.0;
+/// B45: guns and unguided stores score twice (50 minus pointing error).
+pub const UNGUIDED_ANGLE_BASE: f64 = 50.0;
+/// B45: multiplier on the unguided angular term.
+pub const UNGUIDED_ANGLE_SCALE: f64 = 2.0;
+/// B45: bonus for a guided store beyond [`GUIDED_RANGE_BONUS_BEYOND_FT`].
+pub const GUIDED_RANGE_BONUS: f64 = 50.0;
+/// B45: range a guided store must exceed (strictly) to earn the bonus.
+pub const GUIDED_RANGE_BONUS_BEYOND_FT: f64 = 1500.0;
+/// B45: damage against the target's category is divided by this.
+pub const DAMAGE_SCORE_DIVISOR: f64 = 25.0;
+/// B45 store choice considers at most this many usable stations. More is
+/// invalid input, not a silent truncation.
+pub const STORE_CANDIDATE_LIMIT: usize = 10;
+
+/// B45: one usable station against the current target, as resolved by the
+/// host. Every field is an input; the score combines them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StoreCandidate {
+    pub station: StationId,
+    pub guided: bool,
+    /// Pointing error in degrees when the employment envelope passed, `None`
+    /// when it did not (the angular term is then zero).
+    pub employment_fit: Option<f64>,
+    /// The store's hit chance against the target. B45 records the producing
+    /// routine as opaque and not yet stated, so it is an input here.
+    pub hit_chance: f64,
+    pub range_feet: f64,
+    /// The store's damage against the target's category.
+    pub damage_vs_category: f64,
+}
+
+/// B45 store score: the employment-envelope angular term (100 minus pointing
+/// error for guided stores, twice 50 minus error for guns and unguided
+/// stores, zero when the envelope failed), plus hit chance, plus 50 for a
+/// guided store beyond 1500 ft, plus damage against the target's category
+/// over 25.
+pub fn store_score(candidate: &StoreCandidate) -> f64 {
+    let angle = match candidate.employment_fit {
+        Some(error_deg) if candidate.guided => GUIDED_ANGLE_BASE - error_deg,
+        Some(error_deg) => UNGUIDED_ANGLE_SCALE * (UNGUIDED_ANGLE_BASE - error_deg),
+        None => 0.0,
+    };
+    let range_bonus = if candidate.guided && candidate.range_feet > GUIDED_RANGE_BONUS_BEYOND_FT {
+        GUIDED_RANGE_BONUS
+    } else {
+        0.0
+    };
+    angle + candidate.hit_chance + range_bonus + candidate.damage_vs_category / DAMAGE_SCORE_DIVISOR
+}
+
+/// B45: index of the highest-scoring candidate; the first wins a tie. `None`
+/// for an empty slice; more than [`STORE_CANDIDATE_LIMIT`] candidates is
+/// invalid input.
+pub fn select_store(candidates: &[StoreCandidate]) -> Result<Option<usize>> {
+    if candidates.len() > STORE_CANDIDATE_LIMIT {
+        return Err(AiError::InvalidInput(
+            "store selection considers at most ten candidates",
+        ));
+    }
+    let mut best: Option<(usize, f64)> = None;
+    for (index, candidate) in candidates.iter().enumerate() {
+        let score = store_score(candidate);
+        if best.is_none_or(|(_, best_score)| score > best_score) {
+            best = Some((index, score));
+        }
+    }
+    Ok(best.map(|(index, _)| index))
+}
+
+// ---------------------------------------------------------------------------
+// B45: in-flight support
+// ---------------------------------------------------------------------------
+
+/// B45: the launcher-support facts a guided weapon's equipment can require,
+/// gathered by the host on each in-flight update. Support flags stay separate
+/// rather than collapsing into one universal support channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SupportRequirement {
+    /// The equipment requires launcher support at all.
+    pub requires_launcher: bool,
+    pub launcher_alive: bool,
+    pub launcher_emitting: bool,
+    pub launcher_human: bool,
+    /// For a human launcher: the pilot still holds the target in radar.
+    pub human_launcher_holds_target_in_radar: bool,
+}
+
+/// B45: result of a guided weapon's per-update target re-check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrackOutcome {
+    Tracking,
+    /// The weapon simply loses its target: it is not destroyed, flies on
+    /// unguided until its normal lifetime ends, and does not reacquire.
+    TargetLost,
+}
+
+/// B45 in-flight target re-check. Only the angular limits of the employment
+/// envelope apply (`employment_angles_pass` is the host's result of that
+/// check); range limits do not, so the weapon never loses its target by
+/// closing inside its own launch minimum range. When support is required the
+/// launcher must be alive; an AI launcher's support does not lapse on its own
+/// while the missile keeps asking, whereas a human launcher's support lapses
+/// when the pilot stops emitting or no longer holds the target in radar.
+pub fn in_flight_track_check(
+    employment_angles_pass: bool,
+    support: &SupportRequirement,
+) -> TrackOutcome {
+    if !employment_angles_pass {
+        return TrackOutcome::TargetLost;
+    }
+    if support.requires_launcher {
+        if !support.launcher_alive {
+            return TrackOutcome::TargetLost;
+        }
+        if support.launcher_human
+            && !(support.launcher_emitting && support.human_launcher_holds_target_in_radar)
+        {
+            return TrackOutcome::TargetLost;
+        }
+    }
+    TrackOutcome::Tracking
+}
+
+/// B45: the AI radar-on check extends the emission-valid deadline to at least
+/// this far ahead (10 s on the quarter-second clock).
+pub const AI_SUPPORT_EXTENSION_QUARTERS: u64 = 40;
+
+/// B45 AI launcher support check. Requires the actor's emission-enabled state
+/// and extends its emission-valid deadline to at least 10 s ahead, returning
+/// the new deadline; `None` when emission is not enabled. This is not ten
+/// seconds of guidance after radar shutdown.
+pub fn ai_launcher_support(
+    emission_enabled: bool,
+    now_quarters: u64,
+    deadline_quarters: u64,
+) -> Option<u64> {
+    emission_enabled.then(|| deadline_quarters.max(now_quarters + AI_SUPPORT_EXTENSION_QUARTERS))
+}
+
+/// B45: a target moving slower than this (0x2400/256 = 36 ft/s) counts as
+/// stationary for the passive emitter exception.
+pub const PASSIVE_EMITTER_STATIONARY_FPS: ScalarSpeed = ScalarSpeed(36.0);
+
+/// B45: a passive emitter weapon keeps tracking a stationary emitter that has
+/// shut down but loses a moving one. `threshold` is normally
+/// [`PASSIVE_EMITTER_STATIONARY_FPS`]; a target at or above it is moving.
+pub fn passive_emitter_keeps_track(
+    target_emitting: bool,
+    target_speed: ScalarSpeed,
+    threshold: ScalarSpeed,
+) -> bool {
+    target_emitting || target_speed < threshold
+}
+
+// ---------------------------------------------------------------------------
 // Device release schedule (experience spec, "Other experience effects")
 // ---------------------------------------------------------------------------
 
@@ -1580,5 +1982,291 @@ mod tests {
     fn postponement_needs_a_finite_deadline() {
         let mut service = service(AircraftId::F18);
         assert_eq!(service.postpone_for_device_reaction(), None);
+    }
+
+    // B45: envelopes, signature, eligibility, store choice, in-flight support
+
+    #[test]
+    fn store_envelopes_check_the_named_role() {
+        let acquisition = SeekerEnvelope {
+            max_range_ft: Some(60000.0),
+            ..profile()
+        };
+        let envelopes = StoreEnvelopes {
+            acquisition,
+            employment: profile(),
+        };
+        assert_eq!(envelopes.envelope(EnvelopeRole::Acquisition), &acquisition);
+        assert_eq!(envelopes.envelope(EnvelopeRole::Employment), &profile());
+        let g = geometry(45000.0);
+        assert_eq!(
+            envelopes.check(EnvelopeRole::Acquisition, &g),
+            EnvelopeResult::Eligible
+        );
+        assert_eq!(
+            envelopes.check(EnvelopeRole::Employment, &g),
+            EnvelopeResult::Rejected(EnvelopeRejection::AboveMaximumRange)
+        );
+    }
+
+    #[test]
+    fn detection_range_scales_with_signature_and_caps_at_full() {
+        assert_eq!(detection_range_feet(Some(20000.0), 0), Some(0.0));
+        assert_eq!(detection_range_feet(Some(20000.0), 50), Some(10000.0));
+        assert_eq!(detection_range_feet(Some(20000.0), 100), Some(20000.0));
+        assert_eq!(detection_range_feet(Some(20000.0), 150), Some(20000.0));
+        assert_eq!(detection_range_feet(None, 50), None);
+    }
+
+    #[test]
+    fn rear_cone_and_vertical_boundaries_are_inclusive() {
+        assert!(in_rear_cone(40.0, 0.0));
+        assert!(!in_rear_cone(41.0, 0.0));
+        assert!(in_rear_cone(-40.0, 140.0));
+        assert!(!in_rear_cone(0.0, 141.0));
+        assert!(in_rear_cone(0.0, -140.0));
+        assert!(pointing_vertical(60.0));
+        assert!(pointing_vertical(-60.0));
+        assert!(pointing_vertical(90.0));
+        assert!(!pointing_vertical(59.0));
+        assert!(!pointing_vertical(0.0));
+    }
+
+    #[test]
+    fn aspect_penalty_blocks_from_the_front_only() {
+        assert!(aspect_penalty_applies(false, false));
+        assert!(!aspect_penalty_applies(true, false));
+        assert!(!aspect_penalty_applies(false, true));
+        // The AA-2's 100 percent penalty: nothing from the front, full from behind.
+        let front = aspect_penalty_applies(in_rear_cone(0.0, 180.0), pointing_vertical(0.0));
+        assert_eq!(apply_aspect_penalty(100, 100, front), 0);
+        let rear = aspect_penalty_applies(in_rear_cone(10.0, 20.0), pointing_vertical(0.0));
+        assert_eq!(apply_aspect_penalty(100, 100, rear), 100);
+        // Sidewinder 30 from the front, saturating below zero.
+        assert_eq!(apply_aspect_penalty(80, 30, true), 50);
+        assert_eq!(apply_aspect_penalty(20, 30, true), 0);
+        // Vertical bypass at 60 degrees, not 61 degrees short of it.
+        assert_eq!(
+            apply_aspect_penalty(
+                100,
+                100,
+                aspect_penalty_applies(false, pointing_vertical(60.0))
+            ),
+            100
+        );
+        assert_eq!(
+            apply_aspect_penalty(
+                100,
+                100,
+                aspect_penalty_applies(false, pointing_vertical(59.0))
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn infrared_boost_doubles_with_a_floor_of_200() {
+        assert_eq!(infrared_boost(50, true), 200);
+        assert_eq!(infrared_boost(100, true), 200);
+        assert_eq!(infrared_boost(150, true), 300);
+        assert_eq!(infrared_boost(50, false), 50);
+    }
+
+    #[test]
+    fn radar_bonuses_add_and_floor_at_100() {
+        assert_eq!(radar_configuration_bonus(10, true, false), 100);
+        assert_eq!(radar_configuration_bonus(10, false, true), 100);
+        assert_eq!(radar_configuration_bonus(10, true, true), 125);
+        assert_eq!(radar_configuration_bonus(80, true, false), 113);
+        assert_eq!(radar_configuration_bonus(80, true, true), 138);
+        assert_eq!(radar_configuration_bonus(10, false, false), 10);
+    }
+
+    #[test]
+    fn emitter_signature_is_all_or_nothing() {
+        assert_eq!(emitter_signature(true), 100);
+        assert_eq!(emitter_signature(false), 0);
+    }
+
+    #[test]
+    fn night_divisor_rises_from_1500_to_4500_ft() {
+        assert_eq!(night_visual_divisor(0.0), 1.0);
+        assert_eq!(night_visual_divisor(1500.0), 1.0);
+        assert_eq!(night_visual_divisor(3000.0), 3.0);
+        assert_eq!(night_visual_divisor(4500.0), 5.0);
+        assert_eq!(night_visual_divisor(9000.0), 5.0);
+    }
+
+    #[test]
+    fn visual_floor_lifts_close_targets_and_blends_back() {
+        assert_eq!(visual_close_range_floor(0.0, 25), 75);
+        assert_eq!(visual_close_range_floor(200.0, 25), 75);
+        assert_eq!(visual_close_range_floor(850.0, 25), 50);
+        assert_eq!(visual_close_range_floor(1500.0, 25), 25);
+        assert_eq!(visual_close_range_floor(3000.0, 25), 25);
+        // Clear weather is never lowered by the floor.
+        assert_eq!(visual_close_range_floor(100.0, 100), 100);
+        assert_eq!(visual_close_range_floor(850.0, 100), 100);
+    }
+
+    #[test]
+    fn look_down_rejection_by_angle_and_height() {
+        assert_eq!(look_down_rejection(45.0, 5000.0), 1.0);
+        assert_eq!(look_down_rejection(90.0, 5000.0), 1.0);
+        assert_eq!(look_down_rejection(22.5, 5000.0), 0.5);
+        assert_eq!(look_down_rejection(0.0, 0.0), 1.0);
+        assert_eq!(look_down_rejection(0.0, 2500.0), 0.5);
+        assert_eq!(look_down_rejection(0.0, 5000.0), 0.0);
+        assert_eq!(look_down_rejection(0.0, 10000.0), 0.0);
+        assert_eq!(look_down_rejection(-30.0, 10000.0), 0.0);
+        assert_eq!(look_down_rejection(22.5, 0.0), 1.0);
+    }
+
+    #[test]
+    fn eligibility_matrix() {
+        use StoreCapability as C;
+        use TargetClass as T;
+        assert!(store_eligible(C::AIR_TO_AIR_MISSILE, T::Air));
+        assert!(!store_eligible(C::AIR_TO_AIR_MISSILE, T::Surface));
+        assert!(!store_eligible(C::SURFACE_STORE, T::Air));
+        assert!(store_eligible(C::SURFACE_STORE, T::Surface));
+        assert!(store_eligible(C::GUN, T::Air));
+        assert!(store_eligible(C::GUN, T::Surface));
+    }
+
+    fn candidate(station: u8) -> StoreCandidate {
+        StoreCandidate {
+            station: StationId(station),
+            guided: true,
+            employment_fit: Some(10.0),
+            hit_chance: 0.0,
+            range_feet: 1000.0,
+            damage_vs_category: 0.0,
+        }
+    }
+
+    #[test]
+    fn store_score_terms() {
+        let guided = candidate(1);
+        assert_eq!(store_score(&guided), 90.0);
+        let unguided = StoreCandidate {
+            guided: false,
+            ..guided
+        };
+        assert_eq!(store_score(&unguided), 80.0);
+        let failed = StoreCandidate {
+            employment_fit: None,
+            hit_chance: 7.0,
+            ..guided
+        };
+        assert_eq!(store_score(&failed), 7.0);
+        let at_limit = StoreCandidate {
+            range_feet: 1500.0,
+            ..guided
+        };
+        assert_eq!(store_score(&at_limit), 90.0);
+        let beyond = StoreCandidate {
+            range_feet: 1501.0,
+            ..guided
+        };
+        assert_eq!(store_score(&beyond), 140.0);
+        let unguided_beyond = StoreCandidate {
+            guided: false,
+            range_feet: 1501.0,
+            ..guided
+        };
+        assert_eq!(store_score(&unguided_beyond), 80.0);
+        let damage = StoreCandidate {
+            damage_vs_category: 250.0,
+            ..guided
+        };
+        assert_eq!(store_score(&damage), 100.0);
+    }
+
+    #[test]
+    fn select_store_takes_the_highest_and_the_first_on_a_tie() {
+        let low = StoreCandidate {
+            employment_fit: Some(40.0),
+            ..candidate(1)
+        };
+        let high = StoreCandidate {
+            range_feet: 2000.0,
+            ..candidate(2)
+        };
+        assert_eq!(select_store(&[low, high, candidate(3)]), Ok(Some(1)));
+        assert_eq!(select_store(&[candidate(1), candidate(2)]), Ok(Some(0)));
+        assert_eq!(select_store(&[]), Ok(None));
+        let ten = vec![candidate(1); STORE_CANDIDATE_LIMIT];
+        assert_eq!(select_store(&ten), Ok(Some(0)));
+        let eleven = vec![candidate(1); STORE_CANDIDATE_LIMIT + 1];
+        assert!(select_store(&eleven).is_err());
+    }
+
+    #[test]
+    fn in_flight_track_check_cases() {
+        let ai = SupportRequirement {
+            requires_launcher: true,
+            launcher_alive: true,
+            launcher_emitting: false,
+            launcher_human: false,
+            human_launcher_holds_target_in_radar: false,
+        };
+        assert_eq!(in_flight_track_check(true, &ai), TrackOutcome::Tracking);
+        assert_eq!(in_flight_track_check(false, &ai), TrackOutcome::TargetLost);
+        let dead = SupportRequirement {
+            launcher_alive: false,
+            ..ai
+        };
+        assert_eq!(in_flight_track_check(true, &dead), TrackOutcome::TargetLost);
+        let unsupported = SupportRequirement {
+            requires_launcher: false,
+            launcher_alive: false,
+            ..ai
+        };
+        assert_eq!(
+            in_flight_track_check(true, &unsupported),
+            TrackOutcome::Tracking
+        );
+        let human = SupportRequirement {
+            launcher_human: true,
+            launcher_emitting: true,
+            human_launcher_holds_target_in_radar: true,
+            ..ai
+        };
+        assert_eq!(in_flight_track_check(true, &human), TrackOutcome::Tracking);
+        let human_off = SupportRequirement {
+            launcher_emitting: false,
+            ..human
+        };
+        assert_eq!(
+            in_flight_track_check(true, &human_off),
+            TrackOutcome::TargetLost
+        );
+        let human_dropped = SupportRequirement {
+            human_launcher_holds_target_in_radar: false,
+            ..human
+        };
+        assert_eq!(
+            in_flight_track_check(true, &human_dropped),
+            TrackOutcome::TargetLost
+        );
+    }
+
+    #[test]
+    fn ai_launcher_support_extends_the_deadline_ten_seconds() {
+        assert_eq!(ai_launcher_support(true, 100, 0), Some(140));
+        assert_eq!(ai_launcher_support(true, 100, 130), Some(140));
+        assert_eq!(ai_launcher_support(true, 100, 200), Some(200));
+        assert_eq!(ai_launcher_support(false, 100, 200), None);
+    }
+
+    #[test]
+    fn passive_emitter_keeps_stationary_shutdown_targets() {
+        let t = PASSIVE_EMITTER_STATIONARY_FPS;
+        assert!(passive_emitter_keeps_track(true, ScalarSpeed(500.0), t));
+        assert!(passive_emitter_keeps_track(false, ScalarSpeed(0.0), t));
+        assert!(passive_emitter_keeps_track(false, ScalarSpeed(35.9), t));
+        assert!(!passive_emitter_keeps_track(false, ScalarSpeed(36.0), t));
+        assert!(!passive_emitter_keeps_track(false, ScalarSpeed(500.0), t));
     }
 }

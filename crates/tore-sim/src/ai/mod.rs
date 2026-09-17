@@ -11,8 +11,8 @@
 //! - Unknown behavior returns [`AiError::UnspecifiedRule`]; there are no silent
 //!   fallback constants.
 //! - Recovered quantities keep their recovered domain. Distances are feet,
-//!   angles in recovered rules are degrees, and unresolved scalar speeds use
-//!   [`ScalarSpeed`] rather than pretending to be knots or feet per second.
+//!   angles in recovered rules are degrees, and speeds are feet per second
+//!   wrapped in [`ScalarSpeed`].
 //! - Randomness is caller-owned [`DecisionRandom`] state. Percentages are draw
 //!   thresholds, not a promise to reproduce the original sequence.
 //! - The simulation runs at a fixed 120 Hz; nominal timings are simulation
@@ -21,9 +21,11 @@ pub mod experience;
 pub mod geometry;
 pub mod motion;
 pub mod pursuit;
+pub mod route;
 pub mod steering;
 pub mod tactics;
 pub mod targeting;
+pub mod threat;
 pub mod weapon_service;
 pub mod wing;
 
@@ -84,9 +86,9 @@ impl Experience {
     }
 }
 
-/// Scalar speed in the recovered source domain (B04, B15). Its physical unit
-/// is unresolved; arithmetic on it is allowed, conversion to knots or feet per
-/// second is not until research closes the unit.
+/// Scalar speed in the AI rules (B04, B15): feet per second, executable
+/// confirmed on 2026-09-17 (the HUD shows the same value in knots). Kept as a
+/// newtype so speeds cannot be mixed with distances or rates by accident.
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
 pub struct ScalarSpeed(pub f64);
 impl ScalarSpeed {

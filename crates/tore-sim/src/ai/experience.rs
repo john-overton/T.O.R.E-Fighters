@@ -6,7 +6,7 @@
 //! thresholds as typed constants. It performs no tactical decisions; the
 //! tactics component draws against these thresholds at its own decision points.
 
-use super::{AiError, DecisionRandom, Experience, Result};
+use super::{DecisionRandom, Experience, Result};
 
 /// Where a resolved level came from ("Experience channels"). Explicit
 /// per-object mission values must stay distinguishable from generation
@@ -17,9 +17,12 @@ pub enum ExperienceOrigin {
     ExplicitPerObject,
     /// The mission editor's bulk assignment, jittered from `selected`.
     EditorAssignment { selected: Experience },
-    /// Quick Mission generation. Its distribution is unknown; a request with
-    /// this origin never resolves.
-    QuickMission,
+    /// Quick Mission generation: every member of a wing carries the wing's
+    /// menu selection. Executable-confirmed on 2026-09-17 (generator, loader
+    /// and post-load paths); the manual's "range of skills" is not implemented.
+    QuickMission { selected: Experience },
+    /// The flight-menu enemy-skill preference replaced the level.
+    EnemyOverride,
 }
 
 /// A request to resolve one aircraft's level. Side/domain assignment channels
@@ -31,7 +34,7 @@ pub enum ExperienceRequest {
     Explicit { level: i32 },
     /// Editor bulk assignment from a selected level 0..3.
     Editor { selected: i32 },
-    /// Quick Mission wing selection, level 0..3. Unresolved policy.
+    /// Quick Mission wing selection, level 0..3; applied uniformly to the wing.
     QuickMission { selected: i32 },
 }
 
@@ -55,11 +58,11 @@ pub const EDITOR_UP_FROM: u8 = 68;
 /// - An explicit per-object level is used as is; nothing is drawn.
 /// - Editor bulk assignment draws once and shifts the selected level by at
 ///   most one step, clamped to Novice..Ace.
-/// - Quick Mission returns [`AiError::UnspecifiedRule`]: the spec records its
-///   distribution as unknown and forbids falling back to the editor jitter or
-///   copying the menu selection to every member.
+/// - Quick Mission applies the wing's menu selection to every member, with
+///   no draw; the generator, loader and post-load paths were traced and none
+///   varies members within a wing.
 ///
-/// Levels outside 0..3 are [`AiError::InvalidInput`].
+/// Levels outside 0..3 are [`super::AiError::InvalidInput`].
 pub fn resolve_experience(
     request: ExperienceRequest,
     random: &mut DecisionRandom,
@@ -86,11 +89,42 @@ pub fn resolve_experience(
             })
         }
         ExperienceRequest::QuickMission { selected } => {
-            Experience::from_level(selected)?;
-            Err(AiError::UnspecifiedRule(
-                "Quick Mission experience distribution: writer-to-loader skill handling unresolved",
-            ))
+            let selected = Experience::from_level(selected)?;
+            Ok(ResolvedExperience {
+                level: selected,
+                origin: ExperienceOrigin::QuickMission { selected },
+            })
         }
+    }
+}
+
+/// The flight-menu preference that forces every enemy aircraft to one level
+/// at mission start (AI experience spec, "Experience channels"). It is applied
+/// after objects exist, so it overrides mission files and Quick Mission
+/// settings. `None` leaves the resolved level alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnemySkillOverride {
+    AllNovice,
+    AllAverage,
+}
+
+/// Apply the enemy-skill override to an enemy aircraft's resolved level.
+/// Friendly aircraft are never affected; the caller decides side.
+pub fn apply_enemy_override(
+    resolved: ResolvedExperience,
+    is_enemy_aircraft: bool,
+    setting: Option<EnemySkillOverride>,
+) -> ResolvedExperience {
+    match (is_enemy_aircraft, setting) {
+        (true, Some(EnemySkillOverride::AllNovice)) => ResolvedExperience {
+            level: Experience::Novice,
+            origin: ExperienceOrigin::EnemyOverride,
+        },
+        (true, Some(EnemySkillOverride::AllAverage)) => ResolvedExperience {
+            level: Experience::Average,
+            origin: ExperienceOrigin::EnemyOverride,
+        },
+        _ => resolved,
     }
 }
 
@@ -300,14 +334,43 @@ mod tests {
     }
 
     #[test]
-    fn quick_mission_is_unspecified() {
+    fn quick_mission_is_uniform_per_wing() {
         let mut random = DecisionRandom::seeded(2);
-        let result =
-            resolve_experience(ExperienceRequest::QuickMission { selected: 1 }, &mut random);
-        assert!(
-            matches!(result, Err(AiError::UnspecifiedRule(_))),
-            "{result:?}"
+        for level in Experience::ALL {
+            for _ in 0..50 {
+                let resolved = resolve_experience(
+                    ExperienceRequest::QuickMission {
+                        selected: i32::from(level.level()),
+                    },
+                    &mut random,
+                )
+                .unwrap();
+                assert_eq!(resolved.level, level);
+                assert_eq!(
+                    resolved.origin,
+                    ExperienceOrigin::QuickMission { selected: level }
+                );
+            }
+        }
+        assert_eq!(random, DecisionRandom::seeded(2), "quick mission drew");
+    }
+
+    #[test]
+    fn enemy_override_forces_enemy_aircraft_only() {
+        let ace = ResolvedExperience {
+            level: Experience::Ace,
+            origin: ExperienceOrigin::ExplicitPerObject,
+        };
+        assert_eq!(apply_enemy_override(ace, true, None), ace);
+        assert_eq!(
+            apply_enemy_override(ace, false, Some(EnemySkillOverride::AllNovice)),
+            ace
         );
+        let forced = apply_enemy_override(ace, true, Some(EnemySkillOverride::AllNovice));
+        assert_eq!(forced.level, Experience::Novice);
+        assert_eq!(forced.origin, ExperienceOrigin::EnemyOverride);
+        let forced = apply_enemy_override(ace, true, Some(EnemySkillOverride::AllAverage));
+        assert_eq!(forced.level, Experience::Average);
     }
 
     #[test]
@@ -321,7 +384,7 @@ mod tests {
         ] {
             assert!(matches!(
                 resolve_experience(request, &mut random),
-                Err(AiError::InvalidInput(_))
+                Err(crate::ai::AiError::InvalidInput(_))
             ));
         }
     }
