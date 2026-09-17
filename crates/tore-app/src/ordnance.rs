@@ -560,9 +560,34 @@ pub fn validate_sources(
         if geometry.len() != 1 || geometry[0].0.profile.id != id || geometry[0].1.is_empty() {
             return Err("dummy model identity or geometry mismatch".into());
         }
+        let intact = airframe.vertices(&flight, &camera, world);
+        flight.damage_fraction = 0.6;
+        let damaged = airframe.vertices(&flight, &camera, world);
+        let fragment = airframe.fragment_vertices(&flight, &camera, world);
+        if fragment.is_empty() || fragment == damaged {
+            return Err("detached model missing or substituted".into());
+        }
+        if intact == damaged
+            || damaged.is_empty()
+            || damaged
+                .chunks_exact(10)
+                .any(|v| !v.iter().all(|x| x.is_finite()))
+        {
+            return Err("damaged body did not produce distinct valid geometry".into());
+        }
+        flight.damage_fraction = 0.;
         normal.state.targets[0].hp = 0;
         normal.step(&mut flight, world)?;
+        if normal.dummy_geometry(&camera, world)[0].1.is_empty() {
+            return Err("falling wreck disappeared".into());
+        }
         normal.reset(&mut flight)?;
+        if !normal.state.smoke.puffs.is_empty()
+            || !normal.state.debris.is_empty()
+            || flight.damage_fraction != 0.
+        {
+            return Err("reset retained damage appearance".into());
+        }
         if normal
             .state
             .targets

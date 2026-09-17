@@ -392,3 +392,39 @@ F22 outer glazing is 2136/2153/2170/219c/2220/2255/228a/22a4/22bc/
 2462/247c/2494/2c36/2c6c. Its main-bay belly spans base faces
 35d7/3601/362f/3cc0/3d03 and switched details under word 5dfc.
 All new hinge and material choices follow the linked fitted/opinionated contracts.
+
+## Combat damage and smoke resource review
+
+Local FA media review, 2026-09-17. `FA_1.LIB` SHA-256:
+`657254c5bb3bcf3609b3e84ee6499bf80395a2daffc60c12363e534cf408245f`;
+`FA_2.LIB`: `fb8b30216e739292489d4872cc440debec334e14f8b9a3d0e340092445246198`.
+The bounded SH parser reads A/B/C/D variants for all twelve supported aircraft.
+A/C are body variants; B/D contain separated pieces. Example: F18_A is 296 faces,
+shortened from intact longitudinal bounds -66..102 to -63..44; F18_B is 206 faces
+with narrow lateral bounds -14..14. F18_C is 270 faces with reduced left extent;
+F18_D is a 33-face near-flat piece. Thus A/B and C/D are compatible with two
+breakup pairs, not evidence of four increasing damage levels. That pairing and
+threshold selection are not established native consumers.
+
+All nonempty texture references resolve to the matching variant PIC except
+F22_D, which has no texture reference. The current import closure already selects
+these aircraft-prefixed resources. Local inventory, bounds and texture previews:
+`.local/damage-smoke/`. No retail bytes or previews are committed.
+
+`SMOKE.PIC` is 256x43 with no private palette, containing dark, grey and pale puff
+art in three cells. Visually inspected 43x43 crops begin at x=0, 47 and 94.
+The sheet uses palette index 255 for its background despite the generic PIC mask
+being fully opaque. The host explicitly keys that index transparent.
+The existing bounded general SH reader rejects `SMOKE.SH`;
+its runtime program is not executed or enabled by this work. The host uses the
+original PIC with fitted billboard placement. PIC SHA-256:
+`9058efbbfac301c0d72d096fcedd7ec18df9f0d3e44dcfdae03fc8a19d7e655e`;
+SH: `d4fa9f4374679ab9fe3da7926af75456f38f557035cd75a4889775a5f3838b51`.
+The local FA manual describes effects of damage but does not supply these smoke
+or mesh thresholds. [Implementation rules](../spec/damage-smoke.md) keep tuning
+separate from this resource evidence.
+
+`GRDLRGA.PIC` was also decoded and visually inspected: 256x252, twelve apparent
+ground-explosion frames in three columns and four rows. The host samples 80x63
+cells and scales this down for debris contact. This is a reviewed original asset
+with fitted use; no claim is made that retail bullets selected this sheet.

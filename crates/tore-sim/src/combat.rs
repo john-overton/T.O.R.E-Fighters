@@ -2,9 +2,11 @@
 //! Diagnostic until complete dispatch/contact/guidance contracts are accepted.
 //! No renderer, resource lookup, native execution, wall clock or hidden randomness.
 use std::io::{Error, ErrorKind};
+pub mod debris;
 pub mod loading;
 pub mod loadout;
 pub mod missiles;
+pub mod smoke;
 pub mod systems;
 use tore_formats::{
     Result,

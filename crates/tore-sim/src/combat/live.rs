@@ -133,6 +133,7 @@ pub struct Configuration {
     pub ecm: tore_formats::weapons::Countermeasures,
     pub system_damage: [u8; 45],
     pub damage_capacity: i32,
+    pub fragment_offset: Vector,
     pub afterburner_available: bool,
     pub hardpoint_slots: Vec<Option<usize>>,
     pub radar_hardpoint: usize,
@@ -152,6 +153,7 @@ impl Configuration {
         if self.stations.is_empty()
             || self.stations.len() > 32
             || self.damage_capacity <= 0
+            || !self.fragment_offset.iter().all(|v| v.is_finite())
             || self.hit_points <= 0
             || self.external_equipment_lbs < 0
         {
@@ -315,6 +317,7 @@ impl Configuration {
             .filter(|v| *v <= i32::from(i16::MAX))
             .ok_or_else(|| super::invalid("native player damage capacity"))?;
         Ok(Self {
+            fragment_offset: super::debris::attachment(a.id, &mut read)?,
             ecm,
             system_damage,
             damage_capacity,
@@ -359,7 +362,15 @@ pub struct Target {
     pub airborne: bool,
     pub radius: f64,
     pub hp: i32,
+    pub initial_hp: i32,
+    pub fragment_offset: Vector,
+    pub fragment_released: bool,
     pub category: u16,
+}
+impl Target {
+    pub fn damage_fraction(&self) -> f64 {
+        (1. - f64::from(self.hp.max(0)) / f64::from(self.initial_hp.max(1))).clamp(0., 1.)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projectile {
@@ -384,6 +395,7 @@ pub enum EffectKind {
     Hit,
     Destroyed,
     Ground,
+    DebrisImpact,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Effect {
@@ -421,6 +433,9 @@ pub struct State {
     pub projectiles: Vec<Projectile>,
     pub targets: Vec<Target>,
     pub effects: Vec<Effect>,
+    pub smoke: super::smoke::Smoke,
+    pub debris: Vec<super::debris::Piece>,
+    player_fragment_released: bool,
     pub shots: u32,
     pub hits: u32,
     pub kills: u32,
@@ -509,6 +524,9 @@ impl State {
             projectiles: vec![],
             targets: vec![],
             effects: vec![],
+            smoke: super::smoke::Smoke::default(),
+            debris: Vec::new(),
+            player_fragment_released: false,
             shots: 0,
             hits: 0,
             kills: 0,
@@ -879,6 +897,9 @@ impl State {
             airborne: true,
             radius: 28.,
             hp: config.hit_points,
+            initial_hp: config.hit_points,
+            fragment_offset: config.fragment_offset,
+            fragment_released: false,
             category: config.target_category,
         });
     }
@@ -894,6 +915,8 @@ impl State {
         self.release();
         self.projectiles.clear();
         self.effects.clear();
+        self.smoke = super::smoke::Smoke::default();
+        self.debris.clear();
         self.targets.clear();
         let id = self.next_target_id;
         self.next_target_id = self
@@ -920,6 +943,9 @@ impl State {
             airborne: true,
             radius: 28.,
             hp: self.config.hit_points,
+            initial_hp: self.config.hit_points,
+            fragment_offset: self.config.fragment_offset,
+            fragment_released: false,
         });
         self.sensors.clear_selection();
     }
@@ -1244,10 +1270,14 @@ impl State {
             airborne: launcher.alive,
             radius: 28.,
             hp: if launcher.alive { self.player_hp } else { 0 },
+            initial_hp: self.config.damage_capacity,
+            fragment_offset: self.config.fragment_offset,
+            fragment_released: self.player_fragment_released,
             category: self.config.target_category,
         };
         let mut player_hits = Vec::new();
         let mut impacts = Vec::new();
+        let mut sources = Vec::new();
         self.projectiles.retain_mut(|p| {
             let w = &self.config.stations[p.station].weapon;
             let m = &w.movement;
@@ -1264,6 +1294,12 @@ impl State {
             } else {
                 engine_phase(m, now, p.launched_t)
             };
+            if w.seeker.signature != 0 && phase == super::EnginePhase::Powered {
+                sources.push((
+                    std::array::from_fn(|i| p.position[i] - p.direction[i] * 4.),
+                    super::smoke::Kind::Missile,
+                ));
+            }
             let old_direction = p.direction;
             if p.guidance.is_some() {
                 let was_active = p.guidance.as_ref().unwrap().enabled;
@@ -1471,6 +1507,64 @@ impl State {
         for (p, kind) in impacts {
             self.effect(p, kind);
         }
+        use super::smoke::Kind;
+        for t in self
+            .targets
+            .iter()
+            .filter(|t| t.airborne && t.damage_fraction() >= 0.5)
+        {
+            sources.push((
+                std::array::from_fn(|i| t.position[i] - t.basis.forward[i] * 15.),
+                Kind::Aircraft,
+            ));
+        }
+        if launcher.alive && self.player_hp > 0 && self.player_hp <= self.config.damage_capacity / 2
+        {
+            sources.push((
+                std::array::from_fn(|i| launcher.position[i] - launcher.basis.forward[i] * 15.),
+                Kind::Aircraft,
+            ));
+        }
+        self.smoke.step(sources);
+        let mut debris_impacts = Vec::new();
+        self.debris.retain_mut(|piece| {
+            if let Some(mut p) = piece.step(&ground) {
+                p[1] += 6.;
+                debris_impacts.push(p);
+                false
+            } else {
+                true
+            }
+        });
+        for p in debris_impacts {
+            self.effect(p, EffectKind::DebrisImpact);
+        }
+        for t in &mut self.targets {
+            if t.airborne && t.damage_fraction() >= 0.5 && !t.fragment_released {
+                t.fragment_released = true;
+                if self.debris.len() < super::debris::MAX_PIECES {
+                    self.debris.push(super::debris::Piece::new(
+                        t.id,
+                        t.position,
+                        t.velocity,
+                        t.basis,
+                        t.fragment_offset,
+                    ));
+                }
+            }
+        }
+        if self.player_hp <= self.config.damage_capacity / 2 && !self.player_fragment_released {
+            self.player_fragment_released = true;
+            if self.debris.len() < super::debris::MAX_PIECES {
+                self.debris.push(super::debris::Piece::new(
+                    0,
+                    launcher.position,
+                    launcher.velocity,
+                    launcher.basis,
+                    self.config.fragment_offset,
+                ));
+            }
+        }
         events
     }
 }
@@ -1537,7 +1631,7 @@ pub fn segment_sphere(a: Vector, b: Vector, radius: f64) -> Option<f64> {
     let t = (-bb - disc.sqrt()) / aa;
     (0. ..=1.).contains(&t).then_some(t)
 }
-fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f64) -> Option<f64> {
+pub(super) fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f64) -> Option<f64> {
     let below = |t: f64| {
         let p: Vector = std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t);
         p[1] <= ground(p[0], p[2])
@@ -1660,6 +1754,7 @@ mod tests {
         };
         State::new(
             Configuration {
+                fragment_offset: [0.; 3],
                 ecm: tore_formats::weapons::Countermeasures {
                     weight: 0,
                     flags: 0,
@@ -1840,6 +1935,9 @@ mod tests {
             airborne: true,
             radius: 20.,
             hp,
+            initial_hp: hp,
+            fragment_offset: [0.; 3],
+            fragment_released: false,
             category,
         }
     }
@@ -1925,6 +2023,8 @@ mod tests {
     fn fixed_ticks_replay_across_presentation_rates_and_pause() {
         let run = |fps: usize| {
             let mut s = fixture(false);
+            s.targets.push(target(7, [0., 1000., 100000.], 100, 0x8000));
+            s.targets[0].hp = 50;
             let mut clock = crate::flight::Clock { remainder: 0. };
             let mut tick = 0;
             for frame in 0..fps * 4 {
@@ -1938,7 +2038,16 @@ mod tests {
                     tick += 1;
                 }
             }
-            (tick, s.ammo, s.projectiles, s.targets, s.effects, s.shots)
+            (
+                tick,
+                s.ammo,
+                s.projectiles,
+                s.targets,
+                s.effects,
+                s.shots,
+                s.smoke,
+                s.debris,
+            )
         };
         assert_eq!(run(30), run(60));
         assert_eq!(run(60), run(144));
@@ -1959,6 +2068,97 @@ mod tests {
             s.step(true, l, |_, _| 0.);
         }
         assert_eq!(s.ammo, ammo);
+    }
+    #[test]
+    fn motor_smoke_uses_powered_phase_and_aircraft_smoke_uses_health() {
+        use super::super::smoke::Kind;
+        let l = launcher();
+        let mut s = fixture(true);
+        s.config.stations[0].weapon.movement.ignite_t = 1;
+        s.config.stations[0].weapon.movement.fuel_t = 2;
+        s.command(Command::Incoming, l);
+        s.projectiles[0].incoming = false;
+        s.projectiles[0].target = None;
+        s.projectiles[0].position = [0., 10000., 100000.];
+        s.projectiles[0].direction = [0., 0., 1.];
+        // Exercise the spec vector motor, keeping this fixture far from contacts.
+        s.projectiles[0].motion = Some(Motion::new(
+            &s.config.stations[0].weapon.movement,
+            [0., 0., 1000.],
+            10000.,
+        ));
+        observe(&mut s, l, 30);
+        assert!(s.smoke.puffs.is_empty());
+        observe(&mut s, l, 30);
+        assert_eq!(s.smoke.puffs.len(), 30);
+        assert!(s.smoke.puffs.iter().all(|p| p.kind == Kind::Missile));
+        observe(&mut s, l, 30);
+        assert_eq!(s.smoke.puffs.len(), 30);
+        s.projectiles.clear();
+        observe(&mut s, l, 480);
+        assert!(s.smoke.puffs.is_empty());
+        s.targets.push(target(1, [0., 5000., 100000.], 100, 0x8000));
+        s.targets[0].hp = 51;
+        observe(&mut s, l, 6);
+        assert!(s.smoke.puffs.is_empty());
+        s.targets[0].hp = 50;
+        observe(&mut s, l, 6);
+        assert_eq!(s.smoke.puffs.len(), 3);
+        s.targets[0].hp = 0;
+        observe(&mut s, l, 6);
+        assert_eq!(s.smoke.puffs.len(), 6);
+        s.targets[0].airborne = false;
+        observe(&mut s, l, 6);
+        assert_eq!(s.smoke.puffs.len(), 6);
+        s.range_target(l);
+        assert!(s.smoke.puffs.is_empty());
+        let mut gun = fixture(false);
+        observe(&mut gun, l, 6);
+        gun.step(true, l, |_, _| 0.);
+        assert!(gun.smoke.puffs.is_empty());
+    }
+    #[test]
+    fn detached_piece_is_emitted_once_and_removed_with_one_ground_effect() {
+        let mut s = fixture(false);
+        let l = launcher();
+        s.targets.push(target(7, [0., 5., 100000.], 100, 0x8000));
+        s.targets[0].hp = 50;
+        s.targets[0].velocity = [30., 0., 10.];
+        s.step(false, l, |_, _| 0.);
+        assert_eq!(s.debris.len(), 1);
+        assert_eq!(s.debris[0].owner, 7);
+        assert_eq!(s.debris[0].velocity, [30., 0., 10.]);
+        let mut impacts = 0;
+        for _ in 0..300 {
+            let had_piece = !s.debris.is_empty();
+            s.step(false, l, |_, _| 0.);
+            if had_piece && s.debris.is_empty() {
+                impacts += 1;
+                assert_eq!(
+                    s.effects
+                        .iter()
+                        .filter(|e| e.kind == EffectKind::DebrisImpact)
+                        .count(),
+                    1
+                );
+            }
+        }
+        assert_eq!(impacts, 1);
+        assert!(s.debris.is_empty());
+        assert!(s.effects.iter().all(|e| e.kind != EffectKind::DebrisImpact));
+        s.targets[0].hp = 0;
+        s.step(false, l, |_, _| 0.);
+        assert!(
+            s.debris.is_empty(),
+            "further damage must not duplicate the same lost part"
+        );
+        s.player_hp = s.config.damage_capacity / 2;
+        s.step(false, l, |_, _| 0.);
+        assert_eq!(s.debris.len(), 1);
+        assert_eq!(s.debris[0].owner, 0);
+        assert_eq!(s.debris[0].velocity, l.velocity);
+        let reset = State::new(s.configuration().clone(), true).unwrap();
+        assert!(reset.debris.is_empty());
     }
     #[test]
     fn native_damage_category_switch_is_exact_not_a_mask() {

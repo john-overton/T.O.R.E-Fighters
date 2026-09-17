@@ -49,6 +49,8 @@ pub struct State {
     pub jammer: bool,
     /// Player sensor controls: scope channel, display range and history.
     pub sensors: crate::sensors::Controls,
+    /// Combat presentation health, no additional flight-force coupling.
+    pub damage_fraction: f64,
     pub crashed: bool,
     pub ticks: u64,
 }
@@ -142,6 +144,7 @@ impl State {
             radar: true,
             jammer: false,
             sensors: crate::sensors::Controls::default(),
+            damage_fraction: 0.,
             crashed: false,
             ticks: 0,
         }

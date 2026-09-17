@@ -36,6 +36,7 @@ impl FireInput {
 }
 pub struct Combat {
     pub state: live::State,
+    pub smoke_art: crate::menu::Sprite,
     pub input: FireInput,
     pub controller: FireInput,
     pub range: bool,
@@ -49,6 +50,7 @@ pub struct Combat {
     last_launcher: Option<Launcher>,
     shapes: Vec<Option<Shape>>,
     explosions: Vec<Vec<([f32; 2], [f32; 3])>>,
+    ground_impacts: Vec<Vec<([f32; 2], [f32; 3])>>,
 }
 pub fn launcher(s: &flight::State) -> Launcher {
     Launcher {
@@ -108,28 +110,31 @@ impl Combat {
         if pic.width != 256 || pic.height != 232 {
             return Err("unreviewed AIRLRG frame sheet".into());
         }
-        let mut palette = h.palette;
-        palette[..pic.palette.len()].copy_from_slice(&pic.palette);
-        // Visually reviewed 3x4 cells of the original explosion sheet. Cell
-        // cropping, scheduling and 20x20 GPU sampling are fitted presentation.
-        let mut explosions = Vec::new();
-        for frame in 0..12 {
-            let mut cells = Vec::new();
-            for y in 0..20 {
-                for x in 0..20 {
-                    let index = pic.pixels
-                        [(frame / 3 * 58 + y * 58 / 20) * pic.width + frame % 3 * 80 + x * 80 / 20];
-                    if index != 255 {
-                        cells.push((
-                            [x as f32 / 20. - 0.5, 0.5 - y as f32 / 20.],
-                            palette[index as usize].map(|v| f32::from(v) / 255.),
-                        ));
-                    }
-                }
-            }
-            explosions.push(cells);
+        // Fitted 3x4 frame layout over visually reviewed original effect art.
+        let explosions = effect_frames(&pic, &h.palette, 58);
+        let impact = Pic::parse(data.get("GRDLRGA.PIC").ok_or("missing GRDLRGA.PIC")?)?;
+        if impact.width != 256 || impact.height != 252 {
+            return Err("unreviewed ground impact sheet".into());
         }
+        let ground_impacts = effect_frames(&impact, &h.palette, 63);
+        let smoke = Pic::parse(data.get("SMOKE.PIC").ok_or("missing SMOKE.PIC")?)?;
+        if smoke.width != 256 || smoke.height != 43 {
+            return Err("unreviewed smoke sheet dimensions".into());
+        }
+        let mut smoke_rgba = smoke.rgba(&h.palette);
+        for (index, color) in smoke.pixels.iter().zip(smoke_rgba.chunks_exact_mut(4)) {
+            if *index == 255 {
+                color.fill(0);
+            }
+        }
+        let smoke_art = crate::menu::Sprite {
+            width: smoke.width,
+            height: smoke.height,
+            rgba: smoke_rgba,
+            glyphs: smoke.glyphs,
+        };
         Ok(Self {
+            smoke_art,
             state: live::State::new(config, true)?,
             dummies: Vec::new(),
             dummy_models: Vec::new(),
@@ -143,6 +148,7 @@ impl Combat {
             last_launcher: None,
             shapes,
             explosions,
+            ground_impacts,
         })
     }
     pub fn dummy_geometry(&self, camera: &Camera, world: &World) -> Vec<(&Airframe, Vec<f32>)> {
@@ -151,7 +157,7 @@ impl Combat {
             .enumerate()
             .map(|(index, model)| {
                 let mut vertices = Vec::new();
-                for target in self.state.targets.iter().filter(|t| t.hp > 0) {
+                for target in self.state.targets.iter().filter(|t| t.airborne) {
                     if self
                         .dummies
                         .get(target.id.saturating_sub(1) as usize)
@@ -161,6 +167,7 @@ impl Combat {
                     }
                     let mut pose = model.start(world);
                     pose.position = target.position;
+                    pose.damage_fraction = target.damage_fraction();
                     pose.yaw = target.velocity[0].atan2(target.velocity[2]);
                     pose.pitch = 0.;
                     pose.bank = 0.;
@@ -169,6 +176,18 @@ impl Combat {
                     pose.exhaust = 0.;
                     pose.bay = 0.;
                     vertices.extend(model.vertices(&pose, camera, world));
+                }
+                for piece in self.state.debris.iter().filter(|p| {
+                    p.owner > 0
+                        && self
+                            .dummies
+                            .get(p.owner as usize - 1)
+                            .is_some_and(|(i, _)| *i == index)
+                }) {
+                    let mut pose = model.start(world);
+                    pose.position = piece.position;
+                    [pose.yaw, pose.pitch, pose.bank] = piece.basis.angles();
+                    vertices.extend(model.fragment_vertices(&pose, camera, world));
                 }
                 (model, vertices)
             })
@@ -260,6 +279,7 @@ impl Combat {
         self.input = FireInput::default();
         self.controller.cancel();
         s.set_payload(self.state.payload_lbs())?;
+        s.damage_fraction = 0.;
         s.bay = 0.;
         s.bay_open = false;
         s.bay_auto_open = false;
@@ -311,6 +331,10 @@ impl Combat {
         if self.state.ecm_failed {
             s.jammer = false;
         }
+        s.damage_fraction = (1.
+            - f64::from(self.state.player_hp)
+                / f64::from(self.state.configuration().damage_capacity))
+        .clamp(0., 1.);
         if self.state.player_hp == 0 {
             s.crashed = true;
         }
@@ -440,9 +464,10 @@ impl Combat {
         world: &crate::terrain::World,
     ) -> Vec<f32> {
         let mut v = Vec::new();
-        for t in self.state.targets.iter().filter(|t| t.hp > 0) {
+        for t in self.state.targets.iter().filter(|t| t.airborne) {
             let mut pose = s.clone();
             pose.position = t.position;
+            pose.damage_fraction = t.damage_fraction();
             pose.pitch = 0.;
             pose.bank = 0.;
             pose.yaw = t.velocity[0].atan2(t.velocity[2]);
@@ -457,6 +482,17 @@ impl Combat {
             if self.dummies.is_empty() {
                 v.extend(h.vertices(&pose, camera, world));
             }
+        }
+        for piece in self
+            .state
+            .debris
+            .iter()
+            .filter(|p| p.owner == 0 || self.dummies.is_empty())
+        {
+            let mut pose = s.clone();
+            pose.position = piece.position;
+            [pose.yaw, pose.pitch, pose.bank] = piece.basis.angles();
+            v.extend(h.fragment_vertices(&pose, camera, world));
         }
         // Attached external stores are hidden until the dedicated ordnance
         // rendering pass. Loadout/flight state and launched projectiles remain
@@ -502,7 +538,12 @@ impl Combat {
                 45
             };
             let frame = (usize::from(duration - e.ticks) * 12 / usize::from(duration)).min(11);
-            for (xy, color) in &self.explosions[frame] {
+            let frames = if e.kind == EffectKind::DebrisImpact {
+                &self.ground_impacts
+            } else {
+                &self.explosions
+            };
+            for (xy, color) in &frames[frame] {
                 for d in [
                     [0., 0.],
                     [1. / 20., 0.],
@@ -522,6 +563,34 @@ impl Combat {
         }
         v
     }
+}
+fn effect_frames(
+    pic: &Pic,
+    base: &[[u8; 3]; 256],
+    cell_height: usize,
+) -> Vec<Vec<([f32; 2], [f32; 3])>> {
+    let mut palette = *base;
+    palette[..pic.palette.len()].copy_from_slice(&pic.palette);
+    (0..12)
+        .map(|frame| {
+            let mut cells = Vec::new();
+            for y in 0..20 {
+                for x in 0..20 {
+                    let index = pic.pixels[(frame / 3 * cell_height + y * cell_height / 20)
+                        * pic.width
+                        + frame % 3 * 80
+                        + x * 80 / 20];
+                    if index != 255 {
+                        cells.push((
+                            [x as f32 / 20. - 0.5, 0.5 - y as f32 / 20.],
+                            palette[index as usize].map(|v| f32::from(v) / 255.),
+                        ));
+                    }
+                }
+            }
+            cells
+        })
+        .collect()
 }
 fn mesh(
     out: &mut Vec<f32>,

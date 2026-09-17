@@ -354,3 +354,10 @@ selected types. Friendly Wing 1 includes you; all other slots are dummies, up to
 29 with the existing six wing selectors. They do not attack or evade. Separation
 sets their starting distance. Restart restores the formation and accepted load.
 Nationality, skill and advantage do not yet change these practice flights.
+
+Aircraft at half health or below now display an original damaged body and trail
+dark smoke. Destroyed targets remain visible during their existing fall.
+Powered missiles leave white smoke that disperses after burnout or impact.
+Reset restores intact aircraft and clears smoke. Visual thresholds and smoke
+timing are fitted. Detached pieces inherit aircraft motion, fall, then disappear
+with a brief ground-hit animation. Damage-specific flight handling is not added. See [damage and smoke behavior](spec/damage-smoke.md).

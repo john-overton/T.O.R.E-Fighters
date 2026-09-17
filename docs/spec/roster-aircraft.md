@@ -73,7 +73,8 @@ the other new aircraft have exponent 8 and use one-third foot per source unit.
 
 Original continuous control-surface schedules, MiG-23 sweep aerodynamics,
 original F-22 bay sequencing and side bays, complete cockpit instruments, side mirror masks,
-LOD, shadows, damage models and complete store placement are not established.
+LOD, shadows, original damage transitions and complete store placement are not established.
+Original damaged bodies now render using [fitted selection and smoke rules](damage-smoke.md).
 Preserve neutral geometry for unreviewed controls; do not borrow rig offsets.
 Next research: inspect each aircraft's shape groups and source control consumers,
 then specify schedules or explicitly document independent fitted hinges.

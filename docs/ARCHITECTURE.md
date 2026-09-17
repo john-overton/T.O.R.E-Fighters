@@ -210,3 +210,16 @@ texture binding per identity and vertex buffers that grow to fit the formation.
 The player's atlas is never substituted for another type. This adds no AI or
 changes to fixed-step timing. Normal flight loads supported default stores;
 restricted native research flight keeps its clean configuration.
+
+`combat::smoke` owns bounded, fixed-step puff histories independently of rendering
+and guidance. The app's smoke pass sorts original keyed sprite billboards for
+each camera, blends them without depth writes, and depth-tests against the world.
+Aircraft damage uses the existing hit points. `damage_art` packs intact and damaged
+PICs losslessly into one runtime atlas per identity; each SH face retains its own
+texture region. Damaged shapes bypass intact-model animation address maps.
+
+`combat::debris` computes a fitted attachment from inert shape bounds and advances
+pieces at 120 Hz with inherited velocity, gravity and tumble. First swept terrain
+contact retires a piece and creates a short visual ground impact. The runtime
+atlas also contains the matching fragment textures. Fragment state belongs to
+combat simulation, so replay and rendering consume the same breakup lifecycle.

@@ -33,6 +33,9 @@ local terrain clearance rejects launch. Separation sets starting distance. Natio
 remain setup data with no AI/objective effects. BARCAP mission generation is not
 implemented; unsupported configurations are explained by launch notices.
 
+Load Ordnance no longer shows the straight-flight dummy description; its message
+area is reserved for loading feedback and validation errors.
+
 Custom weapons opens Load Ordnance with the original background/palette, fonts,
 weapon thumbnails, station headings, dial and rocker art. Catalog categories retain
 separate pages. Click a weapon then a compatible station, or drag it there, to load.

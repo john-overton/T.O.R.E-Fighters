@@ -135,9 +135,10 @@ Exact F-14 wing sweep schedules and X-31 physical nozzle/paddle laws are unknown
 Next research: review the FA PT fields, shape branches and original control
 consumers, then specify player-visible schedules. Old ATF rig addresses and
 real-aircraft expectations do not establish these behaviors. Shape-specific
-fitted presentation choices must be recorded before use. Full damage shapes,
+fitted presentation choices must be recorded before use. Original damage transitions and fragment trajectories,
 LOD, shadows, original instrument composition and retail comparisons remain
-outside the current established evidence.
+outside the current established evidence. Body variants now use the
+[damage and smoke specification](damage-smoke.md).
 
 ## A-4 roll tuning
 

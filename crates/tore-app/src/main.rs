@@ -10,6 +10,7 @@ mod cockpit_renderer;
 mod combat;
 mod combat_tape;
 mod controls_editor;
+mod damage_art;
 mod engine_material;
 mod flight;
 mod flight_canvas;
@@ -32,6 +33,7 @@ mod renderer;
 mod roster_animation;
 mod scope;
 mod sim_renderer;
+mod smoke_renderer;
 mod terrain;
 mod weapon_hud;
 mod weather;
@@ -745,7 +747,7 @@ impl App {
                         }
                     }
                     o.visible = true;
-                    o.message=Some("Straight-flight dummies use the selected wings and separation. No combat AI or objectives. Review your load, then Fly.".into());
+                    o.message = None;
                     Ok(())
                 })();
                 if let Err(e) = result {
@@ -1446,6 +1448,7 @@ impl ApplicationHandler for App {
                             self.hornet.streamer_points(&presented),
                         );
                         renderer.vapor(&vapor);
+                        renderer.smoke(&self.combat.smoke_art, &self.combat.state.smoke);
                         match renderer.poll_previews() {
                             Ok(previews) => {
                                 self.performance.completed_previews += previews.len();
@@ -1822,6 +1825,8 @@ fn main() -> AppResult<()> {
     let mut flight_controls = None;
     let mut flight_throttle = None;
     let mut flight_bay = None;
+    let mut damage_preview = None;
+    let mut damage_preview_ticks = 240usize;
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
     let mut validate_creator = false;
@@ -1869,6 +1874,16 @@ fn main() -> AppResult<()> {
             "--jammer-on" => {
                 jammer_on = true;
                 live_fire = true;
+                initial_screen = Screen::Flight;
+            }
+            "--damage-preview-ticks" => {
+                damage_preview_ticks = args.next().ok_or("--damage-preview-ticks needs 1..7200")?.parse()?;
+                if !(1..=7200).contains(&damage_preview_ticks) { return Err("--damage-preview-ticks needs 1..7200".into()); }
+            }
+            "--damage-preview" => {
+                let fraction = args.next().ok_or("--damage-preview needs 0..1")?.parse::<f64>()?;
+                if !fraction.is_finite() || !(0. ..=1.).contains(&fraction) { return Err("--damage-preview needs 0..1".into()); }
+                damage_preview = Some(fraction);
                 initial_screen = Screen::Flight;
             }
             "--dummy-aircraft" => {
@@ -2170,7 +2185,7 @@ fn main() -> AppResult<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Creator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-4 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-4 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -2193,6 +2208,16 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             || headless_ticks.is_some())
     {
         return Err("dummy aircraft require normal desktop flight; range/research/replay/headless-flight modes have separate fixtures".into());
+    }
+    if damage_preview.is_some()
+        && (capture_terrain.is_none()
+            || native_tables_path.is_some()
+            || record_input.is_some()
+            || record_combat.is_some()
+            || replay_combat.is_some()
+            || replay_input.is_some())
+    {
+        return Err("--damage-preview requires --capture-flight and cannot record/replay or use native research flight".into());
     }
     let researched_flight = flight_mode_arg.unwrap_or(native_tables_path.is_none());
     let native_tables = if let Some(path) = native_tables_path {
@@ -2604,7 +2629,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && (flight_devices.is_some()
             || flight_controls.is_some()
             || (flight_throttle.is_some() || flight_bay.is_some())
-            || flight_probe_ticks.is_some());
+            || flight_probe_ticks.is_some()
+            || damage_preview.is_some());
     let mut flight = hornet.start(&world);
     if let Ok(value) = std::env::var("TORE_FLIGHT_AGL") {
         let agl = value.parse::<f64>()?;
@@ -2856,6 +2882,32 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             combat.state.kills,
             combat.state.projectiles.len(),
             combat.state.ammo
+        );
+    }
+    if let Some(fraction) = damage_preview {
+        combat.state.player_hp = (f64::from(combat.state.configuration().damage_capacity)
+            * (1. - fraction))
+            .round() as i32;
+        for target in &mut combat.state.targets {
+            target.hp = (f64::from(target.initial_hp) * (1. - fraction)).round() as i32;
+        }
+        for _ in 0..damage_preview_ticks {
+            flight.step(&tore_input::PilotInput::default(), |x, z| {
+                f64::from(world.height(x as f32, z as f32))
+            });
+            combat.step(&mut flight, &world)?;
+        }
+        println!(
+            "Damage preview: ticks={} debris={} impacts={} smoke={}",
+            damage_preview_ticks,
+            combat.state.debris.len(),
+            combat
+                .state
+                .effects
+                .iter()
+                .filter(|e| e.kind == tore_sim::combat::live::EffectKind::DebrisImpact)
+                .count(),
+            combat.state.smoke.puffs.len()
         );
     }
     if input_profile.is_none() {

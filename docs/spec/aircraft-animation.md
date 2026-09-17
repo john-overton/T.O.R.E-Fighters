@@ -100,6 +100,7 @@ No refraction or new cockpit geometry is introduced.
 Test fixed hinge points, rigid gear lengths, paired surface direction, split
 panel continuity, bay timing/reversal/interpolation, unsupported commands and
 input roundtrip. Inspect closed/partial/open views and F-22 cockpit/exterior
-views. Original schedules, exact mechanical linkage, side bays, damage/LOD
-variants and retail comparison remain unknown. Next research is source shape
+views. Original schedules, exact mechanical linkage, side bays, original damage transitions, LOD
+variants and retail comparison remain unknown. Damaged body rendering follows
+the separate [damage and smoke specification](damage-smoke.md). Next research is source shape
 control consumers and authored fits can ship without claiming original parity.

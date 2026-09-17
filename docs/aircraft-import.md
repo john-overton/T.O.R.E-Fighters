@@ -219,3 +219,8 @@ including the original imported warning samples.
 
 Quick Mission lists only supported aircraft with parsed imported flight profiles,
 not the wider metadata catalog. See [selector behaviour](spec/quick-mission-menu.md).
+
+The runtime now reads the already-imported A/C damaged-body SHs, B/D pieces and their own PIC
+references for every supported aircraft. Missing damage resources produce a
+re-import error rather than substituting a different aircraft. No retail bytes
+are embedded. [Resource evidence and remaining variant questions](formats/objects-and-shapes.md#combat-damage-and-smoke-resource-review).

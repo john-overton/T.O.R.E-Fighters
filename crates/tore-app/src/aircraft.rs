@@ -15,6 +15,7 @@ pub struct Airframe {
     model: tore_sim::models::AircraftModel,
     pub profile: Aircraft,
     pub atlas: Pic,
+    damage_art: crate::damage_art::DamageArt,
     pub palette: [[u8; 3]; 256],
     pub cockpit_pic: Pic,
     pub sprites: BTreeMap<String, Sprite>,
@@ -52,7 +53,7 @@ impl Airframe {
         {
             return Err("unreviewed F18.SH device layout; preserve raw import and review its rig before flying".into());
         }
-        let atlas = Pic::parse(get(&format!("_{}.PIC", id.stem()))?)?;
+        let mut atlas = Pic::parse(get(&format!("_{}.PIC", id.stem()))?)?;
         if !atlas.palette.is_empty() {
             return Err("unreviewed aircraft atlas palette override".into());
         }
@@ -229,6 +230,7 @@ impl Airframe {
                 return Err("unreviewed engine face projection".into());
             }
         }
+        let damage_art = crate::damage_art::DamageArt::load(id, data, &mut atlas)?;
         Ok(Self {
             engine_material,
             nozzle_bounds,
@@ -236,6 +238,7 @@ impl Airframe {
             model: tore_sim::models::AircraftModel::for_aircraft(&profile)?,
             profile,
             atlas,
+            damage_art,
             palette,
             cockpit_pic: frame,
             sprites,
@@ -394,6 +397,18 @@ impl Airframe {
         c
     }
     pub fn vertices(&self, s: &flight::State, camera: &Camera, world: &World) -> Vec<f32> {
+        self.visual_vertices(s, camera, world, false)
+    }
+    pub fn fragment_vertices(&self, s: &flight::State, camera: &Camera, world: &World) -> Vec<f32> {
+        self.visual_vertices(s, camera, world, true)
+    }
+    fn visual_vertices(
+        &self,
+        s: &flight::State,
+        camera: &Camera,
+        world: &World,
+        fragment: bool,
+    ) -> Vec<f32> {
         let mut result = Vec::new();
         let (sy, cy) = (s.yaw as f32).sin_cos();
         let (sp, cp) = (s.pitch as f32).sin_cos();
@@ -416,17 +431,29 @@ impl Airframe {
             });
         let model_scale = self.rig.as_ref().map_or(1. / 3., |r| r.scale());
         let hornet_rig = self.profile.id == tore_formats::aircraft::AircraftId::F18;
-        for source in self.poses[if hornet_rig {
-            15
-        } else if self.rig.is_some() {
-            0
+        let damaged = crate::damage_art::DamageArt::variant(
+            self.profile.id,
+            if fragment { 1. } else { s.damage_fraction },
+        );
+        let shape = if let Some(index) = damaged {
+            if fragment {
+                &self.damage_art.fragments[index]
+            } else {
+                &self.damage_art.bodies[index]
+            }
         } else {
-            usize::from(s.gear > 0.)
-        }]
-        .faces
-        .iter()
-        .flat_map(|f| {
-            if hornet_rig {
+            &self.poses[if hornet_rig {
+                15
+            } else if self.rig.is_some() {
+                0
+            } else {
+                usize::from(s.gear > 0.)
+            }]
+        };
+        for source in shape.faces.iter().flat_map(|f| {
+            if damaged.is_some() {
+                vec![f.clone()]
+            } else if hornet_rig {
                 crate::aircraft_animation::rudder_faces(f, s)
             } else if let Some(rig) = &self.rig {
                 rig.faces(f, s)
@@ -434,7 +461,9 @@ impl Airframe {
                 vec![f.clone()]
             }
         }) {
-            let Some(f) = (if hornet_rig {
+            let Some(f) = (if damaged.is_some() {
+                Some(source.clone())
+            } else if hornet_rig {
                 crate::aircraft_animation::animate(&source, s)
             } else if let Some(rig) = &self.rig {
                 rig.animate(&source, s)
@@ -473,10 +502,12 @@ impl Airframe {
             } else {
                 0.
             };
-            let engine_face = self.engine_material.is_some()
+            let engine_face = damaged.is_none()
+                && self.engine_material.is_some()
                 && crate::engine_material::nozzle(self.profile.id, f.address);
             let engine_group = crate::engine_material::outlet_group(self.profile.id, &f.positions);
-            let canopy = self.profile.id == tore_formats::aircraft::AircraftId::F22
+            let canopy = damaged.is_none()
+                && self.profile.id == tore_formats::aircraft::AircraftId::F22
                 && crate::roster_animation::canopy(f.address);
             for i in 1..f.positions.len() - 1 {
                 for j in [0, i, i + 1] {
@@ -492,13 +523,19 @@ impl Airframe {
                     } else if f.uv.is_empty() {
                         [0.; 2]
                     } else {
+                        let region = self
+                            .damage_art
+                            .regions
+                            .get(&f.texture)
+                            .expect("reviewed aircraft texture");
                         [
                             (f.uv[j][0] + 0.5) / self.atlas.width as f32,
-                            (self.atlas.height as f32 - 0.5 - f.uv[j][1])
+                            (region[2] as f32 + region[1] as f32 - 0.5 - f.uv[j][1])
                                 / self.atlas.height as f32,
                         ]
                     };
-                    let cold_nozzle = !engine_face
+                    let cold_nozzle = damaged.is_none()
+                        && !engine_face
                         && s.exhaust <= 0.
                         && if hornet_rig {
                             crate::aircraft_animation::part(f.address)

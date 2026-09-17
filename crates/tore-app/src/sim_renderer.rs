@@ -7,6 +7,7 @@ fn bytes(values: &[f32]) -> Vec<u8> {
 type AircraftBatch = (wgpu::BindGroup, wgpu::Buffer, u32);
 pub struct SimRenderer {
     lens_flare: crate::lens_flare::LensFlare,
+    smoke: crate::smoke_renderer::SmokeRenderer,
     battle: Option<(wgpu::Buffer, u32)>,
     dummies: Vec<(tore_formats::aircraft::AircraftId, AircraftBatch)>,
     vapor: Option<(wgpu::Buffer, u32)>,
@@ -325,6 +326,7 @@ impl SimRenderer {
         });
         Self {
             lens_flare: crate::lens_flare::LensFlare::new(device, format),
+            smoke: crate::smoke_renderer::SmokeRenderer::new(device, format, &shader),
             battle: None,
             vapor: None,
             vapor_pipeline,
@@ -351,6 +353,15 @@ impl SimRenderer {
             depth: Self::depth(device, width, height),
             size: [width, height],
         }
+    }
+    pub fn smoke(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        art: &crate::menu::Sprite,
+        smoke: &tore_sim::combat::smoke::Smoke,
+    ) {
+        self.smoke.prepare(device, queue, &self.uniform, art, smoke);
     }
     pub fn combat(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
         if self.battle.is_none() {
@@ -693,6 +704,7 @@ impl SimRenderer {
         reflection[3] = world.ocean_motion.environment_reflection;
         uniform.extend(reflection);
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
+        self.smoke.update(queue, camera);
         let mut entries = Vec::with_capacity(11 * 1024);
         for row in std::iter::once(&weather.palette).chain(weather.fog_palette.iter()) {
             for rgb in row {
@@ -824,6 +836,7 @@ impl SimRenderer {
             pass.set_vertex_buffer(0, buffer.slice(..));
             pass.draw(0..*count, 0..1);
         }
+        self.smoke.draw(&mut pass);
         drop(pass);
         if flare_target.is_some() {
             self.lens_flare.draw(encoder, target);

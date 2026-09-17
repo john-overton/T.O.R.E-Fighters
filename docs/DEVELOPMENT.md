@@ -663,3 +663,12 @@ without the creator's five-per-wing selector limit. Range, research and replay
 modes have their own fixtures and cannot be combined with this diagnostic.
 `--validate-creator` now also checks normal stores and 29-dummy reset/model geometry
 for each supported identity. Custom mission recording remains unavailable.
+
+Damage/smoke captures use `--damage-preview 0.6 --flight-view 2 --capture-flight
+.local/damaged.ppm` on one command line. This explicit diagnostic sets player and
+fixture health and advances two seconds before capture (override with
+`--damage-preview-ticks 1..7200`); it cannot record/replay
+or use native research flight. For motor smoke use `--live-fire --weapon-slot 2
+--combat-command seeker-mode --combat-probe-ticks 100 --flight-view 2
+--capture-flight .local/motor-smoke.ppm`. Runtime smoke comes from `SMOKE.PIC`;
+`SMOKE.SH` remains unexecuted. [Fitted rules](spec/damage-smoke.md).

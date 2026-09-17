@@ -670,3 +670,23 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
  let lit=cloud_solar_glow(tex.rgb,normalize(in.direction),1.0-clamp(haze(length(in.direction)),0.0,1.0));
  return vec4<f32>(aerial_perspective(lit,in.direction,in.altitude),1.0);
 }
+
+struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) opacity:f32, @location(2) distance:f32 }
+@vertex fn smoke_vertex(@location(0) center:vec3<f32>,@location(1) offset:vec2<f32>,@location(2) uv:vec2<f32>,@location(3) opacity:f32)->SmokeOut {
+ let position=center+scene.right.xyz*offset.x+scene.up.xyz*offset.y;
+ let p=position-scene.eye.xyz;let z=dot(p,scene.forward.xyz);
+ let near=1.0;let far=2200000.0;let f=1.7320508*scene.up.w;
+ var out:SmokeOut;
+ out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
+ out.uv=uv;out.opacity=opacity;out.distance=length(p);return out;
+}
+@fragment fn smoke_fragment(in:SmokeOut)->@location(0) vec4<f32> {
+ let size=vec2<i32>(textureDimensions(engine_art));
+ let p=in.uv*vec2<f32>(size)-vec2(0.5);let base=floor(p);let f=p-base;
+ var color=vec4(0.0);
+ for(var y=0;y<2;y++){for(var x=0;x<2;x++){
+  let c=textureLoad(engine_art,clamp(vec2<i32>(base)+vec2(x,y),vec2(0),size-vec2(1)),0);
+  color+=c*select(1.-f.x,f.x,x==1)*select(1.-f.y,f.y,y==1);
+ }}
+ return color*in.opacity*(1.0-haze(in.distance));
+}

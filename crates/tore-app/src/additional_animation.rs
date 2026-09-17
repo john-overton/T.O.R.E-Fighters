@@ -151,13 +151,7 @@ impl Rig {
     pub fn scale(&self) -> f32 {
         // FA F14 has header exponent 10; A4/F31 have 8. Retain the host's
         // fitted one-third-foot scale, applying the source exponent difference.
-        if self.id == AircraftId::F14 {
-            4. / 3.
-        } else if self.id == AircraftId::Mig23 {
-            2. / 3.
-        } else {
-            1. / 3.
-        }
+        tore_sim::combat::debris::scale(self.id) as f32
     }
     pub fn cold_nozzle(&self, address: usize) -> bool {
         match self.id {
