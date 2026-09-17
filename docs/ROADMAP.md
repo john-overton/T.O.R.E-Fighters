@@ -176,6 +176,24 @@ Exit: liveness probe green.  Behavior compared against retail recordings and rec
 
 ### 1f. Sensors and weapons
 
+Current authorized slice: shared aircraft radar, requested 2026-09-16, independent
+of the AI milestone. [Behaviour and roster stats](spec/radar.md),
+[standard component proposal](radar.md), [research validation](baselines/radar.md).
+Research now establishes the imported radar profiles and normal range-mode rule.
+Implementation milestones:
+
+1. Shared radar profiles and simulation-owned search/tracking results, using PT
+   radar/IR signatures and the requested authored look-down, era, notch and
+   jammer model. Proposed constants live in the component guide.
+2. Scope range/mode correction, directional jammer noise, the RCS exposure panel
+   and mouse designation using stable target IDs. Aircraft orientation feeds the
+   same effective signature used by the RCS contour and detection. Radar/jammer generation matchups are explicit profiles.
+3. Radar-guided launch and maintained-support transitions with deterministic tests.
+
+IR/HARM/history, IFF and detailed surface modes remain subsequent slices. Unresolved
+retail details may use documented fitted rules; do not turn complete source-code
+closure into a prerequisite. No AI is authorized by this radar pass.
+
 Work:
 - Radar modes, RWR, IFF, and the retail sensor model.
 - Missiles, bombs, and gun stats from retail data.  Stores affect weight and flight.

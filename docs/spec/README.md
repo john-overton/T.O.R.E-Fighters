@@ -54,7 +54,9 @@ evidence in [`../baselines/`](../baselines/) rather than restating it.
 
 ## Status
 
-No specs are written yet. The research material they will be built from is in
-[`../formats/`](../formats/) and in the frozen archives under
-[`../research/`](../research/). The next feature scheduled for a research pass is
-recorded in [`../parity-plan.md`](../parity-plan.md).
+Current specifications include aircraft ports, animation, atmosphere, ocean,
+terrain and menus. See [`../parity-plan.md`](../parity-plan.md) for status and the
+next feature. The [radar specification](radar.md) records the current twelve-plane
+capability survey; its component design is a separate [proposal](../radar.md).
+Supporting research lives in [`../formats/`](../formats/), measured evidence in
+[`../baselines/`](../baselines/), and frozen archives in [`../research/`](../research/).

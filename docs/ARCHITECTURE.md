@@ -158,3 +158,11 @@ the renderer interpolates it, and manual combat can request it without changing
 launch eligibility. Exterior canopy grading is a mesh material, independent
 of cockpit artwork and world-view rendering. Its nearest surface is resolved
 in a depth-only pass, then blended at 75% opacity over the opaque scene.
+
+## Proposed shared radar boundary
+
+The [radar component proposal](radar.md) separates imported capability profiles,
+simulation-owned contacts/tracking, player designation, scope presentation and
+weapon support. This is planned, not implemented. Existing live combat still
+owns radar detection; the next slice consolidates that result for both the scope
+and missiles without changing the flight adapters or renderer independence.

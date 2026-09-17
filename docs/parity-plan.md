@@ -48,6 +48,7 @@ name, with the numbers a player would notice.
 
 | Spec | Covers | Status |
 | --- | --- | --- |
+| [Aircraft radar](spec/radar.md) | Twelve-aircraft radar stats, automatic range modes and look-down evidence | Research complete for initial profiles; [component proposal](radar.md), implementation pending |
 | [Roster expansion](spec/roster-aircraft.md) | Seven REDFOR/F-22A initial player ports | [Acceptance and limits](baselines/aircraft-roster-expansion.md) |
 | [Additional aircraft](spec/additional-aircraft.md) | F-14D, A-4E and X-31 source flight configuration and fitted presentation | Initial ports implemented; [acceptance](baselines/aircraft-fa-expansion.md) |
 | [Ocean](spec/ocean.md) | Short ripples, close pixelation and distance filtering; original textures/colors | Implemented; [acceptance](baselines/ocean.md) |
@@ -80,20 +81,25 @@ research path. Do not change the default without being asked.
 
 ## Next
 
-1. **Write the first behaviour specs.** Start with the features that already have
+1. **Shared aircraft radar**, requested by John on 2026-09-16. Use the
+   [capability spec](spec/radar.md) and [component proposal](radar.md): shared
+   profiles/contact state with PT signatures and authored look-down/notch/jamming,
+   the RCS/aspect display, mouse designation, then radar-guided missile support. Initial research and
+   proposed tuning are recorded; implementation is pending. No AI work.
+2. **Continue behaviour specs.** Start with the features that already have
    the most recovered numbers and the least prose: weather, then flight
    envelope/departure, then the quick-mission and ordnance screens. Each spec
    replaces a pile of source notes with one page a player would recognise.
-2. **Ground contact and landing as an authored feature.** Contact is opinionated
+3. **Ground contact and landing as an authored feature.** Contact is opinionated
    now. Make takeoff, landing, taxi and deck behaviour feel right and hold up in
    tests; stop waiting on a recovered contact producer.
-3. **Maneuver audio and rumble**, then the remaining
+4. **Maneuver audio and rumble**, then the remaining
    [flight-response](research/flight-response-plan.md) items.
-4. **Continue F-14D, A-4E and X-31 acceptance.** Initial FA-only ports are implemented,
+5. **Continue F-14D, A-4E and X-31 acceptance.** Initial FA-only ports are implemented,
    requested by John on 2026-09-16. Resolve the [documented limits](baselines/aircraft-fa-expansion.md),
    especially original X-31 vector animation schedules and remaining pitch/yaw response
    tuning. PT roll response and low-speed auxiliary control are implemented.
-5. **Remaining weather work**: wind, turbulence and vapor.
+6. **Remaining weather work**: wind, turbulence and vapor.
 
 ## Frozen
 
