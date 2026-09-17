@@ -384,6 +384,8 @@ pub struct Effect {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     Fired(usize),
+    SeekerActivated(u32),
+    Pitbull(u32),
     Hit(u32),
     Destroyed(u32),
     Ground,
@@ -1087,7 +1089,18 @@ impl State {
             };
             let old_direction = p.direction;
             if p.guidance.is_some() {
+                let was_active = p.guidance.as_ref().unwrap().enabled;
+                let was_acquired = p.guidance.as_ref().unwrap().seeker.acquired;
                 guide(p, w, &self.targets, &self.sensors, &obscured);
+                let f = p.guidance.as_ref().unwrap();
+                if f.profile.guidance == Guidance::Active {
+                    if !was_active && f.enabled {
+                        events.push(Event::SeekerActivated(p.id));
+                    }
+                    if !was_acquired && f.seeker.status == Status::Pitbull {
+                        events.push(Event::Pitbull(p.id));
+                    }
+                }
             } else {
                 if p.guidance_ticks.is_some_and(|end| p.age >= end) {
                     p.target = None;

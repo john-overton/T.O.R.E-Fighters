@@ -124,5 +124,7 @@ Live accepted profiles use this motion integrator. Version 4 combat records carr
 world velocity; version 2/3 playback explicitly keeps compatibility motion.
 All 167 simulation tests pass, including new heat/aspect/dwell, emitter shutdown,
 shared RCS and reacquisition beyond the memory timeout cases. Seeker observations
-and mounted acquisition now run in the live adapter. Activation acceptance,
-presentation and roster validation remain.
+and mounted acquisition now run in the live adapter. Eight missile integration tests now cover all nine activation boundaries, failed
+acquisition, hidden movement, early guidance expiry, target-free release,
+post-shot mounted reset and two-target ownership. Activation and first pitbull
+produce distinct shot-ID events. Presentation and roster validation remain.

@@ -141,3 +141,160 @@ fn radar_seeker_uses_shared_aspect_signature_range() {
     t.basis = Basis::new(std::f64::consts::FRAC_PI_2, 0., 0.);
     assert!(seeker::observe(&w, profile, &view, &t).is_some());
 }
+
+fn shot(w: &Weapon, mode: LaunchMode, target: Option<u32>) -> Projectile {
+    let profile = Profile::for_weapon(w).unwrap();
+    Projectile {
+        id: 0,
+        guidance: Some(Flight::new(profile, mode, target)),
+        motion: Some(Motion::new(&w.movement, [0., 0., 600.], 1000.)),
+        guidance_ticks: Some(profile.guidance_ticks),
+        age: 0,
+        incoming: false,
+        station: 0,
+        position: [0., 1000., 0.],
+        previous: [0., 1000., 0.],
+        direction: [0., 0., 1.],
+        speed_f8: 600 * 256,
+        launched_t: 0,
+        target,
+        fall: FallState::default(),
+    }
+}
+#[test]
+fn all_nine_activation_thresholds_and_no_false_pitbull() {
+    let sensors = fixture(true).sensors;
+    for (name, nmi) in [
+        ("AIM120.JT", 5.),
+        ("MICA.JT", 5.),
+        ("AA12.JT", 5.),
+        ("AAML.JT", 8.),
+        ("AIM54C.JT", 10.),
+        ("AEMP1.JT", 3.),
+        ("AGM84A.JT", 8.),
+        ("AM39.JT", 8.),
+        ("AS16.JT", 2.),
+    ] {
+        let w = weapon(name);
+        for delta in [-0.01, 0., 0.01] {
+            let mut p = shot(&w, LaunchMode::Cued, Some(1));
+            p.guidance.as_mut().unwrap().last_intercept = Some([0., 1000., nmi * 6076. + delta]);
+            guide(&mut p, &w, &[], &sensors, &|_, _| false);
+            let f = p.guidance.unwrap();
+            assert_eq!(f.enabled, delta <= 0., "{name} {delta}");
+            assert_eq!(
+                f.seeker.status,
+                if delta <= 0. {
+                    Status::Search
+                } else {
+                    Status::Midcourse
+                }
+            );
+        }
+        let mut uncued = shot(&w, LaunchMode::Boresight, None);
+        guide(&mut uncued, &w, &[], &sensors, &|_, _| false);
+        assert!(uncued.guidance.as_ref().unwrap().enabled);
+        assert_eq!(uncued.guidance.as_ref().unwrap().last_intercept, None);
+    }
+    for name in ["R530.JT", "AIM9M.JT", "AGM45.JT"] {
+        assert_eq!(
+            Profile::for_weapon(&weapon(name)).unwrap().activation_ft,
+            None
+        );
+    }
+    for name in [
+        "AS14.JT", "AS30.JT", "AT12.JT", "AT2.JT", "ASROC.JT", "SA19.JT", "SAN11.JT",
+    ] {
+        assert!(Profile::for_weapon(&weapon(name)).is_none());
+    }
+}
+#[test]
+fn hidden_movement_never_updates_intercept_and_expiry_precedes_acquisition() {
+    let sensors = fixture(true).sensors;
+    let w = weapon("AIM120.JT");
+    let mut p = shot(&w, LaunchMode::Cued, Some(1));
+    let intercept = [0., 1000., 40000.];
+    p.guidance.as_mut().unwrap().last_intercept = Some(intercept);
+    let mut t = target(1, [0., 1000., 3000.], 20, 0x80);
+    for i in 0..300 {
+        t.position[0] = f64::from(i) * 100.;
+        guide(&mut p, &w, &[t.clone()], &sensors, &|_, _| true);
+        p.age += 1;
+    }
+    assert_eq!(p.guidance.as_ref().unwrap().last_intercept, Some(intercept));
+    assert!(!p.guidance.as_ref().unwrap().enabled);
+    p.guidance_ticks = Some(p.age);
+    p.guidance.as_mut().unwrap().last_intercept = Some(p.position);
+    guide(&mut p, &w, &[t], &sensors, &|_, _| false);
+    assert_eq!(p.guidance.as_ref().unwrap().seeker.status, Status::Expired);
+    assert!(!p.guidance.as_ref().unwrap().enabled);
+    assert!(!missiles::removed(&w.movement, p.age));
+}
+#[test]
+fn boresight_live_release_without_cockpit_sensors_and_next_round_reset() {
+    let mut s = fixture(true);
+    s.config.stations[0].weapon = weapon("AIM9M.JT");
+    s.launch_mode = LaunchMode::Boresight;
+    let l = Launcher {
+        position: [0., 1000., 0.],
+        basis: Basis::new(0., 0., 0.),
+        speed_fps: 600.,
+        velocity: [40., 60., 600.],
+        radar: false,
+        jammer: false,
+        alive: true,
+        controls: Default::default(),
+    };
+    s.config.sensors.radar = None;
+    s.config.sensors.infrared = None;
+    assert_eq!(s.readiness(l), Readiness::Ready);
+    assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
+    assert_eq!(s.projectiles[0].target, None);
+    assert_eq!(
+        s.projectiles[0].guidance.as_ref().unwrap().mode,
+        LaunchMode::Boresight
+    );
+    assert_eq!(s.projectiles[0].motion.as_ref().unwrap().velocity[0], 40.);
+    s.release();
+    let pos = s.projectiles[0].position;
+    s.targets
+        .push(target(77, [pos[0], pos[1], pos[2] + 2500.], 20, 0x80));
+    for _ in 0..DWELL + 1 {
+        s.step(false, l, |_, _| 0.);
+    }
+    assert_eq!(s.projectiles[0].target, Some(77));
+    assert_eq!(s.designated(), None);
+    assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
+    assert!(!s.mounted.acquired);
+    assert_eq!(s.mounted.dwell, 0);
+}
+#[test]
+fn two_active_shots_own_targets_and_reacquire_without_support() {
+    let sensors = fixture(true).sensors;
+    let w = weapon("AIM120.JT");
+    let mut a = shot(&w, LaunchMode::Cued, Some(1));
+    let mut b = shot(&w, LaunchMode::Cued, Some(2));
+    let targets = [
+        target(1, [0., 1000., 3000.], 20, 0x80),
+        target(2, [10., 1000., 4000.], 20, 0x80),
+    ];
+    a.guidance.as_mut().unwrap().last_intercept = Some(targets[0].position);
+    b.guidance.as_mut().unwrap().last_intercept = Some(targets[1].position);
+    for _ in 0..DWELL {
+        guide(&mut a, &w, &targets, &sensors, &|_, _| false);
+        guide(&mut b, &w, &targets, &sensors, &|_, _| false);
+    }
+    assert_eq!(a.target, Some(1));
+    assert_eq!(b.target, Some(2));
+    assert_eq!(a.guidance.as_ref().unwrap().seeker.status, Status::Pitbull);
+    let known = a.guidance.as_ref().unwrap().last_intercept;
+    for _ in 0..MEMORY + 1 {
+        guide(&mut a, &w, &targets, &sensors, &|_, _| true);
+    }
+    assert_eq!(a.guidance.as_ref().unwrap().last_intercept, known);
+    assert_eq!(a.guidance.as_ref().unwrap().seeker.status, Status::Lost);
+    for _ in 0..DWELL {
+        guide(&mut a, &w, &targets, &sensors, &|_, _| false);
+    }
+    assert_eq!(a.guidance.as_ref().unwrap().seeker.status, Status::Pitbull);
+}

@@ -1324,7 +1324,9 @@ impl ApplicationHandler for App {
                                     }
                                     Event::SubsystemDamaged(_)
                                     | Event::Defeated(_)
-                                    | Event::TrackLost(_) => {}
+                                    | Event::TrackLost(_)
+                                    | Event::SeekerActivated(_)
+                                    | Event::Pitbull(_) => {}
                                     Event::PlayerDestroyed => {
                                         sounds.insert("&EXPL12.5K");
                                         self.flight.crashed = true;
