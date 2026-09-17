@@ -72,7 +72,7 @@ the Linux range, replay and rendered acceptance.
 
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
-| Radar search/tracking modes and contact history | ☑ | ☐ | Completed for the current air-to-air scope. | Manual pp. 96-99; [radar](radar.md) |
+| Radar search/tracking modes and contact history | ☑ | ☐ | Completed for the current air-to-air scope. Pointer takeover covers the full black screen up to the bezel, including radar-off display. | Manual pp. 96-99; [radar](radar.md) |
 | RCS exposure display | ☑ | ☑ | Completed. Uses the same aircraft exposure calculation as detection. | Manual pp. 94-95; [RCS display](spec/rcs.md) |
 | Radar notching and generation-based jammer tuning | ☐ | ☑ | Partially implemented. Detection effects work; side-by-side aircraft tuning remains. | [Radar tuning](radar.md#deliberate-departures-and-known-approximations) |
 | Persistent selection of search-only contacts | ☐ | ☑ | Completed. Selection and firing permission remain separate. | [Selection](radar.md#mouse-designation-and-missiles) |

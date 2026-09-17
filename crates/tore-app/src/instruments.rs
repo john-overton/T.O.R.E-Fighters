@@ -309,7 +309,7 @@ impl Instruments {
                 let (ox, oy, w, h) = self.layout.rect(i);
                 let px = (x - f64::from(ox)) * WIDTH as f64 / f64::from(w);
                 let py = (y - f64::from(oy)) * HEIGHT as f64 / f64::from(h);
-                ((25. ..=135.).contains(&px) && (40. ..=130.).contains(&py))
+                ((11. ..149.).contains(&px) && (21. ..135.).contains(&py))
                     .then_some((px as i32, py as i32))
             })
         });
@@ -706,13 +706,6 @@ impl Instruments {
                                 r.rect(x - 1, y - 1, 3, 3, colour);
                             }
                         }
-                        if let Some((x, y)) = self.crosshair {
-                            // Full-scope crosshair with an open centre, matching the supplied reference.
-                            r.line((25, y), ((x - 4).max(25), y), GREEN);
-                            r.line(((x + 4).min(135), y), (135, y), GREEN);
-                            r.line((x, 40), (x, (y - 4).max(40)), GREEN);
-                            r.line((x, (y + 4).min(130)), (x, 130), GREEN);
-                        }
                         text(&mut r, scope.mode.unwrap_or(scope.channel), 17, 25);
                         text(&mut r, &format!("{range:.0}"), 126, 25);
                         if scope.history {
@@ -723,6 +716,21 @@ impl Instruments {
                                 status.bytes().map(|ch| f.glyphs[ch as usize].advance).sum();
                             text(&mut r, status, 147 - width as i32, 124);
                         }
+                    }
+                }
+                if let Some((x, y)) = self.crosshair {
+                    // Takeover and drawing cover the black screen, not just the contact plot.
+                    if x - 4 >= 11 {
+                        r.line((11, y), (x - 4, y), GREEN);
+                    }
+                    if x + 4 <= 148 {
+                        r.line((x + 4, y), (148, y), GREEN);
+                    }
+                    if y - 4 >= 21 {
+                        r.line((x, 21), (x, y - 4), GREEN);
+                    }
+                    if y + 4 <= 134 {
+                        r.line((x, y + 4), (x, 134), GREEN);
                     }
                 }
             }

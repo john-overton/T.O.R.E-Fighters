@@ -603,3 +603,13 @@ Seeker radar range uses the shared RCS/aspect square-root law with reference 100
 weapon-specific notch and jammer rejection remain unspecified. The bounded
 intercept estimate reuses propulsion and samples lead every 0.1 seconds. It
 approximates a straight path and does not yet price turning losses into EST.
+
+## Radar cursor screen boundary
+
+**Opinionated, requested by John on 2026-09-17.** The radar crosshair replaces
+the OS pointer across the entire black instrument screen, not just the inset
+contact plot. In the 160 by 156 instrument raster, this is x in [11, 149) and
+y in [21, 135). Lines stop at the screen edges and retain a four-pixel central
+gap. The bezel and bottom buttons keep the normal pointer. This applies when
+the radar is off or sensor data is unavailable too. Contact projection and
+selection tolerance do not change. Scaling uses the displayed instrument bounds.

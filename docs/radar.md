@@ -800,7 +800,9 @@ emission eligibility never substitute for one another. Missiles retain their
 last measured intercept during loss and can reacquire their original target
 until guidance expiry. [Missile rules](spec/missiles.md) define the fitted tuning.
 
-The plotting area uses a green crosshair with a central gap instead of the OS
+The entire black radar screen uses a green crosshair with a central gap instead of the OS
 pointer, following John's 2026-09-17 reference image. Its position follows the
-mouse and uses the same scaling as contact selection. L or the upper-right
+mouse and uses the same scaling as contact selection. Takeover starts at the
+screen edge, including margins outside the contact plot, and ends at the bezel.
+It remains visible with the radar off. [Screen bounds](spec/missiles.md#radar-cursor-screen-boundary). L or the upper-right
 RELEASE LOCK button clears designation. [HUD rules](spec/missiles.md#weapon-hud-delivery).

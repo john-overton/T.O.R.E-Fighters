@@ -361,7 +361,7 @@ and the compact range scale sits beneath altitude. BORE READY is omitted. Neithe
 An internal bay opens for BORESIGHT and release waits until 95 percent open.
 Armed missile readouts replace AGL, vertical speed and bank scale. CUED radar
 lock diamonds blink when ready to fire. The radar instrument replaces the mouse
-arrow with a crosshair while the pointer is over its plotting area.
+arrow with a crosshair across the entire black screen, up to the bezel.
 
 Imported IR and radar search/lock samples provide the cues, with a louder lock
 cue. Their assignment is fitted. Effects mute, pause, safe, empty and failed
