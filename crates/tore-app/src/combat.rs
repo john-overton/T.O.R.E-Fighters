@@ -34,12 +34,30 @@ impl FireInput {
         self.held = false;
     }
 }
+/// Yaw, pitch and bank for one drawn airborne target.
+///
+/// With `ai_poses` off this is the existing straight-flight fixture rule: the
+/// heading comes from the velocity and the aircraft is drawn level. With it on
+/// the target carries a real attitude written by the AI bridge, so the stored
+/// basis is used instead.
+pub fn target_pose(target: &live::Target, ai_poses: bool) -> [f64; 3] {
+    if ai_poses {
+        target.basis.angles()
+    } else {
+        [target.velocity[0].atan2(target.velocity[2]), 0., 0.]
+    }
+}
 pub struct Combat {
     pub state: live::State,
     pub smoke_art: crate::menu::Sprite,
     pub input: FireInput,
     pub controller: FireInput,
     pub range: bool,
+    /// Draw airborne targets with their own stored attitude instead of the
+    /// straight-flight fixture pose. Off by default, so the fixture path is
+    /// byte identical; `--ai-wings` turns it on because AI aircraft bank and
+    /// pitch and the fixture pose would hide that.
+    pub ai_poses: bool,
     /// Pilot-only tapes retain their existing clean-aircraft initial state.
     pub clean_recording: bool,
     initial_ammo: Option<Vec<u16>>,
@@ -143,6 +161,7 @@ impl Combat {
             input: FireInput::default(),
             controller: FireInput::default(),
             range,
+            ai_poses: false,
             clean_recording: false,
             initial_ammo,
             recorder: None,
@@ -169,9 +188,7 @@ impl Combat {
                     let mut pose = model.start(world);
                     pose.position = target.position;
                     pose.damage_fraction = target.damage_fraction();
-                    pose.yaw = target.velocity[0].atan2(target.velocity[2]);
-                    pose.pitch = 0.;
-                    pose.bank = 0.;
+                    [pose.yaw, pose.pitch, pose.bank] = target_pose(target, self.ai_poses);
                     pose.gear = 0.;
                     pose.flaps = 0.;
                     pose.exhaust = 0.;
@@ -1291,5 +1308,66 @@ mod tests {
         );
         // One triangle of ten-float vertices; the exhaust face is omitted.
         assert_eq!(out.len(), 30);
+    }
+}
+
+#[cfg(test)]
+mod ai_pose_tests {
+    use super::*;
+    use tore_sim::{
+        combat::missiles::{TargetRole, seeker::Heat},
+        sensors,
+    };
+
+    fn target(velocity: Vector, basis: Basis) -> live::Target {
+        live::Target {
+            role: TargetRole::Aircraft,
+            heat: Heat::Unknown,
+            radar_emitting: false,
+            id: 1,
+            position: [0.; 3],
+            velocity,
+            basis,
+            configuration: sensors::Configuration::CLEAN,
+            signature: sensors::SignatureProfile::default(),
+            jammer: None,
+            jammer_active: false,
+            airborne: true,
+            radius: 28.,
+            hp: 100,
+            initial_hp: 100,
+            fragment_offset: [0.; 3],
+            fragment_released: false,
+            category: 0,
+        }
+    }
+
+    /// The fixture rule is unchanged while `--ai-wings` is off: heading from the
+    /// velocity, level wings, whatever attitude the row happens to carry.
+    #[test]
+    fn the_fixture_pose_ignores_the_stored_attitude() {
+        let banked = Basis::new(1.5, 0.4, 0.9);
+        let t = target([300., 0., 0.], banked);
+        let pose = target_pose(&t, false);
+        assert!((pose[0] - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+        assert_eq!(pose[1], 0.);
+        assert_eq!(pose[2], 0.);
+    }
+
+    /// With the option on the AI's own attitude is drawn, so a banking AI
+    /// aircraft looks like one.
+    #[test]
+    fn the_ai_pose_uses_the_stored_attitude() {
+        let banked = Basis::new(1.5, 0.4, 0.9);
+        let t = target([300., 0., 0.], banked);
+        let pose = target_pose(&t, true);
+        for (got, want) in pose.iter().zip(banked.angles()) {
+            assert!(
+                (got - want).abs() < 1e-9,
+                "{pose:?} vs {:?}",
+                banked.angles()
+            );
+        }
+        assert!(pose[2].abs() > 0.5, "bank was discarded: {pose:?}");
     }
 }

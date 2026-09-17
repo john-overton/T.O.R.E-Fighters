@@ -17,12 +17,17 @@
 //!   thresholds, not a promise to reproduce the original sequence.
 //! - The simulation runs at a fixed 120 Hz; nominal timings are simulation
 //!   seconds on a quarter-second clock ([`QUARTER_SECOND_TICKS`]).
+pub mod controller;
 pub mod experience;
+pub mod fitted;
 pub mod geometry;
+pub mod launch;
+pub mod mission;
 pub mod motion;
 pub mod pursuit;
 pub mod route;
 pub mod steering;
+pub mod steering_adapter;
 pub mod tactics;
 pub mod targeting;
 pub mod threat;

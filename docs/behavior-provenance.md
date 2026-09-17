@@ -111,11 +111,28 @@ Labels describe origin only. None of these is a blocker.
 | `sideslip_drag=0.5` in both aircraft models | Fitted | Chosen by the implementation, not requested by John and not extracted from FA |
 | Achieved G/applied-rate diagnostic snapshot | Diagnostic instrumentation | Measures our adapter; does not prove retail exposes equivalent channels |
 | Sustained controller rumble | Opinionated, requested by John | Mapping still to be designed |
-| AI decision, timing, pursuit, targeting, weapon-service, wing, threat and route components | Spec-derived | `tore-sim::ai`, from [the AI spec](spec/ai.md); not connected to live missions |
+| AI decision, timing, pursuit, targeting, weapon-service, wing, threat and route components | Spec-derived | `tore-sim::ai`, from [the AI spec](spec/ai.md) |
+| Per-actor AI controller sequencing those components | Spec-derived | `ai::controller`; the sequence is the spec's proposed host API, the rules stay in the components |
+| Per-actor AI runtime: own sensors, own stores, own flight model, ammunition debited before a launch event | Spec-derived | `ai::mission`; missile physics are not duplicated, the host's existing combat code realises each launch |
+| Quick Mission launch payload carrying side, wing, member, type and resolved experience | Spec-derived | `ai::launch`; every member of a wing carries the wing's menu level, with no jitter |
 | AI steering curve shapes: linear roll-in below 7/8 maximum bank, cosine pitch authority, opposing-bank suppression, ceiling-before-terrain ordering | Fitted | The spec gives thresholds and floors, not curves; labeled in `ai::steering` |
 | AI pursuit offset sign convention (lateral right, longitudinal ahead) and chased-displacement sign draw | Fitted | Signs unresolved in the source; labeled in `ai::pursuit` and `ai::tactics` |
 | AI weapon-service half-second gate scope, 15 s window handling, blocked-path outcome | Fitted | Spec silent on the consequence; labeled in `ai::weapon_service` |
 | Atomic allocate-then-debit release option | Opinionated, agent choice 2026-09-17 | Default off; the original debits before allocation |
+| AI engagement pitch: half the relative altitude closed over the horizontal distance, bounded to plus or minus 30 degrees, zero when B04 refuses a climb | Fitted, agent choice 2026-09-17 | The evaluator is known not to be the line-of-sight pitch; `ai::fitted` |
+| AI base pitch rate equal to the B44 turn rate for the same loaded G limit and speed | Fitted, agent choice 2026-09-17 | The spec gives no separate pitch rate; `ai::fitted`, `ai::steering::pitch_rate_deg_per_s` still reports it unresolved |
+| AI zero-duration completion axis: the axis whose remaining difference over its rate is largest, heading winning ties | Fitted, agent choice 2026-09-17 | The spec names the inputs, not the selection function; `ai::fitted` |
+| AI last-ditch candidate suitability: a split S needs 1.375 turn radii of altitude, a loop needs that and 100 ft/s above minimum speed, otherwise an equal draw | Fitted, agent choice 2026-09-17 | The spec records "some candidates redraw" without the conditions; `ai::fitted` |
+| AI random-tactic menu: an equal draw among straight climb, straight dive, break left, break right and turnaround | Fitted, agent choice 2026-09-17 | Menu contents unrecovered; the five B13 maneuvers needing no target geometry; `ai::fitted` |
+| AI remaining tactics after the best-attack and random draws both fail: pursuit | Fitted, agent choice 2026-09-17 | The spec says best attack ordinarily selects pursuit; `ai::fitted` |
+| AI lead prediction: the target flies its own heading and pitch at its scalar speed for range divided by store speed | Fitted, agent choice 2026-09-17 | The B44 speed estimator and prediction time are open; the recovered 20000 ft bypass and 1600 ft ramp still apply; `ai::fitted` |
+| AI burst and reload pacing after a shot: the weapon service restarts from search with the aircraft's own search delay | Fitted, agent choice 2026-09-17 | B42 leaves the consequence open; `ai::fitted` |
+| AI store hit chance: fifty points scaled by how far inside its employment angular limit the store points | Fitted, agent choice 2026-09-17 | The original routine is opaque; `ai::fitted` |
+| AI leader and singleton return to base: the private landing route a wingman flies | Fitted, agent choice 2026-09-17 | B48 closes this for a wingman with an AI leader only; `ai::fitted` |
+| AI tactical re-evaluation cadence of 8, 6, 5 and 4 quarter seconds by level | Fitted, agent choice 2026-09-17 | The spec forbids a per-tick reroll but does not give the cadence; `ai::fitted` |
+| AI host maneuver state numbers 19 and 20 | Opinionated, agent choice 2026-09-17 | B46 accepts 19 and 20 and rejects the rest; the original's state names are unknown, so the host only ever produces accepted numbers; `ai::fitted` |
+| AI control deflection, turning bank and throttle mapping from a B44 attitude request | Fitted, agent choice 2026-09-17 | The spec bounds the attitude, not the stick; named constants in `ai::steering_adapter` |
+| AI loaded speed limits and G limit read from the flight model's own envelope block | Fitted, agent choice 2026-09-17 | The spec names "loaded envelope limits" without the query; `ai::mission` |
 
 Diagnostic tooling is not a new gameplay feature. Document its purpose and limits
 without pretending it is recovered retail behavior or a user-chosen flight law.

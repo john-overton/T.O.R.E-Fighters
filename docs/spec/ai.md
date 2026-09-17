@@ -746,10 +746,17 @@ damage-triggered disengagement and the takeoff and landing sequences are open.
 
 ## Implementation status
 
-Isolated, renderer-independent components exist in `crates/tore-sim/src/ai/`.
-Each file names the behavior IDs it implements; unresolved branches return
-`AiError::UnspecifiedRule` rather than a default. Nothing below is hooked into
-live missions, the flight adapters or the player path.
+Renderer-independent components live in `crates/tore-sim/src/ai/`. Each file
+names the behavior IDs it implements; unresolved branches return
+`AiError::UnspecifiedRule` rather than a default, so a component never invents
+a number and presents it as recovered.
+
+A live controller cannot stop flying at those branches. `ai::controller`
+sequences the components and, wherever one reports an unresolved rule, applies
+one named rule from `ai::fitted` and records it. Every such rule is fitted,
+never recovered retail behavior; they are listed in
+[behavior provenance](../behavior-provenance.md) and reachable per actor
+through `Controller::fallbacks`.
 
 | Component | Implements | Not implemented, returns unspecified |
 | --- | --- | --- |
@@ -764,6 +771,11 @@ live missions, the flight adapters or the player path.
 | `threat` | B47 warning delay, receiver gates, countermeasure gate and dispenser selection, decoy roll, script fallback reversal, reason ranking | Decoyed-missile time shortening, restart effect on an in-flight move |
 | `route` | B48 waypoint completion by octant, route command with landing hand-off, leader jitter and floors, join-landing, cruise speed, fuel states, wingman bingo route | Leader and singleton return to base, takeoff and landing sequences |
 | `wing` | B43 spacing clamps, formation table and names, player spacing values, mode 9 speed, control side effects, target sharing cap; B46 receiver outcomes, player break/approach values, reply rules | Approach steering point, mode 9 negative-band entry |
+| `fitted` | One named, documented fitted rule per unresolved branch a fighter/strike actor can reach, with its constants | Nothing; this file exists because the branches are unresolved |
+| `controller` | `Controller::new` and `Controller::step`, persistent state, seeded draws at documented decision points only, reason ranking, target selection, tactical choice, motion resolution, weapon cadence, wing requests, fuel | Families other than fighter/strike are rejected, not served fighter behavior |
+| `steering_adapter` | Motion intent to flight controls through the B44 rate limits, and the AI-only experience G adjustment | Ceiling test and ground contact are caller concerns; the control gains are fitted |
+| `mission` | Actor-owned sensors, stores, flight model and decision state; ammunition debited before a launch event | Missile physics deliberately not duplicated; the host realises each launch |
+| `launch` | Quick Mission launch payload: side, wing, member, aircraft, resolved experience and the enemy-skill override | Nothing; loadout carriage stays with the host |
 
 Fitted and opinionated choices are listed in each file's module comment and in
 the [provenance summary](../behavior-provenance.md).
@@ -863,7 +875,7 @@ remain separate, as in the existing sensor component.
 | `sensors::Sensors::designate` and `step` | Apply validated sensor requests and advance observations; current channel/track rules stay in the shared component. |
 | `combat::live::State::readiness`, `mounted_solution`, `step` | Reuse launch checks and combat simulation through a future actor adapter. Current methods are player/range-oriented, not a ready multi-actor AI API. |
 | `flight::State::step_surface` and selected aircraft model | Convert motion intent into controls and step the actor's own model. `autopilot` supplies reusable steering ideas, not a claim of recovered combat steering. |
-| `quick_mission::QuickMission::dummy_wings` | Replace the lossy launch payload at the later hookup stage; preserve all six wings, side/member identity and experience origin. |
+| `quick_mission::QuickMission::dummy_wings` | Replaced by `QuickMission::wing_launches`, which carries side, wing, member, aircraft and resolved experience through `ai::launch`. `dummy_wings` remains as the flattened legacy view so the fixture path is unchanged. |
 
 ## Acceptance and next research boundary
 

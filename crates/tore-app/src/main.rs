@@ -1,4 +1,5 @@
 mod additional_animation;
+mod ai_wings;
 mod aircraft;
 mod aircraft_animation;
 mod assets;
@@ -92,6 +93,12 @@ struct App {
     camera: terrain::Camera,
     quick: quick_mission::QuickMission,
     mission: Option<(f64, f64)>,
+    /// `--ai-wings`: fly the Quick Mission wings with `tore_sim::ai` instead of
+    /// the straight-flight fixtures. Off by default.
+    ai_wings_enabled: bool,
+    /// Session-only flight-menu enemy-skill preference; see `--enemy-skill`.
+    enemy_skill: Option<tore_sim::ai::experience::EnemySkillOverride>,
+    ai_wings: Option<ai_wings::AiWings>,
     screen: Screen,
     frame_time: Instant,
     instrument_time: Instant,
@@ -853,6 +860,43 @@ impl App {
                     event_loop.exit();
                     return;
                 }
+                // The AI bridge is built from the targets the existing spawner
+                // just placed, so the AI aircraft start exactly where the
+                // straight-flight fixtures would have started.
+                self.ai_wings = None;
+                self.combat.ai_poses = false;
+                if self.ai_wings_enabled && self.mission.is_some() {
+                    let built = self
+                        .quick
+                        .wing_launches(self.enemy_skill)
+                        .map_err(|e| -> Box<dyn Error> { e.to_string().into() })
+                        .and_then(|wings| {
+                            ai_wings::AiWings::build(
+                                &wings,
+                                &self.combat.state.targets,
+                                self.combat.state.configuration(),
+                                &self.theater_resources,
+                            )
+                        });
+                    match built {
+                        Ok(bridge) => {
+                            self.combat.ai_poses = !bridge.is_empty();
+                            if bridge.is_empty() {
+                                self.flight_ui
+                                    .message("AI wings: no aircraft in this setup");
+                            } else {
+                                self.flight_ui
+                                    .message(format!("AI wings: {} aircraft", bridge.len()));
+                            }
+                            self.ai_wings = Some(bridge);
+                        }
+                        Err(error) => {
+                            self.error = Some(error);
+                            event_loop.exit();
+                            return;
+                        }
+                    }
+                }
                 self.reset_vapor();
                 self.previous_flight = self.flight.clone();
                 self.flight_clock.remainder = 0.;
@@ -876,6 +920,8 @@ impl App {
                 self.frame_time = Instant::now();
             }
             Action::Back => {
+                self.ai_wings = None;
+                self.combat.ai_poses = false;
                 if let Err(e) = self.combat.finish_recording() {
                     self.error = Some(e);
                     event_loop.exit();
@@ -1404,6 +1450,23 @@ impl ApplicationHandler for App {
                             if let Some(audio) = &self.audio {
                                 audio.combat(&sounds.into_iter().collect::<Vec<_>>());
                             }
+                            // One AI tick per combat tick, immediately after it,
+                            // so the AI reads the damage combat just applied and
+                            // then writes the authoritative pose back.
+                            if let Some(mut bridge) = self.ai_wings.take() {
+                                let stepped =
+                                    bridge.step(&mut self.combat.state, &self.flight, &self.world);
+                                let message = bridge.take_message();
+                                self.ai_wings = Some(bridge);
+                                if let Err(error) = stepped {
+                                    self.error = Some(error);
+                                    event_loop.exit();
+                                    return;
+                                }
+                                if let Some(message) = message {
+                                    self.flight_ui.message(message);
+                                }
+                            }
 
                             if self.flight.crashed && !self.previous_flight.crashed {
                                 self.input.feedback(tore_input::FeedbackEvent::Crash);
@@ -1803,6 +1866,84 @@ impl ApplicationHandler for App {
         event_loop.set_control_flow(ControlFlow::WaitUntil(next));
     }
 }
+/// Deterministic headless AI probe (`--ai-probe-ticks`).
+///
+/// It builds the same chain a flown Quick Mission builds: the existing spawner
+/// places the wings, `Combat::reset` puts them in the world, and the AI bridge
+/// takes over from the targets it finds. Nothing about the fixture path is
+/// bypassed, so a difference between this probe and a flown mission would be a
+/// real difference.
+///
+/// `opinionated` (agent decision, 2026-09-17): the probe overwrites four setup
+/// fields so both sides always have aircraft. Rule: the default draft populates
+/// only enemy wing 1, which would leave the friendly-side and wingman paths
+/// untested, and a probe that exercises one side is not evidence for two.
+fn ai_probe_run(
+    ticks: usize,
+    quick: &mut quick_mission::QuickMission,
+    hornet: &aircraft::Airframe,
+    resources: &std::collections::BTreeMap<String, Vec<u8>>,
+    world: &terrain::World,
+    enemy_skill: Option<tore_sim::ai::experience::EnemySkillOverride>,
+) -> AppResult<()> {
+    quick.draft.values[7] = 2;
+    quick.draft.values[8] = 1;
+    quick.draft.values[21] = 2;
+    quick.draft.values[22] = 2;
+    let wings = quick
+        .wing_launches(enemy_skill)
+        .map_err(|e| e.to_string())?;
+    let mut combat = combat::Combat::new(hornet, resources, false)?;
+    combat.mission_dummies(&quick.dummy_wings(), quick.separation_feet(), resources)?;
+    let mut flight = hornet.start(world);
+    combat.reset(&mut flight)?;
+    let mut bridge = ai_wings::AiWings::build(
+        &wings,
+        &combat.state.targets,
+        combat.state.configuration(),
+        resources,
+    )?;
+    println!(
+        "AI probe: aircraft={} actors={} ticks={ticks} enemy_skill={enemy_skill:?}",
+        hornet.profile.name,
+        bridge.len()
+    );
+    for _ in 0..ticks {
+        flight.step(&flight::PilotInput::default(), |x, z| {
+            f64::from(world.height(x as f32, z as f32))
+        });
+        combat.step(&mut flight, world)?;
+        bridge.step(&mut combat.state, &flight, world)?;
+    }
+    for line in bridge.probe_lines() {
+        println!("{line}");
+    }
+    // A single number that changes if any actor's path changes, so two runs can
+    // be compared without diffing every coordinate.
+    let checksum = bridge
+        .positions()
+        .iter()
+        .flatten()
+        .fold(0u64, |acc, v| acc.rotate_left(7) ^ v.to_bits());
+    println!(
+        "AI probe totals: wings={} ticks={} shots={} dropped={} warnings={} live_projectiles={} player_hp={} target_hp={:?} checksum={checksum:016x}",
+        bridge.slots().len(),
+        bridge.mission().tick(),
+        bridge.realised_launches,
+        bridge.dropped_launches,
+        bridge.threat_reports().len(),
+        combat.state.projectiles.len(),
+        combat.state.player_hp,
+        combat
+            .state
+            .targets
+            .iter()
+            .map(|t| t.hp)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
 fn main() -> AppResult<()> {
     let mut args = std::env::args().skip(1);
     let mut live_fire = false;
@@ -1813,6 +1954,12 @@ fn main() -> AppResult<()> {
     let mut record_combat = None;
     let mut replay_combat = None;
     let mut combat_probe = None;
+    let mut ai_wings_enabled = false;
+    let mut ai_probe = None;
+    // Session only. `docs/spec/ai-experience.md` records the flight-menu
+    // enemy-skill preference's persistence as untraced, so this setting is not
+    // written to the preferences file and does not survive a restart.
+    let mut enemy_skill = None;
     let mut combat_commands = Vec::new();
     let mut weapon_slot = 1usize;
     let mut input_profile = None;
@@ -1920,6 +2067,31 @@ fn main() -> AppResult<()> {
             "--live-fire" => {
                 live_fire = true;
                 initial_screen = Screen::Flight;
+            }
+            "--ai-wings" => ai_wings_enabled = true,
+            "--enemy-skill" => {
+                enemy_skill = Some(
+                    match args
+                        .next()
+                        .ok_or("--enemy-skill needs novice or average")?
+                        .as_str()
+                    {
+                        "novice" => tore_sim::ai::experience::EnemySkillOverride::AllNovice,
+                        "average" => tore_sim::ai::experience::EnemySkillOverride::AllAverage,
+                        _ => return Err("--enemy-skill needs novice or average".into()),
+                    },
+                );
+            }
+            "--ai-probe-ticks" => {
+                let ticks: usize = args
+                    .next()
+                    .ok_or("--ai-probe-ticks requires 1..72000")?
+                    .parse()?;
+                if !(1..=72000).contains(&ticks) {
+                    return Err("AI probe tick limit exceeded".into());
+                }
+                ai_probe = Some(ticks);
+                ai_wings_enabled = true;
             }
             "--missile-acceptance" => missile_acceptance = true,
             "--compatibility-weapons" => combat_commands.push(tore_sim::combat::live::Command::CompatibilityWeapons),
@@ -2210,7 +2382,7 @@ fn main() -> AppResult<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-5 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-5 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: --ai-wings flies the Quick Mission wings with the tore-sim AI instead of the straight-flight fixtures, and opens the creator. Off by default; without it the fixtures are unchanged. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..72000 runs a headless AI mission and prints a deterministic per-actor summary.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -2223,6 +2395,34 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             }
             _ => return Err(format!("Unknown argument: {arg}").into()),
         }
+    }
+    if enemy_skill.is_some() && !ai_wings_enabled {
+        return Err("--enemy-skill applies to AI wings; add --ai-wings".into());
+    }
+    if ai_wings_enabled
+        && (live_fire
+            || !dummy_aircraft.is_empty()
+            || combat_probe.is_some()
+            || combat_smoke
+            || missile_acceptance
+            || native_tables_path.is_some()
+            || record_combat.is_some()
+            || replay_combat.is_some()
+            || record_input.is_some()
+            || replay_input.is_some()
+            || headless_ticks.is_some())
+    {
+        return Err(
+            "--ai-wings flies a Quick Mission; the range, dummy fixtures, combat/input tapes, native research flight and headless flight have their own paths"
+                .into(),
+        );
+    }
+    if ai_probe.is_some() && (capture_terrain.is_some() || snapshot.is_some() || import_only) {
+        return Err("--ai-probe-ticks is a headless probe and cannot capture or snapshot".into());
+    }
+    if ai_wings_enabled && ai_probe.is_none() {
+        // The bridge reads the Quick Mission setup screen, so the flag opens it.
+        initial_screen = Screen::Quick;
     }
     if !dummy_aircraft.is_empty()
         && (live_fire
@@ -2639,6 +2839,16 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let mut quick =
         quick_mission::QuickMission::new(aircraft_id, creator_options.clone(), &theater_resources);
     quick.theater(selection);
+    if let Some(ticks) = ai_probe {
+        return ai_probe_run(
+            ticks,
+            &mut quick,
+            &hornet,
+            &theater_resources,
+            &world,
+            enemy_skill,
+        );
+    }
     if initial_screen == Screen::Quick && snapshot_state == "ordnance" {
         quick.ordnance = Some(ordnance::Ordnance::new(
             tore_sim::combat::loadout::Loadout::new(&hornet.profile, |n| {
@@ -2967,6 +3177,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && std::env::var_os("TORE_PERF_FRAMES").is_none();
     let mut app = App {
         mission: None,
+        ai_wings_enabled,
+        enemy_skill,
+        ai_wings: None,
         preference_path: if preferences_enabled {
             Some(assets::data_directory()?.join("preferences-v1.conf"))
         } else {

@@ -25,6 +25,8 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
 }
 
 pub const MAX_PROJECTILES: usize = 256;
+/// Owner id of the player's own rounds. Every other owner is an AI actor.
+pub const PLAYER_OWNER: u32 = 0;
 pub const MAX_EFFECTS: usize = 64;
 pub const MAX_HIT_RECORDS: usize = 128;
 
@@ -378,6 +380,10 @@ impl Target {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projectile {
     pub id: u32,
+    /// Who fired this round. `0` is the player; any other value is an AI
+    /// actor's id. Score counters are attributed with it, so an AI aircraft
+    /// killing another AI aircraft does not credit the player.
+    pub owner: u32,
     pub guidance: Option<Flight>,
     pub motion: Option<Motion>,
     pub guidance_ticks: Option<u64>,
@@ -654,6 +660,7 @@ impl State {
                     });
                     self.projectiles.push(Projectile {
                         id: self.shots,
+                        owner: PLAYER_OWNER,
                         guidance: None,
                         motion: None,
                         guidance_ticks: None,
@@ -1474,6 +1481,7 @@ impl State {
                     });
                 self.projectiles.push(Projectile {
                     id: self.shots,
+                    owner: PLAYER_OWNER,
                     guidance,
                     guidance_ticks: (self.weapon_rules == Rules::Spec)
                         .then(|| missiles::Profile::for_weapon(w).map(|p| p.guidance_ticks))
@@ -1767,10 +1775,18 @@ impl State {
                         applied,
                         hp_after: t.hp,
                     });
-                    self.hits += 1;
+                    // Only the player's own rounds move the player's score.
+                    // An AI aircraft killing another AI aircraft still raises
+                    // the hit and destroyed events the host needs for damage,
+                    // debris and effects.
+                    if p.owner == PLAYER_OWNER {
+                        self.hits += 1;
+                    }
                     events.push(Event::Hit(t.id));
                     if t.hp == 0 {
-                        self.kills += 1;
+                        if p.owner == PLAYER_OWNER {
+                            self.kills += 1;
+                        }
                         events.push(Event::Destroyed(t.id));
                     }
                     impacts.push((
@@ -2178,6 +2194,51 @@ mod tests {
             controls: sensors::Controls::default(),
         }
     }
+    #[test]
+    fn an_ai_round_does_not_credit_the_player_score() {
+        // Drive a real shot into a real target twice: once owned by the
+        // player and once owned by an AI actor. The damage, the hit event and
+        // the destroyed event are identical; only the player's counters differ.
+        fn run(owner: u32) -> (u32, u32, Vec<Event>) {
+            let mut s = fixture(false);
+            let l = launcher();
+            s.range_target(l);
+            let mut collected = Vec::new();
+            for _ in 0..600 {
+                for p in &mut s.projectiles {
+                    p.owner = owner;
+                }
+                collected.extend(s.step(true, l, |_, _| 0.));
+            }
+            (s.hits, s.kills, collected)
+        }
+
+        let (player_hits, player_kills, player_events) = run(PLAYER_OWNER);
+        assert!(
+            player_hits > 0,
+            "the fixture never scored a hit, so the test proves nothing"
+        );
+        assert!(player_events.iter().any(|e| matches!(e, Event::Hit(_))));
+
+        let (ai_hits, ai_kills, ai_events) = run(5);
+        assert_eq!(ai_hits, 0, "an AI round credited the player with a hit");
+        assert_eq!(ai_kills, 0, "an AI round credited the player with a kill");
+        // The host still needs the events for damage, debris and effects.
+        let player_hit_events = player_events
+            .iter()
+            .filter(|e| matches!(e, Event::Hit(_)))
+            .count();
+        let ai_hit_events = ai_events
+            .iter()
+            .filter(|e| matches!(e, Event::Hit(_)))
+            .count();
+        assert_eq!(
+            player_hit_events, ai_hit_events,
+            "ownership must change the score, not the damage"
+        );
+        let _ = player_kills;
+    }
+
     #[test]
     fn mission_dummies_keep_distinct_identity_and_straight_velocity() {
         let mut s = fixture(true);

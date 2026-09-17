@@ -24,7 +24,7 @@ of everything in the game or its code.
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
 | Choose Activity menu and dropdowns | ☑ | ☐ | Partially implemented. Menu navigation works; campaign, multiplayer and replay actions remain unavailable. | Manual pp. 11-13; [menu](baselines/main-menu.md) |
-| Quick Mission setup | ☑ | ☑ | Partially implemented. All six wings launch selected aircraft as straight-flying dummies, up to 29 plus the player. Experience selections are not carried into those fixtures; combat AI and objectives remain. AI rules are specified and implemented as isolated components; live hookup is pending. The original gives every member of a wing the wing's selected skill. | Manual pp. 18-20; [creator](baselines/creator-ordnance.md), [AI experience](spec/ai-experience.md) |
+| Quick Mission setup | ☑ | ☑ | Partially implemented. All six wings launch the selected aircraft, up to 29 plus the player, carrying side, wing, member and the wing's selected skill. Those wings fly as combat AI behind an explicit option; the straight-flight fixture path remains the default. Mission objectives remain. The original gives every member of a wing the wing's selected skill, which is what the payload does. | Manual pp. 18-20; [creator](baselines/creator-ordnance.md), [AI experience](spec/ai-experience.md) |
 | Load Ordnance editing | ☑ | ☐ | Partially implemented. Compatible weapons, quantities and internal fuel work; tanks, campaign stock and airbase restrictions remain. | Manual p. 16; [loadout](baselines/creator-ordnance.md) |
 
 ## Flight models
@@ -68,6 +68,25 @@ the Linux range, replay and rendered acceptance.
 | Missile seeker diamond, range scale and lock tone | ☑ | ☐ | Completed with fitted layout, in-range radar diamond blink and imported search/lock samples at doubled default volume. Local manual figures were inspected; exact retail sound mapping and probability formula remain unknown. An explicitly fitted hit estimate is implemented. | Manual pp. 83-84, 119; [HUD delivery](spec/missiles.md#weapon-hud-delivery) |
 | HUD search cone and launch-mode display | ☐ | ☑ | Completed. Rail-aligned search boundaries, mode labels, acquisition status and upper-right shot details share simulation state. Bore uses a provisional blinking diamond and range triangle; short retail labels and bare hit percentages align below speed in a smaller forward HUD; the range scale sits inside altitude, with radar R/C/A below it and ARM above the weapon. IN RNG blinks beside the percentage from predicted reach. Two horizontal bars mark the fitted favorable firing-range window. Armed missile readouts replace lower flight readouts. | [HUD additions](spec/missiles.md#weapon-hud-delivery) |
 | Separate guidance lifetime and lock-loss memory | ☐ | ☑ | Completed in simulation. Guidance expiry is separate from motor and removal. Lost seekers keep their target and can reacquire until guidance expiry. | [Lifetime rules](spec/missiles.md#range-motor-and-tracking-lifetime) |
+
+## Combat AI
+
+AI opponents and wingmen. Behavior comes from [the AI spec](spec/ai.md) and the
+[experience spec](spec/ai-experience.md); the rules the spec leaves open run on
+named fitted stand-ins listed in [behavior provenance](behavior-provenance.md).
+Passing our tests is not a claim of demonstrated retail parity.
+
+| Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
+| --- | :---: | :---: | --- | --- |
+| AI-flown Quick Mission wings | ☑ | ☐ | Partially implemented. `--ai-wings` flies all six wings as AI aircraft, each with its own sensors, stores, flight model and decision state; `--ai-probe-ticks N` runs the same thing headless. The straight-flight fixture path stays the default. AI shots currently borrow the player aircraft's missile record and use the unguided steering branch, so AI missiles have no seeker acquisition or countermeasure deception. Mission objectives, routes and orders beyond fuel and waypoints remain. | [AI spec](spec/ai.md), [stages](ROADMAP.md#1e-ai) |
+| Four AI experience levels per wing | ☑ | ☐ | Completed for Quick Mission. Every member of a wing carries the wing's selected skill, which is what the original writes, and the level drives tactical choice, warning delay, countermeasure odds, pursuit variation and the AI-only G adjustment. | Manual pp. 18-20; [experience](spec/ai-experience.md) |
+| Enemy-skill override | ☑ | ☐ | Partially implemented. `--enemy-skill novice\|average` forces every enemy aircraft to that level, leaving friendly wings alone. There is no menu for it yet. The original's dialog promises the setting persists in the preferences file; that persistence is untraced, so ours is session-only. | [Experience channels](spec/ai-experience.md#experience-channels) |
+| AI target selection, pursuit and maneuvering | ☑ | ☐ | Partially implemented. Retention, ranking, ahead/facing geometry, the experience-dependent tactical choice, pursuit offsets, speed regulation and the B44 steering limits work. Last-ditch shapes, the random-tactic menu and the engagement pitch run on fitted rules. | [B11 to B15](spec/ai.md#b12-approach-tactical-choice-and-pursuit) |
+| AI weapon employment | ☑ | ☐ | Partially implemented. Search, preparation, lock and firing cadence, store choice and finite ammunition work; the AI has no free ammunition and no unlimited bypass. Per-store imported seeker envelopes and the hit-chance routine remain fitted or pending. | [B42, B45](spec/ai.md#b42-weapon-preparation-search-cadence-and-firing) |
+| AI missile warnings and countermeasures | ☑ | ☐ | Partially implemented. Only the aircraft a missile was fired at is warned, with the recovered delay by experience and range; flares and chaff are released by class from the actor's own dispensers. Decoy effect on a missile in flight remains partly open. | [B47](spec/ai.md#b47-threat-warnings-countermeasures-and-reason-priority) |
+| AI formation and wing orders | ☑ | ☐ | Partially implemented. Formation geometry, spacing clamps, the receiver contract and target sharing work. The approach steering point and several radio phrases remain unrecovered. | [B43, B46](spec/ai.md#b43-wing-commands-and-formation-variation) |
+| AI fuel awareness and return to base | ☑ | ☐ | Partially implemented. Caution, bingo, critical and out-of-fuel states work and send an actor home. Takeoff and landing sequences remain, and the leader and singleton route home is fitted. | [B48](spec/ai.md#b48-routes-fuel-and-recovery) |
+| Surface and other-family AI | ☑ | ☐ | Planned. SAM, AAA, vehicles, ships and the non-fighter aircraft families are specified only in part and are rejected rather than served fighter behavior. | [B20, B30](spec/ai.md#b20-other-aircraft-families) |
 
 ## Systems and controls
 

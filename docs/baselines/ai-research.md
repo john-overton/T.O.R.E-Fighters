@@ -206,7 +206,7 @@ in [the main spec](../spec/ai.md) and indexed in
 [the source map](../formats/ai.md). No retail module was executed and no
 dynamic comparison was performed.
 
-## Isolated components
+## Components and runtime
 
 The established rules are implemented in `crates/tore-sim/src/ai/` as
 renderer-independent calculations with synthetic tests: experience, geometry,
@@ -215,9 +215,40 @@ route. Each test checks a specified number or transition (for example B01 at
 89, 90 and 91 degrees; B15 at each side of every band edge; B41 at 19999 and
 20000 ft; B42 timing groups for all twelve aircraft; B43 spacing clamps at
 511, 512, 20000 and 20001 ft; the warning delay examples in B47). Unresolved
-rules return an explicit unspecified-rule error. Nothing is connected to live
-missions, the flight adapters or the player path, so these tests are not
-evidence of flown behavior or retail parity.
+rules still return an explicit unspecified-rule error.
+
+On 2026-09-17 those components were joined into a runtime. `controller`
+sequences them per actor and holds the persistent state and one seeded draw
+stream. `fitted` supplies one named rule per unresolved branch so a live actor
+cannot stall, and every use is recorded per actor. `steering_adapter` converts
+a maneuver into controls for that actor's own flight model and applies the
+AI-only experience G adjustment. `mission` gives each actor its own sensors,
+stores, flight model and decision state, debits ammunition before emitting a
+launch event, and does not duplicate missile physics. `launch` carries the
+Quick Mission payload.
+
+These tests check specified numbers, named fitted rules and deterministic
+headless scenarios. They are not evidence of retail parity, and no retail
+comparison was available.
+
+### Headless scenarios exercised
+
+- 1v1 for each of the twelve ported aircraft at all four experience levels,
+  with every position finite throughout.
+- 2v2 with leaders and wingmen.
+- Identical results across repeated runs at the same seed, and divergence
+  across different seeds.
+- Missiles selected and launched at range, and the guided store actually
+  chosen rather than the gun.
+- Launch warnings delivered only to the aircraft each missile names, with
+  countermeasures released from the actor's own dispensers by matching class
+  only.
+- Wing orders: break changing a wingman's heading in the world, formation and
+  spacing applied as settings, engage assigning the named target.
+- Fuel: bingo turning an actor for home, and out of fuel reported.
+- Negative cases: never targeting itself or its own side, empty and inhibited
+  stores never producing a launch, a destroyed actor ceasing to fly, and no
+  duplicate weapon request identity.
 
 ## What this establishes
 

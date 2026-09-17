@@ -6,6 +6,11 @@ use crate::{
 };
 use std::collections::BTreeMap;
 use tore_formats::{aircraft::AircraftId, ui::creator::Options};
+use tore_sim::ai::{
+    AiError,
+    experience::EnemySkillOverride,
+    launch::{Side, WingId, WingLaunch, WingSelection, legacy_pairs, resolve_wings},
+};
 type Rect = (i32, i32, i32, i32);
 const POPUP: Rect = (185, 100, 270, 370);
 const ROWS: usize = 15;
@@ -163,18 +168,56 @@ impl QuickMission {
             .cloned()
             .unwrap_or_else(|| "Unavailable".into())
     }
+    /// The six wing rows as the AI launch payload: side, aircraft, wing skill
+    /// and one entry per member (`docs/spec/ai-experience.md`, "Experience
+    /// channels"). Wing counts live in fields 4, 7, 10 (friendly) and 21, 24,
+    /// 27 (enemy); each wing's skill is the next field and its aircraft the one
+    /// after that. Friendly wing 1 loses one slot to the player. A wing whose
+    /// aircraft choice does not resolve to a supported import is skipped, which
+    /// `unsupported` reports separately before a mission may start.
+    pub fn wing_launches(
+        &self,
+        enemy_override: Option<EnemySkillOverride>,
+    ) -> Result<Vec<WingLaunch>, AiError> {
+        let mut selections = Vec::with_capacity(6);
+        for (field, side, index) in [
+            (4, Side::Friendly, 0),
+            (7, Side::Friendly, 1),
+            (10, Side::Friendly, 2),
+            (21, Side::Enemy, 0),
+            (24, Side::Enemy, 1),
+            (27, Side::Enemy, 2),
+        ] {
+            let Some(aircraft) = self
+                .aircraft_files
+                .get(self.draft.values[field + 2])
+                .and_then(|name| AircraftId::parse(name).ok())
+            else {
+                continue;
+            };
+            selections.push(WingSelection {
+                wing: WingId::new(side, index)?,
+                aircraft,
+                count: self.draft.values[field].saturating_sub(usize::from(field == 4)),
+                skill_level: self.draft.values[field + 1] as i32,
+            });
+        }
+        resolve_wings(&selections, enemy_override)
+    }
+    /// The aircraft/count pairs the current mission spawner still takes. This
+    /// is the launch payload with side, member and experience dropped; it stays
+    /// for the existing spawner call and must not grow new callers.
+    ///
+    /// `fitted`: an out-of-range wing skill or count would make the payload an
+    /// error, and this infallible signature has nowhere to put one, so it
+    /// launches nothing. Rule: the decoded setup screen offers exactly four
+    /// skills and counts 0 through 5 per wing (`docs/formats/quick-mission.md`),
+    /// so the menu cannot reach that state; the empty result is a visible
+    /// failure rather than a silent clamp if it ever does.
     pub fn dummy_wings(&self) -> Vec<(AircraftId, usize)> {
-        [4, 7, 10, 21, 24, 27]
-            .into_iter()
-            .filter_map(|field| {
-                let count = self.draft.values[field].saturating_sub(usize::from(field == 4));
-                let id = self
-                    .aircraft_files
-                    .get(self.draft.values[field + 2])
-                    .and_then(|name| AircraftId::parse(name).ok())?;
-                Some((id, count))
-            })
-            .collect()
+        self.wing_launches(None)
+            .map(|wings| legacy_pairs(&wings))
+            .unwrap_or_default()
     }
     pub fn separation_feet(&self) -> f64 {
         [1., 2., 5., 10., 20., 50.][self.draft.values[17]] * 5280.
@@ -847,6 +890,85 @@ mod tests {
         assert_eq!(wings[3], (AircraftId::Rafale, 5));
         q.apply(23, 2);
         assert!(q.unsupported().unwrap().contains("populated wing"));
+    }
+    #[test]
+    fn wing_skill_selections_reach_the_launch_payload() {
+        use tore_sim::ai::Experience;
+        use tore_sim::ai::experience::ExperienceOrigin;
+        let mut q = setup();
+        // Every wing populated, with a different skill per wing row.
+        for field in [4, 7, 10, 21, 24, 27] {
+            q.apply(field, 5);
+        }
+        for (field, level) in [(5, 0), (8, 1), (11, 2), (22, 3), (25, 0), (28, 1)] {
+            q.apply(field, level);
+        }
+        let wings = q.wing_launches(None).unwrap();
+        assert_eq!(wings.len(), 6);
+        let levels = [
+            Experience::Novice,
+            Experience::Average,
+            Experience::Experienced,
+            Experience::Ace,
+            Experience::Novice,
+            Experience::Average,
+        ];
+        for (wing, level) in wings.iter().zip(levels) {
+            assert_eq!(wing.selected_level, level);
+            assert!(!wing.is_empty());
+            for member in &wing.members {
+                assert_eq!(member.experience.level, level);
+                assert_eq!(
+                    member.experience.origin,
+                    ExperienceOrigin::QuickMission { selected: level }
+                );
+            }
+            assert!(wing.leader().is_some_and(|m| m.member == 0));
+        }
+        // Sides and the player's slot in friendly wing 1 are preserved.
+        assert_eq!(wings[0].count(), 4);
+        assert_eq!(wings[3].count(), 5);
+        let sides: Vec<bool> = wings.iter().map(|w| w.wing.side.is_enemy()).collect();
+        assert_eq!(sides, [false, false, false, true, true, true]);
+        assert_eq!(
+            wings.iter().map(|w| w.wing.index).collect::<Vec<_>>(),
+            [0, 1, 2, 0, 1, 2]
+        );
+    }
+    #[test]
+    fn the_enemy_skill_override_changes_enemy_wings_only() {
+        use tore_sim::ai::Experience;
+        use tore_sim::ai::experience::ExperienceOrigin;
+        let mut q = setup();
+        for field in [4, 7, 10, 21, 24, 27] {
+            q.apply(field, 5);
+        }
+        for field in [5, 8, 11, 22, 25, 28] {
+            q.apply(field, 3);
+        }
+        let wings = q
+            .wing_launches(Some(EnemySkillOverride::AllNovice))
+            .unwrap();
+        for wing in &wings {
+            assert_eq!(wing.selected_level, Experience::Ace);
+            let enemy = wing.wing.side.is_enemy();
+            for member in &wing.members {
+                if enemy {
+                    assert_eq!(member.experience.level, Experience::Novice);
+                    assert_eq!(member.experience.origin, ExperienceOrigin::EnemyOverride);
+                } else {
+                    assert_eq!(member.experience.level, Experience::Ace);
+                    assert_eq!(
+                        member.experience.origin,
+                        ExperienceOrigin::QuickMission {
+                            selected: Experience::Ace
+                        }
+                    );
+                }
+            }
+        }
+        // The legacy pairs are unchanged by the override.
+        assert_eq!(legacy_pairs(&wings), q.dummy_wings());
     }
     #[test]
     fn placeholders_cannot_silently_launch_as_a_supported_mission() {

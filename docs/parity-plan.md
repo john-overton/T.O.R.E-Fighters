@@ -81,7 +81,7 @@ player-visible numbers out of those files and leaving the byte layouts behind.
 | Input | Keyboard, gamepad, joystick, profiles, rumble, rebinding | opinionated (authored layer) | [input](baselines/input.md) |
 | Weapons | 135 definitions imported; development range with manual firing, damage fixtures, ECM | mixed | [weapons systems](baselines/weapons-systems.md), [manual weapons](baselines/manual-weapons.md) |
 | Sensors | One shared radar, infrared and visual component for all twelve aircraft: imported capability profiles, contacts, one fire-control track, click selection, history, jammer noise, the RCS exposure page and radar weapon support | **opinionated** detection/notch/jamming/RCS tuning over spec-derived equipment data | [radar](baselines/radar.md) |
-| Combat AI | Isolated spec-derived components in `tore-sim::ai` (experience, geometry, tactics, motion, pursuit, targeting, steering, weapon service, wing, threat, route) with synthetic tests; not connected to missions or flight adapters | spec-derived with labeled fitted curves; open rules return an explicit unspecified error | [AI research](baselines/ai-research.md), [delivery stages](ROADMAP.md#1e-ai) |
+| Combat AI | Spec-derived components in `tore-sim::ai` plus a per-actor controller, steering adapter and actor-owned mission runtime. Quick Mission wings fly as AI aircraft behind an explicit option, with the straight-flight fixture path kept. Surface actors and the other aircraft families are not implemented | spec-derived, with named fitted rules where the spec leaves a branch open; each is recorded per actor | [AI research](baselines/ai-research.md), [delivery stages](ROADMAP.md#1e-ai), [provenance](behavior-provenance.md) |
 
 Flight has three selectable paths and they stay distinct: the compatibility `--legacy-flight`, the
 default hybrid `--researched-flight`, and the restricted `--native-flight-tables`
@@ -91,13 +91,16 @@ research path. Do not change the default without being asked.
 
 Current requested work: **aircraft and surface AI research and implementation**.
 The [main AI spec](spec/ai.md), [experience spec](spec/ai-experience.md) and
-[FA source map](formats/ai.md) are written, and the established rules are
-implemented as isolated components in `tore-sim::ai`. Skill loading, speed
-units, performance and terrain rules, formation geometry, wing orders, threat
-warnings, countermeasures, routes and fuel closed on 2026-09-17. Next research
-seeker envelopes and store selection, remaining tactics and surface classes;
-next implementation is the per-actor controller and family variants; hookup
-stays after that. The [M1e stages](ROADMAP.md#1e-ai) include all
+[FA source map](formats/ai.md) are written. Skill loading, speed units,
+performance and terrain rules, formation geometry, wing orders, threat
+warnings, countermeasures, routes and fuel closed on 2026-09-17. The same day
+the components were joined into a per-actor controller, given actor-owned
+sensors, stores and flight models, and hooked into Quick Mission behind an
+explicit option. Next research is seeker envelopes and store selection, the
+remaining tactics that currently run on named fitted rules, and surface
+classes; next implementation is surface actors and the other aircraft
+families, which the controller rejects today rather than serving fighter
+behavior. The [M1e stages](ROADMAP.md#1e-ai) include all
 aircraft families and a separate surface workstream. Initial implementation and
 acceptance cover [all twelve ported aircraft](spec/ai-experience.md#currently-ported-aircraft)
 at all four experience levels. Earlier no-AI restrictions
