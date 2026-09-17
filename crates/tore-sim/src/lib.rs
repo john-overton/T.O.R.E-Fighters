@@ -5,6 +5,7 @@ pub mod environment;
 pub mod flight;
 pub mod models;
 pub mod research;
+pub mod sensors;
 pub mod telemetry;
 pub mod turbulence;
 pub mod vapor;

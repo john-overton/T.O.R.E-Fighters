@@ -101,16 +101,16 @@ The supplied `rwr-50nm.png`, `systems.png` and `target-view.png` are the current
 | 6 Nav | Heading, MSL altitude; no waypoint in free flight | Mission waypoints, ETA and native navigation |
 | 7 Systems | Live throttle and remaining internal fuel; external zero | TEMP/OIL/HYD intentionally `---` until model/threshold recovery |
 | 8 Weapons | Selected source weapon, ammo/readiness, range payload, player HP and visual/radar/ECM fault state; ordinary flight remains externally clean | Alternate loadouts, full subsystem dispatch and native display parity |
-| 9 Radar | Power, range capped by APG-65 source search range, mode/grid | Search/track/seeker physics, contacts, authentic mode logic |
+| 9 Radar | Shared sensor component: automatic RWS/TWS or IR label, recovered range ladder, contacts with heading tails, selection and acquired-track markers, stale plots, history dots and directional jammer noise | Native scan animation, false contacts, air-to-ground and HARM channels |
 
-No fake targets, threat diamonds or healthy-system percentages are inserted to resemble the screenshots. Scope symbology, colors, layout and controls are presently a visual adapter; original engine/native system behavior is not claimed. Four large or six small windows can be open, with Shift-0..9 toggles; page 0 is an explicit RCS placeholder. Camera windows request updates at 10 Hz using bounded asynchronous GPU readback; the last completed raster remains visible while pending. Offline captures wait explicitly. Direct GPU panel composition remains future optimization work. Hover remains silent and button activation requires matching press/release.
+No fake targets, threat diamonds or healthy-system percentages are inserted to resemble the screenshots. Scope symbology, colors, layout and controls are presently a visual adapter; original engine/native system behavior is not claimed. Four large or six small windows can be open, with Shift-0..9 toggles; page 0 draws the authored exposure contour, received emitter symbols and view scale described in the [sensor component guide](../radar.md). Camera windows request updates at 10 Hz using bounded asynchronous GPU readback; the last completed raster remains visible while pending. Offline captures wait explicitly. Direct GPU panel composition remains future optimization work. Hover remains silent and button activation requires matching press/release.
 
 ## Next parity gates
 
 - Trace and test the native flight helpers against this FA build, including loading, devices, negative G, fuel timing, sound speed and crash/landing.
 - Recover full HUD/window layout and native draw rounding; compare equivalent states against the supplied captures and actual retail flight.
 - Recover temperature/oil/hydraulic/system health and map damage, annunciators and failures without fabricated values.
-- Implement radar/RWR/seeker/contact state, camera target tracking, waypoints and weapon execution.
+- Implement RWR threat reception, camera target tracking, waypoints and remaining weapon execution. Radar, infrared and contact state now come from the [shared sensor component](../radar.md).
 - Recover remaining SH control surfaces, continuous device poses, scale, shadow, damage/LOD and mirror views.
 - Run maneuver, visual and audible acceptance on all supported platforms. See the current [baseline](../baselines/f18-free-flight.md).
 

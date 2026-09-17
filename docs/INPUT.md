@@ -10,9 +10,10 @@
 
 This is an authored T.O.R.E input layer, not recovered retail controller dispatch.
 Keyboard, gamepad, stick, throttle, pedals and button-box controls share typed
-pilot actions. The original instruments and their existing scope operations are
-retained. No external screen export, rearrangement, new sensor behavior or
-fabricated readings are added.
+pilot actions. The original instruments and their scope operations are driven
+through those same actions. This layer adds no external screen export, no window
+rearrangement, no sensor behaviour of its own and no fabricated readings; the
+shared [sensor component](radar.md) decides what the scopes show.
 
 ## Quick start
 
@@ -98,9 +99,17 @@ The editor covers the current binding model, not a calibration wizard, persisten
 Apple player assignment, device firmware remapping or unsupported aircraft systems.
 
 Normal sessions also save `preferences-v1.conf`: large/small instrument page sets,
-active layout/selection, scope ranges/mode, cockpit/HUD/ladder visibility, HUD
-brightness, zoom and music/effects. These persist across launches, aircraft changes
-and flight restarts. Pause, head-look and aircraft state are not restored as user
+active layout/selection, scope settings, cockpit/HUD/ladder visibility, HUD
+brightness, zoom and music/effects. The file format is now **version 3**. The
+retired `radar-mode` key is gone, and `rcs-range`, `radar-channel` and
+`radar-history` are added, so the exposure page's scale, the selected sensor
+channel and the history toggle persist along with the radar scope setting.
+Version 1 and version 2 files still load: their retired scope mode is validated
+and dropped, and a saved scope range migrates by its old nautical-mile value to
+the nearest current setting, with equal distances choosing the lower one. That
+maps 10 to 10, 20 to 25, 40 to 50, 80 to 100 and 160 to 150 nautical miles. An
+old index is never reinterpreted as a different range. These persist across
+launches, aircraft changes and flight restarts. Pause, head-look and aircraft state are not restored as user
 preferences. Preference loading is silent; a malformed file is reported and
 preserved. Smoke/capture/performance diagnostics ignore these display preferences
 and do not write them, keeping existing visual probes reproducible. Explicit
@@ -210,8 +219,13 @@ requests a preset. Axes are `pitch`, `roll`, `yaw`, `throttle`, `throttle-rate`,
 
 UI actions: `pause`, `menu`, `end-flight`, `restart`, `view-front`, `view-back`,
 `view-up`, `view-external`, `center-look`, `cockpit`, `hud`, `zoom-in`, `zoom-out`,
-`range-down`, `range-up`, `radar-mode`, `page-0` through `page-9`, instrument
-commands below, and `menu-up/down/left/right/accept/back`. `key:Shift-0` or
+`range-down`, `range-up`, `radar-mode`, `sensor-channel`, `sensor-infrared`,
+`sensor-history`, `page-0` through `page-9`, instrument
+commands below, and `menu-up/down/left/right/accept/back`. `sensor-channel` is an
+alias of `radar-mode`; both cycle the available radar and infrared channels
+rather than the retired cosmetic display mode. `sensor-infrared` requests the
+passive channel and `sensor-history` toggles the scope contact trail. Existing
+profiles that bind `radar-mode` keep working and now cycle channels. `key:Shift-0` or
 `key:Ctrl-t` dispatches a stock flight shortcut through the same menu/availability
 handler; it is a one-shot command, not a synthetic held keyboard key. Unsupported
 systems still report unavailable. Bind continuous flight actions directly.
@@ -259,10 +273,12 @@ through `instrument-6`, `control-1` through `control-4`, and direct actions such
 `instrument-2-control-1`. `page-N` toggles the existing instrument page. A brief
 existing-style notice identifies focus; there is no raster alteration, window
 movement or new screen content. Layout/page changes reset focus to the first
-slot. Absent slots and unimplemented controls report unavailable. Current scope
+slot. Absent slots and unimplemented controls report unavailable. Scope
 buttons are instantaneous commands, so there is no invented held sensor action.
-RWR buttons 1/2 change its range; radar buttons 1/2 change range and button 3 cycles
-its existing display mode. Button 4 and unsupported pages remain unavailable.
+RWR and RCS buttons 1/2 change their range. Radar buttons 1/2 change the scope
+setting, button 3 cycles the available sensor channels and button 4 toggles
+contact history. Buttons with no action on a page, and unsupported pages, remain
+unavailable.
 
 ## Fixed ticks and input tapes
 
@@ -424,8 +440,13 @@ new bindings or regenerate a profile deliberately. No saved file is overwritten.
 | D-pad down | D: explicit player-hit fixture |
 | D-pad left | `]`: next damage class fixture |
 | D-pad right | `[`: selected station failure fixture |
-| Start | Y: target jammer fixture |
-| Guide | I: one incoming selected source weapon fixture |
+| Start | Shift-Y: target jammer fixture |
+| Guide | Shift-I: one incoming selected source weapon fixture |
+
+The `radar` equipment action behaves exactly like the keyboard R: while the
+infrared channel is selected it returns the scope to radar, and otherwise it
+toggles radar power. Bind `sensor-channel` or `sensor-infrared` to select a
+channel without touching the power switch.
 
 Guide may be intercepted by the desktop; bind `incoming` to another exposed
 button or combo in **Escape → Control** when necessary. No desktop shortcuts are

@@ -27,3 +27,13 @@ reflection strength now also follows the distance fade to soften distant grain.
 John tested the final version in game and approved keeping it on 2026-09-16. [Component provenance and remaining source gaps](spec/ocean.md),
 [acceptance evidence](baselines/ocean.md). This is visual presentation only;
 wind/sea-state coupling and water-contact physics are not changed.
+
+The user-scheduled shared aircraft radar (2026-09-16) is implemented. One sensor
+component serves all twelve aircraft from their own imported equipment: the radar
+and infrared scope with automatic RWS/TWS, click-to-designate contacts, contact
+history, directional jammer noise, the radar cross section exposure page, and
+radar weapon support asked per target. Its detection, notch, jamming and exposure
+constants are deliberate design choices, not retail measurements, and no
+side-by-side tuning review of the twelve aircraft has happened yet.
+[What it models and what is deferred](radar.md),
+[what was validated](baselines/radar.md). No AI work is included.

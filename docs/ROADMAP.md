@@ -178,25 +178,32 @@ Exit: liveness probe green.  Behavior compared against retail recordings and rec
 
 Current authorized slice: shared aircraft radar, requested 2026-09-16, independent
 of the AI milestone. [Behaviour and roster stats](spec/radar.md),
-[standard component proposal](radar.md), [research validation](baselines/radar.md).
-Research now establishes the imported radar profiles and normal range-mode rule.
-Implementation milestones:
+[standard component guide](radar.md), [validation](baselines/radar.md).
+Research established the imported radar profiles and the normal range-mode rule;
+the component then shipped on the same day. Implementation milestones:
 
-1. Shared radar/IR A2A profiles and simulation-owned observations with one
-   selected target and at most one fire-control track, using PT radar/IR
-   signatures and the authored look-down, era, notch and jammer model. Separate
-   destroyed-aircraft combat state from physical sensor presence.
-2. Scope range/mode correction, directional jammer noise, the RCS exposure panel
-   persistent mouse selection and Y history using stable target IDs. Aircraft
-   orientation feeds the
-   same effective signature used by the RCS contour and detection. Radar/jammer generation matchups are explicit profiles.
-3. Radar-guided launch and maintained-support transitions with deterministic tests.
+1. **Done.** Shared radar/IR A2A profiles and simulation-owned observations with
+   one selected target and at most one fire-control track, using PT radar/IR
+   signatures and the authored look-down, era, notch and jammer model.
+   Destroyed-aircraft combat state is separate from physical sensor presence.
+2. **Done.** Scope range/mode correction, directional jammer noise, the RCS
+   exposure panel, persistent mouse selection and Y history using stable target
+   IDs. Aircraft orientation feeds the same effective signature used by the RCS
+   contour and detection. Radar/jammer generation matchups are explicit profiles.
+3. **Done.** Radar-guided launch and maintained-support transitions with
+   deterministic tests, including version-3 combat tapes.
 
-Current mode scope is TWS/RWS and installed infrared air-to-air, with single-target
-tracking only. Keep gamified IFF in the target view. A2G/HARM awaits ground weapons
+Remaining in this slice: the tuning pass. All twelve aircraft produce the
+capability summary and pass their combat smokes, but the twelve results have not
+been reviewed side by side, so the presets and jammer matchups are unplayed
+against each other. See the
+[delivery table](radar.md#delivery-and-acceptance) for what each stage delivered.
+
+Mode scope is TWS/RWS and installed infrared air-to-air, with single-target
+tracking only. Gamified IFF stays in the target view. A2G/HARM awaits ground weapons
 and object systems; no realistic IFF, multi-track or AI work is authorized.
-Unresolved retail details may use documented fitted rules; do not turn complete
-source-code closure into a prerequisite.
+Unresolved retail details use documented fitted rules; complete source-code
+closure is not a prerequisite.
 
 Work:
 - Radar modes, RWR, IFF, and the retail sensor model.

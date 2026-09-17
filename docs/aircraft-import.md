@@ -50,7 +50,7 @@ list the reviewed round outlets.
 | Cockpit / HUD / instruments | Original art/fonts, full flight canvas, responsive overlays, rear mirror and asynchronous camera windows; supported live instrument channels | Full native HUD/window composition and unmodeled system readings remain open. [Aircraft formats](formats/aircraft.md), [controls](FLIGHT-CONTROLS.md) |
 | Environment / air data | Shared resolved wind, terrain/standard-atmosphere AirData, camera-local weather, physical turbulence and corrected own-shape vapor attachments | Native atmosphere, wake/contact/coupling, broader vapor and weather acceptance remain partial. [Wind/turbulence evidence](baselines/wind-turbulence-vapor.md) |
 | Audio / feedback | Original engine/device audio, weapon/damage feedback, afterburner rumble, strong environmental turbulence rumble | Maneuver buffet and verified original dispatch are next; audibility/hardware acceptance is distinct from event tests. [Flight-response plan](research/flight-response-plan.md) |
-| Weapons / sensors / damage | PT-default manual range, supported weapon/sensor/ECM/damage behavior; source stations and partial custom-load creator flow | Not full JT catalog or aircraft-system parity. [Systems](baselines/weapons-systems.md), [creator/loadout](baselines/creator-ordnance.md) |
+| Weapons / sensors / damage | PT-default manual range, supported weapon/ECM/damage behavior; source stations and partial custom-load creator flow. One shared sensor component reads each aircraft's own SEE and ECM records, so a port reviews data rather than adding radar code | Not full JT catalog or aircraft-system parity. Sensor detection tuning is opinionated, not recovered. [Systems](baselines/weapons-systems.md), [sensors](baselines/radar.md), [creator/loadout](baselines/creator-ordnance.md) |
 | Validation | Same aircraft flight suite, deterministic same-host probes, rendering and documented Linux checks | Retail trajectory, complete systems and unavailable platform checks remain separate gates. [Flight baseline](baselines/shared-flight-model.md), [progress](research/progress.md) |
 
 Older first-pass sections in individual docs describe historical limitations.
@@ -142,9 +142,14 @@ restart checks. Original cockpit art does not imply complete instrument parity.
   release and device/mute/pause lifecycle without changing physics or RNG.
 - [ ] Verify engine/start/stop/actuator and maneuver audio through original resource
   references and dispatch. Record any authored haptic mapping separately.
-- [ ] Resolve weapons, ammo, stations, compatibility, radar/visual/ECM and supported
-  damage behavior. Test actual launch/muzzle/attachment transforms and supported
-  loadout mass/drag effects; extracted definitions do not enable unsupported weapons.
+- [ ] Resolve weapons, ammo, stations, compatibility and supported damage behavior.
+  Test actual launch/muzzle/attachment transforms and supported loadout mass/drag
+  effects; extracted definitions do not enable unsupported weapons.
+- [ ] Review `--sensor-summary` for this aircraft: its radar, infrared, visual and
+  ECM records, volumes, look-down coefficient and assigned preset and jammer
+  generation. An unreviewed radar or ECM record fails the import on purpose;
+  assign it explicitly in the [component guide](radar.md) rather than borrowing
+  another aircraft's. Do not write aircraft-specific sensor code.
 - [ ] Keep ordinary free flight externally clean. Validate deliberate range and
   creator loadouts separately, including fuel/weight, restart and replay boundaries.
 - [ ] Add creator selection only with honest capability validation and reviewed

@@ -17,10 +17,15 @@ Research mode, 2026-09-16. Build hashes and inspection method are in the
 The existing SENSOR schema maps packed SEE offsets: signature +8, capability
 flags +9, lookDown +10, Doppler above/below/minimum +11/+12/+13, allAspect +14,
 zone 0 +15 and zone 1 +35. The reviewed PROJInFOV at 0x4c2860 selects the zone
-and compares relative altitude, range and angle. Existing application code only
-uses radar zone 0 and ignores lookDown. It labels three scope modes without
-changing sensor behaviour. Scope label and contact projection can use different
-ranges, and plotted contacts do not retain IDs for mouse selection.
+and compares relative altitude, range and angle.
+
+Application code now reads both zones and the lookDown coefficient. The shared
+sensor component keeps search and track volumes independent, applies the
+look-down coefficient through the authored clutter model in the
+[component guide](../radar.md), selects RWS or TWS automatically from the display
+range against the installed tracking range, and carries a stable target identity
+on every plotted contact so the scope label, the projection and the mouse pick
+all agree. The earlier cosmetic three-mode label cycle is gone.
 
 ## Newly inspected look-down consumer
 
@@ -63,7 +68,10 @@ against ten times the selected threshold. This shows a Doppler path exists;
 angle orientation, units and caller use need review before specifying notching.
 The nine inspected roster radar records all have these three bytes zero and
 capability flags either 0 or 1, not bit 4. Bit 1 is still unresolved and is not
-proven to mean TWS or semi-active illumination capability.
+proven to mean TWS or semi-active illumination capability. The three source
+Doppler bytes and the capability flag word are preserved verbatim in the imported
+profile; the notch the remake applies is authored and takes its widths from the
+agent preset, not from these zeroed fields.
 
 Useful bounded follow-ups: CPRadarRange 0x43ddd0, CPNextTarget 0x440e10,
 PROJSetTarget 0x4c0870, PROJLock 0x4c2f20 and PROJLockUpdate 0x4c0960.
@@ -109,8 +117,8 @@ the elevation result clamped to +/-16380. The look-down consumer passes a null
 third argument and a valid fourth output. This supports the downward elevation
 interpretation in the spec. Signed delta convention, original integer rounding,
 complete COSig modifiers and the special caller branches still limit exact
-numeric parity claims. The component proposal deliberately isolates these
-policies from profile import, scope controls and contact identity.
+numeric parity claims. The component deliberately isolates these policies from
+profile import, scope controls and contact identity.
 
 ## RCS panel and signature coupling
 
@@ -163,17 +171,19 @@ FA PT/SEE records supply that roster independently.
 
 Lines 3872..3923 describe semi-active dependence on launcher lock, active radar
 fire-and-forget after launch, and IR seeker lock without radar support. No active
-activation distance or timing is supplied. Current Rust snapshots designation
+activation distance or timing is supplied. Rust snapshots designation
 into each projectile at launch (`crates/tore-sim/src/combat/live.rs`), and its
 weapon-specific tracking gate distinguishes continued radar dependency. See
 [the reviewed weapon evidence](../baselines/manual-weapons.md) for R530 versus
-AIM120/MICA; this is not a new audit of every weapon. The new component must
-preserve independent target ownership and make required illumination specific
-to the missile's assigned target, rather than merely checking radar power.
+AIM120/MICA; this is not a new audit of every weapon. The component preserves
+independent target ownership, and required illumination is now specific to the
+missile's assigned target rather than a check of radar power.
 
-Current Rust audit: target HP gates movement, radar/visual observation, scope
-readout and designation; weapon readiness separately rejects destroyed targets.
-The new requested lifecycle must split those responsibilities. John's report
-that retail hides dead contacts is recorded as user-provided behaviour, not a
-newly verified executable finding. The single-track requirement is likewise a
-product constraint; this pass does not claim to survey every Jane's title.
+Earlier Rust audit: target HP gated movement, radar/visual observation, scope
+readout and designation together, while weapon readiness separately rejected
+destroyed targets. Those responsibilities are now split: hit points reaching zero
+leaves an airborne object observable, and a grounded wreck ends the air-to-air
+observation. John's report that retail hides dead contacts is recorded as
+user-provided behaviour, not a newly verified executable finding. The
+single-track requirement is likewise a product constraint; this pass does not
+claim to survey every Jane's title.

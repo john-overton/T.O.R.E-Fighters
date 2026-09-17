@@ -50,12 +50,26 @@ pub fn write(path: &Path, text: &str) -> io::Result<()> {
     }
     result
 }
+/// Nearest recovered scope setting to a saved nautical-mile value. An equal
+/// distance keeps the lower setting; an old index is never reinterpreted.
+fn nearest_range(nmi: f64) -> usize {
+    let ladder = tore_sim::sensors::RANGE_LADDER_NMI;
+    let mut best = 0;
+    for index in 1..ladder.len() {
+        if (ladder[index] - nmi).abs() < (ladder[best] - nmi).abs() {
+            best = index;
+        }
+    }
+    best
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub zoom: f32,
     pub rwr_range: usize,
     pub radar_range: usize,
-    pub radar_mode: usize,
+    pub rcs_range: usize,
+    pub radar_channel: usize,
+    pub radar_history: bool,
     pub selected: usize,
     pub small: bool,
     pub large_pages: Vec<u8>,
@@ -78,7 +92,9 @@ impl Preferences {
             zoom: ui.zoom,
             rwr_range: i.rwr_range,
             radar_range: i.radar_range,
-            radar_mode: i.mode,
+            rcs_range: i.rcs_range,
+            radar_channel: i.channel,
+            radar_history: i.history,
             selected: i.selected,
             small: i.layout == Layout::Small,
             large_pages: large.clone(),
@@ -105,7 +121,9 @@ impl Preferences {
         ui.zoom = self.zoom;
         i.rwr_range = self.rwr_range;
         i.radar_range = self.radar_range;
-        i.mode = self.radar_mode;
+        i.rcs_range = self.rcs_range;
+        i.channel = self.radar_channel;
+        i.history = self.radar_history;
         i.selected = self.selected.min(i.pages.len().saturating_sub(1));
         i.pressed = None;
         i.cameras.clear();
@@ -126,11 +144,13 @@ impl Preferences {
             }
         }
         format!(
-            "tore-preferences 2\nzoom {}\nrwr-range {}\nradar-range {}\nradar-mode {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nbrightness {}\nmusic {}\neffects {}\n",
+            "tore-preferences 3\nzoom {}\nrwr-range {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nbrightness {}\nmusic {}\neffects {}\n",
             self.zoom,
             self.rwr_range,
             self.radar_range,
-            self.radar_mode,
+            self.rcs_range,
+            self.radar_channel,
+            self.radar_history,
             self.selected,
             self.small,
             pages(&self.large_pages),
@@ -149,9 +169,10 @@ impl Preferences {
         }
         let mut values = std::collections::BTreeMap::new();
         let mut lines = text.lines();
-        let legacy = match lines.next() {
-            Some("tore-preferences 1") => true,
-            Some("tore-preferences 2") => false,
+        let version = match lines.next() {
+            Some("tore-preferences 1") => 1,
+            Some("tore-preferences 2") => 2,
+            Some("tore-preferences 3") => 3,
             _ => return Err("unsupported preferences version".into()),
         };
         for line in lines {
@@ -183,13 +204,13 @@ impl Preferences {
             }
             Ok(p)
         };
-        if values.len() != 14 {
+        if values.len() != if version < 3 { 14 } else { 16 } {
             return Err("unknown preference".into());
         }
         let brightness = get("brightness")?
             .parse::<i16>()
             .map_err(|_| "invalid brightness")?;
-        let brightness = if legacy {
+        let brightness = if version == 1 {
             if !(0..=9).contains(&brightness) {
                 return Err("brightness outside legacy bounds".into());
             }
@@ -214,11 +235,40 @@ impl Preferences {
         if !zoom.is_finite() || !(0.5..=4.).contains(&zoom) {
             return Err("zoom outside bounds".into());
         }
+        if version < 3 {
+            // The retired cosmetic scope mode is still required to be present
+            // and in bounds, so an older file is validated rather than guessed.
+            integer("radar-mode", 2)?;
+        }
+        // Saved scope ranges migrate by their old nautical-mile value to the
+        // nearest new setting, with equal distances choosing the lower one.
+        let radar_range = if version < 3 {
+            nearest_range([10., 20., 40., 80., 160.][integer("radar-range", 4)?])
+        } else {
+            integer("radar-range", tore_sim::sensors::RANGE_LADDER_NMI.len() - 1)?
+        };
         Ok(Self {
             zoom,
             rwr_range: integer("rwr-range", 4)?,
-            radar_range: integer("radar-range", 4)?,
-            radar_mode: integer("radar-mode", 2)?,
+            radar_range,
+            rcs_range: if version < 3 {
+                tore_sim::sensors::passive::DEFAULT_SCALE_INDEX
+            } else {
+                integer(
+                    "rcs-range",
+                    tore_sim::sensors::passive::SCALE_LADDER_NMI.len() - 1,
+                )?
+            },
+            radar_channel: if version < 3 {
+                0
+            } else {
+                integer("radar-channel", 1)?
+            },
+            radar_history: if version < 3 {
+                false
+            } else {
+                boolean("radar-history")?
+            },
             selected: integer("selected", 5)?,
             small: boolean("small")?,
             large_pages: pages("large-pages", 4)?,
@@ -274,7 +324,9 @@ mod tests {
             zoom: 1.2,
             rwr_range: 3,
             radar_range: 2,
-            radar_mode: 1,
+            rcs_range: 4,
+            radar_channel: 1,
+            radar_history: true,
             selected: 0,
             small: true,
             large_pages: vec![9, 5],
@@ -287,7 +339,18 @@ mod tests {
             effects: true,
         };
         assert_eq!(Preferences::parse(&p.text()).unwrap(), p);
-        let legacy = p.text().replace("tore-preferences 2", "tore-preferences 1");
+        // Earlier files keep loading: the retired scope mode is dropped and the
+        // saved scope range migrates by its nautical-mile value.
+        let old = "tore-preferences 2\nzoom 1.2\nrwr-range 3\nradar-range 2\nradar-mode 1\nselected 0\nsmall true\nlarge-pages 9,5\nsmall-pages -\ncockpit false\nhud true\nladder false\nbrightness 3\nmusic false\neffects true\n";
+        let migrated = Preferences::parse(old).unwrap();
+        assert_eq!(migrated.radar_range, 3);
+        assert_eq!(migrated.radar_channel, 0);
+        assert!(!migrated.radar_history);
+        for (saved, expected) in [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5)] {
+            let text = old.replace("radar-range 2", &format!("radar-range {saved}"));
+            assert_eq!(Preferences::parse(&text).unwrap().radar_range, expected);
+        }
+        let legacy = old.replace("tore-preferences 2", "tore-preferences 1");
         assert_eq!(Preferences::parse(&legacy).unwrap().brightness, -64);
         assert_eq!(
             Preferences::parse(&legacy.replace("brightness 3", "brightness 7"))
@@ -296,6 +359,7 @@ mod tests {
             0
         );
         assert!(Preferences::parse(&legacy.replace("brightness 3", "brightness 10")).is_err());
+        assert!(Preferences::parse(&old.replace("radar-mode 1", "radar-history true")).is_err());
         assert!(Preferences::parse(&p.text().replace("brightness 3", "brightness 257")).is_err());
         assert!(
             Preferences::parse(&p.text().replace("large-pages 9,5", "large-pages 1,2,3,4,5"))

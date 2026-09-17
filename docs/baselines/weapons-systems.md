@@ -106,9 +106,12 @@ are preserved; automatic defaults apply to newly mapped standard Linux pads.
 
 ## Replay and diagnostic setup
 
-Combat tape **version 2** adds explicit launcher jammer power and the new
-commands. Version-1 tapes are rejected; this is a deliberate format/behavior
-boundary. Full state comparisons include RNG, player HP, subsystem counts,
+Combat tape **version 2** added explicit launcher jammer power and the commands
+of that pass. **Version 3** additionally records the player's sensor controls,
+the scope channel, display range and history, on every record, and stores a
+designation as `designate-id:N` rather than a screen coordinate. Version-2 tapes
+still replay, using the default sensor controls they were recorded with.
+Version-1 tapes are rejected; this is a deliberate format/behavior boundary. Full state comparisons include RNG, player HP, subsystem counts,
 failed equipment, incoming projectiles and previous player contact position.
 No ticks run while paused; controller/keyboard holds must release after an
 interruption. Reset reconstructs damage/equipment state and cancels held fire.

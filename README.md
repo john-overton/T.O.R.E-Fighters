@@ -66,7 +66,12 @@ persist between sessions. Inspect hardware without loading retail media with
 A development weapons range supports manual weapon testing: all 135 imported FA
 weapon definitions, arm/safe, sensor and range inhibits, damage-class fixtures,
 station failure, jettison, ECM contact resolution and optional recording and
-replay. Ordinary free flight stays externally clean.
+replay. One shared sensor component serves all twelve aircraft from their own
+imported equipment: the radar and infrared scope, click-to-designate contacts,
+contact history, directional jammer noise and the radar cross section page all
+read the same observations. Its detection tuning is a deliberate design choice,
+not a retail measurement. [What it models](docs/radar.md).
+Ordinary free flight stays externally clean.
 [Capabilities and validation](docs/baselines/manual-weapons.md). Combat AI is not
 started.
 
@@ -118,9 +123,9 @@ The default flight model is the researched hybrid adapter (`--researched-flight`
 runs a restricted research build from statically extracted tables. Both are
 research options, not the default. See [the flight model](docs/FLIGHT-MODEL.md).
 
-The development weapons range is `--live-fire --aircraft f18` (also `rafale`, `f14`, `a4e`, `x31`).
-Space fires, semicolon selects a weapon, backslash resets the range and T
-designates.
+The development weapons range is `--live-fire --aircraft f18`, and accepts any of
+the twelve imported aircraft. Space fires, semicolon selects a weapon, backslash
+resets the range, and T or a click on the radar page designates a contact.
 
 ## Explore the theaters
 

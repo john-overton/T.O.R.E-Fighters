@@ -68,14 +68,20 @@ part of this change. Broader native parity contracts remain tracked explicitly.
 ## Connected behavior
 
 The live adapter now distinguishes READY, SAFE, launcher loss, failed station,
-empty ammo, projectile capacity, absent/destroyed target, radar power/coverage,
-terrain masking, minimum/maximum range, altitude and seeker field-of-view.
+empty ammo, projectile capacity, absent/destroyed target, radar power, radar
+failure, RWS search only, acquiring, beyond tracking coverage, minimum/maximum
+range, altitude and seeker field-of-view. Terrain masking is no longer one of
+these: masking clears the observation and the selection, so the readout reports
+NO TARGET instead.
 A launch inhibit consumes no ammunition. Sensor lock can remain valid while the
 master arm is safe or a station is failed; lock is not launch permission.
 
-Both aircraft resolve their own VIS340.SEE and F18R.SEE at construction. Manual
-cycling selects living contacts inside visual or radar coverage. Designation,
-launch solution and post-launch tracking remain separate. Bounded sampled terrain
+Each aircraft resolves its own SEE records at construction, by parsed channel
+rather than by name. Manual cycling and mouse clicks share one eligibility rule:
+any contact the selected channel or the visual sensor currently observes,
+including an airborne wreck. Designation, launch solution and post-launch
+tracking remain separate, and required illumination is specific to each missile's
+own target. [The shared sensor component](../radar.md) owns those rules. Bounded sampled terrain
 visibility gates contacts and launch, and can break missile tracking. This uses
 the existing height-query contract; it is an authored visibility approximation,
 not recovered native terrain masking, Doppler, aspect or sensor cadence.

@@ -29,6 +29,7 @@ mod quick_mission;
 mod rafale_animation;
 mod renderer;
 mod roster_animation;
+mod scope;
 mod sim_renderer;
 mod terrain;
 mod weather;
@@ -262,6 +263,12 @@ impl App {
                     ) && !self.flight.hook_available()
                     {
                         self.flight_ui.message("Hook unavailable for this aircraft");
+                    } else if command == tore_input::PilotCommand::Toggle(tore_input::Switch::Radar)
+                        && self.instruments.channel != 0
+                    {
+                        // The same rule as the keyboard: returning to the radar
+                        // channel comes before spending the power switch.
+                        self.instruments.channel = 0;
                     } else {
                         self.input.queue(command);
                     }
@@ -349,7 +356,11 @@ impl App {
             "instrument-previous" => Command::InstrumentCycle(-1),
             "range-down" => Command::Range(-1),
             "range-up" => Command::Range(1),
-            "radar-mode" => Command::Mode,
+            // The recovered radar-mode action is the available sensor-channel
+            // cycle; the two newer names are explicit aliases for it.
+            "radar-mode" | "sensor-channel" => Command::Mode,
+            "sensor-infrared" => Command::SensorInfrared,
+            "sensor-history" => Command::SensorHistory,
             "cockpit" => {
                 self.flight_ui.cockpit = !self.flight_ui.cockpit;
                 Command::Click
@@ -474,6 +485,12 @@ impl App {
                     self.flight_ui.message("Hook unavailable for this aircraft");
                     return Action::None;
                 }
+                // Returning to the active radar channel comes first, so the
+                // radar power switch is not spent leaving the passive page.
+                if switch == tore_input::Switch::Radar && self.instruments.channel != 0 {
+                    self.instruments.channel = 0;
+                    return Action::Click;
+                }
                 self.input.queue(tore_input::PilotCommand::Toggle(switch));
                 Action::None
             }
@@ -524,7 +541,7 @@ impl App {
                 Action::Click
             }
             Command::Panel(page) => {
-                self.instruments.pressed = None;
+                self.instruments.cancel_press();
                 self.instruments.toggle(page);
                 Action::Click
             }
@@ -533,17 +550,54 @@ impl App {
                 Action::None
             }
             Command::Range(delta) => {
-                if self.instruments.pages.last() == Some(&5) {
-                    self.instruments.rwr_range =
-                        (self.instruments.rwr_range as i32 + delta).clamp(0, 4) as usize;
-                } else {
-                    self.instruments.radar_range =
-                        (self.instruments.radar_range as i32 + delta).clamp(0, 4) as usize;
-                }
+                let last = match self.instruments.pages.last() {
+                    Some(5) => {
+                        self.instruments.rwr_range =
+                            (self.instruments.rwr_range as i32 + delta).clamp(0, 4) as usize;
+                        return Action::Click;
+                    }
+                    Some(0) => {
+                        let scales = tore_sim::sensors::passive::SCALE_LADDER_NMI.len() as i32 - 1;
+                        self.instruments.rcs_range =
+                            (self.instruments.rcs_range as i32 + delta).clamp(0, scales) as usize;
+                        return Action::Click;
+                    }
+                    _ => tore_sim::sensors::RANGE_LADDER_NMI.len() as i32 - 1,
+                };
+                self.instruments.radar_range =
+                    (self.instruments.radar_range as i32 + delta).clamp(0, last) as usize;
                 Action::Click
             }
             Command::Mode => {
-                self.instruments.mode = (self.instruments.mode + 1) % 3;
+                // Cycles the available sensor channels. Radar search and track
+                // modes follow the selected display range automatically.
+                self.instruments.cycle_channel();
+                if !self
+                    .combat
+                    .state
+                    .sensors
+                    .available(self.instruments.controls().channel)
+                {
+                    self.instruments.cycle_channel();
+                    self.flight_ui.message("No infrared sensor is installed.");
+                }
+                Action::Click
+            }
+            Command::SensorHistory => {
+                self.instruments.history = !self.instruments.history;
+                Action::Click
+            }
+            Command::SensorInfrared => {
+                if self
+                    .combat
+                    .state
+                    .sensors
+                    .available(tore_sim::sensors::Channel::Infrared)
+                {
+                    self.instruments.channel = 1;
+                } else {
+                    self.flight_ui.message("No infrared sensor is installed.");
+                }
                 Action::Click
             }
         }
@@ -619,7 +673,7 @@ impl App {
                             }
                             self.previous_flight = self.flight.clone();
                             self.instruments.cameras.clear();
-                            self.instruments.pressed = None;
+                            self.instruments.cancel_press();
                             self.flight_canvas = flight_canvas::FlightCanvas::default();
                         }
                         Err(error) => {
@@ -924,7 +978,7 @@ impl ApplicationHandler for App {
                 renderer.resize();
                 self.menu.state.cancel();
                 self.quick.cancel();
-                self.instruments.pressed = None;
+                self.instruments.cancel_press();
                 self.flight_ui.cancel_press();
                 self.pointer = None;
                 self.camera.keys.clear();
@@ -961,7 +1015,7 @@ impl ApplicationHandler for App {
                 }
                 self.menu.state.cancel();
                 self.quick.cancel();
-                self.instruments.pressed = None;
+                self.instruments.cancel_press();
                 self.flight_ui.cancel_press();
                 self.pointer = None;
                 self.camera.keys.clear();
@@ -996,18 +1050,23 @@ impl ApplicationHandler for App {
                     self.frame_time = Instant::now();
                     self.flight_command(command)
                 } else if self.screen == Screen::Flight {
-                    if self.instruments.screen_pointer(
+                    let hit = self.instruments.screen_pointer(
                         self.pointer,
                         [
                             renderer.window.inner_size().width as f64,
                             renderer.window.inner_size().height as f64,
                         ],
                         state == ElementState::Pressed,
-                    ) {
-                        Action::Click
-                    } else {
-                        Action::None
+                    );
+                    // The simulation revalidates the requested identity, so a
+                    // click can never select a target it does not observe.
+                    if let Some(id) = self.instruments.designation.take() {
+                        self.combat.command(
+                            tore_sim::combat::live::Command::DesignateTarget(id),
+                            combat::launcher(&self.flight),
+                        );
                     }
+                    if hit { Action::Click } else { Action::None }
                 } else if self.screen == Screen::Viewer {
                     Action::None
                 } else if self.screen == Screen::Quick {
@@ -1110,7 +1169,7 @@ impl ApplicationHandler for App {
                     if self.flight_ui.frozen() || before != self.flight_ui.frozen() {
                         self.camera.keys.clear();
                         self.combat.cancel();
-                        self.instruments.pressed = None;
+                        self.instruments.cancel_press();
                         self.flight_clock.remainder = 0.;
                         self.previous_flight.clone_from(&self.flight);
                         self.frame_time = Instant::now();
@@ -1170,6 +1229,10 @@ impl ApplicationHandler for App {
                         if let Some(audio) = &self.audio {
                             audio.pause_flight(self.flight_ui.frozen());
                         }
+                        // Scope channel, display range and history are player
+                        // controls, applied as a simulation input so replay
+                        // reproduces every change and the labels never lag.
+                        self.flight.sensors = self.instruments.controls();
                         for _ in 0..steps {
                             self.previous_flight.clone_from(&self.flight);
                             let (pilot, _) =
@@ -1400,7 +1463,17 @@ impl ApplicationHandler for App {
                             &self.world,
                         );
                         simulation_ms = frame_start.elapsed().as_secs_f64() * 1000.;
-                        self.instruments.combat = Some(self.combat.readout(&self.flight));
+                        self.instruments.combat = Some(
+                            self.combat
+                                .readout(&self.flight, self.instruments.rcs_scale_nmi()),
+                        );
+                        // Hover feedback uses the same projection as the click,
+                        // so the selector marks the contact a click would take.
+                        let window = renderer.window.inner_size();
+                        self.instruments.hover(
+                            self.pointer,
+                            [f64::from(window.width), f64::from(window.height)],
+                        );
                         self.flight_canvas.begin(
                             renderer.flight_size(),
                             &self.hornet,
@@ -1673,6 +1746,9 @@ fn main() -> AppResult<()> {
     let mut native_tables_path: Option<PathBuf> = None;
     let mut window_size = [960, 720];
     let mut instrument_page = None;
+    let mut sensor_channel = None;
+    let mut scope_range = None;
+    let mut scope_history = false;
     let mut instrument_layout = instruments::Layout::Large;
     let mut capture_terrain = None;
     let mut native_flight_report = false;
@@ -1686,6 +1762,7 @@ fn main() -> AppResult<()> {
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
     let mut validate_creator = false;
+    let mut sensor_summary = false;
     let mut validate_weather = false;
     let mut weather_condition: Option<usize> = None;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
@@ -1982,6 +2059,33 @@ fn main() -> AppResult<()> {
             "--no-audio" => no_audio = true,
             "--import-only" => import_only = true,
             "--validate-creator" => validate_creator = true,
+            "--sensor-summary" => sensor_summary = true,
+            "--sensor-channel" => {
+                sensor_channel = Some(
+                    match args
+                        .next()
+                        .ok_or("--sensor-channel needs radar or ir")?
+                        .as_str()
+                    {
+                        "radar" => 0,
+                        "ir" => 1,
+                        _ => return Err("--sensor-channel needs radar or ir".into()),
+                    },
+                );
+            }
+            "--scope-range" => {
+                let nmi: f64 = args
+                    .next()
+                    .ok_or("--scope-range needs a recovered scope setting in nautical miles")?
+                    .parse()?;
+                scope_range = Some(
+                    tore_sim::sensors::RANGE_LADDER_NMI
+                        .iter()
+                        .position(|v| *v == nmi)
+                        .ok_or("--scope-range needs 5, 10, 25, 50, 100 or 150")?,
+                );
+            }
+            "--scope-history" => scope_history = true,
             "--validate-weather" => validate_weather = true,
             "--weather-condition" => {
                 let value: usize = args
@@ -1995,7 +2099,7 @@ fn main() -> AppResult<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Creator: --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; I launches one incoming selected weapon; Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-2 combat-service inputs; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Creator: --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-3 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -2113,6 +2217,17 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             &theater_code,
             &w,
         )?;
+        return Ok(());
+    }
+    if sensor_summary {
+        // The reviewable per-aircraft capability report. Porting an aircraft
+        // means reviewing this output, not writing another radar controller.
+        for id in tore_formats::aircraft::AircraftId::ALL {
+            match aircraft::Airframe::load(&assets.theater_resources, id) {
+                Ok(airframe) => println!("{}", airframe.sensors.summary()),
+                Err(error) => println!("{id:?}: unavailable, {error}"),
+            }
+        }
         return Ok(());
     }
     if combat_smoke {
@@ -2557,6 +2672,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         flight.rudder = v[2];
     }
 
+    // Headless probes and captures have no instrument panel to read, so the
+    // command line supplies the same sensor controls a player would set.
+    flight.sensors = sensor_controls(sensor_channel, scope_range, scope_history);
     let mut combat = combat::Combat::new(&hornet, &theater_resources, live_fire)?;
     if let Some(path) = record_combat {
         combat.recorder = Some(combat_tape::Recorder::new(
@@ -2589,6 +2707,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             tore_sim::combat::live::Command::ReplaceTarget,
             combat::launcher(&flight),
         );
+        // A scripted designation needs a current observation first, exactly as
+        // a player's click does.
+        combat.step(&mut flight, &world)?;
     }
     for command in combat_commands {
         combat.command(command, combat::launcher(&flight));
@@ -2598,6 +2719,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             tore_sim::combat::live::Command::Designate,
             combat::launcher(&flight),
         );
+        // Half a second of tracking before the probe fires, so a radar weapon
+        // has the same support a player would wait for.
+        for _ in 0..tore_sim::sensors::track::ACQUISITION_STEPS {
+            combat.step(&mut flight, &world)?;
+        }
         combat.input.space(true, false, false);
         let mut feedback = tore_input::FeedbackMixer::default();
         let mut cues = std::collections::BTreeMap::<String, usize>::new();
@@ -2702,7 +2828,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             }
             ui
         },
-        instruments: instruments::Instruments::new(instrument_layout, instrument_page),
+        instruments: {
+            let mut i = instruments::Instruments::new(instrument_layout, instrument_page);
+            apply_sensor_controls(&mut i, sensor_channel, scope_range, scope_history);
+            i
+        },
         pointer: None,
         theater_resources,
         world,
@@ -2739,6 +2869,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                         app.instruments.pages = vec![page];
                         app.instruments.selected = 0;
                     }
+                    apply_sensor_controls(
+                        &mut app.instruments,
+                        sensor_channel,
+                        scope_range,
+                        scope_history,
+                    );
                     if std::env::args().any(|a| a == "--flight-zoom") {
                         app.flight_ui.zoom = flight_zoom;
                     }
@@ -2782,6 +2918,39 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
 }
 
+/// Headless sensor control overrides, so a capture or probe can exercise the
+/// infrared channel, another scope setting and the history trail.
+fn sensor_controls(
+    channel: Option<usize>,
+    range: Option<usize>,
+    history: bool,
+) -> tore_sim::sensors::Controls {
+    tore_sim::sensors::Controls {
+        channel: if channel == Some(1) {
+            tore_sim::sensors::Channel::Infrared
+        } else {
+            tore_sim::sensors::Channel::Radar
+        },
+        range_index: range.unwrap_or(tore_sim::sensors::DEFAULT_RANGE_INDEX),
+        history,
+    }
+}
+fn apply_sensor_controls(
+    instruments: &mut instruments::Instruments,
+    channel: Option<usize>,
+    range: Option<usize>,
+    history: bool,
+) {
+    if let Some(channel) = channel {
+        instruments.channel = channel;
+    }
+    if let Some(range) = range {
+        instruments.radar_range = range;
+    }
+    if history {
+        instruments.history = true;
+    }
+}
 fn flight_key(physical: winit::keyboard::PhysicalKey, fallback: &str) -> String {
     use winit::keyboard::{KeyCode, PhysicalKey};
     if let PhysicalKey::Code(code) = physical {

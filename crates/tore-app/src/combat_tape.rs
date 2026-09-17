@@ -9,7 +9,13 @@ use std::{
 use tore_sim::{
     attitude::{Basis, dot},
     combat::live::{Command, Configuration, Launcher, State},
+    sensors::{Channel, Controls, RANGE_LADDER_NMI},
 };
+
+/// Version 3 adds the player sensor controls to every record so channel,
+/// display range and history changes replay deterministically. Version 2 tapes
+/// still replay, using the default controls they were recorded with.
+const VERSION: u32 = 3;
 
 pub struct Recorder {
     out: std::io::BufWriter<std::fs::File>,
@@ -42,7 +48,7 @@ impl Recorder {
         );
         writeln!(
             out,
-            "tore-combat 2 {:?} {} {:016x}",
+            "tore-combat {VERSION} {:?} {} {:016x}",
             config.aircraft,
             theater,
             fingerprint(data)
@@ -76,10 +82,13 @@ impl Recorder {
             }
             writeln!(
                 self.out,
-                " {} {} {}",
+                " {} {} {} {} {} {}",
                 u8::from(l.radar),
                 u8::from(l.alive),
-                u8::from(l.jammer)
+                u8::from(l.jammer),
+                u8::from(l.controls.channel == Channel::Infrared),
+                l.controls.range_index,
+                u8::from(l.controls.history)
             )
         })();
         if let Err(e) = result {
@@ -94,7 +103,12 @@ impl Recorder {
         Ok(())
     }
 }
-pub fn command_name(c: Command) -> &'static str {
+pub fn command_name(c: Command) -> String {
+    // A designation carries its stable target identity, never a screen
+    // coordinate, so a replay selects the same object.
+    if let Command::DesignateTarget(id) = c {
+        return format!("designate-id:{id}");
+    }
     match c {
         Command::NextWeapon => "next",
         Command::Designate => "designate",
@@ -107,9 +121,14 @@ pub fn command_name(c: Command) -> &'static str {
         Command::DamagePlayer => "damage",
         Command::Incoming => "incoming",
         Command::ToggleTargetJammer => "target-jammer",
+        Command::DesignateTarget(_) => unreachable!("handled above"),
     }
+    .into()
 }
 pub fn command(s: &str) -> Option<Command> {
+    if let Some(id) = s.strip_prefix("designate-id:") {
+        return id.parse().ok().map(Command::DesignateTarget);
+    }
     [
         Command::NextWeapon,
         Command::Designate,
@@ -126,9 +145,14 @@ pub fn command(s: &str) -> Option<Command> {
     .into_iter()
     .find(|c| command_name(*c) == s)
 }
-fn parse(line: &str) -> AppResult<(&str, Launcher)> {
+/// Records carry the sensor controls from version 3 onward, so the field count
+/// follows the header rather than being accepted either way.
+fn fields_for(version: u32) -> usize {
+    if version < 3 { 17 } else { 20 }
+}
+fn parse(line: &str, version: u32) -> AppResult<(&str, Launcher)> {
     let fields: Vec<_> = line.split_whitespace().collect();
-    if fields.len() != 17 {
+    if fields.len() != fields_for(version) {
         return Err("invalid combat record fields".into());
     }
     let mut values = [0.; 13];
@@ -158,6 +182,23 @@ fn parse(line: &str) -> AppResult<(&str, Launcher)> {
     {
         return Err("invalid combat launcher basis/speed".into());
     }
+    let controls = if version >= 3 {
+        let range: usize = fields[18].parse()?;
+        if range >= RANGE_LADDER_NMI.len() {
+            return Err("combat tape scope range outside bounds".into());
+        }
+        Controls {
+            channel: if boolean(fields[17])? {
+                Channel::Infrared
+            } else {
+                Channel::Radar
+            },
+            range_index: range,
+            history: boolean(fields[19])?,
+        }
+    } else {
+        Controls::default()
+    };
     Ok((
         fields[0],
         Launcher {
@@ -167,6 +208,7 @@ fn parse(line: &str) -> AppResult<(&str, Launcher)> {
             radar: boolean(fields[14])?,
             jammer: boolean(fields[16])?,
             alive: boolean(fields[15])?,
+            controls,
         },
     ))
 }
@@ -181,7 +223,7 @@ pub fn replay(
         std::io::BufReader::new(std::fs::File::open(path)?),
         config.clone(),
         &format!(
-            "tore-combat 2 {:?} {} {:016x}",
+            "tore-combat {VERSION} {:?} {} {:016x}",
             config.aircraft,
             theater,
             fingerprint(data)
@@ -199,6 +241,7 @@ fn replay_reader(
     let mut s = State::new(config, true)?;
     let mut buffer = Vec::new();
     let mut initialized = false;
+    let mut version = VERSION;
     let mut ticks = 0;
     let mut bytes = 0;
     for count in 0..=432001 {
@@ -229,12 +272,20 @@ fn replay_reader(
         }
         let line = std::str::from_utf8(&buffer)?.trim();
         if count == 0 {
-            if line != header {
-                return Err("combat tape version/aircraft/theater/assets mismatch".into());
-            }
+            // Existing version-2 tapes keep replaying; only the version token
+            // differs, and their records carry the default sensor controls.
+            version = (2..=VERSION)
+                .find(|v| {
+                    line == header.replacen(
+                        &format!("tore-combat {VERSION}"),
+                        &format!("tore-combat {v}"),
+                        1,
+                    )
+                })
+                .ok_or("combat tape version/aircraft/theater/assets mismatch")?;
             continue;
         }
-        let (action, launcher) = parse(line)?;
+        let (action, launcher) = parse(line, version)?;
         if !initialized && action != "reset" {
             return Err("combat tape must start with reset".into());
         }
@@ -262,10 +313,19 @@ mod tests {
     use super::*;
     #[test]
     fn bounded_records_reject_nonfinite_axes_and_invalid_basis() {
-        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 0").is_ok());
-        assert!(parse("tick NaN 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 0").is_err());
-        assert!(parse("tick 0 1000 0 0 0 0 0 1 0 0 0 1 300 1 1 0").is_err());
-        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 2 1 0").is_err());
-        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 2").is_err());
+        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 0", 2).is_ok());
+        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 0 1 3 1", 3).is_ok());
+        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 0 1 9 1", 3).is_err());
+        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 0 2 3 1", 3).is_err());
+        // A record must match the version its header declared.
+        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 0 1 3 1", 2).is_err());
+        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 0", 3).is_err());
+        assert_eq!(command("designate-id:7"), Some(Command::DesignateTarget(7)));
+        assert_eq!(command("designate-id:x"), None);
+        assert_eq!(command_name(Command::DesignateTarget(7)), "designate-id:7");
+        assert!(parse("tick NaN 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 0", 2).is_err());
+        assert!(parse("tick 0 1000 0 0 0 0 0 1 0 0 0 1 300 1 1 0", 2).is_err());
+        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 2 1 0", 2).is_err());
+        assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 2", 2).is_err());
     }
 }

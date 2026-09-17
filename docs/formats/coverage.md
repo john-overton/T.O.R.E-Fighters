@@ -34,7 +34,7 @@ Status is for this **Rust rebuild**, not the reference project's decoders. The a
 | XMI / instrument banks | Excluded from current playback scope | User selected original recordings without MIDI/synthesis; general raw extraction remains available |
 | PT / PTS / SH / HUD | Partial | FA F18 PT fields, Hornet static SH/device geometry and cockpit artwork; PTS and complete native HUD/shape VM remain unimplemented |
 | T2 / BIT2 | Partial | All 16 grids parsed; native packed layout, heights and lookup verified; All 16 base theaters render as fixed-triangle previews (Kurile has no tmap textures) |
-| JT / SEE / ECM | Partial | Named schemas, dependency closure and 135 JT definitions extracted; combat/sensor execution not complete |
+| JT / SEE / ECM | Partial | Named schemas, dependency closure and 135 JT definitions extracted; SEE radar/infrared/visual volumes and ECM radar-deception fields drive the shared sensor component; remaining combat execution not complete |
 | OT | Partial | Bounded STRIP/166 metadata and explicit main shape reference; other classes, placement, callbacks and runtime absent |
 | NT | Not started | Directory inventory only |
 | M / MM | Partial | All 75 selected MM layouts plus named mission environment/tmap fields decoded; isolated eight-field STRIP placement inputs decoded separately; missions and object execution absent |
@@ -51,7 +51,7 @@ open. No format status is promoted by this research. [Plan](weapons.md) and
 
 ### F/A-18D slice
 
-FA PT: typed bounded reader for the reviewed aircraft layouts (identity-specific 612/636/660 type sizes), all source G rows and hardpoints exported; runtime physics is an authored adapter. FA JT/SEE/ECM: named schema decoding and raw data extraction, including transitive shape/texture/audio dependencies; weapon/sensor execution is partial for reviewed default stations of the twelve registered aircraft, including contact ECM and supported automatic equipment faults. GAS: checked tank configuration and raw preservation. SH: nearest-detail static Hornet geometry and observed device endpoint branches, not a general native VM. FNT: bounded bitmap-writing glyph grammar, WIN11 used in instrument windows. HUD: associated source artwork/data preserved, general native HUD composition not decoded. [Detailed scope](aircraft.md).
+FA PT: typed bounded reader for the reviewed aircraft layouts (identity-specific 612/636/660 type sizes), all source G rows and hardpoints exported; runtime physics is an authored adapter. FA JT/SEE/ECM: named schema decoding and raw data extraction, including transitive shape/texture/audio dependencies; weapon execution is partial for reviewed default stations of the twelve registered aircraft, including contact ECM and supported automatic equipment faults. SEE search/track volumes, look-down coefficients and ECM radar-deception fields are consumed by the shared sensor component, whose detection model is authored rather than recovered. GAS: checked tank configuration and raw preservation. SH: nearest-detail static Hornet geometry and observed device endpoint branches, not a general native VM. FNT: bounded bitmap-writing glyph grammar, WIN11 used in instrument windows. HUD: associated source artwork/data preserved, general native HUD composition not decoded. [Detailed scope](aircraft.md).
 
 ## Native flight research
 
@@ -117,10 +117,11 @@ art. The corresponding native lifecycle/SH VM/sensor parity cells remain partial
 [Validation and limits](../baselines/live-fire.md).
 
 Manual weapons follow-up: ten PT-default JT stations pass all five damage-class
-fixtures. Runtime now consumes VIS340/F18R acquisition data, source category
-mapping and failed-station flags, with carried weapon body geometry and bounded
-combat-service tapes. Native sensor/SH/damage parity remains partial; alternative
-catalog loadouts and non-default ordnance are not enabled by this acceptance.
+fixtures. Runtime consumes each aircraft's own SEE radar, infrared and visual
+records, source category mapping and failed-station flags, with carried weapon
+body geometry and bounded combat-service tapes. Native sensor/SH/damage parity
+remains partial; alternative catalog loadouts and non-default ordnance are not
+enabled by this acceptance.
 [Evidence and non-AI gaps](../baselines/manual-weapons.md).
 
 Manual systems follow-up: PT/ECM source data now feeds bounded player damage,

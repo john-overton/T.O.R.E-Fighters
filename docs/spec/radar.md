@@ -11,8 +11,9 @@
 Research mode, 2026-09-16. This partial specification describes the inspected FA
 build, not real-world radar performance. No retail execution or complete parity
 claim. [Source findings](../formats/radar.md), [validation](../baselines/radar.md).
-The [component proposal](../radar.md) separates our implementation choices from
-these findings. Unknowns below do not block implementing the specified portions.
+The [component guide](../radar.md) separates our implementation choices from
+these findings. Unknowns below did not block implementing the specified
+portions.
 
 ## Aircraft capabilities
 
@@ -51,7 +52,7 @@ signature and look-down. A scope setting does not extend a sensor's coverage.
 The target aircraft's PT carries relative signatures separately from the sensor
 installed on the observing aircraft. Radar uses sigs[3]; IR uses sigs[2]. These
 are game scale values, not established square metres of radar cross section or
-physical infrared output. The component proposal uses 100 as its reference.
+physical infrared output. The component guide uses 100 as its reference.
 
 | Target aircraft | Radar signature | IR signature |
 | --- | ---: | ---: |
@@ -70,7 +71,7 @@ physical infrared output. The component proposal uses 100 as its reference.
 
 These are FA base-record values. They do not establish the complete original
 aspect, configuration, power-setting or weather modifiers. They nevertheless
-provide distinct per-aircraft inputs for the proposed authored detection model.
+provide distinct per-aircraft inputs for the authored detection model.
 
 ## Scope range and targeting modes
 
@@ -96,10 +97,12 @@ RWS require follow-up; do not infer them from the acquisition rule.
 
 The FA scope label table contains RWS, TWS, IR, HARM and A-G. This establishes
 available display channels, not that every aircraft has every channel. The
-current remake's M button cycling RWS/TWS/A-G is not established retail behaviour.
-Exact M/Y handlers, mouse selection and track-history durations remain unknown.
-The older USNF manual describes sensor switching and history, but is a lead,
-not authority for FA-specific controls or numbers.
+remake's earlier M button cycling of RWS/TWS/A-G labels was never established
+retail behaviour, and it is gone: M now selects an available sensor channel,
+which is an authored control described in the [component guide](../radar.md).
+Exact retail M/Y handlers, mouse selection and track-history durations remain
+unknown. The older USNF manual describes sensor switching and history, but is a
+lead, not authority for FA-specific controls or numbers.
 
 ## Look-down and detection
 
@@ -147,9 +150,49 @@ The ranges below are nominal search/track, before their own modifiers.
 
 The 9/10 values are present in FA; preserve them rather than silently clamping
 track to search or replacing the device. Initial acquisition versus retained
-track for these sensors needs its own consumer review. All twelve aircraft also
-carry visual sensors. HARM capability belongs to the selected weapon/equipment,
-not a fabricated infrared/radar capability on every aircraft.
+track for these sensors needs its own consumer review. HARM capability belongs
+to the selected weapon/equipment, not a fabricated infrared/radar capability on
+every aircraft.
+
+All twelve aircraft also carry a visual sensor, on source signature 0. Two
+records are installed, and both rate 10 nmi search and 5 nmi track. Their
+half-angles differ, and the record names match the full azimuth coverage.
+
+| Visual record | Search / track nmi | Azimuth x elevation half-angles | Aircraft |
+| --- | --- | --- | --- |
+| VIS340.SEE | 10 / 5 | 170 x 140 degrees | F/A-18D, Rafale C, F-14D, A-4E, X-31, MiG-29, Su-27, Su-35, F-22A |
+| VIS240.SEE | 10 / 5 | 120 x 90 degrees | MiG-21, Su-25, MiG-23 |
+
+Search and track angles are identical within each record; only the distance
+differs. These are the FA record values, not a claim about a pilot's real
+field of view.
+
+## Installed ECM records
+
+Eight distinct ECM records are installed across the twelve aircraft. Two of their
+fields bear on the radar picture: the mode flag word, whose bit 0x10 is the
+reviewed radar-deception mode and bit 0x100 the infrared one, and the radar
+deception chance.
+
+| ECM record | Mode flags | Radar deception chance | Aircraft |
+| --- | ---: | ---: | --- |
+| F4.ECM | 0 | 0 | A-4E |
+| MIG21.ECM | 0 | 0 | MiG-21, MiG-23 |
+| F14.ECM | 0x1F0 | 30 | F-14D |
+| MIG29.ECM | 0x1F0 | 30 | MiG-29 |
+| SU24.ECM | 0x1F0 | 30 | Su-25 |
+| F18.ECM | 0x1F0 | 30 | F/A-18D, Rafale C, X-31 |
+| SU27.ECM | 0x1F0 | 30 | Su-27, Su-35 |
+| F22.ECM | 0x1F0 | 50 | F-22A |
+
+F4.ECM and MIG21.ECM carry neither the radar-deception mode flag nor a nonzero
+chance, so the A-4E, MiG-21 and MiG-23 have no radar-deception capability in
+their own records. The remaining six all share mode flags 0x1F0; only F-22A's
+chance differs. The chance is a source probability field; the remake repurposes
+it as a jammer strength input, which is an agent decision recorded in the
+[component guide](../radar.md). The other ECM fields, chaff and flare counts,
+signature additions and infrared terms, are documented with the
+[weapons systems evidence](../baselines/weapons-systems.md).
 
 ## USNF history and infrared reference
 
@@ -166,7 +209,7 @@ authoritative for installed devices. [Source location and identity](../formats/r
 
 John's requested authored scope includes histories, persistent click selection,
 detectable destroyed aircraft, single-target tracking and IR air-to-air. Those
-rules and proposed timings live in the [component plan](../radar.md). The retail
+rules and their timings live in the [component guide](../radar.md). The retail
 RWS acquisition restriction above remains a research fact, not a reason to reject
 his requested click selection. RWS selection does not supply a fire-control lock.
 The target view keeps gamified IFF; realistic IFF and A2G are outside this pass.
@@ -187,9 +230,11 @@ classification. The requested plan preserves those per-weapon distinctions:
 one aircraft track can support sequential launches at different targets when the
 weapons guide independently. Each missile retains its own launch target.
 
-Missing facts: exact mouse hit rules, history cadence, lock/loss timers, maintained
-support after changing display mode or designation, active-seeker activation,
-and supplemental radar. Detailed ground-target filtering is deferred with A2G;
+Missing retail facts: exact mouse hit rules, history cadence, lock/loss timers,
+maintained support after changing display mode or designation, active-seeker
+activation, and supplemental radar. Each one has an authored replacement in the
+[component guide](../radar.md), labelled there; none of them is recovered
+behaviour. Detailed ground-target filtering is deferred with A2G;
 IFF remains the existing gamified target view. Next research should
 inspect only the handlers needed for the next player interaction, then add its
 observable rules here. Do not hold basic radar profiles or shared contact state

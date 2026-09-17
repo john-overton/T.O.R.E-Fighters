@@ -1,11 +1,12 @@
 //! Small independent raster instruments. Layout fitted to supplied retail captures;
 //! data is live, unsupported native sensors/camera modes are explicit.
-use crate::{aircraft::Airframe, flight::State, menu::Sprite};
+use crate::{aircraft::Airframe, flight::State, menu::Sprite, scope};
 use tore_formats::font::Font;
 pub const WIDTH: usize = 160;
 pub const HEIGHT: usize = 156;
 const GREEN: [u8; 4] = [132, 193, 126, 255];
 const DIM: [u8; 4] = [48, 83, 44, 255];
+const BRIGHT: [u8; 4] = [206, 240, 200, 255];
 pub struct Raster {
     pub pixels: Vec<u8>,
 }
@@ -69,6 +70,42 @@ impl Raster {
         }
     }
 }
+/// Agent-proposed mouse tolerance in instrument raster pixels.
+pub const PICK_TOLERANCE: f64 = 7.;
+/// Readability cap on combined noise density, so text, the selector and valid
+/// track symbols stay legible over a noisy background.
+const MAX_NOISE_DENSITY: f64 = 0.35;
+/// Scope origin and plotted extents inside the instrument window.
+const SCOPE_ORIGIN: (f64, f64) = (80., 130.);
+const SCOPE_HALF_WIDTH: f64 = 55.;
+const SCOPE_DEPTH: f64 = 90.;
+
+/// One projection for drawing and picking: bearing across, distance up.
+/// A contact outside the plotted range returns None and is not drawn, which
+/// does not mean the sensor lost it.
+pub fn project(bearing_rad: f64, distance_ft: f64, range_nmi: f64) -> Option<(f64, f64)> {
+    let range = range_nmi * tore_sim::sensors::FEET_PER_NAUTICAL_MILE;
+    if range <= 0. || distance_ft > range || bearing_rad.abs() > std::f64::consts::FRAC_PI_2 {
+        return None;
+    }
+    Some((
+        SCOPE_ORIGIN.0 + bearing_rad.sin() * SCOPE_HALF_WIDTH,
+        SCOPE_ORIGIN.1 - distance_ft / range * SCOPE_DEPTH,
+    ))
+}
+
+/// Deterministic display texture. It uses the simulation tick and an
+/// independent display seed, never the combat RNG, so noise cannot change
+/// detection or replay.
+fn speckle(x: i32, y: i32, phase: u64) -> f64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64 ^ 0x5241_4441_5f4e_4f49;
+    for v in [x as u64 & 0xffff, y as u64 & 0xffff, phase] {
+        h = (h ^ v).wrapping_mul(0x100_0000_01b3);
+        h ^= h >> 29;
+    }
+    f64::from((h >> 40) as u32 & 0xffff) / 65535.
+}
+
 /// Positions are in the shared 640x480 flight canvas. Small windows form
 /// two groups of three across the bottom, leaving a central gutter.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -128,7 +165,8 @@ pub struct CombatReadout {
     pub ammo: u16,
     pub loaded: bool,
     pub target: Option<(u32, i32, bool)>,
-    pub contacts: Vec<(f64, f64)>,
+    pub scope: scope::Scope,
+    pub rcs: scope::Rcs,
 }
 pub struct Instruments {
     pub combat: Option<CombatReadout>,
@@ -139,8 +177,16 @@ pub struct Instruments {
     pub cameras: std::collections::BTreeMap<u8, Vec<u8>>,
     pub rwr_range: usize,
     pub radar_range: usize,
-    pub mode: usize,
+    pub rcs_range: usize,
+    /// Requested scope channel: 0 radar, 1 infrared.
+    pub channel: usize,
+    pub history: bool,
     pub pressed: Option<(usize, usize)>,
+    pressed_contact: Option<(usize, u32)>,
+    /// The contact under the pointer, drawn with a selector.
+    pub hovered: Option<u32>,
+    /// One pending designation request, drained by the host each frame.
+    pub designation: Option<u32>,
 }
 impl Default for Instruments {
     fn default() -> Self {
@@ -152,9 +198,14 @@ impl Default for Instruments {
             other_pages: vec![7, 5, 6, 4, 9, 8],
             cameras: Default::default(),
             rwr_range: 4,
-            radar_range: 3,
-            mode: 0,
+            radar_range: tore_sim::sensors::DEFAULT_RANGE_INDEX,
+            rcs_range: tore_sim::sensors::passive::DEFAULT_SCALE_INDEX,
+            channel: 0,
+            history: false,
             pressed: None,
+            pressed_contact: None,
+            hovered: None,
+            designation: None,
         }
     }
 }
@@ -169,9 +220,17 @@ impl Instruments {
         }
         result
     }
+    /// Cancel a pending press, on focus loss or a layout change.
+    pub fn cancel_press(&mut self) {
+        self.pressed = None;
+        self.pressed_contact = None;
+        self.hovered = None;
+        self.designation = None;
+    }
     pub fn toggle_layout(&mut self) {
         self.selected = 0;
         self.pressed = None;
+        self.pressed_contact = None;
         std::mem::swap(&mut self.pages, &mut self.other_pages);
         self.layout = if self.layout == Layout::Large {
             Layout::Small
@@ -183,6 +242,7 @@ impl Instruments {
     pub fn toggle(&mut self, page: u8) {
         self.selected = 0;
         self.pressed = None;
+        self.pressed_contact = None;
         if let Some(i) = self.pages.iter().position(|p| *p == page) {
             self.pages.remove(i);
         } else {
@@ -198,20 +258,53 @@ impl Instruments {
         size: [f64; 2],
         down: bool,
     ) -> bool {
-        let point = point.and_then(|(px, py)| {
-            (0..self.pages.len()).find_map(|i| {
-                let (x, y, w, h) = self.layout.rect_on(i, size);
-                if px < x || py < y || px >= x + w || py >= y + h {
-                    return None;
-                }
-                let (lx, ly, lw, lh) = self.layout.rect(i);
-                Some((
-                    lx as f64 + (px - x) * lw as f64 / w,
-                    ly as f64 + (py - y) * lh as f64 / h,
-                ))
-            })
-        });
+        let point = self.canvas_point(point, size);
         self.pointer(point, down)
+    }
+    /// The contact under a flight-canvas point, if any. Drawing and picking
+    /// share one projection, so this is the contact the player sees at every
+    /// window size and in both layouts.
+    fn contact_at(&self, p: Option<(f64, f64)>) -> Option<(usize, u32)> {
+        let (x, y) = p?;
+        let readout = self.combat.as_ref()?;
+        self.pages.iter().enumerate().find_map(|(i, page)| {
+            if *page != 9 {
+                return None;
+            }
+            let (ox, oy, w, h) = self.layout.rect(i);
+            let point = (
+                (x - f64::from(ox)) * WIDTH as f64 / f64::from(w),
+                (y - f64::from(oy)) * HEIGHT as f64 / f64::from(h),
+            );
+            let range = readout.scope.range_nmi;
+            scope::pick(
+                &readout.scope.contacts,
+                |c| project(c.bearing_rad, c.distance_ft, range),
+                point,
+                PICK_TOLERANCE,
+            )
+            .map(|id| (i, id))
+        })
+    }
+    /// Hover feedback: the contact a click would designate right now.
+    pub fn hover(&mut self, point: Option<(f64, f64)>, size: [f64; 2]) {
+        self.hovered = self
+            .contact_at(self.canvas_point(point, size))
+            .map(|(_, id)| id);
+    }
+    fn canvas_point(&self, point: Option<(f64, f64)>, size: [f64; 2]) -> Option<(f64, f64)> {
+        let (px, py) = point?;
+        (0..self.pages.len()).find_map(|i| {
+            let (x, y, w, h) = self.layout.rect_on(i, size);
+            if px < x || py < y || px >= x + w || py >= y + h {
+                return None;
+            }
+            let (lx, ly, lw, lh) = self.layout.rect(i);
+            Some((
+                lx as f64 + (px - x) * lw as f64 / w,
+                ly as f64 + (py - y) * lh as f64 / h,
+            ))
+        })
     }
     pub fn pointer(&mut self, p: Option<(f64, f64)>, down: bool) -> bool {
         let hit = p.and_then(|(x, y)| {
@@ -229,13 +322,21 @@ impl Instruments {
                 }
             })
         });
+        let contact = self.contact_at(p);
         if down {
             self.pressed = hit;
+            self.pressed_contact = contact;
             return false;
         }
         let before = self.pressed.take();
+        let contact_before = self.pressed_contact.take();
         if let Some((i, b)) = hit.filter(|h| Some(*h) == before) {
             return self.control(i, b);
+        }
+        // An empty click leaves the current designation alone.
+        if let Some((_, id)) = contact.filter(|c| Some(*c) == contact_before) {
+            self.designation = Some(id);
+            return true;
         }
         false
     }
@@ -253,17 +354,47 @@ impl Instruments {
         self.selected = (self.selected as i32 + delta).rem_euclid(self.pages.len() as i32) as usize;
         true
     }
-    /// Same stock scope operations for pointer and hardware buttons; no new sensor behavior.
+    /// Stock scope operations for pointer and hardware buttons. Range and
+    /// channel are player controls; they never change a sensor's coverage.
     pub fn control(&mut self, slot: usize, button: usize) -> bool {
+        let last = tore_sim::sensors::RANGE_LADDER_NMI.len() - 1;
+        let scales = tore_sim::sensors::passive::SCALE_LADDER_NMI.len() - 1;
         match (self.pages.get(slot), button) {
+            (Some(0), 0) => self.rcs_range = self.rcs_range.saturating_sub(1),
+            (Some(0), 1) => self.rcs_range = (self.rcs_range + 1).min(scales),
             (Some(5), 0) => self.rwr_range = self.rwr_range.saturating_sub(1),
             (Some(5), 1) => self.rwr_range = (self.rwr_range + 1).min(4),
             (Some(9), 0) => self.radar_range = self.radar_range.saturating_sub(1),
-            (Some(9), 1) => self.radar_range = (self.radar_range + 1).min(4),
-            (Some(9), 2) => self.mode = (self.mode + 1) % 3,
+            (Some(9), 1) => self.radar_range = (self.radar_range + 1).min(last),
+            (Some(9), 2) => self.cycle_channel(),
+            (Some(9), 3) => self.history = !self.history,
             _ => return false,
         }
         true
+    }
+    /// The on-screen M button cycles the available radar and infrared
+    /// channels. Availability is decided by the simulation, not here.
+    pub fn cycle_channel(&mut self) {
+        self.channel = (self.channel + 1) % 2;
+        self.pressed_contact = None;
+    }
+    pub fn controls(&self) -> tore_sim::sensors::Controls {
+        tore_sim::sensors::Controls {
+            channel: if self.channel == 0 {
+                tore_sim::sensors::Channel::Radar
+            } else {
+                tore_sim::sensors::Channel::Infrared
+            },
+            range_index: self
+                .radar_range
+                .min(tore_sim::sensors::RANGE_LADDER_NMI.len() - 1),
+            history: self.history,
+        }
+    }
+    pub fn rcs_scale_nmi(&self) -> f64 {
+        tore_sim::sensors::passive::SCALE_LADDER_NMI[self
+            .rcs_range
+            .min(tore_sim::sensors::passive::SCALE_LADDER_NMI.len() - 1)]
     }
     pub fn page(&self, id: u8, h: &Airframe, s: &State) -> Raster {
         let mut r = Raster::new();
@@ -317,9 +448,10 @@ impl Instruments {
                 r.rect(x + 23, 137, 2, 17, [170, 187, 203, 255]);
             }
             let label = match (id, b) {
-                (5 | 9, 0) => "-",
-                (5 | 9, 1) => "+",
+                (0 | 5 | 9, 0) => "-",
+                (0 | 5 | 9, 1) => "+",
                 (9, 2) => "M",
+                (9, 3) => "Y",
                 _ => "",
             };
             r.text(f, label, x + 6, 141, [20, 35, 46, 255]);
@@ -327,7 +459,70 @@ impl Instruments {
         let text = |r: &mut Raster, t: &str, x, y| r.text(f, t, x, y, GREEN);
         match id {
             0 => {
-                text(&mut r, "RCS NOT IMPLEMENTED", 20, 70);
+                let (cx, cy, radius) = (80i32, 76i32, 48.);
+                r.circle(cx, cy, radius, DIM);
+                r.circle(cx, cy, radius / 2., DIM);
+                r.line((cx, 22), (cx, 133), DIM);
+                r.line((13, cy), (147, cy), DIM);
+                for (label, x, y) in [
+                    ("0", 77, 24),
+                    ("90", 132, 72),
+                    ("180", 74, 126),
+                    ("270", 16, 72),
+                ] {
+                    text(&mut r, label, x, y);
+                }
+                if let Some(c) = &self.combat {
+                    let scale = c.rcs.scale_nmi.max(1e-6);
+                    let point = |bearing: f64, nmi: f64| {
+                        let ratio = (nmi / scale).min(1.) * radius;
+                        (
+                            cx + (bearing.sin() * ratio).round() as i32,
+                            cy - (bearing.cos() * ratio).round() as i32,
+                        )
+                    };
+                    // The exposure contour is a reference estimate of
+                    // directional vulnerability, not a detection boundary.
+                    let mut over_range = false;
+                    for i in 0..c.rcs.contour.len() {
+                        let (ba, na) = c.rcs.contour[i];
+                        let (bb, nb) = c.rcs.contour[(i + 1) % c.rcs.contour.len()];
+                        over_range |= na > scale;
+                        r.line(point(ba, na), point(bb, nb), GREEN);
+                    }
+                    for e in &c.rcs.emitters {
+                        let (x, y) = match e.distance_nmi {
+                            Some(nmi) => point(e.bearing_rad, nmi),
+                            // Bearing without independent range stays on the
+                            // outer ring with an unknown-range marker.
+                            None => point(e.bearing_rad, scale),
+                        };
+                        match (e.symbol, e.distance_nmi) {
+                            (tore_sim::sensors::passive::Symbol::Ground, _) => {
+                                r.rect(x - 2, y - 2, 5, 5, GREEN)
+                            }
+                            (_, Some(_)) => {
+                                r.line((x, y - 2), (x + 2, y), GREEN);
+                                r.line((x + 2, y), (x, y + 2), GREEN);
+                                r.line((x, y + 2), (x - 2, y), GREEN);
+                                r.line((x - 2, y), (x, y - 2), GREEN);
+                            }
+                            _ => {
+                                r.rect(x - 2, y - 2, 5, 1, GREEN);
+                                r.rect(x - 2, y + 2, 5, 1, GREEN);
+                                r.rect(x - 2, y - 2, 1, 5, GREEN);
+                                r.rect(x + 2, y - 2, 1, 5, GREEN);
+                            }
+                        }
+                    }
+                    text(&mut r, &format!("{:.0}", c.rcs.scale_nmi), 126, 25);
+                    if over_range {
+                        text(&mut r, "OVER", 14, 25);
+                    }
+                    text(&mut r, &format!("SIG {:.0}", c.rcs.signature), 14, 124);
+                } else {
+                    text(&mut r, "NO EXPOSURE DATA", 30, 73);
+                }
             }
             7 => {
                 for (i, (label, value)) in [
@@ -368,27 +563,135 @@ impl Instruments {
                 }
             }
             9 => {
-                if !s.radar || !s.engine {
-                    text(&mut r, "RADAR OFF", 48, 75);
-                } else {
-                    for i in 1..4 {
-                        let y = 21 + i * 114 / 4;
-                        r.line((12, y), (148, y), DIM);
-                        let x = 11 + i * 138 / 4;
-                        r.line((x, 22), (x, 134), DIM);
+                for i in 1..4 {
+                    let y = 21 + i * 114 / 4;
+                    r.line((12, y), (148, y), DIM);
+                    let x = 11 + i * 138 / 4;
+                    r.line((x, 22), (x, 134), DIM);
+                }
+                match &self.combat {
+                    None => text(&mut r, "NO SENSOR DATA", 30, 73),
+                    Some(c) if !c.scope.operating => {
+                        let reason = match (c.scope.infrared, c.scope.unavailable) {
+                            (_, Some(text)) => text,
+                            (true, _) => "IR UNAVAILABLE",
+                            _ => "RADAR OFF",
+                        };
+                        text(&mut r, reason, 40, 75);
                     }
-                    text(&mut r, ["RWS", "TWS", "A-G"][self.mode], 17, 25);
-                    text(
-                        &mut r,
-                        &format!(
-                            "{:.0}",
-                            [10f64, 20., 40., 80., 160.][self.radar_range].min(
-                                h.equipment[h.profile.id.radar()].number("zone0.maxRange") / 6076.
-                            )
-                        ),
-                        126,
-                        25,
-                    );
+                    Some(c) => {
+                        let scope = &c.scope;
+                        let range = scope.range_nmi;
+                        // Received noise is drawn under the returns. On this
+                        // bearing/range projection the strobe is a vertical
+                        // band: passive noise supplies no target range.
+                        let phase = scope.tick / 12;
+                        // Indicated bearing is quantized to 2 degrees with a
+                        // 2-degree minimum half width, so noise never discloses
+                        // perfect angular precision.
+                        let bands: Vec<(f64, f64, f64, f64)> = scope
+                            .strobes
+                            .iter()
+                            .map(|strobe| {
+                                (
+                                    ((strobe.bearing_rad.to_degrees() / 2.).round() * 2.)
+                                        .to_radians(),
+                                    strobe.half_width_rad.max(2f64.to_radians()),
+                                    strobe.density,
+                                    strobe.density * strobe.sidelobe,
+                                )
+                            })
+                            .collect();
+                        if !bands.is_empty() {
+                            for y in 22..134 {
+                                for x in 12..149 {
+                                    let bearing = ((f64::from(x) - SCOPE_ORIGIN.0)
+                                        / SCOPE_HALF_WIDTH)
+                                        .clamp(-1., 1.)
+                                        .asin();
+                                    // Emitters combine with bounded brightness:
+                                    // a strong one cannot whiten every pixel.
+                                    let density = bands
+                                        .iter()
+                                        .map(|(centre, half, inside, outside)| {
+                                            if (bearing - centre).abs() <= *half {
+                                                *inside
+                                            } else {
+                                                *outside
+                                            }
+                                        })
+                                        .sum::<f64>()
+                                        .min(MAX_NOISE_DENSITY);
+                                    if density > 0. && speckle(x, y, phase) < density {
+                                        r.rect(x, y, 1, 1, DIM);
+                                    }
+                                }
+                            }
+                        }
+                        for contact in &scope.contacts {
+                            if self.history && !contact.stale {
+                                // Past observations only, never extrapolated
+                                // and never connected across a missing sample.
+                                for (age, (bearing, distance)) in
+                                    contact.trail.iter().rev().enumerate()
+                                {
+                                    if let Some((x, y)) = project(*bearing, *distance, range) {
+                                        let fade = 1. - age as f64 / 10.;
+                                        let shade = DIM.map(|v| (f64::from(v) * fade) as u8);
+                                        r.rect(
+                                            x as i32,
+                                            y as i32,
+                                            1,
+                                            1,
+                                            [shade[0], shade[1], shade[2], 255],
+                                        );
+                                    }
+                                }
+                            }
+                            let Some((x, y)) =
+                                project(contact.bearing_rad, contact.distance_ft, range)
+                            else {
+                                continue;
+                            };
+                            let (x, y) = (x as i32, y as i32);
+                            if contact.stale {
+                                // Visibly stale coasting plot, not selectable.
+                                r.rect(x - 1, y, 3, 1, DIM);
+                                r.rect(x, y - 1, 1, 3, DIM);
+                                continue;
+                            }
+                            let colour = if contact.selected { BRIGHT } else { GREEN };
+                            r.rect(x - 2, y - 2, 5, 1, colour);
+                            r.rect(x - 2, y + 2, 5, 1, colour);
+                            r.rect(x - 2, y - 2, 1, 5, colour);
+                            r.rect(x + 2, y - 2, 1, 5, colour);
+                            if contact.track_eligible {
+                                let tail = (
+                                    x + (contact.heading_rad.sin() * 6.) as i32,
+                                    y - (contact.heading_rad.cos() * 6.) as i32,
+                                );
+                                r.line((x, y), tail, DIM);
+                            }
+                            if contact.selected || self.hovered == Some(contact.id) {
+                                for (dx, dy) in [(-4, -4), (4, -4), (-4, 4), (4, 4)] {
+                                    r.rect(x + dx, y + dy, 1, 1, colour);
+                                }
+                            }
+                            if contact.acquired {
+                                r.rect(x - 1, y - 1, 3, 3, colour);
+                            }
+                        }
+                        text(&mut r, scope.mode.unwrap_or(scope.channel), 17, 25);
+                        text(&mut r, &format!("{range:.0}"), 126, 25);
+                        if scope.history {
+                            text(&mut r, "HIST", 17, 124);
+                        }
+                        if let Some(status) = scope.status {
+                            let width: usize =
+                                status.bytes().map(|ch| f.glyphs[ch as usize].advance).sum();
+                            text(&mut r, status, 147 - width as i32, 124);
+                        }
+                    }
                 }
             }
             8 => {
@@ -487,20 +790,6 @@ impl Instruments {
             }
             _ => {}
         }
-        if id == 9
-            && s.engine
-            && s.radar
-            && let Some(c) = &self.combat
-        {
-            let range = [10., 20., 40., 80., 160.][self.radar_range] * 6076.;
-            for &(bearing, distance) in &c.contacts {
-                if distance <= range && bearing.abs() <= std::f64::consts::FRAC_PI_2 {
-                    let x = 80 + (bearing.sin() * 55.) as i32;
-                    let y = 130 - (distance / range * 90.) as i32;
-                    r.rect(x - 2, y - 2, 5, 5, GREEN);
-                }
-            }
-        }
         r
     }
 }
@@ -533,7 +822,7 @@ mod tests {
                 let point = Some((x + 35. * w / 160., y + 145. * h / 156.));
                 instruments.screen_pointer(point, size, true);
                 assert!(instruments.screen_pointer(point, size, false));
-                assert_eq!(instruments.radar_range, 2);
+                assert_eq!(instruments.radar_range, 0);
                 instruments.screen_pointer(point, size, true);
                 assert!(!instruments.screen_pointer(
                     Some((size[0] - 1., size[1] - 1.)),
@@ -598,6 +887,122 @@ mod tests {
 }
 
 #[cfg(test)]
+mod picking_tests {
+    use super::*;
+    fn contact(id: u32, bearing_rad: f64, distance_ft: f64) -> scope::Contact {
+        scope::Contact {
+            id,
+            bearing_rad,
+            distance_ft,
+            heading_rad: 0.,
+            track_eligible: true,
+            destroyed: false,
+            selected: false,
+            acquired: false,
+            stale: false,
+            trail: vec![],
+        }
+    }
+    fn readout(contacts: Vec<scope::Contact>) -> CombatReadout {
+        CombatReadout {
+            scope: scope::Scope {
+                range_nmi: 10.,
+                operating: true,
+                contacts,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+    /// Screen position of one drawn contact, through the same projection and
+    /// panel rectangle the renderer uses.
+    fn point(i: &Instruments, slot: usize, c: &scope::Contact, size: [f64; 2]) -> (f64, f64) {
+        let (rx, ry) = project(c.bearing_rad, c.distance_ft, 10.).expect("drawn contact");
+        let (x, y, w, h) = i.layout.rect_on(slot, size);
+        (x + rx * w / WIDTH as f64, y + ry * h / HEIGHT as f64)
+    }
+    #[test]
+    fn a_click_designates_the_drawn_contact_in_both_layouts_and_at_every_size() {
+        for layout in [Layout::Large, Layout::Small] {
+            let mut i = Instruments::new(layout, None);
+            let slot = i.pages.iter().position(|p| *p == 9).expect("radar page");
+            for size in [[640., 480.], [1920., 1080.], [2560., 1080.], [800., 1200.]] {
+                i.combat = Some(readout(vec![
+                    contact(4, -0.4, 20_000.),
+                    contact(7, 0.4, 40_000.),
+                ]));
+                let target = i.combat.as_ref().expect("readout").scope.contacts[1].clone();
+                let hit = point(&i, slot, &target, size);
+                let p = Some(hit);
+                i.screen_pointer(p, size, true);
+                assert!(i.screen_pointer(p, size, false));
+                assert_eq!(i.designation.take(), Some(7));
+                // An empty click leaves the designation alone.
+                let empty = Some((hit.0, hit.1 - 40.));
+                i.screen_pointer(empty, size, true);
+                i.screen_pointer(empty, size, false);
+                assert_eq!(i.designation.take(), None);
+                // A press that is released elsewhere selects nothing.
+                i.screen_pointer(p, size, true);
+                i.screen_pointer(empty, size, false);
+                assert_eq!(i.designation.take(), None);
+            }
+        }
+    }
+    #[test]
+    fn hover_marks_the_contact_a_click_would_designate() {
+        let mut i = Instruments::new(Layout::Large, None);
+        let slot = i.pages.iter().position(|p| *p == 9).expect("radar page");
+        let size = [1280., 960.];
+        i.combat = Some(readout(vec![contact(5, 0.3, 30_000.)]));
+        let target = i.combat.as_ref().expect("readout").scope.contacts[0].clone();
+        let hit = point(&i, slot, &target, size);
+        i.hover(Some(hit), size);
+        assert_eq!(i.hovered, Some(5));
+        i.hover(Some((hit.0, hit.1 - 40.)), size);
+        assert_eq!(i.hovered, None);
+        i.hover(None, size);
+        assert_eq!(i.hovered, None);
+        // Hovering never designates by itself.
+        assert_eq!(i.designation, None);
+        i.hover(Some(hit), size);
+        i.cancel_press();
+        assert_eq!(i.hovered, None);
+    }
+    #[test]
+    fn equal_distance_ties_resolve_by_stable_identity_and_stale_plots_never_pick() {
+        let mut i = Instruments::new(Layout::Large, None);
+        let slot = i.pages.iter().position(|p| *p == 9).expect("radar page");
+        let size = [640., 480.];
+        let mut overlapping = readout(vec![contact(9, 0., 20_000.), contact(3, 0., 20_000.)]);
+        let p = Some(point(
+            &i,
+            slot,
+            &overlapping.scope.contacts[0].clone(),
+            size,
+        ));
+        overlapping.scope.contacts[0].stale = false;
+        i.combat = Some(overlapping);
+        i.screen_pointer(p, size, true);
+        assert!(i.screen_pointer(p, size, false));
+        assert_eq!(i.designation.take(), Some(3));
+        let mut stale = readout(vec![contact(3, 0., 20_000.)]);
+        stale.scope.contacts[0].stale = true;
+        i.combat = Some(stale);
+        i.screen_pointer(p, size, true);
+        assert!(!i.screen_pointer(p, size, false));
+        assert_eq!(i.designation.take(), None);
+    }
+    #[test]
+    fn a_contact_beyond_the_plotted_range_is_neither_drawn_nor_picked() {
+        assert!(project(0., 10. * 6076., 10.).is_some());
+        assert!(project(0., 10.1 * 6076., 10.).is_none());
+        assert!(project(std::f64::consts::PI, 1000., 10.).is_none());
+        assert!(project(0., 1000., 0.).is_none());
+    }
+}
+
+#[cfg(test)]
 mod input_selection_tests {
     use super::*;
     #[test]
@@ -609,9 +1014,10 @@ mod input_selection_tests {
         assert_eq!(i.rwr_range, 3);
         assert!(i.cycle_selection(1));
         assert!(i.control(i.selected, 2));
-        assert_eq!(i.mode, 1);
-        assert!(!i.control(0, 0));
-        assert!(!i.control(2, 3));
+        assert_eq!(i.channel, 1);
+        assert!(i.control(i.selected, 3));
+        assert!(i.history);
+        assert!(!i.control(0, 3));
         assert!(!i.select(5));
         assert_eq!(i.pages, pages);
         i.toggle_layout();

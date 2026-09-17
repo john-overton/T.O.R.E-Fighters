@@ -22,7 +22,9 @@ pub struct Airframe {
     pub hud_font: Font,
     pub hud: tore_formats::hud::Hud,
     pub flight_menu: Vec<tore_formats::ui::MenuNode>,
-    pub equipment: BTreeMap<String, tore_formats::aircraft::Equipment>,
+    /// Imported sensor capability for this identity, resolved by record
+    /// channel. Used for capability reporting and scope labels.
+    pub sensors: tore_sim::sensors::SensorProfiles,
     pub poses: Vec<Shape>,
 }
 impl Airframe {
@@ -102,19 +104,9 @@ impl Airframe {
             }
         }
         let font = Font::parse(get("WIN11.FNT")?)?;
-        let mut equipment = BTreeMap::new();
-        for station in &profile.hardpoints {
-            if let Some(name) = &station.store
-                && [".SEE", ".ECM", ".JT"]
-                    .iter()
-                    .any(|ext| name.ends_with(ext))
-            {
-                equipment.insert(
-                    name.clone(),
-                    tore_formats::aircraft::Equipment::parse(name, get(name)?)?,
-                );
-            }
-        }
+        let sensors = tore_sim::sensors::SensorProfiles::from_source(&profile, |name| {
+            get(name).cloned().map_err(std::io::Error::other)
+        })?;
         let mut poses = Vec::new();
         let mut rig = None;
         if id == tore_formats::aircraft::AircraftId::F18 {
@@ -251,7 +243,7 @@ impl Airframe {
             hud_font: Font::parse(get("HUD11.FNT")?)?,
             hud: tore_formats::hud::Hud::parse(get(id.hud())?)?,
             flight_menu,
-            equipment,
+            sensors,
             poses,
             streamer,
         })

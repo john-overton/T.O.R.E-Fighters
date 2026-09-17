@@ -23,7 +23,10 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | Shift-B / E | Afterburner / engine toggle | Development mapping; afterburner requires engine and >95% throttle |
 | Shift+O | F-22 main weapon bays | Fitted 1-second presentation; other aircraft ignore it |
 | G / F / B / H | Gear / flaps / airbrake / hook | Adapter controls; full FA keyboard table still needs verification |
-| R / J | Radar / jammer | Radar gates live-range contacts/locks; powered ECM applies recovered contact-probability terms; decoy behavior remains open |
+| R / J | Radar / jammer | R returns to the radar channel when infrared is selected, and otherwise toggles radar power. Radar power gates radar contacts and locks; powered ECM applies recovered contact-probability terms; decoy behavior remains open |
+| M / O | Cycle the available sensor channels | Radar and the installed infrared sensor; with no infrared installed both report it unavailable and leave radar selected |
+| I | Select the infrared channel | Passive: it stops radar transmission without moving the radar power switch |
+| Y | Toggle scope contact history | Draws past observations as dimming dots; see the [sensor component](radar.md) |
 | F1 | Forward cockpit view; reset pan/zoom | FA `FMENUD.MNU` |
 | F2 / F3 | Look back / up | FA menu; authored angles, forward artwork projects out of view naturally |
 | F10 | External chase view | FA menu; authored camera placement |
@@ -34,8 +37,7 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | Shift-U | Toggle HUD | Development shortcut |
 | Shift-[ / Shift-] | Dim / brighten HUD | FA menu |
 | Shift-0…9 | Toggle instrument windows (four large or six small) | FA menu; oldest open window is replaced |
-| Comma / period | Decrease/increase scope range | USNF manual; applies to RWR if it is the last opened window, radar otherwise |
-| O | Cycle the radar display mode | Development shortcut; sensor physics remain unported |
+| Comma / period | Decrease/increase scope range | USNF manual; applies to the RWR or the RCS page if either is the last opened window, and to the radar scope otherwise |
 | C / Shift-C | Cycle 1×/2×/4×/8× time / select 0.5× | FA menu; fixed 120 Hz ticks, authored adapter time scaling |
 | Ctrl-P | Pause/resume | FA menu |
 | Escape | Open/close in-flight menu; return one level from submenus/help | FA menu/manual |
@@ -54,7 +56,10 @@ Small places six windows across the bottom in two groups of three. Their referen
 The instrument contents retain their original 160×156 raster and are resampled directly to the flight overlay resolution. There is no intermediate 96×94 reduction, so small-window text retains source strokes on larger displays. These are fitted layouts, not recovered native placement rules. Sizes and margins scale by the smaller of width/640 and height/480. Use `--instrument-layout large` or `--instrument-layout small` for startup or repeatable GPU captures.
 
 
-Shift-1 Envelope; Shift-2 Forward View; Shift-3 Other View; Shift-4 Radar/Visual; Shift-5 RWR; Shift-6 Navigation; Shift-7 Systems; Shift-8 Weapons; Shift-9 Radar; Shift-0 Radar Cross Section. Page 0 explicitly reports its unimplemented status. Empty scopes and NO TARGET are intentional in target-free flight. Temperature, oil and hydraulics remain unavailable instead of displaying fabricated healthy values.
+Shift-1 Envelope; Shift-2 Forward View; Shift-3 Other View; Shift-4 Radar/Visual; Shift-5 RWR; Shift-6 Navigation; Shift-7 Systems; Shift-8 Weapons; Shift-9 Radar; Shift-0 Radar Cross Section. Page 0 now draws the exposure contour, received emitter symbols and its view scale; its buttons are `-` and `+`. Page 9 buttons are `-`, `+`, `M` for the channel cycle and `Y` for history. Hovering a contact on page 9 marks it with the selector corners, a click on it designates it, and an empty click leaves the current designation alone. Empty scopes and NO TARGET are intentional in target-free flight. Temperature, oil and hydraulics remain unavailable instead of displaying fabricated healthy values.
+
+The scope, the exposure page and the weapons all read one shared sensor
+component. [What it models, what is authored tuning and what is deferred](radar.md).
 
 ## Recovered commands awaiting their systems
 
@@ -68,8 +73,7 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized. This is
 | Ctrl + view key / Alt + view key | Missile-relative / target-relative camera |
 | Shift-T | Reverse target cycling (T / Enter now designate in live range) |
 | W / Shift-W, N, A | Waypoint selection, navigation/weapons mode, autopilot |
-| M | HARM seeker |
-| I / Y | Original IR sensor / radar history remain unavailable; these keys invoke incoming weapon / target ECM development fixtures in `--live-fire` |
+| M | HARM seeker was the reserved action on this key. M now cycles sensor channels, so HARM has no binding until air-to-ground exists |
 | V | Set Other View camera |
 | Shift-J / Shift-K | Jettison fuel / air-to-ground stores |
 | Ctrl-T / Alt-S | Target information / radio silence |
@@ -211,9 +215,11 @@ selected external weapon group, **]** cycle damage-class fixture and **[** fail
 selected station. Restart repairs/reloads. These are development bindings;
 Shift/Ctrl/Alt combinations retain their prior meanings. Firing stops on weapon,
 arm, jettison and fixture transitions and requires release before another press.
-T/Enter cycles actual living contacts within the imported visual/radar coverage.
-SAFE/EMPTY/STATION FAILED and sensor/range/terrain inhibits are shown separately
-from lock. The systems continuation below adds automatic source-weighted failures
+T/Enter cycles the contacts the selected channel currently observes, on the same
+eligibility a mouse click uses, and a mouse click on the scope designates one
+directly. SAFE/EMPTY/STATION FAILED and the sensor and range inhibits are shown
+separately from lock; a terrain-masked target now reports NO TARGET, because
+masking clears the contact rather than inhibiting the launch. The systems continuation below adds automatic source-weighted failures
 for supported equipment; combat AI remains deferred.
 
 `--record-combat NEW_PATH` records explicit combat-service inputs and commands;
@@ -224,9 +230,10 @@ This is separate from pilot-input recording and does not re-simulate flight.
 ## Weapons and systems continuation
 
 In the explicit `--live-fire` range, **D** requests a gun-strength player hit,
-**I** spawns one incoming selected source weapon, and **Y** toggles target ECM.
-These development fixtures replace the unavailable I/IR and Y/history actions;
-D is also a development binding. **J** controls own ECM and **R** radar. I does
+**Shift-I** spawns one incoming selected source weapon, and **Shift-Y** toggles
+target ECM. Those two fixtures moved off I and Y when those keys took over
+infrared selection and contact history; D is also a development binding.
+**J** controls own ECM and **R** radar. The incoming fixture does
 not command AI or spend player ammunition. U arm/safe, K selected-group jettison,
 L clear designation, semicolon next weapon, T/Enter designate, Space hold fire,
 backslash target replacement and bracket fault/class controls remain available.
@@ -242,7 +249,8 @@ profile migration/editor behavior, unsupported controllers and haptic limits are
 in [INPUT.md](INPUT.md#manual-combat-layer-2026-09-14).
 
 Weapons page V/R/E reports visual availability, radar and ECM: `+` available/on,
-`-` off, `!` failed. Automatic source-index faults are separate from the manual
+`-` off, `!` failed. A failed visual sensor now also removes visual contacts, so
+the V indicator and the scope agree. Automatic source-index faults are separate from the manual
 bracket injection. Unknown engine/hydraulic effects remain unimplemented.
 [Recovered contracts, runtime evidence and remaining gates](baselines/weapons-systems.md).
 

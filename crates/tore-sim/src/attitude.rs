@@ -14,7 +14,7 @@ pub fn unit(v: Vector) -> Vector {
     let length = dot(v, v).sqrt().max(1e-12);
     v.map(|x| x / length)
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Basis {
     pub right: Vector,
     pub up: Vector,

@@ -21,7 +21,12 @@ pub enum Command {
     WindowLayout,
     Throttle(f64),
     Range(i32),
+    /// Cycle the available sensor channels.
     Mode,
+    /// Toggle the scope contact history trail.
+    SensorHistory,
+    /// Request the passive infrared channel.
+    SensorInfrared,
     Effects(bool),
     ControlsOpen,
     ControlsSave,
@@ -391,6 +396,9 @@ impl FlightUi {
                     Command::Click
                 }
                 "j" | "k" => self.unavailable("Jettison stores/fuel"),
+                // The development fixtures moved aside for the sensor keys.
+                "y" => Command::Combat(tore_sim::combat::live::Command::ToggleTargetJammer),
+                "i" => Command::Combat(tore_sim::combat::live::Command::Incoming),
                 "t" => self.unavailable("Previous target"),
                 "w" => self.unavailable("Previous waypoint"),
                 _ => Command::None,
@@ -425,7 +433,7 @@ impl FlightUi {
                 Command::None
             }
             "d" => Command::Combat(tore_sim::combat::live::Command::DamagePlayer),
-            "y" => Command::Combat(tore_sim::combat::live::Command::ToggleTargetJammer),
+            "y" => Command::SensorHistory,
             "u" => Command::Combat(tore_sim::combat::live::Command::ToggleArm),
             "k" => Command::Combat(tore_sim::combat::live::Command::Jettison),
             "l" => Command::Combat(tore_sim::combat::live::Command::ClearDesignation),
@@ -437,8 +445,8 @@ impl FlightUi {
             "\\" => Command::RangeReset,
             "w" => self.unavailable("Next waypoint"),
             "n" => self.unavailable("Navigation / weapons mode"),
-            "i" => Command::Combat(tore_sim::combat::live::Command::Incoming),
-            "m" => self.unavailable("HARM seeker"),
+            "i" => Command::SensorInfrared,
+            "m" => Command::Mode,
 
             "Enter" | "'" => Command::Target,
             "Space" => Command::None,
@@ -576,12 +584,14 @@ impl FlightUi {
                     "1..9: 10..90%, 0: full | Shift-B: burner | E: engine".into(),
                     "G: gear | F: flaps | B: brake | H: hook | J: jammer".into(),
                     "Shift/Ctrl-arrows: look/orbit | Shift-/: center | F1: cockpit".into(),
-                    "Comma/period: scope range | O: radar mode | Shift-U: HUD".into(),
+                    "Comma/period: scope range | M/O: sensor channel | Shift-U: HUD".into(),
                     "Ctrl-Tab/Ctrl-Shift-Tab: instrument | Ctrl-1..6: slot".into(),
                     "Ctrl-Shift-1..4: stock instrument buttons (T.O.R.E)".into(),
                     "T/Shift-T: target | Enter/apostrophe: designate | Space: fire".into(),
                     "A: autopilot | W/Shift-W: waypoint | N: nav/weapons".into(),
-                    "Range: I incoming | D player hit | Y target ECM | J own ECM".into(),
+                    "I: infrared | R: radar | Y: contact history | J: own ECM".into(),
+                    "Click a contact to designate it; L clears the designation".into(),
+                    "Range: Shift-I incoming | D player hit | Shift-Y target ECM".into(),
                     "U arm/safe | K jettison | L clear | ; weapon | [ fault | ] class".into(),
                     "Pad: hold Select, RB fire / LB weapon / A target / B clear".into(),
                     "Select+X arm / Y ECM / L3 radar / R3 jettison".into(),

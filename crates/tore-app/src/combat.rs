@@ -50,9 +50,12 @@ pub fn launcher(s: &flight::State) -> Launcher {
         position: s.position,
         basis: Basis::new(s.yaw, s.pitch, s.bank),
         speed_fps: s.speed,
-        radar: s.radar && s.engine,
+        // Selecting the passive infrared channel stops radar transmission
+        // without changing the radar power switch itself.
+        radar: s.radar && s.engine && s.sensors.channel == tore_sim::sensors::Channel::Radar,
         jammer: s.jammer && s.engine,
         alive: !s.crashed,
+        controls: s.sensors,
     }
 }
 impl Combat {
@@ -133,7 +136,7 @@ impl Combat {
     }
     pub fn command(&mut self, command: live::Command, l: Launcher) {
         if let Some(r) = &mut self.recorder {
-            r.record(crate::combat_tape::command_name(command), l);
+            r.record(&crate::combat_tape::command_name(command), l);
         }
         self.state.command(command, l);
         self.last_launcher = Some(l);
@@ -197,7 +200,7 @@ impl Combat {
         s.set_payload(self.state.payload_lbs())?;
         s.bay_auto_open = s.bay_available()
             && self.state.armed
-            && self.state.designated.is_some()
+            && self.state.designated().is_some()
             && self.state.rounds(self.state.selected) > 0
             && self.state.configuration().stations[self.state.selected]
                 .weapon
@@ -215,7 +218,7 @@ impl Combat {
         }
         Ok(events)
     }
-    pub fn readout(&self, s: &flight::State) -> crate::instruments::CombatReadout {
+    pub fn readout(&self, s: &flight::State, rcs_scale: f64) -> crate::instruments::CombatReadout {
         let i = self.state.selected;
         crate::instruments::CombatReadout {
             weapon: self.state.configuration().stations[i].weapon.name.clone(),
@@ -257,29 +260,16 @@ impl Combat {
             loaded: self.range,
             target: self
                 .state
-                .designated
+                .designated()
                 .and_then(|id| self.state.targets.iter().find(|t| t.id == id))
                 .map(|t| (t.id, t.hp, self.state.can_lock(launcher(s)))),
-            contacts: self
-                .state
-                .targets
-                .iter()
-                .filter(|t| t.hp > 0 && self.state.radar_detects(launcher(s), t.position))
-                .map(|t| {
-                    let delta: Vector = std::array::from_fn(|i| t.position[i] - s.position[i]);
-                    let b = launcher(s).basis;
-                    (
-                        tore_sim::attitude::dot(delta, b.right)
-                            .atan2(tore_sim::attitude::dot(delta, b.forward)),
-                        tore_sim::attitude::dot(delta, delta).sqrt(),
-                    )
-                })
-                .collect(),
+            scope: crate::scope::scope(&self.state, s),
+            rcs: crate::scope::rcs(&self.state, s, rcs_scale),
         }
     }
     pub fn status(&self, s: &flight::State) -> String {
         let i = self.state.selected;
-        let target = self.state.designated.map_or("NO TARGET".into(), |id| {
+        let target = self.state.designated().map_or("NO TARGET".into(), |id| {
             self.state
                 .targets
                 .iter()
@@ -307,8 +297,9 @@ impl Combat {
                     }
                 })
         });
+        let scope = crate::scope::scope(&self.state, s);
         format!(
-            "{} {} {}  {} C{} HIT {} | HP {} SYS {} ECM {} T-JAM {} IN {}",
+            "{} {} {}  {} C{} HIT {} | HP {} SYS {} ECM {} T-JAM {} IN {} | {} {} {:.0}NM {} CONTACTS{}{}",
             self.state.configuration().stations[i].weapon.name,
             self.state.rounds(i),
             self.state.readiness(launcher(s)).label(),
@@ -331,7 +322,16 @@ impl Combat {
             } else {
                 "OFF"
             },
-            self.state.projectiles.iter().filter(|p| p.incoming).count()
+            self.state.projectiles.iter().filter(|p| p.incoming).count(),
+            scope.channel,
+            scope.mode.unwrap_or("OFF"),
+            scope.range_nmi,
+            scope.contacts.iter().filter(|c| !c.stale).count(),
+            if scope.history { " HIST" } else { "" },
+            scope
+                .status
+                .map(|status| format!(" {status}"))
+                .unwrap_or_default()
         )
     }
     pub fn vertices(
@@ -707,7 +707,11 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             }
             combat.state.range_category = category;
             combat.command(live::Command::ReplaceTarget, launcher(&flight));
+            // Selection needs a current observation, and a radar weapon track
+            // needs half a second of it, so observe before designating.
+            observe(&mut combat, &mut flight, &world, 1)?;
             combat.command(live::Command::Designate, launcher(&flight));
+            observe(&mut combat, &mut flight, &world, ACQUISITION)?;
             let initial = combat.state.ammo[index];
             let mut negative = combat.state.clone();
             let l = launcher(&flight);
@@ -967,6 +971,23 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     Ok(())
 }
 
+const ACQUISITION: usize = tore_sim::sensors::track::ACQUISITION_STEPS as usize;
+
+/// Advance the shared sensors without firing, so a scripted probe designates
+/// and tracks the same way a player does. It uses the recorded host step, so a
+/// tape replays the same observations.
+fn observe(
+    combat: &mut Combat,
+    flight: &mut flight::State,
+    world: &World,
+    steps: usize,
+) -> AppResult<()> {
+    for _ in 0..steps {
+        combat.step(flight, world)?;
+    }
+    Ok(())
+}
+
 /// Unguided external stores have release/contact checks, not a missile lock or
 /// same-altitude interception requirement. Does not claim blast-radius parity.
 fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> {
@@ -979,6 +1000,7 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
         radar: false,
         jammer: false,
         alive: true,
+        controls: Default::default(),
     };
     let initial = state.ammo[index];
     let mut safe = state.clone();

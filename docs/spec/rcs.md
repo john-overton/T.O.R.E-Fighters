@@ -8,10 +8,11 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Research mode, 2026-09-16. This adds the RCS panel requested by John to the radar
-planning scope. The supplied screenshot is a visual reference; behaviour comes
-from the manual and inspected FA build. [Evidence](../formats/radar.md#rcs-panel-and-signature-coupling),
-[validation](../baselines/radar.md), [authored proposal](../radar.md#rcs-instrument-and-shared-aspect-model).
+Research mode, 2026-09-16. This records the RCS panel requested by John. The
+supplied screenshot is a visual reference; behaviour comes from the manual and
+inspected FA build. [Evidence](../formats/radar.md#rcs-panel-and-signature-coupling),
+[validation](../baselines/radar.md),
+[the authored component](../radar.md#rcs-instrument-and-shared-aspect-model).
 
 ## Player-visible retail function
 
@@ -26,7 +27,11 @@ radar sources, but it does not identify their type or current lock state.
 
 ## Static FA findings
 
-The current Rust app's page 0 is a placeholder. The inspected FA helper has two
+The Rust app's page 0 now draws the authored exposure contour, emitter symbols
+and view scale described in the
+[component guide](../radar.md#rcs-instrument-and-shared-aspect-model); the
+placeholder it replaced is gone. The findings here are what that authored panel
+was written against. The inspected FA helper has two
 uses: contour dimensions and adjustment of a nonzero base radar signature.
 It is called by both scope drawing and COSig. Do not treat the retail contour
 as unrelated decoration, or equate its radii directly with detection distance.
@@ -55,15 +60,17 @@ returns an adjusted signature rather than those drawing dimensions, with
 alternative weights under a type/player flag branch. COSig adds further
 configuration effects. Do not copy the drawing buckets as the detection model.
 
-## Planning boundary
+## Boundary with the authored panel
 
-The authored replacement should use one aircraft-aspect calculation for detection
-and the exposure display. Its observer-relative response and smooth contour are
-opinionated choices in the component proposal, not these original integer rules.
-Active transmissions and physical reflection must be distinguishable in the new
-model. No autonomous threat behaviour is included.
+The authored replacement uses one aircraft-aspect calculation for detection and
+the exposure display. Its observer-relative response and smooth contour are
+opinionated choices in the [component guide](../radar.md), not these original
+integer rules. Active transmissions and physical reflection stay distinguishable
+in that model. No autonomous threat behaviour is included.
 
 Remaining retail questions: precise RCS zoom steps, full contact eligibility and
 symbol-state mapping, all configuration modifiers, and how closely the contour
-predicts each emitter's detection range. Existing source evidence is sufficient
-to scope the panel without claiming those contracts are complete.
+predicts each emitter's detection range. The shipped panel's 5/10/20/30/50 nmi
+scales are an agent reuse of the warning receiver's set, not a recovered answer
+to the first of those. This source evidence was sufficient to scope the panel
+without claiming those contracts are complete.

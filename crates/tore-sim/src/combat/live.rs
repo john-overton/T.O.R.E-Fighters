@@ -6,6 +6,7 @@ use super::{
     launch_speed, removal_due, unload,
 };
 use crate::attitude::{Basis, Vector, dot, unit};
+use crate::sensors::{self, Observable, Observer, Sensors, Support, passive};
 use tore_formats::{
     Result,
     aircraft::{Aircraft, AircraftId},
@@ -44,10 +45,12 @@ pub enum Readiness {
     Capacity,
     NoTarget,
     TargetDestroyed,
+    NoRadar,
     RadarOff,
     RadarFailed,
     RadarCoverage,
-    TerrainMasked,
+    RadarSearchOnly,
+    RadarAcquiring,
     MinimumRange,
     MaximumRange,
     Altitude,
@@ -64,10 +67,12 @@ impl Readiness {
             Self::Capacity => "PROJECTILE LIMIT",
             Self::NoTarget => "NO TARGET",
             Self::TargetDestroyed => "TARGET DESTROYED",
+            Self::NoRadar => "NO RADAR",
             Self::RadarOff => "RADAR OFF",
             Self::RadarFailed => "RADAR FAILED",
             Self::RadarCoverage => "RADAR COVERAGE",
-            Self::TerrainMasked => "TERRAIN MASKED",
+            Self::RadarSearchOnly => "RWS SEARCH ONLY",
+            Self::RadarAcquiring => "ACQUIRING",
             Self::MinimumRange => "MIN RANGE",
             Self::MaximumRange => "MAX RANGE",
             Self::Altitude => "ALTITUDE LIMIT",
@@ -81,6 +86,8 @@ impl Readiness {
 pub enum Command {
     NextWeapon,
     Designate,
+    /// Persistent selection of one current contact by its stable identity.
+    DesignateTarget(u32),
     ClearDesignation,
     ToggleArm,
     Jettison,
@@ -118,14 +125,15 @@ pub struct Configuration {
     pub hardpoint_slots: Vec<Option<usize>>,
     pub radar_hardpoint: usize,
     pub visual_hardpoint: usize,
+    pub infrared_hardpoint: Option<usize>,
     pub ecm_hardpoint: usize,
     pub aircraft: AircraftId,
     pub stations: Vec<Station>,
     pub hit_points: i32,
     pub target_category: u16,
     pub external_equipment_lbs: i32,
-    pub radar: tore_formats::weapons::Seeker,
-    pub visual: tore_formats::weapons::Seeker,
+    /// Imported sensor capability, resolved by parsed record channel.
+    pub sensors: sensors::SensorProfiles,
 }
 impl Configuration {
     fn validate(&self) -> Result<()> {
@@ -239,20 +247,23 @@ impl Configuration {
         if hit_points <= 0 || stations.is_empty() || !stations[0].internal {
             return Err(super::invalid("invalid live-fire aircraft configuration"));
         }
-        let radar_name = a
-            .hardpoints
-            .iter()
-            .filter_map(|h| h.store.as_deref())
-            .find(|n| *n == a.id.radar())
+        // Sensors resolve by parsed record channel, so a missing device is an
+        // explicit state rather than another aircraft's radar.
+        let profiles = sensors::SensorProfiles::from_source(a, &mut read)?;
+        let station = |record: Option<&String>| {
+            record.and_then(|record| {
+                a.hardpoints.iter().position(|h| {
+                    h.store
+                        .as_deref()
+                        .is_some_and(|n| n.eq_ignore_ascii_case(record))
+                })
+            })
+        };
+        let radar_hardpoint = station(profiles.radar.as_ref().map(|r| &r.record))
             .ok_or_else(|| super::invalid("missing reviewed radar station"))?;
-        let radar = tore_formats::weapons::Seeker::parse(radar_name, &read(radar_name)?)?;
-        let visual_name = a
-            .hardpoints
-            .iter()
-            .filter_map(|h| h.store.as_deref())
-            .find(|n| matches!(*n, "VIS340.SEE" | "VIS240.SEE"))
+        let visual_hardpoint = station(profiles.visual.as_ref().map(|v| &v.record))
             .ok_or_else(|| super::invalid("missing reviewed visual sensor"))?;
-        let visual = tore_formats::weapons::Seeker::parse(visual_name, &read(visual_name)?)?;
+        let infrared_hardpoint = station(profiles.infrared.as_ref().map(|i| &i.record));
         let ecm_hardpoint = a
             .hardpoints
             .iter()
@@ -299,19 +310,11 @@ impl Configuration {
                 .number()?
                 != 0,
             hardpoint_slots,
-            visual_hardpoint: a
-                .hardpoints
-                .iter()
-                .position(|h| h.store.as_deref() == Some(visual_name))
-                .unwrap(),
-            radar_hardpoint: a
-                .hardpoints
-                .iter()
-                .position(|h| h.store.as_deref() == Some(radar_name))
-                .unwrap(),
+            visual_hardpoint,
+            radar_hardpoint,
+            infrared_hardpoint,
             ecm_hardpoint,
-            radar,
-            visual,
+            sensors: profiles,
             external_equipment_lbs,
             aircraft: a.id,
             stations,
@@ -328,7 +331,15 @@ impl Configuration {
 pub struct Target {
     pub id: u32,
     pub position: Vector,
+    /// Ground-relative velocity, also used for the notch projection.
     pub velocity: Vector,
+    pub basis: Basis,
+    pub configuration: sensors::Configuration,
+    pub signature: sensors::SignatureProfile,
+    pub jammer: Option<sensors::JammerProfile>,
+    pub jammer_active: bool,
+    /// Physical airborne presence. Hit points reaching zero does not clear it.
+    pub airborne: bool,
     pub radius: f64,
     pub hp: i32,
     pub category: u16,
@@ -375,7 +386,9 @@ pub struct State {
     config: Configuration,
     pub ammo: Vec<u16>,
     pub selected: usize,
-    pub designated: Option<u32>,
+    pub sensors: Sensors,
+    /// Passive emitters received this step, for the exposure instrument.
+    pub emitters: Vec<passive::Emitter>,
     pub projectiles: Vec<Projectile>,
     pub targets: Vec<Target>,
     pub effects: Vec<Effect>,
@@ -389,6 +402,7 @@ pub struct State {
     pub last_subsystem: Option<usize>,
     pub radar_failed: bool,
     pub visual_failed: bool,
+    pub infrared_failed: bool,
     pub ecm_failed: bool,
     pub chaff: u8,
     pub flares: u8,
@@ -399,7 +413,6 @@ pub struct State {
     pub history: Vec<HitRecord>,
     pub range_category: u16,
     next_target_id: u32,
-    masked_targets: Vec<u32>,
     external: bool,
     tick: u64,
     service_remainder: u16,
@@ -410,9 +423,13 @@ pub struct Launcher {
     pub position: Vector,
     pub basis: Basis,
     pub speed_fps: f64,
+    /// Radar actually transmitting. Selecting infrared stops the emission.
     pub radar: bool,
     pub jammer: bool,
     pub alive: bool,
+    /// Player sensor controls, applied as an input at each step so replay
+    /// reproduces channel, scope range and history changes.
+    pub controls: sensors::Controls,
 }
 impl State {
     pub fn configuration(&self) -> &Configuration {
@@ -427,6 +444,7 @@ impl State {
             .collect();
         let triggers = vec![PlayerTrigger::default(); config.stations.len()];
         let range_category = config.target_category;
+        let sensors = Sensors::new(config.sensors.clone());
         Ok(Self {
             chaff: config.ecm.chaff[0],
             flares: config.ecm.flare[0],
@@ -436,6 +454,7 @@ impl State {
             last_subsystem: None,
             radar_failed: false,
             visual_failed: false,
+            infrared_failed: false,
             ecm_failed: false,
             target_jammer: false,
             rng: 0x46414a54,
@@ -446,11 +465,11 @@ impl State {
             history: vec![],
             range_category,
             next_target_id: 1,
-            masked_targets: vec![],
             config,
             ammo,
             selected: 0,
-            designated: None,
+            sensors,
+            emitters: vec![],
             projectiles: vec![],
             targets: vec![],
             effects: vec![],
@@ -471,14 +490,13 @@ impl State {
         self.release();
         self.selected = (self.selected + 1) % self.ammo.len();
     }
-    pub fn designate_next(&mut self, launcher: Launcher) {
-        self.designated = self
-            .targets
-            .iter()
-            .filter(|t| self.detects(launcher, t))
-            .find(|t| Some(t.id) > self.designated)
-            .or_else(|| self.targets.iter().find(|t| self.detects(launcher, t)))
-            .map(|t| t.id);
+    /// Keyboard cycling and mouse clicks share the same current-observation
+    /// eligibility, including selectable RWS contacts.
+    pub fn designate_next(&mut self) {
+        self.sensors.cycle(true);
+    }
+    pub fn designated(&self) -> Option<u32> {
+        self.sensors.selected()
     }
     pub fn command(&mut self, command: Command, launcher: Launcher) {
         match command {
@@ -508,10 +526,18 @@ impl State {
                 }
             }
             Command::DamagePlayer => self.pending_damage = true,
-            Command::ToggleTargetJammer => self.target_jammer = !self.target_jammer,
+            Command::ToggleTargetJammer => {
+                self.target_jammer = !self.target_jammer;
+                for t in &mut self.targets {
+                    t.jammer_active = self.target_jammer;
+                }
+            }
             Command::NextWeapon => self.select_next(),
-            Command::Designate => self.designate_next(launcher),
-            Command::ClearDesignation => self.designated = None,
+            Command::Designate => self.designate_next(),
+            Command::DesignateTarget(id) => {
+                self.sensors.designate(id);
+            }
+            Command::ClearDesignation => self.sensors.clear_selection(),
             Command::ToggleArm => {
                 self.armed = !self.armed;
                 self.release();
@@ -572,6 +598,8 @@ impl State {
                     self.radar_failed = true;
                 } else if h == self.config.visual_hardpoint {
                     self.visual_failed = true;
+                } else if Some(h) == self.config.infrared_hardpoint {
+                    self.infrared_failed = true;
                 } else if h == self.config.ecm_hardpoint {
                     for _ in 0..10 {
                         let roll = draw(&mut self.rng, 100);
@@ -623,7 +651,7 @@ impl State {
             return Readiness::Ready;
         }
         let Some(t) = self
-            .designated
+            .designated()
             .and_then(|id| self.targets.iter().find(|t| t.id == id))
         else {
             return Readiness::NoTarget;
@@ -631,18 +659,26 @@ impl State {
         if t.hp <= 0 {
             return Readiness::TargetDestroyed;
         }
-        if self.masked_targets.contains(&t.id) {
-            return Readiness::TerrainMasked;
-        }
         if w.seeker.signature == 3 {
+            // Equipment state answers immediately, before the shared support
+            // result, so a failure reported between steps is not stale.
             if self.radar_failed {
                 return Readiness::RadarFailed;
             }
             if !launcher.radar {
                 return Readiness::RadarOff;
             }
-            if !self.radar_detects(launcher, t.position) {
-                return Readiness::RadarCoverage;
+            // One shared support answer for this specific target. The weapon
+            // keeps its own envelope test below.
+            match self.sensors.support(t.id) {
+                Support::Tracked => {}
+                Support::RadarFailed => return Readiness::RadarFailed,
+                Support::RadarOff => return Readiness::RadarOff,
+                Support::Unavailable => return Readiness::NoRadar,
+                Support::SearchOnly => return Readiness::RadarSearchOnly,
+                Support::Acquiring => return Readiness::RadarAcquiring,
+                Support::TrackCoverage => return Readiness::RadarCoverage,
+                Support::NotSelected | Support::NoObservation => return Readiness::NoTarget,
             }
         }
         zone_readiness(
@@ -681,12 +717,14 @@ impl State {
         self.projectiles.clear();
         self.effects.clear();
         self.targets.clear();
-        self.masked_targets.clear();
         let id = self.next_target_id;
         self.next_target_id = self
             .next_target_id
             .checked_add(1)
             .expect("range ID exhaustion");
+        // The fixture is a copy of this aircraft, so it carries the same PT
+        // signatures and ECM record. No AI or autonomous behaviour is added.
+        let yaw = launcher.basis.forward[0].atan2(launcher.basis.forward[2]);
         self.targets.push(Target {
             id,
             category: self.range_category,
@@ -694,36 +732,21 @@ impl State {
                 launcher.position[i] + launcher.basis.forward[i] * distance
             }),
             velocity: launcher.basis.forward.map(|v| v * 300.),
+            basis: Basis::new(yaw, 0., 0.),
+            configuration: sensors::Configuration::CLEAN,
+            signature: self.config.sensors.signature,
+            jammer: self.config.sensors.jammer.clone(),
+            jammer_active: self.target_jammer,
+            airborne: true,
             radius: 28.,
             hp: self.config.hit_points,
         });
-        self.designated = None;
+        self.sensors.clear_selection();
     }
-    pub fn detects(&self, launcher: Launcher, target: &Target) -> bool {
-        target.hp > 0
-            && !self.masked_targets.contains(&target.id)
-            && (self.radar_detects(launcher, target.position)
-                || (!self.visual_failed
-                    && cone(
-                        &self.config.visual.zones[0],
-                        launcher.position,
-                        launcher.basis.forward,
-                        target.position,
-                    )))
-    }
-    pub fn radar_detects(&self, launcher: Launcher, target: Vector) -> bool {
-        !self
-            .targets
-            .iter()
-            .any(|t| t.position == target && self.masked_targets.contains(&t.id))
-            && launcher.radar
-            && !self.radar_failed
-            && cone(
-                &self.config.radar.zones[0],
-                launcher.position,
-                launcher.basis.forward,
-                target,
-            )
+    /// Any current observation of this object, on the selected scope channel
+    /// or visually. Channels are never collapsed into one another.
+    pub fn detects(&self, target: &Target) -> bool {
+        self.sensors.observation(target.id).is_some()
     }
     pub fn can_lock(&self, launcher: Launcher) -> bool {
         self.config.stations[self.selected].weapon.seeker.signature != 0
@@ -771,14 +794,47 @@ impl State {
             e.ticks = e.ticks.saturating_sub(1);
         }
         self.effects.retain(|e| e.ticks > 0);
-        // Authored bounded terrain line-of-sight test shared by acquisition
-        // and scope contacts. Native masking/cadence remains unverified.
-        self.masked_targets = self
+        // Shared observations are produced before this tick's firing decision,
+        // so the scope, the target view and weapon support all agree.
+        self.sensors.controls = launcher.controls;
+        let observables: Vec<Observable> = self
             .targets
             .iter()
-            .filter(|t| t.hp > 0 && terrain_hit(launcher.position, t.position, &ground).is_some())
-            .map(|t| t.id)
+            .map(|t| Observable {
+                id: t.id,
+                position: t.position,
+                velocity: t.velocity,
+                basis: t.basis,
+                configuration: t.configuration,
+                signature: t.signature,
+                jammer: t.jammer.clone(),
+                jammer_active: t.jammer_active,
+                radar_emitting: false,
+                airborne: t.airborne,
+                destroyed: t.hp <= 0,
+            })
             .collect();
+        let observer = Observer {
+            position: launcher.position,
+            basis: launcher.basis,
+            radar_powered: launcher.radar && launcher.alive,
+            radar_failed: self.radar_failed,
+            infrared_failed: self.infrared_failed || !launcher.alive,
+            visual_failed: self.visual_failed || !launcher.alive,
+        };
+        let obscured = |from: Vector, to: Vector| terrain_hit(from, to, &ground).is_some();
+        let height = |x: f64, z: f64| ground(x, z);
+        let environment = sensors::Environment {
+            ground: &height,
+            obscured: &obscured,
+        };
+        self.sensors.step(&observer, &observables, &environment);
+        self.emitters = passive::emitters(
+            &observer,
+            &observables,
+            self.sensors.contacts(),
+            &environment,
+        );
         let index = self.selected;
         let allowed = self.readiness(launcher) == Readiness::Ready;
         let station = &self.config.stations[index];
@@ -815,7 +871,7 @@ impl State {
                         .expect("validated speed limits")
                         * 256,
                     launched_t: now,
-                    target: if guided { self.designated } else { None },
+                    target: if guided { self.designated() } else { None },
                     fall: FallState::default(),
                 });
                 self.shots += 1;
@@ -832,6 +888,19 @@ impl State {
                 for i in 0..3 {
                     t.position[i] += t.velocity[i] / 120.;
                 }
+            } else if t.airborne {
+                // Minimal fitted ballistic fall for a destroyed airframe, so a
+                // wreck stays an observable object until it reaches the ground.
+                t.velocity[1] -= 32.174 / 120.;
+                for i in 0..3 {
+                    t.position[i] += t.velocity[i] / 120.;
+                }
+                let surface = ground(t.position[0], t.position[2]);
+                if t.position[1] <= surface {
+                    t.position[1] = surface;
+                    t.velocity = [0.; 3];
+                    t.airborne = false;
+                }
             }
         }
         let previous_player = self
@@ -842,6 +911,12 @@ impl State {
             id: 0,
             position: launcher.position,
             velocity: [0.; 3],
+            basis: launcher.basis,
+            configuration: sensors::Configuration::CLEAN,
+            signature: self.config.sensors.signature,
+            jammer: None,
+            jammer_active: false,
+            airborne: launcher.alive,
             radius: 28.,
             hp: if launcher.alive { self.player_hp } else { 0 },
             category: self.config.target_category,
@@ -863,14 +938,11 @@ impl State {
                     self.targets.iter().find(|t| t.id == id && t.hp > 0)
                 }
             }) {
-                if acquisition(
-                    w,
-                    p.position,
-                    p.direction,
-                    t.position,
-                    p.incoming || (launcher.radar && !self.radar_failed),
-                    0,
-                ) && terrain_hit(p.position, t.position, &ground).is_none()
+                // Required illumination is specific to this missile's own
+                // target, never to whatever the cockpit has selected now.
+                let supported = p.incoming || self.sensors.supports(t.id);
+                if acquisition(w, p.position, p.direction, t.position, supported, 0)
+                    && terrain_hit(p.position, t.position, &ground).is_none()
                 {
                     let desired = unit(sub(t.position, p.position));
                     let rate = if phase == EnginePhase::Powered {
@@ -1251,8 +1323,8 @@ mod tests {
                 hit_points: 20,
                 target_category: 0x80,
                 external_equipment_lbs: 0,
-                radar: seeker,
-                visual: seeker,
+                infrared_hardpoint: None,
+                sensors: sensor_profiles(),
             },
             true,
         )
@@ -1306,6 +1378,41 @@ mod tests {
         load.quantities[0] = 1001;
         assert!(load.validate().is_err());
     }
+    /// Synthetic sensor suite: a 90/50 nmi radar shape so the default 10-mile
+    /// display selects TWS, plus the short visual channel every aircraft has.
+    fn sensor_profiles() -> sensors::SensorProfiles {
+        let volume = |nmi: f64| sensors::Volume {
+            azimuth_rad: 1.,
+            elevation_rad: 1.,
+            minimum_ft: 0.,
+            maximum_ft: nmi * sensors::FEET_PER_NAUTICAL_MILE,
+            minimum_relative_ft: f64::NEG_INFINITY,
+            maximum_relative_ft: f64::INFINITY,
+        };
+        sensors::SensorProfiles {
+            aircraft: AircraftId::F18,
+            radar: Some(sensors::RadarProfile {
+                record: "SYNTHETIC.SEE".into(),
+                search: volume(90.),
+                track: volume(50.),
+                look_down: 0.,
+                preset: sensors::Preset::Advanced,
+                notch: sensors::Preset::Advanced.notch(),
+                resistance: sensors::Preset::Advanced.resistance(),
+                band: 0,
+                source_flags: [0; 2],
+                source_doppler: [0; 3],
+            }),
+            infrared: None,
+            visual: Some(sensors::profile::VisualProfile {
+                record: "SYNTHETIC.VIS".into(),
+                search: volume(10.),
+                track: volume(5.),
+            }),
+            jammer: None,
+            signature: sensors::SignatureProfile::default(),
+        }
+    }
     fn launcher() -> Launcher {
         Launcher {
             position: [0., 1000., 0.],
@@ -1314,6 +1421,31 @@ mod tests {
             radar: true,
             jammer: false,
             alive: true,
+            controls: sensors::Controls::default(),
+        }
+    }
+    /// Selection needs a current observation, so the shared sensors must have
+    /// produced contacts before a designation command is applied.
+    const ACQUISITION: usize = crate::sensors::track::ACQUISITION_STEPS as usize;
+    fn observe(s: &mut State, l: Launcher, steps: usize) {
+        for _ in 0..steps {
+            s.step(false, l, |_, _| 0.);
+        }
+    }
+    fn target(id: u32, position: Vector, hp: i32, category: u16) -> Target {
+        Target {
+            id,
+            position,
+            velocity: [0.; 3],
+            basis: Basis::new(0., 0., 0.),
+            configuration: sensors::Configuration::CLEAN,
+            signature: sensors::SignatureProfile::default(),
+            jammer: None,
+            jammer_active: false,
+            airborne: true,
+            radius: 20.,
+            hp,
+            category,
         }
     }
     #[test]
@@ -1355,14 +1487,21 @@ mod tests {
         let mut s = fixture(true);
         let mut l = launcher();
         s.range_target(l);
-        s.designate_next(launcher());
+        observe(&mut s, l, 1);
+        s.designate_next();
+        assert_eq!(s.designated(), Some(1));
+        // Selection is immediate; the fire-control track is not.
+        assert_eq!(s.readiness(l), Readiness::RadarAcquiring);
+        observe(&mut s, l, ACQUISITION - 1);
+        assert_eq!(s.sensors.acquired(), None);
+        observe(&mut s, l, 1);
+        assert_eq!(s.sensors.acquired(), Some(1));
         l.radar = false;
-        assert!(!s.radar_detects(l, s.targets[0].position));
         assert!(!s.can_lock(l));
         s.step(true, l, |_, _| 0.);
         assert_eq!(s.ammo, [11]);
-        s.step(false, l, |_, _| 0.);
         l.radar = true;
+        observe(&mut s, l, 60);
         assert!(s.can_lock(l));
         s.step(true, l, |_, _| 0.);
         assert_eq!(s.ammo, [9]);
@@ -1375,14 +1514,7 @@ mod tests {
     #[test]
     fn actual_target_damage_destroys_once_and_generates_effects() {
         let mut s = fixture(false);
-        s.targets.push(Target {
-            id: 7,
-            position: [0., 1000., 150.],
-            velocity: [0.; 3],
-            radius: 20.,
-            hp: 20,
-            category: 0x80,
-        });
+        s.targets.push(target(7, [0., 1000., 150.], 20, 0x80));
         let mut kills = 0;
         for _ in 0..180 {
             for e in s.step(true, launcher(), |_, _| 0.) {
@@ -1456,14 +1588,7 @@ mod tests {
         for (index, category) in [0x80, 0x2000, 0x100, 0x400, 0x40].into_iter().enumerate() {
             let mut s = fixture(false);
             s.config.stations[0].weapon.damage.by_class = [3, 7, 9, 11, 25];
-            s.targets.push(Target {
-                id: 7,
-                position: [0., 1000., 150.],
-                velocity: [0.; 3],
-                radius: 20.,
-                hp: 20,
-                category,
-            });
+            s.targets.push(target(7, [0., 1000., 150.], 20, category));
             for _ in 0..180 {
                 s.step(true, launcher(), |_, _| 0.);
             }
@@ -1503,7 +1628,9 @@ mod tests {
         assert_eq!(s.rounds(0), 11);
         s.command(Command::ToggleArm, l);
         s.range_target(l);
-        s.designate_next(launcher());
+        observe(&mut s, l, 1);
+        s.designate_next();
+        observe(&mut s, l, ACQUISITION);
         assert_eq!(s.readiness(l), Readiness::Ready);
         let z = &mut s.config.stations[0].weapon.seeker.zones[1];
         z.minimum_range = 4000;
@@ -1516,13 +1643,15 @@ mod tests {
     fn replacement_clears_old_engagement_and_uses_fresh_identity() {
         let mut s = fixture(true);
         s.range_target(launcher());
-        s.designate_next(launcher());
+        observe(&mut s, launcher(), 1);
+        s.designate_next();
+        observe(&mut s, launcher(), ACQUISITION);
         s.step(true, launcher(), |_, _| 0.);
         let ammo = s.ammo.clone();
         assert!(!s.projectiles.is_empty());
         s.range_target(launcher());
         assert_eq!(s.targets[0].id, 2);
-        assert!(s.projectiles.is_empty() && s.effects.is_empty() && s.designated.is_none());
+        assert!(s.projectiles.is_empty() && s.effects.is_empty() && s.designated().is_none());
         assert_eq!(s.ammo, ammo);
     }
     #[test]
@@ -1530,7 +1659,9 @@ mod tests {
         let mut s = fixture(true);
         s.config.stations[0].weapon.flags &= !0x200;
         s.range_target(launcher());
-        s.designate_next(launcher());
+        observe(&mut s, launcher(), 1);
+        s.designate_next();
+        observe(&mut s, launcher(), ACQUISITION);
         s.step(true, launcher(), |_, _| 0.);
         let mut l = launcher();
         l.radar = false;
@@ -1547,7 +1678,9 @@ mod tests {
         let mut s = fixture(true);
         let l = launcher();
         s.range_target(l);
-        s.designate_next(l);
+        observe(&mut s, l, 1);
+        s.designate_next();
+        observe(&mut s, l, ACQUISITION);
         let wall = |_: f64, z: f64| {
             if (1000. ..2000.).contains(&z) {
                 2000.
@@ -1555,15 +1688,18 @@ mod tests {
                 0.
             }
         };
+        // Masking removes the observation, so selection and the launch
+        // permission end together and no round is consumed.
         s.step(true, l, wall);
-        assert_eq!(s.readiness(l), Readiness::TerrainMasked);
+        assert!(s.sensors.contacts().is_empty());
+        assert_eq!(s.designated(), None);
+        assert_eq!(s.readiness(l), Readiness::NoTarget);
         assert_eq!(s.rounds(0), 11);
-        assert!(!s.radar_detects(l, s.targets[0].position));
-        s.command(Command::ClearDesignation, l);
-        s.designate_next(l);
-        assert_eq!(s.designated, None);
-        s.step(false, l, |_, _| 0.);
-        s.designate_next(l);
+        s.designate_next();
+        assert_eq!(s.designated(), None);
+        observe(&mut s, l, ACQUISITION + 1);
+        s.designate_next();
+        observe(&mut s, l, ACQUISITION);
         s.step(true, l, |_, _| 0.);
         assert_eq!(s.projectiles[0].target, Some(1));
         assert!(s.step(false, l, wall).contains(&Event::TrackLost(1)));
@@ -1670,12 +1806,88 @@ mod tests {
     }
 
     #[test]
+    fn sequential_launches_keep_their_own_targets_under_one_cockpit_track() {
+        let mut s = fixture(true);
+        // Fire and forget: the weapon needs support at launch, not after it.
+        s.config.stations[0].weapon.flags &= !0x200;
+        let l = launcher();
+        s.targets.push(target(1, [400., 1000., 3000.], 20, 0x80));
+        s.targets.push(target(2, [-400., 1000., 3000.], 20, 0x80));
+        observe(&mut s, l, 1);
+        s.command(Command::DesignateTarget(1), l);
+        observe(&mut s, l, ACQUISITION);
+        assert_eq!(s.sensors.acquired(), Some(1));
+        assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
+        s.release();
+        // Selecting the second target releases the first illumination at once.
+        s.command(Command::DesignateTarget(2), l);
+        assert_eq!(s.sensors.acquired(), None);
+        assert_eq!(s.readiness(l), Readiness::RadarAcquiring);
+        observe(&mut s, l, ACQUISITION);
+        assert_eq!(s.sensors.acquired(), Some(2));
+        assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
+        let targets: Vec<_> = s.projectiles.iter().map(|p| p.target).collect();
+        assert_eq!(targets, [Some(1), Some(2)]);
+        assert_eq!(s.sensors.acquired(), Some(2));
+        assert_eq!(s.designated(), Some(2));
+    }
+    #[test]
+    fn a_continuous_lock_weapon_loses_support_when_the_cockpit_switches_target() {
+        let mut s = fixture(true);
+        assert!(s.config.stations[0].weapon.flags & 0x200 != 0);
+        let l = launcher();
+        s.targets.push(target(1, [400., 1000., 3000.], 20, 0x80));
+        s.targets.push(target(2, [-400., 1000., 3000.], 20, 0x80));
+        observe(&mut s, l, 1);
+        s.command(Command::DesignateTarget(1), l);
+        observe(&mut s, l, ACQUISITION);
+        assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
+        assert_eq!(s.projectiles[0].target, Some(1));
+        s.release();
+        s.command(Command::DesignateTarget(2), l);
+        // Designating another contact is never illumination of the first.
+        assert!(s.step(false, l, |_, _| 0.).contains(&Event::TrackLost(1)));
+        assert_eq!(s.projectiles[0].target, None);
+    }
+    #[test]
+    fn a_destroyed_aircraft_stays_a_contact_until_its_wreck_reaches_the_ground() {
+        let mut s = fixture(true);
+        let l = launcher();
+        s.targets.push(target(1, [0., 1000., 3000.], 20, 0x80));
+        observe(&mut s, l, 1);
+        s.command(Command::DesignateTarget(1), l);
+        observe(&mut s, l, ACQUISITION);
+        s.targets[0].hp = 0;
+        observe(&mut s, l, 1);
+        // Hit points reaching zero removes combat viability, not the return.
+        assert!(s.sensors.contact(1).is_some());
+        assert_eq!(s.designated(), Some(1));
+        assert_eq!(s.readiness(l), Readiness::TargetDestroyed);
+        assert!(s.targets[0].airborne);
+        for _ in 0..1200 {
+            s.step(false, l, |_, _| 0.);
+            if !s.targets[0].airborne {
+                break;
+            }
+        }
+        // A grounded wreck ends the air-to-air observation and selection on
+        // the next step, since observations are produced before movement.
+        assert!(!s.targets[0].airborne);
+        s.step(false, l, |_, _| 0.);
+        assert_eq!(s.targets[0].position[1], 0.);
+        assert!(s.sensors.contact(1).is_none());
+        assert_eq!(s.designated(), None);
+        assert_eq!(s.kills, 0);
+    }
+    #[test]
     fn automatic_radar_failure_inhibits_launch_and_breaks_illumination() {
         let mut s = fixture(true);
         let l = launcher();
         s.range_target(l);
-        s.designate_next(l);
-        let id = s.designated.unwrap();
+        observe(&mut s, l, 1);
+        s.designate_next();
+        observe(&mut s, l, ACQUISITION);
+        let id = s.designated().expect("selected fixture target");
         assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
         s.config.system_damage = [0; 45];
         s.config.system_damage[37] = 0x1f;

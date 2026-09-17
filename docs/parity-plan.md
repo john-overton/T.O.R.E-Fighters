@@ -48,7 +48,7 @@ name, with the numbers a player would notice.
 
 | Spec | Covers | Status |
 | --- | --- | --- |
-| [Aircraft radar](spec/radar.md) | Twelve-aircraft radar stats, automatic range modes and look-down evidence | Research complete for initial profiles; [component proposal](radar.md), implementation pending |
+| [Aircraft radar](spec/radar.md) | Twelve-aircraft radar stats, automatic range modes, installed visual and ECM records, and look-down evidence | Implemented as one shared component; [component guide](radar.md), [validation](baselines/radar.md) |
 | [Roster expansion](spec/roster-aircraft.md) | Seven REDFOR/F-22A initial player ports | [Acceptance and limits](baselines/aircraft-roster-expansion.md) |
 | [Additional aircraft](spec/additional-aircraft.md) | F-14D, A-4E and X-31 source flight configuration and fitted presentation | Initial ports implemented; [acceptance](baselines/aircraft-fa-expansion.md) |
 | [Ocean](spec/ocean.md) | Short ripples, close pixelation and distance filtering; original textures/colors | Implemented; [acceptance](baselines/ocean.md) |
@@ -73,6 +73,7 @@ player-visible numbers out of those files and leaving the byte layouts behind.
 | Ground contact and landing | Runway contact, taxi, brakes, touchdown | **opinionated**, authored, not awaiting a recovered producer | [land foundation](baselines/native-land-foundation.md) |
 | Input | Keyboard, gamepad, joystick, profiles, rumble, rebinding | opinionated (authored layer) | [input](baselines/input.md) |
 | Weapons | 135 definitions imported; development range with manual firing, damage fixtures, ECM | mixed | [weapons systems](baselines/weapons-systems.md), [manual weapons](baselines/manual-weapons.md) |
+| Sensors | One shared radar, infrared and visual component for all twelve aircraft: imported capability profiles, contacts, one fire-control track, click selection, history, jammer noise, the RCS exposure page and radar weapon support | **opinionated** detection/notch/jamming/RCS tuning over spec-derived equipment data | [radar](baselines/radar.md) |
 | Combat AI | Not started, not authorized | n/a | n/a |
 
 Flight has three selectable paths and they stay distinct: the compatibility `--legacy-flight`, the
@@ -81,13 +82,18 @@ research path. Do not change the default without being asked.
 
 ## Next
 
-1. **Shared aircraft radar**, requested by John on 2026-09-16. Use the
-   [capability spec](spec/radar.md) and [component proposal](radar.md): shared
-   profiles/contact state with PT signatures and authored look-down/notch/jamming,
-   the RCS/aspect display, persistent click selection, Y history and infrared A2A.
-   One fire-control track only; detectable destroyed aircraft stay visible. Keep
-   target-view IFF; A2G is deferred. Research and tuning are documented;
-   implementation is pending. No AI work.
+1. **Finish the shared aircraft radar tuning pass.** The component John
+   requested on 2026-09-16 shipped on the same day: shared profiles and contact
+   state using PT signatures with authored look-down, notch and jamming, the
+   RCS/aspect display, persistent click selection, Y history and infrared A2A,
+   one fire-control track only, and detectable destroyed aircraft. Target-view
+   IFF is unchanged and A2G is still deferred. Stages 1 to 4 of the
+   [component guide](radar.md#delivery-and-acceptance) are done. Stage 5 is
+   partly done: all twelve aircraft produce the capability summary and pass their
+   combat smokes, but no side-by-side tuning review of the twelve has happened,
+   so the presets and matchups have not been played against each other yet.
+   [Capability spec](spec/radar.md), [validation](baselines/radar.md). No AI
+   work.
 2. **Continue behaviour specs.** Start with the features that already have
    the most recovered numbers and the least prose: weather, then flight
    envelope/departure, then the quick-mission and ordnance screens. Each spec

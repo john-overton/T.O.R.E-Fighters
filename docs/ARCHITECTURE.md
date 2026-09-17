@@ -19,7 +19,7 @@ The M0 environment supports the M1a menu slice, the M1b renderer across all 16 t
 | Startup bridge | `pollster` 0.4 | Wait for GPU initialization without a general async runtime |
 | Audio device | `cpal` 0.16 | Native output for the small PCM mixer; [upstream API](https://docs.rs/cpal/0.16.0/cpal/) |
 | Formats | Dependency-free `crates/tore-formats` | Bounded EALIB, raw-literal DCL, PIC/glyphs, a narrow CHOOSEAC DLG reader, BIT2, mission environment fields PL weather palettes, BRF aircraft/equipment, bounded SH projection and compiled FNT glyphs |
-| Simulation | `crates/tore-sim` | Shared 120 Hz state/attitude, selectable hybrid dynamics and headless aircraft acceptance |
+| Simulation | `crates/tore-sim` | Shared 120 Hz state/attitude, selectable hybrid dynamics, the shared aircraft sensor component and headless aircraft acceptance |
 | Extraction | `crates/tore-extract` + `tools/extract_assets.py` | Title-independent archive discovery/extraction, safe output paths, provenance |
 | Checks | Cargo, Python standard library, GitHub Actions | Local and CI checks |
 
@@ -114,8 +114,13 @@ impulse; context loss cancels both, without changing authoritative flight state.
 
 `tore-sim::combat::live` owns the deterministic manual range at 120 Hz. Typed
 configuration resolves each supported PT’s loadout, SEE/ECM equipment and damage
-table once; mutable ammo, contacts, projectiles, player HP, subsystem counts and
-adapter RNG remain in state. `combat::systems` contains bounded translations of
+table once; mutable ammo, projectiles, player HP, subsystem counts and
+adapter RNG remain in state. Contacts are no longer its own: it holds a
+`tore-sim::sensors` live state, feeds it ownship pose, equipment state and the
+observable targets each tick, and asks it whether a specific target is supported
+before a radar weapon launches. Physical airborne presence is separate from
+destroyed combat state, so hit points reaching zero does not erase a return.
+`combat::systems` contains bounded translations of
 reviewed ECM probability and damage-selection helpers. Unknown native subsystem
 side effects remain explicit gaps; the service reproduces combat behaviour rather
 than reconstructing the original executable's combat tick.
@@ -128,9 +133,12 @@ disable that device’s feedback until reconnect; finite leases and context stop
 bound rumble. Combat notices reuse the existing HUD line and expire in simulation
 ticks, so pause does not age them or expand overlay composition work.
 
-Version-2 combat tapes record service inputs including jammer state and explicit
-fixture commands. Replays validate identity/assets and reproduce combat state,
-including adapter RNG and subsystem failures; version 1 rejects explicitly. This
+Version-3 combat tapes record service inputs including jammer state, the player
+sensor controls (channel, display range and history) and explicit fixture
+commands; a designation is recorded by stable target identity, never by screen
+coordinate. Replays validate identity/assets and reproduce combat state,
+including adapter RNG and subsystem failures. Version-2 tapes still replay with
+the default sensor controls; version 1 rejects explicitly. This
 is combat-service determinism: it reproduces combat state, not a full application
 replay. See [contracts, validation and limitations](baselines/weapons-systems.md).
 
@@ -138,8 +146,9 @@ replay. See [contracts, validation and limitations](baselines/weapons-systems.md
 
 The aircraft registry includes F-14D, A-4E, X-31 EFM and the seven
 [roster additions](spec/roster-aircraft.md). Each owns a typed
-model configuration; presentation rigs remain in tore-app. Shared combat reads
-the selected identity's radar and PT stations. Audio switching clears old
+model configuration; presentation rigs remain in tore-app. Shared combat resolves
+the selected identity's sensors by parsed record channel, never by aircraft name,
+and reads its PT stations. Audio switching clears old
 aircraft voices. See [aircraft behavior](spec/additional-aircraft.md).
 
 The optional user-supplied [engine material](spec/engine-material.md) replaces reviewed burner
@@ -159,11 +168,24 @@ launch eligibility. Exterior canopy grading is a mesh material, independent
 of cockpit artwork and world-view rendering. Its nearest surface is resolved
 in a depth-only pass, then blended at 75% opacity over the opaque scene.
 
-## Proposed shared radar boundary
+## Shared sensor boundary
 
-The [radar component proposal](radar.md) separates imported capability profiles,
-simulation-owned observations, one shared radar/IR fire-control track, persistent
-player selection, bounded history, scope presentation and weapon support.
-Physical airborne presence is separate from destroyed combat state. This is planned, not implemented. Existing live combat still
-owns radar detection; the next slice consolidates that result for both the scope
-and missiles without changing the flight adapters or renderer independence.
+`tore-sim::sensors` is one component serving all twelve imported aircraft. There
+is no aircraft-specific radar code: `profile` normalizes each PT's own SEE and
+ECM records into typed capability profiles resolved by parsed signature channel,
+`signature` holds the single observer-relative aspect function, `detection` holds
+the authored range model, `track` holds the live state (current observations, one
+selected target, at most one acquired fire-control track across radar and
+infrared, bounded history and received interference), and `passive` collects
+received emitters for the exposure instrument. An unreviewed radar or ECM record
+is an import error rather than a silent substitution.
+
+The component decides what is observable and whether a specific target is
+supported for a radar weapon. `tore-app::scope` only reprojects those shared
+observations for drawing and picking, so the page cannot make a hidden target
+selectable, and one projection serves both drawing and the mouse pick.
+`instruments.rs` draws pages 9 and 0 from that input. Player controls (channel,
+display range, history) travel as a per-tick input, which is why the combat tape
+reproduces them. The flight adapters and renderer independence are unchanged.
+[What is modelled, what is authored tuning and what is deferred](radar.md);
+[what was validated](baselines/radar.md).

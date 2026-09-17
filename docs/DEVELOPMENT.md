@@ -128,9 +128,12 @@ python3 -m unittest discover -s tools -p 'test_*.py'
 python3 tools/check_assets.py
 python3 tools/check_assets.py target/debug/tore-app
 python3 tools/check_assets.py target/debug/tore-extract
+python3 tools/check_docs.py
 ```
 
-On Windows, append `.exe` to both executable paths. Rust tests cover malformed formats, decompression, menu hit testing and interaction, PCM resampling, letterboxing, and extraction filesystem behavior using synthetic inputs. Python tests exercise the data guard. None requires a display, audio device, or retail files.
+On Windows, append `.exe` to both executable paths. `check_docs.py` verifies that
+every Markdown file under `docs/` carries the current T.O.R.E header; `--fix`
+writes missing ones. The pre-push hook and CI run all nine of these. Rust tests cover malformed formats, decompression, menu hit testing and interaction, PCM resampling, letterboxing, and extraction filesystem behavior using synthetic inputs. Python tests exercise the data guard. None requires a display, audio device, or retail files.
 
 With a working desktop session, also run:
 
@@ -211,9 +214,9 @@ cargo run --locked -p tore-app -- --free-flight --theater TVIET --flight-view 1
 cargo run --locked -p tore-app -- --headless-flight 1200 --maneuver pull
 ```
 
-Arrows: pitch/bank (Down pulls up). Z/X: rudder. PageUp/PageDown: throttle; 1..9/0 selects 10..90%/full. Shift-B: afterburner (requires >95% throttle). E: engine. G/F/B/H: gear/flaps/airbrake/hook. R/J: radar/jammer. F1/F2/F3: front/back/up; F10: external. Shift-0..9: instrument windows (four large or six small). Backspace toggles cockpit art. Escape opens the paused in-flight menu; Ctrl-P pauses/resumes; Ctrl-Q ends flight. Focus loss pauses automatically. On Macs use Fn/Globe for function keys and Fn-Up/Down for PageUp/PageDown. See [all current controls and source status](FLIGHT-CONTROLS.md).
+Arrows: pitch/bank (Down pulls up). Z/X: rudder. PageUp/PageDown: throttle; 1..9/0 selects 10..90%/full. Shift-B: afterburner (requires >95% throttle). E: engine. G/F/B/H: gear/flaps/airbrake/hook. J: jammer. R: radar power, or return to the radar channel when infrared is selected. M/O: cycle the available sensor channels; I: infrared; Y: scope contact history; comma/period: scope setting. F1/F2/F3: front/back/up; F10: external. Shift-0..9: instrument windows (four large or six small). Backspace toggles cockpit art. Escape opens the paused in-flight menu; Ctrl-P pauses/resumes; Ctrl-Q ends flight. Focus loss pauses automatically. On Macs use Fn/Globe for function keys and Fn-Up/Down for PageUp/PageDown. See [all current controls and source status](FLIGHT-CONTROLS.md).
 
-Instrument window numbers: 1 envelope, 2 front view, 3 other view, 4 target, 5 RWR, 6 navigation, 7 systems, 8 weapons, 9 radar. Range/mode buttons work on the scopes; unsupported readings and no-target states remain explicit. Older Hornet-less caches refresh from local media. `--viewer` remains a developer terrain diagnostic but has no creator button. Source data, authored integration and remaining parity work are distinguished in [aircraft notes](formats/aircraft.md); [baseline commands](baselines/f18-free-flight.md) cover screenshots and tests.
+Instrument window numbers: 0 radar cross section, 1 envelope, 2 front view, 3 other view, 4 target, 5 RWR, 6 navigation, 7 systems, 8 weapons, 9 radar. Page 0 draws the exposure contour and received emitters with `-`/`+` scale buttons; page 9 has `-`, `+`, `M` for the sensor channel and `Y` for history, and a click on a contact designates it. Unsupported readings and no-target states remain explicit. Older Hornet-less caches refresh from local media. `--viewer` remains a developer terrain diagnostic but has no creator button. Source data, authored integration and remaining parity work are distinguished in [aircraft notes](formats/aircraft.md); [baseline commands](baselines/f18-free-flight.md) cover screenshots and tests.
 
 
 The full-height cockpit and live HUD can be captured with `--capture-flight .local/cockpit.ppm`. Add `--flight-menu` to capture the paused Escape menu. `--flight-view 0|1|2|3|4` selects front/chase/oblique/back/up for inspection. These flags require a display for GPU capture. See [cockpit/control validation](baselines/cockpit-controls.md).
@@ -405,9 +408,10 @@ its imported end-to-end suite headlessly; use one literal identity per invocatio
 
 ### Manual weapon acceptance
 
-Both `--combat-smoke` identities now exercise each of five default JT slots
-against all five source damage entries (50 cases total), with negative launch
-checks and deterministic live-state comparison. Set `TORE_COMBAT_EVIDENCE` to a
+`--combat-smoke` exercises the selected aircraft's default JT slots against all
+five source damage entries, with negative launch checks and deterministic
+live-state comparison. All twelve registered identities pass, and scripted probes
+now wait the same half second for a fire-control track that a player does. Set `TORE_COMBAT_EVIDENCE` to a
 new ignored directory to additionally write and replay per-slot combat tapes,
 comparing complete state before and after manual commands/reset:
 
@@ -423,8 +427,11 @@ headless `--replay-combat PATH`, and `--combat-command NAME` capture setup are
 specified in [manual weapons acceptance](baselines/manual-weapons.md).
 
 The [systems continuation](baselines/weapons-systems.md) adds incoming/player-damage
-and ECM checks to both combat smokes, version-2 combat tapes, `--jammer-on`,
-and `--combat-command damage|incoming|target-jammer`. Probe logs include haptic
+and ECM checks to the combat smokes, combat tapes, `--jammer-on`,
+and `--combat-command damage|incoming|target-jammer`. Tapes are now version 3:
+each record also carries the player's sensor controls, and a designation is
+stored as `designate-id:N` rather than a screen coordinate. Version-2 tapes still
+replay with the default sensor controls. Probe logs include haptic
 event/mixer counts without playing historical pulses on hardware. Use a new
 `TORE_COMBAT_EVIDENCE` directory for ten serialized slot tapes. Current native
 research has 28 reviewed regions; full subsystem/ECM parity remains open.
@@ -432,6 +439,7 @@ research has 28 reviewed regions; full subsystem/ECM parity remains open.
 ## Creator / ordnance acceptance
 
 ```sh
+cargo run -q --locked -p tore-app -- --sensor-summary
 cargo run --locked -p tore-app -- --validate-creator
 cargo run --locked -p tore-app -- --validate-weather
 TORE_WEATHER_TIME=19:06 cargo run --locked -p tore-app -- --capture-terrain .local/weather/dusk.ppm
@@ -440,6 +448,16 @@ cargo run --locked -p tore-app -- --weather-condition 1 --capture-terrain .local
 cargo run --locked -p tore-app -- --quick-mission --snapshot-state ordnance --snapshot .local/ordnance.ppm
 cargo run --locked -p tore-app -- --quick-mission --snapshot-state ordnance --smoke-test
 ```
+
+`--sensor-summary` needs imported media but no display or audio. It prints one
+line per registered aircraft: the installed radar record with its search and
+track volumes, look-down coefficient and assigned preset; the infrared and visual
+records; the ECM record with its assigned generation and strength; and the PT
+radar and infrared signatures. Reviewing that output is the expected cost of
+porting an aircraft's sensors. For repeatable headless captures,
+`--sensor-channel radar|ir`, `--scope-range 5|10|25|50|100|150` and
+`--scope-history` set the scope before the capture. See
+[the component guide](radar.md) and [its validation](baselines/radar.md).
 
 `--validate-creator` needs imported media but no display/audio, and checks both
 aircraft's supported placements, fuel, empty stations and accepted-ammo restart.

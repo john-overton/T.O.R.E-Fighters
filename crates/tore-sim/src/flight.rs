@@ -47,6 +47,8 @@ pub struct State {
     pub hook_down: bool,
     pub radar: bool,
     pub jammer: bool,
+    /// Player sensor controls: scope channel, display range and history.
+    pub sensors: crate::sensors::Controls,
     pub crashed: bool,
     pub ticks: u64,
 }
@@ -139,6 +141,7 @@ impl State {
             hook_down: false,
             radar: true,
             jammer: false,
+            sensors: crate::sensors::Controls::default(),
             crashed: false,
             ticks: 0,
         }
