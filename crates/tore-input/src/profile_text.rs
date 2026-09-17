@@ -22,6 +22,8 @@ pub fn action_name(action: &Action) -> String {
             Switch::Burner => "burner",
             Switch::Radar => "radar",
             Switch::Jammer => "jammer",
+            Switch::Autopilot => "autopilot",
+            Switch::WaypointAutopilot => "waypoint-autopilot",
         }
         .into(),
         Action::Pilot(PilotCommand::Throttle(v)) => format!("throttle={v}"),

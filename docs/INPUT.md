@@ -211,7 +211,9 @@ silently guessed to be one three-position selector. Device-specific neutral
 combinations need explicit bindings or future reviewed composition support.
 
 Equipment actions: `gear`, `flaps`, `airbrake`, `hook`, `engine`, `burner`, `radar`,
-`jammer`. `press` toggles; `switch`/`follow` request a setting. These request the
+`jammer`, `autopilot`, `waypoint-autopilot`. A and Ctrl-A toggle the two
+[autopilot modes](spec/autopilot.md); controller bindings and pilot recordings
+use the same simulation commands. `press` toggles; `switch`/`follow` request a setting. These request the
 existing system behavior and never force animation fractions or bypass aircraft
 capabilities. Rafale's unavailable hook stays unavailable. `throttle=0.75`
 requests a preset. Axes are `pitch`, `roll`, `yaw`, `throttle`, `throttle-rate`,

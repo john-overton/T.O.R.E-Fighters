@@ -72,6 +72,8 @@ impl Action {
             ("burner", Switch::Burner),
             ("radar", Switch::Radar),
             ("jammer", Switch::Jammer),
+            ("autopilot", Switch::Autopilot),
+            ("waypoint-autopilot", Switch::WaypointAutopilot),
         ] {
             if s == name {
                 return Ok(Self::Pilot(PilotCommand::Toggle(switch)));

@@ -238,6 +238,14 @@ existing flight/presentation/systems coverage and all per-aircraft acceptance
 gates. F-14D, A-4E and X-31 now have initial FA-only ports; see
 [acceptance](baselines/aircraft-fa-expansion.md).
 
+## Autopilot
+
+The [autopilot specification](spec/autopilot.md) defines heading/altitude hold
+and waypoint guidance through ordinary stick commands at 120 Hz. Steering gains
+are fitted, throttle remains manual, and mode changes are recorded in pilot
+input tapes. The optional navigation target accepts a waypoint number and world X/Z in feet; routes
+and target-selection recording remain future work. Flight adapters stay distinct.
+
 ## Flight response contracts, 2026-09-15
 
 The adapter response pass has [component/regression evidence](baselines/flight-response.md);

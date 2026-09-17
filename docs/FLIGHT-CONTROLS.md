@@ -39,6 +39,7 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | Shift-0…9 | Toggle instrument windows (four large or six small) | FA menu; oldest open window is replaced |
 | Comma / period | Decrease/increase scope range | USNF manual; applies to the RWR or the RCS page if either is the last opened window, and to the radar scope otherwise |
 | C / Shift-C | Cycle 1×/2×/4×/8× time / select 0.5× | FA menu; fixed 120 Hz ticks, authored adapter time scaling |
+| A / Ctrl-A | Toggle heading/altitude hold / waypoint autopilot | [Autopilot behavior](spec/autopilot.md), requested USNF-ATF modes |
 | Ctrl-P | Pause/resume | FA menu |
 | Escape | Open/close in-flight menu; return one level from submenus/help | FA menu/manual |
 | Ctrl-Q | End mission and return to creator | FA menu; does not quit the application |
@@ -46,6 +47,11 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | F11 | Open keyboard help | Development shortcut |
 
 These replace the earlier provisional **A/D rudder, +/- throttle, T afterburner, F2/F3 external views**. T is reserved for original target cycling. The headless simulation still uses the same deterministic state model; desktop key translation is separate.
+
+Autopilot leaves throttle manual. Stick or rudder input above 15% disengages it.
+Switching modes retains the captured altitude and heading. With no waypoint
+system yet, Ctrl-A holds that heading and shows `AUTO` above `WP --`. Once supplied, a waypoint is labeled `WP <number>`.
+Heading hold shows `AUTO` above `HDG ALT`, beside the heading tape.
 
 ## Instruments
 
@@ -72,7 +78,7 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized. This is
 | F9 / F12 | Fly-by / missile camera |
 | Ctrl + view key / Alt + view key | Missile-relative / target-relative camera |
 | Shift-T | Reverse target cycling (T / Enter now designate in live range) |
-| W / Shift-W, N, A | Waypoint selection, navigation/weapons mode, autopilot |
+| W / Shift-W, N | Waypoint selection, navigation/weapons mode |
 | M | HARM seeker was the reserved action on this key. M now cycles sensor channels, so HARM has no binding until air-to-ground exists |
 | V | Set Other View camera |
 | Shift-J / Shift-K | Jettison fuel / air-to-ground stores |

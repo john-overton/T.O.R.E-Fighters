@@ -34,6 +34,7 @@ current flight model is the default; the previous model remains selectable.
 
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
+| Heading/altitude and waypoint autopilot | ☐ | ☑ | Partially implemented. Requested USNF-ATF modes, pilot override, HUD and input recording work. Waypoint target API is ready; route selection and sequencing remain. Steering is fitted, retail parity unverified. | [Autopilot](spec/autopilot.md) |
 | Pitch, roll and rudder control | ☑ | ☐ | Completed. All twelve aircraft have working flight controls. | Manual pp. 60-61; [aircraft coverage](baselines/aircraft-roster-expansion.md) |
 | Speed- and altitude-dependent turning limits | ☑ | ☐ | Partially implemented. Aircraft limits are used; individual pitch/yaw response tuning remains. | Manual pp. 58-59; [flight model](FLIGHT-MODEL.md) |
 | Throttle, afterburner and fuel use | ☑ | ☐ | Completed. Available engines and afterburners follow the selected aircraft's configuration. | Manual p. 61; [flight model](FLIGHT-MODEL.md) |

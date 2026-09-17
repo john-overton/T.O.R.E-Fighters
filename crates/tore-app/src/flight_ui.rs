@@ -204,6 +204,8 @@ impl FlightUi {
             }
             "Current" => Command::Panel(1),
             _ => match shortcut {
+                "A" | "a" => Command::Toggle(Switch::Autopilot),
+                "Ctrl-A" | "Ctrl-a" => Command::Toggle(Switch::WaypointAutopilot),
                 "F1" => Command::View(0),
                 "F2" => Command::View(3),
                 "F3" => Command::View(4),
@@ -380,6 +382,13 @@ impl FlightUi {
             self.message(format!("Time {}x", self.time_scale));
             return Command::Click;
         }
+        if key == "a" && !shift && !alt {
+            return Command::Toggle(if ctrl {
+                Switch::WaypointAutopilot
+            } else {
+                Switch::Autopilot
+            });
+        }
         if let Some(node) = find(tree, &shortcut) {
             return self.activate(&node.label, &node.shortcut);
         }
@@ -439,7 +448,7 @@ impl FlightUi {
             "l" => Command::Combat(tore_sim::combat::live::Command::ClearDesignation),
             "]" => Command::Combat(tore_sim::combat::live::Command::CycleClass),
             "[" => Command::Combat(tore_sim::combat::live::Command::FailStation),
-            "a" => self.unavailable("Autopilot"),
+
             "t" => Command::Target,
             ";" => Command::NextWeapon,
             "\\" => Command::RangeReset,
@@ -588,7 +597,7 @@ impl FlightUi {
                     "Ctrl-Tab/Ctrl-Shift-Tab: instrument | Ctrl-1..6: slot".into(),
                     "Ctrl-Shift-1..4: stock instrument buttons (T.O.R.E)".into(),
                     "T/Shift-T: target | Enter/apostrophe: designate | Space: fire".into(),
-                    "A: autopilot | W/Shift-W: waypoint | N: nav/weapons".into(),
+                    "A: heading/altitude | Ctrl-A: waypoint autopilot".into(),
                     "I: infrared | R: radar | Y: contact history | J: own ECM".into(),
                     "Click a contact to designate it; L clears the designation".into(),
                     "Range: Shift-I incoming | D player hit | Shift-Y target ECM".into(),
@@ -697,6 +706,28 @@ mod tests {
             }],
         }]
     }
+    #[test]
+    fn autopilot_shortcuts_and_menu_actions() {
+        let mut ui = FlightUi::default();
+        for (ctrl, switch) in [
+            (false, Switch::Autopilot),
+            (true, Switch::WaypointAutopilot),
+        ] {
+            assert_eq!(
+                ui.key("a", false, ctrl, false, &tree()),
+                Command::Toggle(switch)
+            );
+        }
+        assert_eq!(ui.key("a", true, false, false, &tree()), Command::None);
+        assert_eq!(ui.key("a", false, false, true, &tree()), Command::None);
+        assert_eq!(
+            ui.activate("Autopilot", "A"),
+            Command::Toggle(Switch::Autopilot)
+        );
+        ui.menu = true;
+        assert_eq!(ui.key("a", false, false, false, &tree()), Command::None);
+    }
+
     #[test]
     fn no_turbulence_is_a_session_toggle_preserved_by_restart() {
         let mut ui = FlightUi::default();

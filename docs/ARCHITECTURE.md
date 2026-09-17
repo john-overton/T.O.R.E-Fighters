@@ -59,6 +59,12 @@ The Hornet slice adds dependency resolution and bounded BRF/SH/FNT readers to `t
 
 `flight_canvas.rs` now composes the flight-only overlay at an aspect-responsive size (physical drawable, proportionally capped at 1920×1080). The separate GPU cockpit pass preserves uniform cover-fit in the centered forward view, and instrument layout rectangles anchor to actual edges. Native instrument rasters go directly to their destination sizes instead of passing through a reduced 640×480 composite. The original cockpit texture is uploaded once; unchanged scaled panel rasters are cached. Alpha-aware filtering prevents dark transparent borders. `renderer.rs` recreates its UI texture when dimensions change and uses the full viewport for flight; menus/viewer overlays retain their existing canvas. Pointer conversion uses the same responsive panel rectangles, while the centered pause menu retains menu coordinates. HUD metadata uses a 0.7225 layout scale, including the requested additional 15% reduction. Projection compensation preserves angular cues through resizing and portrait aspect.
 
+`tore_sim::autopilot` owns captured heading/altitude, mode and an optional
+world-space navigation target. `State::step_surface` consumes mode switches,
+applies pilot override and generates control deflections before the selected
+flight adapter runs. The HUD reads this state. See the
+[autopilot specification](spec/autopilot.md).
+
 ### Flight presentation and measurement
 
 `flight::State` remains authoritative at 120 Hz. `main` retains the preceding tick for render-only pose interpolation (shortest-path wrapped angles); pause/crash show authoritative state and restart resets history. Camera, exterior geometry and HUD consume the same presented pose. Audio consumes authoritative state. No renderer smoothing feeds back into physics.

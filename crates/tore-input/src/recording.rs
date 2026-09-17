@@ -17,6 +17,8 @@ fn switch_name(s: crate::Switch) -> &'static str {
         Burner => "burner",
         Radar => "radar",
         Jammer => "jammer",
+        Autopilot => "autopilot",
+        WaypointAutopilot => "waypoint-autopilot",
     }
 }
 pub fn write_frame(mut out: impl Write, tick: u64, input: &PilotInput) -> io::Result<()> {
@@ -143,6 +145,8 @@ mod tests {
             roll: -0.271828,
             throttle: Some(0.4),
             commands: vec![
+                PilotCommand::Toggle(crate::Switch::Autopilot),
+                PilotCommand::Set(crate::Switch::WaypointAutopilot, true),
                 PilotCommand::Toggle(crate::Switch::Gear),
                 PilotCommand::Set(crate::Switch::Gear, true),
                 PilotCommand::Throttle(0.8),

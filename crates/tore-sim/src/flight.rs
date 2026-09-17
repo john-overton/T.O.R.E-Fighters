@@ -51,6 +51,7 @@ pub struct State {
     pub sensors: crate::sensors::Controls,
     /// Combat presentation health, no additional flight-force coupling.
     pub damage_fraction: f64,
+    pub autopilot: crate::autopilot::Autopilot,
     pub crashed: bool,
     pub ticks: u64,
 }
@@ -145,6 +146,7 @@ impl State {
             jammer: false,
             sensors: crate::sensors::Controls::default(),
             damage_fraction: 0.,
+            autopilot: Default::default(),
             crashed: false,
             ticks: 0,
         }
@@ -224,6 +226,11 @@ impl State {
         {
             return;
         }
+        if matches!(switch, Switch::Autopilot | Switch::WaypointAutopilot) {
+            self.autopilot
+                .select(switch, setting, self.yaw, self.position[1]);
+            return;
+        }
         let target = match switch {
             Switch::Gear => &mut self.gear_down,
             Switch::Flaps => &mut self.flaps_down,
@@ -234,6 +241,7 @@ impl State {
             Switch::Burner => &mut self.burner,
             Switch::Radar => &mut self.radar,
             Switch::Jammer => &mut self.jammer,
+            Switch::Autopilot | Switch::WaypointAutopilot => unreachable!(),
         };
         *target = setting.unwrap_or(!*target);
     }
@@ -298,6 +306,41 @@ impl State {
     }
 
     pub fn step_surface(
+        &mut self,
+        input: &PilotInput,
+        ground: impl Fn(f64, f64) -> crate::research::Surface,
+    ) {
+        let mut input = input.bounded();
+        input.commands.retain(|command| {
+            if matches!(
+                command,
+                PilotCommand::Toggle(Switch::Autopilot | Switch::WaypointAutopilot)
+                    | PilotCommand::Set(Switch::Autopilot | Switch::WaypointAutopilot, _)
+            ) {
+                self.command(*command);
+                false
+            } else {
+                true
+            }
+        });
+        let mut autopilot = std::mem::take(&mut self.autopilot);
+        autopilot.apply(
+            self,
+            ground(self.position[0], self.position[2]).height,
+            &mut input,
+        );
+        self.autopilot = autopilot;
+        self.step_controlled(&input, &ground);
+        if self.crashed
+            || self.position[1]
+                <= ground(self.position[0], self.position[2]).height
+                    + self.model.configuration().equipment.ground_clearance_ft
+        {
+            self.autopilot.disengage();
+        }
+    }
+
+    fn step_controlled(
         &mut self,
         input: &PilotInput,
         ground: impl Fn(f64, f64) -> crate::research::Surface,

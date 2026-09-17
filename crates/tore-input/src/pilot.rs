@@ -10,6 +10,8 @@ pub enum Switch {
     Burner,
     Radar,
     Jammer,
+    Autopilot,
+    WaypointAutopilot,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PilotCommand {

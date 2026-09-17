@@ -16,6 +16,10 @@ they experience in Fighters Anthology? A behaviour's provenance, `spec-derived`,
 `native`, `fitted`, `opinionated`, records where it came from and never gates
 acceptance.
 
+Heading/altitude autopilot and toggleable waypoint guidance are implemented from
+the requested USNF-ATF behavior. Waypoint mode currently falls back to heading
+hold; route selection is pending. See [scope and provenance](spec/autopilot.md).
+
 ## The decision this plan follows
 
 **D30, 2026-09-15. Parity by expression of feature.** Recorded from John's

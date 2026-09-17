@@ -1,5 +1,6 @@
 //! Renderer-independent aircraft simulation and deterministic validation.
 pub mod attitude;
+pub mod autopilot;
 pub mod combat;
 pub mod environment;
 pub mod flight;

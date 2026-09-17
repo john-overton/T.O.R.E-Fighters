@@ -285,6 +285,10 @@ pub fn draw(
             291,
         );
     }
+    if s.autopilot.mode() != tore_sim::autopilot::Mode::Off {
+        p.text(font, "AUTO", 211, 133);
+        p.text(font, &s.autopilot.label(), 211, 145);
+    }
     if s.stall_alert(ground).is_some() {
         p.text(font, "STALL", 301, 274);
     }
