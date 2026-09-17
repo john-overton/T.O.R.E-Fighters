@@ -15,7 +15,7 @@ use tore_sim::{
 /// Version 3 adds the player sensor controls to every record so channel,
 /// display range and history changes replay deterministically. Version 2 tapes
 /// still replay, using the default controls they were recorded with.
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 
 pub struct Recorder {
     out: std::io::BufWriter<std::fs::File>,
@@ -82,13 +82,16 @@ impl Recorder {
             }
             writeln!(
                 self.out,
-                " {} {} {} {} {} {}",
+                " {} {} {} {} {} {} {} {} {}",
                 u8::from(l.radar),
                 u8::from(l.alive),
                 u8::from(l.jammer),
                 u8::from(l.controls.channel == Channel::Infrared),
                 l.controls.range_index,
-                u8::from(l.controls.history)
+                u8::from(l.controls.history),
+                l.velocity[0],
+                l.velocity[1],
+                l.velocity[2]
             )
         })();
         if let Err(e) = result {
@@ -148,7 +151,13 @@ pub fn command(s: &str) -> Option<Command> {
 /// Records carry the sensor controls from version 3 onward, so the field count
 /// follows the header rather than being accepted either way.
 fn fields_for(version: u32) -> usize {
-    if version < 3 { 17 } else { 20 }
+    if version < 3 {
+        17
+    } else if version < 4 {
+        20
+    } else {
+        23
+    }
 }
 fn parse(line: &str, version: u32) -> AppResult<(&str, Launcher)> {
     let fields: Vec<_> = line.split_whitespace().collect();
@@ -205,6 +214,18 @@ fn parse(line: &str, version: u32) -> AppResult<(&str, Launcher)> {
             position: values[..3].try_into()?,
             basis,
             speed_fps: values[12],
+            velocity: if version >= 4 {
+                let mut velocity = [0.; 3];
+                for (v, field) in velocity.iter_mut().zip(&fields[20..23]) {
+                    *v = field.parse::<f64>()?;
+                    if !v.is_finite() || v.abs() > 100000. {
+                        return Err("invalid combat velocity".into());
+                    }
+                }
+                velocity
+            } else {
+                basis.forward.map(|v| v * values[12])
+            },
             radar: boolean(fields[14])?,
             jammer: boolean(fields[16])?,
             alive: boolean(fields[15])?,
@@ -292,6 +313,11 @@ fn replay_reader(
         match action {
             "reset" => {
                 s = State::new(s.configuration().clone(), true)?;
+                s.weapon_rules = if version < 4 {
+                    tore_sim::combat::missiles::Rules::Compatibility
+                } else {
+                    tore_sim::combat::missiles::Rules::Spec
+                };
                 s.range_target(launcher);
                 initialized = true;
             }

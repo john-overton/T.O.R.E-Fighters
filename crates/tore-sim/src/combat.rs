@@ -4,6 +4,7 @@
 use std::io::{Error, ErrorKind};
 pub mod loading;
 pub mod loadout;
+pub mod missiles;
 pub mod systems;
 use tore_formats::{
     Result,

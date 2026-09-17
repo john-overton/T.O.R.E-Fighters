@@ -8,8 +8,8 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Research mode, 2026-09-17. This pass audits existing game data, reviews the manual and writes a
-proposed specification. It does not implement or validate new missile behavior.
+Implementation mode, 2026-09-17. The inventory evidence below is retained.
+Profile and motion implementation is underway; full seeker acceptance is pending.
 [Specification and matrix](../spec/missiles.md),
 [field interpretation](../formats/missiles.md),
 [implementation milestones](../missile-update-plan.md).
@@ -114,3 +114,12 @@ No rendering changes, so no rendering smoke was required. Windows/macOS runtime,
 interactive missile engagements, seeker tuning and retail comparisons were not
 run. The new guidance, activation, memory and lifetime rules remain proposals;
 passing existing tests does not validate those future features.
+
+## Implementation validation
+
+The new profile module has synthetic tests for vector inheritance, the 1,600 ft/s
+boost example, 1,900/1,300 ft/s closure, crossing lead, impossible intercepts,
+finite burn, early removal, long ages and independent angle boundaries.
+Live accepted profiles use this motion integrator. Version 4 combat records carry
+world velocity; version 2/3 playback explicitly keeps compatibility motion.
+Seeker observations, reacquisition, presentation and roster acceptance remain.

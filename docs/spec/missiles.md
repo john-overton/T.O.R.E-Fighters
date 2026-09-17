@@ -23,12 +23,18 @@ unit choice and detailed rules below are agent proposals. Sequencing is in
 
 | Type | Before and after launch | Loss of support or signal |
 | --- | --- | --- |
-| S: supported radar | Aircraft holds radar lock on this missile's target throughout guided flight. For future ground/ship weapons, the equivalent support comes from their launcher. | No steering from hidden target state after support loss. Proposed 2-second memory period, straight flight, then permanent guidance loss unless support returns. No pitbull. |
+| S: supported radar | Aircraft holds radar lock on this missile's target throughout guided flight. For future ground/ship weapons, the equivalent support comes from their launcher. | No steering from hidden target state after support loss. Retain the last observed intercept and seek renewed support until guidance lifetime expires. No pitbull. |
 | A: active radar | Cued launch: snapshot the aircraft firing solution and intercept, then activate at the matrix distance. Boresight launch: own seeker searches immediately, without aircraft designation or radar lock. | Aircraft updates are optional. Losing aircraft support freezes the last supported intercept; it does not destroy the missile or expose live target coordinates. After seeker acquisition, guide independently. |
-| I: infrared | Use the weapon's own heat seeker, with either a designated target or narrow forward boresight search. Aircraft radar and installed FLIR are not required for boresight search. | Proposed 2-second straight-flight memory and reacquisition of the same target, then permanent guidance loss. No radar or emitter fallback. |
+| I: infrared | Use the weapon's own heat seeker, with either a designated target or narrow forward boresight search. Aircraft radar and installed FLIR are not required for boresight search. | Retain the last observed intercept and attempt same-target reacquisition until guidance lifetime expires. No radar or emitter fallback. |
 | E: passive emitter | Use the weapon's receiver with designation or forward boresight search for compatible emissions. An enabled passive receiver does not transmit radar. | Emission shutdown stops measurement immediately. Proposed 2-second straight-flight memory and same-target reacquisition, then permanent guidance loss. No heat fallback. |
 
-The 2-second memory is an **agent-selected fitted game rule**, not `trackT`.
+John revised loss behavior on 2026-09-17: retain the known intercept and attempt
+same-target reacquisition within the applicable seeker cone until guidance life
+expires. The 2-second **agent-fitted** memory timer now separates MEMORY from
+LOST searching; it never permanently disables reacquisition. Search can steer
+toward the frozen intercept, but cannot follow hidden movement. S still requires
+launcher support; IR and emitter weapons retain their own sensor types. This
+supersedes the draft permanent-loss rule and does not interpret `trackT`.
 Use current shared sensor support for S. A missile retains its own target ID;
 changing cockpit selection never redirects an existing shot. At most one target
 receives aircraft support at once. No aircraft combat AI is included.
@@ -395,7 +401,7 @@ Keep four independent concepts:
    Keep the original speed interpretation in the compatibility profile. No new
    physical drag model or real-world range values are part of this plan.
 4. **Guidance lifetime:** a separate `guidance_lifetime_s` starts at launch and
-   ends steering and reacquisition permanently. Call this guidance lifetime in
+   ends steering and reacquisition permanently. Signal loss alone does not. Call this guidance lifetime in
    the UI, not battery life, since the source does not establish battery meaning.
    Agent-proposed fitted fallback: equal to the source-derived removal lifetime.
    Profiles may explicitly shorten it; do not lengthen object life implicitly.

@@ -189,3 +189,9 @@ display range, history) travel as a per-tick input, which is why the combat tape
 reproduces them. The flight adapters and renderer independence are unchanged.
 [What is modelled, what is authored tuning and what is deferred](radar.md);
 [what was validated](baselines/radar.md).
+
+Missile profiles and the fitted finite-boost motion predictor live in
+`combat::missiles`, independent of rendering. The live adapter uses full release
+velocity for accepted missile profiles; compatibility retains scalar source
+motion. Combat tape version 4 includes world velocity, while versions 2 and 3
+select compatibility rules. [Missile specification](spec/missiles.md).

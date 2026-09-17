@@ -50,6 +50,7 @@ pub fn launcher(s: &flight::State) -> Launcher {
         position: s.position,
         basis: Basis::new(s.yaw, s.pitch, s.bank),
         speed_fps: s.speed,
+        velocity: s.velocity,
         // Selecting the passive infrared channel stops radar transmission
         // without changing the radar power switch itself.
         radar: s.radar && s.engine && s.sensors.channel == tore_sim::sensors::Channel::Radar,
@@ -997,6 +998,7 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
         position: [0., 500., 0.],
         basis: Basis::new(0., -0.3, 0.),
         speed_fps: 500.,
+        velocity: Basis::new(0., -0.3, 0.).forward.map(|v| v * 500.),
         radar: false,
         jammer: false,
         alive: true,

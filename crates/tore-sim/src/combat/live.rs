@@ -1,6 +1,7 @@
 //! Explicit development live-fire adapter. Source configuration and recovered scalar
 //! kernels are combined with authored scheduling, guidance and swept-sphere contacts.
 //! This is NOT the diagnostic native-parity update or a retail AI implementation.
+use super::missiles::{self, Motion, Rules};
 use super::{
     EnginePhase, FallState, PlayerTrigger, axial_speed, commanded_speed, engine_phase,
     launch_speed, removal_due, unload,
@@ -346,6 +347,9 @@ pub struct Target {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projectile {
+    pub motion: Option<Motion>,
+    pub guidance_ticks: Option<u64>,
+    pub age: u64,
     pub incoming: bool,
     pub station: usize,
     pub position: Vector,
@@ -383,6 +387,7 @@ pub enum Event {
 }
 #[derive(Clone, Debug)]
 pub struct State {
+    pub weapon_rules: Rules,
     config: Configuration,
     pub ammo: Vec<u16>,
     pub selected: usize,
@@ -423,6 +428,7 @@ pub struct Launcher {
     pub position: Vector,
     pub basis: Basis,
     pub speed_fps: f64,
+    pub velocity: Vector,
     /// Radar actually transmitting. Selecting infrared stops the emission.
     pub radar: bool,
     pub jammer: bool,
@@ -446,6 +452,7 @@ impl State {
         let range_category = config.target_category;
         let sensors = Sensors::new(config.sensors.clone());
         Ok(Self {
+            weapon_rules: Rules::Spec,
             chaff: config.ecm.chaff[0],
             flares: config.ecm.flare[0],
             player_hp: config.damage_capacity,
@@ -507,6 +514,9 @@ impl State {
                         launcher.position[i] + launcher.basis.forward[i] * 1800.
                     });
                     self.projectiles.push(Projectile {
+                        motion: None,
+                        guidance_ticks: None,
+                        age: 0,
                         incoming: true,
                         station: self.selected,
                         position,
@@ -862,6 +872,13 @@ impl State {
                         + launcher.basis.forward[i] * station.mount[2]
                 });
                 self.projectiles.push(Projectile {
+                    guidance_ticks: (self.weapon_rules == Rules::Spec)
+                        .then(|| missiles::Profile::for_weapon(w).map(|p| p.guidance_ticks))
+                        .flatten(),
+                    motion: (self.weapon_rules == Rules::Spec
+                        && missiles::Profile::for_weapon(w).is_some())
+                    .then(|| Motion::new(&w.movement, launcher.velocity, position[1])),
+                    age: 0,
                     incoming: false,
                     station: index,
                     position,
@@ -926,11 +943,23 @@ impl State {
         self.projectiles.retain_mut(|p| {
             let w = &self.config.stations[p.station].weapon;
             let m = &w.movement;
-            if removal_due(m, now, p.launched_t, (p.position[1] * 256.) as i32) {
+            if if p.motion.is_some() {
+                missiles::removed(m, p.age)
+            } else {
+                removal_due(m, now, p.launched_t, (p.position[1] * 256.) as i32)
+            } {
                 return false;
             }
             p.previous = p.position;
-            let phase = engine_phase(m, now, p.launched_t);
+            let phase = if p.motion.is_some() {
+                missiles::phase(m, p.age)
+            } else {
+                engine_phase(m, now, p.launched_t)
+            };
+            let old_direction = p.direction;
+            if p.guidance_ticks.is_some_and(|end| p.age >= end) {
+                p.target = None;
+            }
             if let Some(t) = p.target.and_then(|id| {
                 if p.incoming && id == 0 && player.hp > 0 {
                     Some(&player)
@@ -968,27 +997,41 @@ impl State {
             } else if let Some(id) = p.target.take() {
                 events.push(Event::TrackLost(id));
             }
-            if w.flags & 0x40 != 0 {
-                let target =
-                    commanded_speed(m, phase, p.speed_f8, (p.position[1] * 256.) as i32) as i16;
-                p.speed_f8 =
-                    axial_speed(m, p.speed_f8, target, false, service).expect("validated movement");
+            if let Some(motion) = &mut p.motion {
+                motion.turn(old_direction, p.direction);
+                let delta = motion.step(m, p.age, p.direction);
+                for (position, delta) in p.position.iter_mut().zip(delta) {
+                    *position += delta;
+                }
+                p.speed_f8 = (missiles::length(motion.velocity) * 256.) as i32;
+            } else {
+                if w.flags & 0x40 != 0 {
+                    let target =
+                        commanded_speed(m, phase, p.speed_f8, (p.position[1] * 256.) as i32) as i16;
+                    p.speed_f8 = axial_speed(m, p.speed_f8, target, false, service)
+                        .expect("validated movement");
+                }
+                let distance = f64::from(p.speed_f8) * f64::from(service) / 65536.;
+                for i in 0..3 {
+                    p.position[i] += p.direction[i] * distance;
+                }
+                p.position[1] = f64::from(
+                    p.fall
+                        .advance(
+                            w.flags & 4 != 0,
+                            phase,
+                            service,
+                            (p.position[1] * 256.) as i32,
+                        )
+                        .expect("positive service"),
+                ) / 256.;
             }
-            let distance = f64::from(p.speed_f8) * f64::from(service) / 65536.;
-            for i in 0..3 {
-                p.position[i] += p.direction[i] * distance;
-            }
-            p.position[1] = f64::from(
-                p.fall
-                    .advance(
-                        w.flags & 4 != 0,
-                        phase,
-                        service,
-                        (p.position[1] * 256.) as i32,
-                    )
-                    .expect("positive service"),
-            ) / 256.;
-            let armed = now.wrapping_sub(p.launched_t) >= w.damage.fuze_arm_t;
+            let armed = if p.motion.is_some() {
+                p.age >= u64::from(w.damage.fuze_arm_t) * 30
+            } else {
+                now.wrapping_sub(p.launched_t) >= w.damage.fuze_arm_t
+            };
+            p.age += 1;
             let mut first: Option<(f64, Option<usize>)> = None;
             if armed
                 && p.incoming
@@ -1418,6 +1461,7 @@ mod tests {
             position: [0., 1000., 0.],
             basis: Basis::new(0., 0., 0.),
             speed_fps: 300.,
+            velocity: [0., 0., 300.],
             radar: true,
             jammer: false,
             alive: true,

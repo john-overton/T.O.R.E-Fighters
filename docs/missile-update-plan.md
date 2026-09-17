@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Research and planning mode. Feature sequencing is tracked in the
+Implementation mode. Feature sequencing is tracked in the
 [roadmap](ROADMAP.md); the delivery stages for this feature live here.
 
 John requested this next planning slice on 2026-09-17: four guidance types,
@@ -30,7 +30,7 @@ systems. Radar's remaining tuning pass stays open.
 | 4. HUD, seeker tone and replay | Deliver the spec's manual-supported HUD cues, mode/search cone, solution estimates and IR tone. Add the rebindable mode action, bay handling and mounted-seeker reset. Record full launch velocity, launch mode and heat state; update fingerprints and user guides. | Cone projection matches search geometry across zoom/aspect ratios; tone and HUD agree with acquisition. Pause and mute behave correctly; replay reproduces both launch modes. Unknown hit probability is not replaced with heat quality. |
 | 5. Range and roster acceptance | Run the spec's launch-speed, target-motion, range and uncued-search scenarios, then manually exercise current A2A default stores. Record observed reach and remaining approximations in one feature baseline. | All applicable repository checks and display smoke pass; report platform limits. Catalog-only ordnance and held rows are not silently enabled. |
 
-Stages 1 through 5 are planned, not implemented. Start with the fifteen current
+Stage 1 profile and motion implementation is in progress. Stages 2 through 5 remain. Start with the fifteen current
 allowlisted missile identities, prioritizing A2A. Existing AGM65G/AS7 integration
 gets regression coverage; expanded A2G behavior remains deferred. The two emitter
 candidates can be tested with explicit fixtures before adding ground systems.
@@ -42,4 +42,4 @@ fallback, boost budget and intercept estimator are agent decisions in the spec, 
 The [feature evidence matrix](features.md) separates the retail-supported parts,
 authored additions and implementation status. Stage 4 includes original HUD
 resource/figure inspection and audio-sample identification; the planning pass
-reviewed manual text only. No new gameplay is implemented by these documents.
+reviewed manual text only. Implementation progress and measured results are recorded in the feature baseline.
