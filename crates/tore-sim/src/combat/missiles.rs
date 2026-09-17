@@ -100,6 +100,9 @@ impl Profile {
     pub fn independent(self) -> bool {
         self.guidance != Guidance::Supported
     }
+    pub fn guidance_available(self, radar_power: bool) -> bool {
+        radar_power || self.guidance == Guidance::Infrared
+    }
     pub fn supports_boresight(self) -> bool {
         self.role == TargetRole::Aircraft && self.independent()
     }
@@ -107,7 +110,7 @@ impl Profile {
         self.role == target.role && (self.role == TargetRole::Surface || target.airborne)
     }
     pub fn search_cap(self) -> f64 {
-        7f64.to_radians()
+        5f64.to_radians()
     }
 }
 
@@ -188,7 +191,7 @@ impl Motion {
             budget: (f64::from(maximum) - f64::from(m.initial_speed)).max(0.),
         }
     }
-    /// Steering rotates velocity, preserving speed. No change of rail direction
+    /// Steering rotates inherited velocity and applies fitted maneuver loss. No change of rail direction
     /// means full inherited climb/side-slip survives the unsteered boost.
     pub fn turn(&mut self, old: Vector, new: Vector) {
         let axis = crate::attitude::cross(old, new);
@@ -200,10 +203,12 @@ impl Motion {
                 forward: [0., 0., 1.],
             }
             .rotated(unit(axis).map(|v| v * angle));
+            let loss = (-0.03 * angle * angle / DT).exp();
             self.velocity = std::array::from_fn(|i| {
-                b.right[i] * self.velocity[0]
+                (b.right[i] * self.velocity[0]
                     + b.up[i] * self.velocity[1]
-                    + b.forward[i] * self.velocity[2]
+                    + b.forward[i] * self.velocity[2])
+                    * loss
             });
         }
     }
@@ -259,33 +264,260 @@ pub fn estimated_hit_percent(
         .clamp(0., 95.) as u8
 }
 
-/// Fitted bounded straight-path estimate. Uses exactly the propulsion integrator
-/// used in flight, with lead from observed velocity. Turn costs remain approximate.
+/// Constant-speed lead from observed motion only. No target state lookup.
+pub fn lead(position: Vector, speed: f64, target: Vector, velocity: Vector) -> Solution {
+    let r = sub(target, position);
+    let a = dot(velocity, velocity) - speed * speed;
+    let b = 2. * dot(r, velocity);
+    let c = dot(r, r);
+    let mut seconds = 0.;
+    if a.abs() < 1e-9 {
+        if b < -1e-9 {
+            seconds = -c / b;
+        }
+    } else {
+        let discriminant = b * b - 4. * a * c;
+        if discriminant >= 0. {
+            seconds = [
+                (-b - discriminant.sqrt()) / (2. * a),
+                (-b + discriminant.sqrt()) / (2. * a),
+            ]
+            .into_iter()
+            .filter(|t| *t >= 0. && t.is_finite())
+            .min_by(f64::total_cmp)
+            .unwrap_or(0.);
+        }
+    }
+    Solution {
+        point: std::array::from_fn(|i| target[i] + velocity[i] * seconds),
+        seconds,
+    }
+}
+
+/// Correct inherited slip/climb using flight-path error, not nose error alone.
+pub fn commanded_heading(forward: Vector, velocity: Vector, desired: Vector) -> Vector {
+    if length(velocity) < 1. {
+        return desired;
+    }
+    let flight_path = unit(velocity);
+    unit(std::array::from_fn(|i| {
+        forward[i] + desired[i] - flight_path[i]
+    }))
+}
+
+/// Same exact angular limit in prediction and live guidance.
+pub fn steer(m: &Movement, age: u64, forward: Vector, desired: Vector) -> Vector {
+    let angle = dot(forward, desired).clamp(-1., 1.).acos();
+    let rate = if phase(m, age) == EnginePhase::Powered {
+        m.powered_turn_rate
+    } else {
+        m.unpowered_turn_rate
+    };
+    let step = (f64::from(rate.max(0)) * std::f64::consts::TAU / 65520. * DT).min(angle);
+    if angle < 1e-12 || step <= 0. {
+        return forward;
+    }
+    let mut axis = crate::attitude::cross(forward, desired);
+    if length(axis) < 1e-9 {
+        axis = crate::attitude::cross(
+            forward,
+            if forward[1].abs() < 0.9 {
+                [0., 1., 0.]
+            } else {
+                [1., 0., 0.]
+            },
+        );
+    }
+    let axis = unit(axis);
+    let tangent = crate::attitude::cross(axis, forward);
+    unit(std::array::from_fn(|i| {
+        forward[i] * step.cos() + tangent[i] * step.sin()
+    }))
+}
+
+/// Fitted 120 Hz flyout with observed constant-velocity target and shared physics.
+#[allow(clippy::too_many_arguments)]
 pub fn intercept(
     m: &Movement,
-    motion: Motion,
-    position: Vector,
-    target: Vector,
+    mut motion: Motion,
+    mut position: Vector,
+    mut forward: Vector,
+    mut target: Vector,
     velocity: Vector,
     age: u64,
     lifetime: u64,
 ) -> Option<Solution> {
     let end = lifetime.min(u64::from(m.remove_t) * 30);
-    let mut predicted = motion;
-    let forward = unit(sub(target, position));
-    let mut traveled = [0.; 3];
+    let mut aim = target;
     for tick in age..end {
-        let delta = predicted.step(m, tick, forward);
-        for i in 0..3 {
-            traveled[i] += delta[i];
+        if tick == age || tick.is_multiple_of(12) {
+            aim = lead(position, length(motion.velocity), target, velocity).point;
         }
-        let seconds = (tick - age + 1) as f64 * DT;
-        let point = std::array::from_fn(|i| target[i] + velocity[i] * seconds);
-        if length(traveled) >= length(sub(point, position)) {
-            return Some(Solution { point, seconds });
+        let previous = sub(target, position);
+        let desired = commanded_heading(forward, motion.velocity, unit(sub(aim, position)));
+        let next = steer(m, tick, forward, desired);
+        motion.turn(forward, next);
+        forward = next;
+        let delta = motion.step(m, tick, forward);
+        for i in 0..3 {
+            position[i] += delta[i];
+            target[i] += velocity[i] * DT;
+        }
+        let relative = sub(target, position);
+        let segment = sub(relative, previous);
+        let u = (-dot(previous, segment) / dot(segment, segment).max(1e-12)).clamp(0., 1.);
+        let closest = std::array::from_fn(|i| previous[i] + segment[i] * u);
+        if length(closest) <= 25. {
+            return Some(Solution {
+                point: target,
+                seconds: (tick - age + 1) as f64 * DT,
+            });
         }
     }
     None
+}
+
+/// Imported minimum/angle/altitude limits, without the obsolete fixed launch max.
+pub fn launch_geometry(w: &Weapon) -> Zone {
+    Zone {
+        maximum_range: i32::MAX,
+        ..w.seeker.zones[1]
+    }
+}
+
+/// Max useful launch distance bounded by available motion/time, not nominal max.
+#[allow(clippy::too_many_arguments)]
+pub fn maximum_range(
+    w: &Weapon,
+    position: Vector,
+    forward: Vector,
+    velocity: Vector,
+    target: Vector,
+    target_velocity: Vector,
+    lifetime: u64,
+) -> f64 {
+    let minimum = f64::from(w.seeker.zones[1].minimum_range.max(0));
+    let motion = Motion::new(&w.movement, velocity, position[1]);
+    let seconds = lifetime.min(u64::from(w.movement.remove_t) * 30) as f64 * DT;
+    // A conservative search ceiling: both objects' maximum possible travel.
+    // It is only a bound for the solve, never the displayed range itself.
+    let travel_bound = (length(velocity) + motion.budget + length(target_velocity)) * seconds + 25.;
+    let cap = if Profile::for_weapon(w).is_some_and(|p| p.guidance == Guidance::Active) {
+        travel_bound
+    } else {
+        // IR/emitter/supported seekers must measure before independent steering.
+        travel_bound.min(f64::from(w.seeker.zones[0].maximum_range))
+    };
+    if cap <= minimum {
+        return 0.;
+    }
+    let bearing = unit(sub(target, position));
+    let reaches = |range| {
+        intercept(
+            &w.movement,
+            Motion::new(&w.movement, velocity, position[1]),
+            position,
+            forward,
+            std::array::from_fn(|i| position[i] + bearing[i] * range),
+            target_velocity,
+            0,
+            lifetime,
+        )
+        .is_some()
+    };
+    if reaches(cap) {
+        return cap;
+    }
+    let step = (cap - minimum) / 16.;
+    for sample in (0..16).rev() {
+        let mut low = minimum + f64::from(sample) * step;
+        if !reaches(low) {
+            continue;
+        }
+        let mut high = low + step;
+        for _ in 0..10 {
+            let middle = (low + high) * 0.5;
+            if reaches(middle) {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        return low;
+    }
+    0.
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FiringBand {
+    pub minimum: f64,
+    pub maximum: f64,
+}
+/// Fitted favorable interval, not a guaranteed kill or calibrated no-escape zone.
+#[allow(clippy::too_many_arguments)]
+pub fn firing_band(
+    w: &Weapon,
+    position: Vector,
+    basis: Basis,
+    velocity: Vector,
+    observation: seeker::Observation,
+    maximum: f64,
+    lifetime: u64,
+    bore: bool,
+) -> Option<FiringBand> {
+    let minimum = f64::from(w.seeker.zones[1].minimum_range.max(0));
+    if maximum <= minimum {
+        return None;
+    }
+    let profile = Profile::for_weapon(w)?;
+    let lower = minimum + 0.1 * (maximum - minimum);
+    let step = (maximum - lower) / 16.;
+    let bearing = unit(sub(observation.position, position));
+    let mut zone = w.seeker.zones[1];
+    zone.maximum_range = maximum.floor() as _;
+    let mut start = None;
+    let mut best: Option<FiringBand> = None;
+    for sample in 0..=16 {
+        let range = lower + f64::from(sample) * step;
+        let target = std::array::from_fn(|i| position[i] + bearing[i] * range);
+        let solution = if geometry(&launch_geometry(w), position, basis, target, None) {
+            intercept(
+                &w.movement,
+                Motion::new(&w.movement, velocity, position[1]),
+                position,
+                basis.forward,
+                target,
+                observation.velocity,
+                0,
+                lifetime,
+            )
+        } else {
+            None
+        };
+        let score = estimated_hit_percent(
+            seeker::Observation {
+                position: target,
+                range,
+                ..observation
+            },
+            solution,
+            &zone,
+            lifetime.min(u64::from(w.movement.remove_t) * 30) as f64 * DT,
+            bore.then(|| profile.search_cap()),
+        );
+        if score >= 70 {
+            let first = *start.get_or_insert(range);
+            if range > first && best.is_none_or(|b| range - first > b.maximum - b.minimum) {
+                best = Some(FiringBand {
+                    minimum: first,
+                    maximum: range,
+                });
+            }
+        } else {
+            start = None;
+        }
+    }
+    best
 }
 
 #[cfg(test)]
@@ -337,12 +569,16 @@ mod tests {
     }
     #[test]
     fn prediction_leads_crossing_and_bounds_impossible_shots() {
-        let m = movement();
+        let mut m = movement();
+        // Crossing interception now needs enough actual turn authority.
+        m.powered_turn_rate = 6000;
+        m.unpowered_turn_rate = 6000;
         let motion = Motion::new(&m, [0., 0., 600.], 10000.);
         let solution = intercept(
             &m,
             motion,
             [0.; 3],
+            [0., 0., 1.],
             [0., 0., 3000.],
             [300., 0., 0.],
             0,
@@ -355,6 +591,7 @@ mod tests {
                 &m,
                 motion,
                 [0.; 3],
+                [0., 0., 1.],
                 [0., 0., 3000.],
                 [0., 0., 10000.],
                 0,
@@ -362,7 +599,19 @@ mod tests {
             )
             .is_none()
         );
-        assert!(intercept(&m, motion, [0.; 3], [0., 0., 3000.], [0.; 3], 0, 30).is_none());
+        assert!(
+            intercept(
+                &m,
+                motion,
+                [0.; 3],
+                [0., 0., 1.],
+                [0., 0., 3000.],
+                [0.; 3],
+                0,
+                30
+            )
+            .is_none()
+        );
         assert!(removed(&m, 65536 * 30));
         let mut early = m;
         early.remove_t = 8;
@@ -402,6 +651,7 @@ mod tests {
 pub mod seeker;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Flight {
+    pub unguided: bool,
     pub launch_origin: Vector,
     /// Qualification survives terminal closure; minR is not a retention range.
     pub qualified_target: Option<u32>,
@@ -427,6 +677,7 @@ impl Flight {
         launch_origin: Vector,
     ) -> Self {
         Self {
+            unguided: false,
             launch_origin,
             qualified_target: None,
             profile,

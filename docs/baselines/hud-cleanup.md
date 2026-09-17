@@ -58,7 +58,7 @@ short label. No retail code was executed to infer label selection.
 Validation on Linux with a display-capable host:
 
 - `cargo fmt --all -- --check`, Clippy with warnings denied, workspace build
-  and all 484 Rust tests passed using `--locked` where applicable.
+  and all 497 Rust tests passed using `--locked` where applicable.
 - All 40 Python tool tests passed. Source and both built executable asset checks
   passed. Documentation header checks passed, including a separate check of this
   new untracked document.
@@ -67,7 +67,7 @@ Validation on Linux with a display-capable host:
 - Inspected captures at 1280x720 for seven-degree radar bore, right look at
   12 degrees, and left look at 12 degrees with 1.5x zoom. The circle and weapon
   text move with the flight HUD without the old stationary clipping edge.
-  The annotated-layout capture at 1280x720 verifies the additional 15% layout
+  The earlier annotated-layout capture at 1280x720 verifies the additional 15% layout
   shrink, weapon/percentage alignment with speed, compact right-aligned range
   scale beneath altitude, and aspect in debug. BORE READY and EST HIT text are
   absent. The physical seven-degree bore is preserved.
@@ -82,6 +82,28 @@ Validation on Linux with a display-capable host:
   contrast is independent of fighter exhaust aspect/power. All seven explicit
   surface profiles reject A2A bore and aircraft designation for release.
   No interactive surface-designation path was validated or added.
+- Radar-power regressions cover disabling mounted radar cues, rejecting the bore
+  toggle, unguided release for active and supported radar missiles,
+  and no reacquisition after power returns. Armed IR remains in bore with radar
+  power off without designation; minimum-range inhibition remains intact.
+  Radar bore tests cover selected scope range and exact aircraft tracking limits.
+  IR handoff checks select a weaker target outside bore, inhibit the bore toggle
+  while designated, launch against that target, then clear designation and
+  reacquire the stronger bore return without changing the airborne shot. Passive IR channel selection remains
+  distinct from the power switch. Tape version 5 round-trips that distinction;
+  older tapes retain their prior power-gate interpretation. Default search/lock
+  amplitude is doubled from 0.15 to 0.30 for PCM and synthesized fallback.
+  No human listening comparison was performed for the volume change.
+- Latest 1280x720 captures in `/tmp/hud-retail-layout.ppm` and
+  `/tmp/hud-ir-final.ppm` check the retail-reference ARM/count/percentage rows,
+  range scale inside altitude, and radar R/C/A below altitude. The new bore
+  half-angle is five degrees. Surface weapons still reject practice aircraft.
+- The 1280x720 `/tmp/safe-hud.ppm` capture confirms a selected radar-contact
+  box with master arm SAFE, restored AGL/VS/bank readouts, no weapon HUD cues,
+  and zero shots fired.
+- The 1280x720 `/tmp/hud-spacing.ppm` capture checks the altitude-box gap
+  and separation between tape labels and weapon rows. TARGET DESTROYED is
+  excluded by the HUD warning filter; its release inhibit is unchanged.
 - Synthetic checks cover the 2 Hz radar-diamond timing, radar crosshair pointer
   transforms, shifted upper-right instrument picking, recorded PCM looping,
   pause/mute, stronger mounted IR reacquisition and leaving the bore circle.
@@ -91,4 +113,3 @@ interactive crosshair screenshot, human sound comparison or retail parity test
 was run. The original probability formula remains unknown. The bare HUD percentage uses the
 specified fitted heuristic, with numeric regression tests, not a calibrated
 claim of actual hit frequency.
-

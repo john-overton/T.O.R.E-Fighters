@@ -59,6 +59,7 @@ pub fn run(config: Configuration) -> AppResult<()> {
                                     (speed * speed - side * side - climb * climb).sqrt(),
                                 ],
                                 bay_ready: true,
+                                radar_power: true,
                                 radar: true,
                                 jammer: false,
                                 alive: true,

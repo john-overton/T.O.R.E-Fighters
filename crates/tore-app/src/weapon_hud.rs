@@ -70,6 +70,27 @@ pub fn draw(
     color: [u8; 3],
     zoom: f64,
 ) {
+    if !state.armed
+        && combat::launcher(s).radar
+        && state.sensors.operating(tore_sim::sensors::Channel::Radar)
+        && let Some(contact) = state.designated().and_then(|id| state.sensors.contact(id))
+        && contact.channel == tore_sim::sensors::Channel::Radar
+        && let Some((x, y)) = projected(missiles::sub(contact.position, s.position), s, zoom)
+    {
+        let mut paint = Paint {
+            pixels,
+            clip: (174, 96, 292, 325),
+            color: [color[0], color[1], color[2], 255],
+        };
+        for (a, b) in [
+            ((-7., -7.), (7., -7.)),
+            ((7., -7.), (7., 7.)),
+            ((7., 7.), (-7., 7.)),
+            ((-7., 7.), (-7., -7.)),
+        ] {
+            paint.line((x + a.0, y + a.1), (x + b.0, y + b.1));
+        }
+    }
     if !active(state) {
         return;
     }
@@ -84,14 +105,16 @@ pub fn draw(
         clip: (174, 96, 292, 325),
         color: [color[0], color[1], color[2], 255],
     };
-    let bore = state.launch_mode == LaunchMode::Boresight;
+    let bore = state.guidance_available(l) && state.launch_mode == LaunchMode::Boresight;
     let cap = if bore {
         profile.search_cap()
     } else {
         std::f64::consts::PI
     };
     let zone = &w.seeker.zones[0];
-    let cone = if bore {
+    let cone = if !state.guidance_available(l) {
+        Vec::new()
+    } else if bore {
         let angle = cap
             .min(missiles::half_angle(zone.heading))
             .min(missiles::half_angle(zone.pitch));
@@ -131,6 +154,7 @@ pub fn draw(
         }
     }
     let observed = state.weapon_observation(l);
+    let in_range = state.in_estimated_range(l);
     if let Some(observation) = observed {
         let position = observation.position;
         if let Some((x, y)) = projected(missiles::sub(position, s.position), s, zoom) {
@@ -144,8 +168,8 @@ pub fn draw(
                     paint.line((x + a.0, y + a.1), (x + b.0, y + b.1));
                 }
             }
-            let radar_in_range = matches!(profile.guidance, Guidance::Active | Guidance::Supported)
-                && state.readiness(l) == live::Readiness::Ready;
+            let radar_in_range =
+                matches!(profile.guidance, Guidance::Active | Guidance::Supported) && in_range;
             if diamond_visible(
                 bore || matches!(state.mounted.status, Status::Locked | Status::Pitbull),
                 bore || radar_in_range,
@@ -163,66 +187,86 @@ pub fn draw(
         }
         let range = missiles::length(missiles::sub(position, s.position));
         let min = f64::from(w.seeker.zones[1].minimum_range);
-        let max = f64::from(w.seeker.zones[1].maximum_range);
-        // Compact scale below the altitude tape, flush with the altitude box edge.
-        let altitude = format!("{:.0}", s.position[1]);
+        let max = state.estimated_max_range(l).unwrap_or(0.);
+        // Retail reference: range scale just inside the altitude tape.
         let text_width = |text: &str| {
             text.bytes()
                 .map(|c| font.glyphs[c as usize].advance)
                 .sum::<usize>() as i32
         };
-        let right = 402 + text_width(&altitude).max(24) + 3;
+        let right = 390;
         let x = f64::from(right);
-        let (top, bottom) = (300., 332.);
+        let (top, bottom) = (230., 282.);
         paint.line((x, top), (x, bottom));
         paint.line((x - 5., top), (x, top));
         paint.line((x - 5., bottom), (x, bottom));
-        let maximum = format!("{:.1}", max / missiles::NMI);
+        let maximum = if max > min {
+            format!("{:.1}", max / missiles::NMI)
+        } else {
+            "--".into()
+        };
         let minimum = format!("{:.1}", min / missiles::NMI);
-        paint.text(font, &maximum, right - text_width(&maximum), 288);
-        paint.text(font, &minimum, right - text_width(&minimum), 334);
+        paint.text(font, &maximum, right - text_width(&maximum), 218);
+        paint.text(font, &minimum, right - text_width(&minimum), 284);
         if max > min
-            && (bore || (min..=max).contains(&range))
-            && (!bore || state.sensors.tick() % 60 < 30)
+            && let Some(band) = state.favorable_firing_band(l)
         {
+            let scale_y =
+                |range: f64| bottom - (bottom - top) * ((range - min) / (max - min)).clamp(0., 1.);
+            let upper = scale_y(band.maximum);
+            let lower = scale_y(band.minimum);
+            paint.line((x - 6., upper), (x, upper));
+            paint.line((x - 6., lower), (x, lower));
+        }
+        if max > min && (!bore || state.sensors.tick() % 60 < 30) {
             let y = bottom - (bottom - top) * ((range - min) / (max - min)).clamp(0., 1.);
             paint.line((x - 8., y - 3.), (x - 2., y));
             paint.line((x - 2., y), (x - 8., y + 3.));
             paint.line((x - 8., y + 3.), (x - 8., y - 3.));
         }
     }
+    paint.text(font, "ARM", 207, 279);
     paint.text(
         font,
-        &format!("{} {}", w.hud_name, state.rounds(state.selected)),
+        &format!("{} {}", state.rounds(state.selected), w.hud_name),
         207,
         291,
     );
     let ready = state.readiness(l);
-    let permission = if ready == live::Readiness::Ready {
-        "IN RNG"
-    } else {
-        ready.label()
-    };
-    if !(bore && ready == live::Readiness::Ready) {
-        paint.text(font, permission, 300, 328);
+    let percent = format!("{}%", state.estimated_hit_percent(l));
+    paint.text(font, &percent, 207, 306);
+    if in_range && state.sensors.tick() % 60 < 30 {
+        let width: usize = percent
+            .bytes()
+            .map(|c| font.glyphs[c as usize].advance)
+            .sum();
+        paint.text(font, "IN RNG", 211 + width as i32, 306);
+    } else if !matches!(
+        ready,
+        live::Readiness::Ready | live::Readiness::TargetDestroyed
+    ) {
+        paint.text(font, ready.label(), 207, 321);
     }
-    paint.text(
-        font,
-        &format!("{}%", state.estimated_hit_percent(l)),
-        207,
-        306,
-    );
-    if bore && profile.guidance == Guidance::Infrared {
-        paint.text(
-            font,
-            if state.mounted.status == Status::Locked {
-                "IR TONE"
+    if matches!(profile.guidance, Guidance::Active | Guidance::Supported)
+        && let Some(o) = observed
+    {
+        let closure = missiles::closure(s.position, s.velocity, o.position, o.velocity) / 1.68781;
+        paint.text(font, &format!("R {:.1}", o.range / missiles::NMI), 402, 291);
+        paint.text(font, &format!("C {closure:+.0}"), 402, 303);
+        let aspect = if missiles::length(o.velocity) > 1e-9 {
+            let forward = tore_sim::attitude::unit(o.velocity);
+            let los = tore_sim::attitude::unit(missiles::sub(s.position, o.position));
+            let angle = dot(forward, los).clamp(-1., 1.).acos().to_degrees();
+            let side = if forward[2] * los[0] - forward[0] * los[2] >= 0. {
+                "R"
             } else {
-                "IR SEARCH"
-            },
-            207,
-            328,
-        );
+                "L"
+            };
+            format!("A {angle:.0}{side}")
+        } else {
+            "A --".into()
+        };
+        paint.text(font, &aspect, 402, 315);
     }
 }
 /// Diagnostic state and controls are composed at the window's upper right.

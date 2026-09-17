@@ -15,7 +15,7 @@ use tore_sim::{
 /// Version 4 defines the spec missile rules and records world velocity and bay
 /// permission. Mode, heat and emitter changes are explicit commands. Versions
 /// 2/3 retain compatibility rules and their original control defaults.
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 
 pub struct Recorder {
     out: std::io::BufWriter<std::fs::File>,
@@ -82,7 +82,7 @@ impl Recorder {
             }
             writeln!(
                 self.out,
-                " {} {} {} {} {} {} {} {} {} {}",
+                " {} {} {} {} {} {} {} {} {} {} {}",
                 u8::from(l.radar),
                 u8::from(l.alive),
                 u8::from(l.jammer),
@@ -92,7 +92,8 @@ impl Recorder {
                 l.velocity[0],
                 l.velocity[1],
                 l.velocity[2],
-                u8::from(l.bay_ready)
+                u8::from(l.bay_ready),
+                u8::from(l.radar_power)
             )
         })();
         if let Err(e) = result {
@@ -185,8 +186,10 @@ fn fields_for(version: u32) -> usize {
         17
     } else if version < 4 {
         20
-    } else {
+    } else if version < 5 {
         24
+    } else {
+        25
     }
 }
 fn parse(line: &str, version: u32) -> AppResult<(&str, Launcher)> {
@@ -257,6 +260,7 @@ fn parse(line: &str, version: u32) -> AppResult<(&str, Launcher)> {
             } else {
                 basis.forward.map(|v| v * values[12])
             },
+            radar_power: version < 5 || boolean(fields[24])?,
             radar: boolean(fields[14])?,
             jammer: boolean(fields[16])?,
             alive: boolean(fields[15])?,
@@ -368,6 +372,15 @@ fn replay_reader(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn version_five_preserves_power_separately_from_transmission() {
+        let line = "tick 0 1000 0 1 0 0 0 1 0 0 0 1 600 0 1 0 1 1 0 40 60 600 1";
+        assert!(parse(&format!("{line} 1"), 5).unwrap().1.radar_power);
+        assert!(!parse(&format!("{line} 0"), 5).unwrap().1.radar_power);
+        assert!(!parse(&format!("{line} 1"), 5).unwrap().1.radar);
+        assert!(parse(&format!("{line} 2"), 5).is_err());
+        assert!(parse(line, 4).unwrap().1.radar_power);
+    }
     #[test]
     fn version_four_preserves_velocity_bay_mode_and_heat_commands() {
         let line = "tick 0 1000 0 1 0 0 0 1 0 0 0 1 600 1 1 0 0 1 0 40 60 600 0";

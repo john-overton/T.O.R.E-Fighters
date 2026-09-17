@@ -191,14 +191,18 @@ reproduces them. The flight adapters and renderer independence are unchanged.
 [what was validated](baselines/radar.md).
 
 Missile profiles and the fitted finite-boost motion predictor live in
-`combat::missiles`, independent of rendering. The live adapter uses full release
+`combat::missiles`, independent of rendering. Its 120 Hz prediction shares live
+lead steering, turn limits, maneuver losses and propulsion. The live adapter
+refreshes the bounded maximum-range search at 2 Hz per selected observed target. The live adapter uses full release
 velocity for accepted missile profiles; compatibility retains scalar source
 motion. Explicit target role is separate from damage category. Launch-origin
 minimum-range qualification persists through terminal closure, as specified in
 [engagement rules](spec/missiles.md#minimum-engagement-and-target-role). Combat tape version 4 includes world velocity and bay permission, while versions 2 and 3
 select compatibility rules. [Missile specification](spec/missiles.md).
 
-Combat tape version 4 is the missile rule-version boundary. Seeker mode and
+Combat tape version 5 records radar power separately from transmission, preserving
+passive-channel behavior and radar-off unguided releases. Versions before 5 imply
+power on for the new guidance gate. Version 4 remains the missile rule-version boundary. Seeker mode and
 controlled target heat/emission changes are recorded commands; seeker observations
 and acquisition are reproduced from those inputs, the matching asset fingerprint
 and terrain. `--combat-command compatibility-weapons` explicitly selects the old

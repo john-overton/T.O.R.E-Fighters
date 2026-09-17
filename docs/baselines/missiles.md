@@ -9,11 +9,60 @@
 > <!-- tore-header v2 -->
 
 Implementation mode, 2026-09-17. The inventory evidence below is retained.
-Stages 1 through 5 are implemented and validated on Linux. Remaining tuning
-and unavailable reviews are listed below.
+Current fitted trajectory and range changes are validated by the synthetic checks
+below. Earlier imported-store reach results are retained as historical evidence,
+not revalidation of the new motion model. Remaining limits are listed below.
 [Specification and matrix](../spec/missiles.md),
 [field interpretation](../formats/missiles.md),
 [implementation milestones](../missile-update-plan.md).
+
+## Current trajectory and estimated-range validation
+
+Implementation mode, 2026-09-17. The working tree builds on checkpoint `2f8d967`.
+The [engagement-dependent specification](../spec/missiles.md#engagement-dependent-maximum-range)
+defines shared live/predicted steering, propulsion and fitted maneuver loss.
+All 497 Rust tests and 40 Python tests passed, along with formatting, Clippy,
+workspace build, source/binary asset guards, documentation checks and renderer
+smoke. Linux only; no retail or real-world performance calibration is claimed.
+
+Synthetic `range_weapon` uses 1,600 ft/s motor gain, 400 ft/s² acceleration,
+six seconds of powered time, 30 seconds of life, 20 ft/s² coast deceleration,
+and a 100,000-foot imported nominal maximum (not a solver cap). Level release altitude is 1,000 feet. The target
+moves at 300 ft/s. Estimated maximum slant ranges were:
+
+| Geometry | Launcher ft/s | Maximum feet |
+| --- | ---: | ---: |
+| Head-on | 600 | 66,068.2 |
+| Crossing | 600 | 55,879.5 |
+| Tail chase | 600 | 48,067.5 |
+| Tail chase, slower launch | 300 | 39,069.4 |
+| Tail chase, faster launch | 900 | 57,064.6 |
+| Tail chase, rail 60 degrees off velocity/target | 600 | 41,281.2 |
+
+An additional active-radar fixture sets nominal launch and seeker maxima to
+5,000 feet. At 20,000 feet altitude, its predicted reach is 73,386.2 feet at
+500 knots level, 88,573.3 feet at 800 knots level, and 88,257.8 feet at 800 knots
+with a 15-degree climb. These exceed the old cap and respond to launch conditions.
+A release test permits a reachable target beyond seeker range without granting
+an onboard seeker observation, then inhibits an unreachable receding target.
+
+These are regression-fixture outputs, not AIM-120 performance claims. Repeating
+identical inputs returns identical estimates. Independent live-guidance flyouts
+match predicted interception ticks for head-on, receding, crossing, climbing,
+and combined off-axis/slipping cases, with a controlled already-acquired seeker
+and a common 25-foot comparison radius. Tests also check finite reversal rate,
+turn-energy loss, unchanged straight-flight velocity and insufficient turn
+capacity. Existing minimum-range and radar/IR ownership tests remain passing.
+The `/tmp/uncapped-range.ppm` capture checks the estimated HUD range scale:
+the F/A-18D AIM-120 scenario displays 57.0 nmi rather than the old 23.7 nmi
+ceiling. This verifies the display binding, not calibrated weapon performance.
+The `/tmp/firing-band.ppm` capture checks the two horizontal favorable-window
+bars with the target triangle retained. Synthetic band tests verify the 10%
+minimum margin, qualifying predicted endpoints, suppression for weak/edge
+returns and impossible range, hiding while SAFE, and IN RNG independence from
+rounded hit percentage. Band selection is an agent-fitted recommendation.
+No 3,920-case imported-store rerun, human flight assessment, or platform other
+than Linux was performed for this motion change.
 
 ## Reviewed state and source identity
 
@@ -142,7 +191,7 @@ content do not establish lock-sound mapping. The temporary cue is authored,
 Envelope, timbre separation and pause/mute have deterministic tests. No retail
 audio or PDF bytes are committed. Human listening review remains unavailable.
 
-## Roster and range acceptance
+## Earlier roster and range acceptance
 
 All twelve supported aircraft passed `--combat-smoke`, exercising their current
 stations and all five source damage classes. The pass includes AGM65G and AS7.
@@ -199,7 +248,7 @@ fitted translucent backing keeps weapon details readable over the zoomed cockpit
 Original HUD color and font remain in use.
 
 Remaining approximations: authored activation distances, heat and boost tuning;
-a straight-path intercept estimate that does not price turn losses; conservative
+fitted turn losses and a constant-target-motion prediction; conservative
 radar-only emitter defaults; unspecified missile-specific notch/jammer rejection
 and original rear-aspect/target-class consumer details. Existing airborne target
 eligibility is preserved. No new ground, ship, SAM or aircraft combat AI exists.

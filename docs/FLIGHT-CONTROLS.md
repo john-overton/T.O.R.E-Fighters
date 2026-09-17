@@ -335,20 +335,49 @@ speed deficit and back-stick. No fixed rudder percentage suddenly enables full
 spin torque in hybrid flight. A-4 researched flight also uses a faster fitted
 roll response; see [A-4 roll tuning](spec/additional-aircraft.md#a-4-roll-tuning).
 
+With master arm off, an operating radar still draws a HUD box around the selected
+current radar contact. Clearing selection, losing the observation or turning
+radar off removes it. Weapon cues remain hidden while safe.
+
 ## Missile seeker control
 
-Armed independent air-to-air missiles automatically enter BORESIGHT when no target is
-selected. Select a target to return to CUED. Press **L**, the existing
+The upper range-scale value is now an estimated maximum for the observed
+engagement, refreshed twice per simulation second. Launcher speed and attitude,
+target direction/speed, altitude-dependent motor performance and turning losses
+change it. Active-radar shots can be cued beyond the imported nominal launch
+maximum and acquire with their own seeker later. Other guidance types still
+require prelaunch acquisition within seeker range. The lower scale value remains
+the imported minimum range. Onboard seeker limits are unchanged. The percentage and IN RNG use the predicted
+intercept. Target evasion and future loss of guidance are not predicted.
+Two short horizontal bars inside the vertical scale mark the favorable firing
+window. They move with the estimated engagement and disappear when no favorable
+window exists. This is a fitted recommendation, not a guaranteed hit. The target
+triangle remains visible outside range, clamped to the appropriate scale end.
+IN RNG reflects predicted reach and release readiness, independent of percentage
+rounding. [Band rules](spec/missiles.md#favorable-firing-range-bars).
+
+Weapon-mode tape labels stop above the weapon rows. The altitude box sits just
+outside its ticks with the same gap as the speed box. TARGET DESTROYED remains
+in diagnostics and release logic but is omitted from the HUD.
+
+Armed independent air-to-air missiles automatically enter BORESIGHT when radar power is on and no target is
+selected. IR also supports bore with radar power off. A selected track takes
+priority for IR and forces CUED acquisition against that identity, even when a
+stronger bore return exists. Clear the track to return to BORESIGHT; airborne
+missiles keep their own targets. Select a target to return to CUED. Press **L**, the existing
 `clear-designation` action, or click **RELEASE LOCK** at the upper right to clear
 selection. The manual's targeting list does not establish a retail release key.
 `weapon-seeker-mode` remains rebindable, and the upper-right mode label remains
-clickable. Supported radar weapons still need aircraft lock.
+clickable. With radar power off, radar-missile bore, tones and target cues
+turn off; armed A2A IR missiles retain bore search and guidance; master arm still permits a DUMB release. That missile stays unguided
+after radar power returns. Selecting the passive IR channel alone does not turn
+off the power switch. Supported radar weapons need aircraft lock for guided shots.
 A detected bore target inside minimum range displays MIN RANGE and blocks release.
 AGM-65 and other surface profiles cannot engage the practice aircraft or use A2A
 BORESIGHT. Surface designation is still deferred. See the
 [minimum range and target-role rules](spec/missiles.md#minimum-engagement-and-target-role).
 
-BORE uses a seven-degree circular half-angle. Its blinking diamond marks a
+BORE uses a five-degree circular half-angle. Its blinking diamond marks a
 provisional contact, not a guaranteed lock; the blinking triangle on the range
 scale refers to that same contact. Selection favours the centre while retaining
 signal-strength weighting. IR can acquire on the rail; active radar acquires only
@@ -356,8 +385,8 @@ after release. The bare percentage is a fitted estimate, not a calibrated retail
 Short retail weapon labels, bore circle, estimate and readiness all move with
 the forward HUD when looking around. Range, closure and estimated flight time
 and target aspect angle are in the upper-right debug window. The HUD layout
-is 15 percent smaller; weapon/count and percentage align with the speed box,
-and the compact range scale sits beneath altitude. BORE READY is omitted. Neither clearing selection nor changing mode redirects an airborne shot.
+is 15 percent smaller; ARM, count/weapon and percentage with blinking IN RNG
+align below speed. The range scale sits inside altitude; radar R/C/A sits below it. BORE READY is omitted. Neither clearing selection nor changing mode redirects an airborne shot.
 An internal bay opens for BORESIGHT and release waits until 95 percent open.
 Armed missile readouts replace AGL, vertical speed and bank scale. CUED radar
 lock diamonds blink when ready to fire. The radar instrument replaces the mouse
@@ -366,7 +395,7 @@ arrow with a crosshair across the entire black screen, up to the bezel.
 Imported IR and radar search/lock samples provide the cues, with a louder lock
 cue. Their assignment is fitted. Effects mute, pause, safe, empty and failed
 stations silence them. `TORE_SEEKER_VOLUME=0..1` sets maximum amplitude, default
-0.15. Re-import media to add the four samples to an older cache.
+0.30. Re-import media to add the four samples to an older cache.
 [Rules and constants](spec/missiles.md), [validation](baselines/hud-cleanup.md).
 
 Quick Mission wing counts now spawn straight-flying practice aircraft of the

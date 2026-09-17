@@ -109,7 +109,7 @@ impl Audio {
             .ok()
             .map(|v| v.parse::<f64>())
             .transpose()?
-            .unwrap_or(0.15);
+            .unwrap_or(0.30);
         if !seeker_volume.is_finite() || !(0. ..=1.).contains(&seeker_volume) {
             return Err("TORE_SEEKER_VOLUME requires 0..1".into());
         }
@@ -489,7 +489,7 @@ mod tests {
             seeker: seeker::Tone::default(),
             seeker_voice: None,
             seeker_cue: None,
-            seeker_volume: 0.15,
+            seeker_volume: 0.30,
             music: music::Music::new(&BTreeMap::new(), &BTreeMap::new(), 1),
             engine: None,
             engine_aircraft: None,

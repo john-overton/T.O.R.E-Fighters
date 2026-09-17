@@ -429,6 +429,15 @@ pub struct SeekerTone {
     pub locked: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct RangeEstimate {
+    station: usize,
+    target: u32,
+    mode: LaunchMode,
+    maximum: f64,
+    favorable: Option<missiles::FiringBand>,
+}
+
 #[derive(Clone, Debug)]
 pub struct State {
     pub release_readiness: Readiness,
@@ -438,6 +447,7 @@ pub struct State {
     pub bore_observation: Option<seeker::Observation>,
     mounted_key: Option<(usize, LaunchMode, Option<u32>)>,
     pub weapon_rules: Rules,
+    range_estimate: Option<RangeEstimate>,
     config: Configuration,
     pub ammo: Vec<u16>,
     pub selected: usize,
@@ -478,6 +488,8 @@ pub struct State {
 }
 #[derive(Clone, Copy)]
 pub struct Launcher {
+    /// Cockpit power switch, independent of active sensor channel/transmission.
+    pub radar_power: bool,
     pub position: Vector,
     pub basis: Basis,
     pub speed_fps: f64,
@@ -527,6 +539,7 @@ impl State {
             pending_damage: false,
             previous_player_position: None,
             external,
+            range_estimate: None,
             armed: true,
             history: vec![],
             range_category,
@@ -671,11 +684,17 @@ impl State {
                 }
             }
             Command::ToggleSeekerMode => {
-                if self.weapon_rules == Rules::Compatibility {
+                if self.weapon_rules == Rules::Compatibility || !self.guidance_available(launcher) {
                     return;
                 }
                 if missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
                     .is_none_or(|p| !p.supports_boresight())
+                {
+                    return;
+                }
+                if self.designated().is_some()
+                    && missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
+                        .is_some_and(|p| p.guidance == Guidance::Infrared)
                 {
                     return;
                 }
@@ -822,6 +841,9 @@ impl State {
         let profile = (self.weapon_rules == Rules::Spec)
             .then(|| missiles::Profile::for_weapon(w))
             .flatten();
+        if profile.is_some_and(|p| !p.guidance_available(launcher.radar_power)) {
+            return Readiness::Ready;
+        }
         if profile.is_some_and(|p| p.supports_boresight())
             && self.launch_mode == LaunchMode::Boresight
         {
@@ -869,14 +891,14 @@ impl State {
         }
         if let Some(profile) = profile {
             if !missiles::geometry(
-                &w.seeker.zones[1],
+                &missiles::launch_geometry(w),
                 launcher.position,
                 launcher.basis,
                 t.position,
                 None,
             ) {
                 let old = zone_readiness(
-                    &w.seeker.zones[1],
+                    &missiles::launch_geometry(w),
                     launcher.position,
                     launcher.basis.forward,
                     t.position,
@@ -891,6 +913,9 @@ impl State {
                 && (self.mounted.target != Some(t.id) || self.mounted.status != Status::Locked)
             {
                 return Readiness::RadarAcquiring;
+            }
+            if self.mounted_solution(launcher).is_none() {
+                return Readiness::MaximumRange;
             }
             return Readiness::Ready;
         }
@@ -998,7 +1023,14 @@ impl State {
     pub fn detects(&self, target: &Target) -> bool {
         self.sensors.observation(target.id).is_some()
     }
+    pub fn guidance_available(&self, launcher: Launcher) -> bool {
+        missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
+            .is_none_or(|p| p.guidance_available(launcher.radar_power))
+    }
     pub fn can_lock(&self, launcher: Launcher) -> bool {
+        if self.weapon_rules == Rules::Spec && !self.guidance_available(launcher) {
+            return false;
+        }
         if self.weapon_rules == Rules::Spec
             && missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
                 .is_some_and(|p| p.independent())
@@ -1014,6 +1046,7 @@ impl State {
     pub fn seeker_tone(&self, launcher: Launcher) -> Option<SeekerTone> {
         let w = &self.config.stations[self.selected].weapon;
         if self.weapon_rules != Rules::Spec
+            || !self.guidance_available(launcher)
             || !self.armed
             || !launcher.alive
             || self.player_hp <= 0
@@ -1034,11 +1067,32 @@ impl State {
     }
     /// Current observation used by the display, separate from launch authority.
     pub fn weapon_observation(&self, launcher: Launcher) -> Option<seeker::Observation> {
-        if !self.armed {
+        if !self.armed || (self.weapon_rules == Rules::Spec && !self.guidance_available(launcher)) {
             return None;
         }
         if self.launch_mode == LaunchMode::Boresight {
-            return self.bore_observation;
+            let w = &self.config.stations[self.selected].weapon;
+            let profile = missiles::Profile::for_weapon(w)?;
+            return self.bore_observation.filter(|o| {
+                profile.guidance != Guidance::Infrared
+                    || (missiles::geometry(
+                        &missiles::launch_geometry(w),
+                        launcher.position,
+                        launcher.basis,
+                        o.position,
+                        None,
+                    ) && missiles::intercept(
+                        &w.movement,
+                        Motion::new(&w.movement, launcher.velocity, launcher.position[1]),
+                        launcher.position,
+                        launcher.basis.forward,
+                        o.position,
+                        o.velocity,
+                        0,
+                        profile.guidance_ticks,
+                    )
+                    .is_some())
+            });
         }
         self.mounted.observation.or_else(|| {
             let id = self.designated()?;
@@ -1075,11 +1129,41 @@ impl State {
             &w.movement,
             Motion::new(&w.movement, launcher.velocity, launcher.position[1]),
             launcher.position,
+            launcher.basis.forward,
             observed.position,
             observed.velocity,
             0,
             profile.guidance_ticks,
         )
+    }
+    pub fn estimated_max_range(&self, launcher: Launcher) -> Option<f64> {
+        let observed = self.weapon_observation(launcher)?;
+        self.range_estimate
+            .filter(|e| {
+                e.station == self.selected && e.target == observed.id && e.mode == self.launch_mode
+            })
+            .map(|e| e.maximum)
+    }
+    pub fn favorable_firing_band(&self, launcher: Launcher) -> Option<missiles::FiringBand> {
+        let observed = self.weapon_observation(launcher)?;
+        self.range_estimate
+            .filter(|e| {
+                e.station == self.selected && e.target == observed.id && e.mode == self.launch_mode
+            })
+            .and_then(|e| e.favorable)
+    }
+    /// Physical range validity is independent of rounded probability text.
+    pub fn in_estimated_range(&self, launcher: Launcher) -> bool {
+        let Some(o) = self.weapon_observation(launcher) else {
+            return false;
+        };
+        let min =
+            f64::from(self.config.stations[self.selected].weapon.seeker.zones[1].minimum_range);
+        self.readiness(launcher) == Readiness::Ready
+            && self
+                .estimated_max_range(launcher)
+                .is_some_and(|max| max > min && (min..=max).contains(&o.range))
+            && self.mounted_solution(launcher).is_some()
     }
     pub fn estimated_hit_percent(&self, launcher: Launcher) -> u8 {
         let Some(observation) = self.weapon_observation(launcher) else {
@@ -1089,10 +1173,12 @@ impl State {
         let Some(profile) = missiles::Profile::for_weapon(w) else {
             return 0;
         };
+        let mut zone = w.seeker.zones[1];
+        zone.maximum_range = self.estimated_max_range(launcher).unwrap_or(0.).floor() as _;
         missiles::estimated_hit_percent(
             observation,
             self.mounted_solution(launcher),
-            &w.seeker.zones[1],
+            &zone,
             profile
                 .guidance_ticks
                 .min(u64::from(w.movement.remove_t) * 30) as f64
@@ -1189,11 +1275,18 @@ impl State {
         if let Some(profile) =
             missiles::Profile::for_weapon(w).filter(|_| self.weapon_rules == Rules::Spec)
         {
-            if !profile.supports_boresight() {
+            if !profile.guidance_available(launcher.radar_power) || !profile.supports_boresight() {
                 self.launch_mode = LaunchMode::Cued;
             }
-            if self.armed && self.designated().is_none() && profile.supports_boresight() {
+            if profile.guidance_available(launcher.radar_power)
+                && self.armed
+                && self.designated().is_none()
+                && profile.supports_boresight()
+            {
                 self.launch_mode = LaunchMode::Boresight;
+            }
+            if profile.guidance == Guidance::Infrared && self.designated().is_some() {
+                self.launch_mode = LaunchMode::Cued;
             }
             let assigned = if self.launch_mode == LaunchMode::Cued {
                 self.designated()
@@ -1205,7 +1298,15 @@ impl State {
                 self.mounted = Seeker::new(assigned);
                 self.mounted_key = Some(key);
             }
+            if !profile.guidance_available(launcher.radar_power) {
+                self.mounted = Seeker {
+                    status: Status::Unguided,
+                    ..Default::default()
+                };
+                self.mounted_key = None;
+            }
             if self.armed
+                && profile.guidance_available(launcher.radar_power)
                 && launcher.alive
                 && self.player_hp > 0
                 && self.rounds(index) > 0
@@ -1231,6 +1332,14 @@ impl State {
                     .filter(|t| t.hp > 0)
                     .filter(|t| bore || assigned == Some(t.id))
                     .filter_map(|t| seeker::observe(w, profile, &view, t))
+                    .filter(|o| {
+                        !bore
+                            || profile.guidance != Guidance::Active
+                            || self.config.sensors.radar.as_ref().is_some_and(|r| {
+                                o.range <= launcher.controls.range_nmi() * missiles::NMI
+                                    && o.range <= r.track.maximum_ft
+                            })
+                    })
                     .collect();
                 if bore {
                     self.bore_observation = observations
@@ -1266,6 +1375,43 @@ impl State {
             self.mounted = Seeker::default();
             self.mounted_key = None;
         }
+        if let Some(o) = self.weapon_observation(launcher) {
+            if self.tick.is_multiple_of(60)
+                || self.range_estimate.is_none_or(|e| {
+                    e.station != index || e.target != o.id || e.mode != self.launch_mode
+                })
+            {
+                self.range_estimate = missiles::Profile::for_weapon(w).map(|profile| {
+                    let maximum = missiles::maximum_range(
+                        w,
+                        launcher.position,
+                        launcher.basis.forward,
+                        launcher.velocity,
+                        o.position,
+                        o.velocity,
+                        profile.guidance_ticks,
+                    );
+                    RangeEstimate {
+                        station: index,
+                        target: o.id,
+                        mode: self.launch_mode,
+                        maximum,
+                        favorable: missiles::firing_band(
+                            w,
+                            launcher.position,
+                            launcher.basis,
+                            launcher.velocity,
+                            o,
+                            maximum,
+                            profile.guidance_ticks,
+                            self.launch_mode == LaunchMode::Boresight,
+                        ),
+                    }
+                });
+            }
+        } else {
+            self.range_estimate = None;
+        }
         self.release_readiness = self.readiness(launcher);
         let allowed = self.release_readiness == Readiness::Ready;
         let station = &self.config.stations[index];
@@ -1292,11 +1438,14 @@ impl State {
                         + launcher.basis.up[i] * station.mount[1]
                         + launcher.basis.forward[i] * station.mount[2]
                 });
-                let target = if self.launch_mode == LaunchMode::Boresight {
-                    self.mounted.target
-                } else {
-                    self.designated()
-                };
+                let target =
+                    if self.weapon_rules == Rules::Spec && !self.guidance_available(launcher) {
+                        None
+                    } else if self.launch_mode == LaunchMode::Boresight {
+                        self.mounted.target
+                    } else {
+                        self.designated()
+                    };
                 let guidance = missiles::Profile::for_weapon(w)
                     .filter(|_| self.weapon_rules == Rules::Spec)
                     .map(|profile| {
@@ -1314,6 +1463,12 @@ impl State {
                                 || self.launch_mode == LaunchMode::Boresight)
                         {
                             flight.seeker = self.mounted.clone();
+                        }
+                        if !profile.guidance_available(launcher.radar_power) {
+                            flight.unguided = true;
+                            flight.enabled = false;
+                            flight.seeker = Seeker::default();
+                            flight.seeker.status = Status::Unguided;
                         }
                         flight
                     });
@@ -2016,6 +2171,7 @@ mod tests {
             speed_fps: 300.,
             velocity: [0., 0., 300.],
             bay_ready: true,
+            radar_power: true,
             radar: true,
             jammer: false,
             alive: true,
@@ -2644,6 +2800,9 @@ fn guide(
 ) {
     let flight = p.guidance.as_mut().unwrap();
     let profile = flight.profile;
+    if flight.unguided {
+        return;
+    }
     if p.age >= p.guidance_ticks.unwrap_or(profile.guidance_ticks) {
         flight.seeker.status = Status::Expired;
         flight.seeker.observation = None;
@@ -2665,15 +2824,12 @@ fn guide(
         && let Some(contact) = supported
         && (flight.last_intercept.is_none() || p.age.is_multiple_of(12))
     {
-        flight.solution = missiles::intercept(
-            &w.movement,
-            p.motion.unwrap(),
+        flight.solution = Some(missiles::lead(
             p.position,
+            missiles::length(p.motion.unwrap().velocity),
             contact.position,
             contact.velocity,
-            p.age,
-            profile.guidance_ticks,
-        );
+        ));
         flight.last_intercept = Some(flight.solution.map_or(contact.position, |s| s.point));
     }
     if profile.guidance == Guidance::Active && !flight.enabled {
@@ -2717,15 +2873,12 @@ fn guide(
             .filter(|_| matches!(flight.seeker.status, Status::Locked | Status::Pitbull))
             && (flight.last_intercept.is_none() || p.age.is_multiple_of(12))
         {
-            flight.solution = missiles::intercept(
-                &w.movement,
-                p.motion.unwrap(),
+            flight.solution = Some(missiles::lead(
                 p.position,
+                missiles::length(p.motion.unwrap().velocity),
                 o.position,
                 o.velocity,
-                p.age,
-                profile.guidance_ticks,
-            );
+            ));
             flight.last_intercept = Some(flight.solution.map_or(o.position, |s| s.point));
         }
     } else {
@@ -2736,18 +2889,8 @@ fn guide(
     let can_steer = profile.guidance != Guidance::Supported || supported.is_some();
     if can_steer && let Some(point) = flight.last_intercept {
         let desired = unit(sub(point, p.position));
-        let rate = if missiles::phase(&w.movement, p.age) == EnginePhase::Powered {
-            w.movement.powered_turn_rate
-        } else {
-            w.movement.unpowered_turn_rate
-        };
-        let angle = dot(p.direction, desired).clamp(-1., 1.).acos();
-        let fraction =
-            (f64::from(rate.max(0)) * std::f64::consts::TAU / 65520. / 120. / angle.max(1e-9))
-                .min(1.);
-        p.direction = unit(std::array::from_fn(|i| {
-            p.direction[i] * (1. - fraction) + desired[i] * fraction
-        }));
+        let heading = missiles::commanded_heading(p.direction, p.motion.unwrap().velocity, desired);
+        p.direction = missiles::steer(&w.movement, p.age, p.direction, heading);
     }
 }
 

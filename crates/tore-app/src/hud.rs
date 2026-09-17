@@ -217,20 +217,27 @@ pub fn draw(
         }
     }
     let speed = air.map_or(s.speed / 1.68781, |d| d.true_airspeed_knots);
+    let tape_bottom = if weapons { 275. } else { 282. };
     for i in -3..=3 {
         let v = (speed / 10.).floor() * 10. + i as f64 * 10.;
         let y = 228. - (v - speed) * 2.;
-        if (205. ..282.).contains(&y) {
+        if (205. ..tape_bottom).contains(&y) {
             p.line((240., y), (246., y));
-            if i % 2 == 0 && (y - 228.).abs() > 12. {
+            if i % 2 == 0
+                && (y - 228.).abs() > 12.
+                && (!weapons || y as i32 - 4 + font.height as i32 <= 275)
+            {
                 p.text(font, &format!("{v:.0}"), 211, y as i32 - 4);
             }
         }
         let a = (s.position[1] / 100.).floor() * 100. + i as f64 * 100.;
         let y = 228. - (a - s.position[1]) * 0.2;
-        if (205. ..282.).contains(&y) {
+        if (205. ..tape_bottom).contains(&y) {
             p.line((393., y), (399., y));
-            if i % 2 == 0 && (y - 228.).abs() > 12. {
+            if i % 2 == 0
+                && (y - 228.).abs() > 12.
+                && (!weapons || y as i32 - 4 + font.height as i32 <= 275)
+            {
                 p.text(font, &format!("{a:.0}"), 402, y as i32 - 4);
             }
         }
@@ -238,7 +245,7 @@ pub fn draw(
     p.text(font, "TAS", 211, 190);
     p.text(font, "MSL", 402, 190);
     p.readout_box(font, &format!("{speed:.0}"), 211, 223);
-    p.readout_box(font, &format!("{:.0}", s.position[1]), 402, 223);
+    p.readout_box(font, &format!("{:.0}", s.position[1]), 405, 223);
     p.text(font, &format!("{:.1}G", s.g), 235, 164);
     p.text(font, &format!("{:.0}%", s.throttle * 100.), 235, 178);
     if s.afterburner_active() {

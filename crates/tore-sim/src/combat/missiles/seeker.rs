@@ -145,6 +145,7 @@ pub fn compare_returns(a: &Observation, b: &Observation, profile: Profile) -> st
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Status {
+    Unguided,
     Midcourse,
     #[default]
     Search,
@@ -158,6 +159,7 @@ pub enum Status {
 impl Status {
     pub fn label(self) -> &'static str {
         match self {
+            Self::Unguided => "DUMB",
             Self::Midcourse => "MIDCOURSE",
             Self::Search => "ACTIVE SEARCH",
             Self::Acquiring => "ACQUIRING",
