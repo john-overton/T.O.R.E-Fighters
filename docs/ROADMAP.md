@@ -10,6 +10,30 @@
 
 T.O.R.E-Fighters in the Repo - Tasteful Opinionated Reverse Engineered
 
+## Contents
+
+- [Current scope](#current-scope)
+- [Principles](#principles)
+- [What "1:1" means](#what-11-means)
+- [Milestone 0: Spec and salvage](#milestone-0-spec-and-salvage)
+- [Milestone 1: Faithful quick fight](#milestone-1-faithful-quick-fight)
+  - [1a. Shell and menus](#1a-shell-and-menus)
+  - [1b. Original terrain](#1b-original-terrain)
+  - [1c. Free flight](#1c-free-flight)
+  - [1d. Quick fight loop](#1d-quick-fight-loop)
+  - [1e. AI](#1e-ai)
+  - [1f. Sensors and weapons](#1f-sensors-and-weapons)
+- [Milestone 2: Missions and campaigns](#milestone-2-missions-and-campaigns)
+- [Milestone 3: Tools](#milestone-3-tools)
+- [Milestone 4: Remaster layer](#milestone-4-remaster-layer)
+- [Milestone 5: Live campaigns and multiplayer](#milestone-5-live-campaigns-and-multiplayer)
+- [Milestone 6: Custom maps and community theaters](#milestone-6-custom-maps-and-community-theaters)
+- [Importer coverage table](#importer-coverage-table)
+- [Funding](#funding)
+- [Open decisions](#open-decisions)
+
+## Current scope
+
 Development baseline: see [DEVELOPMENT.md](DEVELOPMENT.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [recorded validation](baselines/environment.md). The first M1a [main-menu slice](baselines/main-menu.md) now imports original menu assets and runs natively. M0 research and the remaining M1a screens/audio work remain in progress.
 
 This is the sequencing document for the ground-up rebuild in Rust. Current status
@@ -19,12 +43,15 @@ agents work from those specs is in [AGENTS.md](../AGENTS.md).
 
 The existing TypeScript repo /USNF-ATF is the guide, not the gospel: its format docs, decoders, recovered geometry, audio recovery, and baselines are the reference material. Its engine is not being ported. Original terrain and environment systems are rebuilt from retail assets and from the game's observed behaviour; USNF-ATF's custom terrain system and DEM-based theaters are not being ported. Further menu screens are deferred until explicitly scheduled.
 
-Current state (2026-09-15): original menus, the quick-mission creator and
-ordnance screen, all 16 theaters, and F/A-18D and Rafale C free flight with
-cockpit, HUD, instrument windows, weather and controller support. A development
+Current state (2026-09-17): original menus, the quick-mission creator and
+ordnance screen, all 16 theaters, and twelve aircraft in free flight with
+cockpit, HUD, instrument windows, weather and controller support. The
+[ported roster](spec/ai-experience.md#currently-ported-aircraft) identifies all
+twelve and their AI family bindings. A development
 weapons range supports manual weapon testing. Ground contact and landing are
-authored behaviour ([opinionated](behavior-provenance.md)); combat AI is not
-started and is not authorized.
+authored behaviour ([opinionated](behavior-provenance.md)); combat AI runtime
+implementation is not started. John requested aircraft and surface AI research
+and planning on 2026-09-17; the current scope and stages are in M1e below.
 
 John scheduled the shoreline correction and ocean-motion trial on 2026-09-16.
 See [ocean behavior and visual scope](spec/ocean.md). This bounded visual
@@ -38,14 +65,15 @@ USNF-ATF is a research guide only. Continue maneuver audio/rumble, remaining
 flight-response and weather work in the [parity plan](parity-plan.md).
 No default adapter change or AI scope is included.
 
-The preceding execution order (2026-09-14) remains a broader gate: finish manual weapons, sensors and damage
-acceptance for F/A-18D and Rafale C before AI work. The only AI authorized for the
-later weapon-testing phase is a basic fly-forward target. The broader future AI
-milestone below is not authorization to implement combat AI now. See
+The preceding execution order (2026-09-14) required manual weapons, sensors and
+damage acceptance for F/A-18D and Rafale C before AI work. John's 2026-09-17
+request now schedules the M1e research and plan below. It leaves live AI hookup
+for later; existing straight-flight weapon fixtures remain available. See
 [current systems evidence and remaining gates](baselines/weapons-systems.md).
 The manual range covers both aircraft's ten PT-default weapon slots, partial
 ECM/player-damage integration and controller feedback. This does not close the
-M1d/M1f acceptance gates or authorize additional aircraft/loadouts.
+M1d/M1f acceptance gates. The later aircraft ports are part of the current
+twelve-aircraft scope; their individual acceptance limits remain documented.
 
 ## Principles
 
@@ -106,7 +134,9 @@ Exit: census committed, 1:1 definition committed, AI VM decision recorded.
 
 ## Milestone 1: Faithful quick fight
 
-This is the first playable milestone.  It reads: original menus, original terrain, four aircraft with basic systems, guns and missiles quick fight against real AI.
+This is the first playable milestone: original menus, original terrain, the
+current twelve-aircraft roster with basic systems, and guns and missiles quick
+fight against AI. The original four-aircraft target has expanded with the ports.
 
 ### 1a. Shell and menus
 
@@ -133,10 +163,12 @@ Exit: theater layout matches retail mission geography.  Frame time recorded per 
 
 ### 1c. Free flight
 
-Aircraft: F-14, A-4E, X-31, and F/A-18.  The F/A-18 is included so radar and air-to-ground systems are exercised before the AI step needs ground targets.
+Aircraft: all twelve in the [ported roster](spec/ai-experience.md#currently-ported-aircraft).
+F-14D, A-4E, X-31 EFM and F/A-18D were the original target; Rafale C,
+MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35 and F-22A are also in the port.
 
 Work:
-- Importer: PT, SH, and the cockpit and HUD assets for the four aircraft.
+- Importer: PT, SH, and the cockpit and HUD assets for every ported aircraft.
 - Fixed-rate sim loop, decoupled from render, headless-capable.
 - Flight model from PT.  Engine, gear, flaps, hook, brakes, throttle, afterburner.
 - Cockpit view, HUD, external and chase cameras, control surface animation.
@@ -145,7 +177,7 @@ Work:
 - Engine, actuator, stall, and environment audio from retail samples.
 - Maneuver harness: level flight, sustained turn, loop, stall, runnable headless in one command.
 
-Deliverable: take off, fly, and land any of the four aircraft on any imported theater.
+Deliverable: take off, fly, and land any of the twelve ported aircraft on any imported theater.
 
 Exit: harness green on all three platforms with numbers recorded.  Someone who has played the original says it feels right.
 
@@ -164,15 +196,94 @@ Exit: the loop can be run a hundred times headless with a fixed seed and produce
 
 ### 1e. AI
 
-Work:
-- Importer: OT, JT, and NT.
-- Enemy aircraft AI at retail behavior (per the M0 decision).
-- Wingmen and wingman commands.
-- AI liveness probe: every bot moves, engages, and fires.
+**Current task: research and planning, requested by John on 2026-09-17.** Recover
+FA aircraft behavior and its experience channels, include surface objects where
+evidence permits, then prepare isolated components before later game hookup.
+"Whole AI" means coverage of the behavior families and their engine-side
+services. It does not change the M0 decision against running retail modules or
+porting the USNF-ATF engine. This ordering and the proposed component boundaries
+are agent recommendations, not implementation choices attributed to John.
 
-Deliverable: a dogfight where every aircraft is thinking.
+The [main AI behavior specification](spec/ai.md) now covers established fighter
+choices, other family differences, surface boundaries and proposed API inputs.
+The [experience specification](spec/ai-experience.md), [source map](formats/ai.md)
+and [research baseline](baselines/ai-research.md) provide its companion evidence.
+AI-0 has an installed-archive census; loose overrides and mission bindings remain.
+AI-1 reaches the Quick Mission skill writer, with runtime variation unresolved.
+AI-2 now includes nominal maneuver timing, pursuit regulation, target ranking,
+weapon-service delays, conditional steering, seeker/launch gates, ordinary
+ammunition handling and wing-command receivers. Full performance/signature
+producers, in-flight support transitions, remaining orders and compiled-branch
+correspondence remain open. AI-3 through AI-6 remain pending; runtime
+implementation has not started.
 
-Exit: liveness probe green.  Behavior compared against retail recordings and recorded in the baseline.
+Initial AI delivery covers every aircraft in the
+[ported roster](spec/ai-experience.md#currently-ported-aircraft). All twelve bind
+to the fighter/strike family in FA, so the first family implementation must
+serve all twelve using their own capabilities. Acceptance covers 48 combinations
+of aircraft and experience level, plus mixed-aircraft encounters. Wider retail
+families remain in the research plan without delaying this roster behind new
+aircraft imports.
+
+| Stage | Work and deliverable | Exit evidence |
+| --- | --- | --- |
+| AI-0: FA inventory | Extend the initial FA_2.LIB census to archive precedence and mission bindings; retain exact aircraft identities and separate static scenery from autonomous objects | Every referenced behavior family has a build/source identity, evidence category and explicit gap list; no unnamed fallback controller |
+| AI-1: Experience | Trace the six wing selections, four side/domain assignment channels, per-object mission values and all type-appropriate skill consumers | Specify Quick Mission distributions, saved-skill precedence, tactical percentages, G exemption and device reactions; synthetic boundary cases for 0..3 and invalid input |
+| AI-2: Aircraft behavior specifications | Complete fighter/strike and defensive behavior first, then F-117, helicopters, bombers/AC-130, transports/airliners and special families; include formation, orders, navigation, fuel and damage responses | For each maneuver and decision, prose gives trigger, target geometry, units, limits, duration/completion and interruption rules; source/BI disagreements and unsupported aircraft motion are explicit |
+| AI-3: Isolated Rust components | Implement specified behavior slices in renderer-independent `tore-sim::ai`; add only needed bounded data readers to dependency-free `tore-formats` | Deterministic headless scenarios exercise each family's decisions and maneuvers at all applicable experience levels; known approximations have named rules/constants and provenance |
+| AI-4: Surface behavior | Trace and specify static defenses, SAM, AAA, mobile ground units, ordinary ships, hydrofoil and carrier behavior separately, then implement isolated components | At least one representative fixture per supported class validates detection/eligibility, movement where applicable, fire control and experience; scenery never acquires an invented combat brain |
+| AI-5: Simulation service adapters | Generalize actor ownership for sensors, weapons, missile support, damage, fuel and movement; feed isolated controllers through those services | Multiple actors own independent contacts, stores and targets; no free ammunition, omniscient targeting by accident, duplicated missile physics or player-state contamination |
+| AI-6: Later game hookup | Replace the lossy dummy-wing launch payload with side, wing, member, type, loadout, experience source and resolved level; connect mission routes/orders and activity display | Six mixed-skill wings retain identity end to end; replay and headless/live results agree; player and straight-flight fixture paths remain available |
+
+Research can advance by family and spec section; completing all executable
+routines is not a prerequisite to implementing a specified slice. Surface
+research can proceed once shared actor/weapon contracts are understood, without
+waiting for every aircraft family. Surface firing implementation depends on
+surface sensing/designation and launcher ownership, which are not supplied by
+the current aircraft range. Helicopter, bomber and ship decisions can be tested
+in isolation before their required movement/import coverage exists; that does
+not count as flown acceptance.
+
+Proposed interface: a controller receives its mission/order context, own state,
+equipment, resolved experience, permitted observations and threat events. It
+returns desired motion, sensor/target requests, weapon/device requests and a
+player-readable activity. It does not directly move bodies or apply damage.
+Aircraft motion requests go through a steering adapter and the selected flight
+model; surface motion uses its own bounded rules. Retail awareness shortcuts,
+if established, must be explicit spec-derived inputs rather than hidden access
+to all entity positions. No default flight adapter changes are included.
+
+Keep behavior family, mission role, equipment and experience as independent
+inputs. A fighter family does not imply that a particular aircraft carries a
+radar missile; Ace does not imply better radar hardware. Use one controller
+implementation with experience-dependent rules where supported. Keep actors'
+decision state and deterministic random streams in simulation state. This is a
+proposed host design; the original RNG ordering and command buffers are not
+acceptance targets. Fixed 120 Hz simulation stays independent of rendering.
+
+Acceptance scenarios must include:
+
+- Head-on merge, pursuit, overshoot, defensive break and simultaneous threats at
+  each level, with maneuver envelopes and durations checked against the spec.
+- Conditional tactical probabilities tested independently of encounter win
+  rates; explicit draws at each threshold, plus aggregate checks with stated
+  sampling tolerances. Higher experience need not win every random fight.
+- Lost/occluded contacts, wrong-side and destroyed targets, missile-support
+  loss, empty stores, low fuel, damage and terrain avoidance. Fitted rules are
+  tested as fitted rules, not claimed as measured retail behavior.
+- Wing orders, formation split/rejoin and interrupted route resumption, then
+  SAM/AAA engagement, a moving vehicle and a ship attack in separate fixtures.
+- Same seed and inputs across repeated runs and render schedules; stable actor
+  identity through removal and restart. Check a 30-aircraft fixture matching
+  current creator capacity and record cost, without inventing a retail timing
+  requirement or a performance promise before measurement.
+
+Final deliverable: aircraft and supported surface opponents with behavior tied
+to the correct experience input, integrated only after isolated acceptance.
+Liveness means an eligible combatant can act and fire when appropriate, not that
+unarmed transports or scenery must engage. Retail recordings may add evidence
+if available later; their absence is not a blocker and passing our tests is not
+a claim of demonstrated retail parity.
 
 ### 1f. Sensors and weapons
 
@@ -313,5 +424,5 @@ Formats: ESA, LIB, DCL, PAL, PIC, FNT, DLG, MNU, LAY, XMI, MUS, 5K, 11K, T2, PT,
 | Working title | Whenever, before M1 tag |
 | TS repo stays runnable as reference or is archived at M0 | M0 |
 | Multiplayer in 1.0 or after | Before M2 tag |
-| Fourth aircraft is F/A-18 or something else | M1c |
+| Initial aircraft scope | Expanded to the twelve ported aircraft listed in M1c |
 | Save format and mod manifest schema | M3 |

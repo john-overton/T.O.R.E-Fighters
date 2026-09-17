@@ -891,8 +891,9 @@ The condition writer `0x463af0..0x463b73` uses a separate five-dword table at
 `0x463b74`. Mode 8 becomes mode 7: values other than dword 0x7fff shift left two,
 then current-buffer destinations convert the low word through the saturated
 deadline helper. Mode 7 also uses that helper for current-buffer destinations.
-The above 60 becomes a **240-clock-unit delay**, not 60 seconds or a wrapping
-word deadline. A noncurrent destination retains relative values. The comparison
+The above 60 becomes a **240-clock-unit delay** with saturation rather than
+a wrapping word deadline. The later [AI clock trace](ai.md#clock-pursuit-and-service-follow-through)
+establishes a nominal 60 simulation seconds for that delay. A noncurrent destination retains relative values. The comparison
 byte is ORed into the mode; thresholds are stored as words.
 
 OBJEventProc's 0x4000 branch can apply damage (`0x463ec0`), cleanup (`0x473c10`),

@@ -26,7 +26,7 @@ are identifiers, not evidence for a real-world variant or guidance mode.
 | `zone1` | Launch range, relative altitude and angle permission | Launch envelope is not a kinematic reach guarantee |
 | `zone0` | In-flight geometric tracking gate | Geometry alone does not establish signature strength, acquisition delay, ECM rejection or emitter compatibility |
 | `igniteT`, `fuelT`, `removeT` | Ignition age, motor cutoff age, cleanup age | Live host maps one timer unit to 0.25 seconds; retail scheduling equivalence is unestablished |
-| `trackT` | Parsed as `Guidance::track_t`, unused by live combat | Meaning and units unresolved; not evidence of battery life |
+| `trackT` | Parsed as `Guidance::track_t`, unused by live combat | AI preparation-delay use is traced in [AI B42](../spec/ai.md#b42-weapon-preparation-search-cadence-and-firing); not evidence of battery life |
 
 Reviewed motor consumer treats `fuelT` as a launch-relative cutoff. Burn duration
 is the difference from ignition, not an additional duration after it. Existing

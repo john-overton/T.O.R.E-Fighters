@@ -24,7 +24,7 @@ of everything in the game or its code.
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
 | Choose Activity menu and dropdowns | ☑ | ☐ | Partially implemented. Menu navigation works; campaign, multiplayer and replay actions remain unavailable. | Manual pp. 11-13; [menu](baselines/main-menu.md) |
-| Quick Mission setup | ☑ | ☑ | Partially implemented. All six wings launch selected aircraft as straight-flying dummies, up to 29 plus the player. Combat AI and objectives remain. | Manual pp. 18-20; [creator](baselines/creator-ordnance.md) |
+| Quick Mission setup | ☑ | ☑ | Partially implemented. All six wings launch selected aircraft as straight-flying dummies, up to 29 plus the player. Experience selections are not carried into those fixtures; combat AI and objectives remain. AI research and planning are now in progress. | Manual pp. 18-20; [creator](baselines/creator-ordnance.md), [AI experience](spec/ai-experience.md) |
 | Load Ordnance editing | ☑ | ☐ | Partially implemented. Compatible weapons, quantities and internal fuel work; tanks, campaign stock and airbase restrictions remain. | Manual p. 16; [loadout](baselines/creator-ordnance.md) |
 
 ## Flight models
