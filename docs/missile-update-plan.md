@@ -30,8 +30,8 @@ systems. Radar's remaining tuning pass stays open.
 | 4. HUD, seeker tone and replay | Deliver the spec's manual-supported HUD cues, mode/search cone, solution estimates and IR tone. Add the rebindable mode action, bay handling and mounted-seeker reset. Record full launch velocity, launch mode and heat state; update fingerprints and user guides. | Cone projection matches search geometry across zoom/aspect ratios; tone and HUD agree with acquisition. Pause and mute behave correctly; replay reproduces both launch modes. Unknown hit probability is not replaced with heat quality. |
 | 5. Range and roster acceptance | Run the spec's launch-speed, target-motion, range and uncued-search scenarios, then manually exercise current A2A default stores. Record observed reach and remaining approximations in one feature baseline. | All applicable repository checks and display smoke pass; report platform limits. Catalog-only ordnance and held rows are not silently enabled. |
 
-Stages 1 through 3 are implemented and covered by synthetic checks.
-Presentation and roster acceptance remain. Start with the fifteen current
+Stages 1 through 4 are implemented and covered by synthetic checks.
+Stage 5 roster, rendered and full validation remain. Start with the fifteen current
 allowlisted missile identities, prioritizing A2A. Existing AGM65G/AS7 integration
 gets regression coverage; expanded A2G behavior remains deferred. The two emitter
 candidates can be tested with explicit fixtures before adding ground systems.

@@ -1,6 +1,7 @@
 //! Small PCM mixer: original samples, linear resampling, no external synth.
 use crate::{AppResult, menu::Action};
 pub mod music;
+mod seeker;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::{
     collections::BTreeMap,
@@ -16,6 +17,8 @@ struct Voice {
     position: f64,
 }
 struct Mixer {
+    seeker: seeker::Tone,
+    seeker_volume: f64,
     music: music::Music,
     engine: Option<Voice>,
     engine_aircraft: Option<tore_formats::aircraft::AircraftId>,
@@ -100,7 +103,17 @@ impl Audio {
             .unwrap_or_default()
             .subsec_nanos();
         let music = music::Music::new(&clips, scripts, seed);
+        let seeker_volume = std::env::var("TORE_SEEKER_VOLUME")
+            .ok()
+            .map(|v| v.parse::<f64>())
+            .transpose()?
+            .unwrap_or(0.15);
+        if !seeker_volume.is_finite() || !(0. ..=1.).contains(&seeker_volume) {
+            return Err("TORE_SEEKER_VOLUME requires 0..1".into());
+        }
         let mixer = Arc::new(Mutex::new(Mixer {
+            seeker: seeker::Tone::default(),
+            seeker_volume,
             music,
             engine: None,
             engine_aircraft: None,
@@ -140,6 +153,12 @@ impl Audio {
             mixer,
             clips,
         })
+    }
+    pub fn seeker(&self, state: Option<(f64, bool)>) {
+        if let Ok(mut m) = self.mixer.lock() {
+            m.seeker.target = state.map_or(0., |(gain, _)| gain.clamp(0., 1.)) * m.seeker_volume;
+            m.seeker.ground = state.is_some_and(|(_, ground)| ground);
+        }
     }
     pub fn combat(&self, names: &[&str]) {
         if let Ok(mut mixer) = self.mixer.lock()
@@ -209,6 +228,7 @@ impl Audio {
     ) {
         if let Ok(mut m) = self.mixer.lock() {
             if state.is_none() && m.flight_on {
+                m.seeker = seeker::Tone::default();
                 m.stall = None;
                 m.stall_cue = None;
                 m.engine = None;
@@ -370,7 +390,10 @@ fn stall_cue(
 }
 impl Mixer {
     fn sample(&mut self, rate: f64) -> f32 {
-        let mut value = 0.;
+        let mut value = self.seeker.sample(
+            rate,
+            self.flight_on && !self.flight_paused && self.effects_on,
+        );
         if self.music_on && !(self.flight_on && self.flight_paused) {
             value += self.music.next(rate) * 0.16;
         }
@@ -433,6 +456,8 @@ mod tests {
         assert_eq!(stall_cue(Some(Spinning)), Some("&STALL.5K"));
         assert_eq!(stall_cue(Some(Normal)), None);
         let mut m = Mixer {
+            seeker: seeker::Tone::default(),
+            seeker_volume: 0.15,
             music: music::Music::new(&BTreeMap::new(), &BTreeMap::new(), 1),
             engine: None,
             engine_aircraft: None,

@@ -87,6 +87,7 @@ impl Action {
         if matches!(
             s,
             "fire"
+                | "weapon-seeker-mode"
                 | "weapon-next"
                 | "designate"
                 | "clear-designation"

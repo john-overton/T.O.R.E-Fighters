@@ -193,5 +193,12 @@ reproduces them. The flight adapters and renderer independence are unchanged.
 Missile profiles and the fitted finite-boost motion predictor live in
 `combat::missiles`, independent of rendering. The live adapter uses full release
 velocity for accepted missile profiles; compatibility retains scalar source
-motion. Combat tape version 4 includes world velocity, while versions 2 and 3
+motion. Combat tape version 4 includes world velocity and bay permission, while versions 2 and 3
 select compatibility rules. [Missile specification](spec/missiles.md).
+
+Combat tape version 4 is the missile rule-version boundary. Seeker mode and
+controlled target heat/emission changes are recorded commands; seeker observations
+and acquisition are reproduced from those inputs, the matching asset fingerprint
+and terrain. `--combat-command compatibility-weapons` explicitly selects the old
+weapon adapter. Flight adapter selection is independent. Fitted seeker synthesis
+consumes the mounted-seeker amplitude and never controls acquisition.

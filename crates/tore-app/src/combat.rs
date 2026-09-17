@@ -51,6 +51,7 @@ pub fn launcher(s: &flight::State) -> Launcher {
         basis: Basis::new(s.yaw, s.pitch, s.bank),
         speed_fps: s.speed,
         velocity: s.velocity,
+        bay_ready: !s.bay_available() || s.bay >= 0.95,
         // Selecting the passive infrared channel stops radar transmission
         // without changing the radar power switch itself.
         radar: s.radar && s.engine && s.sensors.channel == tore_sim::sensors::Channel::Radar,
@@ -162,10 +163,12 @@ impl Combat {
             r.record("reset", l);
         }
         self.last_launcher = Some(l);
+        let weapon_rules = self.state.weapon_rules;
         self.state = live::State::new(
             self.state.configuration().clone(),
             self.range || self.initial_ammo.is_some(),
         )?;
+        self.state.weapon_rules = weapon_rules;
         if let Some(ammo) = &self.initial_ammo {
             self.state.ammo.clone_from(ammo);
         }
@@ -201,7 +204,8 @@ impl Combat {
         s.set_payload(self.state.payload_lbs())?;
         s.bay_auto_open = s.bay_available()
             && self.state.armed
-            && self.state.designated().is_some()
+            && (self.state.designated().is_some()
+                || self.state.launch_mode == tore_sim::combat::missiles::LaunchMode::Boresight)
             && self.state.rounds(self.state.selected) > 0
             && self.state.configuration().stations[self.state.selected]
                 .weapon
@@ -999,6 +1003,7 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
         basis: Basis::new(0., -0.3, 0.),
         speed_fps: 500.,
         velocity: Basis::new(0., -0.3, 0.).forward.map(|v| v * 500.),
+        bay_ready: true,
         radar: false,
         jammer: false,
         alive: true,

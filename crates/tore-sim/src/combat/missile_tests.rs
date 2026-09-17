@@ -240,6 +240,7 @@ fn boresight_live_release_without_cockpit_sensors_and_next_round_reset() {
         basis: Basis::new(0., 0., 0.),
         speed_fps: 600.,
         velocity: [40., 60., 600.],
+        bay_ready: true,
         radar: false,
         jammer: false,
         alive: true,
@@ -297,4 +298,37 @@ fn two_active_shots_own_targets_and_reacquire_without_support() {
         guide(&mut a, &w, &targets, &sensors, &|_, _| false);
     }
     assert_eq!(a.guidance.as_ref().unwrap().seeker.status, Status::Pitbull);
+}
+
+#[test]
+fn bay_safe_empty_and_failed_gates_survive_uncued_mode() {
+    let mut s = fixture(true);
+    s.config.stations[0].weapon = weapon("AIM9M.JT");
+    s.launch_mode = LaunchMode::Boresight;
+    let mut l = Launcher {
+        position: [0., 1000., 0.],
+        basis: Basis::new(0., 0., 0.),
+        speed_fps: 600.,
+        velocity: [0., 0., 600.],
+        radar: false,
+        jammer: false,
+        alive: true,
+        bay_ready: false,
+        controls: Default::default(),
+    };
+    assert_eq!(s.readiness(l), Readiness::BayClosed);
+    let ammo = s.ammo.clone();
+    s.step(true, l, |_, _| 0.);
+    assert_eq!(s.ammo, ammo);
+    l.bay_ready = true;
+    s.armed = false;
+    assert_eq!(s.readiness(l), Readiness::Safe);
+    assert!(s.seeker_tone(l).is_none());
+    s.armed = true;
+    s.ammo[0] |= 0x8000;
+    assert_eq!(s.readiness(l), Readiness::StationFailed);
+    assert!(s.seeker_tone(l).is_none());
+    s.ammo[0] = 0;
+    assert_eq!(s.readiness(l), Readiness::Empty);
+    assert!(s.seeker_tone(l).is_none());
 }

@@ -127,4 +127,21 @@ shared RCS and reacquisition beyond the memory timeout cases. Seeker observation
 and mounted acquisition now run in the live adapter. Eight missile integration tests now cover all nine activation boundaries, failed
 acquisition, hidden movement, early guidance expiry, target-free release,
 post-shot mounted reset and two-target ownership. Activation and first pitbull
-produce distinct shot-ID events. Presentation and roster validation remain.
+produce distinct shot-ID events. HUD, controls, bay permission, fitted tone and version-4 replay inputs are
+implemented. Full rendered and roster acceptance remain.
+
+## Local manual and presentation evidence
+
+John supplied `/home/john/Downloads/fa-manual_compress.pdf`, copied to ignored
+`.local/missile-update/manual.pdf`; SHA-256
+`1a082378a8e8cd163ed6b398efcc1df80b67c2f104f6b90ac0733c88d58e26c3`.
+Inspected rendered PDF pages 87/88 (printed pages 83/84): fixed circular reticle,
+square target box, diamond lock cue and vertical range scale. The implementation
+uses those forms with fitted placement and the existing imported HUD11 font and
+HUD module color. It does not claim pixel matching. Printed page 119 describes
+stronger A2A growl and A2G ringing. Inspected the local audio inventory and
+&MISSILE.11K (22,783 bytes) and &SQUEAL.5K (2,392 bytes); their names and PCM
+content do not establish lock-sound mapping. The temporary cue is authored,
+110 Hz modulated growl or 660 Hz ringing, with a 0.1-second amplitude slew.
+Envelope, timbre separation and pause/mute have deterministic tests. No retail
+audio or PDF bytes are committed. Human listening review remains unavailable.

@@ -221,6 +221,8 @@ mod tests {
     #[test]
     fn mixer_pause_mute_and_effects_are_independent() {
         let mut mixer = super::super::Mixer {
+            seeker: Default::default(),
+            seeker_volume: 0.15,
             music: prepared(&[255, b'T', 0, 1, 2, 252]),
             engine: None,
             engine_aircraft: None,

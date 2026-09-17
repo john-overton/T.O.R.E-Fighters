@@ -12,9 +12,9 @@ use tore_sim::{
     sensors::{Channel, Controls, RANGE_LADDER_NMI},
 };
 
-/// Version 3 adds the player sensor controls to every record so channel,
-/// display range and history changes replay deterministically. Version 2 tapes
-/// still replay, using the default controls they were recorded with.
+/// Version 4 defines the spec missile rules and records world velocity and bay
+/// permission. Mode, heat and emitter changes are explicit commands. Versions
+/// 2/3 retain compatibility rules and their original control defaults.
 const VERSION: u32 = 4;
 
 pub struct Recorder {
@@ -82,7 +82,7 @@ impl Recorder {
             }
             writeln!(
                 self.out,
-                " {} {} {} {} {} {} {} {} {}",
+                " {} {} {} {} {} {} {} {} {} {}",
                 u8::from(l.radar),
                 u8::from(l.alive),
                 u8::from(l.jammer),
@@ -91,7 +91,8 @@ impl Recorder {
                 u8::from(l.controls.history),
                 l.velocity[0],
                 l.velocity[1],
-                l.velocity[2]
+                l.velocity[2],
+                u8::from(l.bay_ready)
             )
         })();
         if let Err(e) = result {
@@ -109,12 +110,18 @@ impl Recorder {
 pub fn command_name(c: Command) -> String {
     // A designation carries its stable target identity, never a screen
     // coordinate, so a replay selects the same object.
+    if let Command::TargetHeat(value) = c {
+        return format!("target-heat:{value}");
+    }
     if let Command::DesignateTarget(id) = c {
         return format!("designate-id:{id}");
     }
     match c {
         Command::NextWeapon => "next",
         Command::ToggleSeekerMode => "seeker-mode",
+        Command::CompatibilityWeapons => "compatibility-weapons",
+        Command::ToggleTargetRadar => "target-radar",
+        Command::TargetHeat(_) => unreachable!("handled above"),
         Command::Designate => "designate",
         Command::ClearDesignation => "clear",
         Command::ToggleArm => "arm",
@@ -130,12 +137,21 @@ pub fn command_name(c: Command) -> String {
     .into()
 }
 pub fn command(s: &str) -> Option<Command> {
+    if let Some(value) = s.strip_prefix("target-heat:") {
+        return value
+            .parse::<u8>()
+            .ok()
+            .filter(|v| *v <= 4)
+            .map(Command::TargetHeat);
+    }
     if let Some(id) = s.strip_prefix("designate-id:") {
         return id.parse().ok().map(Command::DesignateTarget);
     }
     [
         Command::NextWeapon,
         Command::ToggleSeekerMode,
+        Command::CompatibilityWeapons,
+        Command::ToggleTargetRadar,
         Command::Designate,
         Command::ClearDesignation,
         Command::ToggleArm,
@@ -158,7 +174,7 @@ fn fields_for(version: u32) -> usize {
     } else if version < 4 {
         20
     } else {
-        23
+        24
     }
 }
 fn parse(line: &str, version: u32) -> AppResult<(&str, Launcher)> {
@@ -215,6 +231,7 @@ fn parse(line: &str, version: u32) -> AppResult<(&str, Launcher)> {
         Launcher {
             position: values[..3].try_into()?,
             basis,
+            bay_ready: version < 4 || boolean(fields[23])?,
             speed_fps: values[12],
             velocity: if version >= 4 {
                 let mut velocity = [0.; 3];
@@ -339,6 +356,23 @@ fn replay_reader(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn version_four_preserves_velocity_bay_mode_and_heat_commands() {
+        let line = "tick 0 1000 0 1 0 0 0 1 0 0 0 1 600 1 1 0 0 1 0 40 60 600 0";
+        let (_, launcher) = parse(line, 4).unwrap();
+        assert_eq!(launcher.velocity, [40., 60., 600.]);
+        assert!(!launcher.bay_ready);
+        assert!(parse(&line.replace("40 60 600", "NaN 60 600"), 4).is_err());
+        for c in [
+            Command::ToggleSeekerMode,
+            Command::CompatibilityWeapons,
+            Command::TargetHeat(4),
+            Command::ToggleTargetRadar,
+        ] {
+            assert_eq!(command(&command_name(c)), Some(c));
+        }
+        assert_eq!(command("target-heat:5"), None);
+    }
     #[test]
     fn bounded_records_reject_nonfinite_axes_and_invalid_basis() {
         assert!(parse("tick 0 1000 0 1 0 0 0 1 0 0 0 1 300 1 1 0", 2).is_ok());

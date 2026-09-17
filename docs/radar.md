@@ -686,12 +686,12 @@ RWS/TWS, and three named actions joined the controls editor and custom profiles:
 [FLIGHT-CONTROLS.md](FLIGHT-CONTROLS.md).
 
 Stage 4 took each supported radar weapon's requirements from existing reviewed
-weapon configuration. Active missiles did not gain a new terminal activation
-range; the current supported active/semi-active lifecycle is preserved and its
-approximation is reported. Deterministic replay captures radar/IR channel,
+weapon configuration. The subsequent missile update adds explicit per-weapon active activation and
+seeker acquisition, documented in [the missile specification](spec/missiles.md). Deterministic replay captures radar/IR channel,
 display range, power and selection changes, physical contact lifetime and target
-jammer inputs: version-3 combat tapes add the three sensor-control fields per
-record and a designation by target identity, and version-2 tapes still replay.
+jammer inputs: version-4 combat tapes retain sensor controls and designation identity, and
+add full launch velocity and bay permission. Version 2/3 tapes explicitly
+replay with compatibility weapons.
 
 ### Acceptance cases
 

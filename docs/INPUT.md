@@ -517,3 +517,17 @@ see the [engine material contract](spec/engine-material.md).
 Researched flight is now the default; `--legacy-flight` preserves the previous
 model. HUD and audio share the [stall warning signal](spec/stall-warnings.md),
 including the original imported warning samples.
+
+## Missile seeker control
+
+`weapon-seeker-mode` is a rebindable action with no default key reassignment.
+The HUD CUED/BORESIGHT label is also clickable. Independent radar, IR and emitter
+profiles support BORESIGHT release without designation; supported-radar weapons
+still require aircraft lock. Mode changes do not redirect airborne missiles.
+IR search uses a three-degree half-angle and shows acquisition before lock.
+An internal bay opens for BORESIGHT without designation and release waits until
+it is at least 95 percent open, an agent-selected fitted threshold.
+
+The temporary fitted IR cue has a separate air-to-ground timbre. Effects mute,
+pause, safe, empty and failed stations silence it. `TORE_SEEKER_VOLUME=0..1`
+sets its maximum amplitude, default 0.15. [Rules and limits](spec/missiles.md).

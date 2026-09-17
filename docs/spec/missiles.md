@@ -436,8 +436,10 @@ There is no explicit midcourse/activation state, no total guidance timer, and
 loss currently clears the target permanently without reacquisition. Onboard
 steering gates do not yet use the full shared RCS detection model. The launcher
 currently supplies scalar speed and attitude, not its world velocity vector;
-guided release requires a designated target. These are implementation gaps for
-the launch and boresight rules above, not completed features.
+guided release requires a designated target. That paragraph records the pre-update baseline. The current implementation
+adds vector release, finite boost, seeker-owned observations, activation,
+guidance lifetime and reacquisition, plus the mounted seeker, HUD and tone.
+See the feature baseline for validation and remaining approximations.
 
 The plan adds the A activation phase, seeker-owned observations, explicit
 loss/reacquisition rules, a guidance timer and readable state events. Preserve

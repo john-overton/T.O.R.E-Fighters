@@ -43,6 +43,7 @@ pub fn damage_class(category: u16) -> usize {
 pub enum Readiness {
     Ready,
     Safe,
+    BayClosed,
     LauncherLost,
     StationFailed,
     Empty,
@@ -65,6 +66,7 @@ impl Readiness {
         match self {
             Self::Ready => "READY",
             Self::Safe => "SAFE",
+            Self::BayClosed => "OPENING BAY",
             Self::LauncherLost => "LAUNCHER LOST",
             Self::StationFailed => "STATION FAILED",
             Self::Empty => "EMPTY",
@@ -90,6 +92,9 @@ impl Readiness {
 pub enum Command {
     NextWeapon,
     ToggleSeekerMode,
+    CompatibilityWeapons,
+    TargetHeat(u8),
+    ToggleTargetRadar,
     Designate,
     /// Persistent selection of one current contact by its stable identity.
     DesignateTarget(u32),
@@ -442,6 +447,7 @@ pub struct Launcher {
     pub basis: Basis,
     pub speed_fps: f64,
     pub velocity: Vector,
+    pub bay_ready: bool,
     /// Radar actually transmitting. Selecting infrared stops the emission.
     pub radar: bool,
     pub jammer: bool,
@@ -514,6 +520,11 @@ impl State {
         self.mounted = Seeker::default();
         self.mounted_key = None;
         self.selected = (self.selected + 1) % self.ammo.len();
+        if missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
+            .is_none_or(|p| !p.independent())
+        {
+            self.launch_mode = LaunchMode::Cued;
+        }
     }
     /// Keyboard cycling and mouse clicks share the same current-observation
     /// eligibility, including selectable RWS contacts.
@@ -525,6 +536,42 @@ impl State {
     }
     pub fn command(&mut self, command: Command, launcher: Launcher) {
         match command {
+            Command::CompatibilityWeapons => {
+                self.weapon_rules = Rules::Compatibility;
+                self.mounted = Seeker::default();
+            }
+            Command::TargetHeat(value) => {
+                for t in &mut self.targets {
+                    t.heat = match value {
+                        0 => Heat::Unknown,
+                        1 => Heat::Engine {
+                            on: false,
+                            throttle: 0.,
+                            afterburner: false,
+                        },
+                        2 => Heat::Engine {
+                            on: true,
+                            throttle: 0.,
+                            afterburner: false,
+                        },
+                        3 => Heat::Engine {
+                            on: true,
+                            throttle: 1.,
+                            afterburner: false,
+                        },
+                        _ => Heat::Engine {
+                            on: true,
+                            throttle: 1.,
+                            afterburner: true,
+                        },
+                    };
+                }
+            }
+            Command::ToggleTargetRadar => {
+                for t in &mut self.targets {
+                    t.radar_emitting = !t.radar_emitting;
+                }
+            }
             Command::Incoming => {
                 if self.projectiles.len() < MAX_PROJECTILES && self.player_hp > 0 {
                     let w = &self.config.stations[self.selected].weapon;
@@ -563,6 +610,11 @@ impl State {
                 }
             }
             Command::ToggleSeekerMode => {
+                if missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
+                    .is_none_or(|p| !p.independent())
+                {
+                    return;
+                }
                 self.launch_mode = if self.launch_mode == LaunchMode::Cued {
                     LaunchMode::Boresight
                 } else {
@@ -682,6 +734,9 @@ impl State {
         }
         if self.projectiles.len() >= MAX_PROJECTILES {
             return Readiness::Capacity;
+        }
+        if !launcher.bay_ready && !self.config.stations[self.selected].internal {
+            return Readiness::BayClosed;
         }
         self.launch_solution(launcher)
     }
@@ -828,6 +883,44 @@ impl State {
             && self.launch_solution(launcher) == Readiness::Ready
     }
 
+    pub fn seeker_tone(&self, launcher: Launcher) -> Option<(f64, bool)> {
+        let w = &self.config.stations[self.selected].weapon;
+        if self.weapon_rules != Rules::Spec
+            || !self.armed
+            || !launcher.alive
+            || self.player_hp <= 0
+            || self.rounds(self.selected) == 0
+            || self.ammo[self.selected] & 0x8000 != 0
+            || missiles::Profile::for_weapon(w).is_none_or(|p| p.guidance != Guidance::Infrared)
+        {
+            return None;
+        }
+        Some((self.mounted.tone(), w.source == "AGM65G.JT"))
+    }
+    pub fn mounted_solution(&self, launcher: Launcher) -> Option<missiles::Solution> {
+        let w = &self.config.stations[self.selected].weapon;
+        let profile = missiles::Profile::for_weapon(w)?;
+        let observed = self
+            .mounted
+            .observation
+            .map(|o| (o.position, o.velocity))
+            .or_else(|| {
+                self.designated()
+                    .filter(|_| self.launch_mode == LaunchMode::Cued)
+                    .and_then(|id| self.sensors.observation(id))
+                    .map(|o| (o.position, o.velocity))
+            })?;
+        missiles::intercept(
+            &w.movement,
+            Motion::new(&w.movement, launcher.velocity, launcher.position[1]),
+            launcher.position,
+            observed.0,
+            observed.1,
+            0,
+            profile.guidance_ticks,
+        )
+    }
+
     fn effect(&mut self, position: Vector, kind: EffectKind) {
         if self.effects.len() == MAX_EFFECTS {
             self.effects.remove(0);
@@ -945,7 +1038,23 @@ impl State {
                     .filter(|t| self.launch_mode == LaunchMode::Boresight || assigned == Some(t.id))
                     .filter_map(|t| seeker::observe(w, profile, &view, t))
                     .collect();
-                self.mounted.step(profile, &observations);
+                if self.launch_mode == LaunchMode::Cued
+                    && matches!(profile.guidance, Guidance::Active | Guidance::Supported)
+                {
+                    let supported: Vec<_> = observations
+                        .into_iter()
+                        .filter(|o| self.sensors.supports(o.id))
+                        .collect();
+                    self.mounted.step(
+                        missiles::Profile {
+                            guidance: Guidance::Supported,
+                            ..profile
+                        },
+                        &supported,
+                    );
+                } else {
+                    self.mounted.step(profile, &observations);
+                }
             } else {
                 self.mounted = Seeker::new(assigned);
             }
@@ -1018,6 +1127,15 @@ impl State {
                     target: if guided { target } else { None },
                     fall: FallState::default(),
                 });
+                if let Some(flight) = self.projectiles.last().and_then(|p| p.guidance.as_ref())
+                    && flight.profile.guidance == Guidance::Active
+                    && flight.enabled
+                {
+                    events.push(Event::SeekerActivated(self.shots));
+                    if flight.seeker.acquired {
+                        events.push(Event::Pitbull(self.shots));
+                    }
+                }
                 self.shots += 1;
                 events.push(Event::Fired(index));
             }
@@ -1609,6 +1727,7 @@ mod tests {
             basis: Basis::new(0., 0., 0.),
             speed_fps: 300.,
             velocity: [0., 0., 300.],
+            bay_ready: true,
             radar: true,
             jammer: false,
             alive: true,

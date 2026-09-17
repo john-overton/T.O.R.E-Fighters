@@ -32,6 +32,7 @@ mod roster_animation;
 mod scope;
 mod sim_renderer;
 mod terrain;
+mod weapon_hud;
 mod weather;
 
 use assets::Assets;
@@ -333,6 +334,9 @@ impl App {
         }
         let command = match name.as_str() {
             "weapon-next" => Command::NextWeapon,
+            "weapon-seeker-mode" => {
+                Command::Combat(tore_sim::combat::live::Command::ToggleSeekerMode)
+            }
             "designate" => Command::Target,
             "clear-designation" => {
                 Command::Combat(tore_sim::combat::live::Command::ClearDesignation)
@@ -417,6 +421,7 @@ impl App {
                         command,
                         tore_sim::combat::live::Command::ToggleArm
                             | tore_sim::combat::live::Command::ClearDesignation
+                            | tore_sim::combat::live::Command::ToggleSeekerMode
                     )
                 {
                     self.combat.cancel();
@@ -1049,6 +1054,26 @@ impl ApplicationHandler for App {
                     self.combat.cancel();
                     self.frame_time = Instant::now();
                     self.flight_command(command)
+                } else if self.screen == Screen::Flight
+                    && self.flight_ui.hud
+                    && !self.flight_ui.frozen()
+                    && self.pointer.is_some_and(|p| {
+                        weapon_hud::mode_hit(
+                            p,
+                            [
+                                f64::from(renderer.window.inner_size().width),
+                                f64::from(renderer.window.inner_size().height),
+                            ],
+                        )
+                    })
+                {
+                    if state == ElementState::Pressed {
+                        self.combat.command(
+                            tore_sim::combat::live::Command::ToggleSeekerMode,
+                            combat::launcher(&self.flight),
+                        );
+                    }
+                    Action::Click
                 } else if self.screen == Screen::Flight {
                     let hit = self.instruments.screen_pointer(
                         self.pointer,
@@ -1227,6 +1252,11 @@ impl ApplicationHandler for App {
                         let steps = self.flight_ui.steps(&mut self.flight_clock, elapsed);
                         self.frame_time = now;
                         if let Some(audio) = &self.audio {
+                            audio.seeker(
+                                self.combat
+                                    .state
+                                    .seeker_tone(combat::launcher(&self.flight)),
+                            );
                             audio.pause_flight(self.flight_ui.frozen());
                         }
                         // Scope channel, display range and history are player
@@ -1503,6 +1533,17 @@ impl ApplicationHandler for App {
                                 self.flight_canvas.hud_zoom(1.),
                             );
                         }
+                        if self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4) {
+                            weapon_hud::draw(
+                                &mut self.menu.pixels,
+                                &presented,
+                                &self.combat.state,
+                                &self.hornet.hud_font,
+                                &self.camera,
+                                cockpit_palette[usize::from(self.hornet.hud.primary_color)],
+                                f64::from(self.flight_canvas.hud_zoom(self.camera.zoom)),
+                            );
+                        }
                         renderer.cockpit(
                             &presented,
                             &self.camera,
@@ -1519,6 +1560,11 @@ impl ApplicationHandler for App {
                         );
                         self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
                         if let Some(audio) = &self.audio {
+                            audio.seeker(
+                                self.combat
+                                    .state
+                                    .seeker_tone(combat::launcher(&self.flight)),
+                            );
                             audio.pause_flight(self.flight_ui.frozen());
                             audio.flight(Some((
                                 &self.hornet.profile,
@@ -2101,7 +2147,7 @@ fn main() -> AppResult<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Creator: --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-3 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Creator: --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-4 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
