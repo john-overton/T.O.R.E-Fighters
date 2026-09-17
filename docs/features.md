@@ -24,7 +24,7 @@ of everything in the game or its code.
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
 | Choose Activity menu and dropdowns | ☑ | ☐ | Partially implemented. Menu navigation works; campaign, multiplayer and replay actions remain unavailable. | Manual pp. 11-13; [menu](baselines/main-menu.md) |
-| Quick Mission setup | ☑ | ☐ | Partially implemented. Aircraft, theater and briefing edits work; multi-aircraft missions and objectives remain. | Manual pp. 18-20; [creator](baselines/creator-ordnance.md) |
+| Quick Mission setup | ☑ | ☑ | Partially implemented. All six wings launch selected aircraft as straight-flying dummies, up to 29 plus the player. Combat AI and objectives remain. | Manual pp. 18-20; [creator](baselines/creator-ordnance.md) |
 | Load Ordnance editing | ☑ | ☐ | Partially implemented. Compatible weapons, quantities and internal fuel work; tanks, campaign stock and airbase restrictions remain. | Manual p. 16; [loadout](baselines/creator-ordnance.md) |
 
 ## Flight models
@@ -53,7 +53,7 @@ the Linux range, replay and rendered acceptance.
 
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
-| Guns and manual weapon release | ☑ | ☐ | Partially implemented. Current aircraft stores fire in the range; remaining catalog weapons and full combat missions remain. | Manual pp. 124-126; [weapon coverage](baselines/aircraft-roster-expansion.md) |
+| Guns and manual weapon release | ☑ | ☐ | Partially implemented. Current supported stores are available in normal starts, custom missions and the range. Remaining catalog weapons and full combat missions remain. | Manual pp. 124-126; [weapon coverage](baselines/aircraft-roster-expansion.md) |
 | Missiles requiring continuous radar lock | ☑ | ☐ | Completed for supported default stores. Lost support stops measured guidance; the original target can be reacquired before guidance expiry. | Manual pp. 117-118; [current missile behavior](spec/missiles.md#what-exists-today-and-what-changes) |
 | Independent infrared guidance | ☑ | ☐ | Completed for current stores. Seeker-owned IR observations, heat scoring, reacquisition, HUD and fitted tone work. Retail tone mapping remains unknown. | Manual p. 119; [missile scope](spec/missiles.md) |
 | Delayed active-radar acquisition | ☑ | ☐ | Completed. Cued shots fly to a supported intercept before enabling their own seeker. Acquisition is separate from activation. | Manual p. 118; [activation](spec/missiles.md#activation-and-independent-acquisition) |

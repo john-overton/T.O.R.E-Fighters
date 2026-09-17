@@ -40,6 +40,9 @@ pub struct Combat {
     pub controller: FireInput,
     pub range: bool,
     initial_ammo: Option<Vec<u16>>,
+    dummies: Vec<(usize, Vector)>,
+    dummy_models: Vec<Airframe>,
+    dummy_configs: Vec<live::Configuration>,
     pub recorder: Option<crate::combat_tape::Recorder>,
     last_launcher: Option<Launcher>,
     shapes: Vec<Option<Shape>>,
@@ -125,7 +128,10 @@ impl Combat {
             explosions.push(cells);
         }
         Ok(Self {
-            state: live::State::new(config, range)?,
+            state: live::State::new(config, true)?,
+            dummies: Vec::new(),
+            dummy_models: Vec::new(),
+            dummy_configs: Vec::new(),
             input: FireInput::default(),
             controller: FireInput::default(),
             range,
@@ -135,6 +141,77 @@ impl Combat {
             shapes,
             explosions,
         })
+    }
+    pub fn dummy_geometry(&self, camera: &Camera, world: &World) -> Vec<(&Airframe, Vec<f32>)> {
+        self.dummy_models
+            .iter()
+            .enumerate()
+            .map(|(index, model)| {
+                let mut vertices = Vec::new();
+                for target in self.state.targets.iter().filter(|t| t.hp > 0) {
+                    if self
+                        .dummies
+                        .get(target.id.saturating_sub(1) as usize)
+                        .is_none_or(|(i, _)| *i != index)
+                    {
+                        continue;
+                    }
+                    let mut pose = model.start(world);
+                    pose.position = target.position;
+                    pose.yaw = target.velocity[0].atan2(target.velocity[2]);
+                    pose.pitch = 0.;
+                    pose.bank = 0.;
+                    pose.gear = 0.;
+                    pose.flaps = 0.;
+                    pose.exhaust = 0.;
+                    pose.bay = 0.;
+                    vertices.extend(model.vertices(&pose, camera, world));
+                }
+                (model, vertices)
+            })
+            .collect()
+    }
+    pub fn mission_dummies(
+        &mut self,
+        wings: &[(tore_formats::aircraft::AircraftId, usize)],
+        separation: f64,
+        data: &BTreeMap<String, Vec<u8>>,
+    ) -> AppResult<()> {
+        for (id, count) in wings {
+            if *count == 0 {
+                continue;
+            }
+            let model = if let Some(i) = self.dummy_models.iter().position(|h| h.profile.id == *id)
+            {
+                i
+            } else {
+                let h = Airframe::load(data, *id)?;
+                self.dummy_configs
+                    .push(live::Configuration::from_source(&h.profile, |name| {
+                        data.get(name)
+                            .cloned()
+                            .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+                    })?);
+                self.dummy_models.push(h);
+                self.dummy_models.len() - 1
+            };
+            for _ in 0..*count {
+                let n = self.dummies.len();
+                // Fitted stagger: first contact straight ahead, successive pairs
+                // 500 feet to either side, 500 feet deeper per pair.
+                let side = if n == 0 {
+                    0.
+                } else if n % 2 == 1 {
+                    1.
+                } else {
+                    -1.
+                };
+                let row = n.div_ceil(2) as f64;
+                self.dummies
+                    .push((model, [side * row * 500., 0., separation + row * 500.]));
+            }
+        }
+        Ok(())
     }
     pub fn command(&mut self, command: live::Command, l: Launcher) {
         if let Some(r) = &mut self.recorder {
@@ -164,10 +241,7 @@ impl Combat {
         }
         self.last_launcher = Some(l);
         let weapon_rules = self.state.weapon_rules;
-        self.state = live::State::new(
-            self.state.configuration().clone(),
-            self.range || self.initial_ammo.is_some(),
-        )?;
+        self.state = live::State::new(self.state.configuration().clone(), s.native.is_none())?;
         self.state.weapon_rules = weapon_rules;
         if weapon_rules == tore_sim::combat::missiles::Rules::Compatibility
             && let Some(r) = &mut self.recorder
@@ -185,6 +259,14 @@ impl Combat {
         s.bay_auto_open = false;
         if self.range {
             self.state.range_target(launcher(s));
+        }
+        for (index, (model, offset)) in self.dummies.iter().enumerate() {
+            let position = std::array::from_fn(|i| {
+                l.position[i] + l.basis.right[i] * offset[0] + l.basis.forward[i] * offset[2]
+            });
+            self.state
+                .add_dummy(&self.dummy_configs[*model], position, l.basis);
+            debug_assert_eq!(self.state.targets.last().unwrap().id as usize, index + 1);
         }
         Ok(())
     }
@@ -366,7 +448,9 @@ impl Combat {
             pose.rudder = 0.;
             pose.brake = 0.;
             pose.hook = 0.;
-            v.extend(h.vertices(&pose, camera, world));
+            if self.dummies.is_empty() {
+                v.extend(h.vertices(&pose, camera, world));
+            }
         }
         // Attached external stores are hidden until the dedicated ordnance
         // rendering pass. Loadout/flight state and launched projectiles remain

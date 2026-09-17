@@ -4,9 +4,11 @@ use wgpu::util::DeviceExt;
 fn bytes(values: &[f32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
+type AircraftBatch = (wgpu::BindGroup, wgpu::Buffer, u32);
 pub struct SimRenderer {
     lens_flare: crate::lens_flare::LensFlare,
     battle: Option<(wgpu::Buffer, u32)>,
+    dummies: Vec<(tore_formats::aircraft::AircraftId, AircraftBatch)>,
     vapor: Option<(wgpu::Buffer, u32)>,
     vapor_pipeline: wgpu::RenderPipeline,
     vapor_bind: wgpu::BindGroup,
@@ -335,6 +337,7 @@ impl SimRenderer {
             canopy_pipeline,
             canopy_visible: false,
             aircraft: None,
+            dummies: Vec::new(),
             sky_pipeline,
             celestial_pipeline,
             celestial_vertices,
@@ -391,6 +394,27 @@ impl SimRenderer {
         }
     }
 
+    pub fn dummies(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        geometry: Vec<(&crate::aircraft::Airframe, Vec<f32>)>,
+    ) {
+        let ownship = self.aircraft.take();
+        let canopy = self.canopy_visible;
+        let mut old = std::mem::take(&mut self.dummies);
+        for (model, vertices) in geometry {
+            self.aircraft = old
+                .iter()
+                .position(|(id, _)| *id == model.profile.id)
+                .map(|i| old.swap_remove(i).1);
+            self.aircraft(device, queue, model, &vertices);
+            self.dummies
+                .push((model.profile.id, self.aircraft.take().unwrap()));
+        }
+        self.aircraft = ownship;
+        self.canopy_visible = canopy;
+    }
     pub fn clear_aircraft(&mut self) {
         self.aircraft = None;
         self.canopy_visible = false;
@@ -501,7 +525,14 @@ impl SimRenderer {
             self.aircraft = Some((bind, buffer, 0));
         }
         if let Some((_, buffer, count)) = &mut self.aircraft {
-            assert!(vertices.len() * 4 <= 2 * 1024 * 1024);
+            if vertices.len() as u64 * 4 > buffer.size() {
+                *buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Aircraft formation poses"),
+                    size: (vertices.len() as u64 * 4).next_power_of_two(),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
             if !vertices.is_empty() {
                 queue.write_buffer(buffer, 0, &bytes(vertices));
             }
@@ -756,6 +787,16 @@ impl SimRenderer {
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..*count, 0..1);
             }
+        }
+        for (_, (bind, vertices, count)) in &self.dummies {
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, bind, &[]);
+            pass.set_vertex_buffer(0, vertices.slice(..));
+            pass.draw(0..*count, 0..1);
+            pass.set_pipeline(&self.canopy_depth_pipeline);
+            pass.draw(0..*count, 0..1);
+            pass.set_pipeline(&self.canopy_pipeline);
+            pass.draw(0..*count, 0..1);
         }
         if self.canopy_visible
             && let Some((bind, vertices, count)) = &self.aircraft

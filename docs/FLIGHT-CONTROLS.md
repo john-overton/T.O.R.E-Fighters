@@ -83,7 +83,7 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized. This is
 Space now holds the selected player trigger. Semicolon selects the next PT weapon
 slot; T or Enter designates an actual range target. `--live-fire` enables the
 explicit PT-default test range; backslash resets its target at a suitable range
-for the selected weapon. Ordinary free flight loads only the internal gun.
+for the selected weapon. Ordinary free flight loads the aircraft's supported default weapons. The restricted native research adapter stays clean.
 The complete native weapon/countermeasure dispatch remains unverified.
 [Live-fire scope and approximations](baselines/live-fire.md). USNF manual bindings are reference evidence pending FA-specific verification; FA menu labels take precedence.
 
@@ -346,3 +346,9 @@ it is at least 95 percent open, an agent-selected fitted threshold.
 The temporary fitted IR cue has a separate air-to-ground timbre. Effects mute,
 pause, safe, empty and failed stations silence it. `TORE_SEEKER_VOLUME=0..1`
 sets its maximum amplitude, default 0.15. [Rules and limits](spec/missiles.md).
+
+Quick Mission wing counts now spawn straight-flying practice aircraft of the
+selected types. Friendly Wing 1 includes you; all other slots are dummies, up to
+29 with the existing six wing selectors. They do not attack or evade. Separation
+sets their starting distance. Restart restores the formation and accepted load.
+Nationality, skill and advantage do not yet change these practice flights.

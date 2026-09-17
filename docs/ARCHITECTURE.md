@@ -202,3 +202,11 @@ and acquisition are reproduced from those inputs, the matching asset fingerprint
 and terrain. `--combat-command compatibility-weapons` explicitly selects the old
 weapon adapter. Flight adapter selection is independent. Fitted seeker synthesis
 consumes the mounted-seeker amplitude and never controls acquisition.
+
+Quick Mission straight-flight fixtures share `combat::live::Target` movement,
+sensors and damage. The host retains accepted wing identities and fitted starting
+offsets for restart. Rendering groups targets by imported airframe, with a cached
+texture binding per identity and vertex buffers that grow to fit the formation.
+The player's atlas is never substituted for another type. This adds no AI or
+changes to fixed-step timing. Normal flight loads supported default stores;
+restricted native research flight keeps its clean configuration.

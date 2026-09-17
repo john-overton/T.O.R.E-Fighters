@@ -523,6 +523,43 @@ pub fn validate_sources(
                 .ok_or_else(|| std::io::Error::other(format!("missing {n}")))
         })?;
         load.validate()?;
+        let mut normal = crate::combat::Combat::new(&airframe, data, false)?;
+        let mut flight = airframe.start(world);
+        normal.reset(&mut flight)?;
+        if normal.state.ammo != load.quantities || normal.range || !normal.state.targets.is_empty()
+        {
+            return Err("normal start lost default weapons or spawned a range target".into());
+        }
+        normal.state.ammo.fill(0);
+        normal.reset(&mut flight)?;
+        if normal.state.ammo != load.quantities {
+            return Err("normal restart lost weapons".into());
+        }
+        normal.mission_dummies(&[(id, 29)], 5280., data)?;
+        normal.reset(&mut flight)?;
+        let positions: Vec<_> = normal.state.targets.iter().map(|t| t.position).collect();
+        if positions.len() != 29 {
+            return Err("mission wing count mismatch".into());
+        }
+        let camera = airframe.panel_camera(&flight, 3);
+        let geometry = normal.dummy_geometry(&camera, world);
+        if geometry.len() != 1 || geometry[0].0.profile.id != id || geometry[0].1.is_empty() {
+            return Err("dummy model identity or geometry mismatch".into());
+        }
+        normal.state.targets[0].hp = 0;
+        normal.step(&mut flight, world)?;
+        normal.reset(&mut flight)?;
+        if normal
+            .state
+            .targets
+            .iter()
+            .map(|t| t.position)
+            .collect::<Vec<_>>()
+            != positions
+            || normal.state.targets.iter().any(|t| t.hp <= 0)
+        {
+            return Err("restart did not restore dummy formation".into());
+        }
         load.fuel(false);
         for i in 0..load.quantities.len() {
             load.change(i, -1);
@@ -571,7 +608,7 @@ pub fn validate_sources(
             return Err("empty loadout gained ammunition".into());
         }
         println!(
-            "{}: {alternatives} supported store/placement cases, edited fuel, empty stations and accepted-load restart passed",
+            "{}: {alternatives} supported store/placement cases, edited fuel, empty stations, normal weapons, 29 dummy models and restart passed",
             id.label()
         );
     }

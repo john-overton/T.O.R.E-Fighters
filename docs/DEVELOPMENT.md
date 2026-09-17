@@ -175,7 +175,7 @@ An editor with rust-analyzer is useful but optional. No global editor configurat
 
 ## Terrain development loop
 
-The main-menu Create Quick Mission action opens the original `QUIKMIS3.PIC` artwork with editable briefing fields and standard/custom weapons selection. The terrain inspection camera is now a CLI diagnostic. This supports an airborne patrol preview; AI and mission objectives remain open. Launch it with `--quick-mission`, or skip to the world with `--viewer`.
+The main-menu Create Quick Mission action opens the original `QUIKMIS3.PIC` artwork with editable briefing fields and standard/custom weapons selection. The terrain inspection camera is now a CLI diagnostic. This supports airborne missions with straight-flying practice aircraft; combat AI and mission objectives remain open. Launch it with `--quick-mission`, or skip to the world with `--viewer`.
 
 ```sh
 cargo run --locked -p tore-app -- --quick-mission --smoke-test
@@ -202,10 +202,11 @@ Quick Mission and Load Ordnance use a bundled, open-licensed Noto Sans Bold rast
 
 ## Hornet free flight
 
-Create Quick Mission supports F/A-18D and Rafale C airborne previews with accepted
-weapons, ammunition and fuel. Set all additional wings to zero, clear conditions
-and no ground targets/defenses. Select a custom load to open Load Ordnance; standard
-uses reviewed PT defaults. Direct `--free-flight` remains clean with full fuel.
+Create Quick Mission supports all imported aircraft with accepted weapons, ammunition
+and fuel, and up to 29 straight-flying dummies from the six wing selectors. Select
+no ground targets/defenses. Select a custom load to open Load Ordnance; standard
+uses reviewed PT defaults. Direct `--free-flight` loads supported default weapons
+with full fuel; restricted native research flight remains clean.
 Selected creator altitude is retained exactly or rejected for terrain clearance.
 
 ```sh
@@ -654,3 +655,11 @@ Heat codes are unknown, off, idle, dry and afterburner respectively. Distance is
 bounded to 1..1,000,000 feet. Version-4 tapes record these commands, full world
 velocity and bay permission. Use fresh tape paths because recording never
 overwrites an existing file. [Missile acceptance](baselines/missiles.md).
+
+For a rendered formation check, use `--dummy-aircraft f18,5 --dummy-aircraft rafale,5`
+with `--capture-flight .local/formation.ppm`. This repeatable diagnostic uses the
+same dummy creation/rendering as the creator, one mile ahead. It accepts a count
+without the creator's five-per-wing selector limit. Range, research and replay
+modes have their own fixtures and cannot be combined with this diagnostic.
+`--validate-creator` now also checks normal stores and 29-dummy reset/model geometry
+for each supported identity. Custom mission recording remains unavailable.

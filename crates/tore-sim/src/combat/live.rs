@@ -857,6 +857,31 @@ impl State {
     }
     /// An explicit, non-AI range target of the selected ported aircraft. No
     /// targets are inserted into ordinary free flight or fabricated on scopes.
+    /// Straight-flight mission fixture. No steering, sensors transmitting or AI.
+    pub fn add_dummy(&mut self, config: &Configuration, position: Vector, basis: Basis) {
+        let id = self.next_target_id;
+        self.next_target_id = id.checked_add(1).expect("target ID exhaustion");
+        self.targets.push(Target {
+            id,
+            position,
+            basis,
+            velocity: basis.forward.map(|v| v * 300.),
+            heat: Heat::Engine {
+                on: true,
+                throttle: 0.7,
+                afterburner: false,
+            },
+            radar_emitting: false,
+            configuration: sensors::Configuration::CLEAN,
+            signature: config.sensors.signature,
+            jammer: config.sensors.jammer.clone(),
+            jammer_active: false,
+            airborne: true,
+            radius: 28.,
+            hp: config.hit_points,
+            category: config.target_category,
+        });
+    }
     pub fn range_target(&mut self, launcher: Launcher) {
         let w = &self.config.stations[self.selected].weapon;
         let distance = if w.seeker.signature == 0 {
@@ -1767,6 +1792,30 @@ mod tests {
             alive: true,
             controls: sensors::Controls::default(),
         }
+    }
+    #[test]
+    fn mission_dummies_keep_distinct_identity_and_straight_velocity() {
+        let mut s = fixture(true);
+        let mut config = s.configuration().clone();
+        config.hit_points = 37;
+        let basis = Basis::new(0.3, 0., 0.);
+        for n in 0..29 {
+            s.add_dummy(&config, [n as f64 * 500., 5000., 6000.], basis);
+        }
+        let before = s.targets.clone();
+        observe(&mut s, launcher(), 120);
+        for (index, (a, b)) in before.iter().zip(&s.targets).enumerate() {
+            assert_eq!(b.id, index as u32 + 1);
+            assert_eq!(b.hp, 37);
+            assert_eq!(b.signature, config.sensors.signature);
+            assert_eq!(b.velocity, a.velocity);
+            assert!(!b.radar_emitting && !b.jammer_active);
+            for i in 0..3 {
+                assert!((b.position[i] - a.position[i] - a.velocity[i]).abs() < 1e-7);
+            }
+        }
+        s.range_target(launcher());
+        assert_eq!(s.targets[0].id, 30);
     }
     /// Selection needs a current observation, so the shared sensors must have
     /// produced contacts before a designation command is applied.

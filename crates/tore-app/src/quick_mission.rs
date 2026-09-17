@@ -163,6 +163,22 @@ impl QuickMission {
             .cloned()
             .unwrap_or_else(|| "Unavailable".into())
     }
+    pub fn dummy_wings(&self) -> Vec<(AircraftId, usize)> {
+        [4, 7, 10, 21, 24, 27]
+            .into_iter()
+            .filter_map(|field| {
+                let count = self.draft.values[field].saturating_sub(usize::from(field == 4));
+                let id = self
+                    .aircraft_files
+                    .get(self.draft.values[field + 2])
+                    .and_then(|name| AircraftId::parse(name).ok())?;
+                Some((id, count))
+            })
+            .collect()
+    }
+    pub fn separation_feet(&self) -> f64 {
+        [1., 2., 5., 10., 20., 50.][self.draft.values[17]] * 5280.
+    }
     pub fn unsupported(&self) -> Option<String> {
         if self.player().is_none() {
             return Some(
@@ -171,8 +187,18 @@ impl QuickMission {
             );
         }
         let v = &self.draft.values;
-        if v[4] != 1 || [7, 10, 21, 24, 27].iter().any(|i| v[*i] != 0) {
-            return Some("Additional aircraft are not available yet. Set friendly Wing 1 to one and all other wings to zero.".into());
+        for field in [4, 7, 10, 21, 24, 27] {
+            if v[field] > 0
+                && self
+                    .aircraft_files
+                    .get(v[field + 2])
+                    .and_then(|name| AircraftId::parse(name).ok())
+                    .is_none()
+            {
+                return Some(
+                    "Choose a supported imported aircraft for every populated wing.".into(),
+                );
+            }
         }
         if v[30] != 0 || v[31] != 0 || v[32] != 0 {
             return Some(
@@ -808,9 +834,25 @@ mod tests {
         assert_eq!(q.draft.values[20], 37);
     }
     #[test]
+    fn all_wings_launch_with_the_selected_identities() {
+        let mut q = setup();
+        for field in [4, 7, 10, 21, 24, 27] {
+            q.apply(field, 5);
+        }
+        q.apply(23, 1);
+        assert!(q.unsupported().is_none());
+        let wings = q.dummy_wings();
+        assert_eq!(wings.iter().map(|(_, n)| n).sum::<usize>(), 29);
+        assert_eq!(wings[0], (AircraftId::F18, 4));
+        assert_eq!(wings[3], (AircraftId::Rafale, 5));
+        q.apply(23, 2);
+        assert!(q.unsupported().unwrap().contains("populated wing"));
+    }
+    #[test]
     fn placeholders_cannot_silently_launch_as_a_supported_mission() {
         let mut q = setup();
-        assert!(q.unsupported().is_some());
+        assert!(q.unsupported().is_none());
+        assert_eq!(q.dummy_wings().iter().map(|(_, n)| n).sum::<usize>(), 2);
         q.apply(21, 0);
         assert!(q.unsupported().is_none());
         q.apply(6, 2);

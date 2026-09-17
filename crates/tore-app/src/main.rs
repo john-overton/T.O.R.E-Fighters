@@ -745,7 +745,7 @@ impl App {
                         }
                     }
                     o.visible = true;
-                    o.message=Some("Airborne patrol preview: no enemy AI or mission objectives yet. Review your load, then Fly.".into());
+                    o.message=Some("Straight-flight dummies use the selected wings and separation. No combat AI or objectives. Review your load, then Fly.".into());
                     Ok(())
                 })();
                 if let Err(e) = result {
@@ -786,7 +786,15 @@ impl App {
                 }
                 let fuel = load.fuel_lbs;
                 match combat::Combat::with_loadout(&self.hornet, &self.theater_resources, load) {
-                    Ok(c) => {
+                    Ok(mut c) => {
+                        if let Err(error) = c.mission_dummies(
+                            &self.quick.dummy_wings(),
+                            self.quick.separation_feet(),
+                            &self.theater_resources,
+                        ) {
+                            self.quick.ordnance.as_mut().unwrap().message = Some(error.to_string());
+                            return;
+                        }
                         self.combat = c;
                         self.mission = Some((altitude, fuel));
                         // Rebuild the world on the mission's own weather choice
@@ -1451,6 +1459,7 @@ impl ApplicationHandler for App {
                                 return;
                             }
                         }
+                        renderer.dummies(self.combat.dummy_geometry(&self.camera, &self.world));
                         renderer.combat(&self.combat.vertices(
                             &self.hornet,
                             &presented,
@@ -1769,6 +1778,7 @@ impl ApplicationHandler for App {
 fn main() -> AppResult<()> {
     let mut args = std::env::args().skip(1);
     let mut live_fire = false;
+    let mut dummy_aircraft = Vec::new();
     let mut jammer_on = false;
     let mut combat_smoke = false;
     let mut missile_acceptance = false;
@@ -1859,6 +1869,12 @@ fn main() -> AppResult<()> {
             "--jammer-on" => {
                 jammer_on = true;
                 live_fire = true;
+                initial_screen = Screen::Flight;
+            }
+            "--dummy-aircraft" => {
+                let value = args.next().ok_or("--dummy-aircraft needs ID,COUNT")?;
+                let (id, count) = value.split_once(',').ok_or("--dummy-aircraft needs ID,COUNT")?;
+                dummy_aircraft.push((tore_formats::aircraft::AircraftId::parse(id)?, count.parse::<usize>()?));
                 initial_screen = Screen::Flight;
             }
             "--live-fire" => {
@@ -2154,7 +2170,7 @@ fn main() -> AppResult<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Creator: --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-4 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Creator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-4 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -2167,6 +2183,16 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             }
             _ => return Err(format!("Unknown argument: {arg}").into()),
         }
+    }
+    if !dummy_aircraft.is_empty()
+        && (live_fire
+            || native_tables_path.is_some()
+            || record_input.is_some()
+            || replay_input.is_some()
+            || replay_combat.is_some()
+            || headless_ticks.is_some())
+    {
+        return Err("dummy aircraft require normal desktop flight; range/research/replay/headless-flight modes have separate fixtures".into());
     }
     let researched_flight = flight_mode_arg.unwrap_or(native_tables_path.is_none());
     let native_tables = if let Some(path) = native_tables_path {
@@ -2749,6 +2775,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             &theater_code,
         )?);
     }
+    combat.mission_dummies(&dummy_aircraft, 5280., &theater_resources)?;
     combat.reset(&mut flight)?;
     if let Some(value) = flight_bay {
         if !flight.bay_available() {

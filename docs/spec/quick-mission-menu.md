@@ -64,3 +64,28 @@ unknown. Further research would inspect the original dialog drawing data.
 
 The Aircraft menu label is vertically centered by visible glyph bounds within
 y=38..58, matching the [ordnance menu bar](ordnance-presentation.md).
+
+## Straight-flight mission fixtures
+
+Implementation mode, requested by John on 2026-09-17. Every populated wing now
+launches its selected supported aircraft. Friendly Wing 1 includes the player;
+its remaining aircraft and every aircraft in the other five wings are dummies.
+The source count choices remain 0 through 5 per wing, permitting 29 dummies.
+They fly straight and can be observed, designated and hit through shared combat
+and sensor rules. They never maneuver, shoot, transmit radar or operate a jammer.
+Nationality, skill and advantage do not control behavior or protect a dummy from
+selection. These are practice fixtures, not friendly/enemy combat AI.
+
+Agent-selected fitted placement: all dummies start at the player's altitude and
+heading, forward at the selected separation interpreted as statute miles
+(5,280 feet). The first is directly ahead. Successive pairs are 500 feet farther
+forward and 500 feet farther to either side per pair. Speed is 300 feet/second;
+engine heat uses 70% throttle without afterburner. Radius is 28 feet. Aircraft
+identity supplies original geometry, texture, radar signature and hit points.
+Straight paths can intersect terrain, using the existing collision rules.
+Restart restores the accepted formation, stores and fuel. No avoidance is added.
+
+Normal free flight loads the aircraft's supported PT-default weapons as requested
+by John on 2026-09-17. The range flag adds diagnostic fixtures; it is no longer
+needed for ammunition. The restricted native research adapter remains clean.
+Weapon compatibility, custom loads and the guns-only creator choice still apply.

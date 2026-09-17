@@ -24,11 +24,12 @@ the paged selector. Aircraft choices now follow the
 preserves the previous field. Theater selection maps all 16 source entries by
 identity and resets nationality/target dependencies. Friendly Wing 1 cannot be zero.
 
-Creator OK validates the supported airborne preview: a supported imported aircraft, one
-player aircraft, all other wings zero, no ground targets/defenses, and one of the
-six supported weather conditions.
+Creator OK validates supported imported aircraft in every populated wing, no
+ground targets/defenses, and one of the six supported weather conditions.
+All six wings launch straight-flight fixtures according to the
+[mission specification](../spec/quick-mission-menu.md#straight-flight-mission-fixtures).
 Selected 5,000/10,000/20,000/40,000-foot altitude is passed unchanged; insufficient
-local terrain clearance rejects launch. Nationality, skill, situation and separation
+local terrain clearance rejects launch. Separation sets starting distance. Nationality, skill and situation
 remain setup data with no AI/objective effects. BARCAP mission generation is not
 implemented; unsupported configurations are explained by launch notices.
 
@@ -45,7 +46,8 @@ it is not acceptance of retail mission-specific standard-load assignment.
 Fly validates supported weapon identity, compatibility, ammunition, fuel and mass.
 Accepted stores feed combat, geometry, instruments and flight payload without a
 practice target. Restart restores accepted ammunition, fuel and selected altitude.
-Direct CLI clean free flight and the explicit live-fire range remain available.
+Direct free flight now carries supported default stores. The explicit live-fire
+range remains available; native research flight retains its clean restriction.
 
 Current visual validation is recorded in the
 [ordnance presentation pass](ordnance-presentation.md).
@@ -89,9 +91,26 @@ screen/mission behavior is not claimed. Open: dynamic aircraft era/eligibility
 filters, auxiliary/tank editing, year/stock/airbase/cheat lifecycle, complete native
 mass/drag/visual pairing, dial states and hold-repeat timing, sentence wrapping,
 popup art/geometry/gesture comparison against original execution, custom replay,
-AI/targets/defenses/objectives and other weather/start behavior.
+combat AI/ground targets/defenses/objectives and other weather/start behavior.
 
 Human testing should cover custom → edit → Select Plane → OK → Fly → restart →
 return for each aircraft, full catalog browsing and resize/pointer alignment. Reject
 unsupported setups explicitly; do not interpret editable setup options as implemented
 mission systems. Full plans remain open at those acceptance gates.
+
+## Straight-flight fixture validation, 2026-09-17
+
+Implementation mode. Synthetic tests exercise all six populated wings, exact
+selected identities, invalid populated-wing rejection and 29 distinct straight
+trajectories over 120 ticks. The imported `--validate-creator` pass succeeds for
+all twelve aircraft: normal default ammunition, reset after depletion, 29 dummy
+geometries using the selected model, restoration after damage and movement, and
+existing custom/empty loadout checks. Local log:
+`.local/creator-dummies-validation.log`. Placement and heat remain fitted, and no
+retail execution comparison or aircraft combat AI is claimed.
+
+A mixed 15-aircraft formation (F/A-18D, Rafale C and F-22A) rendered successfully
+on NVIDIA RTX 4070/Vulkan. The captured cockpit and radar scope were inspected
+in `.local/formation.png`; the shared scope displayed the formation contacts.
+App/simulation tests passed (106/178), as did warnings-denied Clippy and the
+144-file documentation header check for this stage.

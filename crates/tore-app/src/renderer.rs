@@ -141,6 +141,9 @@ impl Renderer {
             self.sim.hide_aircraft();
         }
     }
+    pub fn dummies(&mut self, geometry: Vec<(&crate::aircraft::Airframe, Vec<f32>)>) {
+        self.sim.dummies(&self.device, &self.queue, geometry);
+    }
     pub fn combat(&mut self, vertices: &[f32]) {
         self.sim.combat(&self.device, &self.queue, vertices);
     }
