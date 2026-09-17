@@ -138,3 +138,42 @@ radar signature. This corrects a possible overreading of the ignored reference
 notes saying the RCS drawing is not the detection calculation: the drawing is
 not a calibrated range boundary, but its attitude/configuration helper also
 feeds detection. The spec separates the two outputs explicitly.
+
+## USNF history and IR functional reference
+
+Read ignored `USNF-ATF/Docs/reference/JANES_US_NAVY_FIGHTERS_djvu.txt`, the local
+Internet Archive OCR transcript, SHA-256
+`cbb832fde3e80005a60acb454f74d4f15b9ac9db94ede1200db0b51025eb1dd7`.
+Its [original source](https://archive.org/download/JANES_US_NAVY_FIGHTERS/JANES_US_NAVY_FIGHTERS_djvu.txt)
+is identified by the accompanying reference README. The transcript has 197,638
+bytes; it is an older-title manual, not the identity of the installed FA build.
+No reference engine or other-title aircraft values were imported.
+
+Lines 2066..2073 describe historical mode: Y or its scope button shows past
+contact positions as dots. Lines 2041..2044 separately describe the TWS heading
+tail and designation bars. The text supplies no interval, capacity, lifetime,
+fade, gap or toggle-retention contract. The guide's eight samples at half-second
+intervals are an agent choice, not recovered timing.
+
+Lines 2078..2099 describe IR equipment and selection by I or the M button, and
+return to radar using R. Lines 3652..3675 describe passive heat sensing and
+cloud/fog limitations. These establish useful functional expectations, not the
+FA roster's installed sensors or the new model's weather attenuation. Current
+FA PT/SEE records supply that roster independently.
+
+Lines 3872..3923 describe semi-active dependence on launcher lock, active radar
+fire-and-forget after launch, and IR seeker lock without radar support. No active
+activation distance or timing is supplied. Current Rust snapshots designation
+into each projectile at launch (`crates/tore-sim/src/combat/live.rs`), and its
+weapon-specific tracking gate distinguishes continued radar dependency. See
+[the reviewed weapon evidence](../baselines/manual-weapons.md) for R530 versus
+AIM120/MICA; this is not a new audit of every weapon. The new component must
+preserve independent target ownership and make required illumination specific
+to the missile's assigned target, rather than merely checking radar power.
+
+Current Rust audit: target HP gates movement, radar/visual observation, scope
+readout and designation; weapon readiness separately rejects destroyed targets.
+The new requested lifecycle must split those responsibilities. John's report
+that retail hides dead contacts is recorded as user-provided behaviour, not a
+newly verified executable finding. The single-track requirement is likewise a
+product constraint; this pass does not claim to survey every Jane's title.

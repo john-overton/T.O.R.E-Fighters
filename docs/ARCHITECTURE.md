@@ -162,7 +162,8 @@ in a depth-only pass, then blended at 75% opacity over the opaque scene.
 ## Proposed shared radar boundary
 
 The [radar component proposal](radar.md) separates imported capability profiles,
-simulation-owned contacts/tracking, player designation, scope presentation and
-weapon support. This is planned, not implemented. Existing live combat still
+simulation-owned observations, one shared radar/IR fire-control track, persistent
+player selection, bounded history, scope presentation and weapon support.
+Physical airborne presence is separate from destroyed combat state. This is planned, not implemented. Existing live combat still
 owns radar detection; the next slice consolidates that result for both the scope
 and missiles without changing the flight adapters or renderer independence.

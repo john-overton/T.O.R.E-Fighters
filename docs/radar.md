@@ -12,7 +12,12 @@ Research and design proposal, 2026-09-16. John requested an aircraft capability
 survey and a standard component plan. John then proposed using PT radar/IR
 signatures with our own look-down, era, notch and jamming behaviour on 2026-09-16.
 John also requested era-dependent jammer effectiveness, directional scope
-noise based on jammer location/distance, and the orientation-sensitive RCS panel. That authored-model direction is requested;
+noise based on jammer location/distance, and the orientation-sensitive RCS panel.
+John's subsequent scope clarification keeps TWS/RWS and IR air-to-air, includes
+history and persistent clicked selection, retains detectable destroyed aircraft,
+and leaves gamified IFF in the target view. John also specified single-target
+tracking only, not multi-track. Air-to-ground awaits ground weapons
+and object systems. These directions are requested;
 the formulas, constants and preset
 assignments below are agent proposals, not values requested by John. No radar
 gameplay changes are implemented by this document. The [retail behaviour spec](spec/radar.md) owns
@@ -23,24 +28,27 @@ all recovered numbers; [source notes](formats/radar.md) own their evidence.
 Status: **proposed, awaiting review before implementation**. Deliver one common
 radar implementation serving all twelve imported aircraft, with data-driven
 profiles and an authored detection model. First release covers air targets,
-ownship radar, self-protection RF jamming, mouse designation and radar-guided
-missile support in the existing manual combat environment. It creates no AI,
+ownship radar and installed IR air-to-air sensors, contact history, self-protection
+RF jamming, persistent mouse selection and radar-guided missile support in the existing manual combat environment. It creates no AI,
 new missions or autonomous target selection.
 
 | Review item | Proposed first release |
 | --- | --- |
 | Retail inputs | Exact PT equipment and target signatures; SEE range/angles; ECM capability/statistics |
 | Our detection rules | Square-root signature scaling, geometric look-down, radar/jammer generation matchups, notch and directional interference |
-| Controls | Retail range ladder and automatic RWS/TWS; green mouse selector, stable-ID selection and bearing-only jammer noise |
-| Track timing | 0.5-second acquisition; immediate support loss; 1-second visibly stale plot |
-| Missile support | One designated target for own-radar illumination; active missiles retain their own target |
+| Controls | Automatic RWS/TWS, installed IR air-to-air, Y history, green selector, persistent clicked selection and bearing-only jammer noise |
+| Track timing | Immediate selection; 0.5-second weapon-track acquisition; selection clears on observation loss; 1-second unselected stale plot |
+| Tracking limit | One selected target and at most one acquired fire-control track across radar and IR; other returns are search observations |
+| Missile support | One target for launcher illumination; fire-and-forget radar/IR missiles retain separate launch targets |
 | Aircraft differences | Profile parameters, never separate aircraft-specific radar code |
 | RCS panel | Shared observer-relative aircraft signature, exposure contour and passive emitter symbols |
-| Deferred | New IR/HARM/ground modes, IFF, history trails, scan animation, false contacts, escort jamming and detailed IR/engine modelling |
+| Contact lifetime | Destroyed aircraft remain detectable while an airborne physical object remains; HP zero does not erase a return |
+| Identification | Existing gamified target-view IFF stays; no separate radar IFF system |
+| Deferred | A-G, HARM, ground-weapon/object systems, scan animation, false contacts, escort jamming and detailed IR/engine modelling |
 
 The complete [aircraft capability/signature tables](spec/radar.md) are the data
 review. The numerical rules below are the tuning review. The presets, square-root
-curve and immediate guidance loss are deliberate agent proposals and may be
+curve and immediate launcher-support loss are deliberate agent proposals and may be
 changed independently before implementation. In particular, the proposed curve
 makes signature-10 targets detectable at about one third of nominal range.
 
@@ -69,7 +77,7 @@ for later aircraft. Do not default an unknown plane to F18R.
 | Part | Owns | Does not decide |
 | --- | --- | --- |
 | Imported profile | Source identity, search and track volumes, look-down coefficient, authored notch/ECCM preset, component provenance | Selected target or screen pixels |
-| Radar live state | Power/failure, contacts, tracking status and loss reasons | Weapon ammunition or missile flight |
+| Radar live state | Power/failure, search observations, the single fire-control track and loss reasons | Weapon ammunition or missile flight |
 | Player sensor controls | Selected channel, display range, designation request, history preference | Hidden targets or detection probability |
 | Scope presentation | Projection, original glyphs, selector and contact picking | Whether a radar lock exists |
 | Weapon system | Seeker compatibility, launch envelope, required radar support, missile lifecycle | A duplicate radar detection test |
@@ -117,10 +125,9 @@ F/A-18D, 63.6 for Rafale C and 28.5 for F-22A. Its 50-mile tracking volume gives
 retail measurements or real-aircraft detection claims. A-4E's 120 signature hits
 the nominal cap in clear conditions but provides more margin under interference.
 
-IR sensors and IR missile seekers use the target's separate IR signature.
-Do not run radar notch or RF jammer modifiers on that channel. The initial IR
-range law and engine/aspect modifiers are a separate policy to tune, not a reason
-to overwrite the radar signature or assign modern avionics to an aircraft.
+IR uses the target's separate IR signature and installed signature-2 SEE device.
+The initial IR policy is specified below. Never apply radar RCS/aspect, Doppler
+notch or RF jammer factors to the IR channel.
 
 ### Look-down and equipment generations
 
@@ -285,24 +292,166 @@ projection only; it must not change interference strength or reveal jammer range
 The key player experience is a noisy direction, unreliable contacts there,
 cleaner sectors elsewhere, and targets returning as ownship burns through.
 
-### Timing and track stability
+### Selection, weapon tracking and contact loss
 
-Proposed fitted host cadence remains the fixed 120 Hz simulation. Coverage is
-computed independently of rendering. Proposed opinionated acquisition requires
-0.5 seconds (60 consecutive valid steps); losing coverage removes firing and
-illumination permission immediately, but retains the identified contact as a
-coasting plot for 1 second (120 steps). Coasting is visibly distinct and supplies
-no valid missile support. Regaining coverage requires acquisition again. Initial
-identity display may appear before the track is weapon-ready.
+**Single-track only**, requested by John. Maintain one optional selected ID, one
+acquisition timer and one optional acquired fire-control track across radar and
+IR together. A list of search contacts and stored observations is not a list of
+weapon tracks. No background acquisition, track queue, simultaneous radar/IR
+locks, automatic promotion or multi-target firing solution. TWS continues showing
+other search returns while only the selected target can acquire tracking.
 
-These are common starting constants, not era bonuses or retail timings. The
-acquisition clock starts on designation and requires valid TWS tracking coverage;
-other search contacts do not silently acquire weapon lock. Zero-ammunition and
-master-arm-safe states do not erase a valid radar track. Radar shutdown or failure
-removes its live contacts and support immediately; stale plots remain explicitly
-non-selectable. No random per-frame detection rolls are proposed. Track quality can later become a
-continuous signal if the first tuning pass needs it; the profile/state interface
-does not depend on that change. Contact histories remain presentation data.
+Selecting B while A is selected immediately replaces the selection, releases
+A's acquired track/illumination and resets the timer for B. Re-clicking the same
+current target does not reset acquisition. Switching radar/IR preserves a still
+observed selected ID but releases the old channel's fire-control track and starts
+new acquisition; the inactive channel cannot retain a second track. Entering RWS
+releases the track and pauses acquisition, while a current selected return stays
+selected. Returning to TWS starts a new acquisition timer.
+
+Single-track limits the aircraft's fire-control support, not the number of
+missiles in flight or their assigned targets. John explicitly requests preserving
+fire-and-forget versus continuous-lock guidance. With a valid firing solution,
+select A, fire an independently guided missile, select B, acquire a valid firing
+solution and fire another. The first missile retains A and the second retains B.
+Each launch snapshots its own target ID; cockpit selection changes never redirect
+an earlier shot. Multiple missiles may also share the same target.
+
+Preserve each weapon's existing guidance requirements. Fire-and-forget radar and
+IR weapons continue using their own target and seeker rules after cockpit lock
+or radar power is lost. A weapon requiring continuous launcher illumination loses
+support when the aircraft switches targets or otherwise breaks the required lock.
+Its existing loss/reacquisition rules decide the outcome; loss of support does
+not itself authorize a fabricated instant destruction rule. IR seekers do not
+add another cockpit track. Do not introduce a mandatory mid-course support phase
+or an activation distance for all active weapons: exact activation behaviour
+remains unresolved, and this pass preserves the existing weapon model. No
+multi-track aircraft support is implied by the TWS name.
+
+John's requested click behaviour takes precedence over the retail target-cycle
+restriction: clicking a current contact selects its stable target ID immediately,
+including a search-only RWS contact. Selection persists without holding the
+mouse, re-clicking or periodically re-designating. Empty clicks leave it alone;
+explicit clear or clicking another current contact changes it. Selection supplies
+the existing target view and its gamified identification. It is not a weapon lock.
+
+Clear selection when the active sensor no longer has a current observation:
+notch, look-down, jamming, terrain masking, range/angle exit, power/failure, crash
+ending airborne existence, or removal. Loss of weapon tracking alone does not
+clear a still-observed search contact. A missile-envelope failure also does not
+clear selection. Reappearance creates an unselected contact; there is no hidden
+sticky ID or automatic reacquisition of a lost selection.
+
+A display zoom that moves a still-observed contact outside the plotted range does
+not itself lose the sensor observation or selection. RWS/TWS changes preserve
+selection while the underlying return remains current; RWS removes radar weapon
+support. Channel switching preserves the ID only when the new channel has a
+current observation of it. These distinctions are agent interpretations of the
+requested persistence, documented explicitly for review.
+
+Proposed fitted host cadence stays at fixed 120 Hz. Selection appears immediately;
+opinionated weapon-track acquisition takes 0.5 seconds (60 consecutive valid
+steps) in TWS or the selected IR tracking volume. Radar support and IR tracking
+remain separate. RWS never provides radar weapon lock, even for a selected target.
+Master-arm-safe and zero-ammunition states do not erase a sensor track.
+
+Loss of current observation clears selection and weapon support immediately.
+Keep its final observation as an unselected coasting symbol for 1 second (120
+steps), with no predicted motion or updated position. It is visibly stale and
+non-selectable. After it expires, only enabled history samples may remain until
+their independent age limit; they do not preserve an active track or target view.
+A new current observation after a gap requires a fresh click and track acquisition.
+No random per-render-frame rolls or autonomous target selection are introduced.
+
+### History trails, based on the USNF manual
+
+The USNF manual's historical mode draws a sequence of past contact positions,
+enabled with Y or the scope Y button. It does not provide timing or capacity;
+[source evidence](formats/radar.md#usnf-history-and-ir-functional-reference)
+keeps that limit explicit. Reproduce that function, using these agent-proposed
+values in TWS, RWS and IR air-to-air:
+
+- Default history off. Y and the Y button toggle the same preference.
+- Record one actual sensor observation every 0.5 seconds (60 simulation steps),
+  at most 8 past observations per target per channel, with maximum age 4 seconds.
+  Store simulation timestamp and observed world position, not old screen pixels.
+- Draw small progressively dimmer dots, separate from the current contact symbol
+  and heading tail. Reproject samples through the current scope transform when
+  ownship moves or the range/layout changes. Do not connect across missing samples.
+- No extrapolation, no points after loss, no target identity inferred from trails,
+  no selecting or firing at historical dots. The current return is always distinct.
+- Collect history while its display is off, so enabling it shows the recent
+  observations immediately. Inactive channels collect no new samples. Switching
+  channels does not fuse their observations; RWS/TWS share the radar channel.
+- Age samples using simulation time, freeze while paused and clear on mission
+  restart or aircraft change. Retain bounded history for lost or destroyed contacts
+  until its normal expiration; never fabricate a trail for an undetected object.
+
+Presentation timing is independent of rendering and independent of the 1-second
+stale contact marker. Contact samples from different channels remain separate even
+when they refer to the same physical ID.
+
+### Infrared air-to-air mode
+
+First release supports only aircraft with installed IR sensors listed in the
+[retail equipment table](spec/radar.md#other-installed-sensor-channels). Carrying
+an IR missile does not grant the aircraft a full IRST scope. An absent/failed
+IR sensor is unavailable rather than borrowed from another aircraft.
+
+Proposed initial IR effective range is
+`min(nominal_IR_range, nominal_IR_range * sqrt(PT_IR_signature / 100))`.
+Apply its own SEE search/track angles and ranges plus terrain visibility.
+No RF jammer/noise, radar notch, look-down coefficient or RCS aspect factors
+apply to this channel. Use base PT IR signature initially; engine/throttle heat,
+rear-aspect bonuses, weather attenuation and post-destruction cooling remain
+explicit fitted limitations, not invented retail capability. IR operation is
+passive and does not emit radar energy or confer radar missile illumination.
+
+For sensors with search 9/track 10 nmi, new contacts require the search envelope.
+An already selected acquired IR track can stay current within its own tracking
+envelope, even just outside search coverage. It cannot acquire an unseen target
+at 10 miles. Current retained tracks may be selected/displayed as observations;
+the wider track range does not grant hidden world-object access.
+
+I requests IR and turns off radar emission. R returns to active radar using its
+existing power action; selecting IR again after powering radar down still works.
+The on-screen M button cycles only available radar/IR channels in this release;
+radar channel RWS/TWS remains automatic by display range. Keep the recovered
+range ladder for scope zoom in both channels; selecting a larger scale does not
+extend the IR device's physical coverage. Label IR clearly and clear RF noise
+from that page. If no IR is available, M or I reports unavailable and preserves radar
+state. Exact default-key migration is covered in delivery below.
+
+IR selection drives the same target view and existing IR seeker launch checks.
+It never bypasses a missile's own seeker envelope, ammunition, arming or radar
+requirement. Existing radar-emission and missile lifecycle rules remain independent
+of merely having an IR-selected target. Preserve the target view's gamified IFF;
+no interrogation simulation or new radar-scope friend/foe classification is added.
+
+### Destroyed aircraft remain sensor objects
+
+John requested keeping dead opponents visible, an intentional departure from his
+reported retail behaviour. Treat combat viability, physical existence and sensor
+observation as separate states. HP reaching zero must not delete a radar/IR
+return, selection, or its history while the aircraft is still airborne and the
+active sensor can observe it. It may still be clicked as a current contact.
+Identification and known damage status stay in the target view, not an omniscient
+DEAD label automatically applied to every scope return.
+
+Disable destroyed-aircraft combat actions and keep damage/kill accounting final.
+Preserve the existing weapon rejection of destroyed targets where applicable;
+that rejection must not erase the observation. Existing missile retirement rules
+are not implicitly changed into wreck engagement. Emissions cease when the
+relevant equipment is destroyed or powered off, independently of passive radar
+reflection or the fitted IR signature. A radar return is not proof of radiation.
+
+Audit current HP-based movement, visibility, designation and target-view filters.
+Retain a physical airborne remnant until impact/removal, using existing remnant
+motion where available. If absent, add only the minimal fitted ballistic fall to
+impact, not new AI or a full breakup simulation. A grounded wreck ends the active
+A2A observation/selection; its existing trail can age out normally. This does not
+remove the wreck from the world or implement A2G acquisition. Detailed wreck,
+debris, fire and cooling behaviour belongs with future object-system work.
 
 ## RCS instrument and shared aspect model
 
@@ -332,7 +481,7 @@ same bank bonus. This ties exposure to what that observer can see rather than
 making every turn globally increase signature. At 180-degree roll the clean
 level-side factor returns to 2x. Apply this to targets as well as ownship.
 The existing square-root detection law and jammer return comparison both use
-this same effective signature. IR signature remains a separate policy.
+this same effective signature. IR uses its own base-signature policy above.
 
 Proposed contour: sample this function around ownship at 5-degree bearing steps
 against a documented, level reference radar. Use 25 nmi nominal search range,
@@ -405,15 +554,15 @@ Weapons consult that result for launch and, only when their guidance requires
 it, during flight. Retargeting the cockpit must not silently retarget every
 missile already in flight. No target selection is automated.
 
-Ordinary RWS cannot create a new own-radar designation, as recovered. Keeping an
-existing selection as information is distinct from continuing weapon support.
-Agent-proposed first support policy: radar-off, failure, masking, loss of tracking
-coverage, switching designation or switching display to RWS immediately ends
-own-radar illumination. A retained selection or coasting plot cannot preserve it.
-These support transitions are opinionated where retail evidence is unresolved;
-test each explicitly. A missile already using its own active seeker is not
-retargeted or disabled by these cockpit actions. Active
-seeker activation and missile flight tuning remain weapon-owned work.
+A clicked RWS contact stays selected for information but provides no radar weapon
+lock. The player-requested persistent selection deliberately differs from retail
+RWS acquisition. Changing to RWS ends radar illumination while preserving a
+current observation/selection. Switching designation, losing tracking coverage,
+power loss, failure or masking ends illumination. Selection is cleared only under
+the observation-loss rules above. A selected but untracked or stale target cannot
+preserve radar support. These transitions are opinionated where retail evidence
+is unresolved. An already active missile retains its own target and seeker state;
+active-seeker activation and flight tuning remain weapon-owned work.
 
 ## Porting an aircraft
 
@@ -435,26 +584,34 @@ ends with a reviewable result. Begin only after review of this plan.
 
 | Stage | Work | Reviewable exit |
 | --- | --- | --- |
-| 1. Profiles | Expose PT signatures; normalize radar/ECM inputs; review nine radar presets and every unique jammer generation/band assignment | All twelve aircraft produce the expected capability summary; no missing sensor silently becomes F18R |
-| 2. Shared simulation | Add detection/aspect factors, explicit passive emitters and shared contact/designation/track state at fixed 120 Hz | Numeric boundary tests and deterministic headless contact traces pass; no renderer or frame rate affects results |
-| 3. Player scope | Use shared contacts/interference; correct range modes; add directional noise, selector, RCS contour/passive symbols and clear track status | Mouse picks the intended target in both layouts and after resize; RWS cannot acquire; scope scale and hit testing agree |
+| 1. Profiles | Expose PT radar/IR signatures, installed radar/IR channels and ECM inputs; review radar and jammer tuning | All twelve aircraft produce the expected capability summary; no missing sensor silently becomes F18R |
+| 2. Shared simulation | Add radar/IR detection, aspect factors, passive emitters, bounded history and persistent selection; separate death from physical contact lifetime | Numeric boundary tests and deterministic headless contact traces pass; no renderer or frame rate affects results |
+| 3. Player scope | Use shared contacts/interference; correct range modes; add IR air-to-air, Y history, directional noise, persistent selection, RCS contour and clear track status | Mouse picks the intended target in both layouts and after resize; RWS selection cannot supply weapon lock; history cannot be clicked; target-view IFF stays unchanged |
 | 4. Weapon integration | Replace duplicated radar checks with shared support status; preserve weapon-specific launch envelopes and active/semi-active distinctions | Correct target receives launch; each support-loss case passes; recording/replay reproduces selected target and engagement |
 | 5. Aircraft tuning pass | Exercise synthetic same-target scenarios for each radar preset and local imported profile; run workspace and rendered checks | Side-by-side capability results and captures reviewed, known approximations recorded, guides updated |
 
 Stage 3 includes migrating saved scope ranges by their old nautical-mile value
 to the nearest new range, with equal-distance ties choosing the lower setting.
 Do not reinterpret an old index as a different range. New profiles default to the
-recovered 10-mile display. Stop M from cosmetically cycling unsupported modes;
-retain original button art and give unavailable controls clear feedback until
-sensor switching/history have functioning handlers. No new IR/HARM/Y behaviour
-is claimed in this release. Keyboard target cycling and mouse designation must
-apply the same eligibility rules.
+recovered 10-mile display. Wire M to available radar/IR channels and Y to history;
+no HARM or A-G page is enabled by this change. Keyboard cycling and mouse clicks
+use the same current-observation eligibility, including selectable RWS contacts.
+
+The current defaults use Y for the target-jammer fixture and I for an incoming
+weapon fixture. Agent-proposed migration: Y becomes history, I becomes IR, and
+those two development commands move to Shift-Y and Shift-I. Keep their named
+actions, CLI commands and replay commands; preserve user-customized bindings.
+Add named history/channel actions to the controls editor and report conflicts
+rather than overwriting a custom profile. O's existing radar-mode action becomes
+the available sensor-channel cycle rather than cosmetic RWS/TWS toggling. Record
+all default changes in INPUT.md and FLIGHT-CONTROLS.md when implemented.
 
 Stage 4 must explicitly define each currently supported radar weapon's
 requirements from existing reviewed weapon configuration. Do not silently give
 all active missiles a new terminal activation range; preserve the current
 supported active/semi-active lifecycle and report its approximation. Capture
-radar range/power/designation changes and target jammer inputs in deterministic
+radar/IR channel, range/power/selection changes, physical contact lifetime and
+target jammer inputs in deterministic
 replay, versioning its format when needed and preserving existing supported tapes.
 
 ### Acceptance cases
@@ -482,15 +639,38 @@ Use source-free synthetic fixtures for the automated cases:
   remain readable, and cosmetic randomness cannot alter detection or replay.
 - Modes: Hornet 50 TWS/100 RWS, A-4E 25 TWS/50 RWS, MiG-29 25 TWS/50 RWS;
   switching display range does not modify physical coverage values.
-- Track lifecycle: valid designation acquires on step 60, never on step 59;
-  an invalid step resets acquisition. Lost coverage prevents firing immediately.
-  A stale plot lasts at most 120 steps and is never selectable or usable as lock.
+- Selection/track lifecycle: a current RWS/TWS/IR click selects immediately and
+  persists without repeat input. TWS/IR weapon tracking acquires on step 60, not
+  59. Search-only selection never implies radar lock. Loss clears selection and
+  firing permission immediately; reappearance stays unselected. A stale plot is
+  unselected/non-selectable for at most 120 steps. Empty clicks and display zoom
+  alone do not clear a still-observed target.
+- Single-track limit: select A then B, re-click B, switch TWS/RWS/IR and remove
+  the selected object. There are always zero or one acquired aircraft tracks;
+  non-selected contacts never acquire, old illumination is released immediately,
+  and no destroyed/lost target causes automatic selection of another contact.
+- History: sample every 60 ticks, retain at most 8 per target/channel, expire at
+  480 ticks; no samples after loss or through gaps. Pause, resize, turn, channel
+  change, toggle and restart preserve the specified sample/age behaviour. Trail
+  dots cannot produce selection, identity or launch permission.
+- IR: unavailable without installed signature-2 SEE; passive mode disables radar
+  emissions, uses PT IR values and source zones, ignores RF jammer/notch effects,
+  and supports retained 9/10-nmi search/track cases without acquiring unseen targets.
+- Destroyed contacts: HP zero alone does not remove an airborne observable
+  contact or selection. Radar failure can silence emissions without hiding its
+  reflection. Crash/removal ends A2A selection; no double kill/damage credit or
+  new A2G acquisition is introduced. Existing target-view IFF remains unchanged.
 - UI: two adjacent contacts, equal-distance tie, stale target between press and
   release, resize, both layouts, focus loss, empty click and no-radar aircraft.
 - Weapons: failed launch consumes no ammo; launch uses the designated ID; radar
   off/failure, masking, out-of-track coverage, RWS and changed designation remove
-  illumination. An already active missile keeps its own target. Lost/stale
-  cockpit tracks cannot create a new guided launch.
+  illumination. Launch an independent missile at A, then acquire B and launch
+  another: their stored target IDs and pursuit remain A and B respectively, with
+  only one cockpit track. Repeat with IR guidance. For a continuous-lock weapon,
+  switching to B removes support for A and invokes its existing guidance-loss
+  rules; unrelated designation must never count as illumination of A. Radar-off
+  cases preserve independent guidance while removing required launcher support.
+  Lost/stale cockpit tracks cannot create a new guided launch.
 - Replay: the same inputs produce the same contacts, designation, lock transitions
   and shots under different rendering rates, with no retail fixtures committed.
 

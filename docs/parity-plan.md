@@ -84,8 +84,10 @@ research path. Do not change the default without being asked.
 1. **Shared aircraft radar**, requested by John on 2026-09-16. Use the
    [capability spec](spec/radar.md) and [component proposal](radar.md): shared
    profiles/contact state with PT signatures and authored look-down/notch/jamming,
-   the RCS/aspect display, mouse designation, then radar-guided missile support. Initial research and
-   proposed tuning are recorded; implementation is pending. No AI work.
+   the RCS/aspect display, persistent click selection, Y history and infrared A2A.
+   One fire-control track only; detectable destroyed aircraft stay visible. Keep
+   target-view IFF; A2G is deferred. Research and tuning are documented;
+   implementation is pending. No AI work.
 2. **Continue behaviour specs.** Start with the features that already have
    the most recovered numbers and the least prose: weather, then flight
    envelope/departure, then the quick-mission and ordnance screens. Each spec

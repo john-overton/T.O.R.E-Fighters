@@ -88,3 +88,29 @@ reference checkout's prior oracle results are not presented as this pass's tests
 aspect weights, configuration multipliers and reference contour are proposed
 agent tuning, not retail results. Full glyph-state/contact eligibility and original
 RCS zoom steps remain unresolved. No renderer or simulation code changed.
+
+## History, selection and A2A scope review
+
+Re-read the local USNF manual's historical-mode, contact-symbol, IR and missile
+guidance sections;
+recomputed the transcript hash recorded in the source notes. No history timing
+was found in those passages. Audited current scope/control and live-combat code
+for Y/I action conflicts and HP-based contact suppression. This is read-only
+research, not implementation or live validation of the requested new behaviour.
+
+The plan now includes Y history and IR A2A, persistent current-contact selection,
+retained detectable destroyed aircraft and a single shared fire-control track.
+These directions are John's; the trail length/cadence, IR initial range law,
+key migration and detailed loss transitions remain labelled agent proposals.
+Reviewed the current per-projectile launch target snapshot and weapon-specific
+radar-dependency gate. John's clarification preserves independent missile targets
+for sequential fire-and-forget shots while continuous-lock weapons still require
+support for their own target. Acceptance cases are planned, not implemented.
+Existing target-view IFF stays gamified. A2G/HARM and detailed ground/remnant
+systems are deferred. No new code was implemented or committed in this review.
+
+All nine required repository checks passed again after this scope review:
+formatting, Clippy, Rust tests/build with --locked, Python tests, three asset
+scans and documentation headers. No rendering smoke test was run because this
+change only updates research and planning documents. These checks do not validate
+the proposed new radar behaviour or establish retail parity.

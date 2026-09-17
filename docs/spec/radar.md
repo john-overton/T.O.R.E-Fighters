@@ -151,6 +151,26 @@ track for these sensors needs its own consumer review. All twelve aircraft also
 carry visual sensors. HARM capability belongs to the selected weapon/equipment,
 not a fabricated infrared/radar capability on every aircraft.
 
+## USNF history and infrared reference
+
+The locally retained USNF manual describes Y, or the scope Y button, enabling a
+trail of dots showing prior contact movement. It separately describes a heading
+tail on a TWS contact; that is not the history trail. No trail count, sample
+interval, persistence or fade schedule is specified in the inspected text.
+
+The same manual describes passive IR selection through I or the on-screen M
+button, with R returning to active radar. IR uses heat signatures and has shorter
+coverage and weather limitations. This is USNF evidence, not proof of FA's exact
+bindings, timings or aircraft equipment. The FA equipment table above remains
+authoritative for installed devices. [Source location and identity](../formats/radar.md#usnf-history-and-ir-functional-reference).
+
+John's requested authored scope includes histories, persistent click selection,
+detectable destroyed aircraft, single-target tracking and IR air-to-air. Those
+rules and proposed timings live in the [component plan](../radar.md). The retail
+RWS acquisition restriction above remains a research fact, not a reason to reject
+his requested click selection. RWS selection does not supply a fire-control lock.
+The target view keeps gamified IFF; realistic IFF and A2G are outside this pass.
+
 ## Weapon coupling and remaining evidence
 
 Reviewed PROJLock evidence distinguishes launch radar requirements from continued
@@ -158,9 +178,19 @@ illumination under weapon flag 0x200. A designation is not by itself permission
 to fire, and active radar missiles must not all be treated as semi-active.
 [Manual weapons](../baselines/manual-weapons.md) documents the current evidence.
 
+The USNF manual describes active radar weapons as receiving a target at launch
+and permitting the aircraft to break lock after firing. It describes IR weapons
+as needing their own seeker lock at launch, without aircraft radar support, and
+semi-active weapons as depending on continued launcher lock. This is a manual
+functional reference, not proof of FA activation distances or every weapon's
+classification. The requested plan preserves those per-weapon distinctions:
+one aircraft track can support sequential launches at different targets when the
+weapons guide independently. Each missile retains its own launch target.
+
 Missing facts: exact mouse hit rules, history cadence, lock/loss timers, maintained
 support after changing display mode or designation, active-seeker activation,
-supplemental radar, IFF and detailed ground-target filtering. Next research should
+and supplemental radar. Detailed ground-target filtering is deferred with A2G;
+IFF remains the existing gamified target view. Next research should
 inspect only the handlers needed for the next player interaction, then add its
 observable rules here. Do not hold basic radar profiles or shared contact state
 behind complete byte-level closure. No AI work is included.
