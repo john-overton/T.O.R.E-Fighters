@@ -1,4 +1,4 @@
-# Feature evidence and authored additions
+# Feature matrix
 
 > **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
 > The thing being reverse engineered is the *experience*, not the executable. We
@@ -8,49 +8,81 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-This matrix separates what evidence supports from what we deliberately add or
-approximate. **Origin and completion are separate.** A retail record establishes
-its values, not every rule using them. A manual describes intended behavior, not
-a verified match to our imported executable. No retail comparison is claimed.
+Selected player-facing features, grouped by area. This is not a complete list
+of everything in the game or its code.
 
-Read the [provenance definitions](behavior-provenance.md) for `spec-derived`,
-`native`, `fitted`, `opinionated` and `unknown`. A behavior specification can
-contain both retail-supported components and explicit authored additions;
-implementing that spec does not turn every component into recovered retail fact.
-This is a reader's index, not a second roadmap or a revision log. Exact rules,
-constants and tests live in the linked specifications and guides.
+- **Retail manual:** ☑ means the feature is described in the [FA manual][manual].
+- **Opinionated addition:** ☑ means we deliberately add or change behavior.
+- Both may be checked when we extend a manual-described feature. An unchecked
+  retail box means we are not claiming manual support, not that retail lacked it.
+- Checkboxes describe the feature's origin. **Status** describes our game:
+  Completed, Partially implemented with remaining work, or Planned. Completed
+  does not mean tested against a running retail copy.
 
-## Implemented components
+## Menus
 
-| Component | Retail support | Our contribution or limitation | State and source |
-| --- | --- | --- | --- |
-| Menu art, fonts and sounds | Imported original resources and recovered layout evidence | Native assets with spec-derived layout; host navigation and presentation are separate | Implemented; [menu evidence](baselines/main-menu.md) |
-| Aircraft equipment and signatures | Reviewed PT/SEE/ECM records | Spec-derived profiles; aircraft labels do not justify substituting equipment | Implemented for twelve aircraft; [radar spec](spec/radar.md) |
-| Radar contact detection | Source ranges and some reviewed conditions | Opinionated detection, notch, jammer and era tuning; not retail measurements | Implemented; [decisions and limits](radar.md#deliberate-departures-and-known-approximations) |
-| RCS display and aircraft exposure | Documented panel purpose and partial source calculations | Opinionated shared aspect/contour model; agent constants are identified separately from John's feature request | Implemented; [RCS spec](spec/rcs.md), [component guide](radar.md#rcs-instrument-and-shared-aspect-model) |
-| Destroyed aircraft on sensors | Remaining original behavior is not fully established | Opinionated persistence requested by John; fitted fall and target eligibility remain documented | Implemented; [scope](radar.md#destroyed-aircraft-remain-sensor-objects) |
-| Flight response | Imported PT values and reviewed component behavior | Hybrid flight combines native components with fitted laws; provenance is not whole-aircraft parity | Implemented with limits; [flight model](FLIGHT-MODEL.md), [component origins](behavior-provenance.md#current-flight-examples) |
-| Ground contact and landing | Full retail contract unresolved | Opinionated contact accepted by John on 2026-09-15; authored rules are not waiting for native provenance | Implemented with limits; [landing baseline](baselines/native-land-foundation.md) |
-| Input and device profiles | Original game controls are references, not evidence for modern device support | Opinionated modern binding layer and controller feedback | Implemented; [input guide](INPUT.md), [validation](baselines/input.md) |
-| Current missile motion | Imported envelopes, source launch-speed/motor helpers and weapon-specific support checks | Fitted timing and pursuit; scalar launch-speed inheritance exists, full velocity inheritance does not | Development range implemented; [current behavior](spec/missiles.md#what-exists-today-and-what-changes), [record interpretation](formats/missiles.md) |
+| Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
+| --- | :---: | :---: | --- | --- |
+| Choose Activity menu and dropdowns | ☑ | ☐ | Partially implemented. Menu navigation works; campaign, multiplayer and replay actions remain unavailable. | Manual pp. 11-13; [menu](baselines/main-menu.md) |
+| Quick Mission setup | ☑ | ☐ | Partially implemented. Aircraft, theater and briefing edits work; multi-aircraft missions and objectives remain. | Manual pp. 18-20; [creator](baselines/creator-ordnance.md) |
+| Load Ordnance editing | ☑ | ☐ | Partially implemented. Compatible weapons, quantities and internal fuel work; tanks, campaign stock and airbase restrictions remain. | Manual p. 16; [loadout](baselines/creator-ordnance.md) |
 
-## Planned missile additions
+## Flight models
 
-All rows below are **planned, not implemented**. John requested the feature
-additions on 2026-09-17. Agent-selected constants are not attributed to him.
-The [missile plan](missile-update-plan.md) owns delivery stages; the
-[missile matrix](spec/missiles.md#first-pass-inventory-matrix) owns per-weapon values.
+These rows cover ordinary free flight across the twelve supported aircraft. The
+current flight model is the default; the previous model remains selectable.
 
-| Component | Retail-supported portion | Deliberate addition or unresolved part | Origin of the planned change |
-| --- | --- | --- | --- |
-| Active-radar activation | General concept has manual support, as recorded in the spec | Per-weapon last-intercept thresholds and explicit search/acquired states; exact original transitions unknown | Opinionated requested feature, fitted agent distances; [activation](spec/missiles.md#activation-and-independent-acquisition) |
-| Launch motion and prediction | Existing source helper incorporates aircraft scalar speed | Full vector inheritance, finite additive boost and matching motion/intercept estimates | Opinionated user request; fitted agent boost budget; [velocity rules](spec/missiles.md#launch-velocity-and-intercept-estimates) |
-| Seeker-active uncued release | General no-designation release is not established by the reviewed evidence | A/I/E BORESIGHT launch with immediate own-seeker search; S retains support requirements | Opinionated user request; [launch modes](spec/missiles.md#uncued-launch-and-narrow-ir-search) |
-| Narrow forward IR acquisition | Imported IR signature and seeker volume | Smaller uncued cone, ranked heat quality, dwell and aircraft engine/aspect modifiers | Opinionated user request; fitted agent cone and quality constants; [heat rules](spec/missiles.md#fitted-heat-quality-and-tone) |
-| Weapon HUD and seeker sound | Manual-supported cues are listed in the spec | Projected search cone, mode labels and estimates; exact original pixels/samples and probability model unresolved | Mixed manual-supported presentation and opinionated additions; fitted tone envelope; [HUD scope](spec/missiles.md#weapon-hud-delivery) |
-| Guidance lifetime and reacquisition | Motor and cleanup fields exist; `trackT` meaning remains unknown | Independent guidance lifetime, memory window and explicit fallback values | Requested lifetime feature, fitted agent rules; [timers](spec/missiles.md#range-motor-and-tracking-lifetime) |
-| Passive emitter behavior | Candidate source records and manual context | Exact radar/jammer eligibility still needs per-weapon evidence; no invented heat fallback | Requested separate E category; unresolved eligibility; [guidance types](spec/missiles.md#four-game-guidance-types) |
+| Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
+| --- | :---: | :---: | --- | --- |
+| Pitch, roll and rudder control | ☑ | ☐ | Completed. All twelve aircraft have working flight controls. | Manual pp. 60-61; [aircraft coverage](baselines/aircraft-roster-expansion.md) |
+| Speed- and altitude-dependent turning limits | ☑ | ☐ | Partially implemented. Aircraft limits are used; individual pitch/yaw response tuning remains. | Manual pp. 58-59; [flight model](FLIGHT-MODEL.md) |
+| Throttle, afterburner and fuel use | ☑ | ☐ | Completed. Available engines and afterburners follow the selected aircraft's configuration. | Manual p. 61; [flight model](FLIGHT-MODEL.md) |
+| Weapon weight affects handling | ☑ | ☐ | Partially implemented. Carried mass affects acceleration and loading; weapon-specific drag and external fuel transfer remain. | Manual p. 59; [flight model](FLIGHT-MODEL.md) |
+| Stalls, spins and recovery | ☑ | ☐ | Partially implemented. Entry and recovery work; aircraft-specific handling review remains. | Manual p. 72; [flight tests](baselines/aircraft-roster-expansion.md) |
+| X-31 low-speed control assistance | ☑ | ☑ | Partially implemented. Low-speed assistance works; full vector-control behavior and original animation timing remain. | Manual pp. 60, 81; [X-31 scope](spec/additional-aircraft.md) |
+| Takeoff, touchdown, taxi and braking | ☑ | ☑ | Partially implemented. Test runways support these actions; validated theater runways and carrier landings remain. | Manual pp. 63-71; [landing limits](FLIGHT-MODEL.md#what-working-covers) |
+| Smooth momentum and control response | ☐ | ☑ | Completed. Nose direction can differ from travel direction, with continuous movement through vertical and inverted flight. | [Flight response](FLIGHT-CONTROLS.md#flight-response-and-vertical-flight) |
+| Select current or previous flight model | ☐ | ☑ | Completed. Both choices remain available. | [Flight options](FLIGHT-MODEL.md#run-and-reproduce) |
 
-A fitted value is allowed to ship when its behavior is documented and validated.
-It does not become a retail fact because a test passes. Planned features remain
-planned until their implementation and acceptance evidence are linked here.
+## Weapons
+
+The [missile plan](missile-update-plan.md) contains the delivery stages, and the
+[ordnance matrix](spec/missiles.md#first-pass-inventory-matrix) contains weapon values.
+
+| Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
+| --- | :---: | :---: | --- | --- |
+| Guns and manual weapon release | ☑ | ☐ | Partially implemented. Current aircraft stores fire in the range; remaining catalog weapons and full combat missions remain. | Manual pp. 124-126; [weapon coverage](baselines/aircraft-roster-expansion.md) |
+| Missiles requiring continuous radar lock | ☑ | ☐ | Completed for supported default stores. | Manual pp. 117-118; [current missile behavior](spec/missiles.md#what-exists-today-and-what-changes) |
+| Independent infrared guidance | ☑ | ☐ | Partially implemented. Current IR stores guide; detailed heat/aspect behavior and seeker feedback remain. | Manual p. 119; [missile scope](spec/missiles.md) |
+| Delayed active-radar acquisition | ☑ | ☐ | Planned. Current active-radar missiles guide independently immediately after launch. | Manual p. 118; [activation](spec/missiles.md#activation-and-independent-acquisition) |
+| Per-weapon pitbull activation distances | ☐ | ☑ | Planned. Initial distances are recorded in the matrix. | [Activation rules](spec/missiles.md#activation-and-independent-acquisition) |
+| Emitter-homing missiles | ☑ | ☐ | Planned. Catalog candidates exist; operating seeker behavior remains. | Manual pp. 117, 120; [guidance types](spec/missiles.md#four-game-guidance-types) |
+| Aircraft velocity, motor boost and target-motion estimates | ☐ | ☑ | Planned. Scalar launch-speed inheritance exists; full direction-aware motion and matching estimates remain. | [Launch motion](spec/missiles.md#launch-velocity-and-intercept-estimates) |
+| Uncued launch with the onboard seeker enabled | ☐ | ☑ | Planned. Includes radar, IR and emitter seekers; supported-radar weapons still need lock. | [Launch modes](spec/missiles.md#uncued-launch-and-narrow-ir-search) |
+| Narrow IR search and heat-quality selection | ☐ | ☑ | Planned. Cone sizes, acquisition delay and heat scoring are specified. | [IR rules](spec/missiles.md#fitted-heat-quality-and-tone) |
+| Missile seeker diamond, range scale and lock tone | ☑ | ☐ | Planned. Weapon HUD and sound integration remain. | Manual pp. 83-84, 119; [HUD delivery](spec/missiles.md#weapon-hud-delivery) |
+| HUD search cone and launch-mode display | ☐ | ☑ | Planned. Cone projection and mounted-seeker feedback remain. | [HUD additions](spec/missiles.md#weapon-hud-delivery) |
+| Separate guidance lifetime and lock-loss memory | ☐ | ☑ | Planned. Motor and removal timers exist; independent guidance timers remain. | [Lifetime rules](spec/missiles.md#range-motor-and-tracking-lifetime) |
+
+## Systems and controls
+
+| Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
+| --- | :---: | :---: | --- | --- |
+| Radar search/tracking modes and contact history | ☑ | ☐ | Completed for the current air-to-air scope. | Manual pp. 96-99; [radar](radar.md) |
+| RCS exposure display | ☑ | ☑ | Completed. Uses the same aircraft exposure calculation as detection. | Manual pp. 94-95; [RCS display](spec/rcs.md) |
+| Radar notching and generation-based jammer tuning | ☐ | ☑ | Partially implemented. Detection effects work; side-by-side aircraft tuning remains. | [Radar tuning](radar.md#deliberate-departures-and-known-approximations) |
+| Persistent selection of search-only contacts | ☐ | ☑ | Completed. Selection and firing permission remain separate. | [Selection](radar.md#mouse-designation-and-missiles) |
+| Destroyed aircraft remain visible to sensors | ☐ | ☑ | Completed while the wreck remains airborne. | [Destroyed aircraft](radar.md#destroyed-aircraft-remain-sensor-objects) |
+| Rebindable modern controller profiles | ☐ | ☑ | Completed. Gamepads, sticks, throttles and pedals use the in-flight binding editor. | [Input](INPUT.md) |
+
+## Maps, weather and atmosphere
+
+| Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
+| --- | :---: | :---: | --- | --- |
+| Select and fly over the original theaters | ☑ | ☐ | Completed. All sixteen theaters are selectable. | Manual p. 198; [terrain](baselines/ukraine-viewer.md) |
+| Weather and time-of-day presentation | ☑ | ☐ | Partially implemented. Six weather choices and day/night presentation work; remaining cloud forms and special weather effects remain. | Manual p. 198; [weather coverage](formats/weather.md) |
+| Physical turbulence and its disable option | ☑ | ☐ | Partially implemented. Low-altitude disturbance works; live neighboring-aircraft wake effects remain. | Manual appendix D, No Turbulence; [weather flight effects](baselines/wind-turbulence-vapor.md) |
+| Animated ocean ripples and reflections | ☐ | ☑ | Completed. Original water colors and textures are retained. | [Ocean](spec/ocean.md) |
+| Temperature-aware atmosphere and speed calculations | ☐ | ☑ | Partially implemented. Air-data calculations work; calibrated airspeed and pressure-based cockpit instruments remain. | [Air-data scope](FLIGHT-MODEL.md#independent-aircraft-models-and-future-gauges) |
+
+[manual]: https://pdfcoffee.com/famanual-pdf-free.html

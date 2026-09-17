@@ -144,6 +144,9 @@ not have to be replaced by a `native` one before acceptance. See
   pass, not one per recovered routine. This governs new baselines; the existing
   `baselines/native-strip-*` set predates the rule and is kept as evidence.
 - **Link, do not duplicate.** A fact has one home; everything else points at it.
+- **Before every commit, review [the feature matrix](docs/features.md)** and update
+  affected rows, category checkboxes, status and remaining work in the same change.
+  Keep it limited to manual-described features and opinionated additions.
 - Keep the guides current in the same change that alters the behaviour they
   document: [aircraft import](docs/aircraft-import.md),
   [flight model](docs/FLIGHT-MODEL.md), [flight controls](docs/FLIGHT-CONTROLS.md),

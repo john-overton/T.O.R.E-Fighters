@@ -34,10 +34,10 @@ behaviour being rebuilt is described in [docs/spec/](docs/spec/).
 
 ## What makes it T.O.R.E
 
-Original game evidence and deliberate additions are tracked separately in the
-[feature matrix](docs/features.md). It distinguishes retail-supported behavior,
-fitted approximations and opinionated choices, with implementation status and
-links to the evidence.
+The [feature matrix](docs/features.md) groups menus, flight models, weapons,
+systems, and maps/weather. Checkboxes distinguish manual-described features from
+opinionated additions; each row says what is completed, partially implemented
+or planned, with remaining work and links to details.
 
 Our shared radar/RCS tuning, authored landing behavior and modern input layer
 are implemented examples. Per-weapon seeker activation distances, velocity-aware
@@ -165,7 +165,7 @@ This discovers and unpacks all supported archives into ignored `.local/extracted
 
 - [Roadmap](docs/ROADMAP.md): milestones and what 1:1 means.
 - [Parity plan](docs/parity-plan.md): what is built, what is specified, what is next.
-- [Feature matrix](docs/features.md): retail evidence, fitted behavior, deliberate additions and delivery status.
+- [Feature matrix](docs/features.md): grouped features, manual/addition checkboxes and implementation status.
 - [Behaviour specs](docs/spec/): what a player experiences, with numbers. This is the parity target.
 - [Development](docs/DEVELOPMENT.md): environment and everyday commands.
 - [Extraction](docs/EXTRACTION.md): shared script, filtering, output layout, and supported containers.
