@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-The M0 environment supports the M1a menu slice, the M1b renderer across all 16 theaters, and M1c free flight in five aircraft (F/A-18D, Rafale C, F-14D, A-4E and X-31 EFM) plus a development weapons range. M0's full title census, salvage inventory, parity specification, and AI VM decision remain open.
+The M0 environment supports the M1a menu slice, the M1b renderer across all 16 theaters, and M1c free flight in twelve aircraft (see the [roster guide](aircraft-import.md)) plus a development weapons range. M0's full title census, salvage inventory, parity specification, and AI VM decision remain open.
 
 | Component | Choice | Purpose |
 | --- | --- | --- |
@@ -136,7 +136,8 @@ replay. See [contracts, validation and limitations](baselines/weapons-systems.md
 
 ## Additional aircraft
 
-The aircraft registry now includes F-14D, A-4E and X-31 EFM. Each owns a typed
+The aircraft registry includes F-14D, A-4E, X-31 EFM and the seven
+[roster additions](spec/roster-aircraft.md). Each owns a typed
 model configuration; presentation rigs remain in tore-app. Shared combat reads
 the selected identity's radar and PT stations. Audio switching clears old
 aircraft voices. See [aircraft behavior](spec/additional-aircraft.md).
@@ -148,3 +149,12 @@ and does not change A-4E presentation or flame geometry.
 Researched flight is now the default; `--legacy-flight` preserves the previous
 model. HUD and audio share the [stall warning signal](spec/stall-warnings.md),
 including the original imported warning samples.
+
+Aircraft-owned exterior fits for the seven roster additions live in
+`roster_animation.rs`, with reviewed source branch membership in
+`additional_animation.rs`. The [animation contract](spec/aircraft-animation.md)
+defines their presentation. F-22 bay fraction advances at the shared 120 Hz;
+the renderer interpolates it, and manual combat can request it without changing
+launch eligibility. Exterior canopy grading is a mesh material, independent
+of cockpit artwork and world-view rendering. Its nearest surface is resolved
+in a depth-only pass, then blended at 75% opacity over the opaque scene.

@@ -189,9 +189,29 @@ pub enum AircraftId {
     F14,
     A4E,
     X31,
+    Mig29,
+    Su27,
+    Mig21,
+    Su25,
+    Mig23,
+    Su35,
+    F22,
 }
 impl AircraftId {
-    pub const ALL: [Self; 5] = [Self::F18, Self::Rafale, Self::F14, Self::A4E, Self::X31];
+    pub const ALL: [Self; 12] = [
+        Self::F18,
+        Self::Rafale,
+        Self::F14,
+        Self::A4E,
+        Self::X31,
+        Self::Mig29,
+        Self::Su27,
+        Self::Mig21,
+        Self::Su25,
+        Self::Mig23,
+        Self::Su35,
+        Self::F22,
+    ];
     pub fn parse(name: &str) -> Result<Self> {
         match name.to_ascii_lowercase().as_str() {
             "f18" | "f18.pt" => Ok(Self::F18),
@@ -199,7 +219,16 @@ impl AircraftId {
             "f14" | "f14.pt" => Ok(Self::F14),
             "a4e" | "a4e.pt" => Ok(Self::A4E),
             "x31" | "f31.pt" => Ok(Self::X31),
-            _ => Err(invalid("supported aircraft: f18, rafale, f14, a4e, x31")),
+            "mig29" | "mig29.pt" => Ok(Self::Mig29),
+            "su27" | "su27.pt" => Ok(Self::Su27),
+            "mig21" | "mig21.pt" => Ok(Self::Mig21),
+            "su25" | "su25.pt" => Ok(Self::Su25),
+            "mig23" | "mig23.pt" => Ok(Self::Mig23),
+            "su35" | "su35.pt" => Ok(Self::Su35),
+            "f22" | "f22.pt" => Ok(Self::F22),
+            _ => Err(invalid(
+                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22",
+            )),
         }
     }
     pub fn pt(self) -> &'static str {
@@ -209,6 +238,13 @@ impl AircraftId {
             Self::F14 => "F14.PT",
             Self::A4E => "A4E.PT",
             Self::X31 => "F31.PT",
+            Self::Mig29 => "MIG29.PT",
+            Self::Su27 => "SU27.PT",
+            Self::Mig21 => "MIG21.PT",
+            Self::Su25 => "SU25.PT",
+            Self::Mig23 => "MIG23.PT",
+            Self::Su35 => "SU35.PT",
+            Self::F22 => "F22.PT",
         }
     }
     pub fn hud(self) -> &'static str {
@@ -218,6 +254,13 @@ impl AircraftId {
             Self::F14 => "F14.HUD",
             Self::A4E => "F4.HUD",
             Self::X31 => "F31.HUD",
+            Self::Mig29 => "SU33CC.HUD",
+            Self::Su27 => "AV8.HUD",
+            Self::Mig21 => "MIG21.HUD",
+            Self::Su25 => "SU33CC.HUD",
+            Self::Mig23 => "SU33CC.HUD",
+            Self::Su35 => "SU35.HUD",
+            Self::F22 => "F22.HUD",
         }
     }
     pub fn stem(self) -> &'static str {
@@ -227,11 +270,26 @@ impl AircraftId {
             Self::F14 => "F14",
             Self::A4E => "A4",
             Self::X31 => "F31",
+            Self::Mig29 => "MIG29",
+            Self::Su27 => "SU27",
+            Self::Mig21 => "MIG21",
+            Self::Su25 => "SU25",
+            Self::Mig23 => "MIG23",
+            Self::Su35 => "SU35",
+            Self::F22 => "F22",
         }
     }
     pub fn cockpit_stem(self) -> &'static str {
         match self {
             Self::A4E => "F4",
+            Self::Mig29 => "SU33",
+            Self::Su27 => "AV8",
+            Self::Mig21 => "M21",
+            Self::Su25 => "SU33",
+            Self::Mig23 => "SU33",
+            Self::Su35 => "SU35",
+            Self::F22 => "F22",
+
             _ => self.stem(),
         }
     }
@@ -242,6 +300,13 @@ impl AircraftId {
             Self::F14 => "~F14H.PIC",
             Self::A4E => "~F4H.PIC",
             Self::X31 => "~F31H.PIC",
+            Self::Mig29 => "~SU33H.PIC",
+            Self::Su27 => "~AV8H.PIC",
+            Self::Mig21 => "~M21H.PIC",
+            Self::Su25 => "~SU33H.PIC",
+            Self::Mig23 => "~SU33H.PIC",
+            Self::Su35 => "~SU35H.PIC",
+            Self::F22 => "~F22H.PIC",
         }
     }
     pub fn label(self) -> &'static str {
@@ -251,12 +316,27 @@ impl AircraftId {
             Self::F14 => "F-14D Tomcat",
             Self::A4E => "A-4E Skyhawk",
             Self::X31 => "X-31 EFM",
+            Self::Mig29 => "MiG-29 Fulcrum-C",
+            Self::Su27 => "Su-27 Flanker-B",
+            Self::Mig21 => "MiG-21 Fishbed",
+            Self::Su25 => "Su-25 Frogfoot-A",
+            Self::Mig23 => "MiG-23 Flogger-B",
+            Self::Su35 => "Su-35",
+            Self::F22 => "F-22A Raptor",
         }
     }
     pub fn radar(self) -> &'static str {
         match self {
             Self::F14 => "F14R.SEE",
             Self::A4E => "F4BR.SEE",
+            Self::Mig29 => "MIG29R.SEE",
+            Self::Su27 => "SU27R.SEE",
+            Self::Mig21 => "MIG21R.SEE",
+            Self::Su25 => "SU24R.SEE",
+            Self::Mig23 => "MIG27R.SEE",
+            Self::Su35 => "SU27R.SEE",
+            Self::F22 => "F22R.SEE",
+
             _ => "F18R.SEE",
         }
     }
@@ -267,6 +347,13 @@ impl AircraftId {
             Self::F14 => "M61.JT",
             Self::A4E => "MK12.JT",
             Self::X31 => "M61.JT",
+            Self::Mig29 => "GSH301.JT",
+            Self::Su27 => "GSH301.JT",
+            Self::Mig21 => "GSH23.JT",
+            Self::Su25 => "GSH301.JT",
+            Self::Mig23 => "GSH6_30.JT",
+            Self::Su35 => "GSH301.JT",
+            Self::F22 => "M61.JT",
         }
     }
 }
@@ -299,8 +386,8 @@ impl Aircraft {
         }
         let id = AircraftId::parse(&names[2])?;
         let size = match id {
-            AircraftId::F14 => 636,
-            AircraftId::A4E => 612,
+            AircraftId::F14 | AircraftId::F22 | AircraftId::Mig29 => 636,
+            AircraftId::A4E | AircraftId::Mig21 => 612,
             _ => 660,
         };
         if object["structType"].number()? != 5 || object["typeSize"].number()? != size {
@@ -315,6 +402,14 @@ impl Aircraft {
             AircraftId::F14 => Some(("F-14", "F- 14D Tomcat")),
             AircraftId::A4E => Some(("A-4E", "A- 4E Skyhawk")),
             AircraftId::X31 => Some(("X-31", "X-31 EFM")),
+            AircraftId::Mig29 => Some(("MiG-29", "MiG-29 Fulcrum-C")),
+            AircraftId::Su27 => Some(("Su-27", "Su-27 Flanker-B")),
+            AircraftId::Mig21 => Some(("MiG-21", "MiG-21 Fishbed")),
+            AircraftId::Su25 => Some(("Su-25", "Su-25 Frogfoot-A")),
+            AircraftId::Mig23 => Some(("MiG-23", "MiG-23 Flogger-B")),
+            AircraftId::Su35 => Some(("Su-35", "Su-35")),
+            AircraftId::F22 => Some(("F-22", "F- 22A Raptor")),
+
             _ => None,
         };
         if expected_names.is_some_and(|(short, long)| names[0] != short || names[1] != long) {
@@ -507,7 +602,6 @@ pub fn dependency_report(
     for &id in aircraft {
         for n in [
             id.pt(),
-            &id.pt().replace(".PT", ".PTS"),
             id.hud(),
             &format!("{}.SH", id.stem()),
             "PALETTE.PAL",
@@ -521,6 +615,18 @@ pub fn dependency_report(
                 return Err(invalid(&format!("aircraft import missing {n}")));
             }
             selected.insert(n.into());
+        }
+        // These reviewed FA profiles have no compiled PTS companion. Runtime
+        // flight and editable loadouts use PT data, never the inert PTS code.
+        if !matches!(
+            id,
+            AircraftId::Mig29 | AircraftId::Su27 | AircraftId::Su25 | AircraftId::Mig23
+        ) {
+            let pts = id.pt().replace(".PT", ".PTS");
+            if !catalog.contains(&pts) {
+                return Err(invalid(&format!("aircraft import missing {pts}")));
+            }
+            selected.insert(pts);
         }
         for n in &catalog {
             if n.starts_with("&GEAR")
@@ -844,6 +950,13 @@ mod profile_tests {
             (AircraftId::F14, "F-14", "F- 14D Tomcat", 636),
             (AircraftId::A4E, "A-4E", "A- 4E Skyhawk", 612),
             (AircraftId::X31, "X-31", "X-31 EFM", 660),
+            (AircraftId::Mig29, "MiG-29", "MiG-29 Fulcrum-C", 636),
+            (AircraftId::Su27, "Su-27", "Su-27 Flanker-B", 660),
+            (AircraftId::Mig21, "MiG-21", "MiG-21 Fishbed", 612),
+            (AircraftId::Su25, "Su-25", "Su-25 Frogfoot-A", 660),
+            (AircraftId::Mig23, "MiG-23", "MiG-23 Flogger-B", 660),
+            (AircraftId::Su35, "Su-35", "Su-35", 660),
+            (AircraftId::F22, "F-22", "F- 22A Raptor", 636),
         ] {
             let text = fixture()
                 .replace("F18.PT", id.pt())
@@ -899,6 +1012,24 @@ mod dependency_tests {
         let at = 7 + count * 18 + 14;
         data[at..at + 4].copy_from_slice(&end.to_le_bytes());
         Archive::parse(data).unwrap()
+    }
+    #[test]
+    fn reviewed_missing_pts_profiles_still_require_their_own_aircraft_and_hud() {
+        for id in [
+            AircraftId::Mig29,
+            AircraftId::Su27,
+            AircraftId::Su25,
+            AircraftId::Mig23,
+        ] {
+            let mut r = resources();
+            r.remove(&id.pt().replace(".PT", ".PTS"));
+            let a = archive(r.clone(), None);
+            assert!(dependency_report(&[&a], &[id], false).is_ok());
+            for required in [id.pt(), id.hud()] {
+                let a = archive(r.clone(), Some(required));
+                assert!(dependency_report(&[&a], &[id], false).is_err());
+            }
+        }
     }
     fn resources() -> BTreeMap<String, Vec<u8>> {
         let mut resources = BTreeMap::new();

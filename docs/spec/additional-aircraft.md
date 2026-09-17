@@ -118,7 +118,8 @@ fixed forward area. These hinges and mixing are fitted, not original schedules.
 
 Gear rotates through a fitted quarter turn and disappears at full retraction.
 A-4/X-31 side brakes interpolate through 1.05 rad from their open meshes;
-F-14 brakes use the source switched raised pose. A-4's stowed hook rotates
+F-14 brakes hinge continuously through a fitted 45 degrees to the source raised
+pose, around their forward edge; see the [animation contract](aircraft-animation.md). A-4's stowed hook rotates
 0.9 rad; F-14's projected hook uses a 0.6 rad travel, but its source triangles
 collapse through quantization. Give the coincident root vertices a fitted
 ±0.125 source-unit width, preserving the center and tip, to make the hook visible.

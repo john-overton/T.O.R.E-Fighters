@@ -200,3 +200,30 @@ and the F4 cockpit family. F14's PT controller HUD reference is F14CC.HUD;
 its selected player presentation uses F14.HUD and the F14 cockpit family.
 The F14 radar is F14R.SEE; A4E uses F4BR.SEE; F31 uses F18R.SEE.
 All three use their own PT-selected sound and station references.
+
+## Roster expansion
+
+All seven new roots use the existing 219-field BRF grammar. Require exact
+short/long names and PT identity, not a filename alias. Review evidence and
+hashes are in [roster acceptance](../baselines/aircraft-roster-expansion.md).
+
+| PT | Type size | Player HUD | Cockpit family | Radar | Gun |
+| --- | ---: | --- | --- | --- | --- |
+| MIG29.PT | 636 | SU33CC.HUD | SU33 | MIG29R.SEE | GSH301.JT |
+| SU27.PT | 660 | AV8.HUD | AV8 | SU27R.SEE | GSH301.JT |
+| MIG21.PT | 612 | MIG21.HUD | M21 | MIG21R.SEE | GSH23.JT |
+| SU25.PT | 660 | SU33CC.HUD | SU33 | SU24R.SEE | GSH301.JT |
+| MIG23.PT | 660 | SU33CC.HUD | SU33 | MIG27R.SEE | GSH6_30.JT |
+| SU35.PT | 660 | SU35.HUD | SU35 | SU27R.SEE | GSH301.JT |
+| F22.PT | 636 | F22.HUD | F22 | F22R.SEE | M61.JT |
+
+MiG-29, Su-27, Su-25 and MiG-23 lack PTS resources in the reviewed base media.
+PTS is inert and unused by flight or the PT-backed loadout editor. Its absence
+is allowed only for these reviewed identities. Their PT HUD pointers select
+the shared cockpit families above. SU35.PT has a null HUD pointer; SU35.HUD is
+an explicit player-presentation choice, documented in the behavior spec.
+F22 and M21 cockpit families have no mirror overlay resources; SU33 has side
+overlays but no center overlay. Missing required flight/cockpit resources still
+fail import or loading. VIS240 joins VIS340 as a reviewed source visual sensor
+for the new default stations. Default guns/stores join the existing manually
+controlled service and loadout allowlist, not a claim of all-JT support.

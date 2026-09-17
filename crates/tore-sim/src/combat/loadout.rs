@@ -126,6 +126,18 @@ impl Loadout {
 }
 pub fn supported(name: &str) -> bool {
     [
+        "AA11.JT",
+        "AA11B.JT",
+        "AA12.JT",
+        "AA2.JT",
+        "AA8.JT",
+        "AAML.JT",
+        "AS7.JT",
+        "B13.JT",
+        "B8.JT",
+        "GSH23.JT",
+        "GSH301.JT",
+        "GSH6_30.JT",
         "M61.JT",
         "DEFA.JT",
         "MK12.JT",

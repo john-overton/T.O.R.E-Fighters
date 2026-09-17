@@ -66,7 +66,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     keys.pitch = 1.;
                 }
                 "stall" | "spin" => {
-                    s.speed = 180.;
+                    // Enter below this aircraft's own clean envelope, rather
+                    // than assuming one absolute speed stalls every profile.
+                    s.speed = 0.5
+                        * a.envelopes
+                            .iter()
+                            .find(|e| e.g == 1)
+                            .and_then(|e| e.speeds(s.position[1]))
+                            .ok_or("missing clean envelope at stall test altitude")?
+                            .0;
                     s.engine = false;
                     s.velocity = Basis::new(s.yaw, 0., 0.).forward.map(|v| v * s.speed);
                     if scenario == "spin" {

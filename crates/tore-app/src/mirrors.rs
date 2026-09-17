@@ -12,16 +12,26 @@ pub fn masks(source: &Sprite, id: AircraftId) -> Option<Masks> {
     if [source.width, source.height] != [1280, 490] {
         return None;
     }
+    if matches!(id, AircraftId::Su27 | AircraftId::Su35) {
+        return flood(source, [[640, 40]]);
+    }
     let seeds = match id {
         AircraftId::F18 => [[640, 40], [110, 380], [1170, 380]],
         AircraftId::F14 => [[640, 40], [140, 250], [1140, 250]],
         AircraftId::A4E => [[640, 40], [200, 300], [1080, 300]],
-        AircraftId::X31 => return None,
+        AircraftId::X31
+        | AircraftId::Mig29
+        | AircraftId::Su27
+        | AircraftId::Mig21
+        | AircraftId::Su25
+        | AircraftId::Mig23
+        | AircraftId::Su35
+        | AircraftId::F22 => return None,
         AircraftId::Rafale => [[640, 40], [190, 360], [1090, 360]],
     };
     flood(source, seeds)
 }
-fn flood(source: &Sprite, seeds: [[usize; 2]; 3]) -> Option<Masks> {
+fn flood<const N: usize>(source: &Sprite, seeds: [[usize; 2]; N]) -> Option<Masks> {
     let (w, h) = (source.width, source.height);
     if w == 0 || h == 0 || w.checked_mul(h)?.checked_mul(4)? != source.rgba.len() {
         return None;

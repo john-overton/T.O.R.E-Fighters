@@ -48,6 +48,7 @@ name, with the numbers a player would notice.
 
 | Spec | Covers | Status |
 | --- | --- | --- |
+| [Roster expansion](spec/roster-aircraft.md) | Seven REDFOR/F-22A initial player ports | [Acceptance and limits](baselines/aircraft-roster-expansion.md) |
 | [Additional aircraft](spec/additional-aircraft.md) | F-14D, A-4E and X-31 source flight configuration and fitted presentation | Initial ports implemented; [acceptance](baselines/aircraft-fa-expansion.md) |
 | [Ocean](spec/ocean.md) | Short ripples, close pixelation and distance filtering; original textures/colors | Implemented; [acceptance](baselines/ocean.md) |
 | [Terrain shorelines](spec/terrain-shorelines.md) | Beach/water coverage and absence of land-color strips | Implemented; validation in the viewer baseline |
@@ -67,7 +68,7 @@ player-visible numbers out of those files and leaving the byte layouts behind.
 | Load Ordnance screen | Original art, compatible weapon and fuel edits | mixed | [creator/ordnance](baselines/creator-ordnance.md) |
 | Theaters | All 16 selectable, terrain renderer, free camera; shoreline water cutouts corrected | native data, fitted rendering | [viewer](baselines/ukraine-viewer.md) |
 | Weather | Day/night palettes, horizon, sun/moon/stars, cloud sheets, fog maps | mixed | [weather](baselines/weather.md), [review](baselines/weather-review.md) |
-| Five aircraft in free flight | Cockpit, HUD, instrument windows, mirrors, external views, animation rigs | fitted flight laws, native-derived components | [flight response](baselines/flight-response.md), [additional FA aircraft](baselines/aircraft-fa-expansion.md) |
+| Twelve aircraft in free flight | Source cockpits, HUD, instrument windows, external views, initial device rigs; new control-surface schedules remain open | fitted flight laws, native-derived components | [flight response](baselines/flight-response.md), [additional FA aircraft](baselines/aircraft-fa-expansion.md), [roster](baselines/aircraft-roster-expansion.md) |
 | Ground contact and landing | Runway contact, taxi, brakes, touchdown | **opinionated**, authored, not awaiting a recovered producer | [land foundation](baselines/native-land-foundation.md) |
 | Input | Keyboard, gamepad, joystick, profiles, rumble, rebinding | opinionated (authored layer) | [input](baselines/input.md) |
 | Weapons | 135 definitions imported; development range with manual firing, damage fixtures, ECM | mixed | [weapons systems](baselines/weapons-systems.md), [manual weapons](baselines/manual-weapons.md) |

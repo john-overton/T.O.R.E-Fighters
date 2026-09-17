@@ -199,7 +199,10 @@ impl CockpitRenderer {
         self.mirror_rects = masks.as_ref().map_or([[0.; 4]; 3], |m| m.rects);
         println!(
             "Cockpit mirrors: {} reviewed regions, {}x{} rear feed, every visible frame",
-            if masks.is_some() { 3 } else { 0 },
+            self.mirror_rects
+                .iter()
+                .filter(|r| r[2] > 0. && r[3] > 0.)
+                .count(),
             crate::mirrors::SIZE[0],
             crate::mirrors::SIZE[1]
         );

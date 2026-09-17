@@ -37,6 +37,10 @@ pub struct State {
     pub flaps: f64,
     pub brake: f64,
     pub hook: f64,
+    /// Fitted presentation only, no flight-force or launch gate coupling.
+    pub bay: f64,
+    pub bay_open: bool,
+    pub bay_auto_open: bool,
     pub gear_down: bool,
     pub flaps_down: bool,
     pub brake_out: bool,
@@ -126,6 +130,9 @@ impl State {
             flaps: 0.,
             brake: 0.,
             hook: 0.,
+            bay: 0.,
+            bay_open: false,
+            bay_auto_open: false,
             gear_down: false,
             flaps_down: false,
             brake_out: false,
@@ -159,6 +166,7 @@ impl State {
         result.flaps = lerp(previous.flaps, self.flaps);
         result.brake = lerp(previous.brake, self.brake);
         result.hook = lerp(previous.hook, self.hook);
+        result.bay = lerp(previous.bay, self.bay);
         result.exhaust = lerp(previous.exhaust, self.exhaust);
         result.rudder = lerp(previous.rudder, self.rudder);
         result.elevator = lerp(previous.elevator, self.elevator);
@@ -172,6 +180,10 @@ impl State {
             && self.burner
             && self.throttle > self.model.configuration().equipment.afterburner_throttle
             && !self.crashed
+    }
+    /// Only F-22 has a reviewed main-bay presentation.
+    pub fn bay_available(&self) -> bool {
+        matches!(self.model, crate::models::AircraftModel::F22(_))
     }
     /// Hook controls are available on the reviewed carrier aircraft.
     pub fn hook_available(&self) -> bool {
@@ -200,6 +212,7 @@ impl State {
             PilotCommand::Set(switch, value) => (switch, Some(value)),
         };
         if (switch == Switch::Hook && !self.hook_available())
+            || (switch == Switch::Bay && !self.bay_available())
             || (switch == Switch::Burner
                 && self.model.configuration().propulsion.afterburner_thrust_lbf == 0.)
         {
@@ -210,6 +223,7 @@ impl State {
             Switch::Flaps => &mut self.flaps_down,
             Switch::Airbrake => &mut self.brake_out,
             Switch::Hook => &mut self.hook_down,
+            Switch::Bay => &mut self.bay_open,
             Switch::Engine => &mut self.engine,
             Switch::Burner => &mut self.burner,
             Switch::Radar => &mut self.radar,
@@ -324,6 +338,8 @@ impl State {
             *v = (*v + (if on { 1. } else { -1. }) * DT / c.equipment.deployment_seconds)
                 .clamp(0., 1.);
         }
+        let bay_target = f64::from(self.bay_available() && (self.bay_open || self.bay_auto_open));
+        self.bay += (bay_target - self.bay).clamp(-DT, DT);
         if self.fuel <= 0. {
             self.engine = false;
             self.burner = false;
@@ -607,6 +623,39 @@ impl Clock {
 mod tests {
     use super::integration_tests::profile;
     use super::*;
+    #[test]
+    fn bay_travel_reverses_interpolates_and_ignores_unsupported_aircraft() {
+        let mut a = profile();
+        let mut unsupported = State::new(&a, [0., 15000., 0.]).unwrap();
+        unsupported.command(PilotCommand::Toggle(Switch::Bay));
+        assert!(!unsupported.bay_open);
+        a.id = tore_formats::aircraft::AircraftId::F22;
+        a.name = "F-22".into();
+        a.shape = "F22.SH".into();
+        let mut s = State::new(&a, [0., 15000., 0.]).unwrap();
+        s.command(PilotCommand::Toggle(Switch::Bay));
+        let previous = s.clone();
+        for _ in 0..60 {
+            s.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert!((s.bay - 0.5).abs() < 1e-9);
+        assert!((s.presented(&previous, 0.5).bay - 0.25).abs() < 1e-9);
+        s.command(PilotCommand::Toggle(Switch::Bay));
+        for _ in 0..30 {
+            s.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert!((s.bay - 0.25).abs() < 1e-9);
+        s.bay_auto_open = true;
+        for _ in 0..90 {
+            s.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert!((s.bay - 1.).abs() < 1e-9);
+        s.bay_auto_open = false;
+        for _ in 0..120 {
+            s.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert!(s.bay < 1e-9);
+    }
     fn response_models() -> [crate::models::AircraftModel; 2] {
         use crate::models::{AircraftModel, f18::F18FlightModel, rafale_c::RafaleCFlightModel};
         [

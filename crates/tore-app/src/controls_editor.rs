@@ -21,7 +21,7 @@ pub struct Editor {
     pressed: Option<(usize, i32)>,
 }
 fn actions() -> Vec<String> {
-    let mut a="pitch roll yaw throttle throttle-rate look-x look-y gear flaps airbrake hook engine burner radar jammer fire weapon-next designate clear-designation master-arm jettison range-target damage-class fail-station damage-player target-jammer incoming pause menu end-flight restart view-front view-back view-up view-external center-look cockpit hud zoom-in zoom-out range-down range-up radar-mode instrument-next instrument-previous menu-up menu-down menu-left menu-right menu-accept menu-back".split_whitespace().map(str::to_owned).collect::<Vec<_>>();
+    let mut a="pitch roll yaw throttle throttle-rate look-x look-y gear flaps airbrake hook bay engine burner radar jammer fire weapon-next designate clear-designation master-arm jettison range-target damage-class fail-station damage-player target-jammer incoming pause menu end-flight restart view-front view-back view-up view-external center-look cockpit hud zoom-in zoom-out range-down range-up radar-mode instrument-next instrument-previous menu-up menu-down menu-left menu-right menu-accept menu-back".split_whitespace().map(str::to_owned).collect::<Vec<_>>();
     for n in 0..10 {
         a.push(format!("page-{n}"));
     }

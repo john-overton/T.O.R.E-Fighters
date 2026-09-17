@@ -12,6 +12,7 @@ fn switch_name(s: crate::Switch) -> &'static str {
         Flaps => "flaps",
         Airbrake => "airbrake",
         Hook => "hook",
+        Bay => "bay",
         Engine => "engine",
         Burner => "burner",
         Radar => "radar",
@@ -145,6 +146,8 @@ mod tests {
                 PilotCommand::Toggle(crate::Switch::Gear),
                 PilotCommand::Set(crate::Switch::Gear, true),
                 PilotCommand::Throttle(0.8),
+                PilotCommand::Toggle(crate::Switch::Bay),
+                PilotCommand::Set(crate::Switch::Bay, true),
             ],
             ..Default::default()
         };

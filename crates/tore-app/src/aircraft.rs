@@ -80,9 +80,13 @@ impl Airframe {
             .chain(cockpit_art.iter().map(String::as_str))
         {
             {
-                if id == tore_formats::aircraft::AircraftId::X31
-                    && cockpit_art[1..].iter().any(|n| n == name)
-                {
+                use tore_formats::aircraft::AircraftId;
+                let absent_overlay =
+                    matches!(id, AircraftId::X31 | AircraftId::Mig21 | AircraftId::F22)
+                        && cockpit_art[1..].iter().any(|n| n == name)
+                        || matches!(id, AircraftId::Mig29 | AircraftId::Mig23 | AircraftId::Su25)
+                            && name == cockpit_art[2];
+                if absent_overlay {
                     continue;
                 }
                 let p = Pic::parse(get(name)?)?;
@@ -201,7 +205,7 @@ impl Airframe {
         {
             return Err("unreviewed FA in-flight menu structure".into());
         }
-        let engine_material = if id != tore_formats::aircraft::AircraftId::A4E {
+        let engine_material = if crate::engine_material::outlet_count(id) > 0 {
             crate::engine_material::Image::load()?
         } else {
             None
@@ -214,10 +218,7 @@ impl Airframe {
         ]; 2];
         for face in &poses[0].faces {
             if crate::engine_material::nozzle(id, face.address) {
-                let group = usize::from(
-                    id != tore_formats::aircraft::AircraftId::X31
-                        && face.positions.iter().map(|p| p[0]).sum::<f32>() > 0.,
-                );
+                let group = crate::engine_material::outlet_group(id, &face.positions);
                 for p in &face.positions {
                     let b = &mut nozzle_bounds[group];
                     b[0] = b[0].min(p[0]);
@@ -228,11 +229,7 @@ impl Airframe {
             }
         }
         if engine_material.is_some() {
-            let count = if id == tore_formats::aircraft::AircraftId::X31 {
-                1
-            } else {
-                2
-            };
+            let count = crate::engine_material::outlet_count(id);
             if nozzle_bounds[..count]
                 .iter()
                 .any(|b| !b.iter().all(|v| v.is_finite()) || b[1] <= b[0] || b[3] <= b[2])
@@ -330,6 +327,22 @@ impl Airframe {
                         + basis.right[i] * p[0]
                         + basis.up[i] * p[2]
                         + basis.forward[i] * p[1]
+                })
+            }));
+        }
+        if self.profile.id == tore_formats::aircraft::AircraftId::Mig23 {
+            let demand =
+                (crate::roster_animation::sweep(s) / 40f64.to_radians() * 32767.).round() as i16;
+            let points = [
+                def.attachment(0, demand).ok()?,
+                def.attachment(1, demand).ok()?,
+            ];
+            let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
+            return Some(points.map(|p| {
+                std::array::from_fn(|i| {
+                    s.position[i]
+                        + (basis.right[i] * p[0] + basis.up[i] * p[1] + basis.forward[i] * p[2])
+                            / 3.
                 })
             }));
         }
@@ -470,10 +483,9 @@ impl Airframe {
             };
             let engine_face = self.engine_material.is_some()
                 && crate::engine_material::nozzle(self.profile.id, f.address);
-            let engine_group = usize::from(
-                self.profile.id != tore_formats::aircraft::AircraftId::X31
-                    && f.positions.iter().map(|p| p[0]).sum::<f32>() > 0.,
-            );
+            let engine_group = crate::engine_material::outlet_group(self.profile.id, &f.positions);
+            let canopy = self.profile.id == tore_formats::aircraft::AircraftId::F22
+                && crate::roster_animation::canopy(f.address);
             for i in 1..f.positions.len() - 1 {
                 for j in [0, i, i + 1] {
                     let p = f.positions[j];
@@ -513,6 +525,8 @@ impl Airframe {
                     let textured = !f.uv.is_empty() && !cold_nozzle;
                     let layer = if engine_face {
                         -3. - crate::engine_material::heat(s)
+                    } else if canopy {
+                        -5.
                     } else if textured {
                         if matches!(f.subtype, 0x4c | 0x5c | 0x6c | 0x7c) {
                             -2.

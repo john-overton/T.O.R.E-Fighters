@@ -28,6 +28,7 @@ mod preferences;
 mod quick_mission;
 mod rafale_animation;
 mod renderer;
+mod roster_animation;
 mod sim_renderer;
 mod terrain;
 mod weather;
@@ -1681,6 +1682,7 @@ fn main() -> AppResult<()> {
     let mut flight_devices = None;
     let mut flight_controls = None;
     let mut flight_throttle = None;
+    let mut flight_bay = None;
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
     let mut validate_creator = false;
@@ -1793,7 +1795,7 @@ fn main() -> AppResult<()> {
             }
             "--aircraft" => {
                 aircraft_id = tore_formats::aircraft::AircraftId::parse(
-                    &args.next().ok_or("--aircraft needs f18, rafale, f14, a4e or x31")?,
+                    &args.next().ok_or("--aircraft needs a supported aircraft ID (see --help)")?,
                 )?;
             }
             "--theater" => {
@@ -1886,6 +1888,13 @@ fn main() -> AppResult<()> {
                     return Err("rendered flight probe limited to one minute".into());
                 }
                 flight_probe_ticks = Some(ticks);
+            }
+            "--flight-bay" => {
+                let value: f64 = args.next().ok_or("missing bay fraction")?.parse()?;
+                if !value.is_finite() || !(0. ..=1.).contains(&value) {
+                    return Err("--flight-bay requires 0..1".into());
+                }
+                flight_bay = Some(value);
             }
             "--flight-throttle" => {
                 let value: f64 = args.next().ok_or("missing flight throttle")?.parse()?;
@@ -1992,8 +2001,8 @@ fn main() -> AppResult<()> {
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
                 );
                 println!(
-                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E and X-31 EFM assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale|f14|a4e|x31 selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35 and F-22A assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22 selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
             }
@@ -2052,7 +2061,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             || flight_probe_ticks.is_some()
             || flight_devices.is_some()
             || flight_controls.is_some()
-            || flight_throttle.is_some())
+            || (flight_throttle.is_some() || flight_bay.is_some()))
     {
         return Err("--record-input requires direct --free-flight without headless/capture/probe/pose overrides".into());
     }
@@ -2388,7 +2397,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let animation_capture = capture_terrain.is_some()
         && (flight_devices.is_some()
             || flight_controls.is_some()
-            || flight_throttle.is_some()
+            || (flight_throttle.is_some() || flight_bay.is_some())
             || flight_probe_ticks.is_some());
     let mut flight = hornet.start(&world);
     if let Ok(value) = std::env::var("TORE_FLIGHT_AGL") {
@@ -2507,8 +2516,18 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         return Ok(());
     }
     if let Some(v) = flight_devices {
-        if v[4] > 0. && aircraft_id == tore_formats::aircraft::AircraftId::A4E {
-            return Err("A-4E has no afterburner; set the fifth device fraction to 0".into());
+        if v[4] > 0.
+            && flight
+                .model()
+                .configuration()
+                .propulsion
+                .afterburner_thrust_lbf
+                <= 0.
+        {
+            return Err(
+                "the selected aircraft has no afterburner; set the fifth device fraction to 0"
+                    .into(),
+            );
         }
         if v[3] > 0. && !flight.hook_available() {
             return Err(
@@ -2548,6 +2567,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         )?);
     }
     combat.reset(&mut flight)?;
+    if let Some(value) = flight_bay {
+        if !flight.bay_available() {
+            return Err("selected aircraft has no reviewed weapon bay".into());
+        }
+        flight.bay = value;
+        flight.bay_open = value > 0.;
+    }
+
     if weapon_slot == 0 || weapon_slot > combat.state.ammo.len() {
         return Err("weapon slot outside this aircraft's PT loadout".into());
     }

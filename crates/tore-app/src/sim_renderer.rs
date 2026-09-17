@@ -14,6 +14,9 @@ pub struct SimRenderer {
     weather_tiles: wgpu::TextureView,
     pipeline: wgpu::RenderPipeline,
     terrain_pipeline: wgpu::RenderPipeline,
+    canopy_depth_pipeline: wgpu::RenderPipeline,
+    canopy_pipeline: wgpu::RenderPipeline,
+    canopy_visible: bool,
     aircraft: Option<(wgpu::BindGroup, wgpu::Buffer, u32)>,
     bind: wgpu::BindGroup,
     sky_pipeline: wgpu::RenderPipeline,
@@ -89,6 +92,28 @@ impl SimRenderer {
         surface_descriptor.layout = Some(&sky_layout);
         surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("terrain_fragment");
         let terrain_pipeline = device.create_render_pipeline(&surface_descriptor);
+        // Share the aircraft material bindings. First select the nearest glass
+        // without changing color, then blend that surface once over opaque art.
+        surface_descriptor.label = Some("Canopy nearest depth");
+        surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("canopy_fragment");
+        let depth_target = [Some(wgpu::ColorTargetState {
+            format,
+            blend: None,
+            write_mask: wgpu::ColorWrites::empty(),
+        })];
+        surface_descriptor.fragment.as_mut().unwrap().targets = &depth_target;
+        let canopy_depth_pipeline = device.create_render_pipeline(&surface_descriptor);
+        surface_descriptor.label = Some("Canopy transparency");
+        let glass_target = [Some(wgpu::ColorTargetState {
+            format,
+            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
+        surface_descriptor.fragment.as_mut().unwrap().targets = &glass_target;
+        let depth = surface_descriptor.depth_stencil.as_mut().unwrap();
+        depth.depth_write_enabled = false;
+        depth.depth_compare = wgpu::CompareFunction::Equal;
+        let canopy_pipeline = device.create_render_pipeline(&surface_descriptor);
         let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Retail sky preview"),
             layout: Some(&sky_layout),
@@ -306,6 +331,9 @@ impl SimRenderer {
             weather_tiles: view,
             pipeline,
             terrain_pipeline,
+            canopy_depth_pipeline,
+            canopy_pipeline,
+            canopy_visible: false,
             aircraft: None,
             sky_pipeline,
             celestial_pipeline,
@@ -365,6 +393,7 @@ impl SimRenderer {
 
     pub fn clear_aircraft(&mut self) {
         self.aircraft = None;
+        self.canopy_visible = false;
     }
     pub fn aircraft(
         &mut self,
@@ -477,6 +506,7 @@ impl SimRenderer {
                 queue.write_buffer(buffer, 0, &bytes(vertices));
             }
             *count = (vertices.len() / 10) as u32;
+            self.canopy_visible = vertices.chunks_exact(10).any(|v| v[5] == -5.);
         }
     }
     pub fn update_aircraft_vertices(&mut self, queue: &wgpu::Queue, vertices: &[f32]) {
@@ -486,9 +516,11 @@ impl SimRenderer {
                 queue.write_buffer(buffer, 0, &bytes(vertices));
             }
             *count = (vertices.len() / 10) as u32;
+            self.canopy_visible = vertices.chunks_exact(10).any(|v| v[5] == -5.);
         }
     }
     pub fn hide_aircraft(&mut self) {
+        self.canopy_visible = false;
         if let Some((_, _, count)) = &mut self.aircraft {
             *count = 0;
         }
@@ -724,6 +756,16 @@ impl SimRenderer {
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..*count, 0..1);
             }
+        }
+        if self.canopy_visible
+            && let Some((bind, vertices, count)) = &self.aircraft
+        {
+            pass.set_bind_group(0, bind, &[]);
+            pass.set_vertex_buffer(0, vertices.slice(..));
+            pass.set_pipeline(&self.canopy_depth_pipeline);
+            pass.draw(0..*count, 0..1);
+            pass.set_pipeline(&self.canopy_pipeline);
+            pass.draw(0..*count, 0..1);
         }
         if cloud_count > 0 {
             pass.set_pipeline(&self.cloud_pipeline);

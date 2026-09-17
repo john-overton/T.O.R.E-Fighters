@@ -356,3 +356,39 @@ the rear polygon pairs leaves a stationary diagonal section in the elevator.
 The optional user-supplied [engine material](../spec/engine-material.md) replaces reviewed burner
 face materials at runtime. Its throttle glow is separate from the retail atlas
 and does not change A-4E presentation or flame geometry.
+
+## Seven-aircraft roster geometry
+
+The base FA shapes were projected with `shape_inspect`, then each observed
+state word was set independently to 1. Added face identities and geometry
+bounds establish device endpoints, not original continuous schedules.
+[Behavior and limitations](../spec/roster-aircraft.md),
+[source build and validation](../baselines/aircraft-roster-expansion.md).
+
+| Shape | CODE bytes | Neutral faces | Flame word / faces | Brake word / faces | Gear word / faces |
+| --- | ---: | ---: | --- | --- | --- |
+| MIG29 | 29290 | 328 | 8240 / 16 | 8246 / 4 | 824c / 16 |
+| SU27 | 12838 | 146 | 41f0 / 16 | 41f6 / 2 | 41fc / 8 |
+| MIG21 | 14952 | 159 | 4a50 / 8 | none | 4a56 / 6 |
+| SU25 | 29626 | 334 | none | 8390 / 8 | 8396 / 18 |
+| MIG23 | 23312 | 219 | 6ae0 / 6 | none | 6ae6 / 18 |
+| SU35 | 27114 | 329 | 79c0 / 8 | 79c6 / 2 | 79cc / 18 |
+| F22 | 20012 | 245 | 5df0 / 8 | 5e02 / 4 | 5e0e / 12 |
+
+Words are hexadecimal. The loader checks CODE length, complete observed word
+set, neutral count, added face counts and texture identity before applying any
+rig. F22 word 5dfc adds 14 main-bay belly details, handled independently of gear. MiG23 header exponent is 9; the others are 8.
+Flame forward roots are respectively -41, -60, -56, absent, -29, -59 and -48
+source units. Gear upper bounds are 0, 0, -1, -9, -3, -1 and -1. These own-shape
+bounds establish source endpoints; the [animation spec](../spec/aircraft-animation.md)
+defines fitted rigid travel. Local projection logs: `.local/*-shape.txt` and
+`.local/<aircraft>-<word>.txt`. Unreviewed controls retain neutral geometry.
+
+The subsequent [animation pass](../baselines/aircraft-animation.md) reviews
+round nozzle faces at MIG29 468b/46a6/46d7/4706, SU27 2117/22fe,
+MIG21 22e8, MIG23 34af/34d6 and SU35 2aee/366c/3690/3a9b/3af0.
+Addresses are hexadecimal CODE offsets, not transferable between aircraft.
+F22 outer glazing is 2136/2153/2170/219c/2220/2255/228a/22a4/22bc/
+2462/247c/2494/2c36/2c6c. Its main-bay belly spans base faces
+35d7/3601/362f/3cc0/3d03 and switched details under word 5dfc.
+All new hinge and material choices follow the linked fitted/opinionated contracts.

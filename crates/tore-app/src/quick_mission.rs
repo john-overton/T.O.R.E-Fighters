@@ -166,7 +166,7 @@ impl QuickMission {
     pub fn unsupported(&self) -> Option<String> {
         if self.player().is_none() {
             return Some(
-                "This aircraft is available for setup only. Choose F/A-18D, Rafale C, F-14D, A-4E or X-31 EFM to fly."
+                "This aircraft is available for setup only. Choose an imported aircraft from the player list to fly."
                     .into(),
             );
         }

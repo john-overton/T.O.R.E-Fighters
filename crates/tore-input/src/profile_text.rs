@@ -17,6 +17,7 @@ pub fn action_name(action: &Action) -> String {
             Switch::Flaps => "flaps",
             Switch::Airbrake => "airbrake",
             Switch::Hook => "hook",
+            Switch::Bay => "bay",
             Switch::Engine => "engine",
             Switch::Burner => "burner",
             Switch::Radar => "radar",
@@ -87,7 +88,7 @@ mod tests {
     use super::*;
     #[test]
     fn roundtrip_preserves_aliases_calibration_and_behaviors() {
-        let p=Profile::parse("tore-input 1\nrumble on\nalias pad device\nbind pad x roll axis -0.9 0.1 0.8 0.12 1.7 -1 30\nbind pad t throttle unit\nbind pad b gear follow\nbind pad hat instrument-next position=-1\nbind keyboard Ctrl-g gear press\n").unwrap();
+        let p=Profile::parse("tore-input 1\nrumble on\nalias pad device\nbind pad x roll axis -0.9 0.1 0.8 0.12 1.7 -1 30\nbind pad t throttle unit\nbind pad b gear follow\nbind pad hat instrument-next position=-1\nbind keyboard Ctrl-g gear press\nbind keyboard Shift-o bay press\n").unwrap();
         let text = p.to_text().unwrap();
         assert_eq!(Profile::parse(&text).unwrap().to_text().unwrap(), text);
         assert!(text.contains("0.12 1.7 -1 30"));

@@ -669,7 +669,7 @@ fn main() -> Result<()> {
                     .push(tore_formats::aircraft::AircraftId::parse(
                         &args
                             .next()
-                            .ok_or("--aircraft needs f18, rafale, f14, a4e or x31")?,
+                            .ok_or("--aircraft needs a supported aircraft ID (see --help)")?,
                     )?);
             }
             "--weapons" => options.weapons = true,
@@ -713,7 +713,7 @@ fn main() -> Result<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--aircraft f18|rafale|f14|a4e|x31] [--weapons] [--music] [--creator] [--wav-previews] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and general format conversion are not implemented. --music --wav-previews adds lossless PCM WAV wrappers.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
+                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22] [--weapons] [--music] [--creator] [--wav-previews] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and general format conversion are not implemented. --music --wav-previews adds lossless PCM WAV wrappers.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
                 );
                 return Ok(());
             }

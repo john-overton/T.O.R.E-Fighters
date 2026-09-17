@@ -21,6 +21,7 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | PageUp / PageDown | Increase/decrease throttle while held | Development mapping |
 | 1…9 / 0 | 10…90% / full throttle | Development mapping |
 | Shift-B / E | Afterburner / engine toggle | Development mapping; afterburner requires engine and >95% throttle |
+| Shift+O | F-22 main weapon bays | Fitted 1-second presentation; other aircraft ignore it |
 | G / F / B / H | Gear / flaps / airbrake / hook | Adapter controls; full FA keyboard table still needs verification |
 | R / J | Radar / jammer | Radar gates live-range contacts/locks; powered ECM applies recovered contact-probability terms; decoy behavior remains open |
 | F1 | Forward cockpit view; reset pan/zoom | FA `FMENUD.MNU` |
@@ -139,6 +140,13 @@ The development adapter now carries an independent world-space velocity vector. 
 Attitude rotates as an orthonormal basis and is interpolated in that basis. The old ±1.5-radian flight pitch clamp is removed; flight can pass through vertical/inverted attitudes and complete loops with sufficient energy. Cockpit head-look still cannot look below its forward eye line, this separate viewing restriction does not limit aircraft pitch. [Evidence and limitations](baselines/flight-response-sky.md).
 
 ## Exterior animations
+
+The seven added aircraft now have fitted moving flaps, pitch/roll/yaw surfaces,
+rigid gear and continuous airbrakes. MiG-23 wings sweep visually with speed.
+F-22 main bays open with Shift+O or an armed guided-weapon designation; this does
+not delay firing. Its exterior canopy is amber and 75% opaque; cockpit rendering stays clear.
+See the [animation contract](spec/aircraft-animation.md) for fits and limits.
+
 
 Use **0 then Shift+B** for full throttle and afterburner, and **F10** to inspect the model. G/F/B/H animate gear/flaps/airbrake/hook continuously. Pitch/roll inputs move fitted stabilators; Z/X move fitted trailing rudders. Engine/fuel/throttle gate afterburner consistently across HUD and audio; flame length has a short visual transition. These reuse original polygons with authored hinges and schedules. [Coverage, captures and remaining work](baselines/f18-animations.md).
 
@@ -289,11 +297,12 @@ behavior.
 ## Additional aircraft
 
 The additional FA aircraft use the same controls. F-14D and A-4E accept hook
-commands; X-31 does not. A-4E ignores burner commands and rejects a nonzero
+commands; X-31 and the seven [roster additions](spec/roster-aircraft.md) do not.
+A-4E and Su-25 ignore burner commands and rejects a nonzero
 burner capture fraction. F-14 visual sweep is automatic and fitted. X-31 thrust
 vectoring controls remain unavailable. See [aircraft behavior](spec/additional-aircraft.md).
 
-F-14D, A-4E and X-31 use their own FA roll response values. Below 220 ft/s,
+F-14D, A-4E, X-31 and the seven roster additions use their own FA roll response values. Below 220 ft/s,
 ordinary stick and rudder also command the source low-speed auxiliary rotation;
 authority depends on throttle and is removed on the ground or without power.
 There is no separate X-31 nozzle key. See the

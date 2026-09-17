@@ -481,6 +481,13 @@ mod tests {
                 AircraftId::F14 => "F-14",
                 AircraftId::A4E => "A-4E",
                 AircraftId::X31 => "X-31",
+                AircraftId::Mig29 => "MiG-29",
+                AircraftId::Su27 => "Su-27",
+                AircraftId::Mig21 => "MiG-21",
+                AircraftId::Su25 => "Su-25",
+                AircraftId::Mig23 => "MiG-23",
+                AircraftId::Su35 => "Su-35",
+                AircraftId::F22 => "F-22",
             }
             .into();
             profile.shape = format!("{}.SH", id.stem());

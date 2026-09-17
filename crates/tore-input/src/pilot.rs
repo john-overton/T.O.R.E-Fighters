@@ -5,6 +5,7 @@ pub enum Switch {
     Flaps,
     Airbrake,
     Hook,
+    Bay,
     Engine,
     Burner,
     Radar,

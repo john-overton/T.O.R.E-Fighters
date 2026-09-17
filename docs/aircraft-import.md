@@ -28,6 +28,16 @@ SWPATCH F-14 exterior are not used. Exact wing-sweep flight effects, X-31 thrust
 vectoring, damage/LOD/shadow shapes and complete systems parity remain open.
 No AI work is included. Existing flight adapter defaults remain unchanged.
 
+The next requested batch adds **MiG-29 Fulcrum-C, Su-27 Flanker-B, MiG-21
+Fishbed, Su-25 Frogfoot-A, MiG-23 Flogger-B, Su-35 and F-22A Raptor** as initial
+player ports. All twelve identities are selectable through Quick Mission and
+`--aircraft`. [Roster spec](spec/roster-aircraft.md) and
+[acceptance](baselines/aircraft-roster-expansion.md) document shared source
+cockpits, missing PTS companions and fitted devices. The
+[animation contract](spec/aircraft-animation.md) covers the subsequent surface,
+airbrake, rigid-gear and bay pass; [engine materials](spec/engine-material.md)
+list the reviewed round outlets.
+
 ## Current coverage and authoritative references
 
 | Area | Implemented for F18 / Rafale C | Remaining work / reference |
@@ -182,7 +192,8 @@ cargo run --locked -p tore-app -- --free-flight --aircraft rafale --researched-f
 
 The LHX exclusion only skips unrelated bundled media; adapt source selection as
 specified in [EXTRACTION](EXTRACTION.md). Register and document new CLI identities
-only after source review. The reviewed additions are `f14`, `a4e` and `x31`.
+only after source review. The reviewed additions are `f14`, `a4e`, `x31`, `mig29`, `su27`, `mig21`,
+`su25`, `mig23`, `su35` and `f22`.
 For FA-only CLI extraction, exclude `swpatch.lib` and unrelated disc archives,
 as shown in the [acceptance record](baselines/aircraft-fa-expansion.md).
 

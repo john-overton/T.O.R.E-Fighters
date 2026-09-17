@@ -12,6 +12,7 @@ enum Part {
     Brake,
     Gear,
     Hook,
+    Bay,
 }
 pub struct Rig {
     id: AircraftId,
@@ -46,6 +47,65 @@ impl Rig {
                         (0x65a0, Part::Flame, 4),
                         (0x65a6, Part::Brake, 4),
                         (0x65b2, Part::Gear, 22),
+                    ],
+                ),
+                AircraftId::Mig29 => (
+                    29290,
+                    328,
+                    &[0x8240, 0x8246, 0x824c, 0x8258, 0x825e],
+                    &[
+                        (0x8240, Part::Flame, 16),
+                        (0x8246, Part::Brake, 4),
+                        (0x824c, Part::Gear, 16),
+                    ],
+                ),
+                AircraftId::Su27 => (
+                    12838,
+                    146,
+                    &[0x41f0, 0x41f6, 0x41fc, 0x4208, 0x420e, 0x4214, 0x421a],
+                    &[
+                        (0x41f0, Part::Flame, 16),
+                        (0x41f6, Part::Brake, 2),
+                        (0x41fc, Part::Gear, 8),
+                    ],
+                ),
+                AircraftId::Mig21 => (
+                    14952,
+                    159,
+                    &[0x4a50, 0x4a56],
+                    &[(0x4a50, Part::Flame, 8), (0x4a56, Part::Gear, 6)],
+                ),
+                AircraftId::Su25 => (
+                    29626,
+                    334,
+                    &[0x8390, 0x8396, 0x83a2, 0x83a8, 0x83ae],
+                    &[(0x8390, Part::Brake, 8), (0x8396, Part::Gear, 18)],
+                ),
+                AircraftId::Mig23 => (
+                    23312,
+                    219,
+                    &[0x6ae0, 0x6ae6, 0x6af2, 0x6af8, 0x6afe],
+                    &[(0x6ae0, Part::Flame, 6), (0x6ae6, Part::Gear, 18)],
+                ),
+                AircraftId::Su35 => (
+                    27114,
+                    329,
+                    &[0x79c0, 0x79c6, 0x79cc, 0x79d8, 0x79de],
+                    &[
+                        (0x79c0, Part::Flame, 8),
+                        (0x79c6, Part::Brake, 2),
+                        (0x79cc, Part::Gear, 18),
+                    ],
+                ),
+                AircraftId::F22 => (
+                    20012,
+                    245,
+                    &[0x5df0, 0x5dfc, 0x5e02, 0x5e0e, 0x5e1a, 0x5e20],
+                    &[
+                        (0x5df0, Part::Flame, 8),
+                        (0x5dfc, Part::Bay, 14),
+                        (0x5e02, Part::Brake, 4),
+                        (0x5e0e, Part::Gear, 12),
                     ],
                 ),
                 _ => return Err("no additional aircraft rig for identity".into()),
@@ -93,6 +153,8 @@ impl Rig {
         // fitted one-third-foot scale, applying the source exponent difference.
         if self.id == AircraftId::F14 {
             4. / 3.
+        } else if self.id == AircraftId::Mig23 {
+            2. / 3.
         } else {
             1. / 3.
         }
@@ -105,6 +167,9 @@ impl Rig {
         }
     }
     pub fn faces(&self, f: &Face, s: &State) -> Vec<Face> {
+        if roster_flame_root(self.id).is_some() {
+            return crate::roster_animation::faces(self.id, f, s);
+        }
         if self.id == AircraftId::A4E && a4_tail(f.address) && s.elevator.abs() >= 1e-8 {
             return crate::aircraft_animation::split_surface(
                 f,
@@ -133,6 +198,9 @@ impl Rig {
     pub fn animate(&self, source: &Face, s: &State) -> Option<Face> {
         let mut f = source.clone();
         let part = self.parts.get(&f.address).copied();
+        if let Some(flame_root) = roster_flame_root(self.id) {
+            return roster_device(self.id, f, part, s, flame_root);
+        }
         let side = if f.positions.iter().map(|p| p[0]).sum::<f32>() < 0. {
             -1.
         } else {
@@ -196,9 +264,15 @@ impl Rig {
                 if s.brake <= 0. {
                     return None;
                 }
-                // F14 source raised panel is a switched pose. Side brakes
-                // interpolate from their reviewed open pose to a fitted hinge.
-                if self.id != AircraftId::F14 {
+                // Retain the source deployed endpoint and hinge toward a fitted closed pose.
+                if self.id == AircraftId::F14 {
+                    turn(
+                        &mut f,
+                        [side * 2., -11., 1.],
+                        [1., side * 0.5, -side * 0.5],
+                        std::f64::consts::FRAC_PI_4 * (1. - s.brake),
+                    );
+                } else {
                     let pivot = if self.id == AircraftId::A4E {
                         [side * 5., -30., -3.]
                     } else {
@@ -232,7 +306,7 @@ impl Rig {
                     turn(&mut f, [0., -5., -2.], [1., 0., 0.], -0.6 * (1. - s.hook));
                 }
             }
-            None => {}
+            Some(Part::Bay) | None => {}
         }
         let a = f.address;
         match self.id {
@@ -355,7 +429,7 @@ fn vector_angles(s: &State) -> [f64; 2] {
 pub fn sweep(s: &State) -> f64 {
     ((s.speed / 1.68781 - 400.) / 300.).clamp(0., 1.) * 48f64.to_radians() * (1. - s.flaps)
 }
-fn turn(f: &mut Face, pivot: [f32; 3], axis: [f32; 3], angle: f64) {
+pub(crate) fn turn(f: &mut Face, pivot: [f32; 3], axis: [f32; 3], angle: f64) {
     let length = axis.iter().map(|v| v * v).sum::<f32>().sqrt();
     let axis = axis.map(|v| f64::from(v / length));
     for p in &mut f.positions {
@@ -366,6 +440,64 @@ fn turn(f: &mut Face, pivot: [f32; 3], axis: [f32; 3], angle: f64) {
         let n = rotate([n[0], n[2], n[1]], axis, angle);
         f.normal = Some([n[0], n[2], n[1]]);
     }
+}
+
+/// Agent-fitted travel between reviewed source device endpoints. No foreign rig offsets.
+fn roster_flame_root(id: AircraftId) -> Option<f32> {
+    match id {
+        AircraftId::Mig29 => Some(-41.),
+        AircraftId::Su27 => Some(-60.),
+        AircraftId::Mig21 => Some(-56.),
+        AircraftId::Su25 => Some(0.),
+        AircraftId::Mig23 => Some(-29.),
+        AircraftId::Su35 => Some(-59.),
+        AircraftId::F22 => Some(-48.),
+        _ => None,
+    }
+}
+fn roster_device(
+    id: AircraftId,
+    mut f: Face,
+    part: Option<Part>,
+    s: &State,
+    flame_root: f32,
+) -> Option<Face> {
+    let scaling = match part {
+        Some(Part::Flame) if s.exhaust > 0. => Some((1, flame_root, s.exhaust as f32)),
+        Some(Part::Gear) if s.gear > 0. => {
+            crate::roster_animation::gear(id, &mut f, s.gear);
+            None
+        }
+        Some(Part::Brake) if s.brake > 0. => {
+            crate::roster_animation::brake(id, &mut f, s.brake);
+            None
+        }
+        Some(Part::Bay) if s.bay > 0. => None,
+        Some(_) => return None,
+        None => {
+            crate::roster_animation::animate(id, &mut f, s);
+            None
+        }
+    };
+    if let Some((axis, root, fraction)) = scaling {
+        for p in &mut f.positions {
+            p[axis] = root + (p[axis] - root) * fraction;
+        }
+        // Normals transform by inverse transpose under nonuniform scaling.
+        if let Some(n) = &mut f.normal {
+            let old_length = n.iter().map(|v| v * v).sum::<f32>().sqrt();
+            // Normal storage is right/up/forward; positions are right/forward/up.
+            let normal_axis = [0, 2, 1][axis];
+            n[normal_axis] /= fraction.max(f32::MIN_POSITIVE);
+            let length = n.iter().map(|v| v * v).sum::<f32>().sqrt();
+            if length.is_finite() && length > 0. {
+                for v in n {
+                    *v *= old_length / length;
+                }
+            }
+        }
+    }
+    Some(f)
 }
 
 #[cfg(test)]
@@ -381,6 +513,70 @@ mod tests {
             normal: Some([0., 1., 0.]),
             address,
             fog: Default::default(),
+        }
+    }
+    #[test]
+    fn roster_devices_keep_roots_and_preserve_each_source_endpoint() {
+        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        for id in AircraftId::ALL {
+            let Some(flame_root) = roster_flame_root(id) else {
+                continue;
+            };
+            let rig = Rig {
+                id,
+                parts: [(7, Part::Gear), (8, Part::Flame), (9, Part::Brake)].into(),
+            };
+            for (address, axis, root) in [(7, 2, 0.), (8, 1, flame_root)] {
+                let mut source = face(address);
+                source.normal = Some([0., 1., 1.]);
+                source.positions[0][axis] = root;
+                source.positions[1][axis] = root - 10.;
+                state.gear = 1.;
+                state.exhaust = 1.;
+                assert_eq!(
+                    rig.animate(&source, &state).unwrap().positions,
+                    source.positions
+                );
+                state.gear = 0.5;
+                state.exhaust = 0.5;
+                let half = rig.animate(&source, &state).unwrap();
+                assert_eq!(half.uv, source.uv);
+                if address == 7 {
+                    let distance = |a: [f32; 3], b: [f32; 3]| {
+                        a.iter().zip(b).map(|(a, b)| (a - b).powi(2)).sum::<f32>()
+                    };
+                    for i in 0..3 {
+                        let j = (i + 1) % 3;
+                        assert!(
+                            (distance(half.positions[i], half.positions[j])
+                                - distance(source.positions[i], source.positions[j]))
+                            .abs()
+                                < 0.001
+                        );
+                    }
+                    assert_ne!(half.positions, source.positions);
+                } else {
+                    assert_eq!(half.positions[0], source.positions[0]);
+                    assert_eq!(half.positions[1][axis], root - 5.);
+                    let n = half.normal.unwrap();
+                    assert!((n[2] / n[1] - 2.).abs() < 1e-6);
+                    assert!((n.iter().map(|v| v * v).sum::<f32>() - 2.).abs() < 1e-6);
+                }
+                state.gear = 0.;
+                state.exhaust = 0.;
+                assert!(rig.animate(&source, &state).is_none());
+            }
+            state.brake = 0.;
+            assert!(rig.animate(&face(9), &state).is_none());
+            state.brake = 1.;
+            assert_eq!(
+                rig.animate(&face(9), &state).unwrap().positions,
+                face(9).positions
+            );
+            assert_eq!(
+                rig.animate(&face(10), &state).unwrap().positions,
+                face(10).positions
+            );
         }
     }
     #[test]

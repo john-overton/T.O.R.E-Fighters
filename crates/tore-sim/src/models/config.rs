@@ -79,6 +79,13 @@ impl Configuration {
                 tore_formats::aircraft::AircraftId::F14
                     | tore_formats::aircraft::AircraftId::A4E
                     | tore_formats::aircraft::AircraftId::X31
+                    | tore_formats::aircraft::AircraftId::Mig29
+                    | tore_formats::aircraft::AircraftId::Su27
+                    | tore_formats::aircraft::AircraftId::Mig21
+                    | tore_formats::aircraft::AircraftId::Su25
+                    | tore_formats::aircraft::AircraftId::Mig23
+                    | tore_formats::aircraft::AircraftId::Su35
+                    | tore_formats::aircraft::AircraftId::F22
             ) {
                 Some(super::handling::Profile::from_aircraft(a)?)
             } else {

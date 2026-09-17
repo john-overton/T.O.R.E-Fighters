@@ -98,8 +98,24 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
         }
         AircraftId::F14 => matches!(address, 0x48a6 | 0x48d5 | 0x48fc | 0x491b),
         AircraftId::X31 => address == 0x29f7,
-        AircraftId::A4E => false,
+        AircraftId::Mig29 => matches!(address, 0x468b | 0x46a6 | 0x46d7 | 0x4706),
+        AircraftId::Su27 => matches!(address, 0x2117 | 0x22fe),
+        AircraftId::Mig21 => address == 0x22e8,
+        AircraftId::Mig23 => matches!(address, 0x34af | 0x34d6),
+        AircraftId::Su35 => matches!(address, 0x2aee | 0x366c | 0x3690 | 0x3a9b | 0x3af0),
+        AircraftId::A4E | AircraftId::Su25 | AircraftId::F22 => false,
     }
+}
+/// Reviewed round, afterburning outlet families. F-22 deliberately excluded.
+pub fn outlet_count(id: AircraftId) -> usize {
+    match id {
+        AircraftId::X31 | AircraftId::Mig21 | AircraftId::Mig23 => 1,
+        AircraftId::A4E | AircraftId::Su25 | AircraftId::F22 => 0,
+        _ => 2,
+    }
+}
+pub fn outlet_group(id: AircraftId, positions: &[[f32; 3]]) -> usize {
+    usize::from(outlet_count(id) == 2 && positions.iter().map(|p| p[0]).sum::<f32>() > 0.)
 }
 pub fn heat(s: &crate::flight::State) -> f32 {
     if !s.engine || s.fuel <= 0. {
@@ -114,6 +130,23 @@ pub fn heat(s: &crate::flight::State) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn split_single_outlets_share_uv_bounds_and_excluded_planes_never_match() {
+        for id in [AircraftId::Mig21, AircraftId::Mig23, AircraftId::X31] {
+            assert_eq!(outlet_count(id), 1);
+            assert_eq!(outlet_group(id, &[[-1., 0., 0.]]), 0);
+            assert_eq!(outlet_group(id, &[[1., 0., 0.]]), 0);
+        }
+        for id in [AircraftId::Mig29, AircraftId::Su27, AircraftId::Su35] {
+            assert_eq!(outlet_count(id), 2);
+            assert_eq!(outlet_group(id, &[[-1., 0., 0.]]), 0);
+            assert_eq!(outlet_group(id, &[[1., 0., 0.]]), 1);
+        }
+        for id in [AircraftId::F22, AircraftId::Su25, AircraftId::A4E] {
+            assert_eq!(outlet_count(id), 0);
+            assert!((0..65536).all(|address| !nozzle(id, address)));
+        }
+    }
     #[test]
     fn bounded_image_and_power() {
         let mut bytes = b"TORErgba".to_vec();

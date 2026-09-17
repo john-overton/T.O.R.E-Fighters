@@ -67,6 +67,7 @@ impl Action {
             ("flaps", Switch::Flaps),
             ("airbrake", Switch::Airbrake),
             ("hook", Switch::Hook),
+            ("bay", Switch::Bay),
             ("engine", Switch::Engine),
             ("burner", Switch::Burner),
             ("radar", Switch::Radar),

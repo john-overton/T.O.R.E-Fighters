@@ -59,11 +59,15 @@ The app defaults to the researched hybrid adapter, requested by John on
 2026-09-16. `--researched-flight` remains an explicit alias; `--legacy-flight`
 selects the previous compatibility model. Selection persists across new free
 flights in that process. It also works
-with `--headless-flight 7200 --maneuver loop`. F/A-18D, Rafale C, F-14D, A-4E and X-31 EFM are rendered aircraft; select Rafale with
-`--aircraft rafale` or Quick Mission. Each uses its own original cockpit and
-separate fitted animation rig. No F18.SH animation addresses are applied to another shape. The additional
+with `--headless-flight 7200 --maneuver loop`. Twelve aircraft have rendered initial ports; the
+[roster guide](aircraft-import.md) lists their identities. Select Rafale with
+`--aircraft rafale` or Quick Mission. Each uses its source-referenced cockpit family and
+its own reviewed exterior device mapping. No F18.SH animation addresses are applied to another shape. The additional
 models own their configurations and use the [documented shared fit](spec/additional-aircraft.md).
 Select them with `--aircraft f14|a4e|x31`; see [validation](baselines/aircraft-fa-expansion.md).
+The seven [roster additions](spec/roster-aircraft.md) own separate configurations
+with the same shared fit and their own source roll rates. See their
+[validation](baselines/aircraft-roster-expansion.md).
 
 For already-extracted files:
 

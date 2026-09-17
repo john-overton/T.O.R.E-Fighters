@@ -196,6 +196,14 @@ impl Configuration {
             // Restrict the live adapter to the actual default stations of the
             // reviewed aircraft. Catalog import never makes another type flyable.
             let permitted = match a.id {
+                AircraftId::Mig29 => ["AA8.JT", "GSH301.JT"].contains(&name),
+                AircraftId::Su27 => ["AA11.JT", "AA12.JT", "GSH301.JT"].contains(&name),
+                AircraftId::Mig21 => ["AA2.JT", "GSH23.JT"].contains(&name),
+                AircraftId::Su25 => ["AA8.JT", "AS7.JT", "B13.JT", "GSH301.JT"].contains(&name),
+                AircraftId::Mig23 => ["AS7.JT", "B8.JT", "GSH6_30.JT"].contains(&name),
+                AircraftId::Su35 => ["AA11B.JT", "AA12.JT", "AAML.JT", "GSH301.JT"].contains(&name),
+                AircraftId::F22 => ["AGM65G.JT", "AIM120.JT", "AIM9X.JT", "M61.JT"].contains(&name),
+
                 AircraftId::F18 => ["M61.JT", "AIM120.JT", "AGM65G.JT", "AIM9M.JT"].contains(&name),
                 AircraftId::F14 => ["M61.JT", "AIM54C.JT", "AIM120.JT", "AIM9M.JT"].contains(&name),
                 AircraftId::A4E => ["MK12.JT", "MK82.JT", "LAU61.JT"].contains(&name),
@@ -242,7 +250,7 @@ impl Configuration {
             .hardpoints
             .iter()
             .filter_map(|h| h.store.as_deref())
-            .find(|n| *n == "VIS340.SEE")
+            .find(|n| matches!(*n, "VIS340.SEE" | "VIS240.SEE"))
             .ok_or_else(|| super::invalid("missing reviewed visual sensor"))?;
         let visual = tore_formats::weapons::Seeker::parse(visual_name, &read(visual_name)?)?;
         let ecm_hardpoint = a

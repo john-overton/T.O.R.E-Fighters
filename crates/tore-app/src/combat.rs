@@ -168,6 +168,9 @@ impl Combat {
         self.input = FireInput::default();
         self.controller.cancel();
         s.set_payload(self.state.payload_lbs())?;
+        s.bay = 0.;
+        s.bay_open = false;
+        s.bay_auto_open = false;
         if self.range {
             self.state.range_target(launcher(s));
         }
@@ -192,6 +195,15 @@ impl Combat {
                 f64::from(world.height(x as f32, z as f32))
             });
         s.set_payload(self.state.payload_lbs())?;
+        s.bay_auto_open = s.bay_available()
+            && self.state.armed
+            && self.state.designated.is_some()
+            && self.state.rounds(self.state.selected) > 0
+            && self.state.configuration().stations[self.state.selected]
+                .weapon
+                .seeker
+                .signature
+                != 0;
         if self.state.radar_failed {
             s.radar = false;
         }
@@ -551,6 +563,36 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             .filter(|e| matches!(e, Event::PlayerDestroyed))
             .count();
     }
+    // Different source weapons produce different damage histories. A fatal
+    // missile can legitimately select no subsystem. Cover each source station
+    // plus gradual gun damage without changing aircraft damage values or RNG.
+    for source in 0..combat.state.configuration().stations.len() {
+        if systems > 0 {
+            break;
+        }
+        let mut gradual = live::State::new(combat.state.configuration().clone(), true)?;
+        gradual.selected = source;
+        if source > 0 {
+            gradual.command(live::Command::Incoming, l);
+        }
+        let mut replay = gradual.clone();
+        for tick in 0..1240 {
+            if tick >= 1200 {
+                gradual.command(live::Command::DamagePlayer, l);
+                replay.command(live::Command::DamagePlayer, l);
+            }
+            let events = gradual.step(false, l, |_, _| 0.);
+            if events != replay.step(false, l, |_, _| 0.)
+                || format!("{gradual:?}") != format!("{replay:?}")
+            {
+                return Err("gradual source damage replay diverged".into());
+            }
+            systems += events
+                .iter()
+                .filter(|e| matches!(e, Event::SubsystemDamaged(_)))
+                .count();
+        }
+    }
     if (systems == 0
         && damaged
             .configuration()
@@ -715,10 +757,18 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     return Err("source radar-off tracking contract failed".into());
                 }
                 let mut jettison = combat.state.clone();
-                let expected_mass =
-                    jettison.payload_lbs() - f64::from(weapon.weight) * f64::from(initial);
+                let internal = jettison.configuration().stations[index].internal;
+                let expected_rounds = if internal { initial } else { 0 };
+                let expected_mass = jettison.payload_lbs()
+                    - if internal {
+                        0.
+                    } else {
+                        f64::from(weapon.weight.max(0)) * f64::from(initial)
+                    };
                 jettison.command(live::Command::Jettison, l);
-                if jettison.rounds(index) != 0 || jettison.payload_lbs() != expected_mass {
+                if jettison.rounds(index) != expected_rounds
+                    || jettison.payload_lbs() != expected_mass
+                {
                     return Err("source jettison mass/ammunition contract failed".into());
                 }
                 if combat.state.configuration().stations[index]

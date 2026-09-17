@@ -258,19 +258,33 @@ fn engine_color(uv:vec2<f32>,heat:f32)->vec3<f32> {
  return mix(mix(engine_texel(base,heat),engine_texel(base+vec2<i32>(1,0),heat),t.x),
             mix(engine_texel(base+vec2<i32>(0,1),heat),engine_texel(base+vec2<i32>(1,1),heat),t.x),t.y);
 }
-@fragment fn fragment(in:VertexOut)->@location(0) vec4<f32>{
+fn aircraft_color(in:VertexOut)->vec4<f32>{
  var color=in.color;
  if in.layer<=-3.0 && in.layer>=-4.0 {color=engine_color(in.uv,clamp(-in.layer-3.0,0.0,1.0));}
- if in.layer>=0.0 || in.layer == -2.0 {
+ if in.layer>=0.0 || in.layer == -2.0 || in.layer == -5.0 {
   var remaps=vec2<f32>(-1.0);if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
   let tex=sample_tile(in.uv,i32(max(in.layer,0.0)),0,-1,in.light_row,remaps);
   if in.layer == -2.0 && tex.a < 0.5 { discard; }
   color=mix(color,tex.rgb,tex.a);
+  if in.layer == -5.0 {
+   let luminance=dot(color,vec3<f32>(0.2126,0.7152,0.0722));
+   color=mix(color,vec3<f32>(0.95,0.45,0.08)*(0.3+0.7*luminance),0.75);
+  }
  }
- if textureDimensions(palette).y<=1u || (in.own_color>0.0 && in.layer<0.0 && in.layer != -2.0) { color=mix(color,linear(scene.sky.rgb),haze(in.distance)); }
+ if textureDimensions(palette).y<=1u || (in.own_color>0.0 && in.layer<0.0 && in.layer != -2.0 && in.layer != -5.0) { color=mix(color,linear(scene.sky.rgb),haze(in.distance)); }
  if in.fog_enabled!=0u {color=aerial_perspective(color,in.direction,in.altitude);}
  else {color=cloud_occlusion(color,in.direction,in.altitude);}
  return vec4<f32>(color,1.0);
+}
+// Glazing composites after opaque geometry. The depth prepass selects one
+// nearest surface, avoiding compounded opacity through overlapping glass.
+@fragment fn fragment(in:VertexOut)->@location(0) vec4<f32>{
+ if in.layer == -5.0 {discard;}
+ return aircraft_color(in);
+}
+@fragment fn canopy_fragment(in:VertexOut)->@location(0) vec4<f32>{
+ if in.layer != -5.0 {discard;}
+ return vec4<f32>(aircraft_color(in).rgb,0.75);
 }
 struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32> }
 @vertex fn sky_vertex(@builtin(vertex_index) i:u32)->SkyOut {

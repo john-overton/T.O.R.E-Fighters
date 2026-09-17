@@ -43,6 +43,9 @@ cargo run --locked -p tore-app -- --monitor-inputs 30
 | D-pad up/down | Selected instrument's first/second stock button |
 | D-pad and south/east buttons in menus | Navigate and accept/back |
 
+Shift+O toggles the F-22 main bays. The `bay` action is available in the controls
+editor, text profiles and recorded input. Other aircraft ignore it.
+
 Keyboard assignments continue working. Standard keyboard axes have priority over
 controller axes while pressed. These gamepad defaults are convenience mappings,
 not a claim about FA's original joystick layout. Back/paddle/extra buttons are

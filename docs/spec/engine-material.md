@@ -11,8 +11,11 @@
 ## Behavior
 
 Opinionated presentation requested by John on 2026-09-16. Replace the existing
-rear engine faces of F/A-18D, Rafale C, X-31 and F-14D with his supplied artwork.
-A-4E retains its original presentation. Flame geometry, flight forces and sound
+rear round engine faces of F/A-18D, Rafale C, X-31, F-14D, MiG-21,
+MiG-23, MiG-29, Su-27 and Su-35 with his supplied artwork. The expansion
+was requested by John on 2026-09-16. Reuse the existing pink-mask grading below.
+A-4E and Su-25 have no afterburner; F-22 has rectangular outlets. All three
+retain their original engine presentation. Flame geometry, flight forces and sound
 are unchanged. This is not a claim about original FA artwork or behavior.
 
 Keep metal pixels unchanged. The pink regions serve as the glow mask: normalized

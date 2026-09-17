@@ -3,8 +3,15 @@ pub mod a4e;
 pub mod config;
 pub mod f14d;
 pub mod f18;
+pub mod f22;
 pub(crate) mod handling;
+pub mod mig21;
+pub mod mig23;
+pub mod mig29;
 pub mod rafale_c;
+pub mod su25;
+pub mod su27;
+pub mod su35;
 pub mod x31;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -72,6 +79,13 @@ pub enum AircraftModel {
     F14D(f14d::F14DFlightModel),
     A4E(a4e::A4EFlightModel),
     X31(x31::X31FlightModel),
+    Mig29(mig29::Mig29FlightModel),
+    Su27(su27::Su27FlightModel),
+    Mig21(mig21::Mig21FlightModel),
+    Su25(su25::Su25FlightModel),
+    Mig23(mig23::Mig23FlightModel),
+    Su35(su35::Su35FlightModel),
+    F22(f22::F22FlightModel),
 }
 impl AircraftModel {
     pub fn for_aircraft(a: &tore_formats::aircraft::Aircraft) -> tore_formats::Result<Self> {
@@ -83,6 +97,13 @@ impl AircraftModel {
             ("F-14", "F14.SH") => Ok(Self::F14D(f14d::F14DFlightModel::from_aircraft(a)?)),
             ("A-4E", "A4.SH") => Ok(Self::A4E(a4e::A4EFlightModel::from_aircraft(a)?)),
             ("X-31", "F31.SH") => Ok(Self::X31(x31::X31FlightModel::from_aircraft(a)?)),
+            ("MiG-29", "MIG29.SH") => Ok(Self::Mig29(mig29::Mig29FlightModel::from_aircraft(a)?)),
+            ("Su-27", "SU27.SH") => Ok(Self::Su27(su27::Su27FlightModel::from_aircraft(a)?)),
+            ("MiG-21", "MIG21.SH") => Ok(Self::Mig21(mig21::Mig21FlightModel::from_aircraft(a)?)),
+            ("Su-25", "SU25.SH") => Ok(Self::Su25(su25::Su25FlightModel::from_aircraft(a)?)),
+            ("MiG-23", "MIG23.SH") => Ok(Self::Mig23(mig23::Mig23FlightModel::from_aircraft(a)?)),
+            ("Su-35", "SU35.SH") => Ok(Self::Su35(su35::Su35FlightModel::from_aircraft(a)?)),
+            ("F-22", "F22.SH") => Ok(Self::F22(f22::F22FlightModel::from_aircraft(a)?)),
             #[cfg(test)]
             ("Synthetic", "TEST.SH") => Ok(Self::F18(f18::F18FlightModel::from_aircraft(a)?)),
             _ => Err(std::io::Error::other(
@@ -108,6 +129,13 @@ impl AircraftModel {
             Self::F14D(m) => m.configuration = configuration,
             Self::A4E(m) => m.configuration = configuration,
             Self::X31(m) => m.configuration = configuration,
+            Self::Mig29(m) => m.configuration = configuration,
+            Self::Su27(m) => m.configuration = configuration,
+            Self::Mig21(m) => m.configuration = configuration,
+            Self::Su25(m) => m.configuration = configuration,
+            Self::Mig23(m) => m.configuration = configuration,
+            Self::Su35(m) => m.configuration = configuration,
+            Self::F22(m) => m.configuration = configuration,
         }
         Ok(())
     }
@@ -120,6 +148,13 @@ impl FlightModel for AircraftModel {
             Self::F14D(m) => m.configuration(),
             Self::A4E(m) => m.configuration(),
             Self::X31(m) => m.configuration(),
+            Self::Mig29(m) => m.configuration(),
+            Self::Su27(m) => m.configuration(),
+            Self::Mig21(m) => m.configuration(),
+            Self::Su25(m) => m.configuration(),
+            Self::Mig23(m) => m.configuration(),
+            Self::Su35(m) => m.configuration(),
+            Self::F22(m) => m.configuration(),
         }
     }
     fn response(&self, c: Conditions) -> Response {
@@ -129,6 +164,13 @@ impl FlightModel for AircraftModel {
             Self::F14D(m) => m.response(c),
             Self::A4E(m) => m.response(c),
             Self::X31(m) => m.response(c),
+            Self::Mig29(m) => m.response(c),
+            Self::Su27(m) => m.response(c),
+            Self::Mig21(m) => m.response(c),
+            Self::Su25(m) => m.response(c),
+            Self::Mig23(m) => m.response(c),
+            Self::Su35(m) => m.response(c),
+            Self::F22(m) => m.response(c),
         }
     }
     fn tuning(&self) -> Tuning {
@@ -138,6 +180,13 @@ impl FlightModel for AircraftModel {
             Self::F14D(m) => m.tuning(),
             Self::A4E(m) => m.tuning(),
             Self::X31(m) => m.tuning(),
+            Self::Mig29(m) => m.tuning(),
+            Self::Su27(m) => m.tuning(),
+            Self::Mig21(m) => m.tuning(),
+            Self::Su25(m) => m.tuning(),
+            Self::Mig23(m) => m.tuning(),
+            Self::Su35(m) => m.tuning(),
+            Self::F22(m) => m.tuning(),
         }
     }
 }
@@ -267,6 +316,13 @@ mod additional_tests {
             (AircraftId::F14, "F-14", true, 400.),
             (AircraftId::A4E, "A-4E", true, 0.),
             (AircraftId::X31, "X-31", false, 500.),
+            (AircraftId::Mig29, "MiG-29", false, 500.),
+            (AircraftId::Su27, "Su-27", false, 500.),
+            (AircraftId::Mig21, "MiG-21", false, 500.),
+            (AircraftId::Su25, "Su-25", false, 0.),
+            (AircraftId::Mig23, "MiG-23", false, 500.),
+            (AircraftId::Su35, "Su-35", false, 500.),
+            (AircraftId::F22, "F-22", false, 500.),
         ] {
             let mut a = crate::flight::integration_tests::profile();
             a.id = id;

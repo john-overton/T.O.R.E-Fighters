@@ -385,6 +385,7 @@ impl FlightUi {
             return match key {
                 "/" => Command::CenterLook,
                 "b" => Command::Toggle(Switch::Burner),
+                "o" => Command::Toggle(Switch::Bay),
                 "u" => {
                     self.hud = !self.hud;
                     Command::Click
