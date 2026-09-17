@@ -5,6 +5,8 @@ pub struct Tone {
     pub gain: f64,
     pub phase: f64,
     pub ground: bool,
+    pub radar: bool,
+    pub locked: bool,
     ramp_target: f64,
     increment: f64,
     remaining: u32,
@@ -29,7 +31,11 @@ impl Tone {
             }
         }
         self.phase = (self.phase + 1. / rate).fract();
-        let wave = if self.ground {
+        let wave = if self.locked {
+            (self.phase * if self.radar { 1800. } else { 1320. } * std::f64::consts::TAU).sin()
+        } else if self.radar {
+            (self.phase * 880. * std::f64::consts::TAU).sin()
+        } else if self.ground {
             (self.phase * 660. * std::f64::consts::TAU).sin()
         } else {
             (self.phase * 110. * std::f64::consts::TAU).sin()

@@ -2,7 +2,6 @@
 use crate::{
     combat, flight,
     hud::{self, Paint},
-    terrain::Camera,
 };
 use tore_formats::font::Font;
 use tore_sim::{
@@ -13,22 +12,33 @@ use tore_sim::{
     },
 };
 
-pub fn mode_hit(point: (f64, f64), size: [f64; 2]) -> bool {
-    let scale = (size[0] / 640.).min(size[1] / 480.) * crate::flight_canvas::HUD_SCALE;
-    let x = (point.0 - (size[0] - 640. * scale) / 2.) / scale;
-    let y = (point.1 - (size[1] - 480. * scale) / 2.) / scale;
-    (178. ..320.).contains(&x) && (99. ..114.).contains(&y)
+pub fn active(state: &live::State) -> bool {
+    state.armed
+        && missiles::Profile::for_weapon(&state.configuration().stations[state.selected].weapon)
+            .is_some()
 }
-fn projected(direction: Vector, camera: &Camera, zoom: f64) -> Option<(f64, f64)> {
-    let bearing = direction[0].atan2(direction[2]) - f64::from(camera.yaw);
-    let elevation = direction[1].atan2(direction[0].hypot(direction[2]));
-    hud::project(
-        f64::from(camera.pitch),
-        -f64::from(camera.roll),
-        bearing,
-        elevation,
-        zoom,
+fn debug_point(point: (f64, f64), size: [f64; 2]) -> (f64, f64) {
+    let scale = (size[0] / 640.).min(size[1] / 480.);
+    (
+        (point.0 - size[0] + 258. * scale) / scale,
+        (point.1 - 8. * scale) / scale,
     )
+}
+pub fn mode_hit(point: (f64, f64), size: [f64; 2]) -> bool {
+    let (x, y) = debug_point(point, size);
+    (4. ..130.).contains(&x) && (4. ..18.).contains(&y)
+}
+pub fn release_hit(point: (f64, f64), size: [f64; 2]) -> bool {
+    let (x, y) = debug_point(point, size);
+    (132. ..246.).contains(&x) && (4. ..18.).contains(&y)
+}
+fn diamond_visible(locked: bool, radar_in_range: bool, tick: u64) -> bool {
+    locked && (!radar_in_range || tick % 60 < 30)
+}
+fn projected(direction: Vector, s: &flight::State, zoom: f64) -> Option<(f64, f64)> {
+    let bearing = direction[0].atan2(direction[2]) - s.yaw;
+    let elevation = direction[1].atan2(direction[0].hypot(direction[2]));
+    hud::project(s.pitch, s.bank, bearing, elevation, zoom)
 }
 /// The boundary uses the exact independent heading/elevation tests of the seeker.
 fn boundary(basis: Basis, horizontal: f64, vertical: f64) -> Vec<Vector> {
@@ -57,10 +67,12 @@ pub fn draw(
     s: &flight::State,
     state: &live::State,
     font: &Font,
-    camera: &Camera,
     color: [u8; 3],
     zoom: f64,
 ) {
+    if !active(state) {
+        return;
+    }
     let station = &state.configuration().stations[state.selected];
     let w = &station.weapon;
     let Some(profile) = missiles::Profile::for_weapon(w) else {
@@ -72,45 +84,43 @@ pub fn draw(
         clip: (174, 96, 292, 325),
         color: [color[0], color[1], color[2], 255],
     };
-    // Fitted translucent backing keeps weapon details readable when the
-    // original cockpit HUD and bank scale are magnified by camera zoom.
-    paint.color = [0, 0, 0, 230];
-    paint.rect(176, 337, 288, 73);
-    paint.rect(176, 98, 148, 33);
-    paint.color = [color[0], color[1], color[2], 255];
-    let mode = if state.weapon_rules == missiles::Rules::Compatibility {
-        "COMPATIBILITY"
-    } else {
-        state.launch_mode.label()
-    };
-    paint.text(font, mode, 178, 101);
-    let status = match (profile.guidance, state.mounted.status) {
-        (Guidance::Infrared, Status::Locked) => "IR LOCK",
-        (_, Status::Pitbull) => "RADAR LOCK",
-        (_, Status::Search) => "SEARCH",
-        (_, status) => status.label(),
-    };
-    paint.text(font, status, 178, 115);
-    let cap = if state.launch_mode == LaunchMode::Boresight && !state.mounted.acquired {
+    let bore = state.launch_mode == LaunchMode::Boresight;
+    let cap = if bore {
         profile.search_cap()
     } else {
         std::f64::consts::PI
     };
     let zone = &w.seeker.zones[0];
-    let cone = boundary(
-        l.basis,
-        missiles::half_angle(zone.heading).min(cap),
-        missiles::half_angle(zone.pitch).min(cap),
-    );
+    let cone = if bore {
+        let angle = cap
+            .min(missiles::half_angle(zone.heading))
+            .min(missiles::half_angle(zone.pitch));
+        (0..=96)
+            .map(|i| {
+                let a = f64::from(i) * std::f64::consts::TAU / 96.;
+                std::array::from_fn(|j| {
+                    l.basis.forward[j] * angle.cos()
+                        + (l.basis.right[j] * a.cos() + l.basis.up[j] * a.sin()) * angle.sin()
+                })
+            })
+            .collect()
+    } else {
+        boundary(
+            l.basis,
+            missiles::half_angle(zone.heading),
+            missiles::half_angle(zone.pitch),
+        )
+    };
     for pair in cone.windows(2) {
-        if let (Some(a), Some(b)) = (
-            projected(pair[0], camera, zoom),
-            projected(pair[1], camera, zoom),
-        ) {
+        if let (Some(a), Some(b)) = (projected(pair[0], s, zoom), projected(pair[1], s, zoom)) {
             paint.line(a, b);
         }
     }
-    if let Some((x, y)) = projected(l.basis.forward, camera, zoom) {
+    if let Some((x, y)) = projected(l.basis.forward, s, zoom) {
+        if bore {
+            let radius = 240. * 3f64.sqrt() * cap.tan() * zoom;
+            paint.text(font, "BORE", x as i32 - 12, (y - radius + 5.) as i32);
+        }
         for i in 0..32 {
             let a = f64::from(i) * std::f64::consts::TAU / 32.;
             let b = f64::from(i + 1) * std::f64::consts::TAU / 32.;
@@ -120,32 +130,27 @@ pub fn draw(
             );
         }
     }
-    let observed = state
-        .mounted
-        .observation
-        .map(|o| (o.position, o.velocity))
-        .or_else(|| {
-            state
-                .designated()
-                .filter(|_| state.launch_mode == LaunchMode::Cued)
-                .and_then(|id| state.sensors.observation(id))
-                .map(|c| (c.position, c.velocity))
-        });
-    if let Some((position, velocity)) = observed {
-        if let Some((x, y)) = projected(
-            missiles::sub(position, camera.position.map(f64::from)),
-            camera,
-            zoom,
-        ) {
-            for (a, b) in [
-                ((-7., -7.), (7., -7.)),
-                ((7., -7.), (7., 7.)),
-                ((7., 7.), (-7., 7.)),
-                ((-7., 7.), (-7., -7.)),
-            ] {
-                paint.line((x + a.0, y + a.1), (x + b.0, y + b.1));
+    let observed = state.weapon_observation(l);
+    if let Some(observation) = observed {
+        let position = observation.position;
+        if let Some((x, y)) = projected(missiles::sub(position, s.position), s, zoom) {
+            if !bore {
+                for (a, b) in [
+                    ((-7., -7.), (7., -7.)),
+                    ((7., -7.), (7., 7.)),
+                    ((7., 7.), (-7., 7.)),
+                    ((-7., 7.), (-7., -7.)),
+                ] {
+                    paint.line((x + a.0, y + a.1), (x + b.0, y + b.1));
+                }
             }
-            if matches!(state.mounted.status, Status::Locked | Status::Pitbull) {
+            let radar_in_range = matches!(profile.guidance, Guidance::Active | Guidance::Supported)
+                && state.readiness(l) == live::Readiness::Ready;
+            if diamond_visible(
+                bore || matches!(state.mounted.status, Status::Locked | Status::Pitbull),
+                bore || radar_in_range,
+                state.sensors.tick(),
+            ) {
                 for (a, b) in [
                     ((0., -7.), (7., 0.)),
                     ((7., 0.), (0., 7.)),
@@ -157,59 +162,129 @@ pub fn draw(
             }
         }
         let range = missiles::length(missiles::sub(position, s.position));
-        let closing = missiles::closure(s.position, s.velocity, position, velocity) / 1.68781;
-        paint.text(
-            font,
-            &format!("R {:.1} C {closing:+.0}", range / missiles::NMI),
-            178,
-            352,
-        );
         let min = f64::from(w.seeker.zones[1].minimum_range);
         let max = f64::from(w.seeker.zones[1].maximum_range);
-        paint.line((451., 178.), (451., 257.));
-        paint.line((445., 178.), (451., 178.));
-        paint.line((445., 257.), (451., 257.));
-        paint.text(font, &format!("{:.1}", max / missiles::NMI), 420, 166);
-        paint.text(font, &format!("{:.1}", min / missiles::NMI), 420, 259);
-        if (min..=max).contains(&range) && max > min {
-            let y = 257. - 79. * (range - min) / (max - min);
-            paint.line((441., y - 4.), (447., y));
-            paint.line((447., y), (441., y + 4.));
+        // Compact scale below the altitude tape, flush with the altitude box edge.
+        let altitude = format!("{:.0}", s.position[1]);
+        let text_width = |text: &str| {
+            text.bytes()
+                .map(|c| font.glyphs[c as usize].advance)
+                .sum::<usize>() as i32
+        };
+        let right = 402 + text_width(&altitude).max(24) + 3;
+        let x = f64::from(right);
+        let (top, bottom) = (300., 332.);
+        paint.line((x, top), (x, bottom));
+        paint.line((x - 5., top), (x, top));
+        paint.line((x - 5., bottom), (x, bottom));
+        let maximum = format!("{:.1}", max / missiles::NMI);
+        let minimum = format!("{:.1}", min / missiles::NMI);
+        paint.text(font, &maximum, right - text_width(&maximum), 288);
+        paint.text(font, &minimum, right - text_width(&minimum), 334);
+        if max > min
+            && (bore || (min..=max).contains(&range))
+            && (!bore || state.sensors.tick() % 60 < 30)
+        {
+            let y = bottom - (bottom - top) * ((range - min) / (max - min)).clamp(0., 1.);
+            paint.line((x - 8., y - 3.), (x - 2., y));
+            paint.line((x - 2., y), (x - 8., y + 3.));
+            paint.line((x - 8., y + 3.), (x - 8., y - 3.));
         }
+    }
+    paint.text(
+        font,
+        &format!("{} {}", w.hud_name, state.rounds(state.selected)),
+        207,
+        291,
+    );
+    let ready = state.readiness(l);
+    let permission = if ready == live::Readiness::Ready {
+        "IN RNG"
+    } else {
+        ready.label()
+    };
+    if !(bore && ready == live::Readiness::Ready) {
+        paint.text(font, permission, 300, 328);
+    }
+    paint.text(
+        font,
+        &format!("{}%", state.estimated_hit_percent(l)),
+        207,
+        306,
+    );
+    if bore && profile.guidance == Guidance::Infrared {
+        paint.text(
+            font,
+            if state.mounted.status == Status::Locked {
+                "IR TONE"
+            } else {
+                "IR SEARCH"
+            },
+            207,
+            328,
+        );
+    }
+}
+/// Diagnostic state and controls are composed at the window's upper right.
+pub fn debug(
+    pixels: &mut [u8],
+    state: &live::State,
+    s: &flight::State,
+    font: &Font,
+    color: [u8; 3],
+) {
+    let mut paint = Paint {
+        pixels,
+        clip: (0, 0, 250, 96),
+        color: [0, 0, 0, 190],
+    };
+    paint.rect(0, 0, 250, 96);
+    paint.color = [color[0], color[1], color[2], 255];
+    paint.text(
+        font,
+        if state.weapon_rules == missiles::Rules::Compatibility {
+            "COMPATIBILITY"
+        } else {
+            state.launch_mode.label()
+        },
+        4,
+        4,
+    );
+    paint.text(font, "[RELEASE LOCK]", 132, 4);
+    paint.text(
+        font,
+        if state.armed {
+            state.mounted.status.label()
+        } else {
+            "SAFE"
+        },
+        4,
+        18,
+    );
+    let l = combat::launcher(s);
+    let details = if let Some(o) = state.weapon_observation(l) {
+        let closing = missiles::closure(s.position, s.velocity, o.position, o.velocity) / 1.68781;
+        format!("R {:.1}NM C {closing:+.0}KT", o.range / missiles::NMI)
+    } else {
+        "R -- C --".into()
+    };
+    paint.text(font, &details, 4, 32);
+    let time = state
+        .mounted_solution(l)
+        .map_or_else(|| "EST --".into(), |s| format!("EST {:.1}S", s.seconds));
+    paint.text(font, &time, 4, 44);
+    if let Some(o) = state.weapon_observation(l)
+        && missiles::length(o.velocity) > 1e-9
+    {
         let aspect = dot(
-            tore_sim::attitude::unit(velocity),
-            tore_sim::attitude::unit(missiles::sub(s.position, position)),
+            tore_sim::attitude::unit(o.velocity),
+            tore_sim::attitude::unit(missiles::sub(s.position, o.position)),
         )
         .clamp(-1., 1.)
         .acos()
         .to_degrees();
-        if missiles::length(velocity) > 1e-9 {
-            paint.text(font, &format!("ASP {aspect:.0}"), 368, 352);
-        }
-        match state.mounted_solution(l) {
-            Some(solution) => paint.text(font, &format!("EST {:.1}S", solution.seconds), 178, 364),
-            None => paint.text(font, "NO SOLUTION", 178, 364),
-        }
-    } else {
-        paint.text(font, "R -- C -- EST --", 178, 352);
+        paint.text(font, &format!("ASP {aspect:.0}"), 132, 44);
     }
-    paint.text(
-        font,
-        &format!("{} {}", w.name, state.rounds(state.selected)),
-        178,
-        340,
-    );
-    let ready = state.readiness(l);
-    let permission =
-        if ready == live::Readiness::Ready && state.launch_mode == LaunchMode::Boresight {
-            "BORESIGHT READY"
-        } else if ready == live::Readiness::Ready {
-            "IN RNG"
-        } else {
-            ready.label()
-        };
-    paint.text(font, permission, 300, 340);
-    paint.text(font, "P HIT --", 368, 364);
     for (row, shot) in state
         .projectiles
         .iter()
@@ -237,21 +312,29 @@ pub fn draw(
             &format!(
                 "#{} {} {} {motor} {remaining:.0}S",
                 shot.id,
-                state.configuration().stations[shot.station].weapon.name,
+                state.configuration().stations[shot.station].weapon.hud_name,
                 if f.seeker.status == Status::Search && f.profile.guidance != Guidance::Active {
                     "SEARCH"
                 } else {
                     f.seeker.status.label()
                 }
             ),
-            178,
-            376 + row as i32 * 10,
+            4,
+            58 + row as i32 * 11,
         );
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn radar_ready_diamond_blinks_twice_per_simulation_second() {
+        for tick in 0..120 {
+            assert_eq!(diamond_visible(true, true, tick), tick % 60 < 30);
+            assert!(diamond_visible(true, false, tick));
+            assert!(!diamond_visible(false, true, tick));
+        }
+    }
     #[test]
     fn search_boundary_projects_with_zoom_and_hit_region_tracks_aspect() {
         let b = Basis::new(0., 0., 0.);
@@ -262,14 +345,10 @@ mod tests {
             assert!(h <= 3. + 1e-9 && v <= 3. + 1e-9);
         }
         for size in [[640., 480.], [1920., 1080.], [1080., 1920.]] {
-            let scale = (size[0] / 640f64).min(size[1] / 480.) * crate::flight_canvas::HUD_SCALE;
-            assert!(mode_hit(
-                (
-                    (size[0] - 640. * scale) / 2. + 200. * scale,
-                    (size[1] - 480. * scale) / 2. + 105. * scale
-                ),
-                size
-            ));
+            let scale = (size[0] / 640f64).min(size[1] / 480.);
+            assert!(mode_hit((size[0] - 248. * scale, 18. * scale), size));
+            assert!(release_hit((size[0] - 108. * scale, 18. * scale), size));
+            assert!(!mode_hit((size[0] - 108. * scale, 18. * scale), size));
         }
         for size in [[640, 480], [1920, 1080], [1080, 1920]] {
             let mut canvas = crate::flight_canvas::FlightCanvas::default();

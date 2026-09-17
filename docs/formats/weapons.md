@@ -208,3 +208,10 @@ weighted subsystem selection, eligibility, ECM lookup/probability and equipment
 damage. Runtime resolves both PT systemDamage tables and ECM once at startup.
 [Exact translated contracts, integration and open native gates](../baselines/weapons-systems.md).
 The 119 located symbol spans are not 119 fully translated routines.
+
+The reviewed JT `si_names` block contains three strings: short label, long
+description and resource identity. The HUD preserves the first independently
+of menu descriptions. Local FA_2.LIB records give `AIM-120` / `AIM-120 AMRAAM`,
+`AIM-9M` / `AIM-9M Sidewinder`, and `AGM-65` / `AGM-65G Maverick`.
+This establishes resource labels, not proof of the original HUD's string lookup.
+[Source identity and checks](../baselines/hud-cleanup.md).

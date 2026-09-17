@@ -105,6 +105,8 @@ pub struct Effects {
 pub struct Weapon {
     pub source: String,
     pub name: String,
+    /// Original short si_names label, retained when menus expand the display name.
+    pub hud_name: String,
     pub shape: Option<String>,
     pub fire_sound: Option<String>,
     pub native_callback: String,
@@ -425,6 +427,7 @@ impl Weapon {
         Ok(Self {
             source,
             name: e.name.clone(),
+            hud_name: e.name.clone(),
             shape: o.pointer(&b, "shape")?,
             fire_sound: f.pointer(&b, "fireSound")?,
             native_callback,
@@ -523,7 +526,10 @@ mod tests {
     #[test]
     fn checked_profile_retains_fields_without_defaulting_missing_values() {
         let s = fixture();
-        let w = Weapon::parse("test.jt", s.as_bytes()).unwrap();
+        let mut w = Weapon::parse("test.jt", s.as_bytes()).unwrap();
+        assert_eq!(w.hud_name, "Synthetic");
+        w.name = "Synthetic weapon".into();
+        assert_eq!(w.hud_name, "Synthetic");
         assert_eq!(w.movement.maximum_speed, 500);
         assert_eq!(w.shape, None);
         assert!(Weapon::parse("TEST.JT", s.replace("word 315", "word 314").as_bytes()).is_err());

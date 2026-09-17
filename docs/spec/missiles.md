@@ -28,7 +28,7 @@ unit choice and detailed rules below are agent proposals. Sequencing is in
 | S: supported radar | Aircraft holds radar lock on this missile's target throughout guided flight. For future ground/ship weapons, the equivalent support comes from their launcher. | No steering from hidden target state after support loss. Retain the last observed intercept and seek renewed support until guidance lifetime expires. No pitbull. |
 | A: active radar | Cued launch: snapshot the aircraft firing solution and intercept, then activate at the matrix distance. Boresight launch: own seeker searches immediately, without aircraft designation or radar lock. | Aircraft updates are optional. Losing aircraft support freezes the last supported intercept; it does not destroy the missile or expose live target coordinates. After seeker acquisition, guide independently. |
 | I: infrared | Use the weapon's own heat seeker, with either a designated target or narrow forward boresight search. Aircraft radar and installed FLIR are not required for boresight search. | Retain the last observed intercept and attempt same-target reacquisition until guidance lifetime expires. No radar or emitter fallback. |
-| E: passive emitter | Use the weapon's receiver with designation or forward boresight search for compatible emissions. An enabled passive receiver does not transmit radar. | Emission shutdown stops measurement immediately. Retain the last observed intercept and attempt same-target reacquisition until guidance lifetime expires. No heat fallback. |
+| E: passive emitter | Use the surface weapon's receiver with designation for compatible emissions. An enabled passive receiver does not transmit radar. | Emission shutdown stops measurement immediately. Retain the last observed intercept and attempt same-target reacquisition until guidance lifetime expires. No heat fallback. |
 
 John revised loss behavior on 2026-09-17: retain the known intercept and attempt
 same-target reacquisition within the applicable seeker cone until guidance life
@@ -84,65 +84,65 @@ separate proposed profile setting, never inferred from these motor numbers.
 | Record (source label) | Type | Availability | Launch envelope nmi | Ignition s | Burn s | Removal s | Seeker max nmi | Seeker H/V half-angle deg | Active-on distance nmi (fitted) | Uncued search H/V deg (fitted) |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |
 | AA10.JT (AA-10T) | S* | Catalog | 1.97 to 19.75 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
-| AA11.JT (AA-11) | I* | Live | 0.33 to 9.87 | 0 | 26 | 52 | 9.87 | 80/80 | N/A | 3/3 |
-| AA11B.JT (AA-11B) | I* | Live | 0.25 to 9.87 | 0 | 26 | 52 | 9.87 | wide*/90 | N/A | 3/3 |
-| AA12.JT (AA-12) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 60/60 | 5 | 10/10 |
-| AA2.JT (AA-2) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 4.94 | 45/45 | N/A | 3/3 |
+| AA11.JT (AA-11) | I* | Live | 0.33 to 9.87 | 0 | 26 | 52 | 9.87 | 80/80 | N/A | 7/7 |
+| AA11B.JT (AA-11B) | I* | Live | 0.25 to 9.87 | 0 | 26 | 52 | 9.87 | wide*/90 | N/A | 7/7 |
+| AA12.JT (AA-12) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 60/60 | 5 | 7/7 |
+| AA2.JT (AA-2) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 4.94 | 45/45 | N/A | 7/7 |
 | AA6.JT (AA-6) | S* | Catalog | 1.97 to 14.81 | 1 | 39 | 80 | 14.81 | 45/45 | N/A | N/A |
-| AA8.JT (AA-8) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 4.94 | 45/45 | N/A | 3/3 |
+| AA8.JT (AA-8) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 4.94 | 45/45 | N/A | 7/7 |
 | AA9.JT (AA-9) | S* | Catalog | 1.97 to 41.15 | 2 | 130 | 264 | 41.15 | 45/45 | N/A | N/A |
-| AAML.JT (AAM-L) | A* | Live | 4.94 to 74.06 | 0 | 130 | 270 | 74.06 | 45/45 | 8 | 10/10 |
-| AEMP1.JT (AEMP-1) | A* | Catalog | 0.33 to 14.81 | 0 | 35 | 70 | 19.75 | 45/45 | 3 | 10/10 |
-| AGM45.JT (AGM-45) | E* | Catalog | 0.00 to 9.87 | 0 | 10 | 40 | 9.87 | 45/45 | N/A | 10/10 |
-| AGM65A.JT (AGM-65A) | I* | Catalog | 0.00 to 8.23 | 1 | 9 | 40 | 8.23 | 45/45 | N/A | 3/3 |
-| AGM65G.JT (AGM-65) | I* | Live | 0.08 to 9.87 | 1 | 9 | 40 | 9.87 | 45/45 | N/A | 3/3 |
-| AGM84A.JT (AGM-84A) | A* | Catalog | 0.08 to 59.25 | 2 | 118 | 120 | 59.25 | 45/45 | 8 | 10/10 |
-| AGM84E.JT (AGM-84E) | I* | Catalog | 0.08 to 49.37 | 2 | 118 | 120 | 49.37 | 45/45 | N/A | 3/3 |
-| AGM88.JT (AGM-88) | E* | Catalog | 0.08 to 32.92 | 0 | 25 | 40 | 32.92 | 45/45 | N/A | 10/10 |
-| AIM120.JT (AIM-120) | A* | Live | 1.97 to 23.70 | 0 | 66 | 132 | 23.70 | 45/45 | 5 | 10/10 |
-| AIM54C.JT (AIM-54) | A* | Live | 4.94 to 98.75 | 2 | 139 | 283 | 98.75 | 45/45 | 10 | 10/10 |
+| AAML.JT (AAM-L) | A* | Live | 4.94 to 74.06 | 0 | 130 | 270 | 74.06 | 45/45 | 8 | 7/7 |
+| AEMP1.JT (AEMP-1) | A* | Catalog | 0.33 to 14.81 | 0 | 35 | 70 | 19.75 | 45/45 | 3 | 7/7 |
+| AGM45.JT (AGM-45) | E* | Catalog | 0.00 to 9.87 | 0 | 10 | 40 | 9.87 | 45/45 | N/A | N/A |
+| AGM65A.JT (AGM-65A) | I* | Catalog | 0.00 to 8.23 | 1 | 9 | 40 | 8.23 | 45/45 | N/A | 7/7 |
+| AGM65G.JT (AGM-65) | I* | Live | 0.08 to 9.87 | 1 | 9 | 40 | 9.87 | 45/45 | N/A | N/A |
+| AGM84A.JT (AGM-84A) | A* | Catalog | 0.08 to 59.25 | 2 | 118 | 120 | 59.25 | 45/45 | 8 | N/A |
+| AGM84E.JT (AGM-84E) | I* | Catalog | 0.08 to 49.37 | 2 | 118 | 120 | 49.37 | 45/45 | N/A | 7/7 |
+| AGM88.JT (AGM-88) | E* | Catalog | 0.08 to 32.92 | 0 | 25 | 40 | 32.92 | 45/45 | N/A | N/A |
+| AIM120.JT (AIM-120) | A* | Live | 1.97 to 23.70 | 0 | 66 | 132 | 23.70 | 45/45 | 5 | 7/7 |
+| AIM54C.JT (AIM-54) | A* | Live | 4.94 to 98.75 | 2 | 139 | 283 | 98.75 | 45/45 | 10 | 7/7 |
 | AIM7.JT (AIM-7) | S* | Catalog | 1.32 to 19.75 | 2 | 51 | 106 | 19.75 | 45/45 | N/A | N/A |
 | AIM7E.JT (AIM-7E) | S* | Catalog | 0.49 to 16.46 | 1 | 11 | 60 | 16.46 | 45/45 | N/A | N/A |
-| AIM9B.JT (AIM-9B) | I* | Catalog | 0.66 to 3.95 | 0 | 3 | 20 | 8.23 | 45/45 | N/A | 3/3 |
-| AIM9M.JT (AIM-9M) | I* | Live | 0.66 to 3.95 | 0 | 11 | 22 | 8.23 | 45/45 | N/A | 3/3 |
-| AIM9X.JT (AIM-9X) | I* | Live | 0.49 to 3.95 | 0 | 15 | 24 | 8.23 | 75/75 | N/A | 3/3 |
-| AM39.JT (AM-39) | A* | Catalog | 0.08 to 59.25 | 2 | 64 | 132 | 59.25 | 45/45 | 8 | 10/10 |
+| AIM9B.JT (AIM-9B) | I* | Catalog | 0.66 to 3.95 | 0 | 3 | 20 | 8.23 | 45/45 | N/A | 7/7 |
+| AIM9M.JT (AIM-9M) | I* | Live | 0.66 to 3.95 | 0 | 11 | 22 | 8.23 | 45/45 | N/A | 7/7 |
+| AIM9X.JT (AIM-9X) | I* | Live | 0.49 to 3.95 | 0 | 15 | 24 | 8.23 | 75/75 | N/A | 7/7 |
+| AM39.JT (AM-39) | A* | Catalog | 0.08 to 59.25 | 2 | 64 | 132 | 59.25 | 45/45 | 8 | N/A |
 | AS14.JT (AS-14) | Hold: designator | Catalog | 0.08 to 6.58 | 1 | 9 | 30 | 8.23 | 45/45 | TBD | TBD |
 | AS15.JT (AS 15) | S* | Catalog | 0.08 to 9.87 | 1 | 19 | 40 | 9.87 | 45/45 | N/A | N/A |
-| AS16.JT (AS-16) | A* | Catalog | 0.08 to 6.58 | 1 | 9 | 30 | 8.23 | 45/45 | 2 | 10/10 |
+| AS16.JT (AS-16) | A* | Catalog | 0.08 to 6.58 | 1 | 9 | 30 | 8.23 | 45/45 | 2 | N/A |
 | AS30.JT (AS 30L) | Hold: designator | Catalog | 0.08 to 9.87 | 1 | 12 | 26 | 9.87 | 45/45 | TBD | TBD |
 | AS7.JT (AS-7) | S* | Live | 0.08 to 4.94 | 1 | 9 | 30 | 8.23 | 45/45 | N/A | N/A |
 | ASROC.JT (ASROC) | Hold: radar role | Catalog | 0.08 to 12.34 | 2 | 20 | 40 | 16.46 | wide*/90 | TBD | TBD |
 | AT12.JT (AT-12) | Hold: designator | Catalog | 0.16 to 4.28 | 3 | 97 | 180 | 4.28 | 45/45 | TBD | TBD |
 | AT2.JT (AT-2) | Hold: no seeker | Catalog | 0.08 to 2.96 | 1 | 9 | 30 | 3.29 | 45/45 | TBD | TBD |
-| FIM92.JT (FIM-92) | I* | Catalog | 1.23 to 8.89 | 0 | 4 | 20 | 16.46 | wide*/90 | N/A | 3/3 |
+| FIM92.JT (FIM-92) | I* | Catalog | 1.23 to 8.89 | 0 | 4 | 20 | 16.46 | wide*/90 | N/A | 7/7 |
 | HQ2J.JT (HQ-2J) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | HQ61.JT (HQ-61) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
-| MICA.JT (MICA) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 45/45 | 5 | 10/10 |
+| MICA.JT (MICA) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 45/45 | 5 | 7/7 |
 | MIM23.JT (MIM-23) | S* | Catalog | 0.16 to 7.41 | 1 | 9 | 20 | 15.43 | wide*/90 | N/A | N/A |
 | MIS.JT (MIS) | S* | Catalog | 1.23 to 7.90 | 2 | 21 | 40 | 10.53 | wide*/90 | N/A | N/A |
 | PL10.JT (PL-10) | S* | Catalog | 1.32 to 24.69 | 2 | 18 | 40 | 24.69 | 45/45 | N/A | N/A |
-| PL7.JT (PL-7) | I* | Catalog | 0.66 to 3.95 | 0 | 4 | 20 | 8.23 | 45/45 | N/A | 3/3 |
+| PL7.JT (PL-7) | I* | Catalog | 0.66 to 3.95 | 0 | 4 | 20 | 8.23 | 45/45 | N/A | 7/7 |
 | R440.JT (R-440) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | R530.JT (R-530D) | S* | Live | 1.32 to 16.46 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
-| R550.JT (R-550) | I* | Live | 0.66 to 3.95 | 0 | 7 | 20 | 8.23 | 45/45 | N/A | 3/3 |
+| R550.JT (R-550) | I* | Live | 0.66 to 3.95 | 0 | 7 | 20 | 8.23 | 45/45 | N/A | 7/7 |
 | ROLAND.JT (Roland) | S* | Catalog | 0.16 to 4.44 | 1 | 9 | 20 | 7.41 | wide*/90 | N/A | N/A |
-| SA13.JT (SA-13) | I* | Catalog | 0.25 to 2.47 | 1 | 9 | 20 | 4.11 | wide*/90 | N/A | 3/3 |
-| SA14.JT (SA-14) | I* | Catalog | 0.08 to 2.47 | 0 | 22 | 20 | 3.29 | wide*/90 | N/A | 3/3 |
+| SA13.JT (SA-13) | I* | Catalog | 0.25 to 2.47 | 1 | 9 | 20 | 4.11 | wide*/90 | N/A | 7/7 |
+| SA14.JT (SA-14) | I* | Catalog | 0.08 to 2.47 | 0 | 22 | 20 | 3.29 | wide*/90 | N/A | 7/7 |
 | SA15.JT (SA-15) | S* | Catalog | 0.16 to 5.92 | 1 | 9 | 20 | 13.17 | wide*/90 | N/A | N/A |
-| SA16.JT (SA-16) | I* | Catalog | 0.08 to 1.32 | 0 | 5 | 20 | 2.47 | wide*/90 | N/A | 3/3 |
+| SA16.JT (SA-16) | I* | Catalog | 0.08 to 1.32 | 0 | 5 | 20 | 2.47 | wide*/90 | N/A | 7/7 |
 | SA19.JT (SA-19) | Hold: radar role | Catalog | 0.08 to 3.95 | 0 | 5 | 20 | 9.87 | wide*/90 | TBD | TBD |
 | SA2A.JT (SA-2A) | S* | Catalog | 1.23 to 15.64 | 2 | 21 | 40 | 24.69 | wide*/90 | N/A | N/A |
 | SA3.JT (SA-3) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | SA6.JT (SA-6) | S* | Catalog | 1.48 to 12.34 | 2 | 21 | 20 | 13.17 | wide*/90 | N/A | N/A |
-| SA7.JT (SA-7) | I* | Catalog | 0.08 to 1.48 | 0 | 5 | 20 | 2.47 | wide*/90 | N/A | 3/3 |
-| SA9.JT (SA-9) | I* | Catalog | 0.41 to 2.96 | 0 | 10 | 20 | 3.29 | wide*/90 | N/A | 3/3 |
+| SA7.JT (SA-7) | I* | Catalog | 0.08 to 1.48 | 0 | 5 | 20 | 2.47 | wide*/90 | N/A | 7/7 |
+| SA9.JT (SA-9) | I* | Catalog | 0.41 to 2.96 | 0 | 10 | 20 | 3.29 | wide*/90 | N/A | 7/7 |
 | SAN11.JT (SA-N-11) | Hold: radar role | Catalog | 0.25 to 3.95 | 2 | 8 | 40 | 16.46 | wide*/90 | TBD | TBD |
 | SAN3.JT (SA-N-3) | S* | Catalog | 0.82 to 16.46 | 2 | 8 | 180 | 16.46 | wide*/90 | N/A | N/A |
 | SAN4.JT (SA-N-4) | S* | Catalog | 0.66 to 5.76 | 2 | 8 | 40 | 16.46 | wide*/90 | N/A | N/A |
-| SAN5.JT (SA-N-5) | I* | Catalog | 0.08 to 1.48 | 2 | 3 | 20 | 2.47 | wide*/90 | N/A | 3/3 |
+| SAN5.JT (SA-N-5) | I* | Catalog | 0.08 to 1.48 | 2 | 3 | 20 | 2.47 | wide*/90 | N/A | 7/7 |
 | SAN7.JT (SA-N-7) | S* | Catalog | 0.25 to 9.87 | 2 | 8 | 40 | 16.46 | wide*/90 | N/A | N/A |
-| SAN8.JT (SA-N-8) | I* | Catalog | 0.08 to 2.47 | 2 | 3 | 40 | 4.11 | wide*/90 | N/A | 3/3 |
+| SAN8.JT (SA-N-8) | I* | Catalog | 0.08 to 2.47 | 2 | 3 | 40 | 4.11 | wide*/90 | N/A | 7/7 |
 | SAN9.JT (SA-N-9) | S* | Catalog | 0.16 to 5.92 | 2 | 8 | 40 | 13.17 | wide*/90 | N/A | N/A |
 | SEA_SPAR.JT (AIM-7) | S* | Catalog | 0.49 to 19.75 | 0 | 10 | 40 | 19.75 | wide*/90 | N/A | N/A |
 | SSN9.JT (SS-N-9) | S* | Catalog | 0.49 to 19.75 | 0 | 100 | 360 | 41.15 | wide*/90 | N/A | N/A |
@@ -194,7 +194,8 @@ For cued launch, calculate the intercept using the launch and target motion
 contract below. Update it only from new observations while the same target has
 valid aircraft support. Never update from hidden target movement. A failed
 intercept estimate falls back to the last observed target position and shows
-`NO SOLUTION`; it must not invent a time-to-go or a hit probability.
+`EST --` in the debug window and `0%` in the HUD; it must not
+invent a time-to-go.
 
 Boresight launch overrides delayed activation: the seeker is enabled before
 release and remains enabled afterward. No guessed intercept is required to fire.
@@ -261,7 +262,8 @@ Use the same motion predictor for launch suitability, intercept, time-to-go and
 in-flight movement. Predict against the latest **observed** target position and
 velocity in the same coordinate frame. Account for approaching, receding,
 crossing, climbing and descending targets. Bound prediction by remaining guidance
-and object lifetime; show `NO SOLUTION` when interception is not predicted.
+and object lifetime; show debug `EST --` and HUD `0%` when
+interception is not predicted.
 A target's motion changes the intercept; it never adds propulsion to the missile.
 
 For the target directly ahead, closing speed is missile speed toward the target
@@ -280,44 +282,56 @@ retain the launch's sideways component rather than replacing it with nose headin
 
 ## Uncued launch and narrow IR search
 
-**Opinionated behavior requested by John, 2026-09-17.** All accepted weapons with
-an independent onboard seeker, A/I/E, get an explicit `BORESIGHT` mode alongside
+**Opinionated behavior requested by John, 2026-09-17.** Accepted air-to-air weapons with
+an independent onboard seeker, A/I, get an explicit `BORESIGHT` mode alongside
 `CUED`. Here “active internal seeker” means an enabled seeker; I and E remain
 passive sensors. Supported radar S still needs launcher support. Held and
 laser/designator rows gain no capability from the generic switch.
 
 Implemented control: a rebindable `weapon-seeker-mode` action and a clickable
-HUD mode label switch modes; no existing key is silently reassigned. Default to
-CUED. Retain the cockpit designation separately, so entering BORESIGHT ignores
-it without deleting it, and returning to CUED restores its normal use. Snapshot
+upper-right diagnostic mode label switch modes; no existing key is silently reassigned.
+Arming an independent air-to-air missile with no designation automatically enters BORESIGHT.
+Designating a contact returns to CUED. The explicit mode switch remains available
+with a retained designation. L and the upper-right RELEASE LOCK button clear the
+aircraft designation and mounted seeker, without redirecting airborne shots.
+The FA manual p. 112 targeting list does not identify a clear-designation key;
+L is an existing host choice, not a recovered retail binding. Snapshot
 the mode at launch; changing modes later cannot retask missiles in flight.
 
 In BORESIGHT, an armed, operational, loaded weapon can fire without designation,
-aircraft radar, installed FLIR or seeker lock. Its own seeker searches forward on
-the rail and after release. With a lock, retain that target; without one, fly on
+aircraft radar, installed FLIR or seeker lock. IR searches forward on the rail
+and after release. Active radar guidance searches only after release, enabling
+its seeker immediately and requiring acquisition before reporting PITBULL.
+A separate prelaunch estimate can identify a provisional bore contact. With a lock, retain that target; without one, fly on
 and search until acquisition or guidance expiry. Keep normal station, bay, trigger
 and ammunition gates. Missing target data cannot produce a fake range inhibit:
-show `BORESIGHT READY`, not `IN RNG`. Known too-close/out-of-envelope cues warn but
-do not prevent this explicitly uncued release; seeker and fuze gates still apply.
+omit `IN RNG` for an uncued release. A known bore candidate inside imported `zone1.minimum_range` inhibits release
+with MIN RANGE. Other envelope cues still warn without blocking uncued release.
 Internal-bay opening must work without a cockpit designation.
 
-The matrix's fitted boresight search caps are **3 degrees horizontal and vertical
-for IR**, and **10 degrees each for A/E**, limited by the imported seeker volume.
-These are half-angles, making the IR search six degrees wide. The center follows
-the weapon's rail axis before launch and missile nose afterward, not the cockpit
-camera or aircraft velocity vector. It can be narrower than the subsequent
-tracking envelope. Once acquired, use the weapon's imported tracking limits.
+The fitted bore is a **7-degree circular half-angle** for independent seekers,
+limited by the imported seeker volume. John requested the reduction from 10 to
+7 degrees on 2026-09-17. The half-angle interpretation preserves the existing
+meaning of the setting. It follows the rail axis
+before launch and missile nose afterward, independent of camera look and zoom.
+Mounted bore IR stays inside the circle even after acquisition. Released seekers
+use imported tracking limits after acquisition.
 No source cone value is overwritten. Keep normal terrain, range, target-class
 and signature/emission eligibility checks, including for unknown uncued contacts.
 
 Uncued acquisition is a weapon-seeker rule authorized here, not aircraft combat
 AI. Evaluate only contacts observed by that seeker. For IR, select the strongest
 eligible heat-quality score; ties use smallest off-axis angle, shortest range,
-then stable target ID. For A/E, prefer smallest off-axis angle among eligible
-seeker returns, then range and stable ID. Both selection rules are agent-fitted.
+then stable target ID. Active radar chooses the strongest directional radar
+signature divided by `100 * (1 + (range / nominal_range)^2)`, then the same ties.
+For IR and active radar, multiply selection score by
+`1 - 0.75 * clamp(off_axis / bore_half_angle, 0, 1)^2`.
+This agent-fitted centre preference gives the edge one quarter of the centre's
+weight without making a much stronger edge return disappear.
+Emitter seekers retain angle, range and ID ordering. These rules are agent-fitted.
 Require 0.25 seconds of continuous eligibility to lock.
-Switching a candidate restarts that dwell; once locked, never jump to a stronger
-contact. During loss memory, retain the identity but show `MEMORY` instead of a
+Switching a candidate restarts that dwell. Mounted bore IR can switch to a
+stronger eligible return; a released missile keeps its acquired identity. During loss memory, retain the identity but show `MEMORY` instead of a
 confirmed lock; suppress lock tone until reacquisition completes. Existing fitted 2-second memory applies after loss. No team label can
 make a physically visible return disappear; known-friendly warnings may use
 existing IFF, but unknown contacts must not gain hidden identity information.
@@ -336,7 +350,7 @@ combat tapes so playback and live search agree.
 
 Use effective IR range `nominal_range * min(1, sqrt(max(0, heat)))`.
 Inside that range and the cone, quality is
-`clamp(heat / (1 + (distance / nominal_range)^2), 0, 1)`; otherwise it is zero.
+`max(heat / (1 + (distance / nominal_range)^2), 0)`; otherwise it is zero.
 Require quality at least 0.25 for the 0.25-second acquisition dwell, and at least
 0.20 for retention. These are game thresholds, not probabilities of hitting.
 Preserve independently specified rear-aspect eligibility and target classes;
@@ -347,46 +361,129 @@ scores 0.8, while its head-on score is 0.2 and cannot acquire at that distance.
 Afterburner raises the same head-on score to 0.3, allowing acquisition after dwell
 if the weapon's aspect eligibility permits it. A masked target scores zero.
 
-For the selected mounted IR weapon, play a low search growl at 15% of configured
+For selected, armed IR or radar missiles, play a search cue at 15% of configured
 seeker volume. While a candidate is observed, use `15% + 55% * quality`; after
-lock use `40% + 60% * quality`. Fade over 0.1 seconds to avoid clicks. The HUD
-changes to `IR LOCK` on acquisition; tone amplitude expresses quality, not hit
-chance. Use a separate lock timbre where a profile specifies A2G IR. Exact retail
-sample mapping is unknown: inspect imported audio resources and verify by
-listening, or label a temporary authored cue fitted. Never infer a sound mapping
-from its filename alone or commit retail audio.
+lock use `40% + 60% * quality`, with tone quality clamped to 0..1.
+Selection scores remain unclamped so stronger returns stay distinguishable. Fade amplitude over
+0.1 seconds. Playback uses user-imported `&IRTRY.5K` / `&IRLOCK.5K` and
+`&RDRTRY.5K` / `&RDRLOCK.5K` for search / lock respectively. The louder lock cue
+replaces the search cue. This sample assignment and looping are **agent-fitted**:
+resource existence and manual tone descriptions do not establish original
+playback rules. A2G IR currently shares the IR pair; its original distinct tone
+is unresolved. If samples are unavailable, the existing fitted oscillator is
+retained as a fallback. Safe, empty, failed stations, death, effects mute and
+pause suppress the cue. Default seeker volume is 0.15.
+[Sample evidence and validation](../baselines/hud-cleanup.md).
+
 
 Only the selected mounted seeker produces this tone. Silence it on safe, empty,
-failed station, pause, leaving flight or switching away from IR; pause must also
+failed station, pause, leaving flight or switching away from IR/radar missiles; pause must also
 freeze acquisition timers. After firing, stop the spent seeker's tone. A newly
 selected remaining round begins its own search and dwell. Do not keep sounding
 lock from an airborne missile as though the next round had acquired it.
 
 ## Weapon HUD delivery
 
-Implement the manual-supported cues above and the following **authored additions**
-from the same simulation-owned weapon state used by firing and seeker logic:
+**Opinionated cleanup requested by John, 2026-09-17.** Armed missile selection
+replaces AGL, vertical speed and bank scale with short weapon/count, readiness warnings and a bare `n%` hit estimate.
+John's annotated layout request reduces the HUD text and fixed layout by 15%
+from the previous size (scale 0.85 to 0.7225). Angular cues retain their actual
+world alignment and seven-degree bore geometry. Weapon/count and percentage
+start at reference x=207, aligned with the speed box's left edge. The range scale
+is 32 reference pixels tall below the altitude tape, with its labels and axis
+aligned to the altitude box's right edge. Suppress the redundant BORE READY
+message, but retain release-inhibiting warnings and CUED IN RNG. Use the imported first `si_names` string for the HUD,
+even when loadout menus use the second, longer description. Manual pp. 83-84
+establish the readout meanings; our probability rule and layout are fitted.
+Stall, engine-off and crash warnings remain visible. Safe restores flight readouts.
 
-| Cue | Planned rule |
-| --- | --- |
-| CUED / BORESIGHT | Always identify launch mode for an eligible selected weapon; changing it never changes an existing missile. |
-| Search-cone outline | Project the actual mode's angular limits around the rail axis onto the HUD. BORESIGHT uses the matrix caps. Clip to the HUD viewport; camera FOV or zoom must not change the physical search volume. The fixed aiming reticle alone is not a cone boundary. |
-| SEARCH / ACQUIRING / IR LOCK | Give non-audio feedback for the same acquisition state. Never draw a lock onto an unobserved contact. IR LOCK remains distinct from a good launch solution. |
-| Reach estimate | Keep source min/max envelope cues separate from the fitted motion-based reach and time-to-go. Label the latter `EST`; omit unavailable estimates rather than drawing a plausible number. |
-| Missile state | Use stable shot identity for MIDCOURSE, ACTIVE SEARCH, PITBULL, LOST and EXPIRED. Include motor phase and remaining guidance time in the weapon detail display. Multiple shots must not overwrite the mounted seeker's state. |
+All weapon symbology is drawn in the same aircraft-forward HUD layer as flight
+symbology. Circle, labels, estimate and range scale translate and fade together
+when looking away, and zoom together. Clip in forward HUD coordinates before
+applying head-look, never against a stationary screen-centred HUD rectangle.
 
-Treat the manual's probability cue as a separately sourced task: its complete
-calculation is unknown. Do not display heat quality or a range ratio as hit
-probability. Until a meaningful game probability model is specified and validated,
-show `P HIT --` and the explicit solution/lock cues. Keep friendly warnings separate
-from seeker physics. Validate original symbol geometry against manual figures
-and available HUD resources during implementation; this pass reviewed text only.
+BORE shows a blinking diamond on one provisional contact, not a target box.
+It blinks at 2 Hz with 50 percent duty, using simulation ticks so pause freezes
+it. This is an estimate, not an aircraft designation or seeker lock. Active radar
+launches still have no preassigned target and acquire independently after release.
+IR's real dwell and tone remain independent of this immediate provisional cue.
+Choose the provisional contact using the same centre-weighted signal score and
+stable tie rules as acquisition, within the actual bore, range and terrain gates.
+No candidate means `0%` and no diamond or range scale.
+
+When a candidate exists, show the imported minimum/maximum weapon range scale.
+Its triangular target marker blinks with the provisional diamond, clamped to
+an endpoint for targets outside the launch envelope. A cued, acquired radar
+seeker diamond still blinks when launch-ready. Inferred bore cues never grant
+launch permission, lock tone or aircraft sensor support.
+
+### Fitted estimated hit calculator
+
+The original probability calculation is unknown. John requested a working
+estimate on 2026-09-17; this is an agent-authored heuristic, not a calibrated
+retail percentage or a guarantee. It scores current observation quality,
+centring, launch envelope and straight-path intercept margin:
+
+- No current observation, an observation outside the launch envelope, or no
+  intercept before guidance/removal expiry gives zero percent.
+- `signal = clamp(observation_quality, 0, 1)`.
+- In bore, `centring = 1 - 0.75 * clamp(off_axis / bore_half_angle, 0, 1)^2`.
+  CUED uses 1 because its seeker is slaved to designation.
+- `r = clamp((range - minimum) / (maximum - minimum), 0, 1)`;
+  `envelope = 1 - 0.75 * r^2`.
+- `life` is the smaller of guidance lifetime and removal time, in seconds.
+  `margin = clamp(1 - 0.6 * intercept_seconds / life, 0, 1)`.
+- Round `95 * signal * centring * envelope * margin` to an integer percentage.
+  Cap at 95. These numeric weights are agent choices.
+
+The intercept uses current observed velocity and the existing propulsion model,
+so target closure affects the estimate. Future evasive manoeuvres, target intent,
+weather and future countermeasures are not predicted. Recompute against the
+same provisional contact used by the diamond and range scale. Do not alter the
+missile's physics or random damage outcomes to force agreement with this cue.
+
+Mode, actual seeker state, release button, `R`, signed `C`, `EST` flight time,
+target aspect angle (`ASP`, in degrees),
+and three recent shot diagnostics stay in the upper-right debug window.
+Unavailable numeric debug values use `--`. A large upper-right instrument moves
+down 104 reference pixels to clear that window. The forward HUD omits BORE READY and retains CUED IN RNG; estimated chance
+cannot confer a lock.
 
 Use original HUD styling and fonts. Add seeker-state readouts and deterministic
 sound controls to the app boundary; do not let the renderer or audio thread choose
 targets or determine lock. Update the input, flight-controls, radar and architecture
 guides when these controls and behaviors are implemented, not as shipped features
 in advance. No new artwork or sound assets are required for this planning pass.
+
+## Minimum engagement and target role
+
+John requested minimum-range enforcement and separate surface-weapon behavior on
+2026-09-17. The following boundary rules are **agent-fitted**, not measured retail
+behavior. Use imported `zone1.minimum_range` in feet, inclusive at equality.
+A known designated or inferred bore target below that distance inhibits release.
+An uncued shot with no observed candidate remains possible. Its seeker cannot
+acquire, and its proximity/direct-hit test cannot damage, a target inside that
+radius measured from the launch origin. A target accepted outside the boundary
+keeps its eligibility while closing, including terminal flight below minR.
+This is an engagement qualification, not a mandatory straight-flight distance or
+an added fuze timer. Imported fuze arming time remains a separate gate.
+
+Weapon role is explicit, separate from seeker type and target damage category.
+AGM65G, AGM45, AGM88, AGM84A, AM39 and AS16 require surface targets; AS7 does too.
+Other reviewed implemented profiles require airborne aircraft. Surface weapons
+have no air-combat BORESIGHT mode and require designation. Aircraft that land or
+are assigned another damage-test category do not become surface targets.
+The manual's air-to-ground and IR sections support Maverick's surface role and
+its separate lock tone. Surface IR uses imported thermal signature without
+fighter exhaust aspect/throttle multipliers, an **agent-fitted** contrast model.
+No surface target scene or surface designation channel is supplied by this fix;
+AGM-65 remains unavailable against the practice aircraft rather than borrowing
+its A2A targeting workflow. Surface seeker behavior is tested with synthetic
+fixtures. Active surface support/mission integration remains deferred.
+
+The imported AGM65G minimum is 500 feet, whereas the manual table states 0.8 nmi.
+This unresolved source discrepancy needs record/unit research. Keep the reviewed
+imported value; do not replace it with an invented real-world value.
 
 ## Range, motor and tracking lifetime
 
@@ -477,7 +574,7 @@ climb, side-slip, finite burn, coast and impossible intercepts. Launcher velocit
 must be inherited exactly once; target closure must never increase missile speed.
 
 For uncued launch, test no designation, radar/FLIR absent, no target in cone,
-contact entry after launch, competing heat sources, exact 3-degree IR edges,
+contact entry after launch, competing heat sources, circular 7-degree bore edges,
 0.25-second dwell, loss/retention thresholds and the 2-second memory boundary.
 Check radar/jammer power cannot substitute for IR heat. A below-threshold or terrain-masked contact
 must never acquire or produce a lock tone. Test safe/empty/failed/bay gates,
@@ -487,7 +584,7 @@ HUD captures must show cone geometry aligned with simulated contacts at multiple
 aspect ratios and zoom settings, including offscreen/clipped cones. Verify audio
 by deterministic state/envelope checks and listening: muted or absent audio must
 leave acquisition and HUD behavior unchanged. Include original-style cues,
-unknown probability, target-free readouts and multiple shots in the visual pass.
+estimated probability, target-free readouts and multiple shots in the visual pass.
 
 First playable acceptance covers current A2A defaults; S uses R530 and A uses
 AIM120/MICA plus the roster's other active candidates. I uses the existing A2A

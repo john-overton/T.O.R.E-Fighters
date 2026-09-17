@@ -48,7 +48,7 @@ name, with the numbers a player would notice.
 
 | Spec | Covers | Status |
 | --- | --- | --- |
-| [Missiles](spec/missiles.md) | Four guidance types, 63-candidate inventory, pitbull, range, motor and guidance lifetime | Implemented for current stores and controlled emitter fixtures; [validation and limits](baselines/missiles.md) |
+| [Missiles](spec/missiles.md) | Four guidance types, 63-candidate inventory, pitbull, range, motor and guidance lifetime | Implemented for A2A stores and controlled surface-seeker fixtures. Surface designation remains deferred; [missile validation](baselines/missiles.md), [HUD cleanup and tone limits](baselines/hud-cleanup.md) |
 | [Aircraft radar](spec/radar.md) | Twelve-aircraft radar stats, automatic range modes, installed visual and ECM records, and look-down evidence | Implemented as one shared component; [component guide](radar.md), [validation](baselines/radar.md) |
 | [Roster expansion](spec/roster-aircraft.md) | Seven REDFOR/F-22A initial player ports | [Acceptance and limits](baselines/aircraft-roster-expansion.md) |
 | [Additional aircraft](spec/additional-aircraft.md) | F-14D, A-4E and X-31 source flight configuration and fitted presentation | Initial ports implemented; [acceptance](baselines/aircraft-fa-expansion.md) |

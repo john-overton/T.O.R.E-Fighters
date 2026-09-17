@@ -185,6 +185,8 @@ pub struct Instruments {
     pressed_contact: Option<(usize, u32)>,
     /// The contact under the pointer, drawn with a selector.
     pub hovered: Option<u32>,
+    pub crosshair: Option<(i32, i32)>,
+    pub weapon_debug: bool,
     /// One pending designation request, drained by the host each frame.
     pub designation: Option<u32>,
 }
@@ -205,6 +207,8 @@ impl Default for Instruments {
             pressed: None,
             pressed_contact: None,
             hovered: None,
+            crosshair: None,
+            weapon_debug: false,
             designation: None,
         }
     }
@@ -225,6 +229,7 @@ impl Instruments {
         self.pressed = None;
         self.pressed_contact = None;
         self.hovered = None;
+        self.crosshair = None;
         self.designation = None;
     }
     pub fn toggle_layout(&mut self) {
@@ -251,6 +256,14 @@ impl Instruments {
             }
             self.pages.push(page);
         }
+    }
+    /// Reserve the upper-right diagnostic area without changing pointer transforms.
+    pub fn screen_rect(&self, slot: usize, size: [f64; 2]) -> (f64, f64, f64, f64) {
+        let (x, mut y, w, h) = self.layout.rect_on(slot, size);
+        if self.weapon_debug && self.layout == Layout::Large && slot == 3 {
+            y += 104. * (size[0] / 640.).min(size[1] / 480.);
+        }
+        (x, y, w, h)
     }
     pub fn screen_pointer(
         &mut self,
@@ -288,6 +301,18 @@ impl Instruments {
     }
     /// Hover feedback: the contact a click would designate right now.
     pub fn hover(&mut self, point: Option<(f64, f64)>, size: [f64; 2]) {
+        self.crosshair = self.canvas_point(point, size).and_then(|(x, y)| {
+            self.pages.iter().enumerate().find_map(|(i, page)| {
+                if *page != 9 {
+                    return None;
+                }
+                let (ox, oy, w, h) = self.layout.rect(i);
+                let px = (x - f64::from(ox)) * WIDTH as f64 / f64::from(w);
+                let py = (y - f64::from(oy)) * HEIGHT as f64 / f64::from(h);
+                ((25. ..=135.).contains(&px) && (40. ..=130.).contains(&py))
+                    .then_some((px as i32, py as i32))
+            })
+        });
         self.hovered = self
             .contact_at(self.canvas_point(point, size))
             .map(|(_, id)| id);
@@ -295,7 +320,7 @@ impl Instruments {
     fn canvas_point(&self, point: Option<(f64, f64)>, size: [f64; 2]) -> Option<(f64, f64)> {
         let (px, py) = point?;
         (0..self.pages.len()).find_map(|i| {
-            let (x, y, w, h) = self.layout.rect_on(i, size);
+            let (x, y, w, h) = self.screen_rect(i, size);
             if px < x || py < y || px >= x + w || py >= y + h {
                 return None;
             }
@@ -681,6 +706,13 @@ impl Instruments {
                                 r.rect(x - 1, y - 1, 3, 3, colour);
                             }
                         }
+                        if let Some((x, y)) = self.crosshair {
+                            // Full-scope crosshair with an open centre, matching the supplied reference.
+                            r.line((25, y), ((x - 4).max(25), y), GREEN);
+                            r.line(((x + 4).min(135), y), (135, y), GREEN);
+                            r.line((x, 40), (x, (y - 4).max(40)), GREEN);
+                            r.line((x, (y + 4).min(130)), (x, 130), GREEN);
+                        }
                         text(&mut r, scope.mode.unwrap_or(scope.channel), 17, 25);
                         text(&mut r, &format!("{range:.0}"), 126, 25);
                         if scope.history {
@@ -918,7 +950,7 @@ mod picking_tests {
     /// panel rectangle the renderer uses.
     fn point(i: &Instruments, slot: usize, c: &scope::Contact, size: [f64; 2]) -> (f64, f64) {
         let (rx, ry) = project(c.bearing_rad, c.distance_ft, 10.).expect("drawn contact");
-        let (x, y, w, h) = i.layout.rect_on(slot, size);
+        let (x, y, w, h) = i.screen_rect(slot, size);
         (x + rx * w / WIDTH as f64, y + ry * h / HEIGHT as f64)
     }
     #[test]
@@ -959,15 +991,36 @@ mod picking_tests {
         let hit = point(&i, slot, &target, size);
         i.hover(Some(hit), size);
         assert_eq!(i.hovered, Some(5));
+        assert!(i.crosshair.is_some());
         i.hover(Some((hit.0, hit.1 - 40.)), size);
         assert_eq!(i.hovered, None);
         i.hover(None, size);
         assert_eq!(i.hovered, None);
+        assert_eq!(i.crosshair, None);
         // Hovering never designates by itself.
         assert_eq!(i.designation, None);
         i.hover(Some(hit), size);
         i.cancel_press();
         assert_eq!(i.hovered, None);
+    }
+    #[test]
+    fn top_right_scope_picking_follows_reserved_debug_space() {
+        let mut i = Instruments {
+            pages: vec![7, 5, 4, 9],
+            weapon_debug: true,
+            combat: Some(readout(vec![contact(5, 0.3, 30_000.)])),
+            ..Default::default()
+        };
+        let target = i.combat.as_ref().unwrap().scope.contacts[0].clone();
+        for size in [[1280., 720.], [720., 1000.]] {
+            let hit = point(&i, 3, &target, size);
+            i.hover(Some(hit), size);
+            assert_eq!(i.hovered, Some(5));
+            assert!(i.crosshair.is_some());
+            i.screen_pointer(Some(hit), size, true);
+            i.screen_pointer(Some(hit), size, false);
+            assert_eq!(i.designation.take(), Some(5));
+        }
     }
     #[test]
     fn equal_distance_ties_resolve_by_stable_identity_and_stale_plots_never_pick() {

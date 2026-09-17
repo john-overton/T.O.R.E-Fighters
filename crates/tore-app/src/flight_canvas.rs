@@ -1,6 +1,7 @@
 //! Aspect-responsive flight composition; menus keep their original 640x480 canvas.
 use crate::{aircraft::Airframe, flight::State, instruments::Instruments, menu::Sprite};
-pub const HUD_SCALE: f64 = 0.85;
+// Fifteen percent smaller than the prior 0.85 layout. Angular cues retain world alignment.
+pub const HUD_SCALE: f64 = 0.85 * 0.85;
 struct PanelCache {
     source: Vec<u8>,
     size: [u32; 2],
@@ -21,7 +22,7 @@ impl FlightCanvas {
         self.pixels.fill(0);
         for (i, page) in panels.pages.iter().enumerate() {
             let raster = panels.page(*page, h, s);
-            let rect = panels.layout.rect_on(i, [w, height]);
+            let rect = panels.screen_rect(i, [w, height]);
             let size = [rect.2.round() as u32, rect.3.round() as u32];
             let cached = self.panels.remove(page);
             let cached = match cached {
@@ -62,6 +63,27 @@ impl FlightCanvas {
             );
             self.panels.insert(*page, cached);
         }
+    }
+    pub fn weapon_debug(&mut self, pixels: &[u8]) {
+        let mut rgba = Vec::with_capacity(250 * 96 * 4);
+        for y in 0..96 {
+            rgba.extend_from_slice(&pixels[y * 640 * 4..(y * 640 + 250) * 4]);
+        }
+        let scale = (f64::from(self.size[0]) / 640.).min(f64::from(self.size[1]) / 480.);
+        self.blit(
+            &Sprite {
+                width: 250,
+                height: 96,
+                rgba,
+                glyphs: vec![],
+            },
+            (
+                f64::from(self.size[0]) - 258. * scale,
+                8. * scale,
+                250. * scale,
+                96. * scale,
+            ),
+        );
     }
     pub fn hud_zoom(&self, zoom: f32) -> f32 {
         let [w, h] = self.size;

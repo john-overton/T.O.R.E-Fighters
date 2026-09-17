@@ -50,7 +50,7 @@ pub fn heat_quality(target: &Target, observer: Vector, nominal: f64) -> f64 {
     if distance > nominal * heat.sqrt().min(1.) {
         return 0.;
     }
-    (heat / (1. + (distance / nominal).powi(2))).clamp(0., 1.)
+    (heat / (1. + (distance / nominal).powi(2))).max(0.)
 }
 pub struct View<'a> {
     pub position: Vector,
@@ -65,7 +65,7 @@ pub fn observe(
     target: &Target,
 ) -> Option<Observation> {
     let zone = &w.seeker.zones[0];
-    if !target.airborne
+    if !profile.accepts(target)
         || !geometry(zone, view.position, view.basis, target.position, view.cap)
         || (view.obscured)(view.position, target.position)
     {
@@ -74,6 +74,13 @@ pub fn observe(
     let range = length(sub(target.position, view.position));
     let nominal = f64::from(zone.maximum_range);
     let quality = match profile.guidance {
+        Guidance::Infrared if profile.role == TargetRole::Surface => {
+            let contrast = target.signature.infrared.max(0.) / 100.;
+            if nominal <= 0. || range > nominal * contrast.sqrt().min(1.) {
+                return None;
+            }
+            contrast / (1. + (range / nominal).powi(2))
+        }
         Guidance::Infrared => heat_quality(target, view.position, nominal),
         Guidance::Active | Guidance::Supported => {
             let signature = target.signature.effective_radar(
@@ -91,7 +98,8 @@ pub fn observe(
             if signature <= 0. || range > range_limit {
                 return None;
             }
-            1.
+            // Fitted return strength: directional size and inverse-square range.
+            (signature / 100. / (1. + (range / nominal).powi(2))).max(0.)
         }
         Guidance::Emitter => {
             let radar = profile.radar_emissions && target.radar_emitting;
@@ -118,6 +126,23 @@ pub fn observe(
         range,
     })
 }
+/// Centre returns receive up to four times the weight of edge returns.
+pub fn centre_weight(off_axis: f64, cap: f64) -> f64 {
+    1. - 0.75 * (off_axis / cap).clamp(0., 1.).powi(2)
+}
+pub fn compare_returns(a: &Observation, b: &Observation, profile: Profile) -> std::cmp::Ordering {
+    let score = |o: &Observation| o.quality * centre_weight(o.off_axis, profile.search_cap());
+    let signal = if matches!(profile.guidance, Guidance::Infrared | Guidance::Active) {
+        score(b).total_cmp(&score(a))
+    } else {
+        std::cmp::Ordering::Equal
+    };
+    signal
+        .then(a.off_axis.total_cmp(&b.off_axis))
+        .then(a.range.total_cmp(&b.range))
+        .then(a.id.cmp(&b.id))
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Status {
     Midcourse,
@@ -174,16 +199,7 @@ impl Seeker {
         let best = observations
             .iter()
             .filter(|o| self.target.is_none_or(|id| o.id == id) && o.quality >= threshold)
-            .min_by(|a, b| {
-                let heat = if profile.guidance == Guidance::Infrared {
-                    b.quality.total_cmp(&a.quality)
-                } else {
-                    std::cmp::Ordering::Equal
-                };
-                heat.then(a.off_axis.total_cmp(&b.off_axis))
-                    .then(a.range.total_cmp(&b.range))
-                    .then(a.id.cmp(&b.id))
-            })
+            .min_by(|a, b| compare_returns(a, b, profile))
             .copied();
         self.observation = best;
         self.quality = best.map_or(0., |o| o.quality);
@@ -224,12 +240,13 @@ impl Seeker {
         }
     }
     pub fn tone(&self) -> f64 {
+        let quality = self.quality.clamp(0., 1.);
         if matches!(self.status, Status::Memory | Status::Lost | Status::Expired) {
             0.15
         } else if matches!(self.status, Status::Locked) {
-            0.4 + 0.6 * self.quality
+            0.4 + 0.6 * quality
         } else {
-            0.15 + 0.55 * self.quality
+            0.15 + 0.55 * quality
         }
     }
 }

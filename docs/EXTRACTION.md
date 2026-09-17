@@ -402,3 +402,8 @@ The roster batch also accepts `mig29`, `su27`, `mig21`, `su25`, `mig23`, `su35`
 and `f22`. The same resolver imports each PT and its referenced resources;
 known missing PTS companions do not block the four documented profiles.
 [Identity review, commands and validation](baselines/aircraft-roster-expansion.md).
+
+The combat resource set includes `&IRTRY.5K`, `&IRLOCK.5K`, `&RDRTRY.5K`, and
+`&RDRLOCK.5K` from user-owned FA_2.LIB. Re-import older app caches for these cues.
+No sample bytes are compiled into the application. Their search/lock assignment
+is fitted; see [HUD audio evidence](baselines/hud-cleanup.md).

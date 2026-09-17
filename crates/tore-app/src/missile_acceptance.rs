@@ -19,11 +19,15 @@ pub fn run(config: Configuration) -> AppResult<()> {
         let Some(profile) = missiles::Profile::for_weapon(&store.weapon) else {
             continue;
         };
+        // This probe supplies aircraft only, not a surface-designation channel.
+        if profile.role == missiles::TargetRole::Surface {
+            continue;
+        }
         if !seen.insert(store.weapon.source.clone()) {
             continue;
         }
         for mode in [LaunchMode::Cued, LaunchMode::Boresight] {
-            if mode == LaunchMode::Boresight && !profile.independent() {
+            if mode == LaunchMode::Boresight && !profile.supports_boresight() {
                 continue;
             }
             for speed in [300., 600., 900.] {

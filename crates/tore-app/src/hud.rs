@@ -140,6 +140,7 @@ pub fn draw(
     ground: f64,
     air: Option<&tore_sim::telemetry::AirData>,
     ladder: bool,
+    weapons: bool,
     color: [u8; 3],
     zoom: f32,
 ) {
@@ -256,25 +257,27 @@ pub fn draw(
             p.text(font, label, 388, 140 + i as i32 * 11);
         }
     }
-    p.text(
-        font,
-        &format!(
-            "AGL {:.0}",
-            air.map_or(s.position[1] - ground, |d| d.altitude_agl_ft)
-                .max(0.)
-        ),
-        244,
-        291,
-    );
-    p.text(
-        font,
-        &format!(
-            "V/S {:+.0}",
-            air.map_or(s.vertical_speed * 60., |d| d.vertical_speed_fpm)
-        ),
-        336,
-        291,
-    );
+    if !weapons {
+        p.text(
+            font,
+            &format!(
+                "AGL {:.0}",
+                air.map_or(s.position[1] - ground, |d| d.altitude_agl_ft)
+                    .max(0.)
+            ),
+            244,
+            291,
+        );
+        p.text(
+            font,
+            &format!(
+                "V/S {:+.0}",
+                air.map_or(s.vertical_speed * 60., |d| d.vertical_speed_fpm)
+            ),
+            336,
+            291,
+        );
+    }
     if s.stall_alert(ground).is_some() {
         p.text(font, "STALL", 301, 274);
     }
@@ -282,7 +285,7 @@ pub fn draw(
         p.text(font, "CRASHED - ESC", 277, 306);
     } else if !s.engine {
         p.text(font, "ENGINE OFF", 283, 306);
-    } else {
+    } else if !weapons {
         p.clip = (174, 96, 292, 254);
         bank_scale(&mut p, font, s.bank);
     }

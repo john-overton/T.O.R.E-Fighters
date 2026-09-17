@@ -105,6 +105,8 @@ fn emitter_shutdown_has_no_heat_or_reflection_fallback() {
         cap: None,
         obscured: &|_, _| false,
     };
+    t.role = TargetRole::Surface;
+    t.airborne = false;
     t.signature.radar = 10000.;
     t.signature.infrared = 10000.;
     assert!(seeker::observe(&w, profile, &view, &t).is_none());
@@ -146,7 +148,7 @@ fn shot(w: &Weapon, mode: LaunchMode, target: Option<u32>) -> Projectile {
     let profile = Profile::for_weapon(w).unwrap();
     Projectile {
         id: 0,
-        guidance: Some(Flight::new(profile, mode, target)),
+        guidance: Some(Flight::new(profile, mode, target, [0., 1000., 0.])),
         motion: Some(Motion::new(&w.movement, [0., 0., 600.], 1000.)),
         guidance_ticks: Some(profile.guidance_ticks),
         age: 0,
@@ -522,4 +524,347 @@ fn invalid_activation_profiles_fail_explicitly() {
         .validate()
         .is_err()
     );
+}
+
+#[test]
+fn automatic_bore_release_and_radar_search_start_without_designation() {
+    let l = Launcher {
+        position: [0., 1000., 0.],
+        basis: Basis::new(0., 0., 0.),
+        speed_fps: 600.,
+        velocity: [0., 0., 600.],
+        bay_ready: true,
+        radar: true,
+        jammer: false,
+        alive: true,
+        controls: Default::default(),
+    };
+    let mut s = fixture(true);
+    s.config.stations[0].weapon = weapon("AIM120.JT");
+    s.targets.push(target(7, [0., 1000., 5000.], 20, 0x80));
+    for _ in 0..DWELL + 1 {
+        s.step(false, l, |_, _| 0.);
+    }
+    assert_eq!(s.launch_mode, LaunchMode::Boresight);
+    assert_eq!(s.mounted.target, None);
+    assert_eq!(s.mounted.status, Status::Search);
+    assert_eq!(s.bore_observation.unwrap().id, 7);
+    assert_eq!(s.designated(), None);
+    assert!(!s.seeker_tone(l).unwrap().locked);
+    assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
+    assert!(s.projectiles[0].guidance.as_ref().unwrap().enabled);
+    assert_eq!(s.projectiles[0].target, None);
+    s.command(Command::DesignateTarget(7), l);
+    assert_eq!(s.designated(), Some(7));
+    assert_eq!(s.launch_mode, LaunchMode::Cued);
+    s.command(Command::ClearDesignation, l);
+    assert_eq!(s.designated(), None);
+    assert_eq!(s.mounted.target, None);
+    s.step(false, l, |_, _| 0.);
+    assert_eq!(s.launch_mode, LaunchMode::Boresight);
+    s.config.stations[0].weapon = weapon("AIM9M.JT");
+    s.ammo[0] = 5;
+    for _ in 0..DWELL + 1 {
+        s.step(false, l, |_, _| 0.);
+    }
+    assert_eq!(s.mounted.target, Some(7));
+    let mut hot = target(8, [400., 1000., 5000.], 20, 0x80);
+    hot.signature.infrared = 200.;
+    s.targets.push(hot);
+    for _ in 0..DWELL {
+        s.step(false, l, |_, _| 0.);
+    }
+    assert_eq!(s.mounted.target, Some(8));
+    assert!(s.seeker_tone(l).unwrap().locked);
+    s.targets[1].position = [5000., 1000., 5000.];
+    s.targets[0].position = [-5000., 1000., 5000.];
+    s.step(false, l, |_, _| 0.);
+    assert_eq!(s.mounted.status, Status::Search);
+    assert_eq!(s.mounted.target, None);
+    assert!(!s.seeker_tone(l).unwrap().locked);
+    // A supported weapon cannot gain an independent radar seeker.
+    s.config.stations[0].weapon = weapon("R530.JT");
+    s.config.stations[0].weapon.flags |= 0x200;
+    s.launch_mode = LaunchMode::Cued;
+    s.step(false, l, |_, _| 0.);
+    assert_eq!(s.launch_mode, LaunchMode::Cued);
+    assert_eq!(s.readiness(l), Readiness::NoTarget);
+}
+
+#[test]
+fn bore_is_circular_and_prefers_signal_strength_over_centering() {
+    let position = [0., 1000., 0.];
+    let basis = Basis::new(0., 0., 0.);
+    for name in ["AIM9M.JT", "AIM120.JT"] {
+        let w = weapon(name);
+        let profile = Profile::for_weapon(&w).unwrap();
+        let view = seeker::View {
+            position,
+            basis,
+            cap: Some(profile.search_cap()),
+            obscured: &|_, _| false,
+        };
+        let near = target(1, [0., 1000., 5000.], 20, 0x80);
+        let mut strong = target(2, [400., 1000., 5000.], 20, 0x80);
+        strong.signature.infrared = 200.;
+        strong.signature.radar = 200.;
+        let a = seeker::observe(&w, profile, &view, &near).unwrap();
+        let b = seeker::observe(&w, profile, &view, &strong).unwrap();
+        assert!(b.quality > a.quality);
+        let mut seeker = seeker::Seeker::default();
+        for _ in 0..DWELL {
+            seeker.step(profile, &[a, b]);
+        }
+        assert_eq!(seeker.target, Some(2));
+        // Five degrees on each axis is outside a seven-degree circular bore.
+        let offset = 5000. * 5f64.to_radians().tan();
+        let corner = target(3, [offset, 1000. + offset, 5000.], 20, 0x80);
+        assert!(seeker::observe(&w, profile, &view, &corner).is_none());
+        let edge = target(4, [5000. * 7f64.to_radians().tan(), 1000., 5000.], 20, 0x80);
+        assert!(seeker::observe(&w, profile, &view, &edge).is_some());
+    }
+}
+
+#[test]
+fn bore_centre_weight_balances_alignment_and_signal() {
+    let profile = Profile::for_weapon(&weapon("AIM120.JT")).unwrap();
+    let centre = seeker::Observation {
+        id: 1,
+        position: [0., 0., 1000.],
+        velocity: [0.; 3],
+        quality: 1.,
+        range: 1000.,
+        off_axis: 0.,
+    };
+    let edge = seeker::Observation {
+        id: 2,
+        quality: 2.,
+        off_axis: profile.search_cap(),
+        ..centre
+    };
+    assert_eq!(seeker::centre_weight(0., profile.search_cap()), 1.);
+    assert_eq!(
+        seeker::centre_weight(profile.search_cap(), profile.search_cap()),
+        0.25
+    );
+    assert!(seeker::compare_returns(&centre, &edge, profile).is_lt());
+    let strong = seeker::Observation {
+        quality: 5.,
+        ..edge
+    };
+    assert!(seeker::compare_returns(&strong, &centre, profile).is_lt());
+    let tie = seeker::Observation { id: 3, ..centre };
+    assert!(seeker::compare_returns(&centre, &tie, profile).is_lt());
+}
+
+#[test]
+fn estimated_hit_has_explicit_numbers_and_never_claims_certainty() {
+    let w = weapon("AIM120.JT");
+    let mut zone = w.seeker.zones[1];
+    zone.minimum_range = 1000;
+    zone.maximum_range = 9000;
+    let o = seeker::Observation {
+        id: 1,
+        position: [0., 0., 5000.],
+        velocity: [0.; 3],
+        quality: 0.8,
+        range: 5000.,
+        off_axis: 0.,
+    };
+    let solution = Some(missiles::Solution {
+        point: o.position,
+        seconds: 10.,
+    });
+    let cap = 7f64.to_radians();
+    let estimate =
+        |o, solution| missiles::estimated_hit_percent(o, solution, &zone, 100., Some(cap));
+    // round(95 * .8 * 1 * .8125 * .94) = 58.
+    assert_eq!(estimate(o, solution), 58);
+    assert_eq!(
+        estimate(seeker::Observation { off_axis: cap, ..o }, solution),
+        15
+    );
+    assert_eq!(estimate(o, None), 0);
+    assert_eq!(
+        estimate(seeker::Observation { range: 9001., ..o }, solution),
+        0
+    );
+    assert_eq!(
+        estimate(seeker::Observation { range: 999., ..o }, solution),
+        0
+    );
+    assert_eq!(
+        estimate(seeker::Observation { quality: 0., ..o }, solution),
+        0
+    );
+    let best = seeker::Observation {
+        quality: 4.,
+        range: 1000.,
+        ..o
+    };
+    assert_eq!(
+        estimate(
+            best,
+            Some(missiles::Solution {
+                point: o.position,
+                seconds: 0.
+            })
+        ),
+        95
+    );
+    assert!(
+        estimate(
+            o,
+            Some(missiles::Solution {
+                point: o.position,
+                seconds: 90.
+            })
+        ) < 58
+    );
+}
+
+fn range_launcher() -> Launcher {
+    Launcher {
+        position: [0., 1000., 0.],
+        basis: Basis::new(0., 0., 0.),
+        speed_fps: 600.,
+        velocity: [0., 0., 600.],
+        bay_ready: true,
+        radar: true,
+        jammer: false,
+        alive: true,
+        controls: Default::default(),
+    }
+}
+
+#[test]
+fn minimum_range_inhibits_bore_release_at_the_inclusive_boundary() {
+    for name in ["AIM120.JT", "AIM9M.JT"] {
+        for distance in [999., 1000., 1001.] {
+            let mut s = fixture(true);
+            s.config.stations[0].weapon = weapon(name);
+            s.config.stations[0].weapon.seeker.zones[1].minimum_range = 1000;
+            s.targets.push(target(7, [0., 1000., distance], 200, 0x80));
+            let l = range_launcher();
+            for _ in 0..DWELL + 1 {
+                s.step(false, l, |_, _| 0.);
+            }
+            assert!(s.bore_observation.is_some());
+            let rounds = s.rounds(0);
+            if distance < 1000. {
+                assert_eq!(s.readiness(l), Readiness::MinimumRange, "{name}");
+                s.step(true, l, |_, _| 0.);
+                assert_eq!(s.rounds(0), rounds);
+                assert!(s.projectiles.is_empty());
+            } else {
+                assert_eq!(s.readiness(l), Readiness::Ready, "{name}");
+                s.step(true, l, |_, _| 0.);
+                assert!(s.rounds(0) < rounds);
+            }
+        }
+    }
+}
+
+#[test]
+fn blind_shot_rejects_close_contacts_but_retains_valid_terminal_tracking() {
+    for name in ["AIM120.JT", "AIM9M.JT"] {
+        let mut w = weapon(name);
+        w.seeker.zones[1].minimum_range = 1000;
+        let mut p = shot(&w, LaunchMode::Boresight, None);
+        let sensors = fixture(true).sensors;
+        let mut t = target(7, [0., 1000., 999.], 200, 0x80);
+        for _ in 0..DWELL + 1 {
+            guide(&mut p, &w, &[t.clone()], &sensors, &|_, _| false);
+        }
+        assert_eq!(p.target, None);
+        assert!(!p.guidance.as_ref().unwrap().eligible(&w, &t));
+        t.position[2] = 1000.;
+        for _ in 0..DWELL {
+            guide(&mut p, &w, &[t.clone()], &sensors, &|_, _| false);
+        }
+        assert_eq!(p.target, Some(7));
+        // A valid engagement remains valid when both missile and target close.
+        p.position[2] = 700.;
+        t.position[2] = 800.;
+        guide(&mut p, &w, &[t.clone()], &sensors, &|_, _| false);
+        let f = p.guidance.as_ref().unwrap();
+        assert!(f.eligible(&w, &t));
+        assert!(matches!(f.seeker.status, Status::Locked | Status::Pitbull));
+    }
+}
+
+#[test]
+fn blind_shot_cannot_damage_inside_minimum_range() {
+    for name in ["AIM120.JT", "AIM9M.JT"] {
+        let mut s = fixture(true);
+        let mut w = weapon(name);
+        w.seeker.zones[1].minimum_range = 1000;
+        w.damage.fuze_arm_t = 0;
+        let mut p = shot(&w, LaunchMode::Boresight, None);
+        p.position[2] = 500.;
+        p.previous = p.position;
+        s.config.stations[0].weapon = w;
+        s.targets.push(target(7, [0., 1000., 500.], 200, 0x80));
+        s.projectiles.push(p);
+        s.step(false, range_launcher(), |_, _| 0.);
+        assert_eq!(s.targets[0].hp, 200, "{name}");
+    }
+}
+
+#[test]
+fn surface_weapons_reject_aircraft_and_maverick_uses_surface_contrast() {
+    let view = seeker::View {
+        position: [0., 1000., 0.],
+        basis: Basis::new(0., 0., 0.),
+        cap: None,
+        obscured: &|_, _| false,
+    };
+    for name in [
+        "AGM65G.JT",
+        "AGM45.JT",
+        "AGM88.JT",
+        "AGM84A.JT",
+        "AM39.JT",
+        "AS16.JT",
+        "AS7.JT",
+    ] {
+        let w = weapon(name);
+        let profile = Profile::for_weapon(&w).unwrap();
+        assert!(!profile.supports_boresight());
+        let mut t = target(7, [0., 1000., 1000.], 200, 0x200);
+        t.radar_emitting = true;
+        assert!(seeker::observe(&w, profile, &view, &t).is_none());
+        t.airborne = false;
+        assert!(seeker::observe(&w, profile, &view, &t).is_none());
+        t.role = TargetRole::Surface;
+        let first = seeker::observe(&w, profile, &view, &t).unwrap();
+        if name == "AGM65G.JT" {
+            t.basis = Basis::new(std::f64::consts::PI, 0., 0.);
+            t.heat = Heat::Engine {
+                on: false,
+                throttle: 0.,
+                afterburner: false,
+            };
+            assert_eq!(
+                seeker::observe(&w, profile, &view, &t).unwrap().quality,
+                first.quality
+            );
+        }
+        let mut s = fixture(true);
+        s.config.stations[0].weapon = w;
+        s.targets.push(target(7, [0., 1000., 1000.], 200, 0x80));
+        let l = range_launcher();
+        for _ in 0..DWELL + 1 {
+            s.step(false, l, |_, _| 0.);
+        }
+        s.command(Command::ToggleSeekerMode, l);
+        assert_eq!(s.launch_mode, LaunchMode::Cued);
+        s.command(Command::DesignateTarget(7), l);
+        assert_eq!(s.designated(), Some(7));
+        assert_eq!(s.readiness(l), Readiness::WrongTarget);
+        assert!(s.weapon_observation(l).is_none());
+        let rounds = s.rounds(0);
+        s.step(true, l, |_, _| 0.);
+        assert_eq!(s.rounds(0), rounds);
+    }
 }

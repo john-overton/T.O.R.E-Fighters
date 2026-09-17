@@ -104,7 +104,7 @@ Layout, line symbology, frame scaling, pan, zoom and camera placement are author
 See [recovery details](formats/aircraft.md), [progress](research/progress.md), and [validation](baselines/cockpit-controls.md).
 
 
-The flight overlay is independent of the fixed menu canvas and tracks the window aspect. It is composed at the physical drawable size, proportionally capped at 1920×1080 for bounded CPU/GPU work. At centered forward view, cockpit art covers that entire overlay; menus remain centered at their original proportions. The HUD is 15% smaller, with projection compensation keeping the pitch ladder aligned with the camera. TAS and MSL primary numbers have transparent backgrounds; nearby tape labels are suppressed instead of drawing dark backing rectangles. Static cockpit artwork and unchanged instrument rasters are cached.
+The flight overlay is independent of the fixed menu canvas and tracks the window aspect. It is composed at the physical drawable size, proportionally capped at 1920×1080 for bounded CPU/GPU work. At centered forward view, cockpit art covers that entire overlay; menus remain centered at their original proportions. The HUD uses a 0.7225 layout scale, an additional 15% reduction from the previous 0.85 scale, with projection compensation keeping the pitch ladder aligned with the camera. TAS and MSL primary numbers have transparent backgrounds; nearby tape labels are suppressed instead of drawing dark backing rectangles. Static cockpit artwork and unchanged instrument rasters are cached.
 
 `--window-size 1280x720` selects an initial logical window size for inspection (minimum 640×480). Flight captures now preserve that window's aspect and the capped overlay resolution; terrain-only captures remain 960×720. See [responsive validation](baselines/responsive-flight-ui.md).
 
@@ -337,17 +337,37 @@ roll response; see [A-4 roll tuning](spec/additional-aircraft.md#a-4-roll-tuning
 
 ## Missile seeker control
 
-`weapon-seeker-mode` is a rebindable action with no default key reassignment.
-The HUD CUED/BORESIGHT label is also clickable. Independent radar, IR and emitter
-profiles support BORESIGHT release without designation; supported-radar weapons
-still require aircraft lock. Mode changes do not redirect airborne missiles.
-IR search uses a three-degree half-angle and shows acquisition before lock.
-An internal bay opens for BORESIGHT without designation and release waits until
-it is at least 95 percent open, an agent-selected fitted threshold.
+Armed independent air-to-air missiles automatically enter BORESIGHT when no target is
+selected. Select a target to return to CUED. Press **L**, the existing
+`clear-designation` action, or click **RELEASE LOCK** at the upper right to clear
+selection. The manual's targeting list does not establish a retail release key.
+`weapon-seeker-mode` remains rebindable, and the upper-right mode label remains
+clickable. Supported radar weapons still need aircraft lock.
+A detected bore target inside minimum range displays MIN RANGE and blocks release.
+AGM-65 and other surface profiles cannot engage the practice aircraft or use A2A
+BORESIGHT. Surface designation is still deferred. See the
+[minimum range and target-role rules](spec/missiles.md#minimum-engagement-and-target-role).
 
-The temporary fitted IR cue has a separate air-to-ground timbre. Effects mute,
-pause, safe, empty and failed stations silence it. `TORE_SEEKER_VOLUME=0..1`
-sets its maximum amplitude, default 0.15. [Rules and limits](spec/missiles.md).
+BORE uses a seven-degree circular half-angle. Its blinking diamond marks a
+provisional contact, not a guaranteed lock; the blinking triangle on the range
+scale refers to that same contact. Selection favours the centre while retaining
+signal-strength weighting. IR can acquire on the rail; active radar acquires only
+after release. The bare percentage is a fitted estimate, not a calibrated retail percentage.
+Short retail weapon labels, bore circle, estimate and readiness all move with
+the forward HUD when looking around. Range, closure and estimated flight time
+and target aspect angle are in the upper-right debug window. The HUD layout
+is 15 percent smaller; weapon/count and percentage align with the speed box,
+and the compact range scale sits beneath altitude. BORE READY is omitted. Neither clearing selection nor changing mode redirects an airborne shot.
+An internal bay opens for BORESIGHT and release waits until 95 percent open.
+Armed missile readouts replace AGL, vertical speed and bank scale. CUED radar
+lock diamonds blink when ready to fire. The radar instrument replaces the mouse
+arrow with a crosshair while the pointer is over its plotting area.
+
+Imported IR and radar search/lock samples provide the cues, with a louder lock
+cue. Their assignment is fitted. Effects mute, pause, safe, empty and failed
+stations silence them. `TORE_SEEKER_VOLUME=0..1` sets maximum amplitude, default
+0.15. Re-import media to add the four samples to an older cache.
+[Rules and constants](spec/missiles.md), [validation](baselines/hud-cleanup.md).
 
 Quick Mission wing counts now spawn straight-flying practice aircraft of the
 selected types. Friendly Wing 1 includes you; all other slots are dummies, up to

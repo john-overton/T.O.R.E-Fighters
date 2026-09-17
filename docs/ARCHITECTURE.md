@@ -57,7 +57,7 @@ The Hornet slice adds dependency resolution and bounded BRF/SH/FNT readers to `t
 `flight_ui.rs` owns desktop command dispatch, imported menu navigation, session presentation settings and pause state. `hud.rs` draws the forward-flight HUD from state and source font glyphs, projecting the ladder/path through the renderer's 60-degree camera convention. Simulation remains independent of both. The full-canvas cockpit is transparent art over the world; instrument windows are independent rasters. Menu/focus pauses stop fixed ticks and engine loops, and input transitions clear held controls. Shader zoom is shared by terrain and sky projection; camera previews restore the main camera before drawing.
 
 
-`flight_canvas.rs` now composes the flight-only overlay at an aspect-responsive size (physical drawable, proportionally capped at 1920×1080). The separate GPU cockpit pass preserves uniform cover-fit in the centered forward view, and instrument layout rectangles anchor to actual edges. Native instrument rasters go directly to their destination sizes instead of passing through a reduced 640×480 composite. The original cockpit texture is uploaded once; unchanged scaled panel rasters are cached. Alpha-aware filtering prevents dark transparent borders. `renderer.rs` recreates its UI texture when dimensions change and uses the full viewport for flight; menus/viewer overlays retain their existing canvas. Pointer conversion uses the same responsive panel rectangles, while the centered pause menu retains menu coordinates. HUD metadata is 15% smaller, with projection compensation for both shrink and portrait aspect.
+`flight_canvas.rs` now composes the flight-only overlay at an aspect-responsive size (physical drawable, proportionally capped at 1920×1080). The separate GPU cockpit pass preserves uniform cover-fit in the centered forward view, and instrument layout rectangles anchor to actual edges. Native instrument rasters go directly to their destination sizes instead of passing through a reduced 640×480 composite. The original cockpit texture is uploaded once; unchanged scaled panel rasters are cached. Alpha-aware filtering prevents dark transparent borders. `renderer.rs` recreates its UI texture when dimensions change and uses the full viewport for flight; menus/viewer overlays retain their existing canvas. Pointer conversion uses the same responsive panel rectangles, while the centered pause menu retains menu coordinates. HUD metadata uses a 0.7225 layout scale, including the requested additional 15% reduction. Projection compensation preserves angular cues through resizing and portrait aspect.
 
 ### Flight presentation and measurement
 
@@ -193,7 +193,9 @@ reproduces them. The flight adapters and renderer independence are unchanged.
 Missile profiles and the fitted finite-boost motion predictor live in
 `combat::missiles`, independent of rendering. The live adapter uses full release
 velocity for accepted missile profiles; compatibility retains scalar source
-motion. Combat tape version 4 includes world velocity and bay permission, while versions 2 and 3
+motion. Explicit target role is separate from damage category. Launch-origin
+minimum-range qualification persists through terminal closure, as specified in
+[engagement rules](spec/missiles.md#minimum-engagement-and-target-role). Combat tape version 4 includes world velocity and bay permission, while versions 2 and 3
 select compatibility rules. [Missile specification](spec/missiles.md).
 
 Combat tape version 4 is the missile rule-version boundary. Seeker mode and

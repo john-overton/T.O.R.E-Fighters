@@ -18,6 +18,8 @@ struct Voice {
 }
 struct Mixer {
     seeker: seeker::Tone,
+    seeker_voice: Option<Voice>,
+    seeker_cue: Option<&'static str>,
     seeker_volume: f64,
     music: music::Music,
     engine: Option<Voice>,
@@ -113,6 +115,8 @@ impl Audio {
         }
         let mixer = Arc::new(Mutex::new(Mixer {
             seeker: seeker::Tone::default(),
+            seeker_voice: None,
+            seeker_cue: None,
             seeker_volume,
             music,
             engine: None,
@@ -154,10 +158,27 @@ impl Audio {
             clips,
         })
     }
-    pub fn seeker(&self, state: Option<(f64, bool)>) {
+    pub fn seeker(&self, state: Option<tore_sim::combat::live::SeekerTone>) {
         if let Ok(mut m) = self.mixer.lock() {
-            m.seeker.target = state.map_or(0., |(gain, _)| gain.clamp(0., 1.)) * m.seeker_volume;
-            m.seeker.ground = state.is_some_and(|(_, ground)| ground);
+            m.seeker.target = state.map_or(0., |cue| cue.strength.clamp(0., 1.)) * m.seeker_volume;
+            m.seeker.ground = state.is_some_and(|cue| cue.ground);
+            m.seeker.radar = state.is_some_and(|cue| cue.radar);
+            m.seeker.locked = state.is_some_and(|cue| cue.locked);
+            if let Some(state) = state {
+                let cue = match (state.radar, state.locked) {
+                    (false, false) => "&IRTRY.5K",
+                    (false, true) => "&IRLOCK.5K",
+                    (true, false) => "&RDRTRY.5K",
+                    (true, true) => "&RDRLOCK.5K",
+                };
+                if m.seeker_cue != Some(cue) {
+                    m.seeker_cue = Some(cue);
+                    m.seeker_voice = self.clips.get(cue).map(|clip| Voice {
+                        clip: clip.clone(),
+                        position: 0.,
+                    });
+                }
+            }
         }
     }
     pub fn combat(&self, names: &[&str]) {
@@ -229,6 +250,8 @@ impl Audio {
         if let Ok(mut m) = self.mixer.lock() {
             if state.is_none() && m.flight_on {
                 m.seeker = seeker::Tone::default();
+                m.seeker_voice = None;
+                m.seeker_cue = None;
                 m.stall = None;
                 m.stall_cue = None;
                 m.engine = None;
@@ -394,6 +417,13 @@ impl Mixer {
             rate,
             self.flight_on && !self.flight_paused && self.effects_on,
         );
+        if let Some(voice) = &mut self.seeker_voice {
+            value = if self.flight_on && !self.flight_paused && self.effects_on {
+                voice.next(rate, true) * self.seeker.gain as f32
+            } else {
+                0.
+            };
+        }
         if self.music_on && !(self.flight_on && self.flight_paused) {
             value += self.music.next(rate) * 0.16;
         }
@@ -457,6 +487,8 @@ mod tests {
         assert_eq!(stall_cue(Some(Normal)), None);
         let mut m = Mixer {
             seeker: seeker::Tone::default(),
+            seeker_voice: None,
+            seeker_cue: None,
             seeker_volume: 0.15,
             music: music::Music::new(&BTreeMap::new(), &BTreeMap::new(), 1),
             engine: None,
@@ -491,6 +523,28 @@ mod tests {
         assert_eq!(m.sample(4.), 0.);
         m.effects_on = true;
         m.stall = None;
+        assert_eq!(m.sample(4.), 0.);
+        // Recorded seeker PCM replaces the oscillator, loops and freezes on pause.
+        m.seeker.target = 0.5;
+        m.seeker_voice = Some(Voice {
+            clip: Arc::new(Clip {
+                samples: vec![192; 4],
+                rate: 4.,
+            }),
+            position: 0.,
+        });
+        for _ in 0..12 {
+            assert!((m.sample(4.) - 0.25).abs() < 1e-6);
+        }
+        m.flight_paused = true;
+        let position = m.seeker_voice.as_ref().unwrap().position;
+        assert_eq!(m.sample(4.), 0.);
+        assert_eq!(m.seeker_voice.as_ref().unwrap().position, position);
+        m.flight_paused = false;
+        m.effects_on = false;
+        assert_eq!(m.sample(4.), 0.);
+        m.effects_on = true;
+        m.seeker.target = 0.;
         assert_eq!(m.sample(4.), 0.);
     }
     #[test]

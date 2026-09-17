@@ -570,6 +570,10 @@ pub const COMBAT_RESOURCES: &[&str] = &[
     "&FIRE.5K",
     "&CHAFF.5K",
     "&FLARE.5K",
+    "&IRTRY.5K",
+    "&IRLOCK.5K",
+    "&RDRTRY.5K",
+    "&RDRLOCK.5K",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

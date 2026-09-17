@@ -524,14 +524,31 @@ including the original imported warning samples.
 
 ## Missile seeker control
 
-`weapon-seeker-mode` is a rebindable action with no default key reassignment.
-The HUD CUED/BORESIGHT label is also clickable. Independent radar, IR and emitter
-profiles support BORESIGHT release without designation; supported-radar weapons
-still require aircraft lock. Mode changes do not redirect airborne missiles.
-IR search uses a three-degree half-angle and shows acquisition before lock.
-An internal bay opens for BORESIGHT without designation and release waits until
-it is at least 95 percent open, an agent-selected fitted threshold.
+Surface weapons cannot use the A2A bore toggle; surface designation remains deferred.
+Armed independent air-to-air missiles automatically enter BORESIGHT when no target is
+selected. Select a target to return to CUED. Press **L**, the existing
+`clear-designation` action, or click **RELEASE LOCK** at the upper right to clear
+selection. The manual's targeting list does not establish a retail release key.
+`weapon-seeker-mode` remains rebindable, and the upper-right mode label remains
+clickable. Supported radar weapons still need aircraft lock.
 
-The temporary fitted IR cue has a separate air-to-ground timbre. Effects mute,
-pause, safe, empty and failed stations silence it. `TORE_SEEKER_VOLUME=0..1`
-sets its maximum amplitude, default 0.15. [Rules and limits](spec/missiles.md).
+BORE uses a seven-degree circular half-angle. Its blinking diamond marks a
+provisional contact, not a guaranteed lock; the blinking triangle on the range
+scale refers to that same contact. Selection favours the centre while retaining
+signal-strength weighting. IR can acquire on the rail; active radar acquires only
+after release. The bare percentage is a fitted estimate, not a calibrated retail percentage.
+Short retail weapon labels, bore circle, estimate and readiness all move with
+the forward HUD when looking around. Range, closure and estimated flight time
+and target aspect angle are in the upper-right debug window. The HUD layout
+is 15 percent smaller; weapon/count and percentage align with the speed box,
+and the compact range scale sits beneath altitude. BORE READY is omitted. Neither clearing selection nor changing mode redirects an airborne shot.
+An internal bay opens for BORESIGHT and release waits until 95 percent open.
+Armed missile readouts replace AGL, vertical speed and bank scale. CUED radar
+lock diamonds blink when ready to fire. The radar instrument replaces the mouse
+arrow with a crosshair while the pointer is over its plotting area.
+
+Imported IR and radar search/lock samples provide the cues, with a louder lock
+cue. Their assignment is fitted. Effects mute, pause, safe, empty and failed
+stations silence them. `TORE_SEEKER_VOLUME=0..1` sets maximum amplitude, default
+0.15. Re-import media to add the four samples to an older cache.
+[Rules and constants](spec/missiles.md), [validation](baselines/hud-cleanup.md).

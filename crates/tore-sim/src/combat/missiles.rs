@@ -37,8 +37,14 @@ pub enum Guidance {
     Infrared,
     Emitter,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetRole {
+    Aircraft,
+    Surface,
+}
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Profile {
+    pub role: TargetRole,
     pub guidance: Guidance,
     pub activation_ft: Option<f64>,
     pub guidance_ticks: u64,
@@ -75,7 +81,13 @@ impl Profile {
             "AGM45.JT" | "AGM88.JT" => (Guidance::Emitter, None),
             _ => return None,
         };
+        let role = match w.source.as_str() {
+            "AGM65G.JT" | "AGM45.JT" | "AGM88.JT" | "AGM84A.JT" | "AM39.JT" | "AS16.JT"
+            | "AS7.JT" => TargetRole::Surface,
+            _ => TargetRole::Aircraft,
+        };
         Some(Self {
+            role,
             guidance,
             activation_ft: active.map(|v| v * NMI),
             guidance_ticks: u64::from(w.movement.remove_t) * 30,
@@ -88,13 +100,14 @@ impl Profile {
     pub fn independent(self) -> bool {
         self.guidance != Guidance::Supported
     }
+    pub fn supports_boresight(self) -> bool {
+        self.role == TargetRole::Aircraft && self.independent()
+    }
+    pub fn accepts(self, target: &super::live::Target) -> bool {
+        self.role == target.role && (self.role == TargetRole::Surface || target.airborne)
+    }
     pub fn search_cap(self) -> f64 {
-        if self.guidance == Guidance::Infrared {
-            3f64
-        } else {
-            10f64
-        }
-        .to_radians()
+        7f64.to_radians()
     }
 }
 
@@ -135,7 +148,10 @@ pub fn geometry(
         .atan2(forward.hypot(dot(d, basis.right)))
         .abs();
     let limit = |raw| half_angle(raw).min(cap.unwrap_or(std::f64::consts::PI));
-    distance >= f64::from(z.minimum_range)
+    let inside_circle =
+        cap.is_none_or(|angle| distance > 0. && forward / distance >= angle.cos() - 1e-12);
+    inside_circle
+        && distance >= f64::from(z.minimum_range)
         && distance <= f64::from(z.maximum_range)
         && d[1] >= f64::from(z.minimum_altitude)
         && d[1] <= f64::from(z.maximum_altitude)
@@ -219,6 +235,30 @@ pub struct Solution {
     pub point: Vector,
     pub seconds: f64,
 }
+/// Opinionated HUD estimate, not a calibrated probability or guidance permission.
+pub fn estimated_hit_percent(
+    observation: seeker::Observation,
+    solution: Option<Solution>,
+    zone: &Zone,
+    lifetime_seconds: f64,
+    bore_cap: Option<f64>,
+) -> u8 {
+    let Some(solution) = solution else {
+        return 0;
+    };
+    let min = f64::from(zone.minimum_range);
+    let max = f64::from(zone.maximum_range);
+    if max <= min || !(min..=max).contains(&observation.range) || lifetime_seconds <= 0. {
+        return 0;
+    }
+    let r = ((observation.range - min) / (max - min)).clamp(0., 1.);
+    let centring = bore_cap.map_or(1., |cap| seeker::centre_weight(observation.off_axis, cap));
+    let margin = (1. - 0.6 * solution.seconds / lifetime_seconds).clamp(0., 1.);
+    (95. * observation.quality.clamp(0., 1.) * centring * (1. - 0.75 * r * r) * margin)
+        .round()
+        .clamp(0., 95.) as u8
+}
+
 /// Fitted bounded straight-path estimate. Uses exactly the propulsion integrator
 /// used in flight, with lead from observed velocity. Turn costs remain approximate.
 pub fn intercept(
@@ -362,6 +402,9 @@ mod tests {
 pub mod seeker;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Flight {
+    pub launch_origin: Vector,
+    /// Qualification survives terminal closure; minR is not a retention range.
+    pub qualified_target: Option<u32>,
     pub profile: Profile,
     pub mode: LaunchMode,
     pub seeker: seeker::Seeker,
@@ -370,8 +413,22 @@ pub struct Flight {
     pub solution: Option<Solution>,
 }
 impl Flight {
-    pub fn new(profile: Profile, mode: LaunchMode, target: Option<u32>) -> Self {
+    pub fn eligible(&self, w: &Weapon, target: &super::live::Target) -> bool {
+        self.profile.accepts(target)
+            && (self.qualified_target == Some(target.id)
+                || length(sub(target.position, self.launch_origin))
+                    >= f64::from(w.seeker.zones[1].minimum_range.max(0)))
+    }
+
+    pub fn new(
+        profile: Profile,
+        mode: LaunchMode,
+        target: Option<u32>,
+        launch_origin: Vector,
+    ) -> Self {
         Self {
+            launch_origin,
+            qualified_target: None,
             profile,
             mode,
             seeker: seeker::Seeker::new(target),

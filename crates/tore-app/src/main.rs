@@ -1067,20 +1067,31 @@ impl ApplicationHandler for App {
                     self.flight_command(command)
                 } else if self.screen == Screen::Flight
                     && self.flight_ui.hud
+                    && matches!(self.flight_view, 0 | 3 | 4)
                     && !self.flight_ui.frozen()
                     && self.pointer.is_some_and(|p| {
-                        weapon_hud::mode_hit(
-                            p,
-                            [
-                                f64::from(renderer.window.inner_size().width),
-                                f64::from(renderer.window.inner_size().height),
-                            ],
-                        )
+                        let size = [
+                            f64::from(renderer.window.inner_size().width),
+                            f64::from(renderer.window.inner_size().height),
+                        ];
+                        weapon_hud::mode_hit(p, size) || weapon_hud::release_hit(p, size)
                     })
                 {
                     if state == ElementState::Pressed {
                         self.combat.command(
-                            tore_sim::combat::live::Command::ToggleSeekerMode,
+                            if self.pointer.is_some_and(|p| {
+                                weapon_hud::release_hit(
+                                    p,
+                                    [
+                                        f64::from(renderer.window.inner_size().width),
+                                        f64::from(renderer.window.inner_size().height),
+                                    ],
+                                )
+                            }) {
+                                tore_sim::combat::live::Command::ClearDesignation
+                            } else {
+                                tore_sim::combat::live::Command::ToggleSeekerMode
+                            },
                             combat::launcher(&self.flight),
                         );
                     }
@@ -1515,9 +1526,14 @@ impl ApplicationHandler for App {
                         // Hover feedback uses the same projection as the click,
                         // so the selector marks the contact a click would take.
                         let window = renderer.window.inner_size();
+                        self.instruments.weapon_debug =
+                            self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4);
                         self.instruments.hover(
                             self.pointer,
                             [f64::from(window.width), f64::from(window.height)],
+                        );
+                        renderer.window.set_cursor_visible(
+                            self.instruments.crosshair.is_none() || self.flight_ui.menu,
                         );
                         self.flight_canvas.begin(
                             renderer.flight_size(),
@@ -1542,8 +1558,19 @@ impl ApplicationHandler for App {
                                 ) as f64,
                                 self.world.air_data(&presented).ok().as_ref(),
                                 self.flight_ui.ladder,
+                                weapon_hud::active(&self.combat.state),
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                                 self.flight_canvas.hud_zoom(1.),
+                            );
+                        }
+                        if self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4) {
+                            weapon_hud::draw(
+                                &mut self.menu.pixels,
+                                &presented,
+                                &self.combat.state,
+                                &self.hornet.hud_font,
+                                cockpit_palette[usize::from(self.hornet.hud.primary_color)],
+                                f64::from(self.flight_canvas.hud_zoom(1.)),
                             );
                         }
                         renderer.cockpit(
@@ -1556,18 +1583,15 @@ impl ApplicationHandler for App {
                         );
                         self.menu.pixels.fill(0);
                         if self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4) {
-                            weapon_hud::draw(
+                            weapon_hud::debug(
                                 &mut self.menu.pixels,
-                                &presented,
                                 &self.combat.state,
+                                &presented,
                                 &self.hornet.hud_font,
-                                &self.camera,
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
-                                f64::from(self.flight_canvas.hud_zoom(self.camera.zoom)),
                             );
+                            self.flight_canvas.weapon_debug(&self.menu.pixels);
                         }
-                        self.flight_canvas
-                            .legacy_layer(&self.menu.pixels, flight_canvas::HUD_SCALE);
                         self.menu.pixels.fill(0);
                         self.flight_ui.draw(
                             &mut self.menu.pixels,
@@ -1614,6 +1638,7 @@ impl ApplicationHandler for App {
                     }
                 };
                 if self.screen != Screen::Flight {
+                    renderer.window.set_cursor_visible(true);
                     renderer.aircraft(&self.hornet, &self.flight, false, &self.camera, &self.world);
                     if let Some(audio) = &self.audio {
                         audio.pause_flight(false);
