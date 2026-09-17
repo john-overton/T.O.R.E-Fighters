@@ -122,4 +122,7 @@ boost example, 1,900/1,300 ft/s closure, crossing lead, impossible intercepts,
 finite burn, early removal, long ages and independent angle boundaries.
 Live accepted profiles use this motion integrator. Version 4 combat records carry
 world velocity; version 2/3 playback explicitly keeps compatibility motion.
-Seeker observations, reacquisition, presentation and roster acceptance remain.
+All 167 simulation tests pass, including new heat/aspect/dwell, emitter shutdown,
+shared RCS and reacquisition beyond the memory timeout cases. Seeker observations
+and mounted acquisition now run in the live adapter. Activation acceptance,
+presentation and roster validation remain.

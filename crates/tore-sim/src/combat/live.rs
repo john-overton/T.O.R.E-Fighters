@@ -1,7 +1,10 @@
 //! Explicit development live-fire adapter. Source configuration and recovered scalar
 //! kernels are combined with authored scheduling, guidance and swept-sphere contacts.
 //! This is NOT the diagnostic native-parity update or a retail AI implementation.
-use super::missiles::{self, Motion, Rules};
+use super::missiles::{
+    self, Flight, Guidance, LaunchMode, Motion, Rules,
+    seeker::{self, Heat, Seeker, Status},
+};
 use super::{
     EnginePhase, FallState, PlayerTrigger, axial_speed, commanded_speed, engine_phase,
     launch_speed, removal_due, unload,
@@ -86,6 +89,7 @@ impl Readiness {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     NextWeapon,
+    ToggleSeekerMode,
     Designate,
     /// Persistent selection of one current contact by its stable identity.
     DesignateTarget(u32),
@@ -330,6 +334,8 @@ impl Configuration {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Target {
+    pub heat: Heat,
+    pub radar_emitting: bool,
     pub id: u32,
     pub position: Vector,
     /// Ground-relative velocity, also used for the notch projection.
@@ -347,6 +353,8 @@ pub struct Target {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projectile {
+    pub id: u32,
+    pub guidance: Option<Flight>,
     pub motion: Option<Motion>,
     pub guidance_ticks: Option<u64>,
     pub age: u64,
@@ -387,6 +395,9 @@ pub enum Event {
 }
 #[derive(Clone, Debug)]
 pub struct State {
+    pub launch_mode: LaunchMode,
+    pub mounted: Seeker,
+    mounted_key: Option<(usize, LaunchMode, Option<u32>)>,
     pub weapon_rules: Rules,
     config: Configuration,
     pub ammo: Vec<u16>,
@@ -452,6 +463,9 @@ impl State {
         let range_category = config.target_category;
         let sensors = Sensors::new(config.sensors.clone());
         Ok(Self {
+            launch_mode: LaunchMode::Cued,
+            mounted: Seeker::default(),
+            mounted_key: None,
             weapon_rules: Rules::Spec,
             chaff: config.ecm.chaff[0],
             flares: config.ecm.flare[0],
@@ -495,6 +509,8 @@ impl State {
     }
     pub fn select_next(&mut self) {
         self.release();
+        self.mounted = Seeker::default();
+        self.mounted_key = None;
         self.selected = (self.selected + 1) % self.ammo.len();
     }
     /// Keyboard cycling and mouse clicks share the same current-observation
@@ -514,6 +530,8 @@ impl State {
                         launcher.position[i] + launcher.basis.forward[i] * 1800.
                     });
                     self.projectiles.push(Projectile {
+                        id: self.shots,
+                        guidance: None,
                         motion: None,
                         guidance_ticks: None,
                         age: 0,
@@ -541,6 +559,16 @@ impl State {
                 for t in &mut self.targets {
                     t.jammer_active = self.target_jammer;
                 }
+            }
+            Command::ToggleSeekerMode => {
+                self.launch_mode = if self.launch_mode == LaunchMode::Cued {
+                    LaunchMode::Boresight
+                } else {
+                    LaunchMode::Cued
+                };
+                self.mounted = Seeker::default();
+                self.mounted_key = None;
+                self.release();
             }
             Command::NextWeapon => self.select_next(),
             Command::Designate => self.designate_next(),
@@ -660,6 +688,12 @@ impl State {
         if w.seeker.signature == 0 {
             return Readiness::Ready;
         }
+        let profile = (self.weapon_rules == Rules::Spec)
+            .then(|| missiles::Profile::for_weapon(w))
+            .flatten();
+        if profile.is_some_and(|p| p.independent()) && self.launch_mode == LaunchMode::Boresight {
+            return Readiness::Ready;
+        }
         let Some(t) = self
             .designated()
             .and_then(|id| self.targets.iter().find(|t| t.id == id))
@@ -690,6 +724,33 @@ impl State {
                 Support::TrackCoverage => return Readiness::RadarCoverage,
                 Support::NotSelected | Support::NoObservation => return Readiness::NoTarget,
             }
+        }
+        if let Some(profile) = profile {
+            if !missiles::geometry(
+                &w.seeker.zones[1],
+                launcher.position,
+                launcher.basis,
+                t.position,
+                None,
+            ) {
+                let old = zone_readiness(
+                    &w.seeker.zones[1],
+                    launcher.position,
+                    launcher.basis.forward,
+                    t.position,
+                );
+                return if old == Readiness::Ready {
+                    Readiness::FieldOfView
+                } else {
+                    old
+                };
+            }
+            if matches!(profile.guidance, Guidance::Infrared | Guidance::Emitter)
+                && (self.mounted.target != Some(t.id) || self.mounted.status != Status::Locked)
+            {
+                return Readiness::RadarAcquiring;
+            }
+            return Readiness::Ready;
         }
         zone_readiness(
             &w.seeker.zones[1],
@@ -736,6 +797,8 @@ impl State {
         // signatures and ECM record. No AI or autonomous behaviour is added.
         let yaw = launcher.basis.forward[0].atan2(launcher.basis.forward[2]);
         self.targets.push(Target {
+            heat: Heat::Unknown,
+            radar_emitting: false,
             id,
             category: self.range_category,
             position: std::array::from_fn(|i| {
@@ -819,7 +882,7 @@ impl State {
                 signature: t.signature,
                 jammer: t.jammer.clone(),
                 jammer_active: t.jammer_active,
-                radar_emitting: false,
+                radar_emitting: t.radar_emitting,
                 airborne: t.airborne,
                 destroyed: t.hp <= 0,
             })
@@ -846,6 +909,48 @@ impl State {
             &environment,
         );
         let index = self.selected;
+        let w = &self.config.stations[index].weapon;
+        if let Some(profile) =
+            missiles::Profile::for_weapon(w).filter(|_| self.weapon_rules == Rules::Spec)
+        {
+            let assigned = if self.launch_mode == LaunchMode::Cued {
+                self.designated()
+            } else {
+                None
+            };
+            let key = (index, self.launch_mode, assigned);
+            if self.mounted_key != Some(key) {
+                self.mounted = Seeker::new(assigned);
+                self.mounted_key = Some(key);
+            }
+            if self.armed
+                && launcher.alive
+                && self.player_hp > 0
+                && self.rounds(index) > 0
+                && self.ammo[index] & 0x8000 == 0
+            {
+                let cap = (self.launch_mode == LaunchMode::Boresight && !self.mounted.acquired)
+                    .then(|| profile.search_cap());
+                let view = seeker::View {
+                    position: launcher.position,
+                    basis: launcher.basis,
+                    cap,
+                    obscured: &obscured,
+                };
+                let observations: Vec<_> = self
+                    .targets
+                    .iter()
+                    .filter(|t| self.launch_mode == LaunchMode::Boresight || assigned == Some(t.id))
+                    .filter_map(|t| seeker::observe(w, profile, &view, t))
+                    .collect();
+                self.mounted.step(profile, &observations);
+            } else {
+                self.mounted = Seeker::new(assigned);
+            }
+        } else {
+            self.mounted = Seeker::default();
+            self.mounted_key = None;
+        }
         let allowed = self.readiness(launcher) == Readiness::Ready;
         let station = &self.config.stations[index];
         let w = &station.weapon;
@@ -871,7 +976,27 @@ impl State {
                         + launcher.basis.up[i] * station.mount[1]
                         + launcher.basis.forward[i] * station.mount[2]
                 });
+                let target = if self.launch_mode == LaunchMode::Boresight {
+                    self.mounted.target
+                } else {
+                    self.designated()
+                };
+                let guidance = missiles::Profile::for_weapon(w)
+                    .filter(|_| self.weapon_rules == Rules::Spec)
+                    .map(|profile| {
+                        let mut flight = Flight::new(profile, self.launch_mode, target);
+                        if self.mounted.acquired
+                            && self.mounted.target == target
+                            && (profile.guidance != Guidance::Active
+                                || self.launch_mode == LaunchMode::Boresight)
+                        {
+                            flight.seeker = self.mounted.clone();
+                        }
+                        flight
+                    });
                 self.projectiles.push(Projectile {
+                    id: self.shots,
+                    guidance,
                     guidance_ticks: (self.weapon_rules == Rules::Spec)
                         .then(|| missiles::Profile::for_weapon(w).map(|p| p.guidance_ticks))
                         .flatten(),
@@ -888,7 +1013,7 @@ impl State {
                         .expect("validated speed limits")
                         * 256,
                     launched_t: now,
-                    target: if guided { self.designated() } else { None },
+                    target: if guided { target } else { None },
                     fall: FallState::default(),
                 });
                 self.shots += 1;
@@ -897,6 +1022,8 @@ impl State {
         }
         if events.iter().any(|e| matches!(e, Event::Fired(_))) {
             self.effect(launcher.position, EffectKind::Launch);
+            self.mounted = Seeker::default();
+            self.mounted_key = None;
         }
         // Targets use a deliberately explicit scripted flight profile, not AI.
         let old_targets: Vec<_> = self.targets.iter().map(|t| t.position).collect();
@@ -925,6 +1052,8 @@ impl State {
             .replace(launcher.position)
             .unwrap_or(launcher.position);
         let player = Target {
+            heat: Heat::Unknown,
+            radar_emitting: launcher.radar,
             id: 0,
             position: launcher.position,
             velocity: [0.; 3],
@@ -957,45 +1086,49 @@ impl State {
                 engine_phase(m, now, p.launched_t)
             };
             let old_direction = p.direction;
-            if p.guidance_ticks.is_some_and(|end| p.age >= end) {
-                p.target = None;
-            }
-            if let Some(t) = p.target.and_then(|id| {
-                if p.incoming && id == 0 && player.hp > 0 {
-                    Some(&player)
-                } else {
-                    self.targets.iter().find(|t| t.id == id && t.hp > 0)
-                }
-            }) {
-                // Required illumination is specific to this missile's own
-                // target, never to whatever the cockpit has selected now.
-                let supported = p.incoming || self.sensors.supports(t.id);
-                if acquisition(w, p.position, p.direction, t.position, supported, 0)
-                    && terrain_hit(p.position, t.position, &ground).is_none()
-                {
-                    let desired = unit(sub(t.position, p.position));
-                    let rate = if phase == EnginePhase::Powered {
-                        m.powered_turn_rate
-                    } else {
-                        m.unpowered_turn_rate
-                    };
-                    // Authored pursuit, capped by source angle-rate field; native
-                    // PN, lead, sun, Doppler, ECM and RNG contracts remain open.
-                    let angle = dot(p.direction, desired).clamp(-1., 1.).acos();
-                    let fraction = (f64::from(rate.max(0)) * std::f64::consts::TAU
-                        / 65520.
-                        / 120.
-                        / angle.max(1e-9))
-                    .min(1.);
-                    p.direction = unit(std::array::from_fn(|i| {
-                        p.direction[i] * (1. - fraction) + desired[i] * fraction
-                    }));
-                } else {
-                    events.push(Event::TrackLost(t.id));
+            if p.guidance.is_some() {
+                guide(p, w, &self.targets, &self.sensors, &obscured);
+            } else {
+                if p.guidance_ticks.is_some_and(|end| p.age >= end) {
                     p.target = None;
                 }
-            } else if let Some(id) = p.target.take() {
-                events.push(Event::TrackLost(id));
+                if let Some(t) = p.target.and_then(|id| {
+                    if p.incoming && id == 0 && player.hp > 0 {
+                        Some(&player)
+                    } else {
+                        self.targets.iter().find(|t| t.id == id && t.hp > 0)
+                    }
+                }) {
+                    // Required illumination is specific to this missile's own
+                    // target, never to whatever the cockpit has selected now.
+                    let supported = p.incoming || self.sensors.supports(t.id);
+                    if acquisition(w, p.position, p.direction, t.position, supported, 0)
+                        && terrain_hit(p.position, t.position, &ground).is_none()
+                    {
+                        let desired = unit(sub(t.position, p.position));
+                        let rate = if phase == EnginePhase::Powered {
+                            m.powered_turn_rate
+                        } else {
+                            m.unpowered_turn_rate
+                        };
+                        // Authored pursuit, capped by source angle-rate field; native
+                        // PN, lead, sun, Doppler, ECM and RNG contracts remain open.
+                        let angle = dot(p.direction, desired).clamp(-1., 1.).acos();
+                        let fraction = (f64::from(rate.max(0)) * std::f64::consts::TAU
+                            / 65520.
+                            / 120.
+                            / angle.max(1e-9))
+                        .min(1.);
+                        p.direction = unit(std::array::from_fn(|i| {
+                            p.direction[i] * (1. - fraction) + desired[i] * fraction
+                        }));
+                    } else {
+                        events.push(Event::TrackLost(t.id));
+                        p.target = None;
+                    }
+                } else if let Some(id) = p.target.take() {
+                    events.push(Event::TrackLost(id));
+                }
             }
             if let Some(motion) = &mut p.motion {
                 motion.turn(old_direction, p.direction);
@@ -1244,7 +1377,8 @@ fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f64) -> Optio
 mod tests {
     use super::*;
     use tore_formats::weapons::*;
-    fn fixture(guided: bool) -> State {
+    use tore_formats::weapons::{Guidance, Seeker};
+    pub(super) fn fixture(guided: bool) -> State {
         let zone = Zone {
             heading: 12000,
             pitch: 12000,
@@ -1476,8 +1610,10 @@ mod tests {
             s.step(false, l, |_, _| 0.);
         }
     }
-    fn target(id: u32, position: Vector, hp: i32, category: u16) -> Target {
+    pub(super) fn target(id: u32, position: Vector, hp: i32, category: u16) -> Target {
         Target {
+            heat: Heat::Unknown,
+            radar_emitting: false,
             id,
             position,
             velocity: [0.; 3],
@@ -1948,3 +2084,109 @@ mod tests {
         assert_eq!(s.ammo, ammo);
     }
 }
+
+fn guide(
+    p: &mut Projectile,
+    w: &Weapon,
+    targets: &[Target],
+    sensors: &Sensors,
+    obscured: &dyn Fn(Vector, Vector) -> bool,
+) {
+    let flight = p.guidance.as_mut().unwrap();
+    let profile = flight.profile;
+    if p.age >= p.guidance_ticks.unwrap_or(profile.guidance_ticks) {
+        flight.seeker.status = Status::Expired;
+        flight.seeker.observation = None;
+        return;
+    }
+    let supported = flight
+        .seeker
+        .target
+        .filter(|id| sensors.supports(*id))
+        .and_then(|id| sensors.observation(id));
+    // Only shared supported observations may update an initially silent shot.
+    if !flight.seeker.acquired
+        && let Some(contact) = supported
+        && (flight.last_intercept.is_none() || p.age.is_multiple_of(12))
+    {
+        flight.solution = missiles::intercept(
+            &w.movement,
+            p.motion.unwrap(),
+            p.position,
+            contact.position,
+            contact.velocity,
+            p.age,
+            profile.guidance_ticks,
+        );
+        flight.last_intercept = Some(flight.solution.map_or(contact.position, |s| s.point));
+    }
+    if profile.guidance == Guidance::Active && !flight.enabled {
+        flight.enabled = flight
+            .last_intercept
+            .zip(profile.activation_ft)
+            .is_some_and(|(point, distance)| missiles::length(sub(point, p.position)) <= distance);
+    }
+    if flight.enabled {
+        let cap = (flight.mode == LaunchMode::Boresight && !flight.seeker.acquired)
+            .then(|| profile.search_cap());
+        let basis = Basis::new(
+            p.direction[0].atan2(p.direction[2]),
+            p.direction[1].atan2(p.direction[0].hypot(p.direction[2])),
+            0.,
+        );
+        let view = seeker::View {
+            position: p.position,
+            basis,
+            cap,
+            obscured,
+        };
+        let observations: Vec<_> = targets
+            .iter()
+            .filter(|t| profile.guidance != Guidance::Supported || sensors.supports(t.id))
+            .filter_map(|t| seeker::observe(w, profile, &view, t))
+            .collect();
+        flight.seeker.step(profile, &observations);
+        p.target = flight.seeker.target;
+        if let Some(o) = flight
+            .seeker
+            .observation
+            .filter(|_| matches!(flight.seeker.status, Status::Locked | Status::Pitbull))
+            && (flight.last_intercept.is_none() || p.age.is_multiple_of(12))
+        {
+            flight.solution = missiles::intercept(
+                &w.movement,
+                p.motion.unwrap(),
+                p.position,
+                o.position,
+                o.velocity,
+                p.age,
+                profile.guidance_ticks,
+            );
+            flight.last_intercept = Some(flight.solution.map_or(o.position, |s| s.point));
+        }
+    } else {
+        flight.seeker.status = Status::Midcourse;
+    }
+    // Remembered intercept is frozen on loss. Reacquisition may continue for the
+    // full guidance lifetime, per John's 2026-09-17 revision.
+    let can_steer = profile.guidance != Guidance::Supported || supported.is_some();
+    if can_steer && let Some(point) = flight.last_intercept {
+        let desired = unit(sub(point, p.position));
+        let rate = if missiles::phase(&w.movement, p.age) == EnginePhase::Powered {
+            w.movement.powered_turn_rate
+        } else {
+            w.movement.unpowered_turn_rate
+        };
+        let angle = dot(p.direction, desired).clamp(-1., 1.).acos();
+        let fraction =
+            (f64::from(rate.max(0)) * std::f64::consts::TAU / 65520. / 120. / angle.max(1e-9))
+                .min(1.);
+        p.direction = unit(std::array::from_fn(|i| {
+            p.direction[i] * (1. - fraction) + desired[i] * fraction
+        }));
+    }
+}
+
+#[cfg(test)]
+#[path = "missile_tests.rs"]
+mod missile_tests;

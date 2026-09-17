@@ -793,3 +793,9 @@ flight adapter default changed. [The baseline](baselines/radar.md) records what
 was actually validated and which gameplay pieces remain opinionated or fitted. No
 retail comparison was made, none is required to validate these local contracts,
 and none establishes retail parity.
+
+Missile observations now belong to the weapon seeker and use the shared
+RCS/aspect function. Cockpit designation remains independent. IR heat and passive
+emission eligibility never substitute for one another. Missiles retain their
+last measured intercept during loss and can reacquire their original target
+until guidance expiry. [Missile rules](spec/missiles.md) define the fitted tuning.

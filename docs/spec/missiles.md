@@ -8,7 +8,9 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Research mode, 2026-09-17. **Draft for implementation, no gameplay changes yet.**
+Implementation mode, 2026-09-17. Delivery status is in the
+[feature matrix](../features.md) and measured checks in the
+[baseline](../baselines/missiles.md).
 John requested four guidance types, pitbull, range, motor burn and tracking
 lifetime. IR is independent of passive emitter homing. The activation thresholds
 and launch modes are **opinionated game rules requested by John**. The manual supports delayed seeker activation in general, but does
@@ -204,7 +206,8 @@ activation distance. Cued shots search for their assigned target only. Uncued
 shots may acquire one eligible contact from their own cone; after acquisition,
 keep that identity and use the same loss rules. Active search continues until
 guidance expiry. There is no opportunistic switching after acquisition.
-After acquisition, loss uses the same proposed 2-second memory rule as I.
+After acquisition, loss uses the same MEMORY/LOST indications as I, with
+same-target reacquisition allowed until guidance expiry.
 Guidance expiry has priority over activation or reacquisition on the same tick.
 
 Use each weapon's imported seeker range and horizontal/vertical half-angles,
@@ -490,3 +493,14 @@ stores. E uses synthetic explicitly controlled emitter fixtures until ground
 weapon support is separately implemented. Keep guns, bombs, compatibility flight
 paths and existing loadouts unchanged. No retail comparison is available and no
 retail parity claim follows from these checks.
+
+## Implementation decisions
+
+Agent decisions, 2026-09-17: AGM45/AGM88 fixture profiles accept radar
+transmissions only; jammer homing requires an explicit profile opt-in. This is a
+fitted conservative receiver policy, not recovered band evidence. Wide 0x7fff
+angles impose no limit on that axis; other axes use independent spherical angles.
+Seeker radar range uses the shared RCS/aspect square-root law with reference 100;
+weapon-specific notch and jammer rejection remain unspecified. The bounded
+intercept estimate reuses propulsion and samples lead every 0.1 seconds. It
+approximates a straight path and does not yet price turning losses into EST.

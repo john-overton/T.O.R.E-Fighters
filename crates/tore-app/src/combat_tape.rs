@@ -114,6 +114,7 @@ pub fn command_name(c: Command) -> String {
     }
     match c {
         Command::NextWeapon => "next",
+        Command::ToggleSeekerMode => "seeker-mode",
         Command::Designate => "designate",
         Command::ClearDesignation => "clear",
         Command::ToggleArm => "arm",
@@ -134,6 +135,7 @@ pub fn command(s: &str) -> Option<Command> {
     }
     [
         Command::NextWeapon,
+        Command::ToggleSeekerMode,
         Command::Designate,
         Command::ClearDesignation,
         Command::ToggleArm,

@@ -53,16 +53,16 @@ The [missile plan](missile-update-plan.md) contains the delivery stages, and the
 | --- | :---: | :---: | --- | --- |
 | Guns and manual weapon release | ☑ | ☐ | Partially implemented. Current aircraft stores fire in the range; remaining catalog weapons and full combat missions remain. | Manual pp. 124-126; [weapon coverage](baselines/aircraft-roster-expansion.md) |
 | Missiles requiring continuous radar lock | ☑ | ☐ | Completed for supported default stores. | Manual pp. 117-118; [current missile behavior](spec/missiles.md#what-exists-today-and-what-changes) |
-| Independent infrared guidance | ☑ | ☐ | Partially implemented. Current IR stores guide; detailed heat/aspect behavior and seeker feedback remain. | Manual p. 119; [missile scope](spec/missiles.md) |
+| Independent infrared guidance | ☑ | ☐ | Partially implemented. Seeker-owned IR observations, heat scoring and reacquisition work. HUD and tone delivery remain. | Manual p. 119; [missile scope](spec/missiles.md) |
 | Delayed active-radar acquisition | ☑ | ☐ | Planned. Current active-radar missiles guide independently immediately after launch. | Manual p. 118; [activation](spec/missiles.md#activation-and-independent-acquisition) |
 | Per-weapon pitbull activation distances | ☐ | ☑ | Planned. Initial distances are recorded in the matrix. | [Activation rules](spec/missiles.md#activation-and-independent-acquisition) |
-| Emitter-homing missiles | ☑ | ☐ | Planned. Catalog candidates exist; operating seeker behavior remains. | Manual pp. 117, 120; [guidance types](spec/missiles.md#four-game-guidance-types) |
+| Emitter-homing missiles | ☑ | ☐ | Completed in controlled fixtures. Explicit radar-emission eligibility and shutdown work without IR fallback. No ground systems or catalog loadouts added. | Manual pp. 117, 120; [guidance types](spec/missiles.md#four-game-guidance-types) |
 | Aircraft velocity, motor boost and target-motion estimates | ☐ | ☑ | Partially implemented. Current missile profiles inherit full velocity and finite boost; the matching predictor exists. Seeker lead and HUD integration remain. | [Launch motion](spec/missiles.md#launch-velocity-and-intercept-estimates) |
 | Uncued launch with the onboard seeker enabled | ☐ | ☑ | Planned. Includes radar, IR and emitter seekers; supported-radar weapons still need lock. | [Launch modes](spec/missiles.md#uncued-launch-and-narrow-ir-search) |
-| Narrow IR search and heat-quality selection | ☐ | ☑ | Planned. Cone sizes, acquisition delay and heat scoring are specified. | [IR rules](spec/missiles.md#fitted-heat-quality-and-tone) |
+| Narrow IR search and heat-quality selection | ☐ | ☑ | Completed in simulation. Three-degree search, heat scoring and 0.25-second dwell have synthetic tests. Presentation remains. | [IR rules](spec/missiles.md#fitted-heat-quality-and-tone) |
 | Missile seeker diamond, range scale and lock tone | ☑ | ☐ | Planned. Weapon HUD and sound integration remain. | Manual pp. 83-84, 119; [HUD delivery](spec/missiles.md#weapon-hud-delivery) |
 | HUD search cone and launch-mode display | ☐ | ☑ | Planned. Cone projection and mounted-seeker feedback remain. | [HUD additions](spec/missiles.md#weapon-hud-delivery) |
-| Separate guidance lifetime and lock-loss memory | ☐ | ☑ | Partially implemented. Profiles separate guidance expiry, motor and removal at 120 Hz. Reacquisition and memory feedback remain. | [Lifetime rules](spec/missiles.md#range-motor-and-tracking-lifetime) |
+| Separate guidance lifetime and lock-loss memory | ☐ | ☑ | Completed in simulation. Guidance expiry is separate from motor and removal. Lost seekers keep their target and can reacquire until guidance expiry. | [Lifetime rules](spec/missiles.md#range-motor-and-tracking-lifetime) |
 
 ## Systems and controls
 

@@ -344,3 +344,26 @@ mod tests {
         ));
     }
 }
+
+pub mod seeker;
+#[derive(Clone, Debug, PartialEq)]
+pub struct Flight {
+    pub profile: Profile,
+    pub mode: LaunchMode,
+    pub seeker: seeker::Seeker,
+    pub enabled: bool,
+    pub last_intercept: Option<Vector>,
+    pub solution: Option<Solution>,
+}
+impl Flight {
+    pub fn new(profile: Profile, mode: LaunchMode, target: Option<u32>) -> Self {
+        Self {
+            profile,
+            mode,
+            seeker: seeker::Seeker::new(target),
+            enabled: profile.guidance != Guidance::Active || mode == LaunchMode::Boresight,
+            last_intercept: None,
+            solution: None,
+        }
+    }
+}
