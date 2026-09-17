@@ -1,4 +1,4 @@
-# Missile inventory and planning baseline
+# Missile implementation and inventory baseline
 
 > **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
 > The thing being reverse engineered is the *experience*, not the executable. We
@@ -9,7 +9,8 @@
 > <!-- tore-header v2 -->
 
 Implementation mode, 2026-09-17. The inventory evidence below is retained.
-Profile and motion implementation is underway; full seeker acceptance is pending.
+Stages 1 through 5 are implemented and validated on Linux. Remaining tuning
+and unavailable reviews are listed below.
 [Specification and matrix](../spec/missiles.md),
 [field interpretation](../formats/missiles.md),
 [implementation milestones](../missile-update-plan.md).
@@ -92,28 +93,21 @@ The concise findings and page references have one home in the
 [the FA manual mirror](https://pdfcoffee.com/famanual-pdf-free.html).
 No screenshot geometry or retail audio was validated from that text.
 
-Inspected the Rust scalar launch helper, powered/coast command, launcher bridge,
-readiness and bay conditions, IR range function, HUD and combat-audio entry
-points. The current flight state has a velocity vector, but the combat launcher
-bridge exposes scalar speed. The existing shared IR function scales range with
-base IR signature; the proposed heat-aspect/power terms are additional fitted
-behavior. Neither the new velocity law nor uncued search/HUD/tone has been run.
+The earlier scalar adapter remains the explicit compatibility path. The new
+launcher bridge carries world velocity and bay permission, while fitted heat,
+seeker geometry and target ownership live in simulation. Original behavior and
+fitted host rules remain separate in the specification.
 
 ## Validation and limits
 
-All prescribed repository checks passed on Linux: formatting, warnings-denied
-Clippy, locked workspace tests and build, Python tests, source/app/extractor
-asset guards and the documentation header check. Logs for the first eight are
-in `.local/missile-plan/checks.log`. Matrix verification checked 63 unique rows,
-135 matching record hashes and decoded field comparisons. The revised matrix
-retains those rows and adds nine active-on values and fitted uncued cone caps;
-non-applicable and held entries are explicit. Documentation links
-and absence of em dashes were checked for the changed documents.
-
-No rendering changes, so no rendering smoke was required. Windows/macOS runtime,
-interactive missile engagements, seeker tuning and retail comparisons were not
-run. The new guidance, activation, memory and lifetime rules remain proposals;
-passing existing tests does not validate those future features.
+The original inventory pass checked all 135 record hashes and decoded fields,
+with 63 unique matrix candidates. The implementation retains that inventory and
+the existing fifteen playable missile identities. No held or catalog-only store
+was enabled. Full Linux repository checks and the rendered smoke passed. Logs
+and captures are local-only in `.local/missile-update/`. Windows/macOS runtime,
+a human flying session, human listening review and retail comparison were not
+available. Automated range engagements and capture review do not establish retail
+parity or physical fidelity.
 
 ## Implementation validation
 
@@ -122,13 +116,15 @@ boost example, 1,900/1,300 ft/s closure, crossing lead, impossible intercepts,
 finite burn, early removal, long ages and independent angle boundaries.
 Live accepted profiles use this motion integrator. Version 4 combat records carry
 world velocity; version 2/3 playback explicitly keeps compatibility motion.
-All 167 simulation tests pass, including new heat/aspect/dwell, emitter shutdown,
+All 177 simulation tests pass, including new heat/aspect/dwell, emitter shutdown,
 shared RCS and reacquisition beyond the memory timeout cases. Seeker observations
-and mounted acquisition now run in the live adapter. Eight missile integration tests now cover all nine activation boundaries, failed
+and mounted acquisition now run in the live adapter. Fourteen missile integration tests cover all nine activation boundaries, failed
 acquisition, hidden movement, early guidance expiry, target-free release,
 post-shot mounted reset and two-target ownership. Activation and first pitbull
 produce distinct shot-ID events. HUD, controls, bay permission, fitted tone and version-4 replay inputs are
-implemented. Full rendered and roster acceptance remain.
+implemented. Projection tests cover 4:3, widescreen and portrait viewports at
+0.5x/1x/2x/4x zoom. Fixed-step replay agrees at 30/60/144 rendering cadences,
+including a pause. The tone envelope tests also cover reduced configured volume.
 
 ## Local manual and presentation evidence
 
@@ -145,3 +141,66 @@ content do not establish lock-sound mapping. The temporary cue is authored,
 110 Hz modulated growl or 660 Hz ringing, with a 0.1-second amplitude slew.
 Envelope, timbre separation and pause/mute have deterministic tests. No retail
 audio or PDF bytes are committed. Human listening review remains unavailable.
+
+## Roster and range acceptance
+
+All twelve supported aircraft passed `--combat-smoke`, exercising their current
+stations and all five source damage classes. The pass includes AGM65G and AS7.
+Forty-six per-slot version-4 tapes were written and replayed with full state
+comparisons. A separate BORESIGHT tape includes heat and emitter fixture inputs,
+and replays to the same 151 ticks, one shot and ammunition state. Old tape versions
+retain explicit compatibility rules. An archived version-2 tape was correctly
+rejected because its asset fingerprint differs from the current import; it was
+not silently reinterpreted with new assets. A new compatibility recording and
+a version-3-format fixture derived from its inputs both replayed successfully
+with matching tick, shot and ammunition results. This fixture is not an archived
+retail recording. Controlled emitter tests cover receiver
+filtering and signal shutdown without reflective-radar or IR fallback.
+
+Run `cargo run --locked -p tore-app -- --aircraft f18 --missile-acceptance`
+for the repeatable imported-store probe, and repeat for the other registered
+aircraft. The no-AI target is at 10,000 feet. Cases use 300/600/900 ft/s launches,
+stationary or 600 ft/s approaching/receding/crossing targets, and 25/50/75/100
+percent launch-envelope samples. Matched 600 ft/s climb and slip cases carry a
+100 ft/s vertical or sideways component and reduce forward speed to preserve
+total speed. Both launch modes are exercised where supported. Target aspect is
+set before acquisition; velocity is applied at release. This is a controlled
+launch fixture, not an aircraft opponent.
+
+Across eleven missile-carrying aircraft the 3,920 cases produced **3,331 hits,
+395 acquisition inhibits and 194 expiry misses**. A-4E has no current missile
+stores. Duplicate weapon identities across aircraft remain separate cases because
+their launcher sensors and target signatures differ. Largest sampled hit range is
+not a guaranteed reach, and the probe does not search beyond the source maximum.
+
+| Weapon | Cases | Hits | Inhibited | Expiry misses | Largest sampled hit nmi |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| AA11.JT | 160 | 117 | 30 | 13 | 9.87 |
+| AA11B.JT | 160 | 117 | 30 | 13 | 9.87 |
+| AA12.JT | 320 | 320 | 0 | 0 | 24.69 |
+| AA2.JT | 160 | 124 | 25 | 11 | 3.95 |
+| AA8.JT | 320 | 253 | 50 | 17 | 3.95 |
+| AAML.JT | 160 | 160 | 0 | 0 | 74.06 |
+| AGM65G.JT | 640 | 389 | 155 | 96 | 9.87 |
+| AIM120.JT | 640 | 636 | 0 | 4 | 23.70 |
+| AIM54C.JT | 160 | 160 | 0 | 0 | 98.75 |
+| AIM9M.JT | 320 | 264 | 40 | 16 | 3.95 |
+| AIM9X.JT | 320 | 259 | 45 | 16 | 3.95 |
+| AS7.JT | 160 | 160 | 0 | 0 | 4.94 |
+| MICA.JT | 160 | 160 | 0 | 0 | 24.69 |
+| R530.JT | 80 | 80 | 0 | 0 | 16.46 |
+| R550.JT | 160 | 132 | 20 | 8 | 3.95 |
+
+Rendered checks used the NVIDIA GeForce RTX 4070 Vulkan renderer. Reviewed
+CUED MIDCOURSE, BORESIGHT IR lock at 2x zoom, target-free search, and individual
+shot/motor/guidance-time captures. The scene smoke presented successfully.
+A separate overlay avoids applying cockpit zoom twice to seeker geometry; a
+fitted translucent backing keeps weapon details readable over the zoomed cockpit.
+Original HUD color and font remain in use.
+
+Remaining approximations: authored activation distances, heat and boost tuning;
+a straight-path intercept estimate that does not price turn losses; conservative
+radar-only emitter defaults; unspecified missile-specific notch/jammer rejection
+and original rear-aspect/target-class consumer details. Existing airborne target
+eligibility is preserved. No new ground, ship, SAM or aircraft combat AI exists.
+The fitted tone is not a verified retail sample. Source `trackT` remains unused.

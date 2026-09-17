@@ -32,7 +32,7 @@ Reviewed motor consumer treats `fuelT` as a launch-relative cutoff. Burn duratio
 is the difference from ignition, not an additional duration after it. Existing
 source evidence and build hashes are in the
 [combat component baseline](../baselines/combat-components.md#native-arithmetic-evidence).
-The live adapter advances simulation at 120 Hz, obtains timer age from `tick/30`
+The compatibility adapter advances simulation at 120 Hz, obtains timer age from `tick/30`
 and movement service increments from a separate 256-units-per-second accumulator.
 These are distinct clocks; do not divide motor timer values by 120 or 256.
 
@@ -48,22 +48,20 @@ values such as 0x7fff. Next implementation must review these cases and separate
 horizontal and vertical gates. The current single-cone simplification does not
 establish their behavior. Source geometry takes priority over invented era values.
 
-## Existing launch adapter and planned replacement
+## Compatibility and current launch adapters
 
 `combat::launch_speed` scales the launcher scalar by source `launchRetard`, takes
 the maximum with source `initialSpeed`, and clamps to source speed limits.
 `commanded_speed` approaches an altitude-adjusted absolute speed while powered,
-then source final speed in coast. The live adapter points the projectile along
-the aircraft basis; `tore-app::combat::launcher` passes `s.speed`, not `s.velocity`.
-Thus aircraft speed already contributes to scalar launch speed, but side-slip
-and climb velocity are not independently inherited by this interface.
+then source final speed in coast. Compatibility points the projectile along the aircraft basis. The current
+launcher bridge carries both scalar speed and world velocity; compatibility
+uses the scalar while the spec profile inherits the full vector.
 
 The [new velocity/intercept specification](../spec/missiles.md#launch-velocity-and-intercept-estimates)
 changes that behavior deliberately. Its additive boost budget reinterprets
 source numbers as fitted inputs and must not be attributed to the reviewed
-consumer. Compatibility retains the current rule. Current guided readiness
-also rejects a missing designation, and bay auto-opening depends on designation;
-both require explicit handling for the proposed boresight mode.
+consumer. Compatibility retains the current rule. CUED readiness requires designation. BORESIGHT permits independent-seeker
+release without one, opens an available bay and retains normal release gates.
 
 The [manual-supported behavior](../spec/missiles.md#manual-supported-behavior)
 is separate evidence from this build's static records. Its presentation and

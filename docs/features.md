@@ -48,11 +48,13 @@ current flight model is the default; the previous model remains selectable.
 
 The [missile plan](missile-update-plan.md) contains the delivery stages, and the
 [ordnance matrix](spec/missiles.md#first-pass-inventory-matrix) contains weapon values.
+[Current-store validation and remaining tuning](baselines/missiles.md) records
+the Linux range, replay and rendered acceptance.
 
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
 | Guns and manual weapon release | ☑ | ☐ | Partially implemented. Current aircraft stores fire in the range; remaining catalog weapons and full combat missions remain. | Manual pp. 124-126; [weapon coverage](baselines/aircraft-roster-expansion.md) |
-| Missiles requiring continuous radar lock | ☑ | ☐ | Completed for supported default stores. | Manual pp. 117-118; [current missile behavior](spec/missiles.md#what-exists-today-and-what-changes) |
+| Missiles requiring continuous radar lock | ☑ | ☐ | Completed for supported default stores. Lost support stops measured guidance; the original target can be reacquired before guidance expiry. | Manual pp. 117-118; [current missile behavior](spec/missiles.md#what-exists-today-and-what-changes) |
 | Independent infrared guidance | ☑ | ☐ | Completed for current stores. Seeker-owned IR observations, heat scoring, reacquisition, HUD and fitted tone work. Retail tone mapping remains unknown. | Manual p. 119; [missile scope](spec/missiles.md) |
 | Delayed active-radar acquisition | ☑ | ☐ | Completed. Cued shots fly to a supported intercept before enabling their own seeker. Acquisition is separate from activation. | Manual p. 118; [activation](spec/missiles.md#activation-and-independent-acquisition) |
 | Per-weapon pitbull activation distances | ☐ | ☑ | Completed. All nine configured activation distances have boundary tests; pitbull requires acquisition. | [Activation rules](spec/missiles.md#activation-and-independent-acquisition) |

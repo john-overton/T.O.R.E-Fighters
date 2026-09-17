@@ -205,10 +205,10 @@ and object systems; no realistic IFF, multi-track or AI work is authorized.
 Unresolved retail details use documented fitted rules; complete source-code
 closure is not a prerequisite.
 
-The [missile update plan](missile-update-plan.md) covers the next requested
-weapon work: four guidance types, pitbull activation, launch velocity and range,
+The [missile update plan](missile-update-plan.md) records the completed current-store
+implementation: four guidance types, pitbull activation, launch velocity and range,
 motor burn, guidance lifetime, uncued seeker search and HUD/tone feedback, with
-delivery stages and acceptance criteria.
+delivery stages, [measured acceptance and remaining limits](baselines/missiles.md).
 
 Work:
 - Radar modes, RWR, IFF, and the retail sensor model.

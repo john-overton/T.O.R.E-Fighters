@@ -47,6 +47,20 @@ pub struct Profile {
     pub jammer_emissions: bool,
 }
 impl Profile {
+    pub fn validate(self) -> tore_formats::Result<()> {
+        let activation_valid = match (self.guidance, self.activation_ft) {
+            (Guidance::Active, Some(value)) => value.is_finite() && value > 0.,
+            (Guidance::Active, None) | (_, Some(_)) => false,
+            (_, None) => true,
+        };
+        if !activation_valid || self.guidance_ticks == 0 || self.memory_ticks == 0 {
+            return Err(super::invalid(
+                "invalid missile profile timing or activation",
+            ));
+        }
+        Ok(())
+    }
+
     /// Explicit reviewed identities only. This does not expand store allowlists.
     pub fn for_weapon(w: &Weapon) -> Option<Self> {
         let (guidance, active) = match w.source.as_str() {

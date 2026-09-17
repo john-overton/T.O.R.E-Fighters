@@ -94,6 +94,8 @@ pub enum Command {
     ToggleSeekerMode,
     CompatibilityWeapons,
     TargetHeat(u8),
+    TargetDistance(u32),
+    ClearRange,
     ToggleTargetRadar,
     Designate,
     /// Persistent selection of one current contact by its stable identity.
@@ -156,6 +158,9 @@ impl Configuration {
             return Err(super::invalid("invalid live configuration bounds"));
         }
         for s in &self.stations {
+            if let Some(profile) = missiles::Profile::for_weapon(&s.weapon) {
+                profile.validate()?;
+            }
             let m = &s.weapon.movement;
             if s.count == 0
                 || s.count >= 32767
@@ -402,6 +407,7 @@ pub enum Event {
 }
 #[derive(Clone, Debug)]
 pub struct State {
+    pub release_readiness: Readiness,
     pub launch_mode: LaunchMode,
     pub mounted: Seeker,
     mounted_key: Option<(usize, LaunchMode, Option<u32>)>,
@@ -471,6 +477,7 @@ impl State {
         let range_category = config.target_category;
         let sensors = Sensors::new(config.sensors.clone());
         Ok(Self {
+            release_readiness: Readiness::Safe,
             launch_mode: LaunchMode::Cued,
             mounted: Seeker::default(),
             mounted_key: None,
@@ -536,8 +543,23 @@ impl State {
     }
     pub fn command(&mut self, command: Command, launcher: Launcher) {
         match command {
+            Command::ClearRange => {
+                self.targets.clear();
+                self.sensors.clear_selection();
+                self.mounted = Seeker::default();
+            }
+            Command::TargetDistance(distance) => {
+                if (1..=1_000_000).contains(&distance) {
+                    for target in &mut self.targets {
+                        target.position = std::array::from_fn(|i| {
+                            launcher.position[i] + launcher.basis.forward[i] * f64::from(distance)
+                        });
+                    }
+                }
+            }
             Command::CompatibilityWeapons => {
                 self.weapon_rules = Rules::Compatibility;
+                self.launch_mode = LaunchMode::Cued;
                 self.mounted = Seeker::default();
             }
             Command::TargetHeat(value) => {
@@ -610,6 +632,9 @@ impl State {
                 }
             }
             Command::ToggleSeekerMode => {
+                if self.weapon_rules == Rules::Compatibility {
+                    return;
+                }
                 if missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
                     .is_none_or(|p| !p.independent())
                 {
@@ -879,6 +904,14 @@ impl State {
         self.sensors.observation(target.id).is_some()
     }
     pub fn can_lock(&self, launcher: Launcher) -> bool {
+        if self.weapon_rules == Rules::Spec
+            && missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
+                .is_some_and(|p| p.independent())
+        {
+            return self.mounted.target == self.designated()
+                && self.mounted.target.is_some()
+                && matches!(self.mounted.status, Status::Locked | Status::Pitbull);
+        }
         self.config.stations[self.selected].weapon.seeker.signature != 0
             && self.launch_solution(launcher) == Readiness::Ready
     }
@@ -1062,7 +1095,8 @@ impl State {
             self.mounted = Seeker::default();
             self.mounted_key = None;
         }
-        let allowed = self.readiness(launcher) == Readiness::Ready;
+        self.release_readiness = self.readiness(launcher);
+        let allowed = self.release_readiness == Readiness::Ready;
         let station = &self.config.stations[index];
         let w = &station.weapon;
         let guided = w.seeker.signature != 0;
@@ -1193,7 +1227,7 @@ impl State {
             let w = &self.config.stations[p.station].weapon;
             let m = &w.movement;
             if if p.motion.is_some() {
-                missiles::removed(m, p.age)
+                missiles::removed(m, p.age) || p.position[1] > 100000.
             } else {
                 removal_due(m, now, p.launched_t, (p.position[1] * 256.) as i32)
             } {
@@ -2277,6 +2311,10 @@ fn guide(
             .filter(|t| profile.guidance != Guidance::Supported || sensors.supports(t.id))
             .filter_map(|t| seeker::observe(w, profile, &view, t))
             .collect();
+        if profile.guidance == Guidance::Supported && !observations.is_empty() {
+            flight.seeker.candidate = flight.seeker.target;
+            flight.seeker.dwell = missiles::DWELL;
+        }
         flight.seeker.step(profile, &observations);
         p.target = flight.seeker.target;
         if let Some(o) = flight

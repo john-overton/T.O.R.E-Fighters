@@ -69,9 +69,15 @@ pub fn draw(
     let l = combat::launcher(s);
     let mut paint = Paint {
         pixels,
-        clip: (174, 96, 292, 278),
+        clip: (174, 96, 292, 325),
         color: [color[0], color[1], color[2], 255],
     };
+    // Fitted translucent backing keeps weapon details readable when the
+    // original cockpit HUD and bank scale are magnified by camera zoom.
+    paint.color = [0, 0, 0, 230];
+    paint.rect(176, 337, 288, 73);
+    paint.rect(176, 98, 148, 33);
+    paint.color = [color[0], color[1], color[2], 255];
     let mode = if state.weapon_rules == missiles::Rules::Compatibility {
         "COMPATIBILITY"
     } else {
@@ -80,6 +86,7 @@ pub fn draw(
     paint.text(font, mode, 178, 101);
     let status = match (profile.guidance, state.mounted.status) {
         (Guidance::Infrared, Status::Locked) => "IR LOCK",
+        (_, Status::Pitbull) => "RADAR LOCK",
         (_, Status::Search) => "SEARCH",
         (_, status) => status.label(),
     };
@@ -125,7 +132,11 @@ pub fn draw(
                 .map(|c| (c.position, c.velocity))
         });
     if let Some((position, velocity)) = observed {
-        if let Some((x, y)) = projected(missiles::sub(position, s.position), camera, zoom) {
+        if let Some((x, y)) = projected(
+            missiles::sub(position, camera.position.map(f64::from)),
+            camera,
+            zoom,
+        ) {
             for (a, b) in [
                 ((-7., -7.), (7., -7.)),
                 ((7., -7.), (7., 7.)),
@@ -151,7 +162,7 @@ pub fn draw(
             font,
             &format!("R {:.1} C {closing:+.0}", range / missiles::NMI),
             178,
-            316,
+            352,
         );
         let min = f64::from(w.seeker.zones[1].minimum_range);
         let max = f64::from(w.seeker.zones[1].maximum_range);
@@ -173,20 +184,20 @@ pub fn draw(
         .acos()
         .to_degrees();
         if missiles::length(velocity) > 1e-9 {
-            paint.text(font, &format!("ASP {aspect:.0}"), 368, 316);
+            paint.text(font, &format!("ASP {aspect:.0}"), 368, 352);
         }
         match state.mounted_solution(l) {
-            Some(solution) => paint.text(font, &format!("EST {:.1}S", solution.seconds), 178, 328),
-            None => paint.text(font, "NO SOLUTION", 178, 328),
+            Some(solution) => paint.text(font, &format!("EST {:.1}S", solution.seconds), 178, 364),
+            None => paint.text(font, "NO SOLUTION", 178, 364),
         }
     } else {
-        paint.text(font, "R -- C -- EST --", 178, 316);
+        paint.text(font, "R -- C -- EST --", 178, 352);
     }
     paint.text(
         font,
         &format!("{} {}", w.name, state.rounds(state.selected)),
         178,
-        302,
+        340,
     );
     let ready = state.readiness(l);
     let permission =
@@ -197,8 +208,8 @@ pub fn draw(
         } else {
             ready.label()
         };
-    paint.text(font, permission, 300, 302);
-    paint.text(font, "P HIT --", 368, 328);
+    paint.text(font, permission, 300, 340);
+    paint.text(font, "P HIT --", 368, 364);
     for (row, shot) in state
         .projectiles
         .iter()
@@ -224,12 +235,17 @@ pub fn draw(
         paint.text(
             font,
             &format!(
-                "#{} {} {motor} {remaining:.0}S",
+                "#{} {} {} {motor} {remaining:.0}S",
                 shot.id,
-                f.seeker.status.label()
+                state.configuration().stations[shot.station].weapon.name,
+                if f.seeker.status == Status::Search && f.profile.guidance != Guidance::Active {
+                    "SEARCH"
+                } else {
+                    f.seeker.status.label()
+                }
             ),
             178,
-            342 + row as i32 * 10,
+            376 + row as i32 * 10,
         );
     }
 }
@@ -254,6 +270,21 @@ mod tests {
                 ),
                 size
             ));
+        }
+        for size in [[640, 480], [1920, 1080], [1080, 1920]] {
+            let mut canvas = crate::flight_canvas::FlightCanvas::default();
+            canvas.size = size;
+            for camera_zoom in [0.5, 1., 2., 4.] {
+                let zoom = f64::from(canvas.hud_zoom(camera_zoom));
+                let offset = hud::project(0., 0., 3f64.to_radians(), 0., zoom).unwrap().0 - 320.;
+                let scale = (f64::from(size[0]) / 640.).min(f64::from(size[1]) / 480.)
+                    * crate::flight_canvas::HUD_SCALE;
+                let expected = f64::from(size[1]) / 2.
+                    * 3f64.sqrt()
+                    * 3f64.to_radians().tan()
+                    * f64::from(camera_zoom);
+                assert!((offset * scale - expected).abs() < 0.001);
+            }
         }
         let at = |z| hud::project(0., 0., 3f64.to_radians(), 0., z).unwrap().0 - 320.;
         assert!((at(2.) - 2. * at(1.)).abs() < 1e-9);

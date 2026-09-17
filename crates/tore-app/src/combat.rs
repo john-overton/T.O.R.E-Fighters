@@ -169,6 +169,11 @@ impl Combat {
             self.range || self.initial_ammo.is_some(),
         )?;
         self.state.weapon_rules = weapon_rules;
+        if weapon_rules == tore_sim::combat::missiles::Rules::Compatibility
+            && let Some(r) = &mut self.recorder
+        {
+            r.record("compatibility-weapons", l);
+        }
         if let Some(ammo) = &self.initial_ammo {
             self.state.ammo.clone_from(ammo);
         }
@@ -707,6 +712,12 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 )?);
             }
             combat.reset(&mut flight)?;
+            // This stationary range fixture starts with an open available bay.
+            // Live actuator delay and closed-bay release have separate tests.
+            if flight.bay_available() {
+                flight.bay = 1.;
+                flight.bay_open = true;
+            }
             for _ in 0..index {
                 combat.command(live::Command::NextWeapon, launcher(&flight));
             }
@@ -758,12 +769,20 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 }
                 tracking.step(false, Launcher { radar: false, ..l }, |_, _| 0.);
                 let loses_track = weapon.seeker.signature == 3 && weapon.flags & 0x200 != 0;
-                if tracking
-                    .projectiles
-                    .iter()
-                    .any(|p| p.target.is_none() != loses_track)
-                {
-                    return Err("source radar-off tracking contract failed".into());
+                if tracking.projectiles.iter().any(|p| {
+                    if let Some(guidance) = &p.guidance {
+                        p.target.is_none()
+                            || (loses_track
+                                && !matches!(
+                                    guidance.seeker.status,
+                                    tore_sim::combat::missiles::seeker::Status::Memory
+                                        | tore_sim::combat::missiles::seeker::Status::Lost
+                                ))
+                    } else {
+                        p.target.is_none() != loses_track
+                    }
+                }) {
+                    return Err("radar-off support and retained-identity contract failed".into());
                 }
                 let mut jettison = combat.state.clone();
                 let internal = jettison.configuration().stations[index].internal;

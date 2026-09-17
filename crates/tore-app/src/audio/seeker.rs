@@ -5,14 +5,29 @@ pub struct Tone {
     pub gain: f64,
     pub phase: f64,
     pub ground: bool,
+    ramp_target: f64,
+    increment: f64,
+    remaining: u32,
 }
 impl Tone {
     pub fn sample(&mut self, rate: f64, audible: bool) -> f32 {
         if !audible {
             return 0.;
         }
-        // Full-scale 0.1 second linear slew, independent of device sample rate.
-        self.gain += (self.target - self.gain).clamp(-10. / rate, 10. / rate);
+        // Each changed amplitude reaches its target over 0.1 seconds, including
+        // when the configured seeker volume is below full scale.
+        if self.target != self.ramp_target {
+            self.ramp_target = self.target;
+            self.remaining = (rate * 0.1).round().max(1.) as u32;
+            self.increment = (self.target - self.gain) / f64::from(self.remaining);
+        }
+        if self.remaining > 0 {
+            self.gain += self.increment;
+            self.remaining -= 1;
+            if self.remaining == 0 {
+                self.gain = self.ramp_target;
+            }
+        }
         self.phase = (self.phase + 1. / rate).fract();
         let wave = if self.ground {
             (self.phase * 660. * std::f64::consts::TAU).sin()
@@ -46,6 +61,14 @@ mod tests {
             }
             assert!(tone.gain < 1e-9);
         }
+        let mut quiet = Tone {
+            target: 0.15,
+            ..Default::default()
+        };
+        for _ in 0..2400 {
+            quiet.sample(48000., true);
+        }
+        assert!((quiet.gain - 0.075).abs() < 1e-9);
         let mut air = Tone {
             target: 1.,
             ..Default::default()

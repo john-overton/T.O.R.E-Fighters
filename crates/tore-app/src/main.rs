@@ -21,6 +21,7 @@ mod lens_flare;
 mod look;
 mod menu;
 mod mirrors;
+mod missile_acceptance;
 mod ocean;
 mod ordnance;
 mod performance;
@@ -1533,6 +1534,15 @@ impl ApplicationHandler for App {
                                 self.flight_canvas.hud_zoom(1.),
                             );
                         }
+                        renderer.cockpit(
+                            &presented,
+                            &self.camera,
+                            self.flight_ui.cockpit && matches!(self.flight_view, 0 | 3 | 4),
+                            self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4),
+                            &self.menu.pixels,
+                            &cockpit_palette,
+                        );
+                        self.menu.pixels.fill(0);
                         if self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4) {
                             weapon_hud::draw(
                                 &mut self.menu.pixels,
@@ -1544,14 +1554,8 @@ impl ApplicationHandler for App {
                                 f64::from(self.flight_canvas.hud_zoom(self.camera.zoom)),
                             );
                         }
-                        renderer.cockpit(
-                            &presented,
-                            &self.camera,
-                            self.flight_ui.cockpit && matches!(self.flight_view, 0 | 3 | 4),
-                            self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4),
-                            &self.menu.pixels,
-                            &cockpit_palette,
-                        );
+                        self.flight_canvas
+                            .legacy_layer(&self.menu.pixels, flight_canvas::HUD_SCALE);
                         self.menu.pixels.fill(0);
                         self.flight_ui.draw(
                             &mut self.menu.pixels,
@@ -1767,6 +1771,7 @@ fn main() -> AppResult<()> {
     let mut live_fire = false;
     let mut jammer_on = false;
     let mut combat_smoke = false;
+    let mut missile_acceptance = false;
     let mut record_combat = None;
     let mut replay_combat = None;
     let mut combat_probe = None;
@@ -1860,6 +1865,8 @@ fn main() -> AppResult<()> {
                 live_fire = true;
                 initial_screen = Screen::Flight;
             }
+            "--missile-acceptance" => missile_acceptance = true,
+            "--compatibility-weapons" => combat_commands.push(tore_sim::combat::live::Command::CompatibilityWeapons),
             "--combat-smoke" => {
                 combat_smoke = true;
             }
@@ -2147,7 +2154,7 @@ fn main() -> AppResult<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Creator: --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-4 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Creator: --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-4 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -2277,6 +2284,16 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             }
         }
         return Ok(());
+    }
+    if missile_acceptance {
+        let config = tore_sim::combat::live::Configuration::from_source(&hornet.profile, |name| {
+            assets
+                .theater_resources
+                .get(name)
+                .cloned()
+                .ok_or_else(|| std::io::Error::other("missing probe resource"))
+        })?;
+        return missile_acceptance::run(config);
     }
     if combat_smoke {
         return combat::smoke(&hornet, &assets.theater_resources);

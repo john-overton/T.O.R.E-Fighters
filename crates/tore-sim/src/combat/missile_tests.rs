@@ -332,3 +332,194 @@ fn bay_safe_empty_and_failed_gates_survive_uncued_mode() {
     assert_eq!(s.readiness(l), Readiness::Empty);
     assert!(s.seeker_tone(l).is_none());
 }
+
+#[test]
+fn mounted_lock_is_not_boresight_release_permission() {
+    let mut s = fixture(true);
+    s.config.stations[0].weapon = weapon("AIM9M.JT");
+    s.launch_mode = LaunchMode::Boresight;
+    let l = Launcher {
+        position: [0., 1000., 0.],
+        basis: Basis::new(0., 0., 0.),
+        speed_fps: 600.,
+        velocity: [0., 0., 600.],
+        bay_ready: true,
+        radar: false,
+        jammer: false,
+        alive: true,
+        controls: Default::default(),
+    };
+    assert_eq!(s.readiness(l), Readiness::Ready);
+    assert!(!s.can_lock(l));
+    s.command(Command::CompatibilityWeapons, l);
+    assert_eq!(s.launch_mode, LaunchMode::Cued);
+    s.command(Command::ToggleSeekerMode, l);
+    assert_eq!(s.launch_mode, LaunchMode::Cued);
+    assert_eq!(s.readiness(l), Readiness::NoTarget);
+}
+#[test]
+fn render_cadence_and_pause_do_not_change_missile_state() {
+    let run = |fps: u32| {
+        let mut s = fixture(true);
+        s.config.stations[0].weapon = weapon("AIM120.JT");
+        s.launch_mode = LaunchMode::Boresight;
+        let l = Launcher {
+            position: [0., 1000., 0.],
+            basis: Basis::new(0., 0., 0.),
+            speed_fps: 600.,
+            velocity: [0., 0., 600.],
+            bay_ready: true,
+            radar: false,
+            jammer: false,
+            alive: true,
+            controls: Default::default(),
+        };
+        s.range_target(l);
+        let mut remainder = 0;
+        let mut tick = 0;
+        let mut events = Vec::new();
+        for frame in 0..fps * 4 {
+            // One second of pause, with no simulation or dwell updates.
+            if (fps..fps * 2).contains(&frame) {
+                continue;
+            }
+            remainder += 120;
+            while remainder >= fps {
+                remainder -= fps;
+                if tick == 120 {
+                    s.command(Command::ToggleSeekerMode, l);
+                }
+                events.extend(s.step(tick == 60, l, |_, _| 0.));
+                tick += 1;
+            }
+        }
+        (s.projectiles, s.targets, s.mounted, events)
+    };
+    assert_eq!(run(30), run(60));
+    assert_eq!(run(60), run(144));
+}
+
+#[test]
+fn strongest_heat_ties_dwell_reset_and_exact_memory_boundary() {
+    let profile = Profile::for_weapon(&weapon("AIM9M.JT")).unwrap();
+    let o = seeker::Observation {
+        id: 8,
+        position: [0., 0., 1000.],
+        velocity: [0.; 3],
+        quality: 0.8,
+        off_axis: 0.,
+        range: 1000.,
+    };
+    let other = seeker::Observation { id: 7, ..o };
+    let hot = seeker::Observation {
+        id: 9,
+        quality: 1.,
+        ..o
+    };
+    let mut s = seeker::Seeker::default();
+    for _ in 0..DWELL - 1 {
+        s.step(profile, &[o, other]);
+    }
+    assert_eq!(s.candidate, Some(7));
+    s.step(profile, &[o, other, hot]);
+    assert_eq!(s.dwell, 1);
+    assert!(!s.acquired);
+    for _ in 1..DWELL {
+        s.step(profile, &[hot]);
+    }
+    assert_eq!(s.target, Some(9));
+    s.step(
+        profile,
+        &[seeker::Observation {
+            quality: 0.20,
+            ..hot
+        }],
+    );
+    assert_eq!(s.status, Status::Locked);
+    for _ in 0..MEMORY - 1 {
+        s.step(profile, &[]);
+    }
+    assert_eq!(s.status, Status::Memory);
+    s.step(profile, &[]);
+    assert_eq!(s.status, Status::Lost);
+}
+#[test]
+fn supported_update_freezes_on_radar_shutdown_and_cockpit_switch() {
+    let mut s = fixture(true);
+    let mut w = weapon("AIM120.JT");
+    for z in &mut w.seeker.zones {
+        z.maximum_range = 100000;
+    }
+    s.config.stations[0].weapon = w;
+    let mut l = Launcher {
+        position: [0., 1000., 0.],
+        basis: Basis::new(0., 0., 0.),
+        speed_fps: 600.,
+        velocity: [0., 0., 600.],
+        bay_ready: true,
+        radar: true,
+        jammer: false,
+        alive: true,
+        controls: Default::default(),
+    };
+    s.range_target(l);
+    s.targets[0].position = [0., 1000., 40000.];
+    s.targets[0].velocity = [0., 0., 300.];
+    s.step(false, l, |_, _| 0.);
+    s.designate_next();
+    for _ in 0..90 {
+        s.step(false, l, |_, _| 0.);
+    }
+    assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
+    s.release();
+    let known = s.projectiles[0]
+        .guidance
+        .as_ref()
+        .unwrap()
+        .last_intercept
+        .unwrap();
+    assert!(!s.projectiles[0].guidance.as_ref().unwrap().enabled);
+    l.radar = false;
+    s.targets[0].position = [100000., 1000., 90000.];
+    s.command(Command::ClearDesignation, l);
+    for _ in 0..60 {
+        s.step(false, l, |_, _| 0.);
+    }
+    assert_eq!(
+        s.projectiles[0].guidance.as_ref().unwrap().last_intercept,
+        Some(known)
+    );
+    assert_eq!(s.projectiles[0].target, Some(s.targets[0].id));
+}
+
+#[test]
+fn invalid_activation_profiles_fail_explicitly() {
+    let profile = Profile::for_weapon(&weapon("AIM120.JT")).unwrap();
+    assert!(profile.validate().is_ok());
+    for value in [0., -1., f64::NAN, f64::INFINITY] {
+        assert!(
+            Profile {
+                activation_ft: Some(value),
+                ..profile
+            }
+            .validate()
+            .is_err()
+        );
+    }
+    assert!(
+        Profile {
+            guidance: Guidance::Infrared,
+            ..profile
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        Profile {
+            guidance_ticks: 0,
+            ..profile
+        }
+        .validate()
+        .is_err()
+    );
+}

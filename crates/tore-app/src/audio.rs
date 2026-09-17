@@ -1,4 +1,4 @@
-//! Small PCM mixer: original samples, linear resampling, no external synth.
+//! Small PCM mixer: original samples, linear resampling and a fitted seeker cue.
 use crate::{AppResult, menu::Action};
 pub mod music;
 mod seeker;

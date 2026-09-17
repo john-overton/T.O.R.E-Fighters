@@ -48,7 +48,7 @@ name, with the numbers a player would notice.
 
 | Spec | Covers | Status |
 | --- | --- | --- |
-| [Missiles](spec/missiles.md) | Four guidance types, 63-candidate inventory, pitbull, range, motor and guidance lifetime | Draft plan only; [inventory validation](baselines/missiles.md) |
+| [Missiles](spec/missiles.md) | Four guidance types, 63-candidate inventory, pitbull, range, motor and guidance lifetime | Implemented for current stores and controlled emitter fixtures; [validation and limits](baselines/missiles.md) |
 | [Aircraft radar](spec/radar.md) | Twelve-aircraft radar stats, automatic range modes, installed visual and ECM records, and look-down evidence | Implemented as one shared component; [component guide](radar.md), [validation](baselines/radar.md) |
 | [Roster expansion](spec/roster-aircraft.md) | Seven REDFOR/F-22A initial player ports | [Acceptance and limits](baselines/aircraft-roster-expansion.md) |
 | [Additional aircraft](spec/additional-aircraft.md) | F-14D, A-4E and X-31 source flight configuration and fitted presentation | Initial ports implemented; [acceptance](baselines/aircraft-fa-expansion.md) |
@@ -83,14 +83,13 @@ research path. Do not change the default without being asked.
 
 ## Next
 
-1. **Missile guidance and lifetime.** Requested by John on 2026-09-17. The
-   [draft spec and matrix](spec/missiles.md) covers supported radar, initially
-   silent active radar, independent IR and passive emitter homing. It inventories
-   63 candidates and separates launch range, burn, guidance life and cleanup.
-   It also specifies velocity inheritance, uncued seeker search, HUD cones and
-   IR tone. The [feature matrix](features.md) distinguishes origins and status.
-   [Delivery stages](missile-update-plan.md) start with profiles and
-   current A2A stores. No missile implementation or AI work in this planning pass.
+1. **Missile tuning and remaining evidence.** Stages 1 through 5 shipped for
+   current stores, with controlled emitter fixtures. Four guidance types, silent
+   active flight, same-target reacquisition through guidance expiry, inherited
+   velocity, BORESIGHT, HUD and fitted tone are implemented. The
+   [baseline](baselines/missiles.md) records 3,920 reach cases and the remaining
+   fitted tuning, unavailable human review and original evidence gaps. No new
+   catalog stores or combat AI were added.
 2. **Finish the shared aircraft radar tuning pass.** The component John
    requested on 2026-09-16 shipped on the same day: shared profiles and contact
    state using PT signatures with authored look-down, notch and jamming, the

@@ -643,3 +643,14 @@ Smooth water reflections separate an 85% sun peak from the sky/cloud peak.
 The sun reflection has independent long-range angular scatter and follows the
 visible fraction of the sun disc. Its reach no longer uses the five-mile
 sky/cloud reflection fade; dense weather still obscures it.
+
+Missile reach probes use `--missile-acceptance --aircraft NAME` and print measured
+hits, acquisition inhibits and expiry misses. These are controlled fixtures,
+not guaranteed effective ranges. `--compatibility-weapons` with `--live-fire`
+selects the prior weapon adapter independently of the flight model. The
+`seeker-mode`, `target-heat:0..4`, `target-radar`, `target-distance:FEET` and
+`empty-range` combat commands support deterministic fixture capture and replay.
+Heat codes are unknown, off, idle, dry and afterburner respectively. Distance is
+bounded to 1..1,000,000 feet. Version-4 tapes record these commands, full world
+velocity and bay permission. Use fresh tape paths because recording never
+overwrites an existing file. [Missile acceptance](baselines/missiles.md).

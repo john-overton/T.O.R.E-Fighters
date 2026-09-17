@@ -110,6 +110,9 @@ impl Recorder {
 pub fn command_name(c: Command) -> String {
     // A designation carries its stable target identity, never a screen
     // coordinate, so a replay selects the same object.
+    if let Command::TargetDistance(value) = c {
+        return format!("target-distance:{value}");
+    }
     if let Command::TargetHeat(value) = c {
         return format!("target-heat:{value}");
     }
@@ -121,7 +124,8 @@ pub fn command_name(c: Command) -> String {
         Command::ToggleSeekerMode => "seeker-mode",
         Command::CompatibilityWeapons => "compatibility-weapons",
         Command::ToggleTargetRadar => "target-radar",
-        Command::TargetHeat(_) => unreachable!("handled above"),
+        Command::TargetHeat(_) | Command::TargetDistance(_) => unreachable!("handled above"),
+        Command::ClearRange => "empty-range",
         Command::Designate => "designate",
         Command::ClearDesignation => "clear",
         Command::ToggleArm => "arm",
@@ -137,6 +141,13 @@ pub fn command_name(c: Command) -> String {
     .into()
 }
 pub fn command(s: &str) -> Option<Command> {
+    if let Some(value) = s.strip_prefix("target-distance:") {
+        return value
+            .parse::<u32>()
+            .ok()
+            .filter(|v| (1..=1_000_000).contains(v))
+            .map(Command::TargetDistance);
+    }
     if let Some(value) = s.strip_prefix("target-heat:") {
         return value
             .parse::<u8>()
@@ -152,6 +163,7 @@ pub fn command(s: &str) -> Option<Command> {
         Command::ToggleSeekerMode,
         Command::CompatibilityWeapons,
         Command::ToggleTargetRadar,
+        Command::ClearRange,
         Command::Designate,
         Command::ClearDesignation,
         Command::ToggleArm,
