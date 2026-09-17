@@ -51,3 +51,17 @@ with the small ground animation visible below the aircraft. Evidence:
 `debris-falling.png`, `debris-impact.png` and their logs in the local evidence
 directory. The piece is not left resting on terrain. These are controlled
 presentation fixtures, not a comparison against original execution.
+
+## Final acceptance
+
+All required AGENTS checks passed: formatting, warnings-denied workspace Clippy,
+474 Rust tests, locked workspace build, 40 Python tests, source and both binary
+asset guards, and 147 documentation headers. The required
+`cargo run --locked -p tore-app -- --smoke-test` presented successfully on
+NVIDIA RTX 4070/Vulkan. No required Linux check was unavailable.
+
+All twelve aircraft completed 230 default-station/five-damage-class cases and 46
+serialized combat replay checks, including AGM65G and AS7. Logs and tapes are
+under `.local/damage-smoke/`; no retail derivatives were added to Git. This
+validation covers fitted game behavior and source-resource use, not original
+runtime parity. Windows/macOS runtime checks and retail comparison were unavailable.
