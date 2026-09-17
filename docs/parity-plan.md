@@ -56,8 +56,8 @@ name, with the numbers a player would notice.
 | [Aircraft radar](spec/radar.md) | Twelve-aircraft radar stats, automatic range modes, installed visual and ECM records, and look-down evidence | Implemented as one shared component; [component guide](radar.md), [validation](baselines/radar.md) |
 | [Roster expansion](spec/roster-aircraft.md) | Seven REDFOR/F-22A initial player ports | [Acceptance and limits](baselines/aircraft-roster-expansion.md) |
 | [Additional aircraft](spec/additional-aircraft.md) | F-14D, A-4E and X-31 source flight configuration and fitted presentation | Initial ports implemented; [acceptance](baselines/aircraft-fa-expansion.md) |
-| [AI experience](spec/ai-experience.md) | Experience channels, initial tactical thresholds and aircraft/surface family scope | Partial research specification; runtime implementation pending |
-| [AI behavior](spec/ai.md) | Fighter decisions, family differences, required observations and proposed API boundaries | Timing, pursuit, steering consumers, launch gates, ammunition and wing receivers researched; remaining contracts and runtime implementation pending |
+| [AI experience](spec/ai-experience.md) | Experience channels, Quick Mission and mission skill rules, enemy-skill override, tactical thresholds, G exemption, family scope | Specified; implemented as isolated `tore-sim::ai::experience`, no live hookup |
+| [AI behavior](spec/ai.md) | Fighter decisions, timing, pursuit, targeting, steering and terrain, seeker gates, ammunition, wing orders and formations, threat warnings and countermeasures, routes and fuel | Established rules implemented as isolated components with synthetic tests; open items in the [M1e backlog](ROADMAP.md#ai-backlog-2026-09-17); no live hookup |
 | [Ocean](spec/ocean.md) | Short ripples, close pixelation and distance filtering; original textures/colors | Implemented; [acceptance](baselines/ocean.md) |
 | [Terrain shorelines](spec/terrain-shorelines.md) | Beach/water coverage and absence of land-color strips | Implemented; validation in the viewer baseline |
 
@@ -81,7 +81,7 @@ player-visible numbers out of those files and leaving the byte layouts behind.
 | Input | Keyboard, gamepad, joystick, profiles, rumble, rebinding | opinionated (authored layer) | [input](baselines/input.md) |
 | Weapons | 135 definitions imported; development range with manual firing, damage fixtures, ECM | mixed | [weapons systems](baselines/weapons-systems.md), [manual weapons](baselines/manual-weapons.md) |
 | Sensors | One shared radar, infrared and visual component for all twelve aircraft: imported capability profiles, contacts, one fire-control track, click selection, history, jammer noise, the RCS exposure page and radar weapon support | **opinionated** detection/notch/jamming/RCS tuning over spec-derived equipment data | [radar](baselines/radar.md) |
-| Combat AI | Research and planning requested 2026-09-17; initial FA trace and family inventory recorded, runtime implementation and hookup pending | researched evidence, remaining rules unknown | [AI research](baselines/ai-research.md), [delivery stages](ROADMAP.md#1e-ai) |
+| Combat AI | Isolated spec-derived components in `tore-sim::ai` (experience, geometry, tactics, motion, pursuit, targeting, steering, weapon service, wing, threat, route) with synthetic tests; not connected to missions or flight adapters | spec-derived with labeled fitted curves; open rules return an explicit unspecified error | [AI research](baselines/ai-research.md), [delivery stages](ROADMAP.md#1e-ai) |
 
 Flight has three selectable paths and they stay distinct: the compatibility `--legacy-flight`, the
 default hybrid `--researched-flight`, and the restricted `--native-flight-tables`
@@ -89,14 +89,15 @@ research path. Do not change the default without being asked.
 
 ## Next
 
-Current requested work: **aircraft and surface AI research and planning**.
+Current requested work: **aircraft and surface AI research and implementation**.
 The [main AI spec](spec/ai.md), [experience spec](spec/ai-experience.md) and
-[FA source map](formats/ai.md) are written. Research now reaches the Quick Mission
-skill writer, maneuver clocks, pursuit regulation, target ranking, weapon-service
-delays, steering consumers, seeker/launch gates, ammunition and wing receivers.
-Next trace skill loading, performance/signature producers, in-flight support
-transitions and remaining wing orders, then build isolated
-components before live hookup. The [M1e stages](ROADMAP.md#1e-ai) include all
+[FA source map](formats/ai.md) are written, and the established rules are
+implemented as isolated components in `tore-sim::ai`. Skill loading, speed
+units, performance and terrain rules, formation geometry, wing orders, threat
+warnings, countermeasures, routes and fuel closed on 2026-09-17. Next research
+seeker envelopes and store selection, remaining tactics and surface classes;
+next implementation is the per-actor controller and family variants; hookup
+stays after that. The [M1e stages](ROADMAP.md#1e-ai) include all
 aircraft families and a separate surface workstream. Initial implementation and
 acceptance cover [all twelve ported aircraft](spec/ai-experience.md#currently-ported-aircraft)
 at all four experience levels. Earlier no-AI restrictions

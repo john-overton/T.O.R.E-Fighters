@@ -8,9 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Research mode, 2026-09-17. This is the main behavior specification for AI work.
-It records the behavior established so far and the inputs needed to reproduce
-it. It is partial, not a claim that the complete AI is recovered or implemented.
+Research and implementation, 2026-09-17. This is the main behavior
+specification for AI work. It records the behavior established so far and the
+inputs needed to reproduce it. It is partial, not a claim that the complete AI
+is recovered or implemented.
 The scope covers [all twelve ported aircraft](ai-experience.md#currently-ported-aircraft),
 the wider aircraft families and surface objects. Experience values and family
 bindings have one home in [AI experience](ai-experience.md).
@@ -29,10 +30,12 @@ does not claim full agreement with the compiled BI. Comments, disabled blocks
 and suggestive names are not behavior evidence. Both are research evidence
 for future spec-derived code, not instructions to copy original internals.
 
-The API below is an **opinionated agent proposal**. No signatures or AI modules
-have been implemented. No new fitted gameplay rule is selected in this pass.
-Unknown behavior must remain visibly unresolved until researched or deliberately
-specified as fitted/opinionated. Runtime hookup remains a later stage.
+The API below is an **opinionated agent proposal**. The established slices
+are implemented as isolated components in `tore-sim::ai` (see
+[implementation status](#implementation-status)); they are not connected to
+live missions. Unknown behavior remains visibly unresolved, returning an
+explicit unspecified-rule error, until researched or deliberately specified as
+fitted/opinionated. Runtime hookup remains a later stage.
 
 ## The information an aircraft uses
 
@@ -45,7 +48,7 @@ sharing are separate, still incomplete contracts.
 | B01 | Target ahead means the larger of absolute heading-to-target error and pitch-to-target error is strictly less than 90 degrees. Off-beam is that larger error, expressed in degrees. | Executable-confirmed. This is not a circular cone measured by one 3D vector angle. |
 | B02 | Target facing means its absolute horizontal bearing error toward this aircraft is at most 90 degrees. | Executable-confirmed. The evaluator uses the heading output, not the target's pitch error; equality differs from B01. |
 | B03 | Target distance is spatial separation; horizontal distance removes altitude separation. Own `alt` is height above the queried surface. | Executable-confirmed, with the existing fixed8 feet contract. Keep AGL and absolute altitude distinct. Terrain/object query eligibility is not fully recovered. |
-| B04 | Climbing is permitted by the script predicate when current scalar speed is at least current minimum speed plus 75. Better-speed means own maximum speed exceeds the target's by at least 75. | Executable-confirmed in the source speed domain. Conversion to the host speed API and equipment/altitude dependence of the maximum-speed query need closure before calibrated acceptance. |
+| B04 | Climbing is permitted by the script predicate when current speed is at least current minimum speed plus 75 ft/s (about 44 knots). Better-speed means own maximum speed exceeds the target's by at least 75 ft/s. | Executable-confirmed. AI speed is feet per second; the HUD shows the same value in knots (times 3600, divided by 6076). Minimum and maximum are the aircraft's loaded envelope limits at its current altitude, so the thresholds move with altitude and loading. |
 | B05 | Better thrust-to-weight means the own-minus-target performance evaluator is at least 10. `corner` and `cornerSpeed` return the same aircraft query. | Executable-confirmed. The thrust-to-weight scale is not established here; do not interpret 10 as a physical ratio of ten or an invented ten-percent bonus. |
 | B06 | The fighter can distinguish human-controlled targets, fighter versus other aircraft, wing combat/approach state, and its own resolved experience. | Source use and executable accessors inspected. Human-control accessor reads the target's control flag. Network/control ownership and wing-state production remain open. |
 
@@ -165,11 +168,21 @@ the source notes, not a requirement to copy the timer representation.
 Zero-duration motion chooses one completion axis from heading, pitch and, when
 constrained, bank, using angular differences and aircraft rate queries. It does
 not wait for all three axes to arrive. The ordinary selected-axis predicate
-requires equality; pitch has additional early completion paths. In the reviewed
-combat-state path, requested pitch above 25 degrees can finish when scalar speed
-is at most minimum speed plus 25. This is separate from B04's entry permission
-for a climb. Terrain avoidance and noncombat-state exceptions still need a
-complete contract. Threat interruption and route resumption remain open.
+requires equality; pitch has additional early completion paths. In free
+flight (not in an airfield or carrier takeoff/landing sequence), a requested
+pitch above 25 degrees finishes when speed has fallen to minimum speed plus
+25 ft/s (about 15 knots). This is separate from B04's entry permission for a
+climb. While the terrain floor of B44 is active, any lower pitch goal counts
+as complete at once. Goal kinds also include speed, altitude, horizontal and
+spatial distance; a cancelled command completes on its next check.
+
+Interruption and route resumption are executable-confirmed: a script issues
+at most one motion per event, and that motion replaces the current maneuver
+immediately. When a maneuver's command list runs out, the aircraft asks its
+script for the next action; if the script declines, the next route leg is
+taken from the current waypoint (B48). A wing member with a leader takes the
+formation move instead. Wing commands cancel the current maneuver outright.
+Script reasons are ranked in B47.
 
 ### B14: Surface attack and egress
 
@@ -223,9 +236,10 @@ to that target position are at most 90 degrees, choose:
 | `-100 <= e < -50` | `v - 25` |
 | `e < -100` | `v - 50` |
 
-The speed increments above remain in the recovered scalar-speed domain;
-physical conversion must be closed before the host treats them as knots or
-feet/second. If either angular error is greater than 90 degrees, the request
+The speed increments are feet per second: +59, +30 and +15 knots above the
+target's speed and 15 and 30 knots below it. Own maximum, minimum and corner
+speed are the loaded envelope values at current altitude, corner capped at
+the maximum. If either angular error is greater than 90 degrees, the request
 instead uses corner speed. The ordinary regulating branch applies own maximum
 and minimum speed queries, with a separate aircraft-state exemption from the
 minimum. Achieved acceleration and turning remain properties of the motion
@@ -380,13 +394,44 @@ next variation deadline advances by a randomly chosen 1 through 10 simulation
 seconds from its previous deadline. It is not a new random offset every frame,
 and delayed service can leave it catching up with an old deadline.
 
-The formation point rotates horizontally with the reference aircraft heading.
-The reviewed formation request lasts nominally 3 seconds and uses its own
-position-regulating speed mode. Exact formation names/table geometry, full
-speed regulation for that mode, join/rejoin completion and wing breakup remain
-open. Keep wing slot, leader, target assignments, spacing and variation state
-explicit in the future API. A single target position and aircraft skill cannot
-represent this behavior.
+The formation point rotates horizontally with the leader's heading. The
+formation request lasts a nominal 3 seconds and is re-issued whenever the
+wingman has nothing else to do.
+
+Formation geometry is executable-confirmed. Three formations exist: echelon,
+line abreast and line astern. Slot positions are multiples of the wing's
+horizontal spacing H and vertical stacking V, with lateral positive to the
+leader's right, vertical positive above, and longitudinal negative behind:
+
+| Formation | Wingman n position before variation |
+| --- | --- |
+| Echelon | Lateral: right for odd n, left for even n, by ceil(n/2) H; longitudinal ceil(n/2) H behind; vertical by a fixed per-slot pattern (1, -1, 2, -2, 3, 3, 4, 4, 5 times V for slots 1 through 9) |
+| Line abreast | Lateral n H to the right; no longitudinal offset; vertical n V |
+| Line astern | Lateral 0; longitudinal 2n H behind; vertical n V |
+
+The first wingman therefore flies one spacing right and one back in echelon,
+one spacing right in line abreast, and two spacings back in line astern. The
+player's horizontal spacing order toggles between 512 and 2048 ft (the manual's
+500 and 2000); the stacking order cycles level, 512 ft high, 512 ft low.
+Mission waypoints set the initial control, formation, spacing and stacking;
+scripts may set spacing from 512 to 20000 ft. An idle AI aircraft that is not
+a wingman and has no command forces loose control, line astern and at least
+1024 ft spacing before holding heading.
+
+Formation speed (mode 9) uses the B15 bands on the spatial distance to the
+slot point: beyond 5000 ft own maximum; 1000 to 5000 ft leader speed plus
+100 ft/s; 250 to 1000 plus 50; 50 to 250 plus 25; within 50 ft leader speed;
+clamped to own minimum and maximum. The negative bands are reachable only
+through a lead-projection branch whose entry condition is open.
+
+Wing control has three levels: loose, medium and tight. The player's control
+key toggles loose and medium. Engage my target, protect me, attack on contact
+and the approach orders silently drop control to loose; engage from formation,
+disengage, formation, spacing and stacking orders raise it to medium. With
+loose control the leader automatically shares its target with wingmen in
+formation, up to the waypoint's attacker cap of 1, 2 or unlimited (this is the
+B41 allowance); with medium or tight control it does not. Other control
+effects are open.
 
 ## B44: Steering execution and pursuit lead
 
@@ -407,15 +452,54 @@ bounded to nominally 10 through 30 degrees per second. Other state branches
 halve roll authority and cap it at 45 degrees per second. These are conditional
 rules, not an experience multiplier or universal aircraft limits.
 
-Requested flight-path pitch is bounded to approximately -90 through +90 degrees.
-At the aircraft ceiling, positive requested pitch becomes level flight. Terrain
-avoidance can raise the pitch request. Body pitch includes a separate offset
-from flight-path pitch, so nose direction and velocity direction must remain
-distinct inputs. Exact terrain clearance, special aircraft-state overrides,
-performance-table selection and every steering mode are **unknown** in this
-specification. The reviewed axis consumers establish these dependencies, not
-complete steering closure for every maneuver. Trace those producers before
-claiming a complete aircraft-specific motion profile.
+Requested flight-path pitch is bounded to -90 through +90 degrees. Body pitch
+includes a separate offset from flight-path pitch, so nose direction and
+velocity direction must remain distinct inputs.
+
+Performance selection is executable-confirmed. There is no separate AI
+performance table: the AI reads the same loaded control-limit block and G
+limit the flight model uses, after damage, hit-point and load reductions.
+Turn rate in degrees per second is 2500 times the current G limit (in G)
+divided by speed in feet per second, with speed treated as at least 125 ft/s
+and the result capped at 40 degrees per second. The constant is the original's
+own; it is about 78 times the physical value, so AI aircraft turn far faster
+than physics would allow at the same G. Turn radius is speed divided by that
+rate in radians, capped at 32767 ft. For example a 7 G limit at 500 ft/s
+gives 35 degrees per second and an 819 ft radius. Because the G limit is the
+loaded one, damage, loading and the experience G adjustment change AI turning.
+Roll rate is the aircraft's roll limit after those reductions, halved and
+capped at 45 degrees per second in ordinary states; a reduced-rate command
+divides it by three and bounds it to 10 through 30. Every ported fighter's
+roll limit is 180 degrees per second or more, so they all roll at the 45
+degree cap; a B-52 rolls at 15. The reference bank magnitude in the bank-dependent heading authority above
+is the aircraft's own maximum bank, so authority scales below seven eighths of
+maximum bank.
+
+Terrain avoidance keeps an AI aircraft at least 300 ft (the aircraft's
+minimum-altitude value; 300 in every inspected record) above the terrain
+1000 ft ahead of it. Level flight is permitted at that clearance; a dive is
+permitted only when 1.375 turn radii times the sine of the dive angle fits
+inside the surplus above the clearance, tested in 5 degree steps; below the
+clearance the floor becomes a climb of at least 5 degrees, steeper as the
+deficit grows. The floor is re-evaluated once a second in ordinary flight and
+four times a second when pitched below -10 degrees or within 3000 ft of the
+ground. While it is active, pitch authority gains 20 degrees per second and
+any lower pitch goal completes at once. Pursuit and route commands enable the
+floor. A separate terrain event can replace the current command with a
+3 second climb at the aircraft's maximum climb angle (80 degrees in inspected
+records), but it is masked while motion commands run, so its delivery
+frequency is open.
+
+Other overrides: above its ceiling altitude the aircraft does not accept a
+climbing pitch request. On the ground it holds its entry pitch, and may pitch
+up only above minimum speed unless in the airborne part of a takeoff; the
+ground turn rate is at least 35 degrees per second. During airfield-attached
+states the pitch request is capped by the airfield's own limit. Aircraft with
+the gravity flag gain or lose 32 ft/s of speed per second times the sine of
+their flight-path pitch, halved when more than 100 ft/s above maximum speed,
+and never decelerate below minimum speed while climbing. The bank request is
+bounded by the aircraft's maximum bank and a second term that is still
+untraced. State labels for the airfield sequences remain unnamed.
 
 The weapon-dependent lead used by B15 starts from the target position. For the
 predictive weapon branch, distances of 20000 feet or more bypass prediction.
@@ -454,8 +538,44 @@ inclusive limits. For vertical errors beyond 90 degrees, the reviewed rule
 accepts horizontal error within the larger of the horizontal limit and 90 degrees,
 or vertical error at least 180 degrees minus the vertical limit. Both angular
 limits set to their unrestricted sentinel bypass angles, not range checking.
-The launch lock routine selects the second stored seeker zone. This does not
-prove which zone every in-flight guidance caller uses.
+
+Every store carries two envelopes. The first is what its seeker can acquire,
+used for sensor and target search; the second is what it may be employed
+against, used for lock, launch, store choice and in-flight support. Each has
+its own minimum and maximum range, relative altitude window and horizontal and
+vertical angular limits. No air-to-air store carried by the twelve ported
+aircraft restricts relative altitude; the AIM-54C and AAM-L cannot be launched
+inside 30000 ft. Per-store values live in the imported weapon records, not in
+this spec.
+
+Signature producers are executable-confirmed. Detection range equals the
+profile's maximum range times the final signature percentage over 100; a
+signature above 100 does not extend reach beyond the profile maximum. The
+starting percentage is the target's own stored signature for the observing
+sensor type (visual, laser, infrared, radar). A passive emitter seeker ignores
+stored signatures: 100 percent while the target radiates, otherwise 0. An
+infrared sensor sees at least double, never below 200 percent, while the
+target is in the hot-engine state or its recent heat window. A radar sensor's
+percentage comes from the attitude and configuration model, then two
+configuration bonuses of 33 and 25 points each floored at 100. Weather scales
+everything; the naked eye is lifted to at least 75 percent within 200 ft and
+blended back by 1500 ft; at night a lit target's visual and laser signature
+divides by up to 5 between 1500 and 4500 ft. Each seeker's aspect penalty is
+subtracted unless the observer is inside a 40 degree elevation, 140 degree
+azimuth rear cone or pointing within 30 degrees of vertical; a 100 percent
+rear-aspect penalty (the AA-2) cannot see a target from the front, while the
+Sidewinder family carries 30 or 20 and radar missiles 0. Look-down rejection
+reaches full strength at 45 degrees down and on the deck, vanishing at
+5000 ft above ground. The closing-speed gate is unused by roster radars.
+
+Given several usable stations against a target, the AI picks the highest
+score: an angular term from the employment envelope (100 minus pointing error
+in degrees for guided stores, twice 50 minus error for guns and unguided
+stores), plus the store's hit chance against the target, plus 50 for a guided
+store beyond 1500 ft, plus the store's damage against the target's category
+divided by 25. Eligibility is one class bit: air-to-air missiles only against
+aircraft, bombs, rockets and ground missiles only against surface targets,
+guns against both. The hit-chance term is an opaque routine not yet stated.
 
 A target must still exist and be usable. Equipment can additionally require a
 live launcher, launcher emission, a compatible supporting seeker, or launcher
@@ -466,8 +586,17 @@ one-missile support channel. The reviewed AI radar-on check requires the actor's
 emission-enabled state and extends its emission-valid deadline to at least
 10 seconds ahead. This is not proof of ten seconds of missile guidance after
 radar shutdown. The corresponding player path checks its existing deadline.
-Support loss, reacquisition and terminal autonomous guidance still require the
-in-flight callers and their state transitions.
+In flight a guided weapon re-checks its target every update using only the
+angular limits of its employment envelope, so it does not lose its target by
+closing inside its own launch minimum range. An AI launcher's support does not
+lapse on its own while its missile keeps asking for it; a human launcher's
+support lapses when the pilot stops emitting. When any check fails the weapon
+simply loses its target: it is not destroyed, flies on unguided until its
+normal lifetime ends, and does not reacquire. A passive emitter weapon keeps
+tracking a stationary emitter that has shut down but loses a moving one. The
+existing [missiles spec](missiles.md) retains its requested reacquisition
+design as an opinionated host rule, not recovered behavior. A 4000 ft
+terminal branch remains open.
 
 For the bomb-type branch when trajectory checking is requested, the predicted
 impact must fall within the larger of 1000 feet and one eighth of current range
@@ -507,6 +636,27 @@ Executable-confirmed for the reviewed aircraft event receiver:
 | Wing control | Applies the control setter and resets the active command. |
 | Target/order assignment | Distinguishes holding fire, restoring free selection, a class/policy request, and a concrete target. A concrete target changes the reaction/target state and establishes a nominal 20-second target-related deadline, with a time-adjustment branch. This is not yet proof that the target is forgotten at expiry. |
 
+Player orders are executable-confirmed: break left and right are 175 and 170
+degree heading changes, break low and high are 70 degree pitch changes, and
+fly straight is a zero change, each a 5 second request at corner speed.
+Approach orders steer 45 degrees left or right of, or 35 degrees below or
+above, the target and complete when the wingman is within 2000 ft of its
+approach point; the wingman then returns to formation unless assigned an
+attack. Whether the approach point is the target itself or displaced is open.
+The player's radio call is printed and voiced when it is sent, regardless of
+whether the wingman can comply; spacing calls say "Tighten up" below 1000 ft
+and "Combat spread" otherwise. Only target assignments get a wingman reply,
+"Engaging" (heard only with radio traffic enabled) or "Showtime!" for protect
+me, from the first wingman. Break, approach, formation, spacing and control
+orders receive no spoken reply.
+
+Disengage puts the wingman back in formation at once and stops it choosing a
+new target until the next engage order. A wingman whose target is lost or
+destroyed returns to formation by itself; a leader resumes its waypoint. There
+is no separate rejoin order or rejoin distance. Bug out hands the wingman to
+the return-to-base helpers, which are open. A wing-order subcode with no
+found sender assigns a target in the second attack state.
+
 Break and approach do not install AI steering on a human-controlled recipient.
 The common maneuver eligibility gate rejects original states 1..18 and 21..30;
 accepted states 19..30 are normalized by a second helper before the new request.
@@ -517,10 +667,106 @@ unknown, so do not relabel them as landing or refueling solely from their number
 The event handler's Boolean result is not an obedience or radio-acknowledgment
 contract: some settings are applied while returning false, and a human break
 or targetless approach can return true without installing motion. A host receiver
-needs distinct applied, rejected, and no-motion outcomes. Broader player radio
-orders, formation names, approach completion, sharing recipients, interruption
-priority and rejoin behavior remain open. Trace these separately rather than
-using the original handler result as the host command outcome.
+needs distinct applied, rejected, and no-motion outcomes. The 20 second
+target deadline's expiry consumer, the approach steering point, the player-side
+voicing of wingman replies and loose-versus-medium self-engagement remain open.
+
+## B47: Threat warnings, countermeasures and reason priority
+
+Executable-confirmed. A missile launch warning is delivered only to the
+aircraft the missile was fired at. Other aircraft, wingmen included, never
+receive it, whatever their equipment. The warning identifies the missile, so
+the aircraft knows who fired and whether the seeker is infrared or radar.
+
+The warning is delayed. A human-flown target is warned one second after
+launch. An AI aircraft in ordinary flight is warned six seconds after launch,
+plus one second for every two statute miles between missile and target at
+launch, capped at twenty seconds, plus an experience term of 6, 3, 1 or 0
+seconds for Novice through Ace. An AI aircraft in the two attack states can
+instead be warned after one second when it is already engaging the launcher
+and after three seconds otherwise; the producers of those states are open.
+The minimum delay is half a second.
+
+An AI aircraft ignores launch warnings while taking off and during the later
+landing states. In the first two approach states it abandons the approach and
+returns to free flight. An aircraft with no countermeasure dispenser station
+does not react at all. A mission-authored hold time can suppress reactions
+until a given time of day. A launch by an aircraft on the same side sends a
+radio message but no maneuver.
+
+On a warning the aircraft rolls for countermeasures at 35, 50, 75 or 90
+percent by experience level. On success it releases two or three devices a
+quarter second apart: radar decoys after a radar warning, infrared decoys
+after an infrared warning. It never substitutes the other device, and the
+release stops as soon as the matching dispenser is empty. The weapon service
+is postponed two seconds. Each device decoys each missile guiding on the
+releasing aircraft whose seeker class matches, with an independent roll of
+the missile's decoy susceptibility times the device's effectiveness, in
+percent. Human aircraft with the unlimited-ammunition option do not consume
+devices. The decoyed missile's remaining flight time is shortened by a rule
+still to be stated.
+
+No evasive maneuver is flown when the launcher is on the aircraft's own side
+or is already the aircraft's current target. Otherwise a wing reaction is
+sent and the fighter script runs with the infrared-launch or radar-launch
+reason (B10); if the script requests nothing the aircraft reverses course,
+left or right with equal probability, at corner speed.
+
+Script reasons are ranked: hit, then infrared launch, then radar launch,
+then attack, then evade, then idle. A script still in progress resumes when
+the new reason is not higher than the one it was started with; a higher
+reason restarts the script from the top. What a restart does to a motion
+command already in flight is open.
+
+## B48: Routes, fuel and recovery
+
+Executable-confirmed, partially. A landing waypoint within 60000 ft of an
+aircraft with an airport hands it to the airport landing sequence. Beyond
+5000 ft from a waypoint, a wing leader varies its commanded altitude by up to
+plus or minus 100 ft on each command. Landing waypoints are never commanded
+below 2000 ft. Waypoint speed is clamped to the aircraft's minimum and
+maximum. Each route command lasts a nominal 5 seconds before re-planning.
+A waypoint completes when it is behind the aircraft; a goal-object waypoint
+also requires the goal destroyed or the whole wing out of usable weapons for
+its class; a ground waypoint requires the aircraft on the ground. With no
+route the aircraft holds its current heading. An AI wingman whose leader is
+taking off or landing, within 10000 ft of the leader and 40000 ft of the
+leader's airport, joins the landing.
+
+Fuel: with a home airport the aircraft computes time to reach it at a cruise
+speed (minimum plus one fifth of the envelope, or half if that is under
+75 ft/s) and its endurance at the lowest throttle that holds that speed. It is
+out of fuel at zero, critical below four minutes of endurance, on bingo when
+endurance is under time-to-home plus five minutes, and on caution at or
+under time-to-home plus ten minutes. An AI wingman whose leader is AI-controlled
+leaves for its home airport on bingo, flying a private landing route at 5000
+to 10000 ft and cruise speed, and lands there. An aircraft whose internal
+fuel reaches zero is lost. Return-to-base for leaders and singletons,
+damage-triggered disengagement and the takeoff and landing sequences are open.
+
+## Implementation status
+
+Isolated, renderer-independent components exist in `crates/tore-sim/src/ai/`.
+Each file names the behavior IDs it implements; unresolved branches return
+`AiError::UnspecifiedRule` rather than a default. Nothing below is hooked into
+live missions, the flight adapters or the player path.
+
+| Component | Implements | Not implemented, returns unspecified |
+| --- | --- | --- |
+| `experience` | Explicit, editor and Quick Mission resolution, enemy-skill override, tactical tables, G adjustment | Nothing; template ground skill values are data, not code |
+| `geometry` | B01 through B05 predicates and distances | Bearing when both aircraft share a horizontal position (reported as unknown) |
+| `tactics` | B10 reactions, B11 evasion entry, B12 approach and best/random choice, pursuit offsets, B14 attack selection | Last-ditch candidate redraw, random-tactic menu contents, dive-bomb profile |
+| `motion` | B13 request limits, maneuver builders, quarter-second deadline clock, free-flight pitch early completion | Zero-duration axis selection |
+| `pursuit` | B15 frame and speed bands, B44 lead scaling and bypass | Speed estimator and prediction time |
+| `targeting` | B41 retention, eligibility and three-penalty ranking | Priority route, surface selector |
+| `steering` | B44 approach without overshoot, turn rate and radius from G and speed, roll caps, authority floors and mode limits, terrain floor and cadence, ceiling, ground and gravity overrides | Base pitch rate, airfield pitch cap, second bank-bound term; the authority curve shapes are labeled fitted |
+| `weapon_service` | B42 phases and retries, timing profiles for all twelve aircraft, B45 ammunition debit, seeker envelopes by role, detection range and stated signature modifiers, class eligibility, store score, in-flight track check and AI support extension, device schedule | Burst pacing after a shot, hit-chance rule, signature producers that need sensor state |
+| `threat` | B47 warning delay, receiver gates, countermeasure gate and dispenser selection, decoy roll, script fallback reversal, reason ranking | Decoyed-missile time shortening, restart effect on an in-flight move |
+| `route` | B48 waypoint completion by octant, route command with landing hand-off, leader jitter and floors, join-landing, cruise speed, fuel states, wingman bingo route | Leader and singleton return to base, takeoff and landing sequences |
+| `wing` | B43 spacing clamps, formation table and names, player spacing values, mode 9 speed, control side effects, target sharing cap; B46 receiver outcomes, player break/approach values, reply rules | Approach steering point, mode 9 negative-band entry |
+
+Fitted and opinionated choices are listed in each file's module comment and in
+the [provenance summary](../behavior-provenance.md).
 
 ## Proposed host API
 
@@ -643,12 +889,15 @@ Add B44 tests for roll-in, opposing bank, rate limiting and the 1600/20000-foot
 lead boundaries; B45 tests for inclusive envelope limits, zero signature, support
 loss, inhibited/empty/unlimited stores and a final partial ammunition debit; B46
 tests separating applied settings from motion installation and handler results.
-These are specified future cases, not newly implemented tests.
+The B01 through B05, B12, B15, B41, B42, B43, B44, B45 and B46 cases listed
+above now exist as synthetic tests in `tore-sim::ai`; they test the specified
+numbers, not flown acceptance.
 
-Next resolve Quick Mission writer-to-loader skill handling; steering performance
-producers, terrain overrides and completion exceptions; signature producers and
-per-store envelopes; in-flight support-loss/reacquisition; and remaining wing
-orders and approach completion. B44 through B46 close the reviewed connections
+Quick Mission skill handling is resolved in the experience spec. Next resolve
+steering performance producers, terrain overrides and completion exceptions;
+signature producers and per-store envelopes; in-flight support-loss and
+reacquisition; and remaining wing orders and approach completion. The
+consolidated backlog lives in [M1e](../ROADMAP.md#1e-ai). B44 through B46 close the reviewed connections
 and explicitly identify the branches still preventing complete behavioral closure.
 Surface engagement follows its separate source map. Broader maneuver and
 family coverage remains open. This document can grow by complete behavior

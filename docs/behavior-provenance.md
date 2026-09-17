@@ -111,6 +111,11 @@ Labels describe origin only. None of these is a blocker.
 | `sideslip_drag=0.5` in both aircraft models | Fitted | Chosen by the implementation, not requested by John and not extracted from FA |
 | Achieved G/applied-rate diagnostic snapshot | Diagnostic instrumentation | Measures our adapter; does not prove retail exposes equivalent channels |
 | Sustained controller rumble | Opinionated, requested by John | Mapping still to be designed |
+| AI decision, timing, pursuit, targeting, weapon-service, wing, threat and route components | Spec-derived | `tore-sim::ai`, from [the AI spec](spec/ai.md); not connected to live missions |
+| AI steering curve shapes: linear roll-in below 7/8 maximum bank, cosine pitch authority, opposing-bank suppression, ceiling-before-terrain ordering | Fitted | The spec gives thresholds and floors, not curves; labeled in `ai::steering` |
+| AI pursuit offset sign convention (lateral right, longitudinal ahead) and chased-displacement sign draw | Fitted | Signs unresolved in the source; labeled in `ai::pursuit` and `ai::tactics` |
+| AI weapon-service half-second gate scope, 15 s window handling, blocked-path outcome | Fitted | Spec silent on the consequence; labeled in `ai::weapon_service` |
+| Atomic allocate-then-debit release option | Opinionated, agent choice 2026-09-17 | Default off; the original debits before allocation |
 
 Diagnostic tooling is not a new gameplay feature. Document its purpose and limits
 without pretending it is recovered retail behavior or a user-chosen flight law.

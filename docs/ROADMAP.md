@@ -49,8 +49,8 @@ cockpit, HUD, instrument windows, weather and controller support. The
 [ported roster](spec/ai-experience.md#currently-ported-aircraft) identifies all
 twelve and their AI family bindings. A development
 weapons range supports manual weapon testing. Ground contact and landing are
-authored behaviour ([opinionated](behavior-provenance.md)); combat AI runtime
-implementation is not started. John requested aircraft and surface AI research
+authored behaviour ([opinionated](behavior-provenance.md)); combat AI has
+isolated spec-derived components and no live hookup. John requested aircraft and surface AI research
 and planning on 2026-09-17; the current scope and stages are in M1e below.
 
 John scheduled the shoreline correction and ocean-motion trial on 2026-09-16.
@@ -209,13 +209,56 @@ choices, other family differences, surface boundaries and proposed API inputs.
 The [experience specification](spec/ai-experience.md), [source map](formats/ai.md)
 and [research baseline](baselines/ai-research.md) provide its companion evidence.
 AI-0 has an installed-archive census; loose overrides and mission bindings remain.
-AI-1 reaches the Quick Mission skill writer, with runtime variation unresolved.
-AI-2 now includes nominal maneuver timing, pursuit regulation, target ranking,
-weapon-service delays, conditional steering, seeker/launch gates, ordinary
-ammunition handling and wing-command receivers. Full performance/signature
-producers, in-flight support transitions, remaining orders and compiled-branch
-correspondence remain open. AI-3 through AI-6 remain pending; runtime
-implementation has not started.
+AI-1 is closed: Quick Mission skill is uniform per wing, saved per-object skill
+is final, the enemy-skill flight-menu override and the human-only G exemption
+are specified. AI-2 covers fighter decisions, timing, pursuit, targeting,
+weapon-service cadence, steering with performance and terrain rules, seeker
+gates, ammunition, wing orders with formation geometry, threat warnings,
+countermeasures, reason priority, routes and fuel. AI-3 has started: isolated
+components exist in `tore-sim::ai` with synthetic tests. AI-4 through AI-6
+remain pending. The backlog below is the single list of open items.
+
+#### AI backlog (2026-09-17)
+
+Established rules with tests are listed in the
+[implementation status table](spec/ai.md#implementation-status). Everything
+else falls into one of four kinds.
+
+Missing evidence (research, in priority order):
+
+1. Signature producers and per-store seeker envelopes; AI store selection by
+   target class; in-flight support loss and reacquisition (B45).
+2. Remaining tactics: last-ditch candidate suitability, the random-tactic menu
+   contents, engagement-pitch rule, jink and circle shapes, what a script
+   restart does to a maneuver in flight (B11, B12, B13, B47).
+3. Surface classes: event mask meanings and command operands in the surface
+   event handler, then SAM, AAA, vehicle, ship and carrier contracts (B30).
+4. Wing remainder: approach steering point, mode 9 negative-band entry,
+   loose-versus-medium self-engagement, 20 second target deadline expiry,
+   bug-out helpers, reply voicing (B43, B46).
+5. Recovery and survival: takeoff and landing sequences, leader and singleton
+   return to base, damage-triggered disengagement, attack-state producers (B48).
+6. Small units: B05 thrust-to-weight scale, pursuit offset signs, lead speed
+   estimator, minimum-speed exemption producer, bank bound second term, burst
+   policy after a shot, decoyed-missile time shortening, template ground skill
+   values, prefs persistence of the enemy-skill override.
+
+Implementation work (spec established, not yet coded): the last-ditch and
+random-tactic branches once researched; a per-actor controller that sequences
+the existing components through `Controller::step`; family variants for F-117,
+helicopter, bomber, AC-130, large and MOTH behaviors (B20); the hydrofoil
+program (B30).
+
+Validation work: synthetic scenarios per aircraft and experience level (48
+combinations) that run the components together headless with a fixed seed;
+determinism and restart tests for the future controller; a review of the
+fitted steering curves against any flight-model turn data already measured.
+
+Integration work (AI-5 and AI-6, not started): actor-owned sensors, stores and
+weapon services; the steering adapter into the selected flight model; the
+Quick Mission launch payload carrying side, wing, member, type, loadout and
+level; live hookup behind an explicit option with the straight-flight fixtures
+kept.
 
 Initial AI delivery covers every aircraft in the
 [ported roster](spec/ai-experience.md#currently-ported-aircraft). All twelve bind
@@ -230,7 +273,7 @@ aircraft imports.
 | AI-0: FA inventory | Extend the initial FA_2.LIB census to archive precedence and mission bindings; retain exact aircraft identities and separate static scenery from autonomous objects | Every referenced behavior family has a build/source identity, evidence category and explicit gap list; no unnamed fallback controller |
 | AI-1: Experience | Trace the six wing selections, four side/domain assignment channels, per-object mission values and all type-appropriate skill consumers | Specify Quick Mission distributions, saved-skill precedence, tactical percentages, G exemption and device reactions; synthetic boundary cases for 0..3 and invalid input |
 | AI-2: Aircraft behavior specifications | Complete fighter/strike and defensive behavior first, then F-117, helicopters, bombers/AC-130, transports/airliners and special families; include formation, orders, navigation, fuel and damage responses | For each maneuver and decision, prose gives trigger, target geometry, units, limits, duration/completion and interruption rules; source/BI disagreements and unsupported aircraft motion are explicit |
-| AI-3: Isolated Rust components | Implement specified behavior slices in renderer-independent `tore-sim::ai`; add only needed bounded data readers to dependency-free `tore-formats` | Deterministic headless scenarios exercise each family's decisions and maneuvers at all applicable experience levels; known approximations have named rules/constants and provenance |
+| AI-3: Isolated Rust components (in progress) | Implement specified behavior slices in renderer-independent `tore-sim::ai`; add only needed bounded data readers to dependency-free `tore-formats` | Deterministic headless scenarios exercise each family's decisions and maneuvers at all applicable experience levels; known approximations have named rules/constants and provenance |
 | AI-4: Surface behavior | Trace and specify static defenses, SAM, AAA, mobile ground units, ordinary ships, hydrofoil and carrier behavior separately, then implement isolated components | At least one representative fixture per supported class validates detection/eligibility, movement where applicable, fire control and experience; scenery never acquires an invented combat brain |
 | AI-5: Simulation service adapters | Generalize actor ownership for sensors, weapons, missile support, damage, fuel and movement; feed isolated controllers through those services | Multiple actors own independent contacts, stores and targets; no free ammunition, omniscient targeting by accident, duplicated missile physics or player-state contamination |
 | AI-6: Later game hookup | Replace the lossy dummy-wing launch payload with side, wing, member, type, loadout, experience source and resolved level; connect mission routes/orders and activity display | Six mixed-skill wings retain identity end to end; replay and headless/live results agree; player and straight-flight fixture paths remain available |

@@ -24,7 +24,7 @@ are identifiers, not evidence for a real-world variant or guidance mode.
 | `sig` | Nonzero enables target guidance; 3 invokes radar support checks | 2 is the proposed IR group, 4 the emitter group; neither proves every weapon's full seeker behavior |
 | `flags & 0x200` | Signature-3 weapons require launcher support during flight | Absence is not proof of an onboard active seeker or a pitbull transition |
 | `zone1` | Launch range, relative altitude and angle permission | Launch envelope is not a kinematic reach guarantee |
-| `zone0` | In-flight geometric tracking gate | Geometry alone does not establish signature strength, acquisition delay, ECM rejection or emitter compatibility |
+| `zone0` | Seeker acquisition envelope, used for sensor and target search | Corrected 2026-09-17: in flight the weapon re-runs the lock routine with range checking off, so only `zone1` angular limits gate tracking; see the [AI source map](ai.md#seeker-signature-and-store-selection-follow-through). Geometry alone does not establish signature strength, acquisition delay, ECM rejection or emitter compatibility |
 | `igniteT`, `fuelT`, `removeT` | Ignition age, motor cutoff age, cleanup age | Live host maps one timer unit to 0.25 seconds; retail scheduling equivalence is unestablished |
 | `trackT` | Parsed as `Guidance::track_t`, unused by live combat | AI preparation-delay use is traced in [AI B42](../spec/ai.md#b42-weapon-preparation-search-cadence-and-firing); not evidence of battery life |
 

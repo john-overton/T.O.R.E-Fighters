@@ -8,10 +8,11 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Research mode, 2026-09-17. John requested an FA aircraft AI review, experience
-mapping, surface AI investigation where feasible, and a plan to prepare behavior
-before later hookup. This pass changes documentation only. No retail executable
-or module was executed and no AI controller was implemented.
+Research and implementation, 2026-09-17. John requested an FA aircraft AI
+review, experience mapping, surface AI investigation where feasible, and a plan
+to prepare behavior before later hookup, then authorized continued research
+and implementation of specified behavior. No retail executable or module was
+executed. Isolated components exist; no controller is hooked into missions.
 
 ## Inputs and identity
 
@@ -162,6 +163,62 @@ This closes selected sender/consumer connections and corrects the proposed
 inventory feedback contract. It does not establish complete steering, all
 store profiles, in-flight support transitions or every wing radio order.
 
+## Skill, performance, wing, threat and route inspection
+
+The 2026-09-17 continuation ran five bounded research traces in parallel and
+a parent trace of the surface event handler, all on the same hashed FA.EXE
+(re-verified before each address was quoted). Bounded decodes are saved under
+local `session3/` (`llvm-objdump -d --x86-asm-syntax=intel --start-address
+--stop-address` as above; a SHA-256 manifest covers the performance set).
+Representative commands:
+
+```sh
+llvm-objdump -d --x86-asm-syntax=intel \
+  --start-address=0x481c10 --stop-address=0x482f30 \
+  gameassets/fighters-anthology/FA.EXE   # mission text parser
+llvm-objdump -d --x86-asm-syntax=intel \
+  --start-address=0x42df80 --stop-address=0x42e0b6 \
+  gameassets/fighters-anthology/FA.EXE   # terrain pitch floor
+llvm-objdump -d --x86-asm-syntax=intel \
+  --start-address=0x4c0f49 --stop-address=0x4c1022 \
+  gameassets/fighters-anthology/FA.EXE   # launch warning delay
+llvm-objdump -d --x86-asm-syntax=intel \
+  --start-address=0x473f50 --stop-address=0x474300 \
+  gameassets/fighters-anthology/FA.EXE   # surface event handler
+```
+
+Data-section reads (the formation table at `0x4f6cb8`, the experience delay
+table at `0x50ce18`, the name and phrase tables) used the PE section map with
+`.rdata` at file offset 950272 and `.data` at 955904. Local PT values quoted
+in the source map (`minAlt`, `maxClimb`, `maxAlt`, roll limits) were read from
+the ignored roster extraction by walking the directive stream in schema order.
+
+Results: Quick Mission skill, saved-skill precedence and the G exemption are
+closed; speed units, turn and roll capability, terrain avoidance and several
+steering overrides are closed; formation geometry, names, player spacing
+values, mode 9 speed, the wing order map, control side effects, radio rules
+and rejoin are closed; launch-warning eligibility and delay, countermeasure
+selection and inventory, reason ranking, waypoint execution and completion,
+and fuel states are closed. The seeker and signature trace was interrupted
+twice by session limits and is recorded as open. The surface handler dispatch
+was inspected but its event meanings remain open. Every closed item is stated
+in [the main spec](../spec/ai.md) and indexed in
+[the source map](../formats/ai.md). No retail module was executed and no
+dynamic comparison was performed.
+
+## Isolated components
+
+The established rules are implemented in `crates/tore-sim/src/ai/` as
+renderer-independent calculations with synthetic tests: experience, geometry,
+tactics, motion, pursuit, targeting, steering, weapon service, wing, threat and
+route. Each test checks a specified number or transition (for example B01 at
+89, 90 and 91 degrees; B15 at each side of every band edge; B41 at 19999 and
+20000 ft; B42 timing groups for all twelve aircraft; B43 spacing clamps at
+511, 512, 20000 and 20001 ft; the warning delay examples in B47). Unresolved
+rules return an explicit unspecified-rule error. Nothing is connected to live
+missions, the flight adapters or the player path, so these tests are not
+evidence of flown behavior or retail parity.
+
 ## What this establishes
 
 There is enough FA-specific evidence to plan all aircraft families and a
@@ -170,27 +227,30 @@ specific effects, not evidence for a universal difficulty multiplier. The
 earlier checkout supplies useful leads, but its runnable pursuit controller and
 unconnected interpreter do not establish FA tactical parity.
 
-The work does not yet establish complete flight maneuvers, threat awareness,
-firing decisions, surface experience scaling, or full source/compiled agreement.
+The work does not yet establish complete maneuver shapes, seeker envelopes and
+store selection, surface class behavior, recovery sequences or full
+source/compiled agreement.
 Retail comparison remains unavailable and is not an acceptance blocker. Future
 acceptance uses specified numbers and synthetic deterministic scenarios; any
 unresolved component implemented by choice must be labeled fitted or opinionated.
 
 ## Repository validation
 
-All required repository checks passed on the current Linux host:
+All required repository checks passed on the current Linux host after the
+2026-09-17 implementation pass:
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`
-- `cargo test --workspace --locked`: 502 Rust tests passed, none ignored.
+- `cargo test --workspace --locked`: 707 Rust tests passed, none ignored, of
+  which 205 are the new `tore-sim::ai` synthetic tests.
 - `cargo build --workspace --locked`
 - `python3 -m unittest discover -s tools -p 'test_*.py'`: 40 tests passed.
 - `python3 tools/check_assets.py`, including separate scans of
   `target/debug/tore-app` and `target/debug/tore-extract`.
-- `python3 tools/check_docs.py`, plus direct use of its header validator on the
-  four new untracked documents, which the tracked-file scan does not visit.
+- `python3 tools/check_docs.py`.
 
-Logs are local in `.local/ai-research/checks/`. These checks protect the existing
-repository; they do not validate newly implemented AI, since there is none.
-No rendering smoke is required for this documentation-only change. No Windows
-or macOS execution or visual/gameplay acceptance was performed.
+Logs are local in `.local/ai-research/checks/`. The AI tests check the
+specified numbers and transitions of isolated components; they do not
+validate flown behavior, since no controller is hooked into live missions.
+No rendering smoke is required for this change. No Windows or macOS execution
+or visual/gameplay acceptance was performed.

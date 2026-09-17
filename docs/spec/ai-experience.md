@@ -8,8 +8,8 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Research mode, 2026-09-17. Partial specification from the local Fighters
-Anthology media and static executable inspection. No AI implementation or retail
+Research and implementation, 2026-09-17. Partial specification from the local Fighters
+Anthology media and static executable inspection. Isolated components exist in `tore-sim::ai`; no live hookup or retail
 flight comparison is claimed. Build identity and validation live in the
 [research baseline](../baselines/ai-research.md); addresses and data contracts
 live in [AI source notes](../formats/ai.md). Delivery stages live in
@@ -26,18 +26,25 @@ enemy-ground selections are separate assignment channels. Preserve those channel
 and the resulting per-object level separately. Do not equate either with player
 flight difficulty, nationality, equipment capability or radar generation.
 
-The manual describes each Quick Mission wing's selection as a range of skills;
-the generator chooses the exact skill for each pilot. The FA Quick Mission
-distribution is **unknown** in this pass. Static tracing now establishes that
-the wing text writer emits its selected skill argument for every member.
-The writer-to-loader path must explain the manual's promised variation before
-we claim the final runtime distribution. Do not make every aircraft in a wing
-identical by silently copying the menu selection, and do not substitute the
-editor's distribution below without evidence.
+In a Quick Mission every aircraft in a wing has the experience level chosen
+for that wing on the setup screen. The generator writes that one level for
+every member, and nothing at mission load changes it. The manual's description
+of a range of skills within a wing is not what the original does. This is
+executable-confirmed on the generator, loader and post-load paths; the
+[source map](../formats/ai.md#quick-mission-skill-boundary) lists the writers.
+
+A mission file gives each object its experience level directly. An object
+with no stated level is Novice. The mission-wide friendly-air, enemy-air,
+friendly-ground and enemy-ground values stored in a mission file are the
+editor's remembered menu positions; they are not applied to objects when a
+mission is played. Preserve those channels in the data model for editing, but
+do not derive a runtime level from them.
 
 The mission editor's bulk assignment uses a one-level downward adjustment for
 33 of 100 possible draws, no change for 35, and an upward adjustment for 32.
-Clamp the result to 0 through 3. This gives the following nominal distribution:
+Clamp the result to 0 through 3. It is an editing tool that rewrites saved
+values and never runs during play. This gives the following nominal
+distribution:
 
 | Selected level | Novice | Average | Experienced | Ace |
 | --- | ---: | ---: | ---: | ---: |
@@ -47,9 +54,20 @@ Clamp the result to 0 through 3. This gives the following nominal distribution:
 | Ace | 0% | 0% | 33% | 67% |
 
 These percentages express draw thresholds, not a promise to copy the original
-random sequence. Whether every mission-loading path preserves the saved skill
-without reassignment remains to be checked. Explicit per-object mission values
-must remain distinguishable from generation settings in the future data model.
+random sequence.
+
+A flight-menu option can force all enemy aircraft to Novice, or all to
+Average, at the start of every mission until the option is switched off. It
+is applied after the mission's objects exist, so it overrides both mission
+files and Quick Mission settings. Whether that preference persists in the
+saved preferences file, as its dialog promises, is not yet traced.
+
+Quick Mission ground defenses are placed independently per template site with
+a chance set by the strength choice: none never, light 25 of 100, medium 60 of
+100, heavy always. The site type is drawn from the enemy nation's equipment
+family. At night, if a friendly wing flies an F-117 or a B-2, every AAA site
+that is placed is a ZSU-23 with a Novice crew. The template's own ground skill
+values are theater data and remain to be read.
 
 ## Fighter tactical choices
 
@@ -91,12 +109,14 @@ weapon lead, sign conventions and interruption still need closure.
 
 ## Other experience effects
 
-Aircraft field update applies an experience-dependent available-G adjustment
-to levels 0 and 1, behind an exemption flag whose human-control meaning still
-needs verification. It subtracts 1 G from the positive limit with a 2 G floor
-and adds 1 G to the negative limit with a -2 G ceiling. Levels 2 and 3 skip
-that adjustment. Treat the exemption as **unknown** until traced; do not change
-player flight limits based on this finding.
+The experience G-limit adjustment applies to AI-flown aircraft only. Any
+aircraft flown by a human, locally or over a network, keeps its full limits;
+the exemption flag is the object's human-control bit, and no AI path sets it.
+AI Novice and Average aircraft, friendly wingmen included, lose 1 G of
+positive limit (never below 2 G) and 1 G of negative limit (never beyond
+-2 G). Experienced and Ace aircraft are unchanged. Whether the adjustment is
+applied once or on every field update is not traced; it does not change who is
+exempt. Player flight limits are not affected.
 
 A launch-reaction path uses nominal thresholds of 35%, 50%, 75% and 90% to
 schedule device release. The successful path requests 2 or 3 releases. The
@@ -182,6 +202,7 @@ carrier behaviour. Most surface records have no named maneuver program.
 
 ## Unknowns before complete implementation
 
+Quick Mission skill, saved-skill precedence and the G exemption are closed.
 Recover observable maneuver trajectories, durations, interruption rules,
 target selection and loss, firing eligibility, missile support, ammunition and
 fuel responses, formation orders, route behavior and return-to-base behavior.
