@@ -16,7 +16,7 @@
 
 <p align="center">
   <a href="docs/formats/theater.md"><img alt="16 theaters" src="https://img.shields.io/badge/theaters-16-3c7a57"></a>
-  <a href="docs/FLIGHT-MODEL.md"><img alt="Five aircraft" src="https://img.shields.io/badge/aircraft-5%20flyable-3c7a57"></a>
+  <a href="docs/FLIGHT-MODEL.md"><img alt="Twelve aircraft" src="https://img.shields.io/badge/aircraft-12%20flyable-3c7a57"></a>
   <a href="docs/baselines/weapons-systems.md"><img alt="135 weapon definitions" src="https://img.shields.io/badge/weapon%20definitions-135-3c7a57"></a>
   <a href="AGENTS.md"><img alt="No retail game data in this repository" src="https://img.shields.io/badge/retail%20game%20data-none%20shipped-6b4fbb"></a>
   <a href="MODS.md"><img alt="Mods keep their own license" src="https://img.shields.io/badge/mods-your%20own%20license-6b4fbb"></a>
@@ -32,6 +32,18 @@ Where the project is going is in [the roadmap](docs/ROADMAP.md). What is built
 and what comes next is on one page in [the parity plan](docs/parity-plan.md). The
 behaviour being rebuilt is described in [docs/spec/](docs/spec/).
 
+## What makes it T.O.R.E
+
+Original game evidence and deliberate additions are tracked separately in the
+[feature matrix](docs/features.md). It distinguishes retail-supported behavior,
+fitted approximations and opinionated choices, with implementation status and
+links to the evidence.
+
+Our shared radar/RCS tuning, authored landing behavior and modern input layer
+are implemented examples. Per-weapon seeker activation distances, velocity-aware
+missile launches, uncued seeker search and additional weapon HUD/tone behavior
+are **planned**, not shipped. See the [missile update plan](docs/missile-update-plan.md).
+
 ## What works today
 
 The app launches into the original **Choose Activity** menu using artwork, button
@@ -42,8 +54,9 @@ and toggles.
 
 **Create Quick Mission** opens the original-style briefing: click the aircraft
 name in Wing 1 or the theater name in "You are flying over…" to select, then
-**OK** to fly. F/A-18D, Rafale C, F-14D, A-4E and X-31 EFM are available, on any of the 16 imported
-theaters. All briefing fields are editable and unsupported mission systems are
+**OK** to fly. Twelve aircraft are available, including F/A-18D, Rafale C,
+F-14D, A-4E and X-31 EFM, on any of the 16 imported theaters.
+[Additional roster and limits](docs/spec/roster-aircraft.md). All briefing fields are editable and unsupported mission systems are
 validated before launch. Custom weapons opens the original-art Load Ordnance
 screen with compatible weapon and fuel edits. Set enemy Wing 1 to zero for the
 supported single-aircraft preview.
@@ -152,6 +165,7 @@ This discovers and unpacks all supported archives into ignored `.local/extracted
 
 - [Roadmap](docs/ROADMAP.md): milestones and what 1:1 means.
 - [Parity plan](docs/parity-plan.md): what is built, what is specified, what is next.
+- [Feature matrix](docs/features.md): retail evidence, fitted behavior, deliberate additions and delivery status.
 - [Behaviour specs](docs/spec/): what a player experiences, with numbers. This is the parity target.
 - [Development](docs/DEVELOPMENT.md): environment and everyday commands.
 - [Extraction](docs/EXTRACTION.md): shared script, filtering, output layout, and supported containers.

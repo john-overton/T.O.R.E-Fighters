@@ -48,6 +48,7 @@ name, with the numbers a player would notice.
 
 | Spec | Covers | Status |
 | --- | --- | --- |
+| [Missiles](spec/missiles.md) | Four guidance types, 63-candidate inventory, pitbull, range, motor and guidance lifetime | Draft plan only; [inventory validation](baselines/missiles.md) |
 | [Aircraft radar](spec/radar.md) | Twelve-aircraft radar stats, automatic range modes, installed visual and ECM records, and look-down evidence | Implemented as one shared component; [component guide](radar.md), [validation](baselines/radar.md) |
 | [Roster expansion](spec/roster-aircraft.md) | Seven REDFOR/F-22A initial player ports | [Acceptance and limits](baselines/aircraft-roster-expansion.md) |
 | [Additional aircraft](spec/additional-aircraft.md) | F-14D, A-4E and X-31 source flight configuration and fitted presentation | Initial ports implemented; [acceptance](baselines/aircraft-fa-expansion.md) |
@@ -82,7 +83,15 @@ research path. Do not change the default without being asked.
 
 ## Next
 
-1. **Finish the shared aircraft radar tuning pass.** The component John
+1. **Missile guidance and lifetime.** Requested by John on 2026-09-17. The
+   [draft spec and matrix](spec/missiles.md) covers supported radar, initially
+   silent active radar, independent IR and passive emitter homing. It inventories
+   63 candidates and separates launch range, burn, guidance life and cleanup.
+   It also specifies velocity inheritance, uncued seeker search, HUD cones and
+   IR tone. The [feature matrix](features.md) distinguishes origins and status.
+   [Delivery stages](missile-update-plan.md) start with profiles and
+   current A2A stores. No missile implementation or AI work in this planning pass.
+2. **Finish the shared aircraft radar tuning pass.** The component John
    requested on 2026-09-16 shipped on the same day: shared profiles and contact
    state using PT signatures with authored look-down, notch and jamming, the
    RCS/aspect display, persistent click selection, Y history and infrared A2A,
@@ -94,20 +103,20 @@ research path. Do not change the default without being asked.
    so the presets and matchups have not been played against each other yet.
    [Capability spec](spec/radar.md), [validation](baselines/radar.md). No AI
    work.
-2. **Continue behaviour specs.** Start with the features that already have
+3. **Continue behaviour specs.** Start with the features that already have
    the most recovered numbers and the least prose: weather, then flight
    envelope/departure, then the quick-mission and ordnance screens. Each spec
    replaces a pile of source notes with one page a player would recognise.
-3. **Ground contact and landing as an authored feature.** Contact is opinionated
+4. **Ground contact and landing as an authored feature.** Contact is opinionated
    now. Make takeoff, landing, taxi and deck behaviour feel right and hold up in
    tests; stop waiting on a recovered contact producer.
-4. **Maneuver audio and rumble**, then the remaining
+5. **Maneuver audio and rumble**, then the remaining
    [flight-response](research/flight-response-plan.md) items.
-5. **Continue F-14D, A-4E and X-31 acceptance.** Initial FA-only ports are implemented,
+6. **Continue F-14D, A-4E and X-31 acceptance.** Initial FA-only ports are implemented,
    requested by John on 2026-09-16. Resolve the [documented limits](baselines/aircraft-fa-expansion.md),
    especially original X-31 vector animation schedules and remaining pitch/yaw response
    tuning. PT roll response and low-speed auxiliary control are implemented.
-6. **Remaining weather work**: wind, turbulence and vapor.
+7. **Remaining weather work**: wind, turbulence and vapor.
 
 ## Frozen
 

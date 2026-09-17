@@ -361,7 +361,10 @@ instant destruction rule. IR seekers do not add another cockpit track. No
 mandatory mid-course support phase or activation distance was introduced for
 active weapons: exact activation behaviour remains unresolved, and this pass
 preserves the existing weapon model. No multi-track aircraft support is implied
-by the TWS name.
+by the TWS name. The subsequent [missile plan](spec/missiles.md) proposes
+an initially silent flight phase and a separate onboard activation/acquisition
+transition. That proposal is not implemented and does not change the behavior
+reported here.
 
 John's requested click behaviour takes precedence over the retail target-cycle
 restriction: clicking a current contact selects its stable target ID immediately,
