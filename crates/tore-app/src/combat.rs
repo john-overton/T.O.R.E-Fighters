@@ -39,6 +39,8 @@ pub struct Combat {
     pub input: FireInput,
     pub controller: FireInput,
     pub range: bool,
+    /// Pilot-only tapes retain their existing clean-aircraft initial state.
+    pub clean_recording: bool,
     initial_ammo: Option<Vec<u16>>,
     dummies: Vec<(usize, Vector)>,
     dummy_models: Vec<Airframe>,
@@ -135,6 +137,7 @@ impl Combat {
             input: FireInput::default(),
             controller: FireInput::default(),
             range,
+            clean_recording: false,
             initial_ammo,
             recorder: None,
             last_launcher: None,
@@ -241,7 +244,10 @@ impl Combat {
         }
         self.last_launcher = Some(l);
         let weapon_rules = self.state.weapon_rules;
-        self.state = live::State::new(self.state.configuration().clone(), s.native.is_none())?;
+        self.state = live::State::new(
+            self.state.configuration().clone(),
+            s.native.is_none() && !self.clean_recording,
+        )?;
         self.state.weapon_rules = weapon_rules;
         if weapon_rules == tore_sim::combat::missiles::Rules::Compatibility
             && let Some(r) = &mut self.recorder

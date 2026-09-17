@@ -53,7 +53,7 @@ the Linux range, replay and rendered acceptance.
 
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
-| Guns and manual weapon release | ☑ | ☐ | Partially implemented. Current supported stores are available in normal starts, custom missions and the range. Remaining catalog weapons and full combat missions remain. | Manual pp. 124-126; [weapon coverage](baselines/aircraft-roster-expansion.md) |
+| Guns and manual weapon release | ☑ | ☐ | Partially implemented. Current supported stores are available in normal starts, custom missions and the range. Pilot-only recordings retain clean loads. Remaining catalog weapons and full combat missions remain. | Manual pp. 124-126; [weapon coverage](baselines/aircraft-roster-expansion.md) |
 | Missiles requiring continuous radar lock | ☑ | ☐ | Completed for supported default stores. Lost support stops measured guidance; the original target can be reacquired before guidance expiry. | Manual pp. 117-118; [current missile behavior](spec/missiles.md#what-exists-today-and-what-changes) |
 | Independent infrared guidance | ☑ | ☐ | Completed for current stores. Seeker-owned IR observations, heat scoring, reacquisition, HUD and fitted tone work. Retail tone mapping remains unknown. | Manual p. 119; [missile scope](spec/missiles.md) |
 | Delayed active-radar acquisition | ☑ | ☐ | Completed. Cued shots fly to a supported intercept before enabling their own seeker. Acquisition is separate from activation. | Manual p. 118; [activation](spec/missiles.md#activation-and-independent-acquisition) |
@@ -75,6 +75,7 @@ the Linux range, replay and rendered acceptance.
 | Radar notching and generation-based jammer tuning | ☐ | ☑ | Partially implemented. Detection effects work; side-by-side aircraft tuning remains. | [Radar tuning](radar.md#deliberate-departures-and-known-approximations) |
 | Persistent selection of search-only contacts | ☐ | ☑ | Completed. Selection and firing permission remain separate. | [Selection](radar.md#mouse-designation-and-missiles) |
 | Destroyed aircraft remain visible to sensors | ☐ | ☑ | Completed while the wreck remains airborne. | [Destroyed aircraft](radar.md#destroyed-aircraft-remain-sensor-objects) |
+| Centered HUD zoom and wide view | ☑ | ☑ | Completed. Zoom uses the HUD center; below 1x the cockpit and mirrors hide while HUD and instruments remain. | Manual p. 104 describes magnification; [requested presentation](baselines/cockpit-slide.md) |
 | Rebindable modern controller profiles | ☐ | ☑ | Completed. Gamepads, sticks, throttles and pedals use the in-flight binding editor. | [Input](INPUT.md) |
 
 ## Maps, weather and atmosphere

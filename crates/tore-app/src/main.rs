@@ -2775,6 +2775,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             &theater_code,
         )?);
     }
+    combat.clean_recording = record_input.is_some();
+    if combat.clean_recording {
+        eprintln!(
+            "Pilot-only recording keeps the existing clean-aircraft load; use combat recording for weapons."
+        );
+    }
     combat.mission_dummies(&dummy_aircraft, 5280., &theater_resources)?;
     combat.reset(&mut flight)?;
     if let Some(value) = flight_bay {

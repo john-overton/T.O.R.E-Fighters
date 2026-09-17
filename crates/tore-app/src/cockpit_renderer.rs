@@ -80,6 +80,18 @@ pub fn layout(size: [u32; 2], art: [u32; 2], yaw: f32, pitch: f32, zoom: f32) ->
         opacity,
     ]
 }
+/// Zoom scales the HUD about its forward datum at screen center. Head-look
+/// translates that datum with the camera, independently of magnification.
+fn hud_layout(size: [u32; 2], translation: [f32; 2], zoom: f32) -> [f32; 4] {
+    let [w, h] = size.map(|v| v as f32);
+    let scale = (w / 640.).min(h / 480.) * crate::flight_canvas::HUD_SCALE as f32 * zoom;
+    [
+        640. * scale,
+        480. * scale,
+        w * 0.5 + translation[0],
+        h * 0.5 + translation[1],
+    ]
+}
 impl CockpitRenderer {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -291,6 +303,7 @@ impl CockpitRenderer {
         hud: bool,
         pixels: &[u8],
     ) {
+        let art = art && camera.zoom >= 1.;
         self.enabled = art || hud;
         self.mirrors_visible = false;
         if !self.enabled {
@@ -326,10 +339,7 @@ impl CockpitRenderer {
             f32::from(art),
             f32::from(hud),
         ]);
-        let scale = (size[0] as f32 / 640.).min(size[1] as f32 / 480.)
-            * crate::flight_canvas::HUD_SCALE as f32
-            * camera.zoom;
-        values.extend_from_slice(&[640. * scale, 480. * scale, 0., 0.]);
+        values.extend_from_slice(&hud_layout(size, [placement[0], placement[1]], camera.zoom));
         for rect in self.mirror_rects {
             values.extend_from_slice(&rect);
         }
@@ -368,6 +378,20 @@ impl CockpitRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hud_zoom_preserves_the_center_at_every_aspect_ratio() {
+        for size in [[640, 480], [1920, 1080], [827, 1080]] {
+            for zoom in [0.5, 0.75, 1., 2., 4.] {
+                let [w, h, x, y] = hud_layout(size, [0., 0.], zoom);
+                assert_eq!([x, y], size.map(|v| v as f32 * 0.5));
+                let normal = hud_layout(size, [0., 0.], 1.);
+                assert!((w - normal[0] * zoom).abs() < 0.001);
+                assert!((h - normal[1] * zoom).abs() < 0.001);
+            }
+        }
+        let panned = hud_layout([640, 480], [-100., 50.], 2.);
+        assert_eq!([panned[2], panned[3]], [220., 290.]);
+    }
     #[test]
     fn cockpit_and_hud_anchor_do_not_move_when_aircraft_attitude_changes() {
         for (yaw, pitch, bank) in [(0., 0., 0.), (2., 1.57, 1.), (4., 2., -2.)] {

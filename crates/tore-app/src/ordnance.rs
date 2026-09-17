@@ -535,6 +535,20 @@ pub fn validate_sources(
         if normal.state.ammo != load.quantities {
             return Err("normal restart lost weapons".into());
         }
+        normal.clean_recording = true;
+        normal.reset(&mut flight)?;
+        if flight.payload_lbs != 0.
+            || normal
+                .state
+                .configuration()
+                .stations
+                .iter()
+                .zip(&normal.state.ammo)
+                .any(|(station, count)| !station.internal && *count != 0)
+        {
+            return Err("pilot-only recording gained external stores".into());
+        }
+        normal.clean_recording = false;
         normal.mission_dummies(&[(id, 29)], 5280., data)?;
         normal.reset(&mut flight)?;
         let positions: Vec<_> = normal.state.targets.iter().map(|t| t.position).collect();

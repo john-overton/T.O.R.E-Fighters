@@ -130,9 +130,11 @@ moves it downward. Both fade from 45–65 degrees horizontal look and 35–55 de
 upward. These are fitted presentation rules, not recovered native FA projection.
 Instruments remain screen-anchored.
 
-+/- scales artwork and HUD text/symbology with world zoom. Zoom-in crops around
-the eye line; zoom-out keeps the bottom anchored and constrains artwork width to
-cover the screen. The finite source art provides no rear/overhead interior.
++/- scales artwork and HUD text/symbology with world zoom. Zoom crops around the HUD
+center at the screen center in forward view, including below 1x. Below 1x,
+cockpit artwork and mirrors disappear; HUD and instrument windows remain. At
+1x or above, artwork returns if the cockpit toggle is enabled. Head-look still
+translates the aircraft-forward datum with the camera. The finite source art provides no rear/overhead interior.
 Mirrors use their original source silhouettes with live rear views. See [sliding cockpit validation](baselines/cockpit-slide.md).
 
 The local USNF manual's “View Panning & Zooming” section specifies Ctrl+arrows when keyboard flight control is used, and Right Shift plus joystick for joystick panning. The reference app chose Shift+arrows. The supplied FA readme did not resolve the Anthology-specific binding, so Shift remains an explicitly documented convenience alias rather than claimed recovered FA behavior. [Validation](baselines/look-around.md).

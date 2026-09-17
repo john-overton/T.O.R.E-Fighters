@@ -31,10 +31,8 @@ struct Output { @builtin(position) position:vec4<f32>, @location(0) screen:vec2<
      max(cockpit.size.y-cockpit.art.y*cockpit.placement.z,
          (cockpit.size.y-cockpit.art.y*cockpit.placement.z)*.5))+cockpit.placement.xy;
  let art_uv=(pixel-origin)/(cockpit.art.xy*cockpit.placement.z);
- // Zoom in about the eye line; zoom out keeps the lower frame on screen.
- let hud_center=vec2(cockpit.size.x*.5,cockpit.size.y*(.5+max(0.,.5*(1.-cockpit.size.z))))
-     +cockpit.placement.xy;
- let hud_uv=vec2(.5)+(pixel-hud_center)/cockpit.hud.xy;
+ // CPU supplies the same centered zoom anchor at every magnification.
+ let hud_uv=vec2(.5)+(pixel-cockpit.hud.zw)/cockpit.hud.xy;
  var color=vec4(0.);
  if cockpit.art.z>0. && all(art_uv>=vec2(0.)) && all(art_uv<=vec2(1.)) {
      color=frame_sample(art_uv);

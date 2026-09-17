@@ -103,7 +103,7 @@ mission systems. Full plans remain open at those acceptance gates.
 Implementation mode. Synthetic tests exercise all six populated wings, exact
 selected identities, invalid populated-wing rejection and 29 distinct straight
 trajectories over 120 ticks. The imported `--validate-creator` pass succeeds for
-all twelve aircraft: normal default ammunition, reset after depletion, 29 dummy
+all twelve aircraft: normal default ammunition, reset after depletion, clean pilot-only recording, 29 dummy
 geometries using the selected model, restoration after damage and movement, and
 existing custom/empty loadout checks. Local log:
 `.local/creator-dummies-validation.log`. Placement and heat remain fitted, and no

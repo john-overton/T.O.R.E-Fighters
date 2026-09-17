@@ -87,5 +87,6 @@ Restart restores the accepted formation, stores and fuel. No avoidance is added.
 
 Normal free flight loads the aircraft's supported PT-default weapons as requested
 by John on 2026-09-17. The range flag adds diagnostic fixtures; it is no longer
-needed for ammunition. The restricted native research adapter remains clean.
+needed for ammunition. The restricted native research adapter and pilot-only input recordings remain
+clean to preserve their existing initial conditions.
 Weapon compatibility, custom loads and the guns-only creator choice still apply.

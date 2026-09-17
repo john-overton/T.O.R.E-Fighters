@@ -303,6 +303,10 @@ cargo run --locked -p tore-app -- --free-flight --record-input flight-input.txt
 cargo run --locked -p tore-app -- --replay-input flight-input.txt
 ```
 
+Pilot-only recording retains its clean-aircraft start, with no external stores,
+to preserve existing replay initial conditions. Normal unrecorded free flight
+loads supported default weapons. Use `--record-combat` for weapon-service tapes.
+
 Recording requires a direct free-flight start without a capture, probe or initial control/device-pose override and stops when that flight ends/restarts. Files are create-new and flushed
 on exit. Tapes contain **pilot inputs only**, not mission saves, UI/camera commands,
 assets or initial state. Replay uses a fresh flight in the chosen theater; supply
