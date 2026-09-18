@@ -303,6 +303,7 @@ pub struct AiMission {
     formation: Formation,
     horizontal_spacing_ft: i32,
     vertical_spacing_ft: i32,
+    external_leaders: Vec<(super::targeting::Side, u8, u32)>,
 }
 
 impl Default for AiMission {
@@ -320,11 +321,19 @@ impl AiMission {
             formation: Formation::Echelon,
             horizontal_spacing_ft: super::wing::PLAYER_SPACING_SPREAD_FT,
             vertical_spacing_ft: super::wing::PLAYER_STACKING_FT,
+            external_leaders: Vec::new(),
         }
     }
 
     pub fn push(&mut self, actor: AiActor) {
         self.actors.push(actor);
+    }
+
+    /// A human leader remains a world object, never an AI-controlled actor.
+    pub fn set_external_leader(&mut self, side: super::targeting::Side, wing: u8, id: u32) {
+        self.external_leaders
+            .retain(|(s, w, _)| *s != side || *w != wing);
+        self.external_leaders.push((side, wing, id));
     }
 
     pub fn actors(&self) -> &[AiActor] {
@@ -389,7 +398,7 @@ impl AiMission {
         output: &mut MissionOutput,
     ) -> Result<()> {
         let actor_id = self.actors[index].id();
-        let leader = self.leader_view(index);
+        let leader = self.leader_view(index, world);
 
         let actor = &mut self.actors[index];
         if !actor.alive() {
@@ -475,20 +484,40 @@ impl AiMission {
     }
 
     /// The leader's pose for a wingman, taken from the leader actor itself.
-    fn leader_view(&self, index: usize) -> Option<LeaderView> {
+    fn leader_view(&self, index: usize, world: &[WorldObject]) -> Option<LeaderView> {
         let actor = &self.actors[index];
         if actor.identity.is_leader() {
             return None;
+        }
+        if let Some((_, _, id)) = self
+            .external_leaders
+            .iter()
+            .find(|(side, wing, _)| *side == actor.identity.side && *wing == actor.identity.wing)
+        {
+            let leader = world
+                .iter()
+                .find(|o| o.id == *id && o.alive && !o.destroyed)?;
+            return Some(LeaderView {
+                position: leader.position,
+                heading_deg: leader.heading_deg,
+                speed: leader.speed,
+                target: None,
+                recovering: false,
+            });
         }
         let leader = self.actors.iter().find(|a| {
             a.identity.is_leader()
                 && a.identity.side == actor.identity.side
                 && a.identity.wing == actor.identity.wing
+                && a.alive()
         })?;
+        let pose = world
+            .iter()
+            .find(|o| o.id == leader.id() && o.alive && !o.destroyed)?;
         Some(LeaderView {
-            position: leader.flight.position,
-            heading_deg: leader.flight.yaw.to_degrees(),
-            speed: ScalarSpeed(leader.flight.speed),
+            position: pose.position,
+            heading_deg: pose.heading_deg,
+            speed: pose.speed,
             target: leader.controller.target(),
             recovering: matches!(leader.activity, Activity::ReturningToBase),
         })
@@ -1511,6 +1540,59 @@ mod tests {
         // The wingmen are not leaders and the leaders are.
         assert!(mission.actor(1).unwrap().identity().is_leader());
         assert!(!mission.actor(2).unwrap().identity().is_leader());
+    }
+
+    #[test]
+    fn each_wing_follows_only_its_own_leader_including_the_human() {
+        let mut mission = AiMission::new();
+        mission.set_external_leader(Side(1), 0, 0);
+        for (id, side, wing, member) in [
+            (1, 1, 0, 1),
+            (2, 1, 1, 0),
+            (3, 1, 1, 1),
+            (4, 2, 1, 0),
+            (5, 2, 1, 1),
+        ] {
+            let mut actor = setup(id, side, member, [id as f64 * 1000., 20000., 0.], 0.);
+            actor.identity.wing = wing;
+            mission.push(AiActor::new(actor).unwrap());
+        }
+        let mut world = world_of(&mission);
+        let mut player = world[0].clone();
+        player.id = 0;
+        player.position = [90000., 20000., 0.];
+        player.human_controlled = true;
+        world.push(player);
+        assert_eq!(mission.leader_view(0, &world).unwrap().position[0], 90000.);
+        assert!(mission.leader_view(1, &world).is_none());
+        assert_eq!(mission.leader_view(2, &world).unwrap().position[0], 2000.);
+        assert_eq!(mission.leader_view(4, &world).unwrap().position[0], 4000.);
+        world.last_mut().unwrap().alive = false;
+        assert!(mission.leader_view(0, &world).is_none());
+    }
+
+    #[test]
+    fn an_idle_wingman_flies_toward_its_own_delta_slot() {
+        let mut mission = AiMission::new();
+        mission.set_spacing(512, 0);
+        mission.push(AiActor::new(setup(1, 1, 0, [0., 20000., 0.], 0.)).unwrap());
+        mission.push(AiActor::new(setup(2, 1, 1, [-3000., 20000., -512.], 0.)).unwrap());
+        let initial_error = 3512.;
+        run(&mut mission, 1200);
+        let leader = mission.actor(1).unwrap().flight();
+        let wingman = mission.actor(2).unwrap().flight();
+        let slot = [
+            leader.position[0] + 512.,
+            leader.position[1],
+            leader.position[2] - 512.,
+        ];
+        assert!(
+            distance(wingman.position, slot) < initial_error,
+            "wingman did not close on its slot: {:?} vs {:?}",
+            wingman.position,
+            slot
+        );
+        assert_eq!(mission.actor(2).unwrap().activity(), Activity::Formation);
     }
 
     #[test]

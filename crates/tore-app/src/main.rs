@@ -93,8 +93,8 @@ struct App {
     camera: terrain::Camera,
     quick: quick_mission::QuickMission,
     mission: Option<(f64, f64)>,
-    /// `--ai-wings`: fly the Quick Mission wings with `tore_sim::ai` instead of
-    /// the straight-flight fixtures. Off by default.
+    /// Quick Mission uses AI by default. `--fixture-wings` retains the
+    /// straight-flight compatibility setup.
     ai_wings_enabled: bool,
     /// Session-only flight-menu enemy-skill preference; see `--enemy-skill`.
     enemy_skill: Option<tore_sim::ai::experience::EnemySkillOverride>,
@@ -796,11 +796,25 @@ impl App {
                 let fuel = load.fuel_lbs;
                 match combat::Combat::with_loadout(&self.hornet, &self.theater_resources, load) {
                     Ok(mut c) => {
-                        if let Err(error) = c.mission_dummies(
-                            &self.quick.dummy_wings(),
-                            self.quick.separation_feet(),
-                            &self.theater_resources,
-                        ) {
+                        let populated = if self.ai_wings_enabled {
+                            self.quick
+                                .wing_launches(self.enemy_skill)
+                                .map_err(|e| -> Box<dyn Error> { e.to_string().into() })
+                                .and_then(|wings| {
+                                    c.mission_aircraft(
+                                        &wings,
+                                        self.quick.separation_feet(),
+                                        &self.theater_resources,
+                                    )
+                                })
+                        } else {
+                            c.mission_dummies(
+                                &self.quick.dummy_wings(),
+                                self.quick.separation_feet(),
+                                &self.theater_resources,
+                            )
+                        };
+                        if let Err(error) = populated {
                             self.quick.ordnance.as_mut().unwrap().message = Some(error.to_string());
                             return;
                         }
@@ -1894,7 +1908,7 @@ fn ai_probe_run(
         .wing_launches(enemy_skill)
         .map_err(|e| e.to_string())?;
     let mut combat = combat::Combat::new(hornet, resources, false)?;
-    combat.mission_dummies(&quick.dummy_wings(), quick.separation_feet(), resources)?;
+    combat.mission_aircraft(&wings, quick.separation_feet(), resources)?;
     let mut flight = hornet.start(world);
     combat.reset(&mut flight)?;
     let mut bridge = ai_wings::AiWings::build(
@@ -1955,6 +1969,7 @@ fn main() -> AppResult<()> {
     let mut replay_combat = None;
     let mut combat_probe = None;
     let mut ai_wings_enabled = false;
+    let mut fixture_wings = false;
     let mut ai_probe = None;
     // Session only. `docs/spec/ai-experience.md` records the flight-menu
     // enemy-skill preference's persistence as untraced, so this setting is not
@@ -2069,6 +2084,7 @@ fn main() -> AppResult<()> {
                 initial_screen = Screen::Flight;
             }
             "--ai-wings" => ai_wings_enabled = true,
+            "--fixture-wings" => fixture_wings = true,
             "--enemy-skill" => {
                 enemy_skill = Some(
                     match args
@@ -2382,7 +2398,7 @@ fn main() -> AppResult<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-5 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: --ai-wings flies the Quick Mission wings with the tore-sim AI instead of the straight-flight fixtures, and opens the creator. Off by default; without it the fixtures are unchanged. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..72000 runs a headless AI mission and prints a deterministic per-actor summary.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-5 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..72000 runs a headless AI mission and prints a deterministic per-actor summary.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -2396,8 +2412,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             _ => return Err(format!("Unknown argument: {arg}").into()),
         }
     }
-    if enemy_skill.is_some() && !ai_wings_enabled {
-        return Err("--enemy-skill applies to AI wings; add --ai-wings".into());
+    if fixture_wings && (ai_wings_enabled || enemy_skill.is_some()) {
+        return Err(
+            "--fixture-wings cannot combine with AI wings, an AI probe or enemy skill".into(),
+        );
     }
     if ai_wings_enabled
         && (live_fire
@@ -3177,7 +3195,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && std::env::var_os("TORE_PERF_FRAMES").is_none();
     let mut app = App {
         mission: None,
-        ai_wings_enabled,
+        ai_wings_enabled: !fixture_wings,
         enemy_skill,
         ai_wings: None,
         preference_path: if preferences_enabled {

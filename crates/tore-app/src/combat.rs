@@ -54,14 +54,14 @@ pub struct Combat {
     pub controller: FireInput,
     pub range: bool,
     /// Draw airborne targets with their own stored attitude instead of the
-    /// straight-flight fixture pose. Off by default, so the fixture path is
-    /// byte identical; `--ai-wings` turns it on because AI aircraft bank and
-    /// pitch and the fixture pose would hide that.
+    /// straight-flight fixture pose. Enabled by an AI creator launch; disabled
+    /// for explicit fixtures, which keep their level velocity-based pose.
     pub ai_poses: bool,
     /// Pilot-only tapes retain their existing clean-aircraft initial state.
     pub clean_recording: bool,
     initial_ammo: Option<Vec<u16>>,
     dummies: Vec<(usize, Vector)>,
+    mission_spawns: Option<Vec<crate::ai_wings::MissionSpawn>>,
     dummy_models: Vec<Airframe>,
     dummy_configs: Vec<live::Configuration>,
     pub recorder: Option<crate::combat_tape::Recorder>,
@@ -156,6 +156,7 @@ impl Combat {
             smoke_art,
             state: live::State::new(config, true)?,
             dummies: Vec::new(),
+            mission_spawns: None,
             dummy_models: Vec::new(),
             dummy_configs: Vec::new(),
             input: FireInput::default(),
@@ -211,6 +212,18 @@ impl Combat {
             })
             .collect()
     }
+    /// Populate all six creator wings, retaining their sides for placement.
+    pub fn mission_aircraft(
+        &mut self,
+        wings: &[tore_sim::ai::launch::WingLaunch],
+        separation: f64,
+        data: &BTreeMap<String, Vec<u8>>,
+    ) -> AppResult<()> {
+        self.mission_dummies(&tore_sim::ai::launch::legacy_pairs(wings), separation, data)?;
+        self.mission_spawns = Some(crate::ai_wings::mission_spawns(wings, separation));
+        Ok(())
+    }
+
     pub fn mission_dummies(
         &mut self,
         wings: &[(tore_formats::aircraft::AircraftId, usize)],
@@ -305,11 +318,16 @@ impl Combat {
             self.state.range_target(launcher(s));
         }
         for (index, (model, offset)) in self.dummies.iter().enumerate() {
-            let position = std::array::from_fn(|i| {
+            let fixture_position = std::array::from_fn(|i| {
                 l.position[i] + l.basis.right[i] * offset[0] + l.basis.forward[i] * offset[2]
             });
+            let (position, basis) = self
+                .mission_spawns
+                .as_ref()
+                .map(|spawns| spawns[index].pose(l.position, l.basis))
+                .unwrap_or((fixture_position, l.basis));
             self.state
-                .add_dummy(&self.dummy_configs[*model], position, l.basis);
+                .add_dummy(&self.dummy_configs[*model], position, basis);
             debug_assert_eq!(self.state.targets.last().unwrap().id as usize, index + 1);
         }
         Ok(())
@@ -1342,7 +1360,7 @@ mod ai_pose_tests {
         }
     }
 
-    /// The fixture rule is unchanged while `--ai-wings` is off: heading from the
+    /// The fixture rule is unchanged with AI poses disabled: heading from the
     /// velocity, level wings, whatever attitude the row happens to carry.
     #[test]
     fn the_fixture_pose_ignores_the_stored_attitude() {

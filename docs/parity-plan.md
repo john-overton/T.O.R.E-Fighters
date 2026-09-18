@@ -56,8 +56,8 @@ name, with the numbers a player would notice.
 | [Aircraft radar](spec/radar.md) | Twelve-aircraft radar stats, automatic range modes, installed visual and ECM records, and look-down evidence | Implemented as one shared component; [component guide](radar.md), [validation](baselines/radar.md) |
 | [Roster expansion](spec/roster-aircraft.md) | Seven REDFOR/F-22A initial player ports | [Acceptance and limits](baselines/aircraft-roster-expansion.md) |
 | [Additional aircraft](spec/additional-aircraft.md) | F-14D, A-4E and X-31 source flight configuration and fitted presentation | Initial ports implemented; [acceptance](baselines/aircraft-fa-expansion.md) |
-| [AI experience](spec/ai-experience.md) | Experience channels, Quick Mission and mission skill rules, enemy-skill override, tactical thresholds, G exemption, family scope | Specified; implemented as isolated `tore-sim::ai::experience`, no live hookup |
-| [AI behavior](spec/ai.md) | Fighter decisions, timing, pursuit, targeting, steering and terrain, seeker gates, ammunition, wing orders and formations, threat warnings and countermeasures, routes and fuel | Established rules implemented as isolated components with synthetic tests; open items in the [M1e backlog](ROADMAP.md#ai-backlog-2026-09-17); no live hookup |
+| [AI experience](spec/ai-experience.md) | Experience channels, Quick Mission and mission skill rules, enemy-skill override, tactical thresholds, G exemption, family scope | Specified; implemented as isolated `tore-sim::ai::experience`, Quick Mission hookup is partial |
+| [AI behavior](spec/ai.md) | Fighter decisions, timing, pursuit, targeting, steering and terrain, seeker gates, ammunition, wing orders and formations, threat warnings and countermeasures, routes and fuel | Established rules implemented as isolated components with synthetic tests; open items in the [M1e backlog](ROADMAP.md#ai-backlog-2026-09-17); Quick Mission hookup is partial |
 | [Ocean](spec/ocean.md) | Short ripples, close pixelation and distance filtering; original textures/colors | Implemented; [acceptance](baselines/ocean.md) |
 | [Terrain shorelines](spec/terrain-shorelines.md) | Beach/water coverage and absence of land-color strips | Implemented; validation in the viewer baseline |
 
@@ -81,7 +81,7 @@ player-visible numbers out of those files and leaving the byte layouts behind.
 | Input | Keyboard, gamepad, joystick, profiles, rumble, rebinding | opinionated (authored layer) | [input](baselines/input.md) |
 | Weapons | 135 definitions imported; development range with manual firing, damage fixtures, ECM | mixed | [weapons systems](baselines/weapons-systems.md), [manual weapons](baselines/manual-weapons.md) |
 | Sensors | One shared radar, infrared and visual component for all twelve aircraft: imported capability profiles, contacts, one fire-control track, click selection, history, jammer noise, the RCS exposure page and radar weapon support | **opinionated** detection/notch/jamming/RCS tuning over spec-derived equipment data | [radar](baselines/radar.md) |
-| Combat AI | Spec-derived components in `tore-sim::ai` plus a per-actor controller, steering adapter and actor-owned mission runtime. Quick Mission wings fly as AI aircraft behind an explicit option, with the straight-flight fixture path kept. Surface actors and the other aircraft families are not implemented | spec-derived, with named fitted rules where the spec leaves a branch open; each is recorded per actor | [AI research](baselines/ai-research.md), [delivery stages](ROADMAP.md#1e-ai), [provenance](behavior-provenance.md) |
+| Combat AI | Spec-derived components in `tore-sim::ai` plus a per-actor controller, steering adapter and actor-owned mission runtime. Quick Mission launches independent AI wings by default; `--fixture-wings` keeps the straight-flight setup. Idle aircraft follow their own wing leader in delta formation. Surface actors and the other aircraft families are not implemented | spec-derived, with named fitted rules where the spec leaves a branch open; each is recorded per actor | [AI research](baselines/ai-research.md), [delivery stages](ROADMAP.md#1e-ai), [provenance](behavior-provenance.md) |
 
 Flight has three selectable paths and they stay distinct: the compatibility `--legacy-flight`, the
 default hybrid `--researched-flight`, and the restricted `--native-flight-tables`
@@ -95,8 +95,10 @@ The [main AI spec](spec/ai.md), [experience spec](spec/ai-experience.md) and
 performance and terrain rules, formation geometry, wing orders, threat
 warnings, countermeasures, routes and fuel closed on 2026-09-17. The same day
 the components were joined into a per-actor controller, given actor-owned
-sensors, stores and flight models, and hooked into Quick Mission behind an
-explicit option. Next research is seeker envelopes and store selection, the
+sensors, stores and flight models, and hooked into Quick Mission. Creator
+launches now enable AI by default with separate wing formations; the explicit
+`--fixture-wings` option retains straight-flight practice. The reviewed combat
+integration gaps still need implementation fixes. Next research is seeker envelopes and store selection, the
 remaining tactics that currently run on named fitted rules, and surface
 classes; next implementation is surface actors and the other aircraft
 families, which the controller rejects today rather than serving fighter

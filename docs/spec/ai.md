@@ -32,10 +32,10 @@ for future spec-derived code, not instructions to copy original internals.
 
 The API below is an **opinionated agent proposal**. The established slices
 are implemented as isolated components in `tore-sim::ai` (see
-[implementation status](#implementation-status)); they are not connected to
-live missions. Unknown behavior remains visibly unresolved, returning an
+[implementation status](#implementation-status)); Quick Mission connects them to live actors, with reviewed combat integration
+gaps still remaining. Unknown behavior remains visibly unresolved, returning an
 explicit unspecified-rule error, until researched or deliberately specified as
-fitted/opinionated. Runtime hookup remains a later stage.
+fitted/opinionated. Runtime hookup is partial.
 
 ## The information an aircraft uses
 

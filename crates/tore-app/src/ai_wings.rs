@@ -15,22 +15,17 @@
 //! - each missile turned into a [`ThreatReport`] delivered only to the aircraft
 //!   it is aimed at (B47: no broadcast).
 //!
-//! The bridge is inert unless `--ai-wings` is given. With the option off
-//! nothing in this file runs and the straight-flight fixtures integrate exactly
-//! as they did before.
+//! The creator uses this bridge by default. `--fixture-wings` keeps the old
+//! straight-flight launch and integration; ordinary free flight has no bridge.
 //!
 //! # Known limitations of the hookup
 //!
-//! These are host limits, not AI limits, and all of them live in
-//! `tore_sim::combat::live`, which this task may not change:
+//! The current combat bridge has these remaining limitations:
 //!
-//! - A `live::Projectile` carries no shooter identity. It can either hit the
-//!   player (`incoming`) or hit a target, never both, and its weapon record is
+//! - A `live::Projectile` can either hit the player (`incoming`) or hit a
+//!   target, never both, and its weapon record is
 //!   always read from the *player's* configuration. AI shots therefore fly the
 //!   player's aircraft's missile, chosen by [`ai_station`].
-//! - `live::State` has one global scorer, so an AI missile that kills another
-//!   AI aircraft still increments the player's `hits`/`kills`. Fixing that
-//!   needs a shooter field on `Projectile`, which is a `tore-sim` change.
 //! - A radar-signature AI shot at another AI aircraft only keeps tracking while
 //!   the *player's* sensors support that contact, because the unguided steering
 //!   branch asks `state.sensors`. [`ai_station`] prefers an infrared store
@@ -79,6 +74,70 @@ pub const ENEMY_SIDE: Side = Side(2);
 /// for the player (`Projectile::target == Some(0)` is the player), and dummy
 /// target ids start at 1, so actor ids and target ids are the same number.
 pub const PLAYER_ID: u32 = 0;
+
+/// Fitted Quick Mission placement, agent choice: use B43 echelon slots at
+/// 512 ft spacing, level with the player. Friendly wing 1 occupies slots
+/// behind the player. Wings 2 and 3 start 4096 ft behind and respectively
+/// 4096 ft left and right. Enemy leaders start at the selected separation,
+/// with wings 2 and 3 offset 4096 ft left and right, facing the player.
+/// Original Quick Mission spawn geometry is unknown. These offsets make the
+/// selected allies nearby instead of placing them in the enemy group.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MissionSpawn {
+    pub offset: Vector,
+    pub opposing: bool,
+}
+
+impl MissionSpawn {
+    pub fn pose(self, position: Vector, basis: Basis) -> (Vector, Basis) {
+        let position = std::array::from_fn(|i| {
+            position[i] + basis.right[i] * self.offset[0] + basis.forward[i] * self.offset[2]
+        });
+        let heading = basis.angles()[0]
+            + if self.opposing {
+                std::f64::consts::PI
+            } else {
+                0.0
+            };
+        (position, Basis::new(heading, 0.0, 0.0))
+    }
+}
+
+pub fn mission_spawns(wings: &[WingLaunch], separation_ft: f64) -> Vec<MissionSpawn> {
+    use tore_sim::ai::wing::{Formation, formation_slot_point};
+    wings
+        .iter()
+        .flat_map(|wing| {
+            wing.members.iter().map(move |member| {
+                let opposing = wing.wing.side.is_enemy();
+                let slot = member.member + u8::from(!opposing && wing.wing.index == 0);
+                let offset = if slot == 0 {
+                    [0.0; 3]
+                } else {
+                    formation_slot_point(Formation::Echelon, slot, 512, 0)
+                        .expect("validated Quick Mission member fits the formation table")
+                };
+                let lateral = match wing.wing.index {
+                    1 => -4096.0,
+                    2 => 4096.0,
+                    _ => 0.0,
+                };
+                MissionSpawn {
+                    offset: if opposing {
+                        [lateral - offset[0], 0.0, separation_ft - offset[2]]
+                    } else {
+                        [
+                            lateral + offset[0],
+                            0.0,
+                            offset[2] - if wing.wing.index == 0 { 0.0 } else { 4096.0 },
+                        ]
+                    },
+                    opposing,
+                }
+            })
+        })
+        .collect()
+}
 
 /// `opinionated` (agent decision, 2026-09-17): AI projectiles take ids from
 /// their own high range so they can never be confused with the player's shots,
@@ -154,8 +213,7 @@ pub struct AiWings {
     /// Projectile ids already turned into threat reports.
     seen_projectiles: Vec<u32>,
     /// Projectile id to the actor that fired it, for B47 attribution. The
-    /// player's shots are absent: `live::Projectile` has no shooter field, so
-    /// the bridge remembers its own.
+    /// player's shots are absent; the bridge remembers its own launchers.
     ai_shots: BTreeMap<u32, u32>,
     /// Last observed hit points per actor, for the damage mirror.
     last_hp: BTreeMap<u32, i32>,
@@ -279,6 +337,10 @@ impl AiWings {
         mut resolve: impl FnMut(AircraftId) -> AppResult<(Aircraft, Option<sensors::SensorProfiles>)>,
     ) -> AppResult<Self> {
         let mut mission = AiMission::new();
+        // Opinionated host setup: level delta formations using B43's
+        // alternating trailing slots, 512 ft spacing, independently per wing.
+        mission.set_spacing(512, 0);
+        mission.set_external_leader(FRIENDLY_SIDE, 0, PLAYER_ID);
         let mut slots = Vec::new();
         let mut profiles: Vec<(AircraftId, Aircraft, Option<sensors::SensorProfiles>)> = Vec::new();
         let mut index = 0usize;
@@ -295,6 +357,9 @@ impl AiWings {
                 .find(|(id, _, _)| *id == wing.aircraft)
                 .expect("just inserted");
             for member in &wing.members {
+                // The player's wing reserves member zero for the human leader.
+                let member_index = member.member
+                    + u8::from(wing.wing.side == launch::Side::Friendly && wing.wing.index == 0);
                 let target = targets.get(index).ok_or_else(|| {
                     format!(
                         "AI wing member {index} has no spawned target; the fixture spawner and the launch payload disagree"
@@ -321,7 +386,7 @@ impl AiWings {
                         actor: ActorId(target.id),
                         side: side_of(wing.wing.side),
                         wing: wing.wing.index,
-                        member: member.member,
+                        member: member_index,
                         aircraft: wing.aircraft,
                         human_controlled: false,
                     },
@@ -335,7 +400,7 @@ impl AiWings {
                     sensors,
                     stations: simple_stations(AI_MISSILES, AI_GUN_ROUNDS, AI_STORE_SPEED),
                     dispensers: simple_dispensers(AI_DISPENSER_COUNT),
-                    wing_slot: member.member.max(1),
+                    wing_slot: member_index.max(1),
                     // `fitted`: a Quick Mission assigns no airfield, so the
                     // spawn point stands in as the home airport. Rule: B48 only
                     // needs somewhere to fly home to when fuel runs low, and
@@ -351,7 +416,7 @@ impl AiWings {
                     id: target.id,
                     side: wing.wing.side,
                     wing_number: wing.wing.display_number(),
-                    member_number: member.member + 1,
+                    member_number: member_index + 1,
                     aircraft: wing.aircraft,
                 });
                 index += 1;
@@ -812,6 +877,76 @@ mod tests {
         combat::missiles::{TargetRole, seeker::Heat},
     };
 
+    #[test]
+    fn six_full_wings_have_separate_delta_formations_and_29_ai_members() {
+        let selections: Vec<_> = [launch::Side::Friendly, launch::Side::Enemy]
+            .into_iter()
+            .flat_map(|side| {
+                (0..3).map(move |index| WingSelection {
+                    wing: WingId::new(side, index).unwrap(),
+                    aircraft: AircraftId::F18,
+                    count: if side == launch::Side::Friendly && index == 0 {
+                        4
+                    } else {
+                        5
+                    },
+                    skill_level: i32::from(index),
+                })
+            })
+            .collect();
+        let wings = resolve_wings(&selections, None).unwrap();
+        let spawns = mission_spawns(&wings, 10560.0);
+        assert_eq!(spawns.len(), 29);
+        assert_eq!(spawns[0].offset, [512., 0., -512.]);
+        assert_eq!(spawns[1].offset, [-512., 0., -512.]);
+        assert_eq!(spawns[2].offset, [1024., 0., -1024.]);
+        assert_eq!(spawns[3].offset, [-1024., 0., -1024.]);
+        assert_eq!(spawns[4].offset, [-4096., 0., -4096.]);
+        assert_eq!(spawns[9].offset, [4096., 0., -4096.]);
+        assert_eq!(spawns[14].offset, [0., 0., 10560.]);
+        assert_eq!(spawns[15].offset, [-512., 0., 11072.]);
+        assert_eq!(spawns[16].offset, [512., 0., 11072.]);
+        assert_eq!(spawns[19].offset, [-4096., 0., 10560.]);
+        assert_eq!(spawns[24].offset, [4096., 0., 10560.]);
+        let basis = Basis::new(std::f64::consts::FRAC_PI_2, 0., 0.);
+        let targets: Vec<_> = spawns
+            .iter()
+            .enumerate()
+            .map(|(i, spawn)| {
+                let (position, attitude) = spawn.pose([100., 20000., 300.], basis);
+                let mut row = target(i as u32 + 1, position, attitude.angles()[0]);
+                row.basis = attitude;
+                assert_eq!(position[1], 20000.);
+                assert_eq!(spawn.opposing, i >= 14);
+                assert!((attitude.forward[0] - if i >= 14 { -1. } else { 1. }).abs() < 1e-9);
+                row
+            })
+            .collect();
+        for (i, a) in targets.iter().enumerate() {
+            for b in &targets[i + 1..] {
+                let distance = (a.position[0] - b.position[0]).hypot(a.position[2] - b.position[2]);
+                assert!(
+                    distance >= 512.,
+                    "overlapping wing slots: {} and {}",
+                    a.id,
+                    b.id
+                );
+            }
+        }
+        let bridge = AiWings::build_with(&wings, &targets, 0, |_| Ok((aircraft(), None))).unwrap();
+        assert_eq!(bridge.len(), 29);
+        for id in 1..=4 {
+            assert!(!bridge.mission.actor(id).unwrap().identity().is_leader());
+            assert_eq!(
+                bridge.mission.actor(id).unwrap().identity().member,
+                id as u8
+            );
+        }
+        for id in [5, 10, 15, 20, 25] {
+            assert!(bridge.mission.actor(id).unwrap().identity().is_leader());
+        }
+    }
+
     /// The fixture spawner's own rule, copied so a test can predict where a
     /// straight-flight target ends up: `live::State::step` adds
     /// `velocity / 120` to every live target once per tick.
@@ -998,7 +1133,7 @@ mod tests {
         );
     }
 
-    /// With the option off nothing in this module runs, so a target row only
+    /// With `--fixture-wings` this bridge is absent, so a target row only
     /// ever receives the fixture integration. This test states that rule and
     /// the next one shows the bridge breaking it, which is the whole point of
     /// the flag.

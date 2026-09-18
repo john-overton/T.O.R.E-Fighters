@@ -9,8 +9,8 @@
 > <!-- tore-header v2 -->
 
 Research and implementation, 2026-09-17. Partial specification from the local Fighters
-Anthology media and static executable inspection. Isolated components exist in `tore-sim::ai`; no live hookup or retail
-flight comparison is claimed. Build identity and validation live in the
+Anthology media and static executable inspection. Components in `tore-sim::ai` are connected to Quick Mission actors; combat
+integration remains partial and no retail flight comparison is claimed. Build identity and validation live in the
 [research baseline](../baselines/ai-research.md); addresses and data contracts
 live in [AI source notes](../formats/ai.md). Delivery stages live in
 [M1e](../ROADMAP.md#1e-ai).
@@ -165,7 +165,7 @@ and F-22 departure behavior. Mission role remains separate from family: Su-25
 uses the fighter/strike family, not a guessed bomber controller.
 
 These aircraft are already ported; their AI controllers and live hookup are
-pending. The [additional-aircraft spec](additional-aircraft.md) and
+partial. The [additional-aircraft spec](additional-aircraft.md) and
 [REDFOR/F-22A spec](roster-aircraft.md) retain their existing handling limits.
 Reconcile this table with `AircraftId::ALL` when the ported roster changes.
 Broader retail family recovery below does not require importing every retail

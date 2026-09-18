@@ -428,6 +428,7 @@ impl FallbackLog {
 struct ActiveManeuver {
     intent: MotionIntent,
     submitted_at: CommandClock,
+    formation: bool,
 }
 
 /// One aircraft's persistent decision state.
@@ -712,6 +713,7 @@ impl Controller {
         self.active = Some(ActiveManeuver {
             intent,
             submitted_at: clock,
+            formation: false,
         });
         // A wing command cancels whatever tactic was pending.
         self.next_choice_quarters =
@@ -1049,10 +1051,25 @@ impl Controller {
                 Completion::Deadline(deadline) => motion::is_expired(deadline, clock),
                 Completion::Axis(_) => self.axis_complete(frame, &active.intent),
             };
-            if !finished && reason.is_none() {
+            if active.formation
+                && reason.is_none()
+                && !recovering
+                && target.is_none()
+                && self.formation_motion(frame, clock, batch)?
+            {
+                return Ok(());
+            }
+            if !finished && reason.is_none() && !active.formation {
                 batch.motion = Some(active.intent);
                 return Ok(());
             }
+        }
+        if reason.is_none()
+            && !recovering
+            && target.is_none()
+            && self.formation_motion(frame, clock, batch)?
+        {
+            return Ok(());
         }
         // Not yet due for a new choice, and nothing is running: keep flying.
         let quarters = clock.quarter_count();
@@ -1068,9 +1085,94 @@ impl Controller {
         self.active = Some(ActiveManeuver {
             intent,
             submitted_at: clock,
+            formation: false,
         });
         batch.motion = Some(intent);
         Ok(())
+    }
+
+    /// B43: follow this wing's own leader using its slot and speed bands.
+    /// Fitted steering aim: project the slot three seconds along the leader's
+    /// heading, using the nominal formation-command duration as the horizon.
+    /// This lets an aircraft already in its slot fly parallel to the leader
+    /// instead of turning back toward a point it has just passed. The speed
+    /// table still measures distance to the unprojected slot. This projection
+    /// is an agent choice, not a recovered lead rule.
+    fn formation_motion(
+        &mut self,
+        frame: &DecisionFrame<'_>,
+        clock: CommandClock,
+        batch: &mut IntentBatch,
+    ) -> Result<bool> {
+        let Some(point) = self.formation_point(frame)? else {
+            return Ok(false);
+        };
+        let leader = frame
+            .wing
+            .leader
+            .expect("formation point requires a leader");
+        let lead = leader.speed.0.max(0.0) * f64::from(wing::FORMATION_REQUEST_SECONDS);
+        let heading = leader.heading_deg.to_radians();
+        let aim = [
+            point[0] + heading.sin() * lead,
+            point[1],
+            point[2] + heading.cos() * lead,
+        ];
+        let dx = aim[0] - frame.own.position[0];
+        let dy = aim[1] - frame.own.position[1];
+        let dz = aim[2] - frame.own.position[2];
+        let heading_deg = dx.atan2(dz).to_degrees();
+        let pitch_deg = dy.atan2(dx.hypot(dz)).to_degrees();
+        let speed = self.formation_speed(frame, point);
+        let duration = Duration::Timed(wing::FORMATION_REQUEST_SECONDS as u8);
+        let request = MotionRequest::new(
+            heading_deg.round() as i32,
+            PitchRequest::Explicit(pitch_deg.round() as i32),
+            Bank::Unconstrained,
+            SpeedRequest::Explicit(speed),
+            duration,
+        );
+        let continuing = self.active.filter(|a| {
+            a.formation
+                && matches!(a.intent.completion,
+            Completion::Deadline(deadline) if !motion::is_expired(deadline, clock))
+        });
+        let (id, completion, submitted_at) = if let Some(active) = continuing {
+            (
+                active.intent.id,
+                active.intent.completion,
+                active.submitted_at,
+            )
+        } else {
+            let id = self.next_motion_id;
+            self.next_motion_id += 1;
+            (
+                id,
+                Completion::Deadline(
+                    motion::deadline_for(duration, clock).expect("timed formation"),
+                ),
+                clock,
+            )
+        };
+        let intent = MotionIntent {
+            id,
+            request,
+            heading_deg,
+            flight_path_pitch_deg: pitch_deg,
+            speed,
+            bank: Bank::Unconstrained,
+            completion,
+            steering_point: Some(aim),
+            mode: CommandMode::Ordinary,
+        };
+        self.active = Some(ActiveManeuver {
+            intent,
+            submitted_at,
+            formation: true,
+        });
+        batch.motion = Some(intent);
+        batch.activity = Some(Activity::Formation);
+        Ok(true)
     }
 
     /// Whether a zero-duration maneuver's chosen axis has arrived (B13).
@@ -1945,6 +2047,37 @@ mod tests {
             );
         }
         assert!(Controller::new(identity(), profile(), resolved(Experience::Ace), 1).is_ok());
+    }
+
+    #[test]
+    fn formation_motion_tracks_its_leader_and_preserves_repeated_tick_determinism() {
+        let mut identity = identity();
+        identity.member = 1;
+        let mut c = Controller::new(identity, profile(), resolved(Experience::Ace), 1234).unwrap();
+        let mut scene = Scene::new();
+        scene.targets.clear();
+        let mut frame = scene.frame(0, own());
+        frame.wing.horizontal_spacing_ft = 512;
+        frame.wing.vertical_spacing_ft = 0;
+        frame.wing.leader = Some(LeaderView {
+            position: [10000., 20000., 10000.],
+            heading_deg: 0.,
+            speed: ScalarSpeed(800.),
+            target: None,
+            recovering: false,
+        });
+        let first = c.step(&frame).unwrap();
+        assert_eq!(first.activity, Some(Activity::Formation));
+        assert!(first.motion.unwrap().heading_deg > 30.);
+        let random = c.random.clone();
+        assert_eq!(first, c.step(&frame).unwrap());
+        assert_eq!(random, c.random);
+        frame.tick = 1;
+        frame.wing.leader.as_mut().unwrap().position[0] = -10000.;
+        let next = c.step(&frame).unwrap();
+        assert!(next.motion.unwrap().heading_deg < -30.);
+        assert_eq!(first.motion.unwrap().id, next.motion.unwrap().id);
+        assert_eq!(random, c.random, "slot tracking must not redraw every tick");
     }
 
     #[test]

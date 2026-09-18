@@ -133,6 +133,8 @@ Labels describe origin only. None of these is a blocker.
 | AI host maneuver state numbers 19 and 20 | Opinionated, agent choice 2026-09-17 | B46 accepts 19 and 20 and rejects the rest; the original's state names are unknown, so the host only ever produces accepted numbers; `ai::fitted` |
 | AI control deflection, turning bank and throttle mapping from a B44 attitude request | Fitted, agent choice 2026-09-17 | The spec bounds the attitude, not the stick; named constants in `ai::steering_adapter` |
 | AI loaded speed limits and G limit read from the flight model's own envelope block | Fitted, agent choice 2026-09-17 | The spec names "loaded envelope limits" without the query; `ai::mission` |
+| Quick Mission AI enabled by default and separate delta formations per wing | Opinionated, requested by John 2026-09-17 | Player leads friendly wing 1; five other independent leaders. Compatibility remains under `--fixture-wings`; [mission wings](spec/quick-mission-menu.md#mission-wings) |
+| Quick Mission wing placement and formation steering projection | Fitted, agent choice 2026-09-17 | 512 ft slot spacing, 4096 ft between wing leader offsets, level stacking and a three-second leader-heading projection. Exact rule and missing research in [mission wings](spec/quick-mission-menu.md#mission-wings) |
 
 Diagnostic tooling is not a new gameplay feature. Document its purpose and limits
 without pretending it is recovered retail behavior or a user-chosen flight law.

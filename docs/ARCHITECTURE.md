@@ -215,12 +215,17 @@ and terrain. `--combat-command compatibility-weapons` explicitly selects the old
 weapon adapter. Flight adapter selection is independent. Fitted seeker synthesis
 consumes the mounted-seeker amplitude and never controls acquisition.
 
-Quick Mission straight-flight fixtures share `combat::live::Target` movement,
-sensors and damage. The host retains accepted wing identities and fitted starting
-offsets for restart. Rendering groups targets by imported airframe, with a cached
+Quick Mission launches AI wings by default; `--fixture-wings` retains the
+straight-flight compatibility path. `Combat::mission_aircraft` retains the six
+wing groups and their fitted spawn poses for restart. `AiWings` builds actors
+after reset and mirrors their poses into `combat::live::Target` for sensors,
+rendering and damage. Each wing follows its own leader from the shared world
+snapshot; the human leader remains outside the AI actor list. The formation
+choice and placement are specified in [mission wings](spec/quick-mission-menu.md#mission-wings).
+Rendering groups targets by imported airframe, with a cached
 texture binding per identity and vertex buffers that grow to fit the formation.
-The player's atlas is never substituted for another type. This adds no AI or
-changes to fixed-step timing. Normal flight loads supported default stores;
+The player's atlas is never substituted for another type. Fixed-step timing and
+the three player flight adapters are unchanged. Normal flight loads supported default stores;
 restricted native research flight keeps its clean configuration.
 
 `combat::smoke` owns bounded, fixed-step puff histories independently of rendering

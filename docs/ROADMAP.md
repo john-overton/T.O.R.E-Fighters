@@ -50,7 +50,7 @@ cockpit, HUD, instrument windows, weather and controller support. The
 twelve and their AI family bindings. A development
 weapons range supports manual weapon testing. Ground contact and landing are
 authored behaviour ([opinionated](behavior-provenance.md)); combat AI has
-isolated spec-derived components and no live hookup. John requested aircraft and surface AI research
+spec-derived components and a partial Quick Mission hookup. John requested aircraft and surface AI research
 and planning on 2026-09-17; the current scope and stages are in M1e below.
 
 John scheduled the shoreline correction and ocean-motion trial on 2026-09-16.
@@ -214,15 +214,16 @@ is final, the enemy-skill flight-menu override and the human-only G exemption
 are specified. AI-2 covers fighter decisions, timing, pursuit, targeting,
 weapon-service cadence, steering with performance and terrain rules, seeker
 gates, ammunition, wing orders with formation geometry, threat warnings,
-countermeasures, reason priority, routes and fuel. AI-3 is complete: the components are joined by a per-actor
+countermeasures, reason priority, routes and fuel. AI-3 has a partial runtime integration: the components are joined by a per-actor
 `ai::controller` that sequences them, with `ai::fitted` supplying one named
 fitted rule per unresolved branch so a live actor cannot stall. AI-5 is
-complete for aircraft: `ai::mission` gives every actor its own sensors,
+partially integrated for aircraft: `ai::mission` gives every actor its own sensors,
 stores, flight model and decision state, debits ammunition before emitting a
-launch event, and does not duplicate missile physics. AI-6 is complete for
+launch event, and does not duplicate missile physics. AI-6 is partially integrated for
 Quick Mission: `ai::launch` carries side, wing, member, type and resolved
-experience, and the live hookup sits behind an explicit option with the
-straight-flight fixture path kept. AI-4, surface behavior, remains pending.
+experience. Quick Mission enables the live hookup by default, with separate
+wing groups and idle delta-formation following. `--fixture-wings` keeps the
+straight-flight setup. Combat integration still has reviewed gaps. AI-4, surface behavior, remains pending.
 The backlog below is the single list of open items.
 
 #### AI backlog (2026-09-17)
@@ -289,10 +290,10 @@ aircraft imports.
 | AI-0: FA inventory | Extend the initial FA_2.LIB census to archive precedence and mission bindings; retain exact aircraft identities and separate static scenery from autonomous objects | Every referenced behavior family has a build/source identity, evidence category and explicit gap list; no unnamed fallback controller |
 | AI-1: Experience | Trace the six wing selections, four side/domain assignment channels, per-object mission values and all type-appropriate skill consumers | Specify Quick Mission distributions, saved-skill precedence, tactical percentages, G exemption and device reactions; synthetic boundary cases for 0..3 and invalid input |
 | AI-2: Aircraft behavior specifications | Complete fighter/strike and defensive behavior first, then F-117, helicopters, bombers/AC-130, transports/airliners and special families; include formation, orders, navigation, fuel and damage responses | For each maneuver and decision, prose gives trigger, target geometry, units, limits, duration/completion and interruption rules; source/BI disagreements and unsupported aircraft motion are explicit |
-| AI-3: Isolated Rust components (complete) | Implement specified behavior slices in renderer-independent `tore-sim::ai`; add only needed bounded data readers to dependency-free `tore-formats` | Deterministic headless scenarios exercise each family's decisions and maneuvers at all applicable experience levels; known approximations have named rules/constants and provenance |
+| AI-3: Isolated Rust components (runtime gaps remain) | Implement specified behavior slices in renderer-independent `tore-sim::ai`; add only needed bounded data readers to dependency-free `tore-formats` | Deterministic headless scenarios exercise each family's decisions and maneuvers at all applicable experience levels; known approximations have named rules/constants and provenance |
 | AI-4: Surface behavior | Trace and specify static defenses, SAM, AAA, mobile ground units, ordinary ships, hydrofoil and carrier behavior separately, then implement isolated components | At least one representative fixture per supported class validates detection/eligibility, movement where applicable, fire control and experience; scenery never acquires an invented combat brain |
-| AI-5: Simulation service adapters (complete for aircraft) | Generalize actor ownership for sensors, weapons, missile support, damage, fuel and movement; feed isolated controllers through those services | Multiple actors own independent contacts, stores and targets; no free ammunition, omniscient targeting by accident, duplicated missile physics or player-state contamination |
-| AI-6: Later game hookup (complete for Quick Mission) | Replace the lossy dummy-wing launch payload with side, wing, member, type, loadout, experience source and resolved level; connect mission routes/orders and activity display | Six mixed-skill wings retain identity end to end; replay and headless/live results agree; player and straight-flight fixture paths remain available |
+| AI-5: Simulation service adapters (partial for aircraft) | Generalize actor ownership for sensors, weapons, missile support, damage, fuel and movement; feed isolated controllers through those services | Multiple actors own independent contacts, stores and targets; no free ammunition, omniscient targeting by accident, duplicated missile physics or player-state contamination |
+| AI-6: Later game hookup (partial for Quick Mission) | Replace the lossy dummy-wing launch payload with side, wing, member, type, loadout, experience source and resolved level; connect mission routes/orders and activity display | Six mixed-skill wings retain identity end to end; replay and headless/live results agree; player and straight-flight fixture paths remain available |
 
 Research can advance by family and spec section; completing all executable
 routines is not a prerequisite to implementing a specified slice. Surface
