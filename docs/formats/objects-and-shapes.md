@@ -8,6 +8,13 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
+The [F/A-XX concept](../spec/fa-xx.md) omits F22.SH fin faces
+34f7/354a/37ff/381e/3841 at runtime. The reviewed base layout is still validated
+by the F-22 rig before use. Its split leaves reuse the existing flap faces and
+texture coordinates; the imported source data is unchanged. Damaged-body fin
+faces are F22_A.SH 3365/3388 and F22_C.SH 2abf/2ae2/2c8a/2cad.
+The concept inherits F-22's C/D damage selection; D contains no vertical fin.
+
 > **Research notes, research mode.** Recovered facts about the original
 > game's data and code, kept as evidence. Requirements, gates and remaining
 > work described here are research-mode scope; they are not acceptance gates

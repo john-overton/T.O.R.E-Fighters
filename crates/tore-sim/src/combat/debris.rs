@@ -3,7 +3,11 @@ use crate::attitude::{Basis, Vector};
 use tore_formats::{Result, aircraft::AircraftId, shape::Shape};
 pub const MAX_PIECES: usize = 256;
 pub fn variant(id: AircraftId) -> usize {
-    AircraftId::ALL.iter().position(|v| *v == id).unwrap() % 2
+    AircraftId::ALL
+        .iter()
+        .position(|v| *v == id.source())
+        .unwrap()
+        % 2
 }
 pub fn scale(id: AircraftId) -> f64 {
     match id {

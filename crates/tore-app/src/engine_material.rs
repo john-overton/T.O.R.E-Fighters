@@ -103,14 +103,14 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
         AircraftId::Mig21 => address == 0x22e8,
         AircraftId::Mig23 => matches!(address, 0x34af | 0x34d6),
         AircraftId::Su35 => matches!(address, 0x2aee | 0x366c | 0x3690 | 0x3a9b | 0x3af0),
-        AircraftId::A4E | AircraftId::Su25 | AircraftId::F22 => false,
+        AircraftId::A4E | AircraftId::Su25 | AircraftId::F22 | AircraftId::Faxx => false,
     }
 }
 /// Reviewed round, afterburning outlet families. F-22 deliberately excluded.
 pub fn outlet_count(id: AircraftId) -> usize {
     match id {
         AircraftId::X31 | AircraftId::Mig21 | AircraftId::Mig23 => 1,
-        AircraftId::A4E | AircraftId::Su25 | AircraftId::F22 => 0,
+        AircraftId::A4E | AircraftId::Su25 | AircraftId::F22 | AircraftId::Faxx => 0,
         _ => 2,
     }
 }

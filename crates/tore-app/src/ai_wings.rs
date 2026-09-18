@@ -276,7 +276,8 @@ impl AiWings {
             let bytes = resources
                 .get(id.pt())
                 .ok_or_else(|| format!("aircraft cache missing {}", id.pt()))?;
-            let aircraft = Aircraft::parse(bytes)?;
+            let mut aircraft = Aircraft::parse(bytes)?;
+            aircraft.id = id;
             // A missing or unreviewed sensor record is not fatal: the actor
             // simply flies without its own sensors, which the AI documents as
             // the host-supplied permitted-target path.

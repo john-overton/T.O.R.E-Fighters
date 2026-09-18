@@ -29,11 +29,12 @@ of everything in the game or its code.
 
 ## Flight models
 
-These rows cover ordinary free flight across the twelve supported aircraft. The
+These rows cover ordinary free flight across twelve retail aircraft and the F/A-XX concept. The
 current flight model is the default; the previous model remains selectable.
 
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
+| F/A-XX concept variant | ☐ | ☑ | Implemented with hidden fins, split flap rudder animation and a concealed retractable hook. F-22 handling retained; independent drag physics remains. | [Contract](spec/fa-xx.md) |
 | Heading/altitude and waypoint autopilot | ☐ | ☑ | Partially implemented. Requested USNF-ATF modes, pilot override, HUD and input recording work. Waypoint target API is ready; route selection and sequencing remain. Steering is fitted, retail parity unverified. | [Autopilot](spec/autopilot.md) |
 | Pitch, roll and rudder control | ☑ | ☐ | Completed. All twelve aircraft have working flight controls. | Manual pp. 60-61; [aircraft coverage](baselines/aircraft-roster-expansion.md) |
 | Speed- and altitude-dependent turning limits | ☑ | ☐ | Partially implemented. Aircraft limits are used; individual pitch/yaw response tuning remains. | Manual pp. 58-59; [flight model](FLIGHT-MODEL.md) |

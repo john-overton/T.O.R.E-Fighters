@@ -193,14 +193,9 @@ impl State {
     pub fn bay_available(&self) -> bool {
         matches!(self.model, crate::models::AircraftModel::F22(_))
     }
-    /// Hook controls are available on the reviewed carrier aircraft.
+    /// Hook capability includes explicitly authored concept equipment.
     pub fn hook_available(&self) -> bool {
-        matches!(
-            self.model,
-            crate::models::AircraftModel::F18(_)
-                | crate::models::AircraftModel::F14D(_)
-                | crate::models::AircraftModel::A4E(_)
-        )
+        self.model.configuration().hook_available
     }
     pub fn command(&mut self, command: PilotCommand) {
         let (switch, setting) = match command {
@@ -672,6 +667,68 @@ impl Clock {
 mod tests {
     use super::integration_tests::profile;
     use super::*;
+    #[test]
+    fn faxx_hook_starts_stowed_deploys_and_reverses_without_enabling_f22() {
+        use tore_formats::aircraft::AircraftId;
+        let mut a = profile();
+        a.id = AircraftId::F22;
+        a.name = "F-22".into();
+        a.shape = "F22.SH".into();
+        let mut donor = State::new(&a, [0., 15000., 0.]).unwrap();
+        donor.command(PilotCommand::Toggle(Switch::Hook));
+        assert!(!donor.hook_available());
+        assert!(!donor.hook_down);
+        a.id = AircraftId::Faxx;
+        let mut s = State::new(&a, [0., 15000., 0.]).unwrap();
+        assert!(s.hook_available());
+        assert_eq!(s.hook, 0.);
+        assert!(!s.hook_down);
+        s.command(PilotCommand::Toggle(Switch::Hook));
+        for _ in 0..180 {
+            s.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert!((s.hook - 0.5).abs() < 1e-9);
+        let previous = s.clone();
+        s.command(PilotCommand::Toggle(Switch::Hook));
+        for _ in 0..90 {
+            s.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert!((s.hook - 0.25).abs() < 1e-9);
+        assert!((s.presented(&previous, 0.5).hook - 0.375).abs() < 1e-9);
+        s.command(PilotCommand::Set(Switch::Hook, true));
+        for _ in 0..270 {
+            s.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert!((s.hook - 1.).abs() < 1e-9);
+        s.command(PilotCommand::Set(Switch::Hook, false));
+        for _ in 0..361 {
+            s.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert_eq!(s.hook, 0.);
+    }
+    #[test]
+    fn faxx_preserves_donor_response_and_bay_support() {
+        use tore_formats::aircraft::AircraftId;
+        let mut a = profile();
+        a.id = AircraftId::F22;
+        a.name = "F-22".into();
+        a.shape = "F22.SH".into();
+        let mut donor = State::new(&a, [0., 15000., 0.]).unwrap();
+        a.id = AircraftId::Faxx;
+        let mut concept = State::new(&a, [0., 15000., 0.]).unwrap();
+        assert!(concept.bay_available());
+        let input = PilotInput {
+            yaw: 1.,
+            ..Default::default()
+        };
+        for _ in 0..120 {
+            donor.step(&input, |_, _| 0.);
+            concept.step(&input, |_, _| 0.);
+        }
+        assert_eq!(concept.position, donor.position);
+        assert_eq!(concept.yaw, donor.yaw);
+        assert_eq!(concept.rudder, donor.rudder);
+    }
     #[test]
     fn bay_travel_reverses_interpolates_and_ignores_unsupported_aircraft() {
         let mut a = profile();

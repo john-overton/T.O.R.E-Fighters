@@ -8,6 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
+The [F/A-XX concept](spec/fa-xx.md) shares the F-22 flight response in all
+three adapters. Its split flap rudder animation represents the existing yaw
+authority; separate differential drag and fin removal effects are not simulated.
+
 `tore-sim` is a renderer-independent, deterministic 120 Hz flight kernel. The
 working **hybrid** path combines recovered aircraft data and native helper rules
 with fitted continuous dynamics where the original engine contract is still

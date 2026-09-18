@@ -19,7 +19,7 @@ impl DamageArt {
             data.get(name)
                 .ok_or_else(|| format!("missing damage resource {name}; re-import media"))
         };
-        let bodies = [
+        let mut bodies = [
             Shape::parse(get(&format!("{}_A.SH", id.stem()))?)?,
             Shape::parse(get(&format!("{}_C.SH", id.stem()))?)?,
         ];
@@ -27,6 +27,23 @@ impl DamageArt {
             Shape::parse(get(&format!("{}_B.SH", id.stem()))?)?,
             Shape::parse(get(&format!("{}_D.SH", id.stem()))?)?,
         ];
+        if id == AircraftId::Faxx {
+            for (body, fins) in bodies
+                .iter_mut()
+                .zip([&[0x3365, 0x3388][..], &[0x2abf, 0x2ae2, 0x2c8a, 0x2cad][..]])
+            {
+                if body
+                    .faces
+                    .iter()
+                    .filter(|f| fins.contains(&f.address))
+                    .count()
+                    != fins.len()
+                {
+                    return Err("unreviewed F/A-XX donor damage fins".into());
+                }
+                body.faces.retain(|f| !fins.contains(&f.address));
+            }
+        }
         let mut regions = BTreeMap::from([(
             format!("_{}.PIC", id.stem()),
             [atlas.width, atlas.height, 0],

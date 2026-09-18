@@ -11,7 +11,7 @@ pub struct F22FlightModel {
 }
 impl F22FlightModel {
     pub fn from_aircraft(a: &tore_formats::aircraft::Aircraft) -> tore_formats::Result<Self> {
-        let supported = a.id == tore_formats::aircraft::AircraftId::F22
+        let supported = a.id.source() == tore_formats::aircraft::AircraftId::F22
             && a.name == "F-22"
             && a.shape == "F22.SH";
         if !supported {

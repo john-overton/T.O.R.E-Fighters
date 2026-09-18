@@ -32,6 +32,12 @@ fn side(f: &Face) -> f32 {
         1.
     }
 }
+fn f22_flap(address: usize) -> bool {
+    matches!(
+        address,
+        0x437f | 0x439e | 0x43fb | 0x4416 | 0x4576 | 0x4599 | 0x45f6
+    )
+}
 fn rudder(id: Id, a: usize) -> Option<(f32, f32)> {
     match id {
         Id::Mig29 if matches!(a, 0x334e | 0x3371 | 0x4d6c | 0x4d93) => Some((-30., 18.)),
@@ -46,6 +52,23 @@ fn rudder(id: Id, a: usize) -> Option<(f32, f32)> {
 }
 /// Split across a reviewed/fitted hinge, keeping the fixed forward skin intact.
 pub fn faces(id: Id, f: &Face, s: &State) -> Vec<Face> {
+    if id == Id::Faxx {
+        if matches!(f.address, 0x34f7 | 0x354a | 0x37ff | 0x381e | 0x3841) {
+            return Vec::new();
+        }
+        let opening = (f64::from(side(f)) * s.rudder).clamp(0., 1.) * 0.6;
+        if f22_flap(f.address) && opening > 1e-8 {
+            return [-opening, opening]
+                .into_iter()
+                .map(|angle| {
+                    let mut leaf = f.clone();
+                    turn(&mut leaf, [side(f) * 17., -22., 0.], [1., 0., 0.], angle);
+                    leaf
+                })
+                .collect();
+        }
+    }
+    let id = id.source();
     let sign = side(f);
     // No switched brake faces exist on these base shapes. These explicitly
     // fitted panels are clipped from their own belly/aft-fuselage skins.
@@ -150,6 +173,7 @@ pub fn faces(id: Id, f: &Face, s: &State) -> Vec<Face> {
 }
 /// Rigid movement of already separated source panels. Each address belongs to this shape.
 pub fn animate(id: Id, f: &mut Face, s: &State) {
+    let id = id.source();
     let a = f.address;
     let sign = side(f);
     let roll = f64::from(sign) * 0.2 * s.aileron;
@@ -235,10 +259,7 @@ pub fn animate(id: Id, f: &mut Face, s: &State) {
             }
         }
         Id::F22 => {
-            if matches!(
-                a,
-                0x437f | 0x439e | 0x43fb | 0x4416 | 0x4576 | 0x4599 | 0x45f6
-            ) {
+            if f22_flap(a) {
                 panel = Some(([sign * 17., -22., 0.], 0.4 * s.flaps));
             }
             if matches!(a, 0x43bd | 0x43dc | 0x45b8 | 0x45d7) {
@@ -264,6 +285,7 @@ pub fn animate(id: Id, f: &mut Face, s: &State) {
 }
 /// Pivots are in each imported shape's coordinates, not borrowed from a different plane.
 pub fn gear(id: Id, f: &mut Face, fraction: f64) {
+    let id = id.source();
     let sign = side(f);
     let forward = f.positions.iter().map(|p| p[1]).sum::<f32>() / f.positions.len() as f32;
     let nose = forward > 20.;
@@ -294,6 +316,7 @@ pub fn gear(id: Id, f: &mut Face, fraction: f64) {
     }
 }
 pub fn brake(id: Id, f: &mut Face, fraction: f64) {
+    let id = id.source();
     let sign = side(f);
     match id {
         Id::Mig29 => {
@@ -432,6 +455,48 @@ mod tests {
             subtype: 0,
             normal: Some([0., 1., 0.]),
             fog: Default::default(),
+        }
+    }
+    #[test]
+    fn faxx_hides_fins_and_opens_only_commanded_flap_about_fixed_hinge() {
+        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        for address in [0x34f7, 0x354a, 0x37ff, 0x381e, 0x3841] {
+            let fin = face(
+                address,
+                vec![[13., -55., 1.], [29., -24., 36.], [14., -11., 4.]],
+            );
+            assert!(faces(Id::Faxx, &fin, &state).is_empty());
+            assert_eq!(faces(Id::F22, &fin, &state).len(), 1);
+        }
+        for sign in [-1., 1.] {
+            let flap = face(
+                0x437f,
+                vec![
+                    [sign * 17., -22., 0.],
+                    [sign * 20., -22., 0.],
+                    [sign * 20., -32., 0.],
+                ],
+            );
+            assert_eq!(faces(Id::Faxx, &flap, &state)[0].positions, flap.positions);
+            for demand in [0.5, 1.] {
+                state.rudder = f64::from(sign) * demand;
+                let leaves = faces(Id::Faxx, &flap, &state);
+                assert_eq!(leaves.len(), 2);
+                for (leaf, direction) in leaves.iter().zip([-1., 1.]) {
+                    assert_eq!(leaf.positions[0], flap.positions[0]);
+                    assert_eq!(leaf.positions[1], flap.positions[1]);
+                    assert_eq!(leaf.uv, flap.uv);
+                    let angle = direction * 0.6 * demand;
+                    assert!((f64::from(leaf.positions[2][2]) + 10. * angle.sin()).abs() < 1e-5);
+                    assert!(
+                        (f64::from(leaf.positions[2][1]) + 22. + 10. * angle.cos()).abs() < 1e-5
+                    );
+                }
+                assert_eq!(faces(Id::F22, &flap, &state).len(), 1);
+                state.rudder = -state.rudder;
+                assert_eq!(faces(Id::Faxx, &flap, &state).len(), 1);
+            }
+            state.rudder = 0.;
         }
     }
     #[test]

@@ -37,12 +37,13 @@ impl Airframe {
             data.get(s)
                 .ok_or_else(|| format!("aircraft cache missing {s}; re-import media"))
         };
-        let profile = Aircraft::parse(get(id.pt())?)?;
-        if profile.id != id || profile.shape != format!("{}.SH", id.stem()) {
+        let mut profile = Aircraft::parse(get(id.pt())?)?;
+        if profile.id != id.source() || profile.shape != format!("{}.SH", id.stem()) {
             return Err(
                 "aircraft identity/shape does not match the selected retail profile".into(),
             );
         }
+        profile.id = id;
         let shape = Shape::parse(get(&profile.shape)?)?;
         let streamer = tore_formats::shape::StreamerDef::parse(get(&profile.shape)?)?;
         if id == tore_formats::aircraft::AircraftId::F18
@@ -84,11 +85,12 @@ impl Airframe {
         {
             {
                 use tore_formats::aircraft::AircraftId;
-                let absent_overlay =
-                    matches!(id, AircraftId::X31 | AircraftId::Mig21 | AircraftId::F22)
-                        && cockpit_art[1..].iter().any(|n| n == name)
-                        || matches!(id, AircraftId::Mig29 | AircraftId::Mig23 | AircraftId::Su25)
-                            && name == cockpit_art[2];
+                let absent_overlay = matches!(
+                    id,
+                    AircraftId::X31 | AircraftId::Mig21 | AircraftId::F22 | AircraftId::Faxx
+                ) && cockpit_art[1..].iter().any(|n| n == name)
+                    || matches!(id, AircraftId::Mig29 | AircraftId::Mig23 | AircraftId::Su25)
+                        && name == cockpit_art[2];
                 if absent_overlay {
                     continue;
                 }
@@ -177,8 +179,8 @@ impl Airframe {
             rig = Some(new_rig);
         }
         println!(
-            "Aircraft: {} — {} exterior faces, {} G rows, {} hardpoints; atlas {}x{}, instrument font {}px",
-            profile.name,
+            "Aircraft: {}, {} exterior faces, {} G rows, {} hardpoints; atlas {}x{}, instrument font {}px",
+            profile.id.label(),
             shape.faces.len(),
             profile.envelopes.len(),
             profile.hardpoints.len(),
@@ -507,7 +509,7 @@ impl Airframe {
                 && crate::engine_material::nozzle(self.profile.id, f.address);
             let engine_group = crate::engine_material::outlet_group(self.profile.id, &f.positions);
             let canopy = damaged.is_none()
-                && self.profile.id == tore_formats::aircraft::AircraftId::F22
+                && self.profile.id.source() == tore_formats::aircraft::AircraftId::F22
                 && crate::roster_animation::canopy(f.address);
             for i in 1..f.positions.len() - 1 {
                 for j in [0, i, i + 1] {

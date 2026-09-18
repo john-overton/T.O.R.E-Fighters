@@ -97,7 +97,7 @@ impl Rig {
                         (0x79cc, Part::Gear, 18),
                     ],
                 ),
-                AircraftId::F22 => (
+                AircraftId::F22 | AircraftId::Faxx => (
                     20012,
                     245,
                     &[0x5df0, 0x5dfc, 0x5e02, 0x5e0e, 0x5e1a, 0x5e20],
@@ -145,6 +145,12 @@ impl Rig {
             .any(|f| !f.texture.is_empty() && f.texture != format!("_{}.PIC", id.stem()))
         {
             return Err("unreviewed FA aircraft texture".into());
+        }
+        if id == AircraftId::Faxx {
+            for face in concept_hook() {
+                parts.insert(face.address, Part::Hook);
+                shape.faces.push(face);
+            }
         }
         Ok((Self { id, parts }, shape))
     }
@@ -436,6 +442,52 @@ pub(crate) fn turn(f: &mut Face, pivot: [f32; 3], axis: [f32; 3], angle: f64) {
     }
 }
 
+/// Authored concept geometry, not a retail mesh. Source-unit dimensions are
+/// specified in docs/spec/fa-xx.md. Reserved addresses cannot collide with SH.
+const CONCEPT_HOOK_ANGLE: f64 = 0.75;
+fn concept_hook() -> Vec<Face> {
+    // Deployed wheel bottoms are z=-23. The shoe extends one unit aft and
+    // 1.3 units below the shank hinge, so include both in its rotated reach.
+    let length = ((18. - 1.3 * CONCEPT_HOOK_ANGLE.cos()) / CONCEPT_HOOK_ANGLE.sin() - 1.) as f32;
+    let end = -26. - length;
+    let mut faces = Vec::new();
+    for (lo, hi) in [
+        ([-0.45, end, -5.45], [0.45, -26., -4.55]),
+        ([-0.9, end - 1., -6.3], [0.9, end + 3., -5.]),
+    ] {
+        for axis in 0..3 {
+            let u = (axis + 1) % 3;
+            let v = (axis + 2) % 3;
+            for upper in [false, true] {
+                let mut positions = [(false, false), (true, false), (true, true), (false, true)]
+                    .map(|(a, b)| {
+                        let mut p = lo;
+                        p[axis] = if upper { hi[axis] } else { lo[axis] };
+                        p[u] = if a { hi[u] } else { lo[u] };
+                        p[v] = if b { hi[v] } else { lo[v] };
+                        p
+                    });
+                if !upper {
+                    positions.reverse();
+                }
+                let mut normal = [0.; 3];
+                normal[axis] = if upper { 32767. } else { -32767. };
+                faces.push(Face {
+                    positions: positions.to_vec(),
+                    colors: vec![55; 4],
+                    fog: Default::default(),
+                    uv: Vec::new(),
+                    texture: String::new(),
+                    subtype: 0x20,
+                    normal: Some([normal[0], normal[2], normal[1]]),
+                    address: usize::MAX - faces.len(),
+                });
+            }
+        }
+    }
+    faces
+}
+
 /// Agent-fitted travel between reviewed source device endpoints. No foreign rig offsets.
 fn roster_flame_root(id: AircraftId) -> Option<f32> {
     match id {
@@ -445,7 +497,7 @@ fn roster_flame_root(id: AircraftId) -> Option<f32> {
         AircraftId::Su25 => Some(0.),
         AircraftId::Mig23 => Some(-29.),
         AircraftId::Su35 => Some(-59.),
-        AircraftId::F22 => Some(-48.),
+        AircraftId::F22 | AircraftId::Faxx => Some(-48.),
         _ => None,
     }
 }
@@ -464,6 +516,15 @@ fn roster_device(
         }
         Some(Part::Brake) if s.brake > 0. => {
             crate::roster_animation::brake(id, &mut f, s.brake);
+            None
+        }
+        Some(Part::Hook) if id == AircraftId::Faxx && s.hook > 1e-8 => {
+            turn(
+                &mut f,
+                [0., -26., -5.],
+                [1., 0., 0.],
+                CONCEPT_HOOK_ANGLE * s.hook,
+            );
             None
         }
         Some(Part::Bay) if s.bay > 0. => None,
@@ -496,6 +557,46 @@ fn roster_device(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn concept_hook_hides_stowed_and_rotates_rigidly_downward() {
+        let mut s = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let faces = concept_hook();
+        assert_eq!(faces.len(), 12);
+        let rig = Rig {
+            id: AircraftId::Faxx,
+            parts: faces.iter().map(|f| (f.address, Part::Hook)).collect(),
+        };
+        s.hook = 1.;
+        let lowest = faces
+            .iter()
+            .flat_map(|f| rig.animate(f, &s).unwrap().positions)
+            .map(|p| p[2])
+            .fold(f32::INFINITY, f32::min);
+        assert!(
+            (lowest + 23.).abs() < 1e-4,
+            "hook tip must meet the level wheel plane"
+        );
+        s.hook = 0.;
+        for source in &faces {
+            assert!(rig.animate(source, &s).is_none());
+            for fraction in [0.5, 1.] {
+                s.hook = fraction;
+                let moved = rig.animate(source, &s).unwrap();
+                for (p, q) in source.positions.iter().zip(&moved.positions) {
+                    let radius = |p: &[f32; 3]| (p[1] + 26.).powi(2) + (p[2] + 5.).powi(2);
+                    assert!((radius(p) - radius(q)).abs() < 0.001);
+                    assert_eq!(p[0], q[0]);
+                    if p[1] < -41. {
+                        assert!(q[2] < -10.);
+                    }
+                }
+                assert_eq!(moved.colors, source.colors);
+            }
+            s.hook = 0.;
+            assert!(rig.animate(source, &s).is_none());
+        }
+    }
+
     use super::*;
     fn face(address: usize) -> Face {
         Face {

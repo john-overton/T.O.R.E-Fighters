@@ -1228,9 +1228,9 @@ pub fn simple_dispensers(each: u32) -> Vec<DispenserStore> {
     ]
 }
 
-/// Whether an aircraft identity is one of the twelve ported records.
+/// Whether an aircraft has a reviewed retail donor.
 pub fn is_ported(aircraft: AircraftId) -> bool {
-    AircraftId::ALL.contains(&aircraft)
+    AircraftId::ALL.contains(&aircraft.source())
 }
 
 #[cfg(test)]
@@ -1262,7 +1262,7 @@ mod tests {
             AircraftId::Su25 => "Su-25",
             AircraftId::Mig23 => "MiG-23",
             AircraftId::Su35 => "Su-35",
-            AircraftId::F22 => "F-22",
+            AircraftId::F22 | AircraftId::Faxx => "F-22",
         }
         .into();
         profile.shape = format!("{}.SH", id.stem());

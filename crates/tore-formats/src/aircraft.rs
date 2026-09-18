@@ -181,7 +181,7 @@ pub struct Hardpoint {
     pub count: i32,
     pub weight_class: i32,
 }
-/// Reviewed retail identities. Other variants require their own profile review.
+/// Reviewed retail identities and explicit opinionated runtime variants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AircraftId {
     F18,
@@ -196,8 +196,36 @@ pub enum AircraftId {
     Mig23,
     Su35,
     F22,
+    Faxx,
 }
 impl AircraftId {
+    /// Retail donor for an opinionated runtime variant.
+    pub fn source(self) -> Self {
+        if self == Self::Faxx { Self::F22 } else { self }
+    }
+    pub fn selection_key(self) -> &'static str {
+        if self == Self::Faxx {
+            "faxx"
+        } else {
+            self.pt()
+        }
+    }
+    pub const SELECTABLE: [Self; 13] = [
+        Self::F18,
+        Self::Rafale,
+        Self::F14,
+        Self::A4E,
+        Self::X31,
+        Self::Mig29,
+        Self::Su27,
+        Self::Mig21,
+        Self::Su25,
+        Self::Mig23,
+        Self::Su35,
+        Self::F22,
+        Self::Faxx,
+    ];
+    /// Retail import identities. Runtime variants reuse these dependencies.
     pub const ALL: [Self; 12] = [
         Self::F18,
         Self::Rafale,
@@ -225,9 +253,10 @@ impl AircraftId {
             "su25" | "su25.pt" => Ok(Self::Su25),
             "mig23" | "mig23.pt" => Ok(Self::Mig23),
             "su35" | "su35.pt" => Ok(Self::Su35),
+            "faxx" | "fa-xx" | "f/a-xx" => Ok(Self::Faxx),
             "f22" | "f22.pt" => Ok(Self::F22),
             _ => Err(invalid(
-                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22",
+                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, faxx",
             )),
         }
     }
@@ -244,7 +273,7 @@ impl AircraftId {
             Self::Su25 => "SU25.PT",
             Self::Mig23 => "MIG23.PT",
             Self::Su35 => "SU35.PT",
-            Self::F22 => "F22.PT",
+            Self::F22 | Self::Faxx => "F22.PT",
         }
     }
     pub fn hud(self) -> &'static str {
@@ -260,7 +289,7 @@ impl AircraftId {
             Self::Su25 => "SU33CC.HUD",
             Self::Mig23 => "SU33CC.HUD",
             Self::Su35 => "SU35.HUD",
-            Self::F22 => "F22.HUD",
+            Self::F22 | Self::Faxx => "F22.HUD",
         }
     }
     pub fn stem(self) -> &'static str {
@@ -276,7 +305,7 @@ impl AircraftId {
             Self::Su25 => "SU25",
             Self::Mig23 => "MIG23",
             Self::Su35 => "SU35",
-            Self::F22 => "F22",
+            Self::F22 | Self::Faxx => "F22",
         }
     }
     pub fn cockpit_stem(self) -> &'static str {
@@ -288,7 +317,7 @@ impl AircraftId {
             Self::Su25 => "SU33",
             Self::Mig23 => "SU33",
             Self::Su35 => "SU35",
-            Self::F22 => "F22",
+            Self::F22 | Self::Faxx => "F22",
 
             _ => self.stem(),
         }
@@ -306,7 +335,7 @@ impl AircraftId {
             Self::Su25 => "~SU33H.PIC",
             Self::Mig23 => "~SU33H.PIC",
             Self::Su35 => "~SU35H.PIC",
-            Self::F22 => "~F22H.PIC",
+            Self::F22 | Self::Faxx => "~F22H.PIC",
         }
     }
     pub fn label(self) -> &'static str {
@@ -323,6 +352,7 @@ impl AircraftId {
             Self::Mig23 => "MiG-23 Flogger-B",
             Self::Su35 => "Su-35",
             Self::F22 => "F-22A Raptor",
+            Self::Faxx => "F/A-XX",
         }
     }
     pub fn radar(self) -> &'static str {
@@ -335,7 +365,7 @@ impl AircraftId {
             Self::Su25 => "SU24R.SEE",
             Self::Mig23 => "MIG27R.SEE",
             Self::Su35 => "SU27R.SEE",
-            Self::F22 => "F22R.SEE",
+            Self::F22 | Self::Faxx => "F22R.SEE",
 
             _ => "F18R.SEE",
         }
@@ -353,7 +383,7 @@ impl AircraftId {
             Self::Su25 => "GSH301.JT",
             Self::Mig23 => "GSH6_30.JT",
             Self::Su35 => "GSH301.JT",
-            Self::F22 => "M61.JT",
+            Self::F22 | Self::Faxx => "M61.JT",
         }
     }
 }
@@ -812,6 +842,21 @@ pub fn dependency_report(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn concept_selection_is_distinct_from_its_retail_dependency() {
+        use super::AircraftId;
+        let concept = AircraftId::parse("faxx").unwrap();
+        assert_eq!(concept, AircraftId::Faxx);
+        assert_eq!(concept.source(), AircraftId::F22);
+        assert_ne!(concept.selection_key(), AircraftId::F22.selection_key());
+        assert_eq!(concept.pt(), AircraftId::F22.pt());
+        assert!(AircraftId::SELECTABLE.contains(&concept));
+        assert!(!AircraftId::ALL.contains(&concept));
+        for id in AircraftId::SELECTABLE {
+            assert_eq!(AircraftId::parse(id.selection_key()).unwrap(), id);
+        }
+    }
+
     use super::*;
     #[test]
     fn brf_bounds_and_relocations() {

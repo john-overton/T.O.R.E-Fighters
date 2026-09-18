@@ -8,6 +8,11 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
+On the [F/A-XX concept](spec/fa-xx.md), normal rudder input opens the split
+flap on the commanded side. F-22 bay and device controls remain available.
+**H** deploys or retracts its added hook over three seconds. The hook starts
+stowed and is completely hidden when retracted.
+
 The F/A-18D cockpit now covers the full flight canvas. The world renders behind transparent cockpit artwork and independently toggled instrument windows. There is no half-height viewport or opaque lower PANEL fill. Menus retain the proportional 640×480 canvas. This is still a development flight adapter; [behaviour provenance](behavior-provenance.md) records which flight and system components are spec-derived, native, fitted or opinionated.
 
 Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity → Create Quick Mission → OK. Free flight skips loadout and starts with clean external stations. On a MacBook, use **Fn/Globe with the function keys** when macOS assigns those keys to system actions. Fn-Up/Down supplies PageUp/PageDown on compact keyboards. The physical US key positions are used in flight, including shifted numbers and Option combinations.

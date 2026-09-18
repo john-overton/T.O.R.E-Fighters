@@ -114,7 +114,8 @@ impl TimingProfile {
             | AircraftId::Mig21
             | AircraftId::Mig23
             | AircraftId::Su35
-            | AircraftId::F22 => 5,
+            | AircraftId::F22
+            | AircraftId::Faxx => 5,
         };
         Self {
             search_delay_s,

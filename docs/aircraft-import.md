@@ -8,6 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
+The opinionated **F/A-XX** concept is also selectable as `--aircraft faxx` or
+from Quick Mission. It uses the validated F-22 import without extra media.
+See the [variant contract](spec/fa-xx.md) for split flaps, the concealed retractable hook and handling limits.
+
 Updated 2026-09-16. Start here when adding an aircraft. This guide joins the
 existing extraction, format, simulation, presentation and systems contracts;
 linked research remains authoritative for byte layouts and native behavior.

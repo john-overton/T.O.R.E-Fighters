@@ -55,6 +55,8 @@ pub struct Configuration {
     /// Velocity bounds and rudder/bay/wheel drag remain diagnostic in this adapter.
     pub native: FlightProfile,
     pub equipment: Equipment,
+    /// Reviewed carrier hook or explicitly authored concept equipment.
+    pub hook_available: bool,
     pub tuning: Tuning,
     /// Required PT turbulence coefficient; mutable event state lives outside configuration.
     pub turbulence_percent: i16,
@@ -74,6 +76,13 @@ impl Configuration {
             Ok(token.number()? as f64)
         };
         let result = Self {
+            hook_available: matches!(
+                a.id,
+                tore_formats::aircraft::AircraftId::F18
+                    | tore_formats::aircraft::AircraftId::F14
+                    | tore_formats::aircraft::AircraftId::A4E
+                    | tore_formats::aircraft::AircraftId::Faxx
+            ),
             controls: if matches!(
                 a.id,
                 tore_formats::aircraft::AircraftId::F14
@@ -86,6 +95,7 @@ impl Configuration {
                     | tore_formats::aircraft::AircraftId::Mig23
                     | tore_formats::aircraft::AircraftId::Su35
                     | tore_formats::aircraft::AircraftId::F22
+                    | tore_formats::aircraft::AircraftId::Faxx
             ) {
                 Some(super::handling::Profile::from_aircraft(a)?)
             } else {

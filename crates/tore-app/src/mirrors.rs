@@ -26,7 +26,8 @@ pub fn masks(source: &Sprite, id: AircraftId) -> Option<Masks> {
         | AircraftId::Su25
         | AircraftId::Mig23
         | AircraftId::Su35
-        | AircraftId::F22 => return None,
+        | AircraftId::F22
+        | AircraftId::Faxx => return None,
         AircraftId::Rafale => [[640, 40], [190, 360], [1090, 360]],
     };
     flood(source, seeds)

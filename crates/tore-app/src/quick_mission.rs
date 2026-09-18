@@ -86,20 +86,20 @@ impl QuickMission {
             .retain(|label| !label.trim_end_matches('.').eq_ignore_ascii_case("overcast"));
         // Metadata for the full retail catalog is also cached. Only expose the
         // exact aircraft identities whose flight profiles were imported.
-        let mut catalog: Vec<(String, String)> = AircraftId::ALL
+        let mut catalog: Vec<(String, String)> = AircraftId::SELECTABLE
             .into_iter()
             .filter(|id| {
                 data.get(id.pt())
                     .and_then(|bytes| tore_formats::aircraft::Aircraft::parse(bytes).ok())
-                    .is_some_and(|aircraft| aircraft.id == *id)
+                    .is_some_and(|aircraft| aircraft.id == id.source())
             })
-            .map(|id| (id.pt().to_string(), id.label().to_string()))
+            .map(|id| (id.selection_key().to_string(), id.label().to_string()))
             .collect();
         catalog.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
         let (aircraft_files, aircraft_names): (Vec<_>, Vec<_>) = catalog.into_iter().unzip();
         let selected = aircraft_files
             .iter()
-            .position(|n| n == id.pt())
+            .position(|n| n == id.selection_key())
             .unwrap_or(0);
         let mut draft = Draft::default();
         for i in [6, 9, 12, 23, 26, 29] {

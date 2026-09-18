@@ -231,7 +231,9 @@ impl Configuration {
                 AircraftId::Su25 => ["AA8.JT", "AS7.JT", "B13.JT", "GSH301.JT"].contains(&name),
                 AircraftId::Mig23 => ["AS7.JT", "B8.JT", "GSH6_30.JT"].contains(&name),
                 AircraftId::Su35 => ["AA11B.JT", "AA12.JT", "AAML.JT", "GSH301.JT"].contains(&name),
-                AircraftId::F22 => ["AGM65G.JT", "AIM120.JT", "AIM9X.JT", "M61.JT"].contains(&name),
+                AircraftId::F22 | AircraftId::Faxx => {
+                    ["AGM65G.JT", "AIM120.JT", "AIM9X.JT", "M61.JT"].contains(&name)
+                }
 
                 AircraftId::F18 => ["M61.JT", "AIM120.JT", "AGM65G.JT", "AIM9M.JT"].contains(&name),
                 AircraftId::F14 => ["M61.JT", "AIM54C.JT", "AIM120.JT", "AIM9M.JT"].contains(&name),
