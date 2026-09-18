@@ -1,41 +1,8 @@
-//! AI-5 steering service adapter: B44 steering execution driving the ordinary
-//! flight model through [`tore_input::PilotInput`].
-//!
-//! [`controller::Controller::step`](super::controller::Controller::step)
-//! resolves a maneuver into a [`MotionIntent`] carrying a requested heading,
-//! flight-path pitch, speed and bank. This file turns one such intent into the
-//! controls one AI aircraft needs so it can fly its own
-//! [`flight::State`](crate::flight::State) through the same flight model the
-//! player uses. The AI-only [`apply_attitude`] boundary then enforces the
-//! requested B44 attitude and updates motion telemetry. The player flight
-//! adapters (`--legacy-flight`, the default `--researched-flight` hybrid and
-//! `--native-flight-tables`) are untouched by anything here.
-//!
-//! The B44 rules themselves live in [`steering`](super::steering) and are
-//! reused as they stand. What this file adds is the boundary work:
-//!
-//! - Reading the actor's attitude out of the flight state, in radians, and
-//!   converting it to the degrees the recovered rules use.
-//! - Asking [`SteeringState::step`] for the rate-limited attitude B44 permits
-//!   this tick, and enforcing that attitude after the host model advances.
-//! - Mapping the difference between that target and the current attitude onto
-//!   bipolar control deflections, and the speed error onto a throttle setting.
-//!
-//! Provenance:
-//!
-//! - spec-derived: everything the B44 rules decide, through
-//!   [`steering`](super::steering); and the AI-only experience G adjustment of
-//!   [`ai_g_limits`], from `docs/spec/ai-experience.md`, "Other experience
-//!   effects".
-//! - fitted (agent decisions, 2026-09-17): the bank a turn requests when the
-//!   maneuver leaves bank unconstrained ([`turning_bank_deg`]), the mapping
-//!   from a requested angular rate to a control deflection
-//!   ([`rate_command`]), and the throttle rule ([`throttle_command`]). Each
-//!   states its rule and constants at its site. None of it is recovered retail
-//!   behavior and none of it may be described as such.
-//! - The base pitch rate is the unresolved B44 branch; it comes from
-//!   [`fitted::base_pitch_rate_deg_per_s`] and every call reports
-//!   [`Fallback::BasePitchRate`].
+//! AI intent-to-input feedback controller. The aircraft model alone advances
+//! attitude, velocity, position and telemetry; no AI movement override exists.
+//! B44 remains a requested-envelope/reference service, not an achieved-motion
+//! constraint. The fitted controller is specified in docs/spec/ai.md under
+//! "Input-only aircraft control". Player adapters are unchanged.
 
 use super::controller::MotionIntent;
 use super::fitted::{self, Fallback};
@@ -45,18 +12,11 @@ use super::steering::{
 };
 use super::{AiError, Experience, Result, ScalarSpeed, SpeedLimits, experience};
 use crate::flight::State;
+use crate::models::FlightModel;
 use tore_input::PilotInput;
 
-/// Fitted: how far ahead the turning bank rule looks, in seconds.
-///
-/// Rule: with bank unconstrained, an aircraft banks fully into a turn while
-/// the heading error is larger than what its current turn authority can erase
-/// in this many seconds, and proportionally less inside that, so it rolls out
-/// as the new heading arrives. Two seconds is an agent choice: it is long
-/// enough that an ordinary intercept turn runs at full bank and short enough
-/// that the wings are level again by the time the heading is reached. The spec
-/// gives the turn authority and the maximum bank but not this relation.
-pub const BANK_COMMAND_LEAD_SECONDS: f64 = 2.0;
+/// Fitted heading-error response horizon; see the input-only control spec.
+pub const BANK_COMMAND_LEAD_SECONDS: f64 = 1.0;
 
 /// Fitted: the speed error, in ft/s, that moves the throttle from closed to
 /// open in one tick. Rule: the throttle setting is the current setting plus
@@ -65,12 +25,6 @@ pub const BANK_COMMAND_LEAD_SECONDS: f64 = 2.0;
 /// large speed error for a fighter, so ordinary corrections are gentle and a
 /// large one saturates. The spec gives no AI throttle rule at all.
 pub const THROTTLE_REFERENCE_ERROR_FPS: f64 = 100.0;
-
-/// Fitted: the smallest reference rate, deg/s, that [`rate_command`] will
-/// divide by. It keeps a zero or near-zero axis authority (a zero G limit, a
-/// zero roll limit) from turning a tiny requested change into a full
-/// deflection. Agent choice; the spec does not describe the degenerate case.
-pub const MINIMUM_REFERENCE_RATE_DEG_PER_S: f64 = 1.0;
 
 /// Controls plus what the adapter had to fall back on.
 #[derive(Clone, Debug, PartialEq)]
@@ -153,11 +107,17 @@ impl ControlAdapter {
         let turn = TurnDirection::toward(current.heading_deg, heading_request_deg);
         let bank_request_deg = match intent.bank {
             Bank::Explicit(deg) => f64::from(deg).clamp(-maximum_bank_deg, maximum_bank_deg),
-            Bank::Unconstrained => turning_bank_deg(
-                heading_error_deg(current.heading_deg, heading_request_deg),
-                rates.turn_deg_per_s,
-                maximum_bank_deg,
-            ),
+            Bank::Unconstrained => {
+                let rate = heading_error_deg(current.heading_deg, heading_request_deg).to_radians()
+                    / BANK_COMMAND_LEAD_SECONDS;
+                let bank_limit = maximum_bank_deg
+                    .min(if intent.formation_flight { 60.0 } else { 75.0 })
+                    .min((1.0 / g_limit.max(1.0)).acos().to_degrees());
+                (state.speed.max(125.0) * rate / 32.174)
+                    .atan()
+                    .to_degrees()
+                    .clamp(-bank_limit, bank_limit)
+            }
         };
 
         // Contact is tracked by the hybrid adapter; without it the adapter
@@ -177,8 +137,7 @@ impl ControlAdapter {
         };
         let requested = current.step(&request, rates, dt_s)?;
 
-        // The same effective rates the step ran under: a request that used the
-        // whole of an axis's authority this tick is a full deflection.
+        // B44 limits the desired roll rate, never the achieved trajectory.
         let effective = steering::effective_rates(
             request.mode,
             rates,
@@ -191,17 +150,87 @@ impl ControlAdapter {
             },
         )?;
 
+        // Fitted feedback controller. These are control requests only: the
+        // aircraft model owns every achieved attitude, velocity and position.
+        let config = state.model().configuration();
+        let stall = config
+            .aerodynamics
+            .envelopes
+            .iter()
+            .find(|e| e.g == 1)
+            .and_then(|e| e.speeds(state.position[1]))
+            .map_or(900.0, |e| e.0);
+        let authority = (state.speed / stall.max(1.0)).powi(2).clamp(0.0, 1.0);
+        let bank_error = heading_error_deg(current.bank_deg, bank_request_deg).to_radians();
+        let desired_roll = (bank_error / 0.7 - state.roll_rate * 0.5).clamp(
+            -effective.roll_deg_per_s.to_radians(),
+            effective.roll_deg_per_s.to_radians(),
+        );
+        let roll_limit = if let Some(profile) = config.controls {
+            let axis = if state.research.is_some() {
+                profile.hybrid_roll.unwrap_or(profile.roll)
+            } else {
+                profile.roll
+            };
+            let bound = if desired_roll < 0.0 {
+                -f64::from(axis.minimum)
+            } else {
+                f64::from(axis.maximum)
+            };
+            bound.to_radians() * (state.speed / (2.0 * stall.max(1.0))).clamp(0.0, 1.0)
+        } else if state.research.is_some() {
+            config
+                .aerodynamics
+                .roll_limit_rad_per_second
+                .clamp(0.1, 6.0)
+                * authority
+        } else {
+            config.tuning.legacy_roll_limit_rad_per_second * authority
+        };
+        let (mut low, mut high) = (-1.0_f64, 1.0_f64);
+        for envelope in &config.aerodynamics.envelopes {
+            if let Some((min, max)) = envelope.speeds(state.position[1])
+                && state.speed >= min
+                && state.speed <= max
+            {
+                low = low.min(f64::from(envelope.g));
+                high = high.max(f64::from(envelope.g));
+            }
+        }
+        let loading = 1.0
+            + (state.fuel + state.payload_lbs) / config.mass.empty_lbs
+                * config.aerodynamics.loaded_elevator_percent
+                / 100.0;
+        low /= loading;
+        high /= loading;
+        let pitch_goal = intent
+            .flight_path_pitch_deg
+            .max(terrain_pitch_floor_deg.unwrap_or(-90.0))
+            .clamp(-90.0, 90.0);
+        let pitch_error = (pitch_goal - current.flight_path_pitch_deg).to_radians();
+        let desired_g = ((current.flight_path_pitch_deg.to_radians().cos()
+            + state.speed * pitch_error / (3.0 * 32.174))
+            / state.bank.cos().max(0.25))
+        .clamp(low, g_limit.max(low));
+        let delta = desired_g / authority.max(0.01) - 1.0;
+        let pitch_input = delta
+            / if delta > 0.0 {
+                (high - 1.0).max(0.01)
+            } else {
+                (1.0 - low).max(0.01)
+            };
+
         let input = PilotInput {
-            pitch: rate_command(
-                requested.flight_path_pitch_deg - current.flight_path_pitch_deg,
-                effective.pitch_deg_per_s,
-                dt_s,
-            ),
-            roll: rate_command(
-                requested.bank_deg - current.bank_deg,
-                effective.roll_deg_per_s,
-                dt_s,
-            ),
+            pitch: if dt_s > 0.0 {
+                pitch_input.clamp(-1.0, 1.0)
+            } else {
+                0.0
+            },
+            roll: if dt_s > 0.0 {
+                (desired_roll / roll_limit.max(0.01)).clamp(-1.0, 1.0)
+            } else {
+                0.0
+            },
             // The AI steers on bank and pitch only; B44 gives the rudder no
             // steering role, so the yaw axis is left alone.
             yaw: 0.0,
@@ -225,54 +254,6 @@ impl ControlAdapter {
     }
 }
 
-/// AI-only B44 attitude integration after the aircraft model advances speed,
-/// fuel and systems. Fitted coupling: preserve scalar speed and body offset,
-/// and integrate position along the bounded flight path. Player adapters never
-/// call this boundary.
-pub fn apply_attitude(before: &State, after: &mut State, requested: SteeringState) {
-    after.yaw = requested.heading_deg.to_radians();
-    after.pitch = (requested.flight_path_pitch_deg + requested.body_pitch_offset_deg).to_radians();
-    after.bank = requested.bank_deg.to_radians();
-    let path =
-        crate::attitude::Basis::new(after.yaw, requested.flight_path_pitch_deg.to_radians(), 0.0);
-    after.velocity = path.forward.map(|v| v * after.speed);
-    after.position =
-        std::array::from_fn(|i| before.position[i] + after.velocity[i] * crate::flight::DT);
-    after.vertical_speed = after.velocity[1];
-    after.roll_rate = (after.bank - before.bank + std::f64::consts::PI)
-        .rem_euclid(std::f64::consts::TAU)
-        - std::f64::consts::PI;
-    after.roll_rate /= crate::flight::DT;
-    after.pitch_rate = (after.pitch - before.pitch) / crate::flight::DT;
-    after.auxiliary_rates = [0.0; 3];
-    let old = crate::attitude::Basis::new(before.yaw, before.pitch, before.bank);
-    let new = crate::attitude::Basis::new(after.yaw, after.pitch, after.bank);
-    use crate::attitude::{cross, dot};
-    let crosses = [
-        cross(old.right, new.right),
-        cross(old.up, new.up),
-        cross(old.forward, new.forward),
-    ];
-    let sine: [f64; 3] = std::array::from_fn(|i| crosses.iter().map(|v| v[i]).sum::<f64>() * 0.5);
-    let magnitude = dot(sine, sine).sqrt();
-    let cosine =
-        ((dot(old.right, new.right) + dot(old.up, new.up) + dot(old.forward, new.forward) - 1.0)
-            * 0.5)
-            .clamp(-1.0, 1.0);
-    let rotation = sine.map(|v| v * magnitude.atan2(cosine) / magnitude.max(1e-12));
-    after.maneuver.body_rates_rad_per_second = [
-        -dot(rotation, old.forward) / crate::flight::DT,
-        -dot(rotation, old.right) / crate::flight::DT,
-        dot(rotation, old.up) / crate::flight::DT,
-    ];
-    let acceleration = std::array::from_fn(|i| {
-        (after.velocity[i] - before.velocity[i]) / crate::flight::DT
-            + if i == 1 { 32.174 } else { 0.0 }
-    });
-    after.g = dot(acceleration, new.up) / 32.174;
-    after.maneuver.achieved_g = after.g;
-}
-
 /// The AI-only experience G adjustment ("Other experience effects").
 ///
 /// Novice and Average AI aircraft lose 1 G of positive limit, never below 2 G,
@@ -289,51 +270,6 @@ pub fn ai_g_limits(
     human_controlled: bool,
 ) -> (f64, f64) {
     experience::adjusted_g_limits(level, positive_g, negative_g, human_controlled)
-}
-
-/// Fitted: the bank an unconstrained turn requests.
-///
-/// Rule: bank is the aircraft's maximum bank scaled by the heading error over
-/// the error the current turn authority erases in [`BANK_COMMAND_LEAD_SECONDS`],
-/// clamped to plus or minus maximum bank and signed with the turn. A right
-/// turn (positive heading error) banks right. With no turn authority left the
-/// request is wings level, because no amount of bank would turn the aircraft.
-///
-/// The spec bounds the bank request by the aircraft's maximum bank and notes a
-/// second, untraced term; it does not say how a turn picks its bank, so this
-/// stands in until research closes it.
-pub fn turning_bank_deg(heading_error_deg: f64, turn_deg_per_s: f64, maximum_bank_deg: f64) -> f64 {
-    let reference = turn_deg_per_s * BANK_COMMAND_LEAD_SECONDS;
-    if !reference.is_finite() || reference <= 0.0 || !heading_error_deg.is_finite() {
-        return 0.0;
-    }
-    maximum_bank_deg.abs() * (heading_error_deg / reference).clamp(-1.0, 1.0)
-}
-
-/// Fitted: the control deflection that asks the flight model for an angular
-/// rate.
-///
-/// Rule: the deflection is the angular change B44 permitted this tick divided
-/// by the time step, giving the requested rate, divided in turn by the axis's
-/// own effective rate, clamped to -1 through 1. A tick that used the whole of
-/// an axis's authority is therefore a full deflection, and an axis arriving at
-/// its request eases off smoothly as the remaining change shrinks. A paused
-/// tick commands nothing. The reference rate is floored at
-/// [`MINIMUM_REFERENCE_RATE_DEG_PER_S`].
-///
-/// The spec has no control-deflection rule at all: the original moved its AI
-/// aircraft by writing the attitude, while this build flies them through the
-/// same flight model as the player, so this mapping is host work.
-pub fn rate_command(delta_deg: f64, reference_rate_deg_per_s: f64, dt_s: f64) -> f64 {
-    if !delta_deg.is_finite() || !dt_s.is_finite() || dt_s <= 0.0 {
-        return 0.0;
-    }
-    let reference = if reference_rate_deg_per_s.is_finite() {
-        reference_rate_deg_per_s.max(MINIMUM_REFERENCE_RATE_DEG_PER_S)
-    } else {
-        MINIMUM_REFERENCE_RATE_DEG_PER_S
-    };
-    (delta_deg / dt_s / reference).clamp(-1.0, 1.0)
 }
 
 /// Fitted: the throttle setting for a commanded speed.
@@ -439,6 +375,7 @@ mod tests {
 
     fn intent(heading_deg: f64, pitch_deg: f64, speed: f64) -> MotionIntent {
         MotionIntent {
+            formation_flight: false,
             id: 1,
             request: MotionRequest::new(
                 heading_deg as i32,
@@ -470,6 +407,28 @@ mod tests {
                 dt_s,
             )
             .unwrap()
+    }
+
+    #[test]
+    fn formation_heading_follows_bank_through_a_shallow_turn() {
+        for direction in [-1.0, 1.0] {
+            let mut s = state();
+            s.speed = 800.;
+            s.velocity = [0., 0., 800.];
+            let mut command = intent(direction * 10., 0., 800.);
+            command.formation_flight = true;
+            command.mode = CommandMode::OtherState;
+            let mut peak_bank = 0.0_f64;
+            for _ in 0..2400 {
+                let output = controls(&s, &command, crate::flight::DT);
+                assert_eq!(output.input.yaw, 0.);
+                s.step(&output.input, |_, _| 0.0);
+                peak_bank = peak_bank.max(s.bank.abs().to_degrees());
+            }
+            assert!(peak_bank > 20. && peak_bank <= 60.);
+            assert!(heading_error_deg(s.yaw.to_degrees(), direction * 10.).abs() < 0.1);
+            assert!(s.bank.abs().to_degrees() < 0.1);
+        }
     }
 
     #[test]
@@ -530,7 +489,10 @@ mod tests {
         let arrived = controls(&s, &command, 10.0);
         assert_eq!(arrived.requested.heading_deg, 90.0);
         assert!(arrived.input.roll.abs() < 1e-9, "{}", arrived.input.roll);
-        assert!(arrived.input.pitch.abs() < 1e-9, "{}", arrived.input.pitch);
+        assert!(
+            arrived.input.pitch > 0.0,
+            "a banked aircraft still needs lift to hold its flight path"
+        );
     }
 
     #[test]

@@ -677,7 +677,8 @@ or use native research flight. For motor smoke use `--live-fire --weapon-slot 2
 
 `cargo run --locked -p tore-app -- --ai-roster-probe-ticks 3600 --no-audio`
 runs imported aircraft at all four experience levels, using all twelve exact
-identities. It checks finite motion and achieved heading/bank rate bounds and
+identities. It checks finite motion and exact replay of aircraft inputs, measures achieved
+heading/bank rates, and
 reports sensor fit, stores, launches and dropped launches. This is separate
 from synthetic tests and is not a retail comparison or visual acceptance.
 The shorter `--ai-probe-ticks N` retains the Quick Mission bridge probe.

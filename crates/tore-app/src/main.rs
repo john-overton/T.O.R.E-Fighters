@@ -1528,6 +1528,11 @@ impl ApplicationHandler for App {
                                 matches!(self.flight_view, 1 | 2),
                             );
                         }
+                        self.combat.present_targets(if self.flight_ui.frozen() {
+                            1.0
+                        } else {
+                            self.flight_clock.remainder / flight::DT
+                        });
                         let presented = if self.flight_ui.frozen() {
                             self.flight.clone()
                         } else {

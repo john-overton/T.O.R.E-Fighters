@@ -67,7 +67,7 @@ flight adapter runs. The HUD reads this state. See the
 
 ### Flight presentation and measurement
 
-`flight::State` remains authoritative at 120 Hz. `main` retains the preceding tick for render-only pose interpolation (shortest-path wrapped angles); pause/crash show authoritative state and restart resets history. Camera, exterior geometry and HUD consume the same presented pose. Audio consumes authoritative state. No renderer smoothing feeds back into physics.
+`flight::State` remains authoritative at 120 Hz. `main` retains the preceding tick for render-only pose interpolation (shortest-path wrapped angles); pause/crash show authoritative state and restart resets history. Camera, exterior geometry and HUD consume the same presented pose. Nearby aircraft retain their own preceding tick poses and use the same blend fraction in the main view, mirrors and camera panels. Combat snapshots them before simulation advances; reset clears that history. Audio consumes authoritative state. No renderer smoothing feeds back into physics.
 
 Active simulation views request the next redraw without a post-render timer; AutoVsync and a requested maximum frame latency of one provide presentation backpressure. Idle menu behavior is unchanged. Failed/zero-size presentation does not continually schedule simulation redraws. `performance.rs` provides opt-in bounded CPU wall-time sampling via environment variables, with warmup exclusion and view cycling.
 
@@ -218,7 +218,8 @@ consumes the mounted-seeker amplitude and never controls acquisition.
 Quick Mission launches AI wings by default; `--fixture-wings` retains the
 straight-flight compatibility path. `Combat::mission_aircraft` retains the six
 wing groups and their fitted spawn poses for restart. `AiWings` builds actors
-after reset and mirrors their poses into `combat::live::Target` for sensors,
+after reset. AI emits aircraft inputs and the flight model alone advances
+its pose; no steering pose overwrite follows physics. The bridge mirrors results into `combat::live::Target` for sensors,
 rendering and damage. Each wing follows its own leader from the shared world
 snapshot; the human leader remains outside the AI actor list. The formation
 choice and placement are specified in [mission wings](spec/quick-mission-menu.md#mission-wings).

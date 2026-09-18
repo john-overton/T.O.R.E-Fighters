@@ -4,8 +4,8 @@
 //! simulation. Each [`AiActor`] owns its own [`flight::State`], its own
 //! [`Sensors`], its own stores and its own [`Controller`]. Nothing here reads
 //! the player's combat state, the player's sensors or any shared global, and
-//! motion goes through the actor's own flight model, followed by the AI-only
-//! B44 attitude boundary in [`steering_adapter`](super::steering_adapter).
+//! motion goes exclusively through the actor's own flight model using the
+//! inputs from [`steering_adapter`](super::steering_adapter).
 //!
 //! **Missile physics are not duplicated.** AI-5's exit evidence forbids it. A
 //! weapon release produces a [`LaunchEvent`] after this module has debited the
@@ -55,6 +55,8 @@ pub struct StationSpec {
     pub store: StoreState,
     /// Rounds debited per release (B45 actual-rounds-per-game-round).
     pub debit: u32,
+    /// External mass per remaining round, using the shared live payload convention.
+    pub external_round_lbs: f64,
     /// Projectiles one release creates; pod and burst metadata can make this
     /// differ from the ammunition debit (B45).
     pub projectile_count: u32,
@@ -982,7 +984,13 @@ impl AiActor {
             global_unlimited: false,
             atomic_release: false,
         };
+        let before = spec.rounds();
         let report = weapon_service::release(&mut spec.store, &request).ok()?;
+        if let (Rounds::Finite(before), Rounds::Finite(after)) = (before, spec.rounds()) {
+            self.flight.payload_lbs = (self.flight.payload_lbs
+                - f64::from(before - after) * spec.external_round_lbs)
+                .max(0.0);
+        }
         let created = match report.projectiles {
             weapon_service::ProjectileCreation::Created { count } => count,
             weapon_service::ProjectileCreation::None => return None,
@@ -1020,15 +1028,13 @@ impl AiActor {
     }
 
     /// Convert this tick's maneuver into controls and step this actor's own
-    /// flight model, then enforce B44 achieved attitude and motion.
+    /// flight model. Only that model may advance the aircraft state.
     fn fly(
         &mut self,
         intent: Option<&MotionIntent>,
         own: &OwnState,
         ground: &dyn Fn(f64, f64) -> f64,
     ) -> Result<()> {
-        let before = self.flight.clone();
-        let mut requested = None;
         let input = match intent {
             Some(intent) => {
                 let floor = self.controller.terrain_floor(&dummy_frame(own))?;
@@ -1042,22 +1048,12 @@ impl AiActor {
                     floor,
                     flight::DT,
                 )?;
-                requested = Some(output.requested);
                 output.input
             }
             None => PilotInput::default(),
         };
         self.flight
             .step_surface(&input, |x, z| Surface::terrain(ground(x, z)));
-        if let Some(requested) = requested
-            && !own.on_ground
-            && !self.flight.crashed
-        {
-            // B44 bounds the achieved AI attitude, independently of the host
-            // aircraft's stick response. Fitted coupling preserves the model's
-            // scalar speed and the pre-step body/flight-path offset.
-            super::steering_adapter::apply_attitude(&before, &mut self.flight, requested);
-        }
         self.last_input = input;
         Ok(())
     }
@@ -1165,6 +1161,7 @@ pub fn simple_stations(
                 rounds: Rounds::Finite(air_to_air_rounds),
             },
             debit: 1,
+            external_round_lbs: 0.0,
             projectile_count: 1,
             employment_limit_deg: Some(30.0),
             damage_vs_category: 100.0,
@@ -1194,6 +1191,7 @@ pub fn simple_stations(
                 rounds: Rounds::Finite(gun_rounds),
             },
             debit: 10,
+            external_round_lbs: 0.0,
             projectile_count: 10,
             employment_limit_deg: Some(5.0),
             damage_vs_category: 10.0,
@@ -1763,6 +1761,53 @@ mod tests {
     }
 
     #[test]
+    fn formation_recovers_from_ahead_or_behind_and_holds_through_turns() {
+        for (turn, initial_offset) in [0.0_f64, 1.5, -1.5]
+            .into_iter()
+            .flat_map(|turn| [-800., 0., 800.].map(|offset| (turn, offset)))
+        {
+            let mut mission = AiMission::new();
+            mission.set_spacing(512, 0);
+            mission.set_external_leader(Side(1), 0, 0);
+            let mut start = setup(1, 1, 1, [512., 20000., -512. + initial_offset], 0.);
+            // Isolate formation from the synthetic model's bingo return.
+            start.home_airport = None;
+            start.flight.speed = 800.;
+            start.flight.velocity = [0., 0., 800.];
+            mission.push(AiActor::new(start).unwrap());
+            let mut leader = object(mission.actor(1).unwrap(), 1);
+            leader.id = 0;
+            leader.human_controlled = true;
+            leader.position = [0., 20000., 0.];
+            let mut last_error = 0.;
+            for tick in 0..14400 {
+                let heading = (turn * (tick as f64 / 120. - 30.).max(0.)).to_radians();
+                leader.heading_deg = heading.to_degrees();
+                leader.velocity = [800. * heading.sin(), 0., 800. * heading.cos()];
+                let mut world = world_of(&mission);
+                world.push(leader.clone());
+                mission.step(&world, &flat, TimeOfDay(0)).unwrap();
+                for i in 0..3 {
+                    leader.position[i] += leader.velocity[i] / 120.;
+                }
+                let slot = [
+                    leader.position[0] + 512. * heading.cos() - 512. * heading.sin(),
+                    20000.,
+                    leader.position[2] - 512. * heading.sin() - 512. * heading.cos(),
+                ];
+                last_error = distance(mission.actor(1).unwrap().flight().position, slot);
+                if tick > 7200 {
+                    assert!(
+                        last_error < 150.,
+                        "turn {turn}, start {initial_offset}, tick {tick}: slot error {last_error}"
+                    );
+                }
+            }
+            assert!(last_error < 150.);
+        }
+    }
+
+    #[test]
     fn an_idle_wingman_flies_toward_its_own_delta_slot() {
         let mut mission = AiMission::new();
         mission.set_spacing(512, 0);
@@ -1814,7 +1859,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(matches!(outcome, ReceiverOutcome::MotionInstalled(_)));
-        run(&mut mission, 240);
+        // Allow physical roll reversal and lift response to develop.
+        run(&mut mission, 720);
         let heading_after = mission.actor(2).unwrap().flight().yaw;
         assert!(
             (heading_after - heading_before).abs() > 0.1,
@@ -2042,6 +2088,34 @@ mod tests {
     }
 
     #[test]
+    fn releases_remove_only_the_mass_of_external_rounds_actually_debited() {
+        let mut actor = AiActor::new(setup(1, 1, 0, [0., 20000., 0.], 0.)).unwrap();
+        actor.stations = simple_stations(2, 10, ScalarSpeed(2000.));
+        actor.stations[0].external_round_lbs = 250.;
+        actor.flight.set_payload(600.).unwrap(); // 100 lb fixed equipment remains.
+        let mut intent = super::super::controller::WeaponIntent {
+            request: weapon_service::FireRequest {
+                actor: ActorId(1),
+                station: StationId(0),
+                target: super::super::weapon_service::TargetId(2),
+                request_id: super::super::weapon_service::RequestId(1),
+            },
+        };
+        for expected in [350., 100.] {
+            assert!(actor.release(&intent, &IntentBatch::default()).is_some());
+            assert_eq!(actor.flight.payload_lbs, expected);
+        }
+        assert!(actor.release(&intent, &IntentBatch::default()).is_none());
+        assert_eq!(actor.flight.payload_lbs, 100.);
+        intent.request.station = StationId(1);
+        assert!(actor.release(&intent, &IntentBatch::default()).is_some());
+        assert_eq!(
+            actor.flight.payload_lbs, 100.,
+            "internal gun uses the shared zero external-mass convention"
+        );
+    }
+
+    #[test]
     fn station_scoring_receives_error_and_failed_envelopes() {
         let actor = AiActor::new(setup(1, 1, 0, [0.0, 20000.0, 0.0], 0.0)).unwrap();
         let own = actor.own_state(&flat);
@@ -2094,26 +2168,34 @@ mod tests {
     }
 
     #[test]
-    fn all_models_obey_achieved_roll_and_turn_bounds_including_reversal_and_damage() {
+    fn all_models_move_only_through_recorded_inputs_including_reversal_and_damage() {
         use super::super::{
             controller::Completion,
             motion::{Bank, Duration, MotionRequest, PitchRequest, SpeedRequest},
-            steering::{CommandMode, turn_rate_deg_per_s},
+            steering::CommandMode,
         };
         for aircraft in AircraftId::ALL {
-            for health in [1.0, 0.25] {
+            for (health, hybrid) in [(1.0, false), (0.25, false), (1.0, true), (0.25, true)] {
                 let mut setup = setup(1, 1, 0, [0.0, 20000.0, 0.0], 0.0);
                 setup.identity.aircraft = aircraft;
                 setup.flight =
                     flight::State::new(&synthetic_profile(aircraft), setup.flight.position)
                         .unwrap();
+                if hybrid {
+                    setup.flight.enable_research(1).unwrap();
+                }
                 setup.flight.damage_fraction = 1.0 - health;
+                setup.flight.set_payload(500.0).unwrap();
                 let mut actor = AiActor::new(setup).unwrap();
                 for tick in 0..600 {
+                    if tick == 450 {
+                        actor.set_internal_fuel(0.0);
+                    }
                     let heading = if tick < 300 { 90 } else { 270 };
                     let own = actor.own_state(&flat);
                     let before = actor.flight.clone();
                     let intent = MotionIntent {
+                        formation_flight: false,
                         id: 1,
                         request: MotionRequest::new(
                             heading,
@@ -2131,19 +2213,16 @@ mod tests {
                         mode: CommandMode::OtherState,
                     };
                     actor.fly(Some(&intent), &own, &flat).unwrap();
-                    let roll = wrap_signed((actor.flight.bank - before.bank).to_degrees()).abs()
-                        / flight::DT;
-                    let turn = wrap_signed((actor.flight.yaw - before.yaw).to_degrees()).abs()
-                        / flight::DT;
-                    assert!(
-                        roll <= (own.roll_limit_deg_per_s * 0.5).min(45.0) + 1e-8,
-                        "{aircraft:?}: roll {roll}"
-                    );
-                    assert!(
-                        turn <= turn_rate_deg_per_s(own.g_limit, own.speed).unwrap() + 1e-8,
-                        "{aircraft:?}: turn {turn}"
+                    let mut replay = before;
+                    replay.step_surface(actor.last_input(), |x, z| Surface::terrain(flat(x, z)));
+                    assert_eq!(
+                        actor.flight, replay,
+                        "{aircraft:?}: AI motion differs from input replay"
                     );
                     assert!(actor.flight.position.iter().all(|v| v.is_finite()));
+                    if tick >= 450 {
+                        assert!(!actor.flight.engine);
+                    }
                 }
             }
         }

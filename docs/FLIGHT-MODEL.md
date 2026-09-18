@@ -27,7 +27,7 @@ Sequencing lives in [the parity plan](parity-plan.md). The
 [environment/systems plan](research/native-environment-systems-plan.md) is a
 frozen archive as of 2026-09-15: use it for its recovered contact, asset,
 lifecycle/event and environmental research, not for sequencing. AI movement has
-a separate [B44 integration boundary](spec/ai.md#live-integration-and-authored-boundaries). The first
+an [input-only controller](spec/ai.md#input-only-aircraft-control). The first
 [cache/preference checkpoint](baselines/native-land-foundation.md) and
 [vertical geometry checkpoint](baselines/native-land-geometry.md) are diagnostic
 only; the restricted research path still stops at unsupported contact.
@@ -338,8 +338,10 @@ A-4 hybrid roll now uses the [90% reported Skyhawk peak target](spec/additional-
 The evidence, variant limits, fitted acceleration and low-speed scaling are
 specified there. Legacy A-4 retains the FA control values.
 
-AI aircraft use their own model for speed, fuel and systems. Their attitude and
-position then follow the bounded B44 request through a fitted integration rule,
-with achieved rotation and G updated in telemetry. This is separate from all
-three player adapters. Synthetic tests cover every model, turn reversal and
-reduced health; imported validation is recorded in the [AI baseline](baselines/ai-research.md).
+AI aircraft command stick and throttle inputs into their own flight model.
+That model alone advances attitude, velocity, position, fuel and telemetry;
+there is no post-step AI movement override. Imported external stores contribute
+payload mass and releases reduce it. The controller and its fitted limits are
+specified in [input-only AI control](spec/ai.md#input-only-aircraft-control).
+The three player adapters stay distinct. Exact input-replay validation is
+recorded in the [AI baseline](baselines/ai-research.md).

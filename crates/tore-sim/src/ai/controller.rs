@@ -355,6 +355,8 @@ pub struct MotionIntent {
     /// The B15 steering point, when the maneuver pursues one.
     pub steering_point: Option<[f64; 3]>,
     pub mode: CommandMode,
+    /// Use the fitted formation bank request limit. Movement remains input-only.
+    pub formation_flight: bool,
 }
 
 /// A sensor/target request.
@@ -749,6 +751,7 @@ impl Controller {
         let id = self.next_motion_id;
         self.next_motion_id += 1;
         let intent = MotionIntent {
+            formation_flight: false,
             id,
             request,
             heading_deg: f64::from(request.heading_deg),
@@ -1184,12 +1187,12 @@ impl Controller {
         Ok(())
     }
 
-    /// B43: follow this wing's own leader using its slot and speed bands.
+    /// B43 slot geometry with fitted signed speed regulation.
     /// Fitted steering aim: project the slot three seconds along the leader's
     /// heading, using the nominal formation-command duration as the horizon.
     /// This lets an aircraft already in its slot fly parallel to the leader
     /// instead of turning back toward a point it has just passed. The speed
-    /// table still measures distance to the unprojected slot. This projection
+    /// correction still measures error to the unprojected slot. This projection
     /// is an agent choice, not a recovered lead rule.
     fn formation_motion(
         &mut self,
@@ -1248,6 +1251,7 @@ impl Controller {
             )
         };
         let intent = MotionIntent {
+            formation_flight: true,
             id,
             request,
             heading_deg,
@@ -1726,6 +1730,7 @@ impl Controller {
         let id = self.next_motion_id;
         self.next_motion_id += 1;
         let mut intent = MotionIntent {
+            formation_flight: false,
             id,
             request,
             heading_deg: f64::from(request.heading_deg),
@@ -1910,18 +1915,23 @@ impl Controller {
         ]))
     }
 
-    /// The B43 mode 9 formation speed for a wingman closing on its slot.
+    /// Fitted host regulation: signed along-track error closes over six
+    /// seconds, capped at +/-100 ft/s. Unlike unsigned B43 distance bands,
+    /// this slows a wingman that has passed its slot. Original negative-band
+    /// entry is unknown; this is not a recovered rule.
     pub fn formation_speed(&self, frame: &DecisionFrame<'_>, slot_point: [f64; 3]) -> ScalarSpeed {
-        let leader_speed = frame
-            .wing
-            .leader
-            .map(|l| l.speed)
-            .unwrap_or(frame.own.limits.corner);
-        wing::formation_speed(
-            distance(frame.own.position, slot_point),
-            leader_speed,
-            &frame.own.limits,
-        )
+        let Some(leader) = frame.wing.leader else {
+            return frame.own.limits.corner;
+        };
+        let heading = leader.heading_deg.to_radians();
+        let along = (slot_point[0] - frame.own.position[0]) * heading.sin()
+            + (slot_point[2] - frame.own.position[2]) * heading.cos();
+        let requested = if along >= 5000.0 {
+            frame.own.limits.maximum.0
+        } else {
+            leader.speed.0 + (along / 6.0).clamp(-100.0, 100.0)
+        };
+        ScalarSpeed(requested.clamp(frame.own.limits.minimum.0, frame.own.limits.maximum.0))
     }
 
     /// The B44 terrain floor for this actor, when one is active.

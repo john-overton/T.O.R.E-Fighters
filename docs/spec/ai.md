@@ -424,6 +424,28 @@ slot point: beyond 5000 ft own maximum; 1000 to 5000 ft leader speed plus
 clamped to own minimum and maximum. The negative bands are reachable only
 through a lead-projection branch whose entry condition is open.
 
+The live host uses a **fitted agent choice (2026-09-18)** for formation
+speed until that negative-band entry is recovered. Project the slot error onto
+the leader's horizontal forward direction. Request leader speed plus that
+signed error divided by 6 seconds, limited to a correction of -100 through
++100 ft/s, then clamp to the follower's loaded speed limits. At 5000 ft or more
+behind the slot, request its own maximum speed. An aircraft ahead of its slot
+therefore slows down. Pure lateral or vertical separation does not ask it to
+race ahead. This continuous rule replaces the positive-only bands in the host;
+the recovered band evaluator remains available separately. Heading and pitch
+still aim three seconds ahead of the moving slot, refreshed each simulation
+tick. Original negative-band selection remains unknown; the next research step
+is to establish the mode 9 lead-projection entry condition.
+
+Formation uses the [input-only controller](#input-only-aircraft-control) with
+its 60-degree requested bank limit. All achieved turns come from aircraft
+physics, including roll response, lift and momentum.
+
+Presentation uses the same previous/current simulation interval and blend
+fraction for the player's camera and nearby aircraft positions and attitudes.
+This is a fitted host rendering rule, with no change to 120 Hz simulation.
+Pause displays current poses; restart discards old presentation history.
+
 Wing control has three levels: loose, medium and tight. The player's control
 key toggles loose and medium. Engage my target, protect me, attack on contact
 and the approach orders silently drop control to loose; engage from formation,
@@ -877,8 +899,54 @@ remain separate, as in the existing sensor component.
 | `sensors::Sensors::contacts`, `visual`, `observation`, `support` | Build permitted target views and track feedback from each actor's own sensor state. `Observable` is service input, not automatic AI knowledge. |
 | `sensors::Sensors::designate` and `step` | Apply validated sensor requests and advance observations; current channel/track rules stay in the shared component. |
 | `combat::live::State::readiness`, `mounted_solution`, `step` | AI projectiles reuse combat simulation with owned records. The AI boundary applies selected-store gates; full AI seeker lifecycle remains open. |
-| `flight::State::step_surface` and selected aircraft model | Convert intent into controls, step the actor's model, then enforce the AI B44 attitude boundary. `autopilot` supplies reusable steering ideas, not a claim of recovered combat steering. |
+| `flight::State::step_surface` and selected aircraft model | Convert intent into controls and step the actor's model without post-step movement writes. `autopilot` supplies reusable steering ideas, not a claim of recovered combat steering. |
 | `quick_mission::QuickMission::dummy_wings` | Replaced by `QuickMission::wing_launches`, which carries side, wing, member, aircraft and resolved experience through `ai::launch`. `dummy_wings` remains as the flattened legacy view so the fixture path is unchanged. |
+
+## Input-only aircraft control
+
+**Opinionated, requested by John on 2026-09-18:** every AI-controlled aircraft
+must move only through the physical aircraft inputs it commands. This applies
+to formation, route flight, combat and evasion. The aircraft flight model alone
+updates attitude, speed, velocity, position and achieved telemetry. AI may not
+replace those results to meet a desired heading, rate limit, slot or maneuver.
+Spawn/restart initializes a pose; destroyed airframes use the shared combat
+wreck simulation. Render interpolation never changes simulation state.
+
+This intentionally supersedes the earlier B44 post-step attitude integration.
+B44's original fast turn formulas remain research facts and isolated reference
+services, not a reason to grant extra movement authority. Replaying a tick's
+AI inputs from the same flight state and environment must reproduce the whole
+resulting flight state exactly. Existing player flight adapter selection stays
+distinct; the AI bridge retains its existing legacy model setup, with hybrid
+also covered by synthetic input replay tests. Matching player adapter selection
+and the restricted native-table AI path are not newly introduced here.
+
+The following feedback controller is **fitted, agent-authored**. The original
+input mapping is unknown. Unconstrained heading error divided by 1 second
+requests turn rate, converted to bank using atan(speed times rate / 32.174),
+with radians/second and ft/s, speed floored at 125. Requested bank is bounded
+by the aircraft maximum, acos(1 / positive G limit floored at 1), and 60 degrees
+in formation or 75 degrees otherwise. Explicit maneuver bank requests keep
+their aircraft bound. Desired roll rate is bank error / 0.7 seconds minus half
+the measured roll rate, bounded by the B44 requested roll authority. Divide by
+the model's current roll authority and clamp stick roll to [-1, 1].
+
+Pitch feedback requests (cos(flight-path pitch) + speed times pitch error /
+(3 seconds times 32.174)) / max(cos(bank), 0.25) G, clamped to the loaded
+negative limit and AI positive G limit. Pitch error includes the terrain floor.
+Invert the model's loaded stick-to-G mapping, with low-speed authority floored
+at 0.01 only for division, and clamp pitch input to [-1, 1]. Rudder stays zero.
+The aircraft model may lag, depart, stall, overshoot or fail to achieve the
+requested maneuver. Steep/inverted maneuver tracking remains approximate.
+Throttle retains the fitted speed-error rule: current throttle plus speed
+error / 100 ft/s, bounded to [0, 1]; requested speed uses the loaded envelope.
+Fuel and engine state can prevent acceleration even at full throttle.
+
+Imported AI stores use the same payload convention as player live combat:
+external equipment plus non-internal remaining rounds times nonnegative source
+weapon weight. A release subtracts only the mass of ammunition actually debited.
+Until axis-specific AI damage is connected, health reduces requested G and roll
+authority linearly. This is a controller restriction, not extra physics power.
 
 ## Live integration and authored boundaries
 
@@ -914,15 +982,8 @@ are behavior fixes, not evidence of retail combat parity. Validation lives in
   a camera-facing glint lasting 45 ticks, growing from 2 ft by 0.15 ft per tick.
   Fitted decoy consequence: clear guidance and coast for the record's remaining
   lifetime. Original lifetime shortening remains unknown.
-- B44 bounds achieved AI heading, flight-path pitch and bank after the aircraft
-  model advances speed, fuel and systems. Fitted coupling preserves scalar speed
-  and the previous body-to-flight-path pitch offset, and advances position along
-  the bounded flight path. The normal host command selects B44's other-state
-  branch, halving roll authority and capping it at 45 degrees/second. This branch
-  selection is an agent choice because the original state producer remains open.
-  Until axis-specific AI damage is available, remaining airframe health scales
-  G and roll authority linearly, a fitted rule. G loading uses the aircraft model's
-  fuel/payload reduction. Player flight adapters are unaffected.
+- AI movement follows the [input-only control contract](#input-only-aircraft-control).
+  B44 remains a reference for requested limits, not a post-step pose override.
 - Wing-assignment penalties count other live attackers on the same side and in
   the same wing. Automatic requests are delivered after all actors decide, and
   player requests address friendly wing 1 only. Each recipient retains its own

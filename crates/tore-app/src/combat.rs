@@ -47,6 +47,44 @@ pub fn target_pose(target: &live::Target, ai_poses: bool) -> [f64; 3] {
         [target.velocity[0].atan2(target.velocity[2]), 0., 0.]
     }
 }
+/// Presentation snapshots are taken before combat advances and before the AI
+/// overwrites its live poses. They never feed back into sensors or physics.
+struct TargetPresentation {
+    previous: BTreeMap<u32, (Vector, Basis)>,
+    alpha: f64,
+}
+impl Default for TargetPresentation {
+    fn default() -> Self {
+        Self {
+            previous: BTreeMap::new(),
+            alpha: 1.0,
+        }
+    }
+}
+impl TargetPresentation {
+    fn capture(&mut self, targets: &[live::Target], ai_poses: bool) {
+        self.previous.clear();
+        self.previous.extend(targets.iter().map(|t| {
+            let [yaw, pitch, bank] = target_pose(t, ai_poses);
+            (t.id, (t.position, Basis::new(yaw, pitch, bank)))
+        }));
+    }
+
+    fn pose(&self, target: &live::Target, ai_poses: bool) -> (Vector, [f64; 3]) {
+        let angles = target_pose(target, ai_poses);
+        let Some((position, basis)) = self.previous.get(&target.id) else {
+            return (target.position, angles);
+        };
+        let alpha = self.alpha.clamp(0., 1.);
+        (
+            std::array::from_fn(|i| position[i] + (target.position[i] - position[i]) * alpha),
+            basis
+                .blended(Basis::new(angles[0], angles[1], angles[2]), alpha)
+                .angles(),
+        )
+    }
+}
+
 pub struct Combat {
     pub state: live::State,
     pub smoke_art: crate::menu::Sprite,
@@ -60,6 +98,7 @@ pub struct Combat {
     /// Pilot-only tapes retain their existing clean-aircraft initial state.
     pub clean_recording: bool,
     initial_ammo: Option<Vec<u16>>,
+    presentation: TargetPresentation,
     dummies: Vec<(usize, Vector)>,
     mission_spawns: Option<Vec<crate::ai_wings::MissionSpawn>>,
     dummy_models: Vec<Airframe>,
@@ -181,6 +220,7 @@ impl Combat {
             ai_poses: false,
             clean_recording: false,
             initial_ammo,
+            presentation: TargetPresentation::default(),
             recorder: None,
             last_launcher: None,
             shapes,
@@ -188,6 +228,10 @@ impl Combat {
             ground_impacts,
         })
     }
+    pub fn present_targets(&mut self, alpha: f64) {
+        self.presentation.alpha = alpha;
+    }
+
     pub fn dummy_geometry(&self, camera: &Camera, world: &World) -> Vec<(&Airframe, Vec<f32>)> {
         self.dummy_models
             .iter()
@@ -203,9 +247,10 @@ impl Combat {
                         continue;
                     }
                     let mut pose = model.start(world);
-                    pose.position = target.position;
+                    let (position, angles) = self.presentation.pose(target, self.ai_poses);
+                    pose.position = position;
                     pose.damage_fraction = target.damage_fraction();
-                    [pose.yaw, pose.pitch, pose.bank] = target_pose(target, self.ai_poses);
+                    [pose.yaw, pose.pitch, pose.bank] = angles;
                     pose.gear = 0.;
                     pose.flaps = 0.;
                     pose.exhaust = 0.;
@@ -306,6 +351,7 @@ impl Combat {
         self.state.release();
     }
     pub fn reset(&mut self, s: &mut flight::State) -> AppResult<()> {
+        self.presentation = TargetPresentation::default();
         let l = launcher(s);
         if let Some(r) = &mut self.recorder {
             r.record("reset", l);
@@ -351,6 +397,8 @@ impl Combat {
         Ok(())
     }
     pub fn step(&mut self, s: &mut flight::State, world: &World) -> AppResult<Vec<Event>> {
+        self.presentation
+            .capture(&self.state.targets, self.ai_poses);
         let l = launcher(s);
         self.last_launcher = Some(l);
         if let Some(r) = &mut self.recorder {
@@ -520,11 +568,10 @@ impl Combat {
         let mut v = Vec::new();
         for t in self.state.targets.iter().filter(|t| t.airborne) {
             let mut pose = s.clone();
-            pose.position = t.position;
+            let (position, angles) = self.presentation.pose(t, self.ai_poses);
+            pose.position = position;
             pose.damage_fraction = t.damage_fraction();
-            pose.pitch = 0.;
-            pose.bank = 0.;
-            pose.yaw = t.velocity[0].atan2(t.velocity[2]);
+            [pose.yaw, pose.pitch, pose.bank] = angles;
             pose.exhaust = 0.;
             pose.gear = 0.;
             pose.flaps = 0.;
@@ -1404,6 +1451,65 @@ mod ai_pose_tests {
             fragment_released: false,
             category: 0,
         }
+    }
+
+    #[test]
+    fn formation_rendering_shares_the_camera_tick_fraction() {
+        // A fixed slot must stay fixed at every render fraction, including
+        // frames without a simulation tick. 800 ft/s used to produce a
+        // 6.67 ft (2.03 m) sawtooth when only the camera was interpolated.
+        for turning in [false, true] {
+            let mut history = TargetPresentation::default();
+            let mut t = target([0., 0., 800.], Basis::new(0., 0., 0.));
+            let mut camera_before = [0.; 3];
+            for tick in 0..240 {
+                let offset = [512., 0., -512.];
+                t.position = std::array::from_fn(|i| camera_before[i] + offset[i]);
+                history.capture(std::slice::from_ref(&t), true);
+                let heading = if turning { tick as f64 * 0.001 } else { 0. };
+                let camera_after: Vector = std::array::from_fn(|i| {
+                    camera_before[i] + Basis::new(heading, 0., 0.).forward[i] * 800. / 120.
+                });
+                t.position = std::array::from_fn(|i| camera_after[i] + offset[i]);
+                t.basis = Basis::new(heading, 0.1, 0.3);
+                let authoritative = t.position;
+                for alpha in [0., 0.13, 0.5, 0.91, 1.] {
+                    history.alpha = alpha;
+                    let (position, angles) = history.pose(&t, true);
+                    for i in 0..3 {
+                        let camera =
+                            camera_before[i] + (camera_after[i] - camera_before[i]) * alpha;
+                        assert!((position[i] - camera - offset[i]).abs() < 1e-9);
+                    }
+                    assert!(angles.iter().all(|a| a.is_finite()));
+                    assert_eq!(t.position, authoritative);
+                }
+                camera_before = camera_after;
+            }
+            history = TargetPresentation::default();
+            assert_eq!(
+                history.pose(&t, true).0,
+                t.position,
+                "restart must discard history"
+            );
+        }
+    }
+
+    #[test]
+    fn target_presentation_blends_attitude_and_keeps_new_targets_current() {
+        let mut history = TargetPresentation::default();
+        let mut t = target([0., 0., 800.], Basis::new(359_f64.to_radians(), 0., 0.));
+        history.capture(std::slice::from_ref(&t), true);
+        t.basis = Basis::new(1_f64.to_radians(), 0., 0.);
+        history.alpha = 0.5;
+        let (_, angles) = history.pose(&t, true);
+        assert!(
+            angles[0].sin().abs() < 1e-9,
+            "heading must take the short path"
+        );
+        t.id = 2;
+        t.position = [100.; 3];
+        assert_eq!(history.pose(&t, true), (t.position, t.basis.angles()));
     }
 
     /// The fixture rule is unchanged with AI poses disabled: heading from the

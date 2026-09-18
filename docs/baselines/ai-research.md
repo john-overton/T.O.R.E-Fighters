@@ -221,9 +221,10 @@ On 2026-09-17 those components were joined into a runtime. `controller`
 sequences them per actor and holds the persistent state and one seeded draw
 stream. `fitted` supplies one named rule per unresolved branch so a live actor
 cannot stall, and every use is recorded per actor. `steering_adapter` converts
-a maneuver into controls for that actor's own flight model, then enforces the
-B44 attitude request through a fitted integration boundary. The AI-only
-experience G adjustment and fitted damage scaling feed its achieved bounds. `mission` gives each actor its own sensors,
+a maneuver into controls for that actor's own flight model. The earlier B44
+post-step override was removed under the input-only contract requested on
+2026-09-18. Experience and fitted damage scaling now restrict control requests,
+not achieved movement. `mission` gives each actor its own sensors,
 stores, flight model and decision state, debits ammunition before emitting a
 launch event, and does not duplicate missile physics. `launch` carries the
 Quick Mission payload.
@@ -246,7 +247,7 @@ not retail parity or full gameplay acceptance.
 | AI-04 | Deplete one missile, then two ten-round synthetic gun releases through the bridge; each projectile retains its own weapon. A station absent from the player configuration still simulates safely |
 | AI-05 | Negative angle, minimum/maximum range, emission, sensor support and terrain gates; a ridge between live mission actors prevents releases without ammunition loss |
 | AI-06 | Individual releases at ticks 0 and 30, third stopped by depletion; live decoy affects only matching missiles targeting the releaser and creates an effect |
-| AI-07 | All twelve distinct model variants tested over roll-in and reversal, at full and quarter health; achieved roll and heading changes stay inside supplied B44 bounds |
+| AI-07 | The original repair tested B44 achieved-rate bounds. Superseded by the input-only acceptance below: every achieved state must equal flight-model input replay |
 | AI-08 | Same-wing assignments change live ranking; another wing's assignment does not contribute |
 | AI-09 | Aligned/failed-envelope station inputs and end-to-end equal-store selection, without rewarding narrower cones |
 | AI-10 | All 36 saved/new priority pairs preserve or replace active motion as specified |
@@ -275,6 +276,66 @@ loaded their own gun and default stations; radar and optional infrared fit
 were reported per aircraft. Zero launches in some combinations are not a
 failure or proof of combat effectiveness. This is finite-duration integration
 validation, not seeker lifecycle, victory, or retail trajectory acceptance.
+
+## Formation timing validation (2026-09-18)
+
+Implementation pass, synthetic fixtures. The ahead-of-slot regression failed
+before the speed correction: starting 800 ft ahead of its slot, the follower
+was still 925.62 ft from it after 60 seconds of straight leader flight. The
+positive-only distance bands asked for more speed even when it was ahead.
+The fitted replacement is specified in [B43](../spec/ai.md#b43-wing-commands-and-formation-variation).
+
+The corrected test runs nine 120-second cases: starts 800 ft ahead, on-slot,
+or 800 ft behind, each with a straight leader or a left/right 1.5 degree/second
+turn beginning at 30 seconds. The leader flies at 800 ft/s, at 20000 ft, with
+512 ft horizontal spacing. During the entire second minute every case stays
+within 150 ft of its nominal slot, including the specified slot variation.
+The synthetic follower has no home airport to isolate formation from bingo
+return behavior. Existing own-leader and command tests cover wing routing.
+These cases do not establish tight formation during arbitrary aerobatics or
+when the leader's speed exceeds the follower's loaded envelope.
+
+A follow-up shallow-turn test commands +10 and -10 degree heading changes at
+800 ft/s through actual flight-model steps. Both settle within 0.1 degrees of
+the heading with less than 0.1 degrees of residual bank in 20 seconds. Rudder
+input remains zero. The nine formation recovery cases also pass after removing
+the post-step override. Original combat maneuver shapes are not established by
+these cases.
+
+Input-only acceptance runs all twelve distinct synthetic aircraft models with
+full/quarter health, 500 lb payload, and legacy/hybrid physics. It reverses the
+heading request halfway through each 600-tick case and removes fuel after
+450 ticks. On every tick the entire AI flight state equals an independent
+flight-model step from the prior state using its recorded input. Engines stay
+off once fuel is gone. A release test checks external-round mass reduction,
+empty-store retries and the shared internal-gun mass convention.
+
+The updated imported roster probe passed all 48 aircraft/experience cases at
+3600 ticks, using two actors per case with their imported stores and payload.
+Live aircraft states matched replay of their actual inputs through the flight
+model. Damage and store mass changes are supplied to the replay as external
+state changes; destroyed actors are excluded. It emitted 87 projectiles with
+0 dropped. Maximum measured Euler bank rate was 45.077 degrees/second and
+heading rate 8.923 degrees/second. These are measurements, not imposed pose
+limits. The probe no longer rejects physical movement for exceeding an AI
+requested-rate cap. Full combat effectiveness and native-table AI flight were
+not validated by this run.
+
+Rendering tests sample five blend fractions over 240 ticks of straight and
+turning motion. A fixed relative position stays constant within 1e-9 ft;
+render queries leave authoritative positions unchanged. Heading interpolation
+crosses 359 to 1 degrees by the short path, and new targets and cleared history
+use current poses. Previously the camera alone was interpolated, giving up to
+800/120 = 6.67 ft (2.03 m) of relative display error at that speed. This explains
+a possible two-metre sawtooth without a simulation race or skill reaction delay.
+It is numerical reproduction, not a recording of the user's session.
+
+This pass passed formatting, Clippy with warnings denied, all 841 Rust tests,
+the workspace build, all 40 Python tests, the repository and both binary asset
+scans, and documentation headers. The renderer smoke presented successfully
+on NVIDIA GeForce RTX 4070 using Vulkan. Windows/macOS and a visual replay of
+the reported formation flight were not run. Validation logs live locally in
+`.local/formation-jitter-validation/`.
 
 ## What this establishes
 

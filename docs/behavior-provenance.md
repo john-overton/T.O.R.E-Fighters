@@ -131,10 +131,11 @@ Labels describe origin only. None of these is a blocker.
 | AI leader and singleton return to base: the private landing route a wingman flies | Fitted, agent choice 2026-09-17 | B48 closes this for a wingman with an AI leader only; `ai::fitted` |
 | AI tactical re-evaluation cadence of 8, 6, 5 and 4 quarter seconds by level | Fitted, agent choice 2026-09-17 | The spec forbids a per-tick reroll but does not give the cadence; `ai::fitted` |
 | AI host maneuver state numbers 19 and 20 | Opinionated, agent choice 2026-09-17 | B46 accepts 19 and 20 and rejects the rest; the original's state names are unknown, so the host only ever produces accepted numbers; `ai::fitted` |
-| AI control deflection, turning bank and throttle mapping from a B44 attitude request | Fitted, agent choice 2026-09-17 | The spec bounds the attitude, not the stick; named constants in `ai::steering_adapter` |
+| AI bank, lift and throttle feedback | Fitted, agent choice 2026-09-18 | [Input mapping](spec/ai.md#input-only-aircraft-control); B44 is a request reference, never an achieved-motion override |
 | AI loaded speed limits and G limit read from the flight model's own envelope block | Fitted, agent choice 2026-09-17 | The spec names "loaded envelope limits" without the query; `ai::mission` |
 | Quick Mission AI enabled by default and separate delta formations per wing | Opinionated, requested by John 2026-09-17 | Player leads friendly wing 1; five other independent leaders. Compatibility remains under `--fixture-wings`; [mission wings](spec/quick-mission-menu.md#mission-wings) |
 | Quick Mission wing placement and formation steering projection | Fitted, agent choice 2026-09-17 | 512 ft slot spacing, 4096 ft between wing leader offsets, level stacking and a three-second leader-heading projection. Exact rule and missing research in [mission wings](spec/quick-mission-menu.md#mission-wings) |
+| Formation overshoot correction, turn coordination and shared render timing | Fitted, agent choice 2026-09-18 | Signed along-track regulation, bank-driven heading and matched camera/aircraft interpolation; [B43 host rules](spec/ai.md#b43-wing-commands-and-formation-variation) |
 
 Diagnostic tooling is not a new gameplay feature. Document its purpose and limits
 without pretending it is recovered retail behavior or a user-chosen flight law.
@@ -153,6 +154,6 @@ AI runtime boundary details have one home in
 | AI compatibility missile steering | Fitted | Owned weapon movement and actor emission; no full AI seeker activation or pitbull |
 | AI device timing and decoy rolls | Spec-derived | Individual quarter-second releases and independent susceptibility-times-effectiveness rolls |
 | AI decoy presentation and aftermath | Fitted, agent choice 2026-09-17 | Glint and unguided coasting, with constants in the live integration rules |
-| AI achieved attitude and damaged authority coupling | Fitted, agent choice 2026-09-17 | Enforce B44 attitude after model stepping; health scales G and roll linearly; normal commands select the capped other-state branch |
+| AI movement exclusively through aircraft inputs | Opinionated, requested by John 2026-09-18 | No post-step pose or velocity overrides; [input-only contract and fitted controller](spec/ai.md#input-only-aircraft-control). Health restricts requested G and roll; physics owns achieved motion |
 | Quick Mission home airport | Fitted, agent choice | Spawn point until the mission supplies an airport |
 | Player wing keyboard shortcuts | Opinionated, agent choice 2026-09-17 | Documented in the input guide; recipient scope is friendly wing 1 |
