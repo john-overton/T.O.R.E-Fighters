@@ -60,3 +60,13 @@ The hook is omitted on damaged bodies, which retain their existing static rig.
 This is device presentation and control, without new carrier arrestment physics.
 
 Validation: [implementation baseline](../baselines/fa-xx.md).
+
+Developer reuse: [source kit and original-game mod limits](../fa-xx-developer-kit.md).
+
+## Original-game export status
+
+The behavior above is implemented in T.O.R.E. An experimental original-format
+separate F/A-XX definition and shape family are exported with discrete flap/rudder/hook poses. Its
+[fitted export contract](fa-xx-export.md) records the differences, resource
+requirements and unknown original-game operation. The
+[packaging baseline](../baselines/fa-xx-packaging.md) records validation.

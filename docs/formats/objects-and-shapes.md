@@ -14,6 +14,11 @@ by the F-22 rig before use. Its split leaves reuse the existing flap faces and
 texture coordinates; the imported source data is unchanged. Damaged-body fin
 faces are F22_A.SH 3365/3388 and F22_C.SH 2abf/2ae2/2c8a/2cad.
 The concept inherits F-22's C/D damage selection; D contains no vertical fin.
+The original-format exporter also removes the indexed decal faces 351e and 386f
+from the intact F22.SH. They use texture-index slots 1 and 0 respectively, with
+source z=9..25 on the fin planes. The gameplay projection omits indexed materials;
+export validation now retains their geometry with unresolved material labels so
+that separate fin artwork cannot evade its removal checks.
 
 > **Research notes, research mode.** Recovered facts about the original
 > game's data and code, kept as evidence. Requirements, gates and remaining
@@ -226,7 +231,10 @@ slots, face lengths, relative branch targets, native re-entry addresses,
 relocations, section sizes, normals, centers and visibility planes. An OBJ
 re-export alone cannot preserve that contract. A safe first writer would need
 an unchanged-input byte round trip and explicit rejection of unhandled records.
-No such general writer is implemented here.
+No such general writer is implemented here. The external OpenFA compiler has
+passed exact F22 and V22 round trips in the [F/A-XX packaging review](../baselines/fa-xx-packaging.md).
+The [F/A-XX export adapter](../spec/fa-xx-export.md) now writes reviewed donor
+modifications and validates decoded poses. Original-game loading remains unverified.
 
 ## 5. Attachment points are not interchangeable
 

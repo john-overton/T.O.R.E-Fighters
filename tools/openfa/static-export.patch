@@ -1,0 +1,108 @@
+diff --git a/apps/ofa-tools/src/main.rs b/apps/ofa-tools/src/main.rs
+index 8ebc506..284584b 100644
+--- a/apps/ofa-tools/src/main.rs
++++ b/apps/ofa-tools/src/main.rs
+@@ -110,48 +110,12 @@ enum Commands {
+ static PANIC_CAPTURE: Mutex<Option<(String, Backtrace)>> = Mutex::new(None);
+
+ fn main() -> Result<()> {
+-    // Safety: We're not going to stick around after a panic, we just want
+-    //         to know when we unwound so that we can report the stack we
+-    //         captured in the panic handler.
+-    panic::set_hook(Box::new(|info| {
+-        *PANIC_CAPTURE.lock().unwrap() = Some((info.to_string(), Backtrace::capture()));
+-    }));
+-    let panout = panic::catch_unwind(panic::AssertUnwindSafe(main_inner));
+-    let result = panout.unwrap_or_else(|e| {
+-        let mut capture = None;
+-        std::mem::swap(&mut *PANIC_CAPTURE.lock().unwrap(), &mut capture);
+-        let message = match capture {
+-            None => {
+-                format!(
+-                    "failed to capture panic, all we have is: {}",
+-                    e.downcast::<&str>().unwrap_or_else(|_| Box::new("nothing"))
+-                )
+-            }
+-            Some((message, bt)) => {
+-                println!("{bt}");
+-                message
+-            }
+-        };
+-        println!("{message}");
+-        msgbox::create(
+-            "Don't Panic!",
+-            &format!(
+-                "ofa-tools encountered more errors than it was prepared to handle.\n{message}"
+-            ),
+-            msgbox::IconType::Error,
+-        )
+-        .ok();
+-        Ok(())
+-    });
+-    if let Err(e) = &result {
+-        msgbox::create(
+-            "Something Unexpected Occurred",
+-            &format!("ofa-tools encountered a problem:\n{e}"),
+-            msgbox::IconType::Error,
+-        )
+-        .ok();
++    if env::args().nth(1).as_deref() == Some("--tore-static-export-version") {
++        anyhow::ensure!(::sh::STATIC_EXPORT, "static-export feature required");
++        println!("tore-static-export-v1");
++        return Ok(());
+     }
+-    result
++    main_inner()
+ }
+
+ fn main_inner() -> Result<()> {
+diff --git a/crates/asset/sh/Cargo.toml b/crates/asset/sh/Cargo.toml
+index 2ab0423..dda8248 100644
+--- a/crates/asset/sh/Cargo.toml
++++ b/crates/asset/sh/Cargo.toml
+@@ -47,3 +47,6 @@ absolute_unit.workspace = true
+ catalog.workspace = true
+ geometry.workspace = true
+ installations.workspace = true
++
++[features]
++static-export = []
+diff --git a/crates/asset/sh/src/lib.rs b/crates/asset/sh/src/lib.rs
+index 4c323e5..bc05463 100644
+--- a/crates/asset/sh/src/lib.rs
++++ b/crates/asset/sh/src/lib.rs
+@@ -43,3 +43,6 @@ pub use crate::{
+ };
+
+ pub const SHAPE_LOAD_BASE: u32 = 0xAA00_0000;
++
++/// True only for the non-executing export build.
++pub const STATIC_EXPORT: bool = cfg!(feature = "static-export");
+diff --git a/crates/asset/sh/src/sh_code.rs b/crates/asset/sh/src/sh_code.rs
+index 6efcfc2..5d57f9f 100644
+--- a/crates/asset/sh/src/sh_code.rs
++++ b/crates/asset/sh/src/sh_code.rs
+@@ -228,7 +228,7 @@ impl CodePtr {
+         let absolute = self.compute_absolute(base)?;
+         let (uuid, usages) = uuid_map
+             .get_mut(&absolute)
+-            .ok_or_else(|| anyhow!("code pointer does not point to anything"))?;
++            .ok_or_else(|| anyhow!("code pointer misses instruction: base {base:04x}, target {absolute:04x}"))?;
+         *usages += 1;
+         *self = Self::Uuid(*uuid);
+         Ok(())
+@@ -883,8 +883,14 @@ impl ShCode {
+         }
+
+         // Run the analysis pass to build the Analysis
++        #[cfg(not(feature = "static-export"))]
+         let (analysis, damage_analysis) =
+             ShAnalysis::analyze(&pe, &instr_map, &mut instrs, gear_layout)?;
++        #[cfg(feature = "static-export")]
++        let (analysis, damage_analysis) = {
++            let _ = gear_layout;
++            (ShAnalysis::default(), None)
++        };
+
+         Ok(Self {
+             time_date_stamp: pe.coff_header().time_date_stamp(),

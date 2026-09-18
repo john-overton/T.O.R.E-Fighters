@@ -161,6 +161,15 @@ python3 tools/extract_assets.py --theater all --exclude-archive 'disc1/LHX/*' --
 
 This discovers and unpacks all supported archives into ignored `.local/extracted/`, preserving archive boundaries and writing a report with hashes. Use `--source` for other media and `--include "*.PIC"` for filtering. The app does not require this full extraction. See [the extraction guide](docs/EXTRACTION.md) for Windows commands, limits, and repeat-run behavior.
 
+## Export aircraft to original FA
+
+The [asset export guide](docs/fa-xx-developer-kit.md) covers the local conversion,
+packing and validation tools, plus Windows installation. The F/A-XX exporter
+creates a separate aircraft definition and shape family, with no F-22 resource
+overrides. John has confirmed flight and the fin-decal fix in original FA.
+The guide documents discrete animation limits and remaining compatibility checks.
+Generated retail-derived files stay local; only tools and specifications ship here.
+
 ## Project guide
 
 - [Roadmap](docs/ROADMAP.md): milestones and what 1:1 means.

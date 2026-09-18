@@ -1,0 +1,19 @@
+{
+  "repository": "https://gitlab.com/openfa/openfa.git",
+  "revision": "7507fef5bbb126302a59cb413e80cadf5c547f9d",
+  "license": "GPL-3.0-only",
+  "files": {
+    "sh.rs": {
+      "upstream_path": "apps/ofa-tools/src/sh.rs",
+      "sha256": "70d1aefd312cae651ea7c81e07b55a1f52b0ee98658c96529ccd690e5f145312"
+    },
+    "lib_ext.rs": {
+      "upstream_path": "apps/ofa-tools/src/lib_ext.rs",
+      "sha256": "ea326258e14f050d428d5ea382d07313d5d992828f4c6649f0bde3881cbd0f87"
+    },
+    "LICENSE": {
+      "upstream_path": "LICENSE",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    }
+  }
+}

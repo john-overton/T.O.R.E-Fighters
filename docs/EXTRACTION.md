@@ -418,3 +418,10 @@ metadata unavailable, reported in `import-report.txt`, without blocking other
 assets or command execution. Missing clips stay silent. This selection belongs
 to the app importer, not the standalone music extraction profile.
 [Data contract and source identity](formats/radio.md).
+
+## Local shape export and repackaging
+
+For reviewed F/A-XX replacement exports and generic SH/YAML or LIB workflows, use
+the [export toolset guide](fa-xx-developer-kit.md). These tools build a patched
+static OpenFA utility under `.local/`; they do not change the extractor's format
+coverage. Generated shapes, archives and editable donor YAML stay local.

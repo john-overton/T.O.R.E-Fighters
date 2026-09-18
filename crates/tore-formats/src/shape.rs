@@ -203,6 +203,14 @@ impl Shape {
         Self::with_state(data, &BTreeMap::new())
     }
     pub fn with_state(data: &[u8], state: &BTreeMap<usize, i32>) -> Result<Self> {
+        Self::project(data, state, false)
+    }
+    /// Export validation follows explicit SH jumps; the gameplay projection stays unchanged.
+    /// This interprets only bounded data records and reviewed state guard patterns, never x86.
+    pub fn with_export_state(data: &[u8], state: &BTreeMap<usize, i32>) -> Result<Self> {
+        Self::project(data, state, true)
+    }
+    fn project(data: &[u8], state: &BTreeMap<usize, i32>, export: bool) -> Result<Self> {
         let (c, base) = module::code(data)?;
         let mut slots = BTreeMap::<usize, [f32; 3]>::new();
         let mut colors = BTreeMap::new();
@@ -233,6 +241,7 @@ impl Shape {
                 break;
             }
             match op {
+                0x48 if export => p = target(p + 4, word(c, p + 2)?, c)?,
                 0x38 => {
                     let t = target(p + 3, word(c, p + 1)?, c)?;
                     if t <= p {
@@ -315,7 +324,12 @@ impl Shape {
                     p += 7;
                 }
                 0xe0 => {
-                    texture = String::new();
+                    // Export checks retain decals even though their runtime material is unknown.
+                    texture = if export {
+                        format!("@indexed:{}", u16_at(c, p + 2)?)
+                    } else {
+                        String::new()
+                    };
                     p += 4;
                 }
                 0xe2 => {
@@ -561,6 +575,33 @@ mod tests {
         c.extend_from_slice(&[0xfc, 0, 0, 100, 0, 3, 0, 1, 2, 0]);
         c
     }
+    #[test]
+    fn export_keeps_indexed_decals_that_gameplay_projection_omits() {
+        let mut code = program();
+        code.pop();
+        code.extend([0xe0, 0, 1, 0]);
+        code.extend([0xfc, 4, 1, 0, 0, 3, 0, 1, 2, 0, 0, 10, 0, 0, 10, 0]);
+        let data = module::fixture(&code);
+        assert_eq!(Shape::parse(&data).unwrap().faces.len(), 1);
+        let exported = Shape::with_export_state(&data, &BTreeMap::new()).unwrap();
+        assert_eq!(exported.faces.len(), 2);
+        assert_eq!(exported.faces[1].texture, "@indexed:1");
+        assert_eq!(exported.faces[1].uv, vec![[0., 0.], [10., 0.], [0., 10.]]);
+    }
+
+    #[test]
+    fn export_jumps_skip_dead_bytes_and_bound_cycles() {
+        let mut code = vec![0x48, 0, 2, 0, 0xfe, 0xfe];
+        code.extend(program());
+        let shape = Shape::with_export_state(&module::fixture(&code), &BTreeMap::new()).unwrap();
+        assert_eq!(shape.faces.len(), 1);
+        assert!(Shape::parse(&module::fixture(&code)).is_err());
+        let loop_code = [0x48, 0, 0xfc, 0xff];
+        assert!(Shape::with_export_state(&module::fixture(&loop_code), &BTreeMap::new()).is_err());
+        let outside = [0x48, 0, 0xff, 0x7f];
+        assert!(Shape::with_export_state(&module::fixture(&outside), &BTreeMap::new()).is_err());
+    }
+
     #[test]
     fn resolve_shared_slots_and_reject_truncations() {
         let c = program();

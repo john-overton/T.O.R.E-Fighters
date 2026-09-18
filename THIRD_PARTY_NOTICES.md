@@ -42,3 +42,12 @@ media; see `docs/formats/menu.md` for provenance and validation scope.
 
 Rust dependency licenses remain those published by their respective authors.
 `Cargo.lock` records the versions used.
+
+## OpenFA export tooling references
+
+`tools/openfa/upstream/sh.rs` and `lib_ext.rs` are unmodified OpenFA 0.2.14
+command sources at revision `7507fef5bbb126302a59cb413e80cadf5c547f9d`,
+from https://gitlab.com/openfa/openfa. They retain their GPL notices; the full
+GPL-3.0 license and source hashes are alongside them. The local static-export
+patch is a T.O.R.E agent-authored modification, not an upstream release.
+OpenFA is built separately under `.local/`, not linked into the game.
