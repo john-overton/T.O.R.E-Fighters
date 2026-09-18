@@ -148,6 +148,7 @@ fn shot(w: &Weapon, mode: LaunchMode, target: Option<u32>) -> Projectile {
     let profile = Profile::for_weapon(w).unwrap();
     Projectile {
         owner: crate::combat::live::PLAYER_OWNER,
+        weapon: None,
         id: 0,
         guidance: Some(Flight::new(profile, mode, target, [0., 1000., 0.])),
         motion: Some(Motion::new(&w.movement, [0., 0., 600.], 1000.)),

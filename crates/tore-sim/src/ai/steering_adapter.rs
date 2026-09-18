@@ -6,8 +6,8 @@
 //! flight-path pitch, speed and bank. This file turns one such intent into the
 //! controls one AI aircraft needs so it can fly its own
 //! [`flight::State`](crate::flight::State) through the same flight model the
-//! player uses. It never writes to a flight state, and it never touches the
-//! player path: stepping the model stays with the caller, and the flight
+//! player uses. The AI-only [`apply_attitude`] boundary then enforces the
+//! requested B44 attitude and updates motion telemetry. The player flight
 //! adapters (`--legacy-flight`, the default `--researched-flight` hybrid and
 //! `--native-flight-tables`) are untouched by anything here.
 //!
@@ -17,7 +17,7 @@
 //! - Reading the actor's attitude out of the flight state, in radians, and
 //!   converting it to the degrees the recovered rules use.
 //! - Asking [`SteeringState::step`] for the rate-limited attitude B44 permits
-//!   this tick. That is a target attitude, not a position write.
+//!   this tick, and enforcing that attitude after the host model advances.
 //! - Mapping the difference between that target and the current attitude onto
 //!   bipolar control deflections, and the speed error onto a throttle setting.
 //!
@@ -110,7 +110,7 @@ impl ControlAdapter {
     /// applies. Returns the controls and every fitted fallback applied.
     ///
     /// `g_limit` and `roll_limit_deg_per_s` are the loaded limits the flight
-    /// model itself uses after damage, hit-point and load reductions, with the
+    /// model supplies, with the documented fitted health reduction and the
     /// AI experience adjustment of [`ai_g_limits`] already applied by the
     /// caller. `maximum_bank_deg` is the aircraft's own maximum bank: it
     /// bounds the bank request and is the B44 reference bank.
@@ -223,6 +223,54 @@ impl ControlAdapter {
             requested,
         })
     }
+}
+
+/// AI-only B44 attitude integration after the aircraft model advances speed,
+/// fuel and systems. Fitted coupling: preserve scalar speed and body offset,
+/// and integrate position along the bounded flight path. Player adapters never
+/// call this boundary.
+pub fn apply_attitude(before: &State, after: &mut State, requested: SteeringState) {
+    after.yaw = requested.heading_deg.to_radians();
+    after.pitch = (requested.flight_path_pitch_deg + requested.body_pitch_offset_deg).to_radians();
+    after.bank = requested.bank_deg.to_radians();
+    let path =
+        crate::attitude::Basis::new(after.yaw, requested.flight_path_pitch_deg.to_radians(), 0.0);
+    after.velocity = path.forward.map(|v| v * after.speed);
+    after.position =
+        std::array::from_fn(|i| before.position[i] + after.velocity[i] * crate::flight::DT);
+    after.vertical_speed = after.velocity[1];
+    after.roll_rate = (after.bank - before.bank + std::f64::consts::PI)
+        .rem_euclid(std::f64::consts::TAU)
+        - std::f64::consts::PI;
+    after.roll_rate /= crate::flight::DT;
+    after.pitch_rate = (after.pitch - before.pitch) / crate::flight::DT;
+    after.auxiliary_rates = [0.0; 3];
+    let old = crate::attitude::Basis::new(before.yaw, before.pitch, before.bank);
+    let new = crate::attitude::Basis::new(after.yaw, after.pitch, after.bank);
+    use crate::attitude::{cross, dot};
+    let crosses = [
+        cross(old.right, new.right),
+        cross(old.up, new.up),
+        cross(old.forward, new.forward),
+    ];
+    let sine: [f64; 3] = std::array::from_fn(|i| crosses.iter().map(|v| v[i]).sum::<f64>() * 0.5);
+    let magnitude = dot(sine, sine).sqrt();
+    let cosine =
+        ((dot(old.right, new.right) + dot(old.up, new.up) + dot(old.forward, new.forward) - 1.0)
+            * 0.5)
+            .clamp(-1.0, 1.0);
+    let rotation = sine.map(|v| v * magnitude.atan2(cosine) / magnitude.max(1e-12));
+    after.maneuver.body_rates_rad_per_second = [
+        -dot(rotation, old.forward) / crate::flight::DT,
+        -dot(rotation, old.right) / crate::flight::DT,
+        dot(rotation, old.up) / crate::flight::DT,
+    ];
+    let acceleration = std::array::from_fn(|i| {
+        (after.velocity[i] - before.velocity[i]) / crate::flight::DT
+            + if i == 1 { 32.174 } else { 0.0 }
+    });
+    after.g = dot(acceleration, new.up) / 32.174;
+    after.maneuver.achieved_g = after.g;
 }
 
 /// The AI-only experience G adjustment ("Other experience effects").

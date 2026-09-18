@@ -221,8 +221,9 @@ On 2026-09-17 those components were joined into a runtime. `controller`
 sequences them per actor and holds the persistent state and one seeded draw
 stream. `fitted` supplies one named rule per unresolved branch so a live actor
 cannot stall, and every use is recorded per actor. `steering_adapter` converts
-a maneuver into controls for that actor's own flight model and applies the
-AI-only experience G adjustment. `mission` gives each actor its own sensors,
+a maneuver into controls for that actor's own flight model, then enforces the
+B44 attitude request through a fitted integration boundary. The AI-only
+experience G adjustment and fitted damage scaling feed its achieved bounds. `mission` gives each actor its own sensors,
 stores, flight model and decision state, debits ammunition before emitting a
 launch event, and does not duplicate missile physics. `launch` carries the
 Quick Mission payload.
@@ -233,22 +234,47 @@ comparison was available.
 
 ### Headless scenarios exercised
 
-- 1v1 for each of the twelve ported aircraft at all four experience levels,
-  with every position finite throughout.
-- 2v2 with leaders and wingmen.
-- Identical results across repeated runs at the same seed, and divergence
-  across different seeds.
-- Missiles selected and launched at range, and the guided store actually
-  chosen rather than the gun.
-- Launch warnings delivered only to the aircraft each missile names, with
-  countermeasures released from the actor's own dispensers by matching class
-  only.
-- Wing orders: break changing a wingman's heading in the world, formation and
-  spacing applied as settings, engage assigning the named target.
-- Fuel: bingo turning an actor for home, and out of fuel reported.
-- Negative cases: never targeting itself or its own side, empty and inhibited
-  stores never producing a launch, a destroyed actor ceasing to fly, and no
-  duplicate weapon request identity.
+The 2026-09-17 defect repair pass adds regression coverage at the controller,
+mission and live combat boundaries. These tests establish the stated conditions,
+not retail parity or full gameplay acceptance.
+
+| Review item | Validation |
+| --- | --- |
+| AI-01 | Step combat then the real bridge for 1500 ticks, twice from fresh state; destroyed airframe falls from 1000 ft, reaches ground and stops |
+| AI-02 | Lateral pursuit points toward the target and follows a moved target without changing maneuver identity; a break keeps its own heading |
+| AI-03 | Fresh reports at every experience level, distances 0, 10559, 10560, 211200 and 211201 ft; no early reaction, one due delivery |
+| AI-04 | Deplete one missile, then two ten-round synthetic gun releases through the bridge; each projectile retains its own weapon. A station absent from the player configuration still simulates safely |
+| AI-05 | Negative angle, minimum/maximum range, emission, sensor support and terrain gates; a ridge between live mission actors prevents releases without ammunition loss |
+| AI-06 | Individual releases at ticks 0 and 30, third stopped by depletion; live decoy affects only matching missiles targeting the releaser and creates an effect |
+| AI-07 | All twelve distinct model variants tested over roll-in and reversal, at full and quarter health; achieved roll and heading changes stay inside supplied B44 bounds |
+| AI-08 | Same-wing assignments change live ranking; another wing's assignment does not contribute |
+| AI-09 | Aligned/failed-envelope station inputs and end-to-end equal-store selection, without rewarding narrower cones |
+| AI-10 | All 36 saved/new priority pairs preserve or replace active motion as specified |
+| AI-11 | Player keyboard dispatch, receiver motion and same-side/same-wing isolation; automatic requests dispatched after the decision pass |
+| AI-12 | 48 synthetic combinations construct each exact aircraft model with distinct envelope data and stores; separate imported-media pass below |
+| AI-13 | Claims corrected to distinguish isolated arithmetic, boundary regressions, imported-media probes and visual acceptance; authored rules indexed in provenance |
+| AI-14 | Reconciled B47 prose with the existing source map: attack-state terms are base delays, with distance and experience added. No behavioral change |
+
+Existing tests also cover deterministic repeated runs, 2v2, independent actors,
+self/friendly exclusion, finite ammunition, unique request identities, bingo
+fuel and out-of-fuel activity.
+
+### Imported aircraft validation
+
+`target/debug/tore-app --ai-roster-probe-ticks 3600 --no-audio` passed all 48
+combinations of twelve exact aircraft identities and four experience levels.
+Each case steps two imported AI models for 30 simulation seconds, through
+combat and the bridge, checking finite position every tick and measuring
+achieved heading and bank changes. Imported PT, weapon and sensor records are
+used, including `F18.PT` for the F/A-18D and `RAFALE.PT` for the Rafale C.
+The FA.EXE and FA_2.LIB hashes were rechecked against the build table above.
+
+The pass created 87 projectiles and dropped none. Maximum measured bank rate
+was 45.000 degrees/second and heading rate 12.018 degrees/second. All cases
+loaded their own gun and default stations; radar and optional infrared fit
+were reported per aircraft. Zero launches in some combinations are not a
+failure or proof of combat effectiveness. This is finite-duration integration
+validation, not seeker lifecycle, victory, or retail trajectory acceptance.
 
 ## What this establishes
 
@@ -267,21 +293,23 @@ unresolved component implemented by choice must be labeled fitted or opinionated
 
 ## Repository validation
 
-All required repository checks passed on the current Linux host after the
-2026-09-17 implementation pass:
+The completed 2026-09-17 repair pass passed the required checks on Linux:
 
-- `cargo fmt --all -- --check`
-- `cargo clippy --workspace --all-targets --locked -- -D warnings`
-- `cargo test --workspace --locked`: 707 Rust tests passed, none ignored, of
-  which 205 are the new `tore-sim::ai` synthetic tests.
-- `cargo build --workspace --locked`
-- `python3 -m unittest discover -s tools -p 'test_*.py'`: 40 tests passed.
-- `python3 tools/check_assets.py`, including separate scans of
-  `target/debug/tore-app` and `target/debug/tore-extract`.
+- `cargo fmt --all -- --check`.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`.
+- `cargo test --workspace --locked`: 836 Rust tests, none ignored.
+- `cargo build --workspace --locked`.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: 40 tests.
+- `python3 tools/check_assets.py`, plus scans of `target/debug/tore-app`
+  and `target/debug/tore-extract`.
 - `python3 tools/check_docs.py`.
+- `cargo run --locked -p tore-app -- --smoke-test`: requested screen presented
+  on NVIDIA GeForce RTX 4070, Vulkan.
 
-Logs are local in `.local/ai-research/checks/`. The AI tests check the
-specified numbers and transitions of isolated components; they do not
-validate flown behavior, since no controller is hooked into live missions.
-No rendering smoke is required for this change. No Windows or macOS execution
-or visual/gameplay acceptance was performed.
+Repair logs are local in `.local/ai-defect-validation/`. The renderer smoke is
+startup/presentation evidence, not visual acceptance of all wing maneuvers,
+projectile shapes or countermeasure effects. Windows and macOS were not run.
+Full retail combat comparison remains unavailable. AI missile seeker activation
+and pitbull, remaining original maneuver shapes, and the B12 wing-approach
+producer remain open. Fitted control coupling, damage authority, device visuals
+and coasting are specified in the [live integration rules](../spec/ai.md#live-integration-and-authored-boundaries).

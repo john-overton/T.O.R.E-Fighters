@@ -97,8 +97,9 @@ warnings, countermeasures, routes and fuel closed on 2026-09-17. The same day
 the components were joined into a per-actor controller, given actor-owned
 sensors, stores and flight models, and hooked into Quick Mission. Creator
 launches now enable AI by default with separate wing formations; the explicit
-`--fixture-wings` option retains straight-flight practice. The reviewed combat
-integration gaps still need implementation fixes. Next research is seeker envelopes and store selection, the
+`--fixture-wings` option retains straight-flight practice. The reviewed runtime defects have regression coverage, including falling wrecks,
+pursuit, warnings, owned weapons, device timing and wing commands. Full AI seeker
+activation and pitbull remain open. Next research is the
 remaining tactics that currently run on named fitted rules, and surface
 classes; next implementation is surface actors and the other aircraft
 families, which the controller rejects today rather than serving fighter

@@ -343,10 +343,7 @@ pub fn debug(
             .unwrap_or(f.profile.guidance_ticks)
             .saturating_sub(shot.age) as f64
             / 120.;
-        let motor = match missiles::phase(
-            &state.configuration().stations[shot.station].weapon.movement,
-            shot.age,
-        ) {
+        let motor = match missiles::phase(&shot.weapon(state.configuration()).movement, shot.age) {
             tore_sim::combat::EnginePhase::BeforeIgnition => "WAIT",
             tore_sim::combat::EnginePhase::Powered => "BURN",
             tore_sim::combat::EnginePhase::Coast => "COAST",
@@ -356,7 +353,7 @@ pub fn debug(
             &format!(
                 "#{} {} {} {motor} {remaining:.0}S",
                 shot.id,
-                state.configuration().stations[shot.station].weapon.hud_name,
+                shot.weapon(state.configuration()).hud_name,
                 if f.seeker.status == Status::Search && f.profile.guidance != Guidance::Active {
                     "SEARCH"
                 } else {

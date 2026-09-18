@@ -420,6 +420,29 @@ impl App {
                 .message("Environmental turbulence is unavailable in native research flight");
         }
         match command {
+            Command::Wing(_) | Command::WingEngage => {
+                if self.flight_ui.frozen() {
+                    return Action::None;
+                }
+                use tore_sim::ai::wing::{TargetId, TargetOrder, WingRequest};
+                let request = match command {
+                    Command::Wing(request) => Some(request),
+                    _ => self.combat.state.designated().map(|id| {
+                        WingRequest::TargetAssignment(TargetOrder::ConcreteTarget(TargetId(id)))
+                    }),
+                };
+                let result = request.and_then(|request| {
+                    self.ai_wings
+                        .as_mut()
+                        .map(|bridge| bridge.player_order(request))
+                });
+                self.flight_ui.message(match result {
+                    Some(Ok(n)) if n > 0 => format!("Order sent to {n} wingmen"),
+                    Some(Err(error)) => error.to_string(),
+                    _ => "Wing order unavailable: no wingmen or designated target".to_owned(),
+                });
+                Action::Click
+            }
             Command::None => Action::None,
             Command::Click => Action::Click,
             Command::End => Action::Back,
@@ -1971,6 +1994,7 @@ fn main() -> AppResult<()> {
     let mut ai_wings_enabled = false;
     let mut fixture_wings = false;
     let mut ai_probe = None;
+    let mut ai_roster_probe = false;
     // Session only. `docs/spec/ai-experience.md` records the flight-menu
     // enemy-skill preference's persistence as untraced, so this setting is not
     // written to the preferences file and does not survive a restart.
@@ -2098,7 +2122,8 @@ fn main() -> AppResult<()> {
                     },
                 );
             }
-            "--ai-probe-ticks" => {
+            "--ai-probe-ticks" | "--ai-roster-probe-ticks" => {
+                ai_roster_probe = arg == "--ai-roster-probe-ticks";
                 let ticks: usize = args
                     .next()
                     .ok_or("--ai-probe-ticks requires 1..72000")?
@@ -2858,6 +2883,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         quick_mission::QuickMission::new(aircraft_id, creator_options.clone(), &theater_resources);
     quick.theater(selection);
     if let Some(ticks) = ai_probe {
+        if ai_roster_probe {
+            return ai_wings::roster_probe(ticks, &theater_resources, &world);
+        }
         return ai_probe_run(
             ticks,
             &mut quick,

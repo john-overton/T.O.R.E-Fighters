@@ -66,10 +66,31 @@ pub struct Combat {
     dummy_configs: Vec<live::Configuration>,
     pub recorder: Option<crate::combat_tape::Recorder>,
     last_launcher: Option<Launcher>,
-    shapes: Vec<Option<Shape>>,
+    shapes: BTreeMap<String, Shape>,
     explosions: Vec<Vec<([f32; 2], [f32; 3])>>,
     ground_impacts: Vec<Vec<([f32; 2], [f32; 3])>>,
 }
+fn weapon_shapes(
+    config: &live::Configuration,
+    data: &BTreeMap<String, Vec<u8>>,
+) -> BTreeMap<String, Shape> {
+    config
+        .stations
+        .iter()
+        .filter_map(|station| {
+            let name = station.weapon.shape.as_ref()?;
+            let shape = data
+                .get(name)
+                .and_then(|bytes| Shape::parse(bytes).ok())
+                .filter(|shape| !shape.faces.is_empty());
+            if shape.is_none() {
+                eprintln!("Combat: {name} uses a tracer marker; line/point drawing remains open");
+            }
+            shape.map(|shape| (name.clone(), shape))
+        })
+        .collect()
+}
+
 pub fn launcher(s: &flight::State) -> Launcher {
     Launcher {
         position: s.position,
@@ -116,12 +137,7 @@ impl Combat {
         config: live::Configuration,
         initial_ammo: Option<Vec<u16>>,
     ) -> AppResult<Self> {
-        let shapes = config.stations.iter().map(|s| s.weapon.shape.as_ref().and_then(|name| {
-            match data.get(name).ok_or("missing shape".to_string()).and_then(|b| Shape::parse(b).map_err(|e| e.to_string())) {
-                Ok(shape) if !shape.faces.is_empty() => Some(shape),
-                _ => {eprintln!("Combat: {name} uses a tracer marker; native line/point drawing remains open");None}
-            }
-        })).collect();
+        let shapes = weapon_shapes(&config, data);
         let pic = Pic::parse(
             data.get("AIRLRG.PIC")
                 .ok_or("missing AIRLRG.PIC combat art")?,
@@ -245,6 +261,8 @@ impl Combat {
                             .cloned()
                             .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
                     })?);
+                self.shapes
+                    .extend(weapon_shapes(self.dummy_configs.last().unwrap(), data));
                 self.dummy_models.push(h);
                 self.dummy_models.len() - 1
             };
@@ -534,7 +552,12 @@ impl Combat {
         // rendering pass. Loadout/flight state and launched projectiles remain
         // independent of this presentation decision in every camera.
         for p in &self.state.projectiles {
-            if let Some(shape) = &self.shapes[p.station] {
+            if let Some(shape) = p
+                .weapon(self.state.configuration())
+                .shape
+                .as_ref()
+                .and_then(|name| self.shapes.get(name))
+            {
                 let right = unit([p.direction[2], 0., -p.direction[0]]);
                 mesh(
                     &mut v,
@@ -561,6 +584,29 @@ impl Combat {
         );
         for e in &self.state.effects {
             if e.kind == EffectKind::Launch {
+                continue;
+            }
+            if matches!(e.kind, EffectKind::Flare | EffectKind::Chaff) {
+                let color = if e.kind == EffectKind::Flare {
+                    [1.0, 0.8, 0.3]
+                } else {
+                    [0.7, 0.8, 0.9]
+                };
+                // Fitted presentation: a small expanding camera-facing device glint.
+                let size = 2.0 + f64::from(45 - e.ticks) * 0.15;
+                for [x, y] in [
+                    [-1., -1.],
+                    [1., -1.],
+                    [1., 1.],
+                    [-1., -1.],
+                    [1., 1.],
+                    [-1., 1.],
+                ] {
+                    let pos = std::array::from_fn(|i| {
+                        e.position[i] + basis.right[i] * x * size + basis.up[i] * y * size
+                    });
+                    vertex(&mut v, pos, color);
+                }
                 continue;
             }
             let scale = if e.kind == EffectKind::Destroyed {

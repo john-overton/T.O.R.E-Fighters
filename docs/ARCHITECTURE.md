@@ -240,3 +240,11 @@ pieces at 120 Hz with inherited velocity, gravity and tumble. First swept terrai
 contact retires a piece and creates a short visual ground impact. The runtime
 atlas also contains the matching fragment textures. Fragment state belongs to
 combat simulation, so replay and rendering consume the same breakup lifecycle.
+
+Quick Mission's `ai_wings` bridge mirrors live actor poses and damage, while
+combat retains movement ownership of wrecks. Each AI projectile carries its
+own weapon record; rendering resolves its shape by resource name, independent
+of the player's station numbering. The simulation owns delayed warnings,
+individual dispenser releases and scoped wing requests. The app realizes
+those events in the existing projectile and effect services. See the
+[AI integration contract](spec/ai.md#live-integration-and-authored-boundaries).

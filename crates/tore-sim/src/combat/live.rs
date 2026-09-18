@@ -384,6 +384,8 @@ pub struct Projectile {
     /// actor's id. Score counters are attributed with it, so an AI aircraft
     /// killing another AI aircraft does not credit the player.
     pub owner: u32,
+    /// Actor-owned weapon for AI releases; player shots use the configured station.
+    pub weapon: Option<Weapon>,
     pub guidance: Option<Flight>,
     pub motion: Option<Motion>,
     pub guidance_ticks: Option<u64>,
@@ -398,8 +400,17 @@ pub struct Projectile {
     pub target: Option<u32>,
     pub fall: FallState,
 }
+impl Projectile {
+    pub fn weapon<'a>(&'a self, config: &'a Configuration) -> &'a Weapon {
+        self.weapon
+            .as_ref()
+            .unwrap_or_else(|| &config.stations[self.station].weapon)
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EffectKind {
+    Flare,
+    Chaff,
     Launch,
     Hit,
     Destroyed,
@@ -661,6 +672,7 @@ impl State {
                     self.projectiles.push(Projectile {
                         id: self.shots,
                         owner: PLAYER_OWNER,
+                        weapon: None,
                         guidance: None,
                         motion: None,
                         guidance_ticks: None,
@@ -1482,6 +1494,7 @@ impl State {
                 self.projectiles.push(Projectile {
                     id: self.shots,
                     owner: PLAYER_OWNER,
+                    weapon: None,
                     guidance,
                     guidance_ticks: (self.weapon_rules == Rules::Spec)
                         .then(|| missiles::Profile::for_weapon(w).map(|p| p.guidance_ticks))
@@ -1571,7 +1584,10 @@ impl State {
         let mut impacts = Vec::new();
         let mut sources = Vec::new();
         self.projectiles.retain_mut(|p| {
-            let w = &self.config.stations[p.station].weapon;
+            let owned = p.weapon.clone();
+            let w = owned
+                .as_ref()
+                .unwrap_or_else(|| &self.config.stations[p.station].weapon);
             let m = &w.movement;
             if if p.motion.is_some() {
                 missiles::removed(m, p.age) || p.position[1] > 100000.
@@ -1619,7 +1635,13 @@ impl State {
                 }) {
                     // Required illumination is specific to this missile's own
                     // target, never to whatever the cockpit has selected now.
-                    let supported = p.incoming || self.sensors.supports(t.id);
+                    let supported = if p.weapon.is_some() {
+                        self.targets.iter().any(|owner| {
+                            owner.id == p.owner && owner.hp > 0 && owner.radar_emitting
+                        })
+                    } else {
+                        p.incoming || self.sensors.supports(t.id)
+                    };
                     if acquisition(w, p.position, p.direction, t.position, supported, 0)
                         && terrain_hit(p.position, t.position, &ground).is_none()
                     {
@@ -1935,7 +1957,7 @@ pub fn segment_sphere(a: Vector, b: Vector, radius: f64) -> Option<f64> {
     let t = (-bb - disc.sqrt()) / aa;
     (0. ..=1.).contains(&t).then_some(t)
 }
-pub(super) fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f64) -> Option<f64> {
+pub(crate) fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f64) -> Option<f64> {
     let below = |t: f64| {
         let p: Vector = std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t);
         p[1] <= ground(p[0], p[2])

@@ -26,7 +26,8 @@ See the [behavior spec](spec/additional-aircraft.md) and
 USNF-ATF supplies research guidance only. Its mixed-edition profiles and toolkit
 SWPATCH F-14 exterior are not used. Exact wing-sweep flight effects, X-31 thrust
 vectoring, damage/LOD/shadow shapes and complete systems parity remain open.
-No AI work is included. Existing flight adapter defaults remain unchanged.
+Quick Mission AI uses these exact imported profiles and their PT default weapon
+and ECM records. Existing player flight adapter defaults remain unchanged.
 
 The next requested batch adds **MiG-29 Fulcrum-C, Su-27 Flanker-B, MiG-21
 Fishbed, Su-25 Frogfoot-A, MiG-23 Flogger-B, Su-35 and F-22A Raptor** as initial

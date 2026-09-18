@@ -5,6 +5,8 @@ use tore_formats::{font::Font, ui::MenuNode};
 use tore_input::Switch;
 #[derive(Debug, PartialEq)]
 pub enum Command {
+    Wing(tore_sim::ai::wing::WingRequest),
+    WingEngage,
     None,
     NextWeapon,
     Target,
@@ -309,6 +311,21 @@ impl FlightUi {
             return Command::None;
         }
         if alt && !ctrl && !shift {
+            use tore_sim::ai::wing::{Formation, PlayerBreak, TargetOrder, WingRequest};
+            // Opinionated host bindings for the implemented wing commands.
+            match key {
+                "b" => return Command::Wing(PlayerBreak::Left.request()),
+                "e" => return Command::WingEngage,
+                "d" => return Command::Wing(WingRequest::TargetAssignment(TargetOrder::HoldFire)),
+                "1" => return Command::Wing(WingRequest::FormationSelection(Formation::Echelon)),
+                "2" => {
+                    return Command::Wing(WingRequest::FormationSelection(Formation::LineAbreast));
+                }
+                "3" => {
+                    return Command::Wing(WingRequest::FormationSelection(Formation::LineAstern));
+                }
+                _ => {}
+            }
             if key.starts_with('F') {
                 return self.unavailable("Target-relative camera (no target)");
             }
@@ -910,5 +927,19 @@ mod tests {
                 Command::Combat(_)
             ));
         }
+    }
+    #[test]
+    fn player_wing_keys_produce_live_orders() {
+        use tore_sim::ai::wing::{Formation, PlayerBreak, WingRequest};
+        let mut ui = FlightUi::default();
+        assert_eq!(
+            ui.key("b", false, false, true, &[]),
+            Command::Wing(PlayerBreak::Left.request())
+        );
+        assert_eq!(ui.key("e", false, false, true, &[]), Command::WingEngage);
+        assert_eq!(
+            ui.key("2", false, false, true, &[]),
+            Command::Wing(WingRequest::FormationSelection(Formation::LineAbreast))
+        );
     }
 }

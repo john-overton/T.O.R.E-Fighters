@@ -4,9 +4,8 @@
 //! simulation. Each [`AiActor`] owns its own [`flight::State`], its own
 //! [`Sensors`], its own stores and its own [`Controller`]. Nothing here reads
 //! the player's combat state, the player's sensors or any shared global, and
-//! nothing here writes a position directly: motion goes through
-//! [`steering_adapter`](super::steering_adapter) and the actor's own flight
-//! model, exactly as M1e AI-5 requires.
+//! motion goes through the actor's own flight model, followed by the AI-only
+//! B44 attitude boundary in [`steering_adapter`](super::steering_adapter).
 //!
 //! **Missile physics are not duplicated.** AI-5's exit evidence forbids it. A
 //! weapon release produces a [`LaunchEvent`] after this module has debited the
@@ -67,6 +66,11 @@ pub struct StationSpec {
     pub pacing: ProjectilePacing,
     /// Maximum employment range, feet. `None` leaves the bound unrestricted.
     pub maximum_range_ft: Option<f64>,
+    pub minimum_range_ft: f64,
+    pub requires_radar: bool,
+    pub requires_sensor: bool,
+    pub employment_zone: Option<tore_formats::weapons::Zone>,
+    pub mount: [f64; 3],
 }
 
 impl StationSpec {
@@ -137,6 +141,7 @@ pub struct MissionOutput {
     pub activities: Vec<(u32, Activity)>,
     /// Every fitted fallback applied this tick, by actor.
     pub fallbacks: Vec<(u32, Fallback)>,
+    pub wing: Vec<(u32, super::wing::WingRequest)>,
 }
 
 /// Everything needed to build one AI aircraft.
@@ -168,6 +173,7 @@ pub struct AiActor {
     home_airport: Option<super::route::Position>,
     pending_threats: Vec<ThreatReport>,
     pending_events: Vec<FrameEvent>,
+    device_schedule: Vec<(u64, SeekerClass, u8)>,
     activity: Activity,
     last_input: PilotInput,
     alive: bool,
@@ -189,6 +195,7 @@ impl AiActor {
             home_airport: setup.home_airport,
             pending_threats: Vec::new(),
             pending_events: Vec::new(),
+            device_schedule: Vec::new(),
             activity: Activity::Idle,
             last_input: PilotInput::default(),
             alive: true,
@@ -221,6 +228,14 @@ impl AiActor {
 
     pub fn stations(&self) -> &[StationSpec] {
         &self.stations
+    }
+
+    pub fn set_stations(&mut self, stations: Vec<StationSpec>) {
+        self.stations = stations;
+    }
+
+    pub fn set_dispensers(&mut self, dispensers: Vec<DispenserStore>) {
+        self.dispensers = dispensers;
     }
 
     pub fn dispensers(&self) -> &[DispenserStore] {
@@ -384,6 +399,14 @@ impl AiMission {
             self.step_actor(index, world, ground, now, tick, &mut output)?;
         }
 
+        // Deliver after all actors have decided, so iteration order cannot
+        // change which wing members observe a new command this tick.
+        for (sender, request) in &output.wing {
+            if let Some(actor) = self.actor(*sender) {
+                let identity = *actor.identity();
+                self.order_wing(identity.side, identity.wing, Some(*sender), *request)?;
+            }
+        }
         self.tick += 1;
         Ok(output)
     }
@@ -400,6 +423,18 @@ impl AiMission {
         let actor_id = self.actors[index].id();
         let leader = self.leader_view(index, world);
 
+        let identity = self.actors[index].identity;
+        let assignments: Vec<u32> = self
+            .actors
+            .iter()
+            .filter(|a| {
+                a.alive()
+                    && a.id() != actor_id
+                    && a.identity.side == identity.side
+                    && a.identity.wing == identity.wing
+            })
+            .filter_map(|a| a.controller.target())
+            .collect();
         let actor = &mut self.actors[index];
         if !actor.alive() {
             actor.activity = Activity::Destroyed;
@@ -415,7 +450,16 @@ impl AiMission {
 
         // 3. The frame.
         let events = actor.drain_events(tick);
-        let targets = actor.target_views(&permitted, world);
+        let mut targets = actor.target_views(&permitted, world);
+        for target in &mut targets {
+            target.wing_attackers =
+                assignments.iter().filter(|id| **id == target.id).count() as u32;
+            target.terrain_blocked =
+                crate::combat::live::terrain_hit(own.position, target.position, &|x, z| {
+                    ground(x, z)
+                })
+                .is_some();
+        }
         let stations = actor.station_views(&targets, &own);
         let wing = WingView {
             control: self.wing_control,
@@ -456,6 +500,14 @@ impl AiMission {
             actor.controller.step(&frame)?
         };
 
+        if let Some(sensors) = &mut actor.sensors
+            && let Some(target) = batch.sensor.designate
+        {
+            sensors.designate(target);
+        }
+        output
+            .wing
+            .extend(batch.wing.iter().map(|request| (actor_id, *request)));
         for fallback in &batch.fallbacks {
             output.fallbacks.push((actor_id, *fallback));
         }
@@ -471,11 +523,26 @@ impl AiMission {
             }
         }
 
-        // 5. Countermeasures: debit this actor's own dispensers.
-        if let Some(devices) = batch.devices
-            && let Some(event) = actor.release_devices(devices.class, devices.count)
-        {
-            output.devices.push(event);
+        // B47: debit each device only when its quarter-second release is due.
+        if let Some(devices) = batch.devices {
+            actor
+                .device_schedule
+                .push((tick, devices.class, devices.count));
+        }
+        let schedule = std::mem::take(&mut actor.device_schedule);
+        for (due, class, remaining) in schedule {
+            if tick < due {
+                actor.device_schedule.push((due, class, remaining));
+            } else if let Some(event) = actor.release_devices(class, 1) {
+                output.devices.push(event);
+                if remaining > 1 {
+                    actor.device_schedule.push((
+                        due + super::QUARTER_SECOND_TICKS,
+                        class,
+                        remaining - 1,
+                    ));
+                }
+            }
         }
 
         // 6. Motion through the adapter and this actor's own flight model.
@@ -531,6 +598,34 @@ impl AiMission {
     ) -> Option<Result<super::wing::ReceiverOutcome>> {
         let tick = self.tick;
         self.actor_mut(actor).map(|a| a.order(request, tick))
+    }
+
+    /// A command stays inside the identified side and wing.
+    pub fn order_wing(
+        &mut self,
+        side: super::targeting::Side,
+        wing: u8,
+        sender: Option<u32>,
+        request: super::wing::WingRequest,
+    ) -> Result<usize> {
+        let mut delivered = 0;
+        for actor in &mut self.actors {
+            if actor.alive()
+                && actor.identity.side == side
+                && actor.identity.wing == wing
+                && (Some(actor.id()) != sender
+                    || matches!(
+                        request,
+                        super::wing::WingRequest::Spacing { .. }
+                            | super::wing::WingRequest::FormationSelection(_)
+                            | super::wing::WingRequest::WingControl(_)
+                    ))
+            {
+                actor.order(request, self.tick)?;
+                delivered += 1;
+            }
+        }
+        Ok(delivered)
     }
 
     pub fn set_formation(&mut self, formation: Formation) {
@@ -633,7 +728,8 @@ impl AiActor {
                 .configuration()
                 .aerodynamics
                 .roll_limit_rad_per_second
-                .to_degrees(),
+                .to_degrees()
+                * self.control_health(),
             maximum_bank_deg: MAXIMUM_BANK_DEG,
             alive: self.alive(),
             fuel_endurance_s: self.endurance_s(),
@@ -714,12 +810,26 @@ impl AiActor {
                 available = envelope.g;
             }
         }
-        ai_g_limits(
+        let config = self.flight.model().configuration();
+        let loading = (self.flight.fuel + self.flight.payload_lbs) / config.mass.empty_lbs;
+        let loaded = f64::from(available.max(1))
+            / (1.0 + loading * config.aerodynamics.loaded_elevator_percent / 100.0);
+        let (positive, negative) = ai_g_limits(
             self.controller.experience().level,
-            f64::from(available.max(1)),
-            -f64::from(available.max(1)) / 2.0,
+            loaded,
+            -loaded / 2.0,
             self.identity.human_controlled,
+        );
+        (
+            positive * self.control_health(),
+            negative * self.control_health(),
         )
+    }
+
+    /// Fitted until axis-specific AI damage is imported: remaining airframe
+    /// health scales both pitch and roll authority linearly.
+    fn control_health(&self) -> f64 {
+        (1.0 - self.flight.damage_fraction).clamp(0.0, 1.0)
     }
 
     /// B48 endurance at cruise, seconds.
@@ -770,6 +880,10 @@ impl AiActor {
                 seeker_eligible: self.seeker_eligible(o),
                 wing_attackers: 0,
                 terrain_blocked: false,
+                sensor_supported: self
+                    .sensors
+                    .as_ref()
+                    .is_none_or(|sensor| sensor.supports(o.id)),
             })
             .collect()
     }
@@ -813,7 +927,7 @@ impl AiActor {
                 let pointing = target
                     .map(|t| pointing_error_deg(own, t.position))
                     .unwrap_or(180.0);
-                StationView {
+                let mut view = StationView {
                     station: s.station,
                     guided: s.guided,
                     capability: s.capability,
@@ -823,12 +937,21 @@ impl AiActor {
                     employment_limit_deg: s.employment_limit_deg,
                     employment_fit: s
                         .employment_limit_deg
-                        .map(|limit| (limit - pointing).max(0.0)),
+                        .is_none_or(|limit| pointing <= limit)
+                        .then_some(pointing),
+                    minimum_range_ft: s.minimum_range_ft,
+                    maximum_range_ft: s.maximum_range_ft,
+                    requires_radar: s.requires_radar,
+                    requires_sensor: s.requires_sensor,
+                    employment_zone: s.employment_zone,
+                    mount: s.mount,
                     damage_vs_category: s.damage_vs_category,
                     store_speed: s.store_speed,
                     tracking_delay: s.tracking_delay,
                     pacing: s.pacing,
-                }
+                };
+                view.employment_fit = target.and_then(|target| view.employment_error(own, target));
+                view
             })
             .collect()
     }
@@ -897,20 +1020,18 @@ impl AiActor {
     }
 
     /// Convert this tick's maneuver into controls and step this actor's own
-    /// flight model. Never writes a position.
+    /// flight model, then enforce B44 achieved attitude and motion.
     fn fly(
         &mut self,
         intent: Option<&MotionIntent>,
         own: &OwnState,
         ground: &dyn Fn(f64, f64) -> f64,
     ) -> Result<()> {
+        let before = self.flight.clone();
+        let mut requested = None;
         let input = match intent {
             Some(intent) => {
-                let floor = self
-                    .controller
-                    .terrain_floor(&dummy_frame(own))
-                    .ok()
-                    .flatten();
+                let floor = self.controller.terrain_floor(&dummy_frame(own))?;
                 let output = self.adapter.controls(
                     &self.flight,
                     intent,
@@ -921,12 +1042,22 @@ impl AiActor {
                     floor,
                     flight::DT,
                 )?;
+                requested = Some(output.requested);
                 output.input
             }
             None => PilotInput::default(),
         };
         self.flight
             .step_surface(&input, |x, z| Surface::terrain(ground(x, z)));
+        if let Some(requested) = requested
+            && !own.on_ground
+            && !self.flight.crashed
+        {
+            // B44 bounds the achieved AI attitude, independently of the host
+            // aircraft's stick response. Fitted coupling preserves the model's
+            // scalar speed and the pre-step body/flight-path offset.
+            super::steering_adapter::apply_attitude(&before, &mut self.flight, requested);
+        }
         self.last_input = input;
         Ok(())
     }
@@ -1045,6 +1176,11 @@ pub fn simple_stations(
                 reload: Delay::seconds(2),
                 startup: Delay::seconds(0),
             },
+            minimum_range_ft: 0.0,
+            requires_radar: false,
+            requires_sensor: false,
+            employment_zone: None,
+            mount: [0.0; 3],
             maximum_range_ft: Some(40000.0),
         });
     }
@@ -1069,6 +1205,11 @@ pub fn simple_stations(
                 reload: Delay::quarters(2),
                 startup: Delay::seconds(0),
             },
+            minimum_range_ft: 0.0,
+            requires_radar: false,
+            requires_sensor: false,
+            employment_zone: None,
+            mount: [0.0; 3],
             maximum_range_ft: Some(6000.0),
         });
     }
@@ -1101,6 +1242,45 @@ mod tests {
     use crate::ai::experience::ExperienceOrigin;
     use crate::ai::targeting::Side;
     use crate::ai::{Experience, weapon_service::ActorId};
+
+    fn aircraft_index(id: AircraftId) -> usize {
+        AircraftId::ALL.iter().position(|item| *item == id).unwrap()
+    }
+
+    // Distinct synthetic capabilities, never presented as measured retail data.
+    fn synthetic_profile(id: AircraftId) -> tore_formats::aircraft::Aircraft {
+        let mut profile = crate::flight::integration_tests::profile();
+        let index = aircraft_index(id);
+        profile.id = id;
+        profile.name = match id {
+            AircraftId::F18 => "F/A-18D",
+            AircraftId::Rafale => "RAFALE",
+            AircraftId::F14 => "F-14",
+            AircraftId::A4E => "A-4E",
+            AircraftId::X31 => "X-31",
+            AircraftId::Mig29 => "MiG-29",
+            AircraftId::Su27 => "Su-27",
+            AircraftId::Mig21 => "MiG-21",
+            AircraftId::Su25 => "Su-25",
+            AircraftId::Mig23 => "MiG-23",
+            AircraftId::Su35 => "Su-35",
+            AircraftId::F22 => "F-22",
+        }
+        .into();
+        profile.shape = format!("{}.SH", id.stem());
+        profile.fields.get_mut("aftThrust").unwrap().value =
+            if matches!(id, AircraftId::A4E | AircraftId::Su25) {
+                "0".into()
+            } else {
+                (400 + index * 10).to_string()
+            };
+        for envelope in &mut profile.envelopes {
+            for point in &mut envelope.points {
+                point[0] *= 0.85 + index as f64 * 0.025;
+            }
+        }
+        profile
+    }
 
     fn profile() -> BehaviorProfile {
         BehaviorProfile {
@@ -1492,6 +1672,17 @@ mod tests {
                 {
                     let mut s = setup(id, side, 0, [0.0, 20000.0, z], yaw);
                     s.identity.aircraft = aircraft;
+                    let profile = synthetic_profile(aircraft);
+                    s.flight = flight::State::new(&profile, s.flight.position).unwrap();
+                    s.flight.yaw = yaw;
+                    s.flight.velocity = crate::attitude::Basis::new(yaw, 0.0, 0.0)
+                        .forward
+                        .map(|v| v * s.flight.speed);
+                    s.stations = simple_stations(
+                        2 + index as u32,
+                        200 + 10 * aircraft_index(aircraft) as u32,
+                        ScalarSpeed(1500.0 + aircraft_index(aircraft) as f64 * 50.0),
+                    );
                     s.experience = resolved(level);
                     s.seed = 101 + index as u64;
                     mission.push(AiActor::new(s).unwrap());
@@ -1830,5 +2021,232 @@ mod tests {
         assert!((pointing_error_deg(&own, [1000.0, 0.0, 0.0]) - 90.0).abs() < 1e-9);
         // Directly above is ninety in the pitch axis.
         assert!((pointing_error_deg(&own, [0.0, 1000.0, 0.0]) - 90.0).abs() < 1e-9);
+    }
+    #[test]
+    fn scheduled_devices_are_single_quarter_second_releases_and_stop_when_empty() {
+        let mut mission = AiMission::new();
+        let mut actor = AiActor::new(setup(1, 1, 0, [0.0, 20000.0, 0.0], 0.0)).unwrap();
+        actor.dispensers[0].count = 2;
+        actor.device_schedule.push((0, SeekerClass::Infrared, 3));
+        mission.push(actor);
+        let mut releases = Vec::new();
+        for tick in 0..100 {
+            let output = mission.step(&[], &flat, TimeOfDay(tick)).unwrap();
+            for device in output.devices {
+                releases.push((tick, device.released));
+            }
+        }
+        assert_eq!(releases, [(0, 1), (30, 1)]);
+        assert_eq!(mission.actor(1).unwrap().dispensers[0].count, 0);
+        assert_eq!(mission.actor(1).unwrap().dispensers[1].count, 30);
+    }
+
+    #[test]
+    fn station_scoring_receives_error_and_failed_envelopes() {
+        let actor = AiActor::new(setup(1, 1, 0, [0.0, 20000.0, 0.0], 0.0)).unwrap();
+        let own = actor.own_state(&flat);
+        let mut target = object(&actor, 2);
+        target.id = 2;
+        target.position = [0.0, 20000.0, 1000.0];
+        let views = actor.target_views(&[2], &[target.clone()]);
+        assert_eq!(
+            actor.station_views(&views, &own)[0].employment_fit,
+            Some(0.0)
+        );
+        target.position = [2000.0, 20000.0, 1000.0];
+        let views = actor.target_views(&[2], &[target]);
+        assert_eq!(actor.station_views(&views, &own)[0].employment_fit, None);
+    }
+
+    #[test]
+    fn wing_orders_do_not_cross_side_or_wing_boundaries() {
+        use super::super::wing::{PlayerBreak, TargetOrder, WingRequest};
+        let mut mission = AiMission::new();
+        for (id, side, wing) in [(1, 1, 0), (2, 1, 1), (3, 2, 0)] {
+            let mut s = setup(id, side, 1, [0.0, 20000.0, 0.0], 0.0);
+            s.identity.wing = wing;
+            mission.push(AiActor::new(s).unwrap());
+        }
+        run(&mut mission, 1);
+        assert_eq!(
+            mission
+                .order_wing(
+                    super::super::targeting::Side(1),
+                    0,
+                    None,
+                    PlayerBreak::Right.request()
+                )
+                .unwrap(),
+            1
+        );
+        mission
+            .order_wing(
+                super::super::targeting::Side(1),
+                0,
+                None,
+                WingRequest::TargetAssignment(TargetOrder::HoldFire),
+            )
+            .unwrap();
+        run(&mut mission, 2);
+        assert_eq!(mission.actor(1).unwrap().controller.target(), None);
+        assert!(mission.actor(2).unwrap().controller.target().is_some());
+        assert!(mission.actor(3).unwrap().controller.target().is_some());
+    }
+
+    #[test]
+    fn all_models_obey_achieved_roll_and_turn_bounds_including_reversal_and_damage() {
+        use super::super::{
+            controller::Completion,
+            motion::{Bank, Duration, MotionRequest, PitchRequest, SpeedRequest},
+            steering::{CommandMode, turn_rate_deg_per_s},
+        };
+        for aircraft in AircraftId::ALL {
+            for health in [1.0, 0.25] {
+                let mut setup = setup(1, 1, 0, [0.0, 20000.0, 0.0], 0.0);
+                setup.identity.aircraft = aircraft;
+                setup.flight =
+                    flight::State::new(&synthetic_profile(aircraft), setup.flight.position)
+                        .unwrap();
+                setup.flight.damage_fraction = 1.0 - health;
+                let mut actor = AiActor::new(setup).unwrap();
+                for tick in 0..600 {
+                    let heading = if tick < 300 { 90 } else { 270 };
+                    let own = actor.own_state(&flat);
+                    let before = actor.flight.clone();
+                    let intent = MotionIntent {
+                        id: 1,
+                        request: MotionRequest::new(
+                            heading,
+                            PitchRequest::Explicit(0),
+                            Bank::Unconstrained,
+                            SpeedRequest::Corner,
+                            Duration::Timed(5),
+                        ),
+                        heading_deg: f64::from(heading),
+                        flight_path_pitch_deg: 0.0,
+                        speed: own.limits.corner,
+                        bank: Bank::Unconstrained,
+                        completion: Completion::Deadline(super::super::motion::Deadline(300)),
+                        steering_point: None,
+                        mode: CommandMode::OtherState,
+                    };
+                    actor.fly(Some(&intent), &own, &flat).unwrap();
+                    let roll = wrap_signed((actor.flight.bank - before.bank).to_degrees()).abs()
+                        / flight::DT;
+                    let turn = wrap_signed((actor.flight.yaw - before.yaw).to_degrees()).abs()
+                        / flight::DT;
+                    assert!(
+                        roll <= (own.roll_limit_deg_per_s * 0.5).min(45.0) + 1e-8,
+                        "{aircraft:?}: roll {roll}"
+                    );
+                    assert!(
+                        turn <= turn_rate_deg_per_s(own.g_limit, own.speed).unwrap() + 1e-8,
+                        "{aircraft:?}: turn {turn}"
+                    );
+                    assert!(actor.flight.position.iter().all(|v| v.is_finite()));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wing_assignments_reach_live_ranking_without_counting_other_wings() {
+        use super::super::wing::{TargetId, TargetOrder, WingRequest};
+        let mut mission = AiMission::new();
+        for (id, side, wing, z) in [
+            (1, 1, 0, 0.0),
+            (2, 1, 0, 0.0),
+            (3, 1, 0, 0.0),
+            (4, 1, 1, 0.0),
+            (10, 2, 0, 9000.0),
+            (11, 2, 0, 12000.0),
+        ] {
+            let mut setup = setup(id, side, 0, [0.0, 20000.0, z], 0.0);
+            setup.identity.wing = wing;
+            mission.push(AiActor::new(setup).unwrap());
+        }
+        for (actor, target) in [(2, 10), (3, 10), (4, 11)] {
+            mission
+                .order(
+                    actor,
+                    WingRequest::TargetAssignment(TargetOrder::ConcreteTarget(TargetId(target))),
+                )
+                .unwrap()
+                .unwrap();
+        }
+        run(&mut mission, 1);
+        assert_eq!(mission.actor(1).unwrap().controller.target(), Some(11));
+    }
+
+    #[test]
+    fn equal_aligned_stores_keep_the_first_station_instead_of_rewarding_narrow_cones() {
+        let mut setup = setup(1, 1, 0, [0.0, 20000.0, 0.0], 0.0);
+        setup.stations.truncate(1);
+        let mut narrow = setup.stations[0].clone();
+        narrow.station = StationId(7);
+        narrow.employment_limit_deg = Some(10.0);
+        setup.stations.push(narrow);
+        let mut actor = AiActor::new(setup).unwrap();
+        let own = actor.own_state(&flat);
+        let mut target = object(&actor, 2);
+        target.id = 2;
+        target.position[2] = 2000.0;
+        let targets = actor.target_views(&[2], &[target]);
+        let stations = actor.station_views(&targets, &own);
+        let mut fired = None;
+        for tick in 0..2400 {
+            let mut frame = dummy_frame(&own);
+            frame.tick = tick;
+            frame.targets = &targets;
+            frame.stations = &stations;
+            let output = actor.controller.step(&frame).unwrap();
+            if let Some(weapon) = output.weapons.first() {
+                fired = Some(weapon.request.station);
+                break;
+            }
+        }
+        assert_eq!(fired, Some(StationId(0)));
+    }
+    #[test]
+    fn terrain_between_live_actors_blocks_release_without_spending_ammunition() {
+        let mut mission = AiMission::new();
+        mission.push(AiActor::new(setup(1, 1, 0, [0.0, 20000.0, 0.0], 0.0)).unwrap());
+        mission.push(
+            AiActor::new(setup(2, 2, 0, [0.0, 20000.0, 5000.0], std::f64::consts::PI)).unwrap(),
+        );
+        let initial: Vec<_> = mission.actors.iter().map(|a| a.flight.clone()).collect();
+        let ammunition: Vec<_> = mission
+            .actors
+            .iter()
+            .map(AiActor::rounds_remaining)
+            .collect();
+        let ridge = |_x: f64, z: f64| {
+            if (2000.0..3000.0).contains(&z) {
+                21000.0
+            } else {
+                0.0
+            }
+        };
+        for tick in 0..2400 {
+            for (actor, flight) in mission.actors.iter_mut().zip(&initial) {
+                actor.flight = flight.clone();
+            }
+            let world = world_of(&mission);
+            assert!(
+                mission
+                    .step(&world, &ridge, TimeOfDay(tick))
+                    .unwrap()
+                    .launches
+                    .is_empty()
+            );
+        }
+        assert_eq!(
+            mission
+                .actors
+                .iter()
+                .map(AiActor::rounds_remaining)
+                .collect::<Vec<_>>(),
+            ammunition
+        );
     }
 }

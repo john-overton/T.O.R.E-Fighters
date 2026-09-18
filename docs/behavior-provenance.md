@@ -138,3 +138,21 @@ Labels describe origin only. None of these is a blocker.
 
 Diagnostic tooling is not a new gameplay feature. Document its purpose and limits
 without pretending it is recovered retail behavior or a user-chosen flight law.
+
+AI runtime boundary details have one home in
+[the live integration rules](spec/ai.md#live-integration-and-authored-boundaries).
+
+| Component | Provenance | Rule and limitation |
+| --- | --- | --- |
+| AI geometric completion tolerance | Fitted, agent choice | One degree; original B13 equality is stricter |
+| AI attack-state producer for warning delay | Fitted, agent choice | Current target equals launcher; original state producers remain unknown |
+| AI preparation readiness | Fitted, agent choice | Selected store's required emission/support gates replace the former universal radar-off flag |
+| AI default inventory | Opinionated, agent choice 2026-09-17 | Import each aircraft's PT default loadout; the universal four-missile/500-round fit is synthetic only |
+| AI weapon identity and launch envelopes | Spec-derived | Actor-owned record, imported range/angle/altitude/class/support fields; host geometric projection is fitted |
+| AI representative projectile count | Fitted, agent choice 2026-09-17 | One projectile per imported release, separate from imported actual-round debit |
+| AI compatibility missile steering | Fitted | Owned weapon movement and actor emission; no full AI seeker activation or pitbull |
+| AI device timing and decoy rolls | Spec-derived | Individual quarter-second releases and independent susceptibility-times-effectiveness rolls |
+| AI decoy presentation and aftermath | Fitted, agent choice 2026-09-17 | Glint and unguided coasting, with constants in the live integration rules |
+| AI achieved attitude and damaged authority coupling | Fitted, agent choice 2026-09-17 | Enforce B44 attitude after model stepping; health scales G and roll linearly; normal commands select the capped other-state branch |
+| Quick Mission home airport | Fitted, agent choice | Spawn point until the mission supplies an airport |
+| Player wing keyboard shortcuts | Opinionated, agent choice 2026-09-17 | Documented in the input guide; recipient scope is friendly wing 1 |

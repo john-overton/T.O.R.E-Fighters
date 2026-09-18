@@ -672,3 +672,12 @@ or use native research flight. For motor smoke use `--live-fire --weapon-slot 2
 --combat-command seeker-mode --combat-probe-ticks 100 --flight-view 2
 --capture-flight .local/motor-smoke.ppm`. Runtime smoke comes from `SMOKE.PIC`;
 `SMOKE.SH` remains unexecuted. [Fitted rules](spec/damage-smoke.md).
+
+## AI regression probes
+
+`cargo run --locked -p tore-app -- --ai-roster-probe-ticks 3600 --no-audio`
+runs imported aircraft at all four experience levels, using all twelve exact
+identities. It checks finite motion and achieved heading/bank rate bounds and
+reports sensor fit, stores, launches and dropped launches. This is separate
+from synthetic tests and is not a retail comparison or visual acceptance.
+The shorter `--ai-probe-ticks N` retains the Quick Mission bridge probe.

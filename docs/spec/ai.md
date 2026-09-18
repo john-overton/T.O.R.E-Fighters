@@ -683,8 +683,11 @@ launch. An AI aircraft in ordinary flight is warned six seconds after launch,
 plus one second for every two statute miles between missile and target at
 launch, capped at twenty seconds, plus an experience term of 6, 3, 1 or 0
 seconds for Novice through Ace. An AI aircraft in the two attack states can
-instead be warned after one second when it is already engaging the launcher
-and after three seconds otherwise; the producers of those states are open.
+instead use a base delay of one second when already engaging the launcher
+and three seconds otherwise, with the same distance and experience additions.
+The reviewed delay arithmetic in the [B47 source map](../formats/ai.md#behavior-source-points)
+establishes these as base terms, not total delays. The producers of those states
+remain open.
 The minimum delay is half a second.
 
 An AI aircraft ignores launch warnings while taking off and during the later
@@ -867,15 +870,70 @@ initial configuration. These are host design requirements, not recovered
 retail scheduling details. Destruction knowledge and physical sensor presence
 remain separate, as in the existing sensor component.
 
-### Existing code to connect later
+### Runtime service boundaries
 
-| Existing boundary | Planned connection and limitation |
+| Existing boundary | Connection and limitation |
 | --- | --- |
-| `sensors::Sensors::contacts`, `visual`, `observation`, `support` | Build permitted target views and track feedback; give each actor its own sensor state. `Observable` is service input, not automatic AI knowledge. |
+| `sensors::Sensors::contacts`, `visual`, `observation`, `support` | Build permitted target views and track feedback from each actor's own sensor state. `Observable` is service input, not automatic AI knowledge. |
 | `sensors::Sensors::designate` and `step` | Apply validated sensor requests and advance observations; current channel/track rules stay in the shared component. |
-| `combat::live::State::readiness`, `mounted_solution`, `step` | Reuse launch checks and combat simulation through a future actor adapter. Current methods are player/range-oriented, not a ready multi-actor AI API. |
-| `flight::State::step_surface` and selected aircraft model | Convert motion intent into controls and step the actor's own model. `autopilot` supplies reusable steering ideas, not a claim of recovered combat steering. |
+| `combat::live::State::readiness`, `mounted_solution`, `step` | AI projectiles reuse combat simulation with owned records. The AI boundary applies selected-store gates; full AI seeker lifecycle remains open. |
+| `flight::State::step_surface` and selected aircraft model | Convert intent into controls, step the actor's model, then enforce the AI B44 attitude boundary. `autopilot` supplies reusable steering ideas, not a claim of recovered combat steering. |
 | `quick_mission::QuickMission::dummy_wings` | Replaced by `QuickMission::wing_launches`, which carries side, wing, member, aircraft and resolved experience through `ai::launch`. `dummy_wings` remains as the flattened legacy view so the fixture path is unchanged. |
+
+## Live integration and authored boundaries
+
+Implementation repairs on 2026-09-17 connect pursuit, delayed warnings, weapon
+ownership, release gates, countermeasures, wing ranking and wing orders. These
+are behavior fixes, not evidence of retail combat parity. Validation lives in
+[the AI baseline](../baselines/ai-research.md).
+
+- Combat owns a destroyed airframe's existing ballistic fall. A dead controller
+  never overwrites its position or velocity; restart creates a fresh bridge.
+- Pursuit retains its chosen target-relative offset for the maneuver, while
+  recomputing heading, pitch and regulating speed against the moving target each
+  tick. Breaks and escapes keep their independent heading requests. The one-degree
+  geometric completion tolerance is fitted, rather than B13's exact equality.
+- A warning is queued until its launch-relative deadline and consumed once.
+  Target equality stands in for the unknown attack-state producer, a fitted
+  choice. Equal and lower-priority reasons preserve an active maneuver.
+- Imported AI actors carry their own PT default weapons and ECM counts. Using
+  the PT default loadout when Quick Mission provides no AI loadout is an
+  opinionated agent choice. A projectile owns its selected weapon record; guns
+  remain unguided. Actual-round debit comes from that record. One representative
+  projectile per imported release is fitted to the existing live weapon adapter;
+  the synthetic fixture's ten-projectile gun burst is not an imported loadout.
+- Selected-store range, separate angular and relative-altitude limits, mount
+  position, target class, required emission and supporting sensor gates precede
+  release. The existing host envelope geometry remains fitted. Terrain checking
+  shares the combat segment query, which samples eight intervals and refines a
+  crossing ten times. Very narrow intervening terrain can remain unresolved by
+  that host sampling rule. The score receives pointing error, never angular margin.
+- Device debits occur individually at 30-tick intervals. Each released device
+  rolls independently against matching missiles targeting its owner, using the
+  imported susceptibility and dispenser effectiveness. Fitted visual feedback is
+  a camera-facing glint lasting 45 ticks, growing from 2 ft by 0.15 ft per tick.
+  Fitted decoy consequence: clear guidance and coast for the record's remaining
+  lifetime. Original lifetime shortening remains unknown.
+- B44 bounds achieved AI heading, flight-path pitch and bank after the aircraft
+  model advances speed, fuel and systems. Fitted coupling preserves scalar speed
+  and the previous body-to-flight-path pitch offset, and advances position along
+  the bounded flight path. The normal host command selects B44's other-state
+  branch, halving roll authority and capping it at 45 degrees/second. This branch
+  selection is an agent choice because the original state producer remains open.
+  Until axis-specific AI damage is available, remaining airframe health scales
+  G and roll authority linearly, a fitted rule. G loading uses the aircraft model's
+  fuel/payload reduction. Player flight adapters are unaffected.
+- Wing-assignment penalties count other live attackers on the same side and in
+  the same wing. Automatic requests are delivered after all actors decide, and
+  player requests address friendly wing 1 only. Each recipient retains its own
+  formation and spacing overrides. Combat spacing is requested only with a target.
+  Disengage prevents self-selection until another target order.
+
+AI missile steering still uses the compatibility path, with actor-owned
+launcher emission support. Full AI seeker acquisition, activation and pitbull
+are not implemented. B12's unknown wing-approach producer remains disabled.
+The remaining original maneuver shapes and approach-order completion are open.
+A status label alone is never evidence of a completed maneuver.
 
 ## Acceptance and next research boundary
 
@@ -894,8 +952,7 @@ simulation time, and B43 spacing clamps and persistent variation deadlines.
 Test climb/dive fallback, distinct IR/radar requests, an unarmed aircraft's
 attack request, non-aircraft targets, absent/stale observations and removed
 actors. Test the host API proposal for actor isolation, deterministic restart,
-no duplicate fire and no per-tick skill rerolls once it is implemented. Do not
-call these tests implemented or flown acceptance yet.
+no duplicate fire and no per-tick skill rerolls once it is implemented. These are synthetic regression scenarios, not visual or retail acceptance.
 
 Add B44 tests for roll-in, opposing bank, rate limiting and the 1600/20000-foot
 lead boundaries; B45 tests for inclusive envelope limits, zero signature, support

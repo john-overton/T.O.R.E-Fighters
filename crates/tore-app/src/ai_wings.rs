@@ -18,18 +18,9 @@
 //! The creator uses this bridge by default. `--fixture-wings` keeps the old
 //! straight-flight launch and integration; ordinary free flight has no bridge.
 //!
-//! # Known limitations of the hookup
-//!
-//! The current combat bridge has these remaining limitations:
-//!
-//! - A `live::Projectile` can either hit the player (`incoming`) or hit a
-//!   target, never both, and its weapon record is
-//!   always read from the *player's* configuration. AI shots therefore fly the
-//!   player's aircraft's missile, chosen by [`ai_station`].
-//! - A radar-signature AI shot at another AI aircraft only keeps tracking while
-//!   the *player's* sensors support that contact, because the unguided steering
-//!   branch asks `state.sensors`. [`ai_station`] prefers an infrared store
-//!   precisely so this does not bite in practice.
+//! Projectiles carry their actor-owned weapon record. Compatibility missile
+//! steering remains fitted: full seeker activation and pitbull are not wired
+//! for AI launches. Live device events and decoy rolls are connected.
 
 use std::collections::BTreeMap;
 
@@ -146,12 +137,8 @@ pub fn mission_spawns(wings: &[WingLaunch], separation_ft: f64) -> Vec<MissionSp
 /// player's shot counter is left untouched by AI fire.
 pub const AI_PROJECTILE_ID_BASE: u32 = 1 << 24;
 
-/// `fitted`: the AI store fit. The Quick Mission screen carries no AI loadout
-/// and `docs/spec/ai.md` does not specify one, so every AI fighter launches
-/// with the reference fit `tore_sim::ai::mission::simple_stations` documents:
-/// four guided air-to-air rounds and five hundred gun rounds. Rule: four
-/// missiles is the smallest fit that lets B45's reattack rules be observed, and
-/// the gun store exists so an actor out of missiles still has a weapon.
+/// Fitted synthetic fixture inventory. Imported missions replace it with each
+/// aircraft's reviewed default weapon and dispenser records before stepping.
 pub const AI_MISSILES: u32 = 4;
 /// See [`AI_MISSILES`].
 pub const AI_GUN_ROUNDS: u32 = 500;
@@ -207,9 +194,9 @@ impl Slot {
 pub struct AiWings {
     mission: AiMission,
     slots: Vec<Slot>,
-    /// Station on the *player's* configuration used to realise AI shots. See
-    /// [`ai_station`].
-    station: usize,
+    weapons: BTreeMap<(u32, u8), tore_formats::weapons::Weapon>,
+    device_random: tore_sim::ai::DecisionRandom,
+    device_effectiveness: BTreeMap<u32, (u8, u8)>,
     /// Projectile ids already turned into threat reports.
     seen_projectiles: Vec<u32>,
     /// Projectile id to the actor that fired it, for B47 attribution. The
@@ -229,30 +216,6 @@ pub struct AiWings {
     threat_reports: Vec<(u32, u32)>,
     /// A line for `FlightUi::message`, taken by the host once.
     pending_message: Option<String>,
-}
-
-/// `fitted`: which of the player aircraft's stations an AI shot borrows.
-///
-/// A `live::Projectile` reads its weapon from `Configuration::stations`, which
-/// is the player's aircraft, so an AI shot has to borrow one. Rule: prefer the
-/// first infrared-signature store (`seeker.signature == 2`), because the
-/// unguided steering branch only demands launcher illumination for radar
-/// stores, so an infrared borrow tracks its target without the player's radar.
-/// Failing that, take the first store with any seeker, and failing that station
-/// zero. The known difference: AI aircraft all shoot the player's missile, not
-/// the one their own record carries.
-pub fn ai_station(config: &live::Configuration) -> usize {
-    config
-        .stations
-        .iter()
-        .position(|s| s.weapon.seeker.signature == 2)
-        .or_else(|| {
-            config
-                .stations
-                .iter()
-                .position(|s| s.weapon.seeker.signature != 0)
-        })
-        .unwrap_or(0)
 }
 
 /// `fitted`: the per-actor decision seed.
@@ -306,10 +269,10 @@ impl AiWings {
     pub fn build(
         wings: &[WingLaunch],
         targets: &[live::Target],
-        config: &live::Configuration,
+        _config: &live::Configuration,
         resources: &BTreeMap<String, Vec<u8>>,
     ) -> AppResult<Self> {
-        Self::build_with(wings, targets, ai_station(config), |id| {
+        let mut bridge = Self::build_with(wings, targets, 0, |id| {
             let bytes = resources
                 .get(id.pt())
                 .ok_or_else(|| format!("aircraft cache missing {}", id.pt()))?;
@@ -325,7 +288,66 @@ impl AiWings {
             })
             .ok();
             Ok((aircraft, found))
-        })
+        })?;
+        for actor in bridge.mission.actors_mut() {
+            let aircraft = Aircraft::parse(&resources[actor.identity().aircraft.pt()])?;
+            let config = live::Configuration::from_source(&aircraft, |name| {
+                resources
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+            })?;
+            let mut stores = Vec::new();
+            for (index, station) in config.stations.iter().enumerate() {
+                let w = &station.weapon;
+                let gun = w.source == aircraft.id.gun();
+                let mut spec = if gun {
+                    simple_stations(0, u32::from(station.count), AI_STORE_SPEED).remove(0)
+                } else {
+                    simple_stations(u32::from(station.count), 0, AI_STORE_SPEED).remove(0)
+                };
+                spec.station = tore_sim::ai::weapon_service::StationId(index as u8);
+                spec.guided = w.flags & 1 != 0;
+                spec.capability = tore_sim::ai::weapon_service::StoreCapability {
+                    air: w.flags & 0x10000 != 0,
+                    surface: w.flags & 0x20000 != 0,
+                };
+                // The reviewed default inventory owns the record used at release.
+                spec.debit = u32::from(w.burst.actual_rounds_per_game).max(1);
+                // Fitted: one representative projectile per release, as in
+                // the player live adapter. The source ammunition debit remains separate.
+                spec.projectile_count = 1;
+                spec.store_speed = ScalarSpeed(f64::from(w.movement.maximum_speed));
+                spec.tracking_delay =
+                    tore_sim::ai::weapon_service::Delay::quarters(u32::from(w.guidance.track_t));
+                spec.damage_vs_category = f64::from(w.damage.by_class[0]);
+                spec.mount = station.mount;
+                spec.requires_radar = w.flags & 0x200 != 0;
+                spec.requires_sensor = w.flags & 0x400 != 0;
+                let zone = w.seeker.zones[1];
+                spec.minimum_range_ft = f64::from(zone.minimum_range);
+                spec.maximum_range_ft = Some(f64::from(zone.maximum_range));
+                spec.employment_limit_deg = None;
+                spec.employment_zone = Some(zone);
+                bridge.weapons.insert((actor.id(), index as u8), w.clone());
+                stores.push(spec);
+            }
+            actor.set_stations(stores);
+            actor.set_dispensers(vec![
+                tore_sim::ai::threat::DispenserStore {
+                    class: SeekerClass::Infrared,
+                    count: u32::from(config.ecm.flare[0]),
+                },
+                tore_sim::ai::threat::DispenserStore {
+                    class: SeekerClass::Radar,
+                    count: u32::from(config.ecm.chaff[0]),
+                },
+            ]);
+            bridge
+                .device_effectiveness
+                .insert(actor.id(), (config.ecm.flare[1], config.ecm.chaff[1]));
+        }
+        Ok(bridge)
     }
 
     /// [`build`](Self::build) with the aircraft records supplied by the caller,
@@ -333,7 +355,7 @@ impl AiWings {
     pub fn build_with(
         wings: &[WingLaunch],
         targets: &[live::Target],
-        station: usize,
+        _station: usize,
         mut resolve: impl FnMut(AircraftId) -> AppResult<(Aircraft, Option<sensors::SensorProfiles>)>,
     ) -> AppResult<Self> {
         let mut mission = AiMission::new();
@@ -425,7 +447,9 @@ impl AiWings {
         Ok(Self {
             mission,
             slots,
-            station,
+            weapons: BTreeMap::new(),
+            device_random: tore_sim::ai::DecisionRandom::seeded(0xdec0),
+            device_effectiveness: BTreeMap::new(),
             seen_projectiles: Vec::new(),
             ai_shots: BTreeMap::new(),
             last_hp: BTreeMap::new(),
@@ -437,6 +461,13 @@ impl AiWings {
             threat_reports: Vec::new(),
             pending_message: None,
         })
+    }
+
+    pub fn player_order(&mut self, request: tore_sim::ai::wing::WingRequest) -> AppResult<usize> {
+        Ok(self
+            .mission
+            .order_wing(FRIENDLY_SIDE, 0, None, request)
+            .map_err(|e| e.to_string())?)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -486,23 +517,28 @@ impl AiWings {
         let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
         let object = self.player_object(player, state.player_hp, state.configuration());
         let output = self.advance(object, &mut state.targets, &ground)?;
-        let station = self.station.min(state.configuration().stations.len() - 1);
-        let weapon = state.configuration().stations[station].weapon.clone();
         for event in &output.launches {
-            self.realise(
-                event,
-                &mut state.projectiles,
-                &weapon,
-                station,
-                player.position,
-            );
+            if let Some(weapon) = self.weapons.get(&(event.actor, event.station.0)).cloned() {
+                self.realise(
+                    event,
+                    &mut state.projectiles,
+                    &weapon,
+                    usize::from(event.station.0),
+                    player.position,
+                );
+            } else {
+                self.dropped_launches += event.projectiles;
+            }
+        }
+        for event in &output.devices {
+            self.realise_device(event, state)?;
         }
         let stations = state.configuration().stations.clone();
         self.report_threats(&state.projectiles, |index| {
-            if stations[index].weapon.seeker.signature == 3 {
-                SeekerClass::Radar
-            } else {
-                SeekerClass::Infrared
+            match stations[index].weapon.seeker.signature {
+                2 => Some(SeekerClass::Infrared),
+                3 => Some(SeekerClass::Radar),
+                _ => None,
             }
         });
         Ok(())
@@ -580,6 +616,10 @@ impl AiWings {
             let Some(target) = targets.iter().find(|t| t.id == slot.id) else {
                 continue;
             };
+            if let Some(actor) = self.mission.actor_mut(slot.id) {
+                actor.flight_mut().damage_fraction = 1.0
+                    - (f64::from(target.hp) / f64::from(target.initial_hp.max(1))).clamp(0.0, 1.0);
+            }
             let previous = *self.last_hp.entry(slot.id).or_insert(target.hp);
             if target.hp < previous
                 && let Some(actor) = self.mission.actor_mut(slot.id)
@@ -651,6 +691,10 @@ impl AiWings {
             let Some(target) = targets.iter_mut().find(|t| t.id == slot.id) else {
                 continue;
             };
+            // Combat owns falling wrecks after destruction.
+            if !actor.alive() || target.hp <= 0 {
+                continue;
+            }
             let f = actor.flight();
             target.position = f.position;
             target.velocity = f.velocity;
@@ -716,6 +760,7 @@ impl AiWings {
                 // Attribute the round to the AI actor that fired it, so an
                 // AI kill never credits the player's score.
                 owner: event.actor,
+                weapon: Some(weapon.clone()),
                 guidance: None,
                 motion: None,
                 guidance_ticks: None,
@@ -727,12 +772,70 @@ impl AiWings {
                 direction,
                 speed_f8: speed * 256,
                 launched_t: launched,
-                target: Some(event.target),
+                target: (weapon.seeker.signature != 0).then_some(event.target),
                 fall: FallState::default(),
             });
             self.ai_shots.insert(id, event.actor);
             self.realised_launches += 1;
         }
+    }
+
+    fn realise_device(
+        &mut self,
+        event: &tore_sim::ai::mission::DeviceEvent,
+        state: &mut live::State,
+    ) -> AppResult<()> {
+        use tore_sim::ai::threat::{self, DecoyOutcome, GuidingMissile};
+        let Some(actor) = self.mission.actor(event.actor) else {
+            return Ok(());
+        };
+        let effectiveness = self
+            .device_effectiveness
+            .get(&event.actor)
+            .copied()
+            .unwrap_or((100, 100));
+        let effectiveness = match event.class {
+            SeekerClass::Infrared => effectiveness.0,
+            SeekerClass::Radar => effectiveness.1,
+        };
+        for _ in 0..event.released {
+            state.effects.push(live::Effect {
+                position: actor.flight().position,
+                kind: match event.class {
+                    SeekerClass::Infrared => live::EffectKind::Flare,
+                    SeekerClass::Radar => live::EffectKind::Chaff,
+                },
+                ticks: 45,
+            });
+            let config = state.configuration().clone();
+            for projectile in &mut state.projectiles {
+                let weapon = projectile.weapon(&config);
+                let class = match weapon.seeker.signature {
+                    2 => SeekerClass::Infrared,
+                    3 => SeekerClass::Radar,
+                    _ => continue,
+                };
+                let missile = GuidingMissile {
+                    seeker: class,
+                    guiding_on_releaser: projectile.target == Some(event.actor),
+                    decoy_susceptibility_percent: weapon.seeker.chaff_flare_chance,
+                };
+                if threat::decoy_missile(
+                    &missile,
+                    event.class,
+                    effectiveness,
+                    &mut self.device_random,
+                )
+                .map_err(|e| e.to_string())?
+                    == DecoyOutcome::Decoyed
+                {
+                    projectile.target = None;
+                    projectile.guidance = None;
+                    // Fitted: coast after decoy, using the existing record lifetime.
+                }
+            }
+        }
+        Ok(())
     }
 
     /// B47: every missile in the world is reported once, to its target only.
@@ -741,7 +844,7 @@ impl AiWings {
     fn report_threats(
         &mut self,
         projectiles: &[live::Projectile],
-        seeker_of: impl Fn(usize) -> SeekerClass,
+        seeker_of: impl Fn(usize) -> Option<SeekerClass>,
     ) {
         let mut reports: Vec<(u32, ThreatReport)> = Vec::new();
         for projectile in projectiles {
@@ -761,7 +864,18 @@ impl AiWings {
             let Some(actor) = self.mission.actor(target) else {
                 continue;
             };
-            let seeker = seeker_of(projectile.station);
+            let seeker = if let Some(weapon) = &projectile.weapon {
+                match weapon.seeker.signature {
+                    2 => SeekerClass::Infrared,
+                    3 => SeekerClass::Radar,
+                    _ => continue,
+                }
+            } else {
+                let Some(class) = seeker_of(projectile.station) else {
+                    continue;
+                };
+                class
+            };
             let launcher_id = self
                 .ai_shots
                 .get(&projectile.id)
@@ -865,6 +979,123 @@ impl AiWings {
     }
 }
 
+/// Imported-media validation, separate from synthetic model tests. No retail
+/// bytes or generated assets are written by this probe.
+pub fn roster_probe(
+    ticks: usize,
+    resources: &BTreeMap<String, Vec<u8>>,
+    world: &World,
+) -> AppResult<()> {
+    use tore_sim::ai::{
+        Experience,
+        launch::{WingId, WingSelection, resolve_wings},
+    };
+    for id in AircraftId::ALL {
+        let aircraft = Aircraft::parse(
+            resources
+                .get(id.pt())
+                .ok_or_else(|| format!("missing {}", id.pt()))?,
+        )?;
+        let config = live::Configuration::from_source(&aircraft, |name| {
+            resources
+                .get(name)
+                .cloned()
+                .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+        })?;
+        for level in Experience::ALL {
+            let wings = resolve_wings(
+                &[
+                    WingSelection {
+                        wing: WingId::new(launch::Side::Friendly, 0)?,
+                        aircraft: id,
+                        count: 1,
+                        skill_level: level.index() as i32,
+                    },
+                    WingSelection {
+                        wing: WingId::new(launch::Side::Enemy, 0)?,
+                        aircraft: id,
+                        count: 1,
+                        skill_level: level.index() as i32,
+                    },
+                ],
+                None,
+            )?;
+            let mut combat = live::State::new(config.clone(), true)?;
+            combat.add_dummy(&config, [512.0, 30000.0, -512.0], Basis::new(0.0, 0.0, 0.0));
+            combat.add_dummy(
+                &config,
+                [0.0, 30000.0, 30000.0],
+                Basis::new(std::f64::consts::PI, 0.0, 0.0),
+            );
+            let mut bridge = AiWings::build(&wings, &combat.targets, &config, resources)?;
+            for actor in bridge.mission.actors() {
+                if actor.stations().len() != config.stations.len()
+                    || actor
+                        .stations()
+                        .iter()
+                        .zip(&config.stations)
+                        .any(|(station, imported)| {
+                            station.employment_zone != Some(imported.weapon.seeker.zones[1])
+                                || station.rounds()
+                                    != tore_sim::ai::weapon_service::Rounds::Finite(u32::from(
+                                        imported.count,
+                                    ))
+                        })
+                {
+                    return Err(format!("AI inventory/envelope mismatch for {}", id.pt()).into());
+                }
+            }
+            let mut player = flight::State::new(&aircraft, [0.0, 30000.0, 0.0])?;
+            let mut peak_roll = 0.0f64;
+            let mut peak_turn = 0.0f64;
+            for _ in 0..ticks {
+                let before: Vec<_> = bridge
+                    .mission
+                    .actors()
+                    .iter()
+                    .map(|a| (a.flight().bank, a.flight().yaw))
+                    .collect();
+                player.step(&flight::PilotInput::default(), |x, z| {
+                    f64::from(world.height(x as f32, z as f32))
+                });
+                combat.step(false, crate::combat::launcher(&player), |x, z| {
+                    f64::from(world.height(x as f32, z as f32))
+                });
+                bridge.step(&mut combat, &player, world)?;
+                for (actor, (bank, yaw)) in bridge.mission.actors().iter().zip(before) {
+                    let f = actor.flight();
+                    if !f.position.iter().all(|v| v.is_finite()) {
+                        return Err(format!("nonfinite {} {level:?}", id.pt()).into());
+                    }
+                    let rate = |delta: f64| {
+                        ((delta.to_degrees() + 180.0).rem_euclid(360.0) - 180.0).abs() * 120.0
+                    };
+                    peak_roll = peak_roll.max(rate(f.bank - bank));
+                    peak_turn = peak_turn.max(rate(f.yaw - yaw));
+                }
+            }
+            if peak_roll > 45.0 + 1e-6 || peak_turn > 40.0 + 1e-6 {
+                return Err(format!(
+                    "AI rate exceeded {} {level:?}: roll={peak_roll} turn={peak_turn}",
+                    id.pt()
+                )
+                .into());
+            }
+            println!(
+                "AI roster {} {level:?}: ticks={ticks} models=2 radar={} ir={} stores={} gun={} projectiles={} dropped={} peak_roll={peak_roll:.3} peak_turn={peak_turn:.3} PASS",
+                id.pt(),
+                config.sensors.radar.is_some(),
+                config.sensors.infrared.is_some(),
+                config.stations.len(),
+                config.stations.iter().any(|s| s.weapon.source == id.gun()),
+                bridge.realised_launches,
+                bridge.dropped_launches
+            );
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -952,6 +1183,146 @@ mod tests {
     /// `velocity / 120` to every live target once per tick.
     const FIXTURE_TICK_RATE: f64 = 120.0;
 
+    fn combat_fixture(guided: bool) -> live::State {
+        use live::{Configuration, State, Station};
+        use tore_formats::weapons::*;
+        let zone = Zone {
+            heading: 12000,
+            pitch: 12000,
+            minimum_range: 0,
+            maximum_range: 10000,
+            minimum_altitude: i32::MIN,
+            maximum_altitude: i32::MAX,
+        };
+        let seeker = Seeker {
+            flags: [0; 2],
+            signature: if guided { 3 } else { 0 },
+            look_down: 0,
+            doppler_above: 0,
+            doppler_below: 0,
+            doppler_minimum_range: 0,
+            all_aspect: 0,
+            zones: [zone; 2],
+            chaff_flare_chance: 0,
+            deception_chance: 0,
+        };
+        let w = Weapon {
+            source: "SYNTHETIC.JT".into(),
+            name: "Synthetic".into(),
+            hud_name: "SYN".into(),
+            shape: None,
+            fire_sound: None,
+            native_callback: "_PROJProc".into(),
+            flags: if guided { 0x240 } else { 0x844 },
+            object_flags: 0,
+            weight: 10,
+            movement: Movement {
+                minimum_speed: 10,
+                corner_speed: 1000,
+                maximum_speed: 2000,
+                acceleration: 100,
+                deceleration: 2,
+                initial_speed: 1000,
+                final_speed: 500,
+                launch_retard: 100,
+                ignite_t: 0,
+                fuel_t: 10,
+                remove_t: 20,
+                powered_turn_rate: 10000,
+                unpowered_turn_rate: 10000,
+                performance_at_0: 100,
+                performance_at_20: 100,
+                cruise: [0; 4],
+                jink: [0; 3],
+            },
+            burst: Burst {
+                projectiles_in_pod: 1,
+                actual_rounds_per_game: 2,
+                game_rounds_in_burst: 1,
+                game_rounds_in_carpet_burst: 1,
+                game_burst_t: 1,
+                reload_t: 0,
+                startup_shots: 0,
+                random_fire_percent: 0,
+                offset_fire_percent: 0,
+                offset_fire_heading: 0,
+                offset_fire_pitch: 0,
+                sine_pattern: [0; 4],
+            },
+            seeker,
+            guidance: Guidance {
+                track_t: 1,
+                track_max_g_raw: 1,
+                target_sun_chance: 0,
+                max_aon: 0,
+                chances: [100; 4],
+                hit_modifiers: [0; 9],
+            },
+            damage: Damage {
+                by_class: [10; 5],
+                fuze_arm_t: 0,
+                fuze_radius: 0,
+                side_hit_fuze_failure: 0,
+                collateral_radius: 0,
+                collateral_percent: 0,
+            },
+            effects: Effects {
+                object_explosion: 0,
+                land_explosion: 0,
+                water_explosion: 0,
+                crater_size: 0,
+                smoke: [0; 5],
+                max_sound_distance: 0,
+                frequency_adjustment: 0,
+            },
+        };
+        State::new(
+            Configuration {
+                fragment_offset: [0.; 3],
+                ecm: tore_formats::weapons::Countermeasures {
+                    weight: 0,
+                    flags: 0,
+                    mode_flags: 0x10,
+                    chaff: [0; 4],
+                    flare: [0; 4],
+                    radar_deception_chance: 30,
+                    radar_signature_add: 0,
+                    radar_noise_range: [0; 2],
+                    infrared_deception_chance: 0,
+                    infrared_signature_add: 0,
+                    infrared_lose_lock_time: 0,
+                },
+                system_damage: [0x11; 45],
+                damage_capacity: 30,
+                afterburner_available: true,
+                hardpoint_slots: vec![Some(0)],
+                radar_hardpoint: 1,
+                visual_hardpoint: 3,
+                ecm_hardpoint: 2,
+                aircraft: AircraftId::F18,
+                stations: vec![Station {
+                    weapon: w,
+                    mount: [0.; 3],
+                    count: 11,
+                    internal: !guided,
+                }],
+                hit_points: 20,
+                target_category: 0x80,
+                external_equipment_lbs: 0,
+                infrared_hardpoint: None,
+                sensors: sensors::SensorProfiles {
+                    aircraft: AircraftId::F18,
+                    radar: None,
+                    infrared: None,
+                    visual: None,
+                    jammer: None,
+                    signature: sensors::SignatureProfile::default(),
+                },
+            },
+            true,
+        )
+        .unwrap()
+    }
     fn aircraft() -> Aircraft {
         crate::flight::animation_tests::profile()
     }
@@ -1269,6 +1640,7 @@ mod tests {
         let shot = live::Projectile {
             id: 7,
             owner: 1,
+            weapon: None,
             guidance: None,
             motion: None,
             guidance_ticks: None,
@@ -1283,7 +1655,7 @@ mod tests {
             target: Some(3),
             fall: FallState::default(),
         };
-        wings.report_threats(std::slice::from_ref(&shot), |_| SeekerClass::Radar);
+        wings.report_threats(std::slice::from_ref(&shot), |_| Some(SeekerClass::Radar));
         // Only actor 3 was told; the others, its wingman included, were not.
         assert_eq!(
             wings.threat_reports(),
@@ -1291,7 +1663,7 @@ mod tests {
             "the warning was broadcast"
         );
         // The same projectile is never reported twice.
-        wings.report_threats(std::slice::from_ref(&shot), |_| SeekerClass::Radar);
+        wings.report_threats(std::slice::from_ref(&shot), |_| Some(SeekerClass::Radar));
         assert_eq!(wings.threat_reports(), [(3, 7)]);
     }
 
@@ -1310,5 +1682,176 @@ mod tests {
         // Repeating the same activity is never a change.
         wings.announce(&[(1, Activity::Attacking)]);
         assert!(wings.take_message().is_none());
+    }
+    #[test]
+    fn destroyed_airframe_falls_through_combat_bridge_order_and_restart() {
+        for _restart in 0..2 {
+            let (mut wings, targets) = build(None);
+            let mut combat = combat_fixture(false);
+            combat.targets = targets;
+            combat.targets[2].position[1] = 1000.0;
+            combat.targets[2].hp = 0;
+            let player = flight::State::new(&aircraft(), [0.0, 20000.0, -5000.0]).unwrap();
+            let mut previous = 1000.0;
+            for tick in 0..1500 {
+                combat.step(false, crate::combat::launcher(&player), flat);
+                wings
+                    .advance(player_object(player.position), &mut combat.targets, &flat)
+                    .unwrap();
+                let wreck = &combat.targets[2];
+                assert!(wreck.position[1] <= previous, "wreck rose on tick {tick}");
+                if tick == 120 {
+                    assert!(wreck.position[1] < 990.0);
+                }
+                previous = wreck.position[1];
+            }
+            assert_eq!(combat.targets[2].position[1], 0.0);
+            assert_eq!(combat.targets[2].velocity, [0.0; 3]);
+            assert!(!wings.mission.actor(3).unwrap().alive());
+        }
+    }
+
+    #[test]
+    fn realised_gun_keeps_its_own_record_and_never_becomes_a_player_missile() {
+        use tore_sim::ai::weapon_service::{RequestId, StationId};
+        let (mut wings, _) = build(None);
+        let mut combat = combat_fixture(true);
+        let mut gun = combat_fixture(false).configuration().stations[0]
+            .weapon
+            .clone();
+        gun.source = "SYNTHETIC-GUN.JT".into();
+        let event = LaunchEvent {
+            actor: 3,
+            station: StationId(1),
+            target: 0,
+            request_id: RequestId(1),
+            projectiles: 10,
+        };
+        let player = flight::State::new(&aircraft(), [0.0, 20000.0, -5000.0]).unwrap();
+        wings.realise(&event, &mut combat.projectiles, &gun, 1, player.position);
+        assert_eq!(combat.projectiles.len(), 10);
+        assert!(
+            combat
+                .projectiles
+                .iter()
+                .all(|p| p.weapon.as_ref() == Some(&gun) && p.target.is_none())
+        );
+        // Station 1 does not even exist on the player. Stepping must use the owned record.
+        combat.step(false, crate::combat::launcher(&player), flat);
+        assert!(
+            combat
+                .projectiles
+                .iter()
+                .all(|p| p.weapon(combat.configuration()).seeker.signature == 0)
+        );
+    }
+
+    #[test]
+    fn live_devices_decoy_only_matching_missiles_targeting_the_releaser() {
+        use tore_sim::ai::{
+            mission::DeviceEvent,
+            weapon_service::{RequestId, StationId},
+        };
+        let (mut wings, _) = build(None);
+        let mut combat = combat_fixture(true);
+        let mut weapon = combat.configuration().stations[0].weapon.clone();
+        weapon.seeker.signature = 2;
+        weapon.seeker.chaff_flare_chance = 100;
+        wings.device_effectiveness.insert(3, (100, 100));
+        for target in [3, 4] {
+            wings.realise(
+                &LaunchEvent {
+                    actor: 1,
+                    station: StationId(0),
+                    target,
+                    request_id: RequestId(u64::from(target)),
+                    projectiles: 1,
+                },
+                &mut combat.projectiles,
+                &weapon,
+                0,
+                [0.0; 3],
+            );
+        }
+        let mut radar = combat.projectiles[0].clone();
+        radar.weapon.as_mut().unwrap().seeker.signature = 3;
+        combat.projectiles.push(radar);
+        wings
+            .realise_device(
+                &DeviceEvent {
+                    actor: 3,
+                    class: SeekerClass::Infrared,
+                    released: 1,
+                },
+                &mut combat,
+            )
+            .unwrap();
+        assert_eq!(combat.projectiles[0].target, None);
+        assert_eq!(combat.projectiles[1].target, Some(4));
+        assert_eq!(combat.projectiles[2].target, Some(3));
+        assert_eq!(combat.effects.last().unwrap().kind, live::EffectKind::Flare);
+    }
+    #[test]
+    fn finite_missile_depletion_is_followed_by_actor_owned_gun_fire() {
+        let (mut wings, mut targets) = build(None);
+        for actor in wings.mission.actors_mut() {
+            actor.set_stations(Vec::new());
+        }
+        wings
+            .mission
+            .actor_mut(3)
+            .unwrap()
+            .set_stations(simple_stations(1, 20, AI_STORE_SPEED));
+        let mut fixed: Vec<_> = wings
+            .mission
+            .actors()
+            .iter()
+            .map(|a| (a.id(), a.flight().clone()))
+            .collect();
+        for (id, flight) in &mut fixed {
+            flight.position = [
+                if *id == 2 || *id == 4 { 50000.0 } else { 0.0 },
+                20000.0,
+                if *id >= 3 { 2000.0 } else { 0.0 },
+            ];
+        }
+        let missile = combat_fixture(true).configuration().stations[0]
+            .weapon
+            .clone();
+        let gun = combat_fixture(false).configuration().stations[0]
+            .weapon
+            .clone();
+        let mut realised = Vec::new();
+        let mut stations = Vec::new();
+        for _ in 0..10000 {
+            for (id, flight) in &fixed {
+                *wings.mission.actor_mut(*id).unwrap().flight_mut() = flight.clone();
+            }
+            let output = wings
+                .advance(player_object([0.0, 20000.0, 0.0]), &mut targets, &flat)
+                .unwrap();
+            for event in output.launches.iter().filter(|e| e.actor == 3) {
+                stations.push(event.station.0);
+                let weapon = if event.station.0 == 0 { &missile } else { &gun };
+                wings.realise(
+                    event,
+                    &mut realised,
+                    weapon,
+                    usize::from(event.station.0),
+                    [0.0, 20000.0, 0.0],
+                );
+            }
+            if wings.mission.actor(3).unwrap().rounds_remaining() == 0 {
+                break;
+            }
+        }
+        assert_eq!(stations, [0, 1, 1]);
+        assert_eq!(realised.len(), 21);
+        assert!(
+            realised[1..]
+                .iter()
+                .all(|p| p.weapon.as_ref() == Some(&gun) && p.target.is_none())
+        );
+        assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 0);
     }
 }

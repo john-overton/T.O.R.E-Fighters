@@ -223,7 +223,9 @@ launch event, and does not duplicate missile physics. AI-6 is partially integrat
 Quick Mission: `ai::launch` carries side, wing, member, type and resolved
 experience. Quick Mission enables the live hookup by default, with separate
 wing groups and idle delta-formation following. `--fixture-wings` keeps the
-straight-flight setup. Combat integration still has reviewed gaps. AI-4, surface behavior, remains pending.
+straight-flight setup. Reviewed runtime defects are covered by the
+[repair baseline](baselines/ai-research.md); AI seeker lifecycle and broader
+mission integration remain partial. AI-4, surface behavior, remains pending.
 The backlog below is the single list of open items.
 
 #### AI backlog (2026-09-17)
@@ -234,8 +236,8 @@ else falls into one of four kinds.
 
 Missing evidence (research, in priority order):
 
-1. Signature producers and per-store seeker envelopes; AI store selection by
-   target class; in-flight support loss and reacquisition (B45).
+1. Remaining signature branches and seeker state producers beyond the reviewed
+   B45 launch envelopes, target-class selection and support rules.
 2. Remaining tactics: last-ditch candidate suitability, the random-tactic menu
    contents, engagement-pitch rule, jink and circle shapes, what a script
    restart does to a maneuver in flight (B11, B12, B13, B47).
@@ -267,13 +269,13 @@ above closes; none is a claim about retail behavior.
 
 Validation work: synthetic scenarios per aircraft and experience level (48
 combinations) that run the components together headless with a fixed seed;
-determinism and restart tests for the future controller; a review of the
+determinism and restart tests for the live controller; a review of the
 fitted steering curves against any flight-model turn data already measured.
 
 Integration work remaining after the 2026-09-17 hookup: surface actors in the
 same runtime; mission routes and orders beyond the fuel and waypoint rules
-already wired; per-store imported seeker envelopes in place of the host's
-current station description; and the wing-approach value producer, without
+already wired; full AI seeker acquisition, activation and pitbull beyond imported launch
+envelopes; and the wing-approach value producer, without
 which the B12 wing-split branch stays untried rather than being fed ordinary
 target distance.
 

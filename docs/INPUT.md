@@ -559,3 +559,23 @@ cue. Their assignment is fitted. Effects mute, pause, safe, empty and failed
 stations silence them. `TORE_SEEKER_VOLUME=0..1` sets maximum amplitude, default
 0.30. Re-import media to add the four samples to an older cache.
 [Rules and constants](spec/missiles.md), [validation](baselines/hud-cleanup.md).
+
+## Player wing orders
+
+These host shortcuts are opinionated agent choices from 2026-09-17. They act
+only on friendly wing 1 in a live AI Quick Mission. An unavailable target or
+absent wing produces an explicit message. Paused flight does not issue orders.
+
+| Shortcut | Order |
+| --- | --- |
+| Alt-B | Break left |
+| Alt-E | Engage the player's designated target |
+| Alt-D | Disengage and stop selecting targets |
+| Alt-1 | Echelon formation |
+| Alt-2 | Line abreast formation |
+| Alt-3 | Line astern formation |
+
+Formation selection changes the formation setting; use disengage to stop a
+current engagement and return to the leader. These bindings are also available
+as `key:Alt-b`, `key:Alt-e`, `key:Alt-d` and `key:Alt-1` through `key:Alt-3`
+in input profiles. [Behavior and limits](spec/ai.md#live-integration-and-authored-boundaries).

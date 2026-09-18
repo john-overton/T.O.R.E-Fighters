@@ -189,6 +189,7 @@ pub struct TargetView {
     pub wing_attackers: u32,
     /// Terrain blocks the firing path.
     pub terrain_blocked: bool,
+    pub sensor_supported: bool,
 }
 
 /// A launch warning delivered to this actor and nobody else (B47).
@@ -257,12 +258,54 @@ pub struct StationView {
     pub employment_limit_deg: Option<f64>,
     /// The store passes its employment envelope against the current target.
     pub employment_fit: Option<f64>,
+    pub minimum_range_ft: f64,
+    pub maximum_range_ft: Option<f64>,
+    pub requires_radar: bool,
+    pub requires_sensor: bool,
+    pub employment_zone: Option<tore_formats::weapons::Zone>,
+    pub mount: [f64; 3],
     pub damage_vs_category: f64,
     /// Nominal store speed, for the fitted lead prediction.
     pub store_speed: ScalarSpeed,
     /// The weapon's own tracking delay once locked (B42).
     pub tracking_delay: Delay,
     pub pacing: ProjectilePacing,
+}
+
+impl StationView {
+    /// Current mount-relative pointing error after a successful employment
+    /// check. This is shared by diagnostics and release, avoiding stale target
+    /// geometry when selection changes during the decision.
+    pub fn employment_error(&self, own: &OwnState, target: &TargetView) -> Option<f64> {
+        let basis = crate::attitude::Basis::new(
+            own.heading_deg.to_radians(),
+            own.body_pitch_deg().to_radians(),
+            own.bank_deg.to_radians(),
+        );
+        let origin = std::array::from_fn(|i| {
+            own.position[i]
+                + basis.right[i] * self.mount[0]
+                + basis.up[i] * self.mount[1]
+                + basis.forward[i] * self.mount[2]
+        });
+        let delta = crate::combat::missiles::sub(target.position, origin);
+        let range = crate::combat::missiles::length(delta);
+        let forward = crate::attitude::dot(delta, basis.forward);
+        let right = crate::attitude::dot(delta, basis.right);
+        let up = crate::attitude::dot(delta, basis.up);
+        let error = right
+            .atan2(forward)
+            .to_degrees()
+            .abs()
+            .max(up.atan2(forward.hypot(right)).to_degrees().abs());
+        let permitted = range >= self.minimum_range_ft
+            && self.maximum_range_ft.is_none_or(|max| range <= max)
+            && self.employment_limit_deg.is_none_or(|limit| error <= limit)
+            && self.employment_zone.is_none_or(|zone| {
+                crate::combat::missiles::geometry(&zone, origin, basis, target.position, None)
+            });
+        permitted.then_some(error)
+    }
 }
 
 /// Route and recovery context (B48).
@@ -458,6 +501,8 @@ pub struct Controller {
     next_motion_id: u64,
     next_request_id: u64,
     fallbacks: FallbackLog,
+    pending_warnings: Vec<(u64, ThreatReport)>,
+    pursuit: Option<(u32, PursuitOffset)>,
 }
 
 impl Controller {
@@ -523,6 +568,8 @@ impl Controller {
             next_motion_id: 1,
             next_request_id: 1,
             fallbacks: FallbackLog::default(),
+            pending_warnings: Vec::new(),
+            pursuit: None,
         })
     }
 
@@ -645,6 +692,7 @@ impl Controller {
     /// installed here replaces the active maneuver outright, which is what
     /// B13 records for a wing command.
     pub fn receive_order(&mut self, request: WingRequest, tick: u64) -> Result<ReceiverOutcome> {
+        self.pursuit = None;
         let outcome = wing::receive(request, &mut self.recipient, tick)?;
         match &outcome {
             ReceiverOutcome::MotionInstalled(summary) => {
@@ -662,9 +710,10 @@ impl Controller {
                 self.active = None;
             }
             ReceiverOutcome::Applied(AppliedSetting::TargetOrder { .. }) => {
-                if let Some(wing::TargetOrder::ConcreteTarget(id)) = self.recipient.target_order {
-                    self.target = Some(id.0);
-                }
+                self.target = match self.recipient.target_order {
+                    Some(wing::TargetOrder::ConcreteTarget(id)) => Some(id.0),
+                    _ => None,
+                };
                 self.active = None;
                 self.next_choice_quarters = 0;
             }
@@ -708,7 +757,7 @@ impl Controller {
             bank: Bank::Unconstrained,
             completion,
             steering_point: None,
-            mode: CommandMode::Ordinary,
+            mode: CommandMode::OtherState,
         };
         self.active = Some(ActiveManeuver {
             intent,
@@ -727,13 +776,29 @@ impl Controller {
         batch: &mut IntentBatch,
     ) -> Result<Option<ScriptReason>> {
         let mut highest: Option<ScriptReason> = None;
-        for event in frame.events {
+        let mut due_missiles = Vec::new();
+        let mut events = frame.events.to_vec();
+        self.pending_warnings.retain(|(due, report)| {
+            if frame.tick >= *due {
+                due_missiles.push(report.missile_id);
+                events.push(FrameEvent::ThreatReported(*report));
+                false
+            } else {
+                true
+            }
+        });
+        for event in &events {
             match event {
                 FrameEvent::Hit => {
                     highest = Some(highest.map_or(ScriptReason::Hit, |r| r.max(ScriptReason::Hit)));
                 }
                 FrameEvent::ThreatReported(report) => {
-                    if let Some(reason) = self.warning(frame, report, batch)? {
+                    if let Some(reason) = self.warning(
+                        frame,
+                        report,
+                        due_missiles.contains(&report.missile_id),
+                        batch,
+                    )? {
                         highest = Some(highest.map_or(reason, |r| r.max(reason)));
                     }
                 }
@@ -756,17 +821,20 @@ impl Controller {
         let Some(reason) = highest else {
             return Ok(None);
         };
-        // B47: a higher reason restarts the script from the top, an equal or
-        // lower one resumes what is already running.
+        Ok(self.accept_reason(reason))
+    }
+
+    fn accept_reason(&mut self, reason: ScriptReason) -> Option<ScriptReason> {
         match threat::on_new_reason(self.reason, reason) {
             ScriptStart::Restart => {
                 self.reason = Some(reason);
                 self.active = None;
+                self.pursuit = None;
                 self.next_choice_quarters = 0;
+                Some(reason)
             }
-            ScriptStart::Resume => {}
+            ScriptStart::Resume => None,
         }
-        Ok(Some(reason))
     }
 
     /// One launch warning (B47).
@@ -774,6 +842,7 @@ impl Controller {
         &mut self,
         frame: &DecisionFrame<'_>,
         report: &ThreatReport,
+        scheduled: bool,
         batch: &mut IntentBatch,
     ) -> Result<Option<ScriptReason>> {
         // The delay is measured from launch; the host delivers the report, and
@@ -793,7 +862,10 @@ impl Controller {
             return Ok(None);
         };
         let due = report.launch_tick + quarters as u64 * super::QUARTER_SECOND_TICKS;
-        if frame.tick < due {
+        if !scheduled && frame.tick < due {
+            if !self.pending_warnings.iter().any(|(_, r)| r == report) {
+                self.pending_warnings.push((due, *report));
+            }
             return Ok(None);
         }
 
@@ -841,6 +913,9 @@ impl Controller {
 
     /// B41 retention, eligibility and ranking over the permitted targets.
     fn select_target(&mut self, frame: &DecisionFrame<'_>) -> Result<Option<u32>> {
+        if self.recipient.target_order == Some(wing::TargetOrder::HoldFire) {
+            return Ok(None);
+        }
         let candidates: Vec<CandidateTarget> = frame
             .targets
             .iter()
@@ -911,8 +986,7 @@ impl Controller {
             Some(_) => weapon_service::TargetClass::Surface,
             None => weapon_service::TargetClass::Air,
         };
-        let range_ft = geometry.map(|g| g.spatial_distance_feet).unwrap_or(0.0);
-        let station = self.choose_station(frame, class, range_ft, batch);
+        let station = self.choose_station(frame, class, target, batch);
         let angles = geometry.and_then(|g| g.angles);
         let locked = target.is_some()
             && station.is_some()
@@ -922,7 +996,8 @@ impl Controller {
         let inputs = ServiceInputs {
             target: target.map(|t| WeaponTargetId(t.id)),
             station: station.map(|s| frame.stations[s].station),
-            unready: !frame.own.radar_emitting,
+            unready: station
+                .is_some_and(|i| frame.stations[i].requires_radar && !frame.own.radar_emitting),
             lock: if locked {
                 LockStatus::Locked {
                     tracking_delay: station
@@ -974,33 +1049,35 @@ impl Controller {
         &mut self,
         frame: &DecisionFrame<'_>,
         class: weapon_service::TargetClass,
-        range_ft: f64,
+        target: Option<TargetView>,
         batch: &mut IntentBatch,
     ) -> Option<usize> {
+        let target = target?;
+        let range_ft = distance(frame.own.position, target.position);
         let usable: Vec<(usize, StoreCandidate)> = frame
             .stations
             .iter()
             .enumerate()
             .filter(|(_, s)| !s.inhibited)
+            .filter(|(_, s)| !s.requires_radar || frame.own.radar_emitting)
+            .filter(|(_, s)| !s.requires_sensor || target.sensor_supported)
             .filter(|(_, s)| weapon_service::store_eligible(s.capability, class))
             .filter(|(_, s)| !matches!(s.rounds, weapon_service::Rounds::Finite(0)))
-            .take(weapon_service::STORE_CANDIDATE_LIMIT)
-            .map(|(index, s)| {
-                (
+            .filter_map(|(index, s)| {
+                let error = s.employment_error(&frame.own, &target)?;
+                Some((
                     index,
                     StoreCandidate {
                         station: s.station,
                         guided: s.guided,
-                        employment_fit: s.employment_fit,
-                        hit_chance: fitted::hit_chance(
-                            s.pointing_error_deg,
-                            s.employment_limit_deg,
-                        ),
+                        employment_fit: Some(error),
+                        hit_chance: fitted::hit_chance(error, s.employment_limit_deg),
                         range_feet: range_ft,
                         damage_vs_category: s.damage_vs_category,
                     },
-                )
+                ))
             })
+            .take(weapon_service::STORE_CANDIDATE_LIMIT)
             .collect();
         if usable.is_empty() {
             return None;
@@ -1014,12 +1091,22 @@ impl Controller {
 
     /// B43 wing requests from a leader.
     fn wing_requests(&mut self, frame: &DecisionFrame<'_>, batch: &mut IntentBatch) {
-        if !self.identity.is_leader() {
+        if !self.identity.is_leader() || self.target.is_none() {
             return;
         }
         // Air-to-air entry raises horizontal spacing to 5000 ft if smaller.
-        let wanted = tactics::air_to_air_wing_spacing(f64::from(frame.wing.horizontal_spacing_ft));
-        if wanted > f64::from(frame.wing.horizontal_spacing_ft) {
+        let wanted = tactics::air_to_air_wing_spacing(f64::from(
+            self.recipient
+                .horizontal_spacing_ft
+                .unwrap_or(frame.wing.horizontal_spacing_ft),
+        ));
+        if wanted
+            > f64::from(
+                self.recipient
+                    .horizontal_spacing_ft
+                    .unwrap_or(frame.wing.horizontal_spacing_ft),
+            )
+        {
             let sender = SenderState {
                 is_leader: true,
                 target: self.target.map(WingTargetId),
@@ -1051,6 +1138,9 @@ impl Controller {
                 Completion::Deadline(deadline) => motion::is_expired(deadline, clock),
                 Completion::Axis(_) => self.axis_complete(frame, &active.intent),
             };
+            if finished && reason.is_none() {
+                self.reason = None;
+            }
             if active.formation
                 && reason.is_none()
                 && !recovering
@@ -1060,7 +1150,9 @@ impl Controller {
                 return Ok(());
             }
             if !finished && reason.is_none() && !active.formation {
-                batch.motion = Some(active.intent);
+                let mut intent = active.intent;
+                self.update_pursuit(frame, target, &mut intent);
+                batch.motion = Some(intent);
                 return Ok(());
             }
         }
@@ -1080,6 +1172,7 @@ impl Controller {
         self.next_choice_quarters =
             quarters + fitted::tactical_cadence_quarters(self.experience.level);
 
+        self.pursuit = None;
         let request = self.choose_maneuver(frame, reason, recovering, target, geometry, batch)?;
         let intent = self.resolve(frame, clock, request, target, geometry, batch)?;
         self.active = Some(ActiveManeuver {
@@ -1163,7 +1256,7 @@ impl Controller {
             bank: Bank::Unconstrained,
             completion,
             steering_point: Some(aim),
-            mode: CommandMode::Ordinary,
+            mode: CommandMode::OtherState,
         };
         self.active = Some(ActiveManeuver {
             intent,
@@ -1565,7 +1658,8 @@ impl Controller {
         // B15 speed regulation and the pursuit steering point.
         let mut steering_point = None;
         let mut speed = request.speed.resolve(frame.own.limits)?;
-        if let (Some(target), Some(geometry)) = (target, geometry)
+        if batch.activity == Some(Activity::Pursuing)
+            && let (Some(target), Some(geometry)) = (target, geometry)
             && let Some(angles) = geometry.angles
         {
             let offsets = tactics::pursuit_offsets(
@@ -1583,6 +1677,14 @@ impl Controller {
                     vertical_feet: f64::from(offsets.vertical_ft),
                 },
             );
+            self.pursuit = Some((
+                target.id,
+                PursuitOffset {
+                    longitudinal_feet: f64::from(offsets.longitudinal_ft),
+                    lateral_feet: f64::from(offsets.lateral_ft),
+                    vertical_feet: f64::from(offsets.vertical_ft),
+                },
+            ));
             steering_point = Some(point);
             if request.speed == SpeedRequest::Corner {
                 speed = pursuit::regulate_speed(
@@ -1623,7 +1725,7 @@ impl Controller {
 
         let id = self.next_motion_id;
         self.next_motion_id += 1;
-        Ok(MotionIntent {
+        let mut intent = MotionIntent {
             id,
             request,
             heading_deg: f64::from(request.heading_deg),
@@ -1632,8 +1734,42 @@ impl Controller {
             bank: request.bank,
             completion,
             steering_point,
-            mode: CommandMode::Ordinary,
-        })
+            mode: CommandMode::OtherState,
+        };
+        self.update_pursuit(frame, target, &mut intent);
+        Ok(intent)
+    }
+
+    fn update_pursuit(
+        &self,
+        frame: &DecisionFrame<'_>,
+        target: Option<TargetView>,
+        intent: &mut MotionIntent,
+    ) {
+        let Some((id, offset)) = self.pursuit else {
+            return;
+        };
+        let Some(target) = target.filter(|t| t.id == id) else {
+            return;
+        };
+        let point = pursuit::steering_point(target.position, target.heading_deg, offset);
+        let delta: [f64; 3] = std::array::from_fn(|i| point[i] - frame.own.position[i]);
+        intent.steering_point = Some(point);
+        intent.heading_deg = delta[0].atan2(delta[2]).to_degrees().rem_euclid(360.0);
+        intent.flight_path_pitch_deg = delta[1].atan2(delta[0].hypot(delta[2])).to_degrees();
+        if let Ok(g) = self.geometry(frame, &target)
+            && let Some(a) = g.angles
+        {
+            intent.speed = pursuit::regulate_speed(
+                offset.longitudinal_feet.abs(),
+                g.spatial_distance_feet,
+                target.speed,
+                a.heading_error_deg,
+                a.pitch_error_deg,
+                &frame.own.limits,
+                false,
+            );
+        }
     }
 
     /// B44 axis rates, with the fitted base pitch rate.
@@ -1757,10 +1893,14 @@ impl Controller {
         }
         self.variation.advance(frame.tick, &mut self.random);
         let slot = wing::formation_slot_point(
-            frame.wing.formation,
+            self.recipient.formation.unwrap_or(frame.wing.formation),
             frame.wing.slot,
-            frame.wing.horizontal_spacing_ft,
-            frame.wing.vertical_spacing_ft,
+            self.recipient
+                .horizontal_spacing_ft
+                .unwrap_or(frame.wing.horizontal_spacing_ft),
+            self.recipient
+                .vertical_spacing_ft
+                .unwrap_or(frame.wing.vertical_spacing_ft),
         )?;
         let offset = wing::formation_point(slot, leader.heading_deg, &self.variation);
         Ok(Some([
@@ -1940,6 +2080,7 @@ mod tests {
             seeker_eligible: true,
             wing_attackers: 0,
             terrain_blocked: false,
+            sensor_supported: true,
         }
     }
 
@@ -1979,6 +2120,12 @@ mod tests {
                     pointing_error_deg: 2.0,
                     employment_limit_deg: Some(30.0),
                     employment_fit: Some(1.0),
+                    minimum_range_ft: 0.0,
+                    maximum_range_ft: Some(40000.0),
+                    requires_radar: false,
+                    requires_sensor: false,
+                    employment_zone: None,
+                    mount: [0.0; 3],
                     damage_vs_category: 100.0,
                     store_speed: ScalarSpeed(2000.0),
                     tracking_delay: Delay::seconds(1),
@@ -2573,5 +2720,120 @@ mod tests {
         let before = labels.len();
         labels.dedup();
         assert_eq!(labels.len(), before);
+    }
+    #[test]
+    fn pursuit_tracks_lateral_and_moving_targets_without_restarting_or_redirecting_breaks() {
+        let mut scene = Scene::new();
+        scene.targets[0].position = [20000.0, 20000.0, 20000.0];
+        let mut c = controller(Experience::Ace);
+        let first = c.step(&scene.frame(0, own())).unwrap().motion.unwrap();
+        assert!(
+            (first.heading_deg - 45.0).abs() < 10.0,
+            "{}",
+            first.heading_deg
+        );
+        scene.targets[0].position[0] = -20000.0;
+        let next = c.step(&scene.frame(1, own())).unwrap().motion.unwrap();
+        assert_eq!(first.id, next.id);
+        assert!(next.heading_deg > 300.0);
+        c.receive_order(wing::PlayerBreak::Right.request(), 2)
+            .unwrap();
+        let ordered = c.step(&scene.frame(2, own())).unwrap().motion.unwrap();
+        assert_eq!(ordered.heading_deg, 170.0);
+        assert!(ordered.steering_point.is_none());
+    }
+
+    #[test]
+    fn all_reason_priority_pairs_preserve_or_replace_active_motion() {
+        let scene = Scene::new();
+        for saved in ScriptReason::ALL {
+            for new in ScriptReason::ALL {
+                let mut c = controller(Experience::Ace);
+                c.step(&scene.frame(0, own())).unwrap();
+                c.reason = Some(saved);
+                let active = c.active;
+                let reason = c.accept_reason(new);
+                if new > saved {
+                    assert_eq!(reason, Some(new));
+                    assert!(c.active.is_none());
+                } else {
+                    assert_eq!(reason, None);
+                    assert_eq!(c.active, active);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fresh_warnings_are_queued_until_due_once_at_all_levels_and_distance_edges() {
+        for level in Experience::ALL {
+            for distance in [0.0, 10559.0, 10560.0, 211200.0, 211201.0] {
+                let mut scene = Scene::new();
+                scene.targets.clear();
+                let report = ThreatReport {
+                    missile_id: 42,
+                    seeker: SeekerClass::Infrared,
+                    launcher_id: 99,
+                    launcher_same_side: false,
+                    distance_at_launch_ft: distance,
+                    launch_tick: 0,
+                };
+                scene.events.push(FrameEvent::ThreatReported(report));
+                let mut c = controller(level);
+                c.step(&scene.frame(0, own())).unwrap();
+                let WarningDelay::Quarters(q) = threat::warning_delay(
+                    &WarningTarget::Ai {
+                        experience: level,
+                        state: AttackState::OrdinaryFlight,
+                    },
+                    distance,
+                )
+                .unwrap() else {
+                    panic!()
+                };
+                assert_eq!(c.pending_warnings, vec![(u64::from(q) * 30, report)]);
+                scene.events.clear();
+                let early = c.step(&scene.frame(u64::from(q) * 30 - 1, own())).unwrap();
+                assert!(early.devices.is_none());
+                assert_eq!(c.pending_warnings.len(), 1);
+                c.step(&scene.frame(u64::from(q) * 30, own())).unwrap();
+                assert!(c.pending_warnings.is_empty());
+                assert!(
+                    c.step(&scene.frame(u64::from(q) * 30 + 1, own()))
+                        .unwrap()
+                        .devices
+                        .is_none()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn selected_store_requires_angle_range_support_and_clear_terrain() {
+        for gate in 0..6 {
+            let mut scene = Scene::new();
+            match gate {
+                0 => scene.targets[0].position = [8000.0 * 3f64.sqrt(), 20000.0, 8000.0],
+                1 => scene.stations[0].maximum_range_ft = Some(7999.0),
+                2 => scene.stations[0].minimum_range_ft = 8001.0,
+                3 => scene.targets[0].terrain_blocked = true,
+                4 => scene.stations[0].requires_radar = true,
+                _ => {
+                    scene.stations[0].requires_sensor = true;
+                    scene.targets[0].sensor_supported = false;
+                }
+            }
+            let mut own = own();
+            if gate == 4 {
+                own.radar_emitting = false;
+            }
+            let mut c = controller(Experience::Ace);
+            for tick in 0..2400 {
+                assert!(
+                    c.step(&scene.frame(tick, own)).unwrap().weapons.is_empty(),
+                    "gate {gate}"
+                );
+            }
+        }
     }
 }

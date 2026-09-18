@@ -228,7 +228,7 @@ eligibility a mouse click uses, and a mouse click on the scope designates one
 directly. SAFE/EMPTY/STATION FAILED and the sensor and range inhibits are shown
 separately from lock; a terrain-masked target now reports NO TARGET, because
 masking clears the contact rather than inhibiting the launch. The systems continuation below adds automatic source-weighted failures
-for supported equipment; combat AI remains deferred.
+for supported equipment. Quick Mission AI integration is described in the [AI spec](spec/ai.md).
 
 `--record-combat NEW_PATH` records explicit combat-service inputs and commands;
 `--replay-combat PATH` replays headlessly with the same aircraft/theater/assets.
@@ -404,15 +404,15 @@ stations silence them. `TORE_SEEKER_VOLUME=0..1` sets maximum amplitude, default
 0.30. Re-import media to add the four samples to an older cache.
 [Rules and constants](spec/missiles.md), [validation](baselines/hud-cleanup.md).
 
-Quick Mission wing counts now spawn straight-flying practice aircraft of the
-selected types. Friendly Wing 1 includes you; all other slots are dummies, up to
-29 with the existing six wing selectors. They do not attack or evade. Separation
-sets their starting distance. Restart restores the formation and accepted load.
-Nationality, skill and advantage do not yet change these practice flights.
+Quick Mission wing counts launch independent AI aircraft by default, up to 29
+plus the player. They use the selected aircraft and skill, with separate wing
+formations. `--fixture-wings` retains straight-flight practice. Restart restores
+the initial actors, stores, formations and damage state. Player wing shortcuts
+are listed in [the input guide](INPUT.md#player-wing-orders).
 
 Aircraft at half health or below now display an original damaged body and trail
 dark smoke. Destroyed targets remain visible during their existing fall.
 Powered missiles leave white smoke that disperses after burnout or impact.
 Reset restores intact aircraft and clears smoke. Visual thresholds and smoke
 timing are fitted. Detached pieces inherit aircraft motion, fall, then disappear
-with a brief ground-hit animation. Damage-specific flight handling is not added. See [damage and smoke behavior](spec/damage-smoke.md).
+with a brief ground-hit animation. AI damage uses the fitted health-to-authority rule in the [AI spec](spec/ai.md#live-integration-and-authored-boundaries); player damage handling is unchanged. See [damage and smoke behavior](spec/damage-smoke.md).
