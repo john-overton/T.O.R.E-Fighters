@@ -19,6 +19,8 @@
 Research date: 2026-09-14. This schedules aircraft armament research and subsequent
 importer/simulation work. It does not mark combat or vanilla parity complete.
 [Measured extraction and code evidence](../baselines/weapons-research.md).
+Every JT record's identity and headline fields are inventoried in
+[the catalog](fa-catalog.md).
 
 ## Scope and fidelity contract
 

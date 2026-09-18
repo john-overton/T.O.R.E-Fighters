@@ -26,6 +26,10 @@ same reader and simulator; Rafale visual/cockpit animation acceptance remains
 separate. The original flight description below describes the legacy adapter;
 [FLIGHT-MODEL](../FLIGHT-MODEL.md) documents the selectable hybrid model.
 
+Every PT record's identity and headline fields, for all 145 aircraft types in the
+supplied installation, are inventoried in [the catalog](fa-catalog.md). Catalog
+presence is not flyable support.
+
 Current combat behavior is documented in [weapons/systems integration](../baselines/weapons-systems.md)
 and the preceding [manual weapons pass](../baselines/manual-weapons.md).
 It supersedes the first-pass unimplemented weapon/instrument states below;

@@ -47,7 +47,9 @@ Initial weapons audit (before implementation, 2026-09-14): 135 JT and 170
 dependencies extracted, but shared native effect roots were missing. All 70 literal JT references
 across 145 PTs are present; PTS/compatibility and ordnance/sensor behavior remain
 open. No format status is promoted by this research. [Plan](weapons.md) and
-[evidence](../baselines/weapons-research.md).
+[evidence](../baselines/weapons-research.md). The decoded identities and headline
+fields of all 145 PT and 135 JT records are inventoried as CSV in
+[the catalog](fa-catalog.md).
 
 ### F/A-18D slice
 
