@@ -35,6 +35,12 @@ Menu-only startup randomness chooses one of the five native backgrounds independ
 
 Menu drawing uses CPU composition for this small static canvas; it is not a commitment to software-rendering flight scenes. The window sleeps while idle. Hover transitions and transient placeholder messages schedule temporary redraws. The fragment shader is authored source; it contains no retail bytes.
 
+
+`assets.rs` retains prior cache generations until a new import is synced and
+validated from disk. Successful import and startup load remove older numbered
+packs from that cache directory. Cleanup is best effort and does not touch
+source media or extracted assets. [Retention contract](spec/import-cache.md).
+
 ## Boundaries for menu work
 
 Keep `tore-formats` independent of windowing and GPU APIs. The future simulation likewise needs to run headlessly with deterministic inputs. Avoid empty placeholder crates or premature engine abstractions.

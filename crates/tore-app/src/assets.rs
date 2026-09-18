@@ -87,6 +87,44 @@ fn archive(root: &Path, name: &str) -> AppResult<Archive> {
         .ok_or_else(|| format!("{}: missing {name}", root.display()))?;
     Ok(Archive::open(path)?)
 }
+fn pack_generation(path: &Path) -> Option<u128> {
+    let name = path.file_name()?.to_str()?;
+    let generation = name.strip_prefix("menu-")?.strip_suffix(".pack")?;
+    if generation.is_empty() || !generation.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    generation.parse().ok()
+}
+
+/// Only called after the retained pack has been decoded successfully.
+fn remove_older_packs(directory: &Path, retained: &Path) -> std::io::Result<usize> {
+    let Some(generation) = pack_generation(retained) else {
+        return Ok(0);
+    };
+    let mut removed = 0;
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        if entry.file_type()?.is_file()
+            && pack_generation(&entry.path()).is_some_and(|old| old < generation)
+        {
+            fs::remove_file(entry.path())?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn cleanup_previous_imports(directory: &Path, retained: &Path) {
+    match remove_older_packs(directory, retained) {
+        Ok(0) => {}
+        Ok(count) => println!("Removed previous import packs: {count}"),
+        Err(error) => eprintln!(
+            "Could not finish cleaning older import packs in {}: {error}",
+            directory.display()
+        ),
+    }
+}
+
 impl Assets {
     fn decode(resources: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
         if resources.get("TORE_MUSIC_V1").map(Vec::as_slice) != Some(b"PCM1") {
@@ -427,7 +465,12 @@ impl Assets {
             file.write_all(&bytes)?;
         }
         file.sync_all()?;
+        drop(file);
         fs::write(destination.join("import-report.txt"), report)?;
+        // Verify the on-disk pack before removing any previously usable import.
+        drop(assets);
+        let assets = Self::load_pack(&path)?;
+        cleanup_previous_imports(destination, &path);
         println!(
             "Imported menu and all theater resources to {}",
             path.display()
@@ -449,7 +492,10 @@ impl Assets {
             "No imported menu. Run with --import gameassets/fighters-anthology".to_string();
         for path in paths.into_iter().rev() {
             match Self::load_pack(&path) {
-                Ok(assets) => return Ok(assets),
+                Ok(assets) => {
+                    cleanup_previous_imports(directory, &path);
+                    return Ok(assets);
+                }
                 Err(error) => {
                     last_error = format!("{}: {error}", path.display());
                     eprintln!("Ignoring invalid menu cache: {last_error}");
@@ -505,5 +551,95 @@ impl Assets {
             return Err("trailing menu pack bytes".into());
         }
         Self::decode(&resources)
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct CacheDirectory(PathBuf);
+    impl CacheDirectory {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "tore-cache-{}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for CacheDirectory {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    #[test]
+    fn cleanup_removes_only_older_numbered_regular_packs() {
+        let directory = CacheDirectory::new();
+        for name in [
+            "menu-9.pack",
+            "menu-10.pack",
+            "menu-20.pack",
+            "menu-30.pack",
+            "menu-backup.pack",
+            "menu-+1.pack",
+            "preferences.conf",
+            "other.pack",
+        ] {
+            fs::write(directory.0.join(name), b"synthetic").unwrap();
+        }
+        fs::create_dir(directory.0.join("menu-1.pack")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("preferences.conf", directory.0.join("menu-2.pack")).unwrap();
+        assert_eq!(
+            remove_older_packs(&directory.0, &directory.0.join("menu-20.pack")).unwrap(),
+            2
+        );
+        assert!(!directory.0.join("menu-9.pack").exists());
+        assert!(!directory.0.join("menu-10.pack").exists());
+        for name in [
+            "menu-20.pack",
+            "menu-30.pack",
+            "menu-backup.pack",
+            "menu-+1.pack",
+            "preferences.conf",
+            "other.pack",
+            "menu-1.pack",
+        ] {
+            assert!(directory.0.join(name).exists(), "removed {name}");
+        }
+        #[cfg(unix)]
+        assert!(directory.0.join("menu-2.pack").is_symlink());
+    }
+
+    #[test]
+    fn failed_load_preserves_all_existing_packs() {
+        let directory = CacheDirectory::new();
+        for name in ["menu-10.pack", "menu-20.pack"] {
+            fs::write(directory.0.join(name), b"invalid synthetic pack").unwrap();
+        }
+        assert!(Assets::load(&directory.0).is_err());
+        assert!(directory.0.join("menu-10.pack").exists());
+        assert!(directory.0.join("menu-20.pack").exists());
+    }
+
+    #[test]
+    fn non_generation_selection_does_not_authorize_cleanup() {
+        let directory = CacheDirectory::new();
+        fs::write(directory.0.join("menu-10.pack"), b"synthetic").unwrap();
+        assert_eq!(
+            remove_older_packs(&directory.0, &directory.0.join("menu-custom.pack")).unwrap(),
+            0
+        );
+        assert!(directory.0.join("menu-10.pack").exists());
     }
 }

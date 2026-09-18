@@ -67,7 +67,7 @@ Cache locations:
 | Linux | `$XDG_DATA_HOME/T.O.R.E-Fighters/`, falling back to `~/.local/share/T.O.R.E-Fighters/` |
 | Windows | `%APPDATA%\T.O.R.E-Fighters\` |
 
-`TORE_DATA_DIR` overrides this directory for isolated checks, e.g. `TORE_DATA_DIR=.local/test-profile cargo run --locked -p tore-app -- --import gameassets/fighters-anthology --import-only`. Each import creates a versioned `menu-*.pack`; the latest valid pack is loaded, with fallback to earlier valid packs if a write was interrupted. `import-report.txt` records resource names and offsets. Older generations are retained; cache cleanup is manual for now. Imported resources never go into the executable.
+`TORE_DATA_DIR` overrides this directory for isolated checks, e.g. `TORE_DATA_DIR=.local/test-profile cargo run --locked -p tore-app -- --import gameassets/fighters-anthology --import-only`. Each import creates a versioned `menu-*.pack`; the latest valid pack is loaded, with fallback to earlier valid packs if a write was interrupted. `import-report.txt` records resource names and offsets. After a successful import or startup load, older numbered packs are automatically removed. An import is read back and validated before cleanup; failed imports leave earlier packs available. Cleanup leaves newer generations and unrelated files alone. See [cache retention](spec/import-cache.md). Imported resources never go into the executable.
 
 ## Linux and Windows
 

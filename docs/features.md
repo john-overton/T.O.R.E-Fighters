@@ -23,6 +23,7 @@ of everything in the game or its code.
 
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
+| Import cache cleanup | ☐ | ☑ | Implemented. Successful import or startup load removes older numbered packs after validating the retained pack. | [Contract](spec/import-cache.md) |
 | Choose Activity menu and dropdowns | ☑ | ☐ | Partially implemented. Menu navigation works; campaign, multiplayer and replay actions remain unavailable. | Manual pp. 11-13; [menu](baselines/main-menu.md) |
 | Quick Mission setup | ☑ | ☑ | Partially implemented. All six wings launch the selected aircraft, up to 29 plus the player, carrying side, wing, member and the wing's selected skill. Those wings use AI by default in separate delta formations; `--fixture-wings` retains straight-flight fixtures. Mission objectives remain. The original gives every member of a wing the wing's selected skill, which is what the payload does. | Manual pp. 18-20; [creator](baselines/creator-ordnance.md), [AI experience](spec/ai-experience.md) |
 | Load Ordnance editing | ☑ | ☐ | Partially implemented. Compatible weapons, quantities and internal fuel work; tanks, campaign stock and airbase restrictions remain. | Manual p. 16; [loadout](baselines/creator-ordnance.md) |

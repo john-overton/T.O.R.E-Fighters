@@ -123,6 +123,10 @@ A repeat full run reused all 7,520 outputs as `unchanged`, with zero errors. Run
 
 All extracted media, caches, snapshots, and derivative assets stay local. Commit parser code, synthetic tests, and research notes only.
 
+The app automatically removes older import packs after a successful import or
+startup load. This cleanup applies to its application-data cache, not the
+extracted output folders described here. See [cache retention](spec/import-cache.md).
+
 ## Ukraine and shared environment profile
 
 ```sh
