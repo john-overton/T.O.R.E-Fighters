@@ -104,6 +104,7 @@ struct App {
     instrument_time: Instant,
     menu: Menu,
     audio: Option<audio::Audio>,
+    wing_recipient: Option<u8>,
     renderer: Option<Renderer>,
     pointer: Option<(f64, f64)>,
     modifiers: ModifiersState,
@@ -420,28 +421,36 @@ impl App {
                 .message("Environmental turbulence is unavailable in native research flight");
         }
         match command {
-            Command::Wing(_) | Command::WingEngage => {
+            Command::WingRecipient(recipient) => {
+                if !self.flight_ui.frozen() {
+                    self.wing_recipient = recipient;
+                    self.flight_ui.message(recipient.map_or_else(
+                        || "Orders address all wingmen".to_owned(),
+                        |n| format!("Orders address wingman {n}"),
+                    ));
+                }
+                Action::None
+            }
+            Command::Wing(order) => {
                 if self.flight_ui.frozen() {
                     return Action::None;
                 }
-                use tore_sim::ai::wing::{TargetId, TargetOrder, WingRequest};
-                let request = match command {
-                    Command::Wing(request) => Some(request),
-                    _ => self.combat.state.designated().map(|id| {
-                        WingRequest::TargetAssignment(TargetOrder::ConcreteTarget(TargetId(id)))
-                    }),
-                };
-                let result = request.and_then(|request| {
-                    self.ai_wings
-                        .as_mut()
-                        .map(|bridge| bridge.player_order(request))
-                });
-                self.flight_ui.message(match result {
-                    Some(Ok(n)) if n > 0 => format!("Order sent to {n} wingmen"),
-                    Some(Err(error)) => error.to_string(),
-                    _ => "Wing order unavailable: no wingmen or designated target".to_owned(),
-                });
-                Action::Click
+                let selected = self.combat.state.designated();
+                let result = self
+                    .ai_wings
+                    .as_mut()
+                    .map(|bridge| bridge.command(order, selected, self.wing_recipient));
+                match result {
+                    Some(Ok(report)) => {
+                        if let Some(audio) = &self.audio {
+                            audio.radio(&report.radio, true);
+                        }
+                        self.flight_ui.message(report.message);
+                    }
+                    Some(Err(error)) => self.flight_ui.message(error.to_string()),
+                    None => self.flight_ui.message("Wing order unavailable: no AI wing"),
+                }
+                Action::None
             }
             Command::None => Action::None,
             Command::Click => Action::Click,
@@ -901,6 +910,7 @@ impl App {
                 // just placed, so the AI aircraft start exactly where the
                 // straight-flight fixtures would have started.
                 self.ai_wings = None;
+                self.wing_recipient = None;
                 self.combat.ai_poses = false;
                 if self.ai_wings_enabled && self.mission.is_some() {
                     let built = self
@@ -958,6 +968,7 @@ impl App {
             }
             Action::Back => {
                 self.ai_wings = None;
+                self.wing_recipient = None;
                 self.combat.ai_poses = false;
                 if let Err(e) = self.combat.finish_recording() {
                     self.error = Some(e);
@@ -2784,7 +2795,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     {
         None
     } else {
-        match audio::Audio::new(std::mem::take(&mut assets.sounds), &assets.music_scores) {
+        match audio::Audio::new(
+            std::mem::take(&mut assets.sounds),
+            &assets.music_scores,
+            &assets.theater_resources,
+        ) {
             Ok(audio) => Some(audio),
             Err(error) => {
                 eprintln!("Continuing without audio: {error}");
@@ -3282,6 +3297,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         instrument_time: Instant::now(),
         menu,
         audio,
+        wing_recipient: None,
         renderer: None,
         modifiers: ModifiersState::empty(),
         smoke_test,

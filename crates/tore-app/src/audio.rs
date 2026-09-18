@@ -4,7 +4,7 @@ pub mod music;
 mod seeker;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     sync::{Arc, Mutex},
 };
 
@@ -33,6 +33,7 @@ struct Mixer {
     burner_gain: f32,
     voices: Vec<Voice>,
     ui_voices: Vec<Voice>,
+    radio: VecDeque<Voice>,
     music_on: bool,
     effects_on: bool,
 }
@@ -40,6 +41,7 @@ pub struct Audio {
     _stream: cpal::Stream,
     mixer: Arc<Mutex<Mixer>>,
     clips: BTreeMap<String, Arc<Clip>>,
+    radio_phrases: BTreeMap<String, String>,
 }
 fn cue(action: Action) -> Option<&'static str> {
     match action {
@@ -86,6 +88,7 @@ impl Audio {
     pub fn new(
         sounds: BTreeMap<String, Vec<u8>>,
         scripts: &BTreeMap<String, Vec<u8>>,
+        resources: &BTreeMap<String, Vec<u8>>,
     ) -> AppResult<Self> {
         let clips = sounds
             .into_iter()
@@ -130,6 +133,7 @@ impl Audio {
             burner_gain: 0.,
             voices: Vec::with_capacity(8),
             ui_voices: Vec::with_capacity(8),
+            radio: VecDeque::new(),
             // Stay silent until the app has restored the user's saved preferences.
             music_on: false,
             effects_on: false,
@@ -156,8 +160,28 @@ impl Audio {
             _stream: stream,
             mixer,
             clips,
+            radio_phrases: tore_formats::radio::STEMS
+                .iter()
+                .filter_map(|(stem, _)| {
+                    let bytes = resources.get(&format!("TORE_RADIO_{stem}"))?;
+                    if bytes.is_empty()
+                        || bytes.len() > 127
+                        || !bytes.iter().all(|b| (32..127).contains(b))
+                    {
+                        return None;
+                    }
+                    Some((stem.to_string(), String::from_utf8(bytes.clone()).ok()?))
+                })
+                .collect(),
         })
     }
+    /// A new order supersedes pending radio, never flight execution.
+    pub fn radio(&self, stems: &[&str], interrupt: bool) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.enqueue_radio(&self.clips, &self.radio_phrases, stems, interrupt);
+        }
+    }
+
     pub fn seeker(&self, state: Option<tore_sim::combat::live::SeekerTone>) {
         if let Ok(mut m) = self.mixer.lock() {
             m.seeker.target = state.map_or(0., |cue| cue.strength.clamp(0., 1.)) * m.seeker_volume;
@@ -231,6 +255,7 @@ impl Audio {
             m.engine_gain = 0.;
             m.burner_gain = 0.;
             m.voices.clear();
+            m.radio.clear();
             m.flight_paused = false;
         }
     }
@@ -259,6 +284,7 @@ impl Audio {
                 m.engine_gain = 0.;
                 m.burner_gain = 0.;
                 m.voices.clear();
+                m.radio.clear();
             }
             m.flight_on = state.is_some();
             if let Some(fault) = m.music.fault.take() {
@@ -274,6 +300,7 @@ impl Audio {
                     m.engine_gain = 0.;
                     m.burner_gain = 0.;
                     m.voices.clear();
+                    m.radio.clear();
                     m.engine_aircraft = Some(a.id);
                 }
                 let alert = stall_cue(s.stall_alert(ground));
@@ -337,6 +364,7 @@ impl Audio {
             mixer.effects_on = effects;
             if !effects {
                 mixer.voices.clear();
+                mixer.radio.clear();
                 mixer.ui_voices.clear();
             }
         }
@@ -354,6 +382,7 @@ impl Audio {
                 if !enabled {
                     mixer.ui_voices.clear();
                     mixer.voices.clear();
+                    mixer.radio.clear();
                 }
             }
             _ => {}
@@ -412,6 +441,33 @@ fn stall_cue(
     }
 }
 impl Mixer {
+    fn enqueue_radio(
+        &mut self,
+        clips: &BTreeMap<String, Arc<Clip>>,
+        phrases: &BTreeMap<String, String>,
+        stems: &[&str],
+        interrupt: bool,
+    ) {
+        if interrupt {
+            self.radio.clear();
+        }
+        if !self.effects_on || self.flight_paused {
+            return;
+        }
+        for stem in stems {
+            if self.radio.len() >= 16 {
+                break;
+            }
+            if phrases.contains_key(*stem)
+                && let Some(clip) = clips.get(&format!("{stem}.5K"))
+            {
+                self.radio.push_back(Voice {
+                    clip: clip.clone(),
+                    position: 0.,
+                });
+            }
+        }
+    }
     fn sample(&mut self, rate: f64) -> f32 {
         let mut value = self.seeker.sample(
             rate,
@@ -441,6 +497,12 @@ impl Mixer {
         if self.effects_on && !(self.flight_on && self.flight_paused) {
             for voice in &mut self.voices {
                 value += voice.next(rate, false) * 0.4;
+            }
+            if let Some(voice) = self.radio.front_mut() {
+                value += voice.next(rate, false) * 0.4;
+                if voice.finished() {
+                    self.radio.pop_front();
+                }
             }
         }
         if self.effects_on {
@@ -477,15 +539,8 @@ fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn stall_cues_and_pause_mute_use_a_dedicated_loop() {
-        use tore_formats::flight_model::departure::DepartureMode::*;
-        assert_eq!(stall_cue(Some(Warning)), Some("&STALLWR.5K"));
-        assert_eq!(stall_cue(Some(ExtendedWarning)), Some("&STALLWR.5K"));
-        assert_eq!(stall_cue(Some(Stalled)), Some("&STALL.5K"));
-        assert_eq!(stall_cue(Some(Spinning)), Some("&STALL.5K"));
-        assert_eq!(stall_cue(Some(Normal)), None);
-        let mut m = Mixer {
+    fn test_mixer() -> Mixer {
+        Mixer {
             seeker: seeker::Tone::default(),
             seeker_voice: None,
             seeker_cue: None,
@@ -508,9 +563,21 @@ mod tests {
             burner_gain: 0.,
             voices: Vec::new(),
             ui_voices: Vec::new(),
+            radio: VecDeque::new(),
             music_on: false,
             effects_on: true,
-        };
+        }
+    }
+
+    #[test]
+    fn stall_cues_and_pause_mute_use_a_dedicated_loop() {
+        use tore_formats::flight_model::departure::DepartureMode::*;
+        assert_eq!(stall_cue(Some(Warning)), Some("&STALLWR.5K"));
+        assert_eq!(stall_cue(Some(ExtendedWarning)), Some("&STALLWR.5K"));
+        assert_eq!(stall_cue(Some(Stalled)), Some("&STALL.5K"));
+        assert_eq!(stall_cue(Some(Spinning)), Some("&STALL.5K"));
+        assert_eq!(stall_cue(Some(Normal)), None);
+        let mut m = test_mixer();
         for _ in 0..12 {
             assert!((m.sample(4.) - 0.2).abs() < 1e-6);
         }
@@ -622,5 +689,50 @@ mod tests {
         v.position = 2.0;
         assert_eq!(v.next(4.0, false), 0.0);
         assert_eq!(v.next(4.0, true), 0.0);
+    }
+    #[test]
+    fn radio_is_serial_pauses_and_interrupts_without_effects_overlap() {
+        let mut m = test_mixer();
+        m.stall = None;
+        let clips = BTreeMap::from([
+            (
+                "^FIRST.5K".into(),
+                Arc::new(Clip {
+                    samples: vec![192; 2],
+                    rate: 4.,
+                }),
+            ),
+            (
+                "^SECOND.5K".into(),
+                Arc::new(Clip {
+                    samples: vec![64; 2],
+                    rate: 4.,
+                }),
+            ),
+        ]);
+        let phrases = BTreeMap::from([
+            ("^FIRST".into(), "First".into()),
+            ("^SECOND".into(), "Second".into()),
+            ("^MISSING".into(), "Missing".into()),
+        ]);
+        m.enqueue_radio(&clips, &phrases, &["^FIRST", "^MISSING", "^SECOND"], true);
+        assert_eq!(m.radio.len(), 2);
+        assert!((m.sample(4.) - 0.2).abs() < 1e-6);
+        m.flight_paused = true;
+        assert_eq!(m.sample(4.), 0.);
+        assert_eq!(m.radio.front().unwrap().position, 1.);
+        m.flight_paused = false;
+        assert!((m.sample(4.) - 0.2).abs() < 1e-6);
+        assert!((m.sample(4.) + 0.2).abs() < 1e-6);
+        m.enqueue_radio(&clips, &phrases, &["^FIRST"], true);
+        assert_eq!(m.radio.len(), 1);
+        assert!((m.sample(4.) - 0.2).abs() < 1e-6);
+        m.enqueue_radio(&clips, &BTreeMap::new(), &["^FIRST"], true);
+        assert!(m.radio.is_empty());
+        m.enqueue_radio(&clips, &phrases, &["^FIRST"; 20], true);
+        assert_eq!(m.radio.len(), 16);
+        m.effects_on = false;
+        m.enqueue_radio(&clips, &phrases, &["^SECOND"], true);
+        assert!(m.radio.is_empty());
     }
 }

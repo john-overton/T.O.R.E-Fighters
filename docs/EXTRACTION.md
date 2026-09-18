@@ -407,3 +407,14 @@ The combat resource set includes `&IRTRY.5K`, `&IRLOCK.5K`, `&RDRTRY.5K`, and
 `&RDRLOCK.5K` from user-owned FA_2.LIB. Re-import older app caches for these cues.
 No sample bytes are compiled into the application. Their search/lock assignment
 is fitted; see [HUD audio evidence](baselines/hud-cleanup.md).
+
+## Wing command radio
+
+The app's regular `--import <retail-directory> --import-only` path also selects
+24 reviewed command/reply recordings from FA_2.LIB and bounded phrase metadata
+from FA.EXE. Reimport updates the local cache; no new retail files enter the
+repository. A missing executable or unreviewed phrase layout leaves radio
+metadata unavailable, reported in `import-report.txt`, without blocking other
+assets or command execution. Missing clips stay silent. This selection belongs
+to the app importer, not the standalone music extraction profile.
+[Data contract and source identity](formats/radio.md).

@@ -562,20 +562,60 @@ stations silence them. `TORE_SEEKER_VOLUME=0..1` sets maximum amplitude, default
 
 ## Player wing orders
 
-These host shortcuts are opinionated agent choices from 2026-09-17. They act
-only on friendly wing 1 in a live AI Quick Mission. An unavailable target or
-absent wing produces an explicit message. Paused flight does not issue orders.
+These host shortcuts are opinionated agent choices. Orders address friendly
+wing 1 in a live AI Quick Mission. Alt-0 selects the whole flight; Alt-4 through
+Alt-7 select wingmen 1 through 4. Restart restores whole-flight addressing.
+Unavailable recipients or targets produce explicit messages. Paused flight does
+not issue orders. The imported flight menu has no wing-order submenu.
 
 | Shortcut | Order |
 | --- | --- |
-| Alt-B | Break left |
-| Alt-E | Engage the player's designated target |
+| Alt-B / Alt-R | Break left / right |
+| Alt-H / Alt-V / Alt-T | Break high / low / fly straight |
+| Alt-E | Engage the designated target |
+| Alt-P | Protect me, assign a currently observed attacker |
+| Alt-W | Attack on contact |
+| Alt-F | Engage designated target from formation, medium control |
 | Alt-D | Disengage and stop selecting targets |
-| Alt-1 | Echelon formation |
-| Alt-2 | Line abreast formation |
-| Alt-3 | Line astern formation |
+| Alt-1 / Alt-2 / Alt-3 | Echelon / line abreast / line astern |
+| Alt-8 | Toggle 512 / 2048 ft horizontal spacing |
+| Alt-K | Cycle level / 512 ft high / 512 ft low stacking |
+| Alt-C | Toggle loose / medium control |
+| Alt-Shift-B / R / H / V | Approach the designated target from left / right / high / low |
+| Alt-0 / Alt-4 through Alt-7 | Address all wingmen / one wingman |
 
-Formation selection changes the formation setting; use disengage to stop a
-current engagement and return to the leader. These bindings are also available
-as `key:Alt-b`, `key:Alt-e`, `key:Alt-d` and `key:Alt-1` through `key:Alt-3`
-in input profiles. [Behavior and limits](spec/ai.md#live-integration-and-authored-boundaries).
+Input profiles can use these as `key:Alt-b`, `key:Alt-8`,
+`key:Alt-Shift-b` and the corresponding keys above. Alt-S remains the unimplemented
+original radio-silence shortcut; it is not repurposed for spacing.
+
+The message gives applied, rejected and no-motion counts. A target must be alive,
+hostile and present in each recipient's own radar or visual contacts. Synthetic
+headless actors without sensors retain their explicit direct-awareness fallback.
+The first living wingman alone replies to an accepted engage/protect assignment.
+Commands take effect immediately, independently of their radio recordings.
+A new command interrupts queued old command audio. Sound off mutes radio along
+with effects; an independent radio-traffic preference remains unimplemented.
+Missing recordings or an old cache leaves commands and text operational.
+Reimport user-owned media to load [verified radio mappings](formats/radio.md).
+
+Line abreast alternates right/left at one spacing, then right/left at two
+spacings, preserving the echelon sides.
+
+Formation selection changes the slot setting; disengage stops the engagement
+and lets the safe rejoin procedure return the aircraft. Approaches assign the
+selected target and continue that engagement after reaching the fitted approach
+point. Protect me currently assigns a detected attacker once, rather than
+maintaining a persistent escort policy. [Behavior and limits](spec/ai.md#live-wing-command-and-radio-integration).
+
+For live testing, use a Quick Mission with at least three friendly aircraft:
+
+1. Issue Alt-D, then change formation, spacing and stacking. Confirm smooth
+   physical repositioning and one player call, without generic wingman replies.
+2. Select wingman 2 with Alt-5 and issue a break. Confirm wingman 1 keeps its
+   assignment. Alt-0 restores whole-flight orders.
+3. Designate a detected enemy and issue Alt-E, then immediately Alt-D. Confirm
+   accepted recipients disengage and stale “Engaging” audio does not follow it.
+4. Try an absent or unobserved target, pause, mute sound, and restart. Confirm
+   no false acknowledgment, paused order or replayed old radio.
+5. Repeat a diving reversal. Confirm separate safe rejoins, restrained status
+   reports and no aircraft pose jumps. A request for steady flight is advisory.

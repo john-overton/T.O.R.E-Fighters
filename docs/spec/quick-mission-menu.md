@@ -94,9 +94,9 @@ separated aircraft use the linked rejoin procedure, with neighborhood clearance
 and approach coordination.
 Restart restores all six groups.
 
-The existing combat AI remains partial. Pursuit steering, missile warning
-delivery, live countermeasures, weapon realization and player wing orders have
-known integration gaps. Separate wing placement and formation following do not
+The existing combat AI remains partial. Scoped [player wing commands and radio](ai.md#live-wing-command-and-radio-integration)
+are connected, including recipient outcomes and cancellation. Broader mission
+orders, persistent protection policy and full missile acquisition remain. Separate wing placement and formation following do not
 establish combat or retail parity.
 
 ## Straight-flight mission fixtures

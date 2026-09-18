@@ -510,6 +510,7 @@ pub struct Controller {
     pursuit: Option<(u32, PursuitOffset)>,
     formation_guidance: super::formation::Guidance,
     formation_traffic: Vec<super::formation::Traffic>,
+    ordered_approach: Option<(u32, f64, f64, bool)>,
 }
 
 impl Controller {
@@ -589,6 +590,7 @@ impl Controller {
             pursuit: None,
             formation_guidance: super::formation::Guidance::default(),
             formation_traffic: Vec::new(),
+            ordered_approach: None,
         })
     }
 
@@ -662,10 +664,24 @@ impl Controller {
         let fuel = self.fuel(frame, &mut batch);
         let recovering = matches!(fuel, Some(FuelState::Bingo) | Some(FuelState::Critical));
 
+        if self
+            .ordered_approach
+            .is_some_and(|(id, ..)| !frame.targets.iter().any(|t| t.id == id && t.valid))
+        {
+            self.ordered_approach = None;
+            self.active = None;
+            self.target = None;
+            self.recipient.target = None;
+            self.recipient.target_order = Some(wing::TargetOrder::HoldFire);
+        }
+
         // 3. Target selection and geometry (B41, B01 to B03).
         let selected = self.select_target(frame)?;
         batch.sensor.designate = selected;
-        if selected.is_none() && self.target.is_some() {
+        if selected.is_none()
+            && (self.target.is_some()
+                || self.recipient.target_order == Some(wing::TargetOrder::HoldFire))
+        {
             batch.sensor.clear_designation = true;
         }
         self.target = selected;
@@ -707,6 +723,23 @@ impl Controller {
         Ok(batch)
     }
 
+    /// Refresh instantaneous physical state before between-tick commands.
+    pub fn prepare_order(&mut self, heading_deg: f64, limits: SpeedLimits) {
+        self.recipient.body_heading_deg = heading_deg.round() as i32;
+        self.recipient.speed_limits = limits;
+        self.recipient.human_controlled = self.identity.human_controlled;
+        self.recipient.active_command = self.active.is_some();
+        self.recipient.target = self.target.map(WingTargetId);
+    }
+
+    pub fn wing_settings(&self) -> (Option<WingControl>, Option<i32>, Option<i32>) {
+        (
+            self.recipient.wing_control,
+            self.recipient.horizontal_spacing_ft,
+            self.recipient.vertical_spacing_ft,
+        )
+    }
+
     /// Receive one wing command (B46).
     ///
     /// The four outcomes stay distinct: a setting applied, a rejection, a
@@ -715,11 +748,32 @@ impl Controller {
     /// installed here replaces the active maneuver outright, which is what
     /// B13 records for a wing command.
     pub fn receive_order(&mut self, request: WingRequest, tick: u64) -> Result<ReceiverOutcome> {
-        self.pursuit = None;
+        self.recipient.target = self.target.map(WingTargetId);
+        self.recipient.active_command = self.active.is_some();
+        self.recipient.human_controlled = self.identity.human_controlled;
         let outcome = wing::receive(request, &mut self.recipient, tick)?;
+        if matches!(
+            outcome,
+            ReceiverOutcome::Applied(_) | ReceiverOutcome::MotionInstalled(_)
+        ) {
+            self.pursuit = None;
+            if !matches!(request, WingRequest::Spacing { .. }) {
+                self.ordered_approach = None;
+            }
+        }
         match &outcome {
             ReceiverOutcome::MotionInstalled(summary) => {
                 self.install_ordered_motion(summary, tick);
+                if matches!(request, WingRequest::Approach { .. })
+                    && let Some(target) = self.recipient.target
+                {
+                    self.ordered_approach = Some((
+                        target.0,
+                        f64::from(summary.heading_deg),
+                        f64::from(summary.pitch_deg),
+                        true,
+                    ));
+                }
             }
             ReceiverOutcome::Applied(AppliedSetting::FormationSelection {
                 cleared_active_command,
@@ -745,6 +799,11 @@ impl Controller {
             | ReceiverOutcome::AppliedNoMotion => {}
         }
         Ok(outcome)
+    }
+
+    /// Fitted moving target approach point; B46 completion is 2000 ft.
+    pub fn track_ordered_approach(&mut self, target: u32, heading_offset: f64, pitch_offset: f64) {
+        self.ordered_approach = Some((target, heading_offset, pitch_offset, false));
     }
 
     /// Turn an ordered maneuver into this actor's active motion.
@@ -1157,6 +1216,41 @@ impl Controller {
         geometry: Option<&geometry::TargetGeometry>,
         batch: &mut IntentBatch,
     ) -> Result<()> {
+        if let Some((id, mut heading_offset, mut pitch_offset, absolute)) = self.ordered_approach {
+            let observed = frame.targets.iter().find(|t| t.id == id && t.valid);
+            if reason.is_none()
+                && !recovering
+                && let Some(t) = observed
+                && !wing::approach_complete(distance(frame.own.position, t.position))
+                && let Some(mut active) = self.active
+            {
+                let dx = t.position[0] - frame.own.position[0];
+                let dy = t.position[1] - frame.own.position[1];
+                let dz = t.position[2] - frame.own.position[2];
+                if absolute {
+                    heading_offset = angle_difference(dx.atan2(dz).to_degrees(), heading_offset);
+                    pitch_offset -= dy.atan2(dx.hypot(dz)).to_degrees();
+                    self.ordered_approach = Some((id, heading_offset, pitch_offset, false));
+                }
+                // Offset tapers near the point so a permanent 45-degree
+                // bearing offset does not turn into an orbit (fitted).
+                let scale =
+                    ((distance(frame.own.position, t.position) - 2000.) / 8000.).clamp(0., 1.);
+                active.intent.heading_deg = dx.atan2(dz).to_degrees() + heading_offset * scale;
+                active.intent.flight_path_pitch_deg =
+                    (dy.atan2(dx.hypot(dz)).to_degrees() + pitch_offset * scale).clamp(-90., 90.);
+                self.active = Some(active);
+                batch.motion = Some(active.intent);
+                batch.activity = Some(Activity::Pursuing);
+                return Ok(());
+            }
+            self.ordered_approach = None;
+            self.active = None;
+            if observed.is_none() {
+                self.target = None;
+                self.recipient.target_order = Some(wing::TargetOrder::HoldFire);
+            }
+        }
         // An active maneuver keeps flying until its completion rule fires.
         if let Some(active) = self.active {
             let finished = match active.intent.completion {
@@ -2850,5 +2944,89 @@ mod tests {
                 );
             }
         }
+    }
+    #[test]
+    fn approach_uses_distance_completion_and_disengage_cancels_it() {
+        let scene = Scene::new();
+        let mut c = controller(Experience::Average);
+        c.step(&scene.frame(0, own())).unwrap();
+        let id = scene.frame(1, own()).targets[0].id;
+        c.receive_order(
+            WingRequest::TargetAssignment(wing::TargetOrder::ConcreteTarget(WingTargetId(id))),
+            1,
+        )
+        .unwrap();
+        c.receive_order(
+            WingRequest::Approach {
+                heading_deg: 0,
+                pitch_deg: 0,
+                speed: ScalarSpeed(0.),
+            },
+            1,
+        )
+        .unwrap();
+        c.track_ordered_approach(id, 45., 0.);
+        let frame = scene.frame(1, own());
+        let result = c.step(&frame).unwrap();
+        assert!(result.motion.is_some());
+        if distance(frame.own.position, frame.targets[0].position) > 2000. {
+            assert!(c.ordered_approach.is_some());
+        }
+        c.receive_order(
+            WingRequest::TargetAssignment(wing::TargetOrder::HoldFire),
+            2,
+        )
+        .unwrap();
+        assert!(c.ordered_approach.is_none());
+        assert!(c.target().is_none());
+        assert!(c.recipient.target.is_none());
+        assert!(c.recipient.target_deadline.is_none());
+    }
+    #[test]
+    fn ordered_approach_survives_heading_alignment_and_finishes_at_2000_feet() {
+        let mut scene = Scene::new();
+        let mut c = controller(Experience::Average);
+        c.step(&scene.frame(0, own())).unwrap();
+        c.receive_order(
+            WingRequest::Approach {
+                heading_deg: 0,
+                pitch_deg: 0,
+                speed: ScalarSpeed(0.),
+            },
+            1,
+        )
+        .unwrap();
+        let mut physical = own();
+        physical.heading_deg = 0.;
+        physical.position = [0., 20000., 5999.];
+        let output = c.step(&scene.frame(1, physical)).unwrap();
+        assert!(
+            c.ordered_approach.is_some(),
+            "aligned heading is not arrival"
+        );
+        assert_eq!(output.activity, Some(Activity::Pursuing));
+        physical.position[2] = 6000.;
+        c.step(&scene.frame(2, physical)).unwrap();
+        assert!(c.ordered_approach.is_none(), "2000 ft is inclusive");
+        c.receive_order(
+            WingRequest::Approach {
+                heading_deg: 45,
+                pitch_deg: 0,
+                speed: ScalarSpeed(0.),
+            },
+            3,
+        )
+        .unwrap();
+        physical.position[2] = -2000.;
+        let output = c.step(&scene.frame(3, physical)).unwrap();
+        assert!((output.motion.unwrap().heading_deg - 45.).abs() < 1e-8);
+        scene.targets.clear();
+        let output = c.step(&scene.frame(4, physical)).unwrap();
+        assert!(c.ordered_approach.is_none());
+        assert!(c.target().is_none());
+        assert!(
+            output.weapons.is_empty(),
+            "lost approach target cannot trigger opportunistic fire"
+        );
     }
 }

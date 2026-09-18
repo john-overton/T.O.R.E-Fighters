@@ -5,8 +5,8 @@ use tore_formats::{font::Font, ui::MenuNode};
 use tore_input::Switch;
 #[derive(Debug, PartialEq)]
 pub enum Command {
-    Wing(tore_sim::ai::wing::WingRequest),
-    WingEngage,
+    Wing(tore_sim::ai::wing::PlayerOrder),
+    WingRecipient(Option<u8>),
     None,
     NextWeapon,
     Target,
@@ -310,21 +310,46 @@ impl FlightUi {
             }
             return Command::None;
         }
+        if alt && !ctrl && shift {
+            use tore_sim::ai::wing::{PlayerApproach as A, PlayerOrder as O};
+            let approach = match key {
+                "b" => Some(A::Left),
+                "r" => Some(A::Right),
+                "h" => Some(A::High),
+                "v" => Some(A::Low),
+                _ => None,
+            };
+            if let Some(approach) = approach {
+                return Command::Wing(O::Approach(approach));
+            }
+        }
         if alt && !ctrl && !shift {
-            use tore_sim::ai::wing::{Formation, PlayerBreak, TargetOrder, WingRequest};
-            // Opinionated host bindings for the implemented wing commands.
-            match key {
-                "b" => return Command::Wing(PlayerBreak::Left.request()),
-                "e" => return Command::WingEngage,
-                "d" => return Command::Wing(WingRequest::TargetAssignment(TargetOrder::HoldFire)),
-                "1" => return Command::Wing(WingRequest::FormationSelection(Formation::Echelon)),
-                "2" => {
-                    return Command::Wing(WingRequest::FormationSelection(Formation::LineAbreast));
+            use tore_sim::ai::wing::{Formation as F, PlayerBreak as B, PlayerOrder as O};
+            let order = match key {
+                "b" => Some(O::Break(B::Left)),
+                "r" => Some(O::Break(B::Right)),
+                "h" => Some(O::Break(B::High)),
+                "v" => Some(O::Break(B::Low)),
+                "t" => Some(O::Break(B::Straight)),
+                "e" => Some(O::EngageMyTarget),
+                "d" => Some(O::Disengage),
+                "p" => Some(O::ProtectMe),
+                "w" => Some(O::AttackOnContact),
+                "f" => Some(O::EngageFromFormation),
+                "8" => Some(O::Spacing),
+                "k" => Some(O::Stacking),
+                "c" => Some(O::ControlToggle),
+                "1" => Some(O::Formation(F::Echelon)),
+                "2" => Some(O::Formation(F::LineAbreast)),
+                "3" => Some(O::Formation(F::LineAstern)),
+                "0" => return Command::WingRecipient(None),
+                "4" | "5" | "6" | "7" => {
+                    return Command::WingRecipient(Some(key.parse::<u8>().unwrap() - 3));
                 }
-                "3" => {
-                    return Command::Wing(WingRequest::FormationSelection(Formation::LineAstern));
-                }
-                _ => {}
+                _ => None,
+            };
+            if let Some(order) = order {
+                return Command::Wing(order);
             }
             if key.starts_with('F') {
                 return self.unavailable("Target-relative camera (no target)");
@@ -930,16 +955,19 @@ mod tests {
     }
     #[test]
     fn player_wing_keys_produce_live_orders() {
-        use tore_sim::ai::wing::{Formation, PlayerBreak, WingRequest};
+        use tore_sim::ai::wing::{Formation, PlayerBreak, PlayerOrder};
         let mut ui = FlightUi::default();
         assert_eq!(
             ui.key("b", false, false, true, &[]),
-            Command::Wing(PlayerBreak::Left.request())
+            Command::Wing(PlayerOrder::Break(PlayerBreak::Left))
         );
-        assert_eq!(ui.key("e", false, false, true, &[]), Command::WingEngage);
+        assert_eq!(
+            ui.key("e", false, false, true, &[]),
+            Command::Wing(PlayerOrder::EngageMyTarget)
+        );
         assert_eq!(
             ui.key("2", false, false, true, &[]),
-            Command::Wing(WingRequest::FormationSelection(Formation::LineAbreast))
+            Command::Wing(PlayerOrder::Formation(Formation::LineAbreast))
         );
     }
 }

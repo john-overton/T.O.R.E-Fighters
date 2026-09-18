@@ -237,6 +237,7 @@ mod tests {
             burner_gain: 0.,
             voices: Vec::new(),
             ui_voices: Vec::new(),
+            radio: std::collections::VecDeque::new(),
             music_on: true,
             effects_on: false,
         };

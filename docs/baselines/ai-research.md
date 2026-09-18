@@ -422,3 +422,42 @@ tests, repository/binary asset checks and documentation checks pass. Local logs
 are under `.local/formation-rejoin-validation/`. Live human flight verification,
 Windows/macOS execution, sensor-limited reacquisition, terrain-aware escape
 routing and mixed-aircraft formation maneuvers were not validated here.
+
+## Wing command and radio validation
+
+Implementation mode, 2026-09-18. The [radio source contract](../formats/radio.md)
+records the reviewed executable identity and phrase addresses. The regular app
+import succeeded and reports 24 verified mappings. A local Rust probe independently
+loaded every selected FA_2.LIB recording through `Archive` and `Pcm`: 24 nonempty
+clips, 115998 decoded sample bytes. No retail bytes or derivatives are committed.
+The imported FMENUD.MNU tree contains no wing-order submenu.
+
+Synthetic tests cover addressed members, side/wing and sender validation,
+first-living-wingman replies, unobserved-target rejection without state changes,
+protect-me assignment, setting preservation, approach interruption and inclusive
+2000 ft completion. A first-tick break uses current physical heading and real
+speed limits. Command delivery itself leaves the full aircraft state unchanged.
+The existing aircraft-input replay, formation-turn, diving-reversal and
+iteration-order suites pass unchanged.
+
+Radio tests cover serial sample ordering, pause/resume, interruption, missing
+clip and metadata silence, mute and queue bounds. Report tests cover phase
+changes, cooldown and one steady-platform request per separation cycle.
+All parser tests use synthetic PE records and check every truncation, invalid
+pointers and unsupported mappings. The imported four-actor probe ran 1200 ticks,
+produced four shots with zero dropped releases, and completed successfully.
+It is a combat/cache regression, not a live command listening test.
+
+All required Linux checks passed: 863 Rust tests, 40 Python tests, formatting,
+Clippy with warnings denied, workspace build, repository and both binary asset
+guards, and documentation headers. Logs and local probes are in
+`.local/wing-radio-validation/`. No rendering code changed, so a rendering smoke
+run was not required. Human listening/flight acceptance and Windows/macOS runs
+were not performed. The [input guide](../INPUT.md#player-wing-orders) contains
+the live-test checklist and current limitations. No commit or push was made.
+
+Balanced line-abreast geometry is checked for all nine wingman slots against
+unchanged echelon lateral positions, with existing stacking and first-slot
+spacing checks retained. All required checks also pass for this geometry change;
+logs are in `.local/balanced-abreast-validation/`. Live formation transitions
+remain to be evaluated by John; no transition planner was added in this change.

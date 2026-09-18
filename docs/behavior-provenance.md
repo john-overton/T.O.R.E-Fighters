@@ -158,3 +158,7 @@ AI runtime boundary details have one home in
 | AI movement exclusively through aircraft inputs | Opinionated, requested by John 2026-09-18 | No post-step pose or velocity overrides; [input-only contract and fitted controller](spec/ai.md#input-only-aircraft-control). Health restricts requested G and roll; physics owns achieved motion |
 | Quick Mission home airport | Fitted, agent choice | Spawn point until the mission supplies an airport |
 | Player wing keyboard shortcuts | Opinionated, agent choice 2026-09-17 | Documented in the input guide; recipient scope is friendly wing 1 |
+| Wing command/reply phrase mappings and recordings | Spec-derived | Bounded original phrase-table import and PCM playback; [source evidence](formats/radio.md) |
+| Radio queue, command interruption, individual addressing and formation status reports | Opinionated, agent choice 2026-09-18 | [Delivery and report rules](spec/ai.md#live-wing-command-and-radio-integration); no unverified voice substitutions |
+| Target approach point and protect-me target resolution | Fitted, agent choice 2026-09-18 | Moving target point, tapered approach offsets and one-time observed-attacker assignment; original displacement and persistent policy remain unknown |
+| Balanced line abreast | Opinionated, requested by John 2026-09-18 | Alternating right/left slots preserve echelon lateral positions; vertical stacking remains unchanged. [Geometry](spec/ai.md#b43-wing-commands-and-formation-variation) |

@@ -22,6 +22,9 @@
 //! steering remains fitted: full seeker activation and pitbull are not wired
 //! for AI launches. Live device events and decoy rolls are connected.
 
+mod orders;
+mod reports;
+
 use std::collections::BTreeMap;
 
 use tore_formats::aircraft::{Aircraft, AircraftId};
@@ -193,6 +196,7 @@ impl Slot {
 /// The live AI bridge for one mission.
 pub struct AiWings {
     mission: AiMission,
+    reports: reports::Reports,
     formation_log: Option<std::io::BufWriter<std::fs::File>>,
     slots: Vec<Slot>,
     weapons: BTreeMap<(u32, u8), tore_formats::weapons::Weapon>,
@@ -480,6 +484,7 @@ impl AiWings {
             ai_shots: BTreeMap::new(),
             last_hp: BTreeMap::new(),
             last_activity: BTreeMap::new(),
+            reports: reports::Reports::default(),
             next_projectile_id: AI_PROJECTILE_ID_BASE,
             last_message_tick: 0,
             dropped_launches: 0,
@@ -487,13 +492,6 @@ impl AiWings {
             threat_reports: Vec::new(),
             pending_message: None,
         })
-    }
-
-    pub fn player_order(&mut self, request: tore_sim::ai::wing::WingRequest) -> AppResult<usize> {
-        Ok(self
-            .mission
-            .order_wing(FRIENDLY_SIDE, 0, None, request)
-            .map_err(|e| e.to_string())?)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -523,7 +521,7 @@ impl AiWings {
 
     /// Take the pending activity line, if the rate limiter released one.
     pub fn take_message(&mut self) -> Option<String> {
-        self.pending_message.take()
+        self.reports.take().or_else(|| self.pending_message.take())
     }
 
     /// One 120 Hz tick of AI, run immediately after `Combat::step`.
@@ -590,6 +588,7 @@ impl AiWings {
             .step(&objects, ground, now)
             .map_err(|e| e.to_string())?;
         self.record_formation_trace();
+        self.formation_reports();
         self.mirror_pose_out(targets);
         self.announce(&output.activities);
         Ok(output)
@@ -1992,5 +1991,162 @@ mod tests {
                 .all(|p| p.weapon.as_ref() == Some(&gun) && p.target.is_none())
         );
         assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 0);
+    }
+    #[test]
+    fn player_commands_report_acceptance_cancel_and_stay_in_the_addressed_wing() {
+        use tore_sim::ai::wing::{PlayerApproach, PlayerBreak, PlayerOrder as O};
+        let mut selections = payload(None);
+        selections[0].wing.index = 0;
+        let mut bridge =
+            AiWings::build_with(&selections, &spawned(), 0, |_| Ok((aircraft(), None))).unwrap();
+        let before = bridge.mission.actor(1).unwrap().flight().clone();
+        let report = bridge.command(O::EngageMyTarget, Some(3), Some(1)).unwrap();
+        assert!(report.message.contains("1 applied"));
+        assert_eq!(report.radio, ["^ATTACK", "^ENGAGE"]);
+        assert_eq!(
+            bridge.mission.actor(1).unwrap().controller().target(),
+            Some(3)
+        );
+        assert_eq!(bridge.mission.actor(2).unwrap().controller().target(), None);
+        assert_eq!(
+            *bridge.mission.actor(1).unwrap().flight(),
+            before,
+            "delivery cannot move an aircraft"
+        );
+        assert!(
+            bridge
+                .command(O::EngageMyTarget, Some(2), None)
+                .unwrap()
+                .radio
+                .is_empty()
+        );
+        let report = bridge.command(O::EngageMyTarget, Some(3), Some(2)).unwrap();
+        assert_eq!(
+            report.radio,
+            ["^ATTACK"],
+            "only the first living wingman replies"
+        );
+        let report = bridge
+            .command(O::Approach(PlayerApproach::Left), Some(3), Some(1))
+            .unwrap();
+        assert_eq!(report.radio, ["^APPRCLF"]);
+        let report = bridge
+            .command(O::Break(PlayerBreak::Right), None, Some(1))
+            .unwrap();
+        assert_eq!(report.radio, ["^BREAKRT"]);
+        assert!(report.message.contains("1 applied"));
+        bridge.command(O::Spacing, None, None).unwrap();
+        for id in [1, 2] {
+            assert_eq!(
+                bridge
+                    .mission
+                    .actor(id)
+                    .unwrap()
+                    .controller()
+                    .wing_settings()
+                    .1,
+                Some(2048)
+            );
+        }
+        bridge.command(O::Stacking, None, Some(2)).unwrap();
+        assert_eq!(
+            bridge
+                .mission
+                .actor(2)
+                .unwrap()
+                .controller()
+                .wing_settings()
+                .2,
+            Some(512)
+        );
+        assert_eq!(
+            bridge
+                .mission
+                .actor(1)
+                .unwrap()
+                .controller()
+                .wing_settings()
+                .2,
+            None
+        );
+        let report = bridge.command(O::Disengage, None, None).unwrap();
+        assert_eq!(report.radio, ["^DISENG"]);
+        assert_eq!(bridge.mission.actor(1).unwrap().controller().target(), None);
+        assert_eq!(bridge.mission.actor(2).unwrap().controller().target(), None);
+        assert_eq!(
+            bridge
+                .mission
+                .actor(3)
+                .unwrap()
+                .controller()
+                .wing_settings(),
+            (None, None, None)
+        );
+        use tore_sim::ai::wing::{TargetId, TargetOrder, WingRequest};
+        bridge
+            .mission
+            .order(
+                3,
+                WingRequest::TargetAssignment(TargetOrder::ConcreteTarget(TargetId(PLAYER_ID))),
+            )
+            .unwrap()
+            .unwrap();
+        let protected = bridge.command(O::ProtectMe, None, None).unwrap();
+        assert_eq!(protected.radio, ["^CLRMY6", "^SHWTIME"]);
+        assert_eq!(
+            bridge.mission.actor(1).unwrap().controller().target(),
+            Some(3)
+        );
+        bridge.mission.actor_mut(1).unwrap().set_alive(false);
+        assert_eq!(
+            bridge
+                .command(O::EngageMyTarget, Some(3), None)
+                .unwrap()
+                .radio,
+            ["^ATTACK", "^ENGAGE"]
+        );
+    }
+    #[test]
+    fn unobserved_target_is_rejected_without_reply_or_control_changes() {
+        use tore_sim::ai::wing::PlayerOrder;
+        let mut selections = payload(None);
+        selections[0].wing.index = 0;
+        let sensors = sensors::SensorProfiles {
+            aircraft: AircraftId::F18,
+            radar: None,
+            infrared: None,
+            visual: None,
+            jammer: None,
+            signature: sensors::SignatureProfile::default(),
+        };
+        let mut bridge = AiWings::build_with(&selections, &spawned(), 0, |_| {
+            Ok((aircraft(), Some(sensors.clone())))
+        })
+        .unwrap();
+        let report = bridge
+            .command(PlayerOrder::EngageMyTarget, Some(3), None)
+            .unwrap();
+        assert!(report.message.contains("0 applied, 2 rejected"));
+        assert_eq!(report.radio, ["^ATTACK"]);
+        for id in [1, 2] {
+            assert!(
+                bridge
+                    .mission
+                    .actor(id)
+                    .unwrap()
+                    .controller()
+                    .target()
+                    .is_none()
+            );
+            assert_eq!(
+                bridge
+                    .mission
+                    .actor(id)
+                    .unwrap()
+                    .controller()
+                    .wing_settings(),
+                (None, None, None)
+            );
+        }
     }
 }

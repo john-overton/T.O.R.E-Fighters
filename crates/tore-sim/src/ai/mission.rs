@@ -297,6 +297,8 @@ impl AiActor {
         request: super::wing::WingRequest,
         tick: u64,
     ) -> Result<super::wing::ReceiverOutcome> {
+        self.controller
+            .prepare_order(self.flight.yaw.to_degrees(), self.speed_limits());
         self.controller.receive_order(request, tick)
     }
 
@@ -419,7 +421,7 @@ impl AiMission {
         // Deliver after all actors have decided, so iteration order cannot
         // change which wing members observe a new command this tick.
         for (sender, request) in &output.wing {
-            if let Some(actor) = self.actor(*sender) {
+            if let Some(actor) = self.actor(*sender).filter(|a| a.alive()) {
                 let identity = *actor.identity();
                 self.order_wing(identity.side, identity.wing, Some(*sender), *request)?;
             }
@@ -622,6 +624,14 @@ impl AiMission {
         self.actor_mut(actor).map(|a| a.order(request, tick))
     }
 
+    pub fn track_ordered_approach(&mut self, actor: u32, target: u32, heading: f64, pitch: f64) {
+        if let Some(actor) = self.actor_mut(actor) {
+            actor
+                .controller
+                .track_ordered_approach(target, heading, pitch);
+        }
+    }
+
     /// A command stays inside the identified side and wing.
     pub fn order_wing(
         &mut self,
@@ -630,11 +640,36 @@ impl AiMission {
         sender: Option<u32>,
         request: super::wing::WingRequest,
     ) -> Result<usize> {
-        let mut delivered = 0;
-        for actor in &mut self.actors {
+        Ok(self
+            .order_wing_report(side, wing, sender, None, request)?
+            .len())
+    }
+
+    /// Per-recipient outcomes, including no-motion and rejection. A directed
+    /// recipient never bypasses the side/wing boundary.
+    pub fn order_wing_report(
+        &mut self,
+        side: super::targeting::Side,
+        wing: u8,
+        sender: Option<u32>,
+        recipient: Option<u32>,
+        request: super::wing::WingRequest,
+    ) -> Result<Vec<(u32, super::wing::ReceiverOutcome)>> {
+        if sender.is_some_and(|id| {
+            !self
+                .actor(id)
+                .is_some_and(|a| a.alive() && a.identity.side == side && a.identity.wing == wing)
+        }) {
+            return Err(super::AiError::InvalidInput(
+                "sender does not belong to live wing",
+            ));
+        }
+        let mut recipients = Vec::new();
+        for actor in &self.actors {
             if actor.alive()
                 && actor.identity.side == side
                 && actor.identity.wing == wing
+                && recipient.is_none_or(|id| id == actor.id())
                 && (Some(actor.id()) != sender
                     || matches!(
                         request,
@@ -643,11 +678,14 @@ impl AiMission {
                             | super::wing::WingRequest::WingControl(_)
                     ))
             {
-                actor.order(request, self.tick)?;
-                delivered += 1;
+                recipients.push(actor.id());
             }
         }
-        Ok(delivered)
+        let mut outcomes = Vec::with_capacity(recipients.len());
+        for id in recipients {
+            outcomes.push((id, self.order(id, request).expect("validated recipient")?));
+        }
+        Ok(outcomes)
     }
 
     pub fn set_formation(&mut self, formation: Formation) {
@@ -2503,5 +2541,33 @@ mod tests {
                 .collect::<Vec<_>>(),
             ammunition
         );
+    }
+    #[test]
+    fn directed_delivery_checks_sender_recipient_and_initial_physical_heading() {
+        use super::super::targeting::Side;
+        use super::super::wing::{PlayerBreak, ReceiverOutcome};
+        let mut mission = AiMission::new();
+        for (id, side) in [(1, 1), (2, 1), (3, 2)] {
+            mission.push(AiActor::new(setup(id, side, 1, [0., 20000., 0.], 90.)).unwrap());
+        }
+        let report = mission
+            .order_wing_report(Side(1), 0, Some(1), Some(3), PlayerBreak::Left.request())
+            .unwrap();
+        assert!(report.is_empty());
+        assert!(
+            mission
+                .order_wing_report(Side(1), 0, Some(3), Some(2), PlayerBreak::Left.request())
+                .is_err()
+        );
+        let heading = mission.actor(2).unwrap().flight().yaw.to_degrees().round() as i32;
+        let report = mission
+            .order_wing_report(Side(1), 0, Some(1), Some(2), PlayerBreak::Right.request())
+            .unwrap();
+        assert_eq!(report.len(), 1);
+        let ReceiverOutcome::MotionInstalled(motion) = report[0].1 else {
+            panic!("no motion");
+        };
+        assert_eq!(motion.heading_deg, (heading + 170).rem_euclid(360));
+        assert!(motion.speed.0 > 0., "first-tick order needs real limits");
     }
 }

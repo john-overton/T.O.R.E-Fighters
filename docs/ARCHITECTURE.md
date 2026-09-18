@@ -254,3 +254,13 @@ of the player's station numbering. The simulation owns delayed warnings,
 individual dispenser releases and scoped wing requests. The app realizes
 those events in the existing projectile and effect services. See the
 [AI integration contract](spec/ai.md#live-integration-and-authored-boundaries).
+
+Wing commands use `AiMission::order_wing_report` for scoped per-recipient
+outcomes. The player bridge resolves orders and applies B43 control effects;
+AI requests use the same B46 receiver after all actors decide. `ai_wings/orders`
+and `reports` keep delivery and advisory text separate from physical steering.
+`audio::Mixer` owns a bounded serial radio queue, independent of simulation
+execution. `tore-formats::radio` reads reviewed inert phrase records during
+import; the existing archive and PCM readers load original recordings.
+[Command behavior](spec/ai.md#live-wing-command-and-radio-integration),
+[radio data](formats/radio.md), [controls](INPUT.md#player-wing-orders).

@@ -8,6 +8,7 @@ pub mod module;
 pub mod music;
 pub mod pcm;
 mod pic;
+pub mod radio;
 pub mod shape;
 pub mod strip;
 pub mod theater;

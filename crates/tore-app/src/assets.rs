@@ -304,6 +304,7 @@ impl Assets {
                         || aircraft_names.contains(*n)
                         || tore_formats::ui::creator::resource(n)
                         || tore_formats::music::resource(n)
+                        || tore_formats::radio::resource(n)
                         || tore_formats::theater::theater_resource(n, "ALL")
                 })
                 .cloned()
@@ -321,6 +322,33 @@ impl Assets {
                     return Err(format!("conflicting resource {filename}/{name}").into());
                 }
                 resources.insert(name.to_string(), bytes);
+            }
+        }
+        let radio = fs::read_dir(source)?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("FA.EXE"))
+            })
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "FA.EXE missing"))
+            .and_then(|path| {
+                let mut bytes = Vec::new();
+                fs::File::open(path)?
+                    .take(16 * 1024 * 1024 + 1)
+                    .read_to_end(&mut bytes)?;
+                tore_formats::radio::phrases(&bytes)
+            });
+        match radio {
+            Ok(phrases) => {
+                report.push_str(&format!(
+                    "Radio: {} verified phrase mappings\n",
+                    phrases.len()
+                ));
+                resources.extend(phrases);
+            }
+            Err(error) => {
+                report.push_str(&format!("Optional radio metadata unavailable: {error}\n"))
             }
         }
         for filename in ["FA_4B.LIB", "FA_4D.LIB"] {

@@ -535,7 +535,8 @@ pub fn wingman_reply(
 // B43: formation geometry, variation and formation speed
 // ---------------------------------------------------------------------------
 
-/// B43 formation table: unitless multipliers `[lateral, vertical,
+/// Host formation table, B43 except balanced line abreast (see spec).
+/// Unitless multipliers `[lateral, vertical,
 /// longitudinal]` of horizontal spacing H, vertical stacking V and H. Slot 0
 /// is the leader; wingman slots run 1 through 9.
 pub fn slot_multipliers(formation: Formation, slot: u8) -> Result<[i32; 3]> {
@@ -553,7 +554,13 @@ pub fn slot_multipliers(formation: Formation, slot: u8) -> Result<[i32; 3]> {
             let side = if n % 2 == 1 { 1 } else { -1 };
             [side * pair, VERTICAL[usize::from(slot - 1)], -pair]
         }
-        Formation::LineAbreast => [n, n, 0],
+        // Opinionated, requested by John 2026-09-18: preserve echelon sides.
+        // B43's original all-right row remains documented in the spec.
+        Formation::LineAbreast => {
+            let pair = (n + 1) / 2;
+            let side = if n % 2 == 1 { 1 } else { -1 };
+            [side * pair, n, 0]
+        }
         Formation::LineAstern => [0, n, -2 * n],
     })
 }
@@ -901,7 +908,11 @@ pub fn receive(
                 }
                 TargetOrder::HoldFire
                 | TargetOrder::FreeSelection
-                | TargetOrder::ClassPolicy(_) => None,
+                | TargetOrder::ClassPolicy(_) => {
+                    recipient.target = None;
+                    recipient.target_deadline = None;
+                    None
+                }
             };
             ReceiverOutcome::Applied(AppliedSetting::TargetOrder { deadline })
         }
@@ -1041,7 +1052,7 @@ mod tests {
             let n = i32::from(slot);
             assert_eq!(
                 slot_multipliers(Formation::LineAbreast, slot).unwrap(),
-                [n, n, 0]
+                [row[0], n, 0]
             );
             assert_eq!(
                 slot_multipliers(Formation::LineAstern, slot).unwrap(),
@@ -1712,7 +1723,8 @@ mod tests {
             );
             assert_eq!(ai.target_order, Some(order));
         }
-        // Nothing here forgets the target at expiry.
-        assert_eq!(ai.target, Some(TargetId(8)));
+        // Explicit cancellation clears the stale target, not deadline expiry.
+        assert_eq!(ai.target, None);
+        assert_eq!(ai.target_deadline, None);
     }
 }

@@ -409,6 +409,14 @@ leader's right, vertical positive above, and longitudinal negative behind:
 | Line abreast | Lateral n H to the right; no longitudinal offset; vertical n V |
 | Line astern | Lateral 0; longitudinal 2n H behind; vertical n V |
 
+The table above records original geometry. **Opinionated, requested by John on
+2026-09-18:** the host uses balanced line abreast instead: odd-numbered wingmen
+stay right and even-numbered wingmen stay left, at ceil(n/2) H. There is no
+longitudinal offset. Vertical stacking remains n V. At 512 ft spacing, slots
+1 through 4 are respectively 512 ft right, 512 ft left, 1024 ft right and
+1024 ft left. This preserves their echelon lateral positions during a formation
+change. Transition planning and random slot variation are unchanged.
+
 The first wingman therefore flies one spacing right and one back in echelon,
 one spacing right in line abreast, and two spacings back in line astern. The
 player's horizontal spacing order toggles between 512 and 2048 ft (the manual's
@@ -501,8 +509,8 @@ record it alongside actual controls and achieved flight state; see
 [development diagnostics](../DEVELOPMENT.md#formation-flight-traces).
 
 This pass retains the host's direct leader/traffic awareness. Sensor-limited
-visual reacquisition, radio permission, AI-leader cooperation and human-leader
-requests remain future work. A standing formation order currently permits
+visual reacquisition, radio permission and AI-leader cooperation remain future
+work. Human-leader advisory requests are described in the [radio integration](#live-wing-command-and-radio-integration). A standing formation order currently permits
 safe automatic rejoin. Prediction assumes locally constant traffic velocities;
 escape scoring approximates response lag rather than simulating each candidate.
 Terrain clearance uses existing steering protection, not terrain-aware route
@@ -761,6 +769,62 @@ or targetless approach can return true without installing motion. A host receive
 needs distinct applied, rejected, and no-motion outcomes. The 20 second
 target deadline's expiry consumer, the approach steering point, the player-side
 voicing of wingman replies and loose-versus-medium self-engagement remain open.
+
+## Live wing command and radio integration
+
+Implementation mode, 2026-09-18. Commands execute on delivery, independently
+of playback. Receiver outcomes distinguish applied settings, installed motion,
+rejection and no motion. The UI reports those outcomes per addressed flight;
+an accepted assignment is not a claim that weapons have fired. Only an accepted
+assignment by the first living wingman may produce its B46 reply. The player
+call precedes that reply. Commands remain scoped to a side and wing; an optional
+actor recipient must belong to that flight. Dead actors do not receive orders.
+
+The following are **opinionated, agent-authored** integration choices. New
+player orders interrupt queued command audio so obsolete acknowledgments do not
+play after a cancellation. Radio is a separate FIFO, capped at 16 clips, with
+one voice at a time and gain 0.4. Pause freezes it; leaving flight, restart or
+muting effects clears it. Missing metadata or recordings produces silence while
+text and commands continue. No synthetic speech or substitute phrase is used.
+Original phrase/recording mappings are imported as bounded inert data from the
+reviewed FA executable, and samples through the existing archive/PCM readers.
+Unsupported executable layouts leave radio unavailable rather than guessed.
+See [radio data contract](../formats/radio.md).
+
+Player commands include all five B46 breaks, target engagement, disengage,
+formation selection, horizontal spacing, stacking and loose/medium control.
+Attack on contact restores free selection. Engage from formation permits an
+explicit target with medium control. Protect me assigns the nearest observed
+hostile currently targeting the player, measured from the first addressed
+wingman; absent such a threat it reports no assignment. Attacker identity uses
+the mission AI target assignment, an explicit direct-awareness fallback rather
+than sensor inference of hostile intent. Each recipient must independently see
+the chosen target before accepting. These last target-resolution choices are **fitted, agent-authored**;
+class/policy pursuit and original protect-me persistence are not established.
+Approaches use the designated target and each recipient's own bearing/elevation.
+The moving target position is the **fitted** approach point because the original
+point displacement is unknown. Player approaches assign that target for attack.
+The requested 45/35-degree offset tapers linearly from full at 10000 ft to zero
+at 2000 ft to avoid orbiting the target, a **fitted, agent-authored** rule.
+Completion is within 2000 ft, not merely heading alignment. A destroyed or unavailable approach target cancels the approach and
+returns the wingman to its standing formation. A new break, assignment, formation
+or control command cancels the old approach.
+
+Formation reports are **opinionated, agent-authored**, from actual guidance
+transitions: breakout/separation, rejoining and completed capture. A wingman
+still intercepting after 30 seconds with nonpositive closure requests a steadier
+platform, without claiming it can never catch up. Reports have a 10-second
+per-aircraft cooldown. They are text-only: original mappings for separated,
+rejoining, unable to catch up and steady-platform requests remain **unknown**.
+Next research is tracing the remaining say-event tables and their senders.
+Human controls are never changed. AI leader cooperation remains future work.
+
+Combat target permissions use actor-owned radar/visual contacts where fitted
+sensors exist. Formation leader/traffic positions remain direct world snapshots;
+these reports do not claim visual contact or sensor-based reacquisition. Actual
+visual reacquisition would require timestamped actor-owned visual observations
+of friendly leaders, contact-loss persistence, and a search/permission policy.
+No new movement override or skill reaction delay is introduced.
 
 ## B47: Threat warnings, countermeasures and reason priority
 
