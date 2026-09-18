@@ -80,7 +80,8 @@ alternating trailing slots with level stacking: slots 1 and 2 are 512 ft right
 and left, 512 ft behind; slots 3 and 4 are 1024 ft right and left, 1024 ft behind.
 This is an opinionated formation choice; it is not a new recovered formation
 name. Idle wingmen track their own leader's moving slots using the
-[fitted signed speed correction](ai.md#b43-wing-commands-and-formation-variation). Combat maneuvers can take them out of formation.
+[physical formation and rejoin procedure](ai.md#physical-departure-and-rejoin).
+Combat maneuvers can take them out of formation.
 
 Original Quick Mission spawn geometry is **unknown**. Next research: recover
 the generator's relative wing placements and situation offsets. Pending that,
@@ -88,9 +89,9 @@ the **fitted**, agent-selected placement puts friendly wings 2 and 3 at 4096 ft
 left/right and 4096 ft behind the player. Enemy wing 1 starts at the selected
 separation, with enemy wings 2 and 3 offset 4096 ft left/right. Enemy aircraft
 face the friendly group; all start at the chosen altitude. Slots rotate with
-each wing leader. The **fitted** formation steering point projects its slot
-three seconds along its leader's heading, while speed regulation uses the
-signed along-track error to the unprojected slot. This avoids circling a slot that is already reached.
+each wing leader. Close tracking projects the slot along the leader velocity;
+separated aircraft use the linked rejoin procedure, with neighborhood clearance
+and approach coordination.
 Restart restores all six groups.
 
 The existing combat AI remains partial. Pursuit steering, missile warning

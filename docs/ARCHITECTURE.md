@@ -221,7 +221,12 @@ wing groups and their fitted spawn poses for restart. `AiWings` builds actors
 after reset. AI emits aircraft inputs and the flight model alone advances
 its pose; no steering pose overwrite follows physics. The bridge mirrors results into `combat::live::Target` for sensors,
 rendering and damage. Each wing follows its own leader from the shared world
-snapshot; the human leader remains outside the AI actor list. The formation
+snapshot; the human leader remains outside the AI actor list.
+`ai::formation` owns persistent trailing, breakout, intercept, stabilization and
+capture guidance. Traffic and arrival states are snapshotted before any actor
+advances, so iteration order cannot grant approach priority. Its trace hook is
+read-only; optional host CSV logging is described in
+[development diagnostics](DEVELOPMENT.md#formation-flight-traces). The formation
 choice and placement are specified in [mission wings](spec/quick-mission-menu.md#mission-wings).
 Rendering groups targets by imported airframe, with a cached
 texture binding per identity and vertex buffers that grow to fit the formation.

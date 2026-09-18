@@ -13,7 +13,7 @@ use super::steering::{
 use super::{AiError, Experience, Result, ScalarSpeed, SpeedLimits, experience};
 use crate::flight::State;
 use crate::models::FlightModel;
-use tore_input::PilotInput;
+use tore_input::{PilotCommand, PilotInput, Switch};
 
 /// Fitted heading-error response horizon; see the input-only control spec.
 pub const BANK_COMMAND_LEAD_SECONDS: f64 = 1.0;
@@ -241,7 +241,7 @@ impl ControlAdapter {
                 intent.speed,
                 limits,
             )?),
-            commands: Vec::new(),
+            commands: vec![PilotCommand::Set(Switch::Burner, intent.afterburner)],
         }
         .bounded();
 
@@ -376,6 +376,7 @@ mod tests {
     fn intent(heading_deg: f64, pitch_deg: f64, speed: f64) -> MotionIntent {
         MotionIntent {
             formation_flight: false,
+            afterburner: false,
             id: 1,
             request: MotionRequest::new(
                 heading_deg as i32,

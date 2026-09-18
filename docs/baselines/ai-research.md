@@ -12,7 +12,8 @@ Research and implementation, 2026-09-17. John requested an FA aircraft AI
 review, experience mapping, surface AI investigation where feasible, and a plan
 to prepare behavior before later hookup, then authorized continued research
 and implementation of specified behavior. No retail executable or module was
-executed. Isolated components exist; no controller is hooked into missions.
+executed. The components now run through the mission controller and physical
+aircraft inputs; current host evidence is recorded below.
 
 ## Inputs and identity
 
@@ -374,3 +375,50 @@ Full retail combat comparison remains unavailable. AI missile seeker activation
 and pitbull, remaining original maneuver shapes, and the B12 wing-approach
 producer remain open. Fitted control coupling, damage authority, device visuals
 and coasting are specified in the [live integration rules](../spec/ai.md#live-integration-and-authored-boundaries).
+
+## Physical formation departure and rejoin validation
+
+Implementation pass, 2026-09-18. This is the opinionated procedure in
+[the AI specification](../spec/ai.md#physical-departure-and-rejoin), not recovered
+retail behavior. Constants, approximations and deferred awareness/leader
+cooperation live in that specification.
+
+The synthetic flight test uses four F/A-18D wingmen at 512 ft echelon spacing,
+a leader initially at 20,000 ft and 800 ft/s, and a 180-degree heading reversal
+spread over 20 seconds starting at second 10. Pitch follows a half sine with
+25-degree dive/climb amplitude. The repeated case reverses again from second
+70 through 90. Each scenario runs 300 seconds as an observation window, not a
+rejoin-time requirement. Wingmen use their actual flight models; leader motion
+is a prescribed test trajectory, not a player-input recording. Terrain is flat.
+
+| Scenario | Minimum simultaneous aircraft separation |
+| --- | --- |
+| Left diving reversal | 469.8 ft |
+| Right diving reversal | 427.3 ft |
+| Right climbing reversal | 310.0 ft |
+| Left dive, then reversed climbing turn | 400.7 ft |
+
+All sixteen wingman runs entered interception and capture, returned to close
+tracking, and finished within 50 ft of their current varied slots. Every tick
+also passed exact whole-flight-state input replay. These are measured scenarios,
+not a universal separation guarantee. Existing nine straight/shallow-turn
+formation cases continue to pass. Reversing actor iteration order gives identical
+flight states and traces. Focused tests cover unsafe closure, conflicting versus
+opposite-side reservations, traffic overriding side preference, anticipatory
+approach detours, stable speed before capture, and fuel/alignment gates for
+burner requests. All-aircraft physical replay also exercises burner on/off,
+damage, payload and fuel exhaustion in legacy and hybrid flight.
+
+The imported 12-aircraft/four-experience roster probe passed all 48 cases at
+3600 ticks each, with 87 projectiles and zero dropped releases. This is a combat
+and physical-input regression, not an imported-aircraft diving-turn validation.
+The bridge trace test records 20 data rows over 120 ticks and verifies logging
+does not change either aircraft's flight state. The ordinary imported combat
+probe verified the opt-in CSV opens, but produced only its header because its
+actors were fighting, not flying formation.
+
+Linux workspace tests, Clippy with warnings denied, formatting, build, 40 Python
+tests, repository/binary asset checks and documentation checks pass. Local logs
+are under `.local/formation-rejoin-validation/`. Live human flight verification,
+Windows/macOS execution, sensor-limited reacquisition, terrain-aware escape
+routing and mixed-aircraft formation maneuvers were not validated here.

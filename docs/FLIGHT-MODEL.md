@@ -342,7 +342,9 @@ A-4 hybrid roll now uses the [90% reported Skyhawk peak target](spec/additional-
 The evidence, variant limits, fitted acceleration and low-speed scaling are
 specified there. Legacy A-4 retains the FA control values.
 
-AI aircraft command stick and throttle inputs into their own flight model.
+AI aircraft command stick, throttle and afterburner inputs into their own flight model.
+Formation departures and rejoins use the [physical rejoin procedure](spec/ai.md#physical-departure-and-rejoin);
+its clearance and braking predictions never override achieved motion.
 That model alone advances attitude, velocity, position, fuel and telemetry;
 there is no post-step AI movement override. Imported external stores contribute
 payload mass and releases reduce it. The controller and its fitted limits are

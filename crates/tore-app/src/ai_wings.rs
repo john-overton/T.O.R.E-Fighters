@@ -193,6 +193,7 @@ impl Slot {
 /// The live AI bridge for one mission.
 pub struct AiWings {
     mission: AiMission,
+    formation_log: Option<std::io::BufWriter<std::fs::File>>,
     slots: Vec<Slot>,
     weapons: BTreeMap<(u32, u8), tore_formats::weapons::Weapon>,
     device_random: tore_sim::ai::DecisionRandom,
@@ -461,8 +462,16 @@ impl AiWings {
                 index += 1;
             }
         }
+        let formation_log = std::env::var_os("TORE_FORMATION_TRACE").map(|path| {
+            use std::io::Write;
+            let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+            let mut log = std::io::BufWriter::new(file);
+            writeln!(log, "tick,actor,phase,phase_seconds,slot_distance_ft,closure_fps,altitude_error_ft,predicted_separation_ft,yielding_to,x,y,z,speed_fps,bank_deg,g,pitch_input,roll_input,yaw_input,throttle,burner,aim_x,aim_y,aim_z")?;
+            Ok::<_, std::io::Error>(log)
+        }).transpose()?;
         Ok(Self {
             mission,
+            formation_log,
             slots,
             weapons: BTreeMap::new(),
             device_random: tore_sim::ai::DecisionRandom::seeded(0xdec0),
@@ -580,9 +589,65 @@ impl AiWings {
             .mission
             .step(&objects, ground, now)
             .map_err(|e| e.to_string())?;
+        self.record_formation_trace();
         self.mirror_pose_out(targets);
         self.announce(&output.activities);
         Ok(output)
+    }
+
+    fn record_formation_trace(&mut self) {
+        use std::io::Write;
+        let Some(log) = self.formation_log.as_mut() else {
+            return;
+        };
+        let tick = self.mission.tick();
+        if !tick.is_multiple_of(12) {
+            return;
+        }
+        let result = (|| -> std::io::Result<()> {
+            for actor in self.mission.actors() {
+                let Some(trace) = actor.controller().formation_trace() else {
+                    continue;
+                };
+                let state = actor.flight();
+                let input = actor.last_input();
+                writeln!(
+                    log,
+                    "{},{},{:?},{:.3},{:.2},{:.2},{:.2},{:.2},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.3},{:.4},{:.4},{:.4},{:.4},{},{:.2},{:.2},{:.2}",
+                    tick,
+                    actor.id(),
+                    trace.phase,
+                    trace.phase_seconds,
+                    trace.slot_distance_ft,
+                    trace.closure_fps,
+                    trace.altitude_error_ft,
+                    trace.minimum_predicted_separation_ft,
+                    trace.yielding_to.map_or(String::new(), |id| id.to_string()),
+                    state.position[0],
+                    state.position[1],
+                    state.position[2],
+                    state.speed,
+                    state.bank.to_degrees(),
+                    state.g,
+                    input.pitch,
+                    input.roll,
+                    input.yaw,
+                    state.throttle,
+                    state.afterburner_active(),
+                    trace.aim[0],
+                    trace.aim[1],
+                    trace.aim[2]
+                )?;
+            }
+            if tick.is_multiple_of(120) {
+                log.flush()?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            eprintln!("Formation trace disabled after write failure: {error}");
+            self.formation_log = None;
+        }
     }
 
     /// The player as the AI sees it: an ordinary object on the friendly side,
@@ -1443,6 +1508,56 @@ mod tests {
             wings
                 .advance(player_object([0., 20000., -5000.]), targets, &flat)
                 .unwrap();
+        }
+    }
+
+    #[test]
+    fn formation_trace_records_controls_without_changing_flight() {
+        let selections = [WingSelection {
+            wing: WingId::new(launch::Side::Friendly, 0).unwrap(),
+            aircraft: AircraftId::F18,
+            count: 2,
+            skill_level: 2,
+        }];
+        let payload = resolve_wings(&selections, None).unwrap();
+        let targets = vec![
+            target(1, [512., 20000., -512.], 0.),
+            target(2, [-512., 20000., -512.], 0.),
+        ];
+        let build =
+            || AiWings::build_with(&payload, &targets, 0, |_| Ok((aircraft(), None))).unwrap();
+        let mut logged = build();
+        let mut plain = build();
+        let path =
+            std::env::temp_dir().join(format!("tore-formation-trace-{}.csv", std::process::id()));
+        logged.formation_log = Some(std::io::BufWriter::new(
+            std::fs::File::create(&path).unwrap(),
+        ));
+        let mut a = targets.clone();
+        let mut b = targets;
+        for tick in 0..120 {
+            let player = player_object([0., 20000., 800. * tick as f64 / 120.]);
+            logged.advance(player.clone(), &mut a, &flat).unwrap();
+            plain.advance(player, &mut b, &flat).unwrap();
+            for id in 1..=2 {
+                assert_eq!(
+                    logged.mission.actor(id).unwrap().flight(),
+                    plain.mission.actor(id).unwrap().flight()
+                );
+            }
+        }
+        drop(logged);
+        let rows = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(rows.lines().count(), 20);
+        for row in rows.lines() {
+            let columns: Vec<_> = row.split(',').collect();
+            assert_eq!(columns.len(), 23);
+            assert_eq!(
+                columns[17].parse::<f64>().unwrap(),
+                0.,
+                "formation commands no rudder"
+            );
         }
     }
 

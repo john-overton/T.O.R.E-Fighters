@@ -397,8 +397,23 @@ impl AiMission {
         let mut output = MissionOutput::default();
         let tick = self.tick;
 
+        let traffic: Vec<_> = world
+            .iter()
+            .filter(|o| o.alive && !o.destroyed && o.is_aircraft)
+            .map(|o| super::formation::Traffic {
+                id: o.id,
+                position: o.position,
+                velocity: o.velocity,
+                phase: self
+                    .actors
+                    .iter()
+                    .find(|a| a.id() == o.id)
+                    .and_then(|a| a.controller().formation_trace())
+                    .map(|t| t.phase),
+            })
+            .collect();
         for index in 0..self.actors.len() {
-            self.step_actor(index, world, ground, now, tick, &mut output)?;
+            self.step_actor(index, world, &traffic, ground, now, tick, &mut output)?;
         }
 
         // Deliver after all actors have decided, so iteration order cannot
@@ -413,10 +428,12 @@ impl AiMission {
         Ok(output)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn step_actor(
         &mut self,
         index: usize,
         world: &[WorldObject],
+        traffic: &[super::formation::Traffic],
         ground: &dyn Fn(f64, f64) -> f64,
         now: TimeOfDay,
         tick: u64,
@@ -438,6 +455,7 @@ impl AiMission {
             .filter_map(|a| a.controller.target())
             .collect();
         let actor = &mut self.actors[index];
+        actor.controller.set_formation_observation(traffic.to_vec());
         if !actor.alive() {
             actor.activity = Activity::Destroyed;
             output.activities.push((actor_id, Activity::Destroyed));
@@ -568,6 +586,7 @@ impl AiMission {
                 .find(|o| o.id == *id && o.alive && !o.destroyed)?;
             return Some(LeaderView {
                 position: leader.position,
+                velocity: leader.velocity,
                 heading_deg: leader.heading_deg,
                 speed: leader.speed,
                 target: None,
@@ -585,6 +604,7 @@ impl AiMission {
             .find(|o| o.id == leader.id() && o.alive && !o.destroyed)?;
         Some(LeaderView {
             position: pose.position,
+            velocity: pose.velocity,
             heading_deg: pose.heading_deg,
             speed: pose.speed,
             target: leader.controller.target(),
@@ -1808,6 +1828,161 @@ mod tests {
     }
 
     #[test]
+    fn formation_decisions_do_not_depend_on_actor_iteration_order() {
+        fn scene(reverse: bool) -> AiMission {
+            let mut m = AiMission::new();
+            m.set_external_leader(Side(1), 0, 0);
+            m.set_spacing(512, 0);
+            for member in 1..=4 {
+                let offset =
+                    super::super::wing::formation_slot_point(Formation::Echelon, member, 512, 0)
+                        .unwrap();
+                let mut start = setup(
+                    u32::from(member),
+                    1,
+                    member,
+                    [offset[0], 20000., offset[2]],
+                    0.,
+                );
+                start.home_airport = None;
+                m.push(AiActor::new(start).unwrap());
+            }
+            if reverse {
+                m.actors.reverse();
+            }
+            m
+        }
+        let mut a = scene(false);
+        let mut b = scene(true);
+        let mut leader = object(a.actor(1).unwrap(), 1);
+        leader.id = 0;
+        leader.position = [0., 20000., 0.];
+        leader.heading_deg = 180.;
+        leader.velocity = [0., 0., -800.];
+        for _ in 0..1800 {
+            for mission in [&mut a, &mut b] {
+                let mut world = world_of(mission);
+                world.push(leader.clone());
+                mission.step(&world, &flat, TimeOfDay(0)).unwrap();
+            }
+            for id in 1..=4 {
+                assert_eq!(a.actor(id).unwrap().flight(), b.actor(id).unwrap().flight());
+                assert_eq!(
+                    a.actor(id).unwrap().controller().formation_trace(),
+                    b.actor(id).unwrap().controller().formation_trace()
+                );
+            }
+            leader.position[2] -= 800. / 120.;
+        }
+    }
+
+    #[test]
+    fn formation_diving_reversal_uses_separate_physical_approaches() {
+        use super::super::formation::Phase;
+        for (turn, climb, repeat) in [
+            (-1.0, -1.0, false),
+            (1.0, -1.0, false),
+            (1.0, 1.0, false),
+            (-1.0, -1.0, true),
+        ] {
+            let mut mission = AiMission::new();
+            mission.set_spacing(512, 0);
+            mission.set_external_leader(Side(1), 0, 0);
+            for member in 1..=4 {
+                let offset =
+                    super::super::wing::formation_slot_point(Formation::Echelon, member, 512, 0)
+                        .unwrap();
+                let mut start = setup(
+                    u32::from(member),
+                    1,
+                    member,
+                    [offset[0], 20000., offset[2]],
+                    0.,
+                );
+                start.home_airport = None;
+                start.flight.speed = 800.;
+                start.flight.velocity = [0., 0., 800.];
+                mission.push(AiActor::new(start).unwrap());
+            }
+            let mut leader = object(mission.actor(1).unwrap(), 1);
+            leader.id = 0;
+            leader.position = [0., 20000., 0.];
+            leader.human_controlled = true;
+            let mut minimum = f64::INFINITY;
+            let mut phases = [[false; 6]; 4];
+            let mut last = [Phase::Close; 4];
+            for tick in 0..36000 {
+                let t = tick as f64 / 120.;
+                let progress = ((t - 10.) / 20.).clamp(0., 1.);
+                let reversal = if repeat {
+                    ((t - 70.) / 20.).clamp(0., 1.)
+                } else {
+                    0.
+                };
+                leader.heading_deg = turn * 180. * (progress - reversal);
+                leader.pitch_deg = climb
+                    * 25.
+                    * ((progress * std::f64::consts::PI).sin()
+                        - (reversal * std::f64::consts::PI).sin());
+                leader.velocity =
+                    super::super::formation::velocity(leader.heading_deg, leader.pitch_deg, 800.);
+                let mut world = world_of(&mission);
+                world.push(leader.clone());
+                let before: Vec<_> = mission
+                    .actors()
+                    .iter()
+                    .map(|a| a.flight().clone())
+                    .collect();
+                mission.step(&world, &flat, TimeOfDay(0)).unwrap();
+                for i in 0..3 {
+                    leader.position[i] += leader.velocity[i] / 120.;
+                }
+                let mut achieved = world_of(&mission);
+                achieved.push(leader.clone());
+                for (i, actor) in mission.actors().iter().enumerate() {
+                    let mut replay = before[i].clone();
+                    replay.step_surface(actor.last_input(), |_, _| Surface::terrain(0.));
+                    assert_eq!(replay, *actor.flight());
+                    let trace = actor.controller().formation_trace().unwrap();
+                    phases[i][trace.phase as usize] = true;
+                    if trace.phase != last[i] {
+                        eprintln!(
+                            "turn {turn} t {t:.1} actor {} {:?} distance {:.0} closure {:.0} yielding {:?}",
+                            actor.id(),
+                            trace.phase,
+                            trace.slot_distance_ft,
+                            trace.closure_fps,
+                            trace.yielding_to
+                        );
+                        last[i] = trace.phase;
+                    }
+                    assert!(!actor.flight().crashed);
+                    for other in achieved.iter().filter(|o| o.id != actor.id()) {
+                        minimum = minimum.min(distance(actor.flight().position, other.position));
+                    }
+                }
+            }
+            eprintln!(
+                "turn {turn}, climb {climb}, repeat {repeat}: minimum separation {minimum:.1}"
+            );
+            for (i, actor) in mission.actors().iter().enumerate() {
+                let trace = actor.controller().formation_trace().unwrap();
+                eprintln!(
+                    "actor {} final {:?} slot distance {:.0}",
+                    actor.id(),
+                    trace.phase,
+                    trace.slot_distance_ft
+                );
+                assert!(phases[i][Phase::Intercept as usize]);
+                assert!(phases[i][Phase::Capture as usize]);
+                assert_eq!(trace.phase, Phase::Close);
+                assert!(trace.slot_distance_ft < 250.);
+            }
+            assert!(minimum > 250., "unsafe separation {minimum}");
+        }
+    }
+
+    #[test]
     fn an_idle_wingman_flies_toward_its_own_delta_slot() {
         let mut mission = AiMission::new();
         mission.set_spacing(512, 0);
@@ -2196,6 +2371,7 @@ mod tests {
                     let before = actor.flight.clone();
                     let intent = MotionIntent {
                         formation_flight: false,
+                        afterburner: tick < 300,
                         id: 1,
                         request: MotionRequest::new(
                             heading,

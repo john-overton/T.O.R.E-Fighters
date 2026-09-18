@@ -424,22 +424,91 @@ slot point: beyond 5000 ft own maximum; 1000 to 5000 ft leader speed plus
 clamped to own minimum and maximum. The negative bands are reachable only
 through a lead-projection branch whose entry condition is open.
 
-The live host uses a **fitted agent choice (2026-09-18)** for formation
-speed until that negative-band entry is recovered. Project the slot error onto
-the leader's horizontal forward direction. Request leader speed plus that
-signed error divided by 6 seconds, limited to a correction of -100 through
-+100 ft/s, then clamp to the follower's loaded speed limits. At 5000 ft or more
-behind the slot, request its own maximum speed. An aircraft ahead of its slot
-therefore slows down. Pure lateral or vertical separation does not ask it to
-race ahead. This continuous rule replaces the positive-only bands in the host;
-the recovered band evaluator remains available separately. Heading and pitch
-still aim three seconds ahead of the moving slot, refreshed each simulation
-tick. Original negative-band selection remains unknown; the next research step
-is to establish the mode 9 lead-projection entry condition.
+### Physical departure and rejoin
 
-Formation uses the [input-only controller](#input-only-aircraft-control) with
-its 60-degree requested bank limit. All achieved turns come from aircraft
-physics, including roll response, lift and momentum.
+**Opinionated, requested by John on 2026-09-18:** formation must give way to
+safe departure and rejoin paths. A rejoin is a separate maneuver. Aircraft
+account for neighbors, stabilize outside the formation, and abandon unsafe
+approaches. No target rejoin time or random delay controls arrivals. All
+movement obeys the [input-only contract](#input-only-aircraft-control).
+This deliberately changes host behavior and is not a claim of retail parity.
+The public procedures in AETCMAN 11-248 sections 9.15 and 9.26-9.27,
+AETCMAN 11-251 section 6.38, and AFMAN 11-2F-16V3 section 3.7.2 informed
+this design. Their aircraft-specific speeds are not universal game limits.
+
+The following implementation rules and thresholds are **fitted, agent-authored**:
+
+- Close formation retains signed longitudinal speed correction, leader speed
+  plus slot error / 6 seconds, bounded to +/-100 ft/s and loaded speed limits.
+  The steering point projects three seconds along the leader's full velocity,
+  including climb and descent. This replaces horizontal-only prediction.
+- Leader turn rate above 4 degrees/second, pitch beyond 20 degrees, follower
+  heading mismatch above 40 degrees, or slot error above 1800 ft releases the
+  rigid slot into a wider trailing approach. A hard maneuver alone is not an
+  emergency breakout.
+- All aircraft positions and velocities come from one immutable mission
+  snapshot. Predict closest approach over 8 seconds. Below 220 ft predicted
+  clearance, break out. Resume interception only above 500 ft predicted
+  clearance and after at least 2 seconds in breakout. These are reaction and
+  hysteresis margins, not guaranteed achieved separations.
+- Compare escape heading offsets 0, +/-30, +/-60 and +/-90 degrees with
+  non-descending current pitch and 15 degrees climb. Score the worst clearance
+  across traffic using equal current/candidate velocity weighting to approximate
+  response lag. Penalize absolute offset by 0.2 ft/degree; formation side adds
+  only a 0.05 ft/degree preference. Terrain pitch protection still applies.
+- Before an ordinary approach becomes an emergency, screen requested headings
+  at 0, +/-15, +/-30 and +/-45 degrees against traffic over 10 seconds. Use the
+  same equal current/candidate velocity weighting, cap clearance credit at
+  500 ft, and penalize offset by 2 ft/degree. The chosen detour remains a
+  physical steering request. This also avoids members already in formation.
+- Approach gates sit 256 ft outward of the assigned lateral offset (floored
+  at 256 ft), and 1200 ft behind the assigned aft offset, at least 1800 ft aft
+  of the leader. This keeps inner capture paths inside the outer slots. Actual occupied side influences departure. Aircraft
+  within 450 ft laterally of a corridor yield to a nearer arrival within
+  1800 ft of its gate, with stable actor IDs breaking distances within 100 ft.
+  Capturing aircraft retain their reservation until close tracking or a safety
+  abort. Stabilizing aircraft have priority over intercepting aircraft. A yielding aircraft aims 1800 ft farther aft.
+  Aircraft already in close formation do not reserve an arrival gate.
+- Intercept requests leader velocity plus a closing vector toward the gate.
+  Both heading/pitch and speed follow this velocity vector, avoiding turns back
+  toward an overshot waiting point. Closing magnitude is the minimum of
+  distance / 6 seconds, sqrt(2 times
+  12 ft/s² times distance), and 300 ft/s. The 12 ft/s² braking estimate is fitted,
+  not extra braking force. Heading mismatch above 60 degrees instead requests
+  the lower of corner and leader speed, within the loaded speed envelope.
+- Within 450 ft of the gate, heading error below 15 degrees and relative speed
+  below 70 ft/s allow stabilization. Heading error below 10 degrees and relative
+  speed below 40 ft/s permit inward capture. The target moves from gate to slot
+  over at least 12 seconds, advancing only below 15 degrees heading error and
+  70 ft/s relative speed. Close tracking resumes within 200 ft of the slot and
+  absolute closure below 40 ft/s.
+- Maneuvering, a conflicting arrival, or closure above 120 ft/s within 1200 ft
+  of the slot abandons stabilization/capture. Predicted collision clearance
+  overrides every phase. There is no teleport, attitude correction or velocity
+  replacement in any transition.
+- Close tracking retains the 60-degree bank request limit. Other formation
+  phases use the ordinary 75-degree request bound, still limited by loaded
+  aircraft bank and G authority. Interception may request afterburner only
+  beyond 6000 ft from its approach target, within 20 degrees heading alignment,
+  with requested acceleration above 100 ft/s and fuel endurance above 180 seconds.
+  Every other phase requests burner off; aircraft capability and fuel remain
+  authoritative.
+
+`Controller::formation_trace` exposes phase, phase duration, slot distance,
+closure, altitude error, predicted clearance, yielding actor and steering point. It is a hidden
+inspection/extension hook, not a normal-flight display. The host can optionally
+record it alongside actual controls and achieved flight state; see
+[development diagnostics](../DEVELOPMENT.md#formation-flight-traces).
+
+This pass retains the host's direct leader/traffic awareness. Sensor-limited
+visual reacquisition, radio permission, AI-leader cooperation and human-leader
+requests remain future work. A standing formation order currently permits
+safe automatic rejoin. Prediction assumes locally constant traffic velocities;
+escape scoring approximates response lag rather than simulating each candidate.
+Terrain clearance uses existing steering protection, not terrain-aware route
+planning. These limitations require live evaluation, especially steep/inverted
+maneuvers and dissimilar aircraft. Original negative-band speed selection
+remains unknown; the isolated recovered mode-9 evaluator is unchanged.
 
 Presentation uses the same previous/current simulation interval and blend
 fraction for the player's camera and nearby aircraft positions and attitudes.
@@ -926,7 +995,7 @@ input mapping is unknown. Unconstrained heading error divided by 1 second
 requests turn rate, converted to bank using atan(speed times rate / 32.174),
 with radians/second and ft/s, speed floored at 125. Requested bank is bounded
 by the aircraft maximum, acos(1 / positive G limit floored at 1), and 60 degrees
-in formation or 75 degrees otherwise. Explicit maneuver bank requests keep
+in close formation or 75 degrees otherwise. Explicit maneuver bank requests keep
 their aircraft bound. Desired roll rate is bank error / 0.7 seconds minus half
 the measured roll rate, bounded by the B44 requested roll authority. Divide by
 the model's current roll authority and clamp stick roll to [-1, 1].

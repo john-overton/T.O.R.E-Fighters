@@ -3,8 +3,8 @@
 //! Everything here is built from [`docs/spec/ai.md`](../../../../docs/spec/ai.md)
 //! and [`docs/spec/ai-experience.md`](../../../../docs/spec/ai-experience.md).
 //! Behavior IDs (B01, B15, ...) in doc comments refer to those specs. Nothing in
-//! this module is connected to live missions, the flight adapters or the player
-//! path yet; the components are reviewable pieces exercised by synthetic tests.
+//! this module drives the human player. The mission and steering adapters
+//! connect aircraft decisions to physical controls, with synthetic replay tests.
 //!
 //! Rules of the module:
 //!
@@ -20,6 +20,7 @@
 pub mod controller;
 pub mod experience;
 pub mod fitted;
+pub mod formation;
 pub mod geometry;
 pub mod launch;
 pub mod mission;

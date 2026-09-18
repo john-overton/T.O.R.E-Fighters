@@ -238,6 +238,7 @@ pub struct WingView {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LeaderView {
     pub position: [f64; 3],
+    pub velocity: [f64; 3],
     pub heading_deg: f64,
     pub speed: ScalarSpeed,
     pub target: Option<u32>,
@@ -355,8 +356,10 @@ pub struct MotionIntent {
     /// The B15 steering point, when the maneuver pursues one.
     pub steering_point: Option<[f64; 3]>,
     pub mode: CommandMode,
-    /// Use the fitted formation bank request limit. Movement remains input-only.
+    /// Use the fitted close-formation bank request limit. Movement remains input-only.
     pub formation_flight: bool,
+    /// Request afterburner through the physical aircraft switch.
+    pub afterburner: bool,
 }
 
 /// A sensor/target request.
@@ -505,9 +508,21 @@ pub struct Controller {
     fallbacks: FallbackLog,
     pending_warnings: Vec<(u64, ThreatReport)>,
     pursuit: Option<(u32, PursuitOffset)>,
+    formation_guidance: super::formation::Guidance,
+    formation_traffic: Vec<super::formation::Traffic>,
 }
 
 impl Controller {
+    /// Supply one immutable mission snapshot before advancing this controller.
+    pub fn set_formation_observation(&mut self, traffic: Vec<super::formation::Traffic>) {
+        self.formation_traffic = traffic;
+    }
+
+    /// Diagnostics/extension hook, with no normal-flight display or side effects.
+    pub fn formation_trace(&self) -> Option<super::formation::Trace> {
+        self.formation_guidance.trace
+    }
+
     /// Build a controller for one actor.
     ///
     /// Only the fighter/strike family is implemented. Any other family is
@@ -572,6 +587,8 @@ impl Controller {
             fallbacks: FallbackLog::default(),
             pending_warnings: Vec::new(),
             pursuit: None,
+            formation_guidance: super::formation::Guidance::default(),
+            formation_traffic: Vec::new(),
         })
     }
 
@@ -617,6 +634,7 @@ impl Controller {
 
         let mut batch = IntentBatch::default();
         if !frame.own.alive {
+            self.formation_guidance = super::formation::Guidance::default();
             batch.activity = Some(Activity::Destroyed);
             self.last_batch = batch.clone();
             return Ok(batch);
@@ -680,6 +698,9 @@ impl Controller {
         // outranks whatever tactical activity the rest of the tick produced.
         if fuel == Some(FuelState::OutOfFuel) {
             batch.activity = Some(Activity::OutOfFuel);
+        }
+        if batch.activity != Some(Activity::Formation) {
+            self.formation_guidance = super::formation::Guidance::default();
         }
         batch.reason = self.reason;
         self.last_batch = batch.clone();
@@ -752,6 +773,7 @@ impl Controller {
         self.next_motion_id += 1;
         let intent = MotionIntent {
             formation_flight: false,
+            afterburner: false,
             id,
             request,
             heading_deg: f64::from(request.heading_deg),
@@ -1187,13 +1209,8 @@ impl Controller {
         Ok(())
     }
 
-    /// B43 slot geometry with fitted signed speed regulation.
-    /// Fitted steering aim: project the slot three seconds along the leader's
-    /// heading, using the nominal formation-command duration as the horizon.
-    /// This lets an aircraft already in its slot fly parallel to the leader
-    /// instead of turning back toward a point it has just passed. The speed
-    /// correction still measures error to the unprojected slot. This projection
-    /// is an agent choice, not a recovered lead rule.
+    /// B43 slot geometry with opinionated physical departure/rejoin guidance.
+    /// See the formation procedure in docs/spec/ai.md.
     fn formation_motion(
         &mut self,
         frame: &DecisionFrame<'_>,
@@ -1207,19 +1224,22 @@ impl Controller {
             .wing
             .leader
             .expect("formation point requires a leader");
-        let lead = leader.speed.0.max(0.0) * f64::from(wing::FORMATION_REQUEST_SECONDS);
-        let heading = leader.heading_deg.to_radians();
-        let aim = [
-            point[0] + heading.sin() * lead,
-            point[1],
-            point[2] + heading.cos() * lead,
-        ];
+        let guidance = self.formation_guidance.step(
+            self.identity.actor.0,
+            &frame.own,
+            leader,
+            leader.velocity,
+            point,
+            &self.formation_traffic,
+            1. / 120.,
+        );
+        let aim = guidance.aim;
         let dx = aim[0] - frame.own.position[0];
         let dy = aim[1] - frame.own.position[1];
         let dz = aim[2] - frame.own.position[2];
         let heading_deg = dx.atan2(dz).to_degrees();
         let pitch_deg = dy.atan2(dx.hypot(dz)).to_degrees();
-        let speed = self.formation_speed(frame, point);
+        let speed = ScalarSpeed(guidance.speed);
         let duration = Duration::Timed(wing::FORMATION_REQUEST_SECONDS as u8);
         let request = MotionRequest::new(
             heading_deg.round() as i32,
@@ -1251,7 +1271,8 @@ impl Controller {
             )
         };
         let intent = MotionIntent {
-            formation_flight: true,
+            formation_flight: guidance.close,
+            afterburner: guidance.burner,
             id,
             request,
             heading_deg,
@@ -1731,6 +1752,7 @@ impl Controller {
         self.next_motion_id += 1;
         let mut intent = MotionIntent {
             formation_flight: false,
+            afterburner: false,
             id,
             request,
             heading_deg: f64::from(request.heading_deg),
@@ -1913,25 +1935,6 @@ impl Controller {
             leader.position[1] + offset[1],
             leader.position[2] + offset[2],
         ]))
-    }
-
-    /// Fitted host regulation: signed along-track error closes over six
-    /// seconds, capped at +/-100 ft/s. Unlike unsigned B43 distance bands,
-    /// this slows a wingman that has passed its slot. Original negative-band
-    /// entry is unknown; this is not a recovered rule.
-    pub fn formation_speed(&self, frame: &DecisionFrame<'_>, slot_point: [f64; 3]) -> ScalarSpeed {
-        let Some(leader) = frame.wing.leader else {
-            return frame.own.limits.corner;
-        };
-        let heading = leader.heading_deg.to_radians();
-        let along = (slot_point[0] - frame.own.position[0]) * heading.sin()
-            + (slot_point[2] - frame.own.position[2]) * heading.cos();
-        let requested = if along >= 5000.0 {
-            frame.own.limits.maximum.0
-        } else {
-            leader.speed.0 + (along / 6.0).clamp(-100.0, 100.0)
-        };
-        ScalarSpeed(requested.clamp(frame.own.limits.minimum.0, frame.own.limits.maximum.0))
     }
 
     /// The B44 terrain floor for this actor, when one is active.
@@ -2217,6 +2220,7 @@ mod tests {
         frame.wing.horizontal_spacing_ft = 512;
         frame.wing.vertical_spacing_ft = 0;
         frame.wing.leader = Some(LeaderView {
+            velocity: [0., 0., 800.],
             position: [10000., 20000., 10000.],
             heading_deg: 0.,
             speed: ScalarSpeed(800.),
@@ -2225,14 +2229,14 @@ mod tests {
         });
         let first = c.step(&frame).unwrap();
         assert_eq!(first.activity, Some(Activity::Formation));
-        assert!(first.motion.unwrap().heading_deg > 30.);
+        assert!(first.motion.unwrap().heading_deg > 0.);
         let random = c.random.clone();
         assert_eq!(first, c.step(&frame).unwrap());
         assert_eq!(random, c.random);
         frame.tick = 1;
         frame.wing.leader.as_mut().unwrap().position[0] = -10000.;
         let next = c.step(&frame).unwrap();
-        assert!(next.motion.unwrap().heading_deg < -30.);
+        assert!(next.motion.unwrap().heading_deg < 0.);
         assert_eq!(first.motion.unwrap().id, next.motion.unwrap().id);
         assert_eq!(random, c.random, "slot tracking must not redraw every tick");
     }
@@ -2542,6 +2546,7 @@ mod tests {
             Controller::new(wingman_identity, profile(), resolved(Experience::Ace), 5).unwrap();
         let mut view = wing_view();
         view.leader = Some(LeaderView {
+            velocity: [0., 0., 800.],
             position: [0.0, 20000.0, 0.0],
             heading_deg: 0.0,
             speed: ScalarSpeed(800.0),

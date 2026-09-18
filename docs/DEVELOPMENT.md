@@ -682,3 +682,26 @@ heading/bank rates, and
 reports sensor fit, stores, launches and dropped launches. This is separate
 from synthetic tests and is not a retail comparison or visual acceptance.
 The shorter `--ai-probe-ticks N` retains the Quick Mission bridge probe.
+
+## Formation flight traces
+
+Normal flight has no formation diagnostics on screen. To record a live rejoin,
+set `TORE_FORMATION_TRACE` to a local CSV path before starting the application:
+
+```sh
+TORE_FORMATION_TRACE=.local/formation-flight.csv cargo run --locked -p tore-app
+```
+
+The parent directory must exist. The bridge appends a header at each mission
+start and samples every 12 simulation ticks (10 Hz), flushing every second.
+Rows contain the decision phase, its duration, slot error, closure, altitude error, predicted
+minimum separation, yielding actor, steering target, achieved position/speed/
+bank/G, and commanded axes plus actual throttle/afterburner. Decision quantities
+precede that tick's physics; achieved quantities follow it. A write failure
+reports to stderr and disables logging without stopping flight. With the
+variable unset, no file is opened. The simulation inspection hook is
+`Controller::formation_trace`; it never changes aircraft movement.
+
+`cargo test --locked -p tore-sim formation_diving_reversal -- --nocapture`
+runs the synthetic four-wingman diving-reversal regression. This is a safety
+and physical-input replay check, not a target rejoin-time requirement.
