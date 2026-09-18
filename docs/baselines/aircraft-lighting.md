@@ -39,6 +39,11 @@ shader, shadow maps and material pipelines. Pixel readbacks establish:
 - Eleven low-sun frames cover five seconds in half-second increments with small
   camera translations. A 32 by 32 pixel patch on an inclined receiver changes
   by at most two linear 8-bit levels per channel between frames. Sunglare is off.
+- Low-sun land contrast is checked on a synthetic grey slope: at 17:00 the
+  back slope's red channel falls from its preceding 20 levels to at most 15.
+  The 07:00 sun-facing slope, noon slope and nighttime slope retain reference
+  red values 90, 56 and 24 within two linear 8-bit levels. The existing water,
+  painted-panel, temporal-stability and contact-shadow checks still pass.
 - Stepped compatibility draws no new geometry shadows.
 - Fully transparent texture cutouts, glass, emissive glints and textured flames
   do not cast opaque silhouettes.
@@ -108,6 +113,13 @@ the user's exact scene or prove the absence of every possible flicker. The
 controlled GPU sequence establishes the five-second stability check. Original
 terrain artwork and material-color boundaries are retained; the new shared
 normals address lighting seams without repainting the source tiles.
+
+The land-only low-sun follow-up is validated in
+`.local/low-sun-land-validation/`. Matched 18:50 coastal captures were inspected:
+shaded land darkens without raising sunlit brightness. The sampled 200 by 25
+pixel water patch at (20, 320) is byte-identical before and after. All required
+checks and the expanded GPU test passed for this follow-up. This capture is
+not the user's exact hill or camera position.
 
 Windows/macOS execution, retail comparison, long-session performance and all
 possible imported material variants were not validated. Finite map coverage,

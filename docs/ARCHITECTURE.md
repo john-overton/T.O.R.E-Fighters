@@ -66,7 +66,8 @@ distance with smooth camera-distance antialiasing. Terrain has a separate
 stream of area-weighted shared normals for lighting; shadow depth still uses
 actual triangles. Smooth sky, glare and shadow directions share fractional
 weather-clock time. Sun-disc strength and geometric visibility are independent
-of the sunglare toggle. Smooth aircraft geometry is complete,
+of the sunglare toggle. Terrain alone reduces low-sun ambient fill on unexposed
+slopes; exposed ridges, aircraft and water retain their existing response. Smooth aircraft geometry is complete,
 including faces hidden from the camera, and hiding the player in cockpit view
 does not remove its shadow caster. Material layer -6 identifies emissive combat
 effects and -7 identifies textured flame sheets. Glass and flame sheets do not

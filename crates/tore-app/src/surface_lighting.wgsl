@@ -128,7 +128,14 @@ fn surface_color(color:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,panels:bool
  let visibility=geometric_visibility(relative,receiver_normal)*sunlight_transmission(surface.origin.y+relative.y)*surface.reserved.x;
  let tint=mix(vec3<f32>(1.0),solar_tint(surface.reserved.y),0.65);
  let skyward=clamp(normal.y*0.5+0.5,0.0,1.0);
- let ambient=mix(vec3<f32>(0.12,0.14,0.18),vec3<f32>(0.28,0.32,0.39),skyward);
+ var ambient=mix(vec3<f32>(0.12,0.14,0.18),vec3<f32>(0.28,0.32,0.39),skyward);
+ if !panels {
+  // Land has less low-sun sky fill than reflective water or painted panels.
+  // Preserve exposed ridge brightness; obtain contrast by darkening shade.
+  let low=1.0-smoothstep(0.104528,0.422618,surface.reserved.y);
+  let shaded=1.0-smoothstep(0.0,0.35,facing*visibility);
+  ambient*=1.0-0.55*low*shaded;
+ }
  let night=vec3<f32>(mix(0.20,0.32,skyward)+0.30*max(dot(normal,surface.moon.xyz),0.0));
  let illumination=mix(night,ambient,day)+0.90*facing*visibility*tint;
  var lit=color*illumination;

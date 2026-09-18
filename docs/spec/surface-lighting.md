@@ -35,6 +35,18 @@ fill varies with the surface normal: downward faces use RGB (0.12, 0.14, 0.18),
 upward faces (0.28, 0.32, 0.39), interpolated by (normal.y + 1) / 2.
 Night uses 0.20 to 0.32 ambient by orientation and 0.30 moon diffuse.
 
+John requested darker shaded land in early/late light on 2026-09-18, retaining
+water and the current brightness of sunlit ridges. Terrain alone reduces its
+ambient fill by up to 55 percent. The reduction is strongest at solar elevation
+6 degrees and below, easing away by 25 degrees with the same sine-elevation
+smoothstep as solar warmth. It applies to the unexposed portion:
+`1 - smoothstep(0, 0.35, normal/light dot * light visibility)`. Fully exposed
+slopes retain the preceding ambient and direct response; no extra ridge light
+is added. The existing night/day blend phases out this change at night. These
+constants are agent decisions. Aircraft fill, water lighting and fog remain
+unchanged.
+
+
 Daylight strength is the visible area fraction of the original solid sun disc,
 including when its center is below the horizon. While partly visible, the light
 and shadow direction use the centroid of its visible circular segment. This

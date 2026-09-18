@@ -1415,6 +1415,23 @@ mod lighting_tests {
                 "terrain must not acquire a painted-panel highlight"
             );
             let morning = render(7 * 60, false, false, true, true, -1., 0., false, 30., 0);
+            let shaded_land = render(17 * 60, false, false, true, true, -1., 0., false, 30., 0);
+            let noon_land = render(12 * 60, false, false, true, true, -1., 0., false, 30., 0);
+            let night_land = render(22 * 60, false, false, true, true, -1., 0., false, 30., 0);
+            let pixel = (128 * 256 + 128) * 4;
+            assert!(
+                shaded_land[pixel] <= 15,
+                "low-sun back slope must darken from its preceding 20-level fill, got {}",
+                shaded_land[pixel]
+            );
+            // Reference values from the unchanged response on this synthetic grey slope.
+            for (image, expected) in [(&morning, 90), (&noon_land, 56), (&night_land, 24)] {
+                assert!(
+                    (i32::from(image[pixel]) - expected).abs() <= 2,
+                    "preserve exposed/day/night land brightness: got {} expected {expected}",
+                    image[pixel]
+                );
+            }
             let before = render(7 * 60 + 1, false, false, true, true, -1., 0., false, 30., 0);
             let at = (128 * 256 + 128) * 4;
             assert!(
