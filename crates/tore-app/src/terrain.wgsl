@@ -75,7 +75,7 @@ fn aerial_perspective(color:vec3<f32>,direction:vec3<f32>,altitude:f32)->vec3<f3
 }
 struct VertexOut {
  @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
- @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>, @location(7) @interpolate(flat) fog_enabled:u32, @location(8) @interpolate(flat) light_row:i32
+ @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>, @location(7) @interpolate(flat) fog_enabled:u32, @location(8) @interpolate(flat) light_row:i32, @location(9) terrain_normal:vec3<f32>
 }
 // Exact sRGB decoding includes the dark linear segment; source black stays zero.
 fn linear(c:vec3<f32>)->vec3<f32>{return select(pow((c+vec3<f32>(0.055))/1.055,vec3<f32>(2.4)),c/12.92,c<=vec3<f32>(0.04045));}
@@ -213,7 +213,7 @@ fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec
  if sum.a<=0.0 { return vec4<f32>(0.0); }
  return vec4<f32>(sum.rgb/sum.a,sum.a);
 }
-@vertex fn vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
+fn world_vertex(position:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec3<f32>,index:f32)->VertexOut {
  let p=position-scene.eye.xyz;
  let z=dot(p,scene.forward.xyz);
  let near=1.0;let far=2200000.0;let f=1.7320508*scene.up.w;
@@ -229,16 +229,25 @@ fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec
  if index>=0.0 { var source_index=u32(index)%256u; if out.light_row>=0 {source_index=textureLoad(weather_tiles,vec2<i32>(i32(source_index),out.light_row),i32(scene.deck_a.w),0).r;} out.color=shade(source_index,0).rgb; if fog_enabled {out.color=remap_color(source_index,ray_rows(length(p),position.y));} } else { out.color=linear(color); }
  out.distance=length(p);return out;
 }
+@vertex fn vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
+ return world_vertex(position,uv,layer,color,index);
+}
+@vertex fn terrain_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32,@location(5) normal:vec3<f32>)->VertexOut {
+ var out=world_vertex(position,uv,layer,color,index);
+ out.terrain_normal=normal;return out;
+}
 // Terrain cutouts expose the already rendered ocean/horizon, never the T2
 // land color. Keep this separate from aircraft's base-color texture blending.
 @fragment fn terrain_fragment(in:VertexOut)->@location(0) vec4<f32>{
- if in.layer<0.0 {return vec4<f32>(aerial_perspective(in.color,in.direction,in.altitude),1.0);}
+ let receiver=surface_normal(in.direction);
+ let normal=select(receiver,normalize(in.terrain_normal),dot(in.terrain_normal,in.terrain_normal)>0.1 && smooth_weather());
+ if in.layer<0.0 {return vec4<f32>(aerial_perspective(surface_color(in.color,in.direction,normal,false,receiver),in.direction,in.altitude),1.0);}
  var remaps=vec2<f32>(-1.0);
  if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
  let tex=sample_tile(in.uv,i32(in.layer),0,-1,in.light_row,remaps);
  // Fitted bilinear coverage boundary; discarded water writes no depth.
  if tex.a<0.5 {discard;}
- return vec4<f32>(aerial_perspective(tex.rgb,in.direction,in.altitude),1.0);
+ return vec4<f32>(aerial_perspective(surface_color(tex.rgb,in.direction,normal,false,receiver),in.direction,in.altitude),1.0);
 }
 // User-requested material. Pink is a mask; metal pixels retain their source RGB.
 fn engine_texel(at:vec2<i32>,heat:f32)->vec3<f32> {
@@ -258,13 +267,13 @@ fn engine_color(uv:vec2<f32>,heat:f32)->vec3<f32> {
  return mix(mix(engine_texel(base,heat),engine_texel(base+vec2<i32>(1,0),heat),t.x),
             mix(engine_texel(base+vec2<i32>(0,1),heat),engine_texel(base+vec2<i32>(1,1),heat),t.x),t.y);
 }
-fn aircraft_color(in:VertexOut)->vec4<f32>{
+fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
  var color=in.color;
  if in.layer<=-3.0 && in.layer>=-4.0 {color=engine_color(in.uv,clamp(-in.layer-3.0,0.0,1.0));}
- if in.layer>=0.0 || in.layer == -2.0 || in.layer == -5.0 {
+ if in.layer>=0.0 || in.layer == -2.0 || in.layer == -5.0 || in.layer == -7.0 {
   var remaps=vec2<f32>(-1.0);if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
   let tex=sample_tile(in.uv,i32(max(in.layer,0.0)),0,-1,in.light_row,remaps);
-  if in.layer == -2.0 && tex.a < 0.5 { discard; }
+  if (in.layer == -2.0 || in.layer == -7.0) && tex.a < 0.5 { discard; }
   color=mix(color,tex.rgb,tex.a);
   if in.layer == -5.0 {
    let luminance=dot(color,vec3<f32>(0.2126,0.7152,0.0722));
@@ -272,6 +281,7 @@ fn aircraft_color(in:VertexOut)->vec4<f32>{
   }
  }
  if textureDimensions(palette).y<=1u || (in.own_color>0.0 && in.layer<0.0 && in.layer != -2.0 && in.layer != -5.0) { color=mix(color,linear(scene.sky.rgb),haze(in.distance)); }
+ if in.layer != -6.0 && in.layer != -7.0 && !(in.layer < -3.0 && in.layer >= -4.0) {color=surface_color(color,in.direction,normal,true,normal);}
  if in.fog_enabled!=0u {color=aerial_perspective(color,in.direction,in.altitude);}
  else {color=cloud_occlusion(color,in.direction,in.altitude);}
  return vec4<f32>(color,1.0);
@@ -279,12 +289,14 @@ fn aircraft_color(in:VertexOut)->vec4<f32>{
 // Glazing composites after opaque geometry. The depth prepass selects one
 // nearest surface, avoiding compounded opacity through overlapping glass.
 @fragment fn fragment(in:VertexOut)->@location(0) vec4<f32>{
+ let normal=surface_normal(in.direction);
  if in.layer == -5.0 {discard;}
- return aircraft_color(in);
+ return aircraft_color(in,normal);
 }
 @fragment fn canopy_fragment(in:VertexOut)->@location(0) vec4<f32>{
+ let normal=surface_normal(in.direction);
  if in.layer != -5.0 {discard;}
- return vec4<f32>(aircraft_color(in).rgb,0.75);
+ return vec4<f32>(aircraft_color(in,normal).rgb,0.75);
 }
 struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32> }
 @vertex fn sky_vertex(@builtin(vertex_index) i:u32)->SkyOut {
@@ -449,7 +461,10 @@ fn water_sun(color:vec3<f32>,ray:vec3<f32>,hit:vec3<f32>,distance:f32)->vec3<f32
  let scatter=0.55*exp(-pow(azimuth/(angular_radius+0.026180),2.0)-pow(vertical/(angular_radius+0.104720),2.0));
  let coverage=mix(direct,scatter,smoothstep(40.0,800.0,footprint));
  let transmission=1.0-air_opacity(distance,hit.y);
- return mix(color,shade(index,0).rgb,0.85*coverage*visible*transmission);
+ // Light must reach this water point. Darkening finished water alone leaves a
+ // false glint in land shadows, especially when only part of the sun is visible.
+ let illumination=geometric_visibility(hit-surface.origin.xyz,vec3<f32>(0.0,1.0,0.0))*sunlight_transmission(hit.y);
+ return mix(color,shade(index,0).rgb,0.85*coverage*visible*transmission*illumination);
 }
 // CLOUD weather has palette water rather than a named OCEAN plane.
 fn overcast_water(color:vec3<f32>,ray:vec3<f32>)->vec3<f32> {
@@ -532,7 +547,7 @@ fn solar_glow(color:vec3<f32>,ray:vec3<f32>)->vec3<f32> {
  let wash=exp(-pow(azimuth/0.785398,2.0)-pow(elevation/0.244346,2.0));
  let strength=(mix(0.30,0.85,low)*narrow+mix(0.06,0.24,low)*wide+0.16*low*wash)
      *smoothstep(0.0,0.2,cosine)*scene.circles[0].z;
- let emission=mix(vec3<f32>(1.0,0.88,0.65),vec3<f32>(1.0,0.32,0.075),low)*strength;
+ let emission=solar_tint(scene.sun.y)*strength;
  return color+(vec3<f32>(1.0)-color)*(vec3<f32>(1.0)-exp(-emission));
 }
 // Per-pixel angular cloud lighting. World direction avoids per-tile seams;
@@ -545,7 +560,7 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
  let rising=smoothstep(-0.087156,0.034899,scene.sun.y);
  let angular=exp(-pow(acos(cosine)/0.610865,2.0))*smoothstep(0.0,0.2,cosine);
  let strength=0.90*low*rising*angular*scene.circles[0].z*visibility;
- let tint=mix(vec3<f32>(1.0,0.88,0.65),vec3<f32>(1.0,0.32,0.075),low);
+ let tint=solar_tint(scene.sun.y);
  let emission=color*tint*strength;
  return color+(vec3<f32>(1.0)-color)*(vec3<f32>(1.0)-exp(-emission));
 }
@@ -598,7 +613,7 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
   if scene.ocean[i+1]>0.0 {
    tex=ocean_surface(hit,deck,distance,passes,core);
    tex=vec4<f32>(aerial_perspective(tex.rgb,ray*distance,deck.x),tex.a);
-   tex=vec4<f32>(water_sun(tex.rgb,ray,hit,distance),tex.a);
+   tex=vec4<f32>(water_shadow(water_sun(tex.rgb,ray,hit,distance),hit),tex.a);
   } else {
   tex=weather_tile(uv,i32(deck.z),fog_row(distance),passes,core,vec2<f32>(-1.0));
   if smooth_weather() {
@@ -627,7 +642,8 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
   if scene.cloud_reflection.z>0.0 && ray.y< -0.000001 && scene.eye.y>0.0 {
    let distance=-scene.eye.y/ray.y;
    if distance<2000000.0 {
-    let reflected=water_sun(color,ray,scene.eye.xyz+ray*distance,distance);
+    let hit=scene.eye.xyz+ray*distance;
+    let reflected=water_shadow(water_sun(color,ray,hit,distance),hit);
     color=mix(reflected,color,smoothstep(1800000.0,2000000.0,distance));
    }
   }

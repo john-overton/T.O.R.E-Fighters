@@ -8,6 +8,18 @@ struct Flare { settings:vec4<f32>, circles:array<vec4<f32>,16> }
 }
 @fragment fn fragment(@builtin(position) p:vec4<f32>)->@location(0) vec4<f32>{
  let color=textureLoad(source,vec2<i32>(p.xy),0);
+ // Continuous optical emission in smooth mode. Never quantize the background.
+ if flare.settings.z>0.0 {
+  var emission=vec3<f32>(0.0);
+  for(var i=0;i<i32(flare.settings.x);i++) {
+   let c=flare.circles[i];
+   let coverage=1.0-smoothstep(max(c.z-1.5,0.0),c.z,distance(p.xy,c.xy));
+   let tint=select(vec3<f32>(1.0,0.55,0.22),vec3<f32>(1.0,0.32,0.18),c.w>0.5);
+   let strength=select(0.12,0.08,c.w>0.5);
+   emission+=tint*strength*coverage*flare.settings.y;
+  }
+  return vec4<f32>(color.rgb+(vec3<f32>(1.0)-color.rgb)*(vec3<f32>(1.0)-exp(-emission)),color.a);
+ }
  var index=-1;
  for(var i=0;i<i32(flare.settings.x);i++){
   let c=flare.circles[i];if distance(p.xy,c.xy)>c.z {continue;}

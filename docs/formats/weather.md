@@ -786,7 +786,8 @@ normal. Light remapping precedes distance fog.
 
 0x4b35b8..0x4b364a selects daytime sun arc or moon angles, adds 32760 to azimuth
 and negates elevation. This light producer does not use the sun visibility flag.
-The port retains source arithmetic/remaps; animation/world orientation still
+The stepped port retains source arithmetic/remaps; smooth world surfaces
+use the [shared lighting and shadow presentation](../spec/surface-lighting.md). Animation/world orientation still
 uses the host float basis, then Q15 rounding. It is not native matrix parity.
 Neutral imported F18/RAF/CLOUD1 lit-face counts are 275/201/0. Special sensor or
 display color maps remain outside this reviewed ordinary world path.

@@ -229,3 +229,8 @@ The runtime now reads the already-imported A/C damaged-body SHs, B/D pieces and 
 references for every supported aircraft. Missing damage resources produce a
 re-import error rather than substituting a different aircraft. No retail bytes
 are embedded. [Resource evidence and remaining variant questions](formats/objects-and-shapes.md#combat-damage-and-smoke-resource-review).
+
+Aircraft use the shared warm, continuous surface lighting and geometric shadows
+in smooth weather. See the [surface spec](spec/surface-lighting.md) for coverage,
+night lighting and transparent-material exceptions. Imported shadow shapes remain
+unresolved and are not required by this geometry-based presentation.

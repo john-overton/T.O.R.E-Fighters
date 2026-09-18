@@ -53,6 +53,28 @@ The creator selects among all 16 base theaters. Scene replacement rebuilds the G
 
 The Hornet slice adds dependency resolution and bounded BRF/SH/FNT readers to `tore-formats`. `tore-sim::flight` contains fixed-tick state/integration without wgpu/winit dependencies; the app re-exports its interface; `aircraft.rs` adapts imported geometry and camera poses. `instruments.rs` renders independent small rasters from flight/equipment state. The GPU terrain pass now accepts an aircraft vertex stream and original rectangular atlas with shared depth; front/other instrument cameras render offscreen. CLI extraction and cache import share the same dependency resolver. These adapters do not execute imported x86 modules. See [aircraft evidence and open questions](formats/aircraft.md).
 
+`surface_lighting.rs` owns three geometric shadow maps and the shared light
+uniform. `surface_lighting.wgsl` supplies continuous diffuse response, solar
+warmth, orientation-dependent fill, painted-panel highlights, cloud transmission
+and shadow sampling to terrain, aircraft and weapon
+surfaces; sky/cloud shaders share its solar tint helper. Opaque batches enter
+the shadow pass before the world pass. Partial sunrise/sunset uses the solid
+disc's visible area and segment centroid for direct light and shadow direction.
+Manually filtered depth neighbors each use receiver-plane correction and
+continuous blocker weights. The bounded penumbra filter combines caster
+distance with smooth camera-distance antialiasing. Terrain has a separate
+stream of area-weighted shared normals for lighting; shadow depth still uses
+actual triangles. Smooth sky, glare and shadow directions share fractional
+weather-clock time. Sun-disc strength and geometric visibility are independent
+of the sunglare toggle. Smooth aircraft geometry is complete,
+including faces hidden from the camera, and hiding the player in cockpit view
+does not remove its shadow caster. Material layer -6 identifies emissive combat
+effects and -7 identifies textured flame sheets. Glass and flame sheets do not
+cast solid shadows; ordinary cutout surfaces cast only their opaque texels. Stepped
+mode retains palette lighting and camera face rejection. See the
+[surface specification](spec/surface-lighting.md) for fitted limits.
+
+
 
 `flight_ui.rs` owns desktop command dispatch, imported menu navigation, session presentation settings and pause state. `hud.rs` draws the forward-flight HUD from state and source font glyphs, projecting the ladder/path through the renderer's 60-degree camera convention. Simulation remains independent of both. The full-canvas cockpit is transparent art over the world; instrument windows are independent rasters. Menu/focus pauses stop fixed ticks and engine loops, and input transitions clear held controls. Shader zoom is shared by terrain and sky projection; camera previews restore the main camera before drawing.
 
@@ -271,3 +293,10 @@ position; no coordinator moves aircraft directly. Live random slot offsets are
 smoothed in `Controller`, with vertical amplitude reduced to five feet. The
 [transition specification](spec/ai.md#normal-formation-variation-and-transitions)
 owns the fitted parameters and limits.
+
+Smooth lens flare is a continuous optical-light composite over the completed
+world, so the sky gradient is not quantized inside flare circles. Stepped mode
+keeps indexed remapping. Water's solar glint tests geometric light visibility
+before adding reflected sunlight; ordinary water shadow tint is a separate
+operation. See [glare](spec/sun-glow.md#continuous-lens-flare-composition) and
+[water reflection](spec/ocean.md#separate-sun-and-environment-reflection-trial).

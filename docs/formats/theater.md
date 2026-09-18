@@ -134,3 +134,9 @@ the preview renderer or its height sampling. Native fine lookup returns a zero-
 elevation/class-1 fallback for out-of-grid corners; it does not clamp to the last
 sample. [Contract](native-land-contact.md#vertical-terrain-arithmetic-ne-001b),
 [measured decoder/replay coverage](../baselines/native-land-geometry.md).
+
+Smooth presentation adds continuous sunlight and geometric shadows to the
+existing terrain triangles, with shared area-weighted vertex normals for
+continuous lighting across their edges. Shadow positions and height queries
+still use the source triangles. This is an authored renderer, not newly recovered
+terrain behavior. See the [shared surface spec](../spec/surface-lighting.md).

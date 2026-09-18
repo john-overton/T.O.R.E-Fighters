@@ -130,14 +130,13 @@ impl Renderer {
         if !visible {
             self.mirror_vertices = hornet.vertices(state, &self.mirror_camera, world);
         }
-        if visible {
-            self.sim.aircraft(
-                &self.device,
-                &self.queue,
-                hornet,
-                &hornet.vertices(state, camera, world),
-            );
-        } else {
+        self.sim.aircraft(
+            &self.device,
+            &self.queue,
+            hornet,
+            &hornet.vertices(state, camera, world),
+        );
+        if !visible {
             self.sim.hide_aircraft();
         }
     }

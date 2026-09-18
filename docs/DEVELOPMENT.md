@@ -705,3 +705,23 @@ variable unset, no file is opened. The simulation inspection hook is
 `cargo test --locked -p tore-sim formation_diving_reversal -- --nocapture`
 runs the synthetic four-wingman diving-reversal regression. This is a safety
 and physical-input replay check, not a target rejoin-time requirement.
+
+## Surface lighting and shadow validation
+
+The [surface lighting spec](spec/surface-lighting.md) describes the smooth renderer.
+`TORE_WEATHER_SMOOTH=0` retains stepped palette lighting without geometric shadows.
+On a GPU-capable host, run the synthetic cross-surface shadow and warmth test:
+
+```sh
+cargo test --locked -p tore-app gpu_geometry_shadows -- --ignored --nocapture
+cargo test --locked -p tore-app gpu_smooth_glare -- --ignored --nocapture
+```
+
+The test renders terrain/object receivers and occluders through the production
+pipelines, reads pixels back, checks both sun directions and stepped mode,
+and checks a warm surface's continuous response, partial-disc shadows and
+view-dependent panel highlights, blocked water glints and sharper near-contact
+shadows versus distant casters, and a five-second low-sun stability sequence
+with small camera movements and sunglare disabled. The glare test checks
+every channel of a synthetic gradient under two flare circles against continuous
+optical composition. Both tests use no retail media.

@@ -752,6 +752,8 @@ fn mesh(
                     pos,
                     palette[face.colors[j] as usize].map(|c| f32::from(c) / 255.),
                 );
+                let layer = out.len() - 5;
+                out[layer] = -1.;
             }
         }
     }
@@ -764,7 +766,7 @@ fn vertex(out: &mut Vec<f32>, pos: Vector, color: [f32; 3]) {
         pos[2] as f32,
         0.,
         0.,
-        -1.,
+        -6., // Emissive effect; mesh() opts solid weapon bodies into lighting.
         color[0],
         color[1],
         color[2],

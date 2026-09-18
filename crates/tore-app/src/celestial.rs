@@ -143,12 +143,29 @@ impl Celestial {
             light_rows,
         })
     }
+    pub(crate) fn solid_sun_radius(&self) -> Option<f32> {
+        self.sun
+            .primitives
+            .iter()
+            .filter_map(|p| match p {
+                Primitive::Circle {
+                    center,
+                    diameter,
+                    fill,
+                } if *fill != 267 && center[2] > 0. => {
+                    Some((*diameter as f32 * CELESTIAL_SCALE / (2. * center[2])).atan())
+                }
+                _ => None,
+            })
+            .filter(|r| *r > 0.)
+            .max_by(f32::total_cmp)
+    }
     pub fn sun_uniform(&self, world: &World, altitude: f32) -> Vec<f32> {
         let layer = world.weather.sample(altitude as f64);
         let seconds = world.weather.seconds_of_day();
         let direction = layer.as_ref().and_then(|layer| {
             if world.smooth_weather {
-                continuous_sun_direction(layer, seconds)
+                visual_sun_direction(layer, &world.weather)
             } else {
                 tore_sim::environment::sun_angles(layer, seconds)
                     .map(|angle| rotate([0., 0., 1.], angle))
@@ -252,16 +269,27 @@ pub(crate) fn glare_strength(world: &World, altitude: f64, sun: [f32; 3]) -> f32
     strength
 }
 
+// Use the weather clock's fractional second for every smooth sun consumer.
+pub(crate) fn visual_sun_direction(
+    layer: &tore_formats::weather::Layer,
+    weather: &tore_sim::environment::Environment,
+) -> Option<[f32; 3]> {
+    continuous_sun_direction(
+        layer,
+        f64::from(weather.seconds_of_day()) + weather.ticks().rem_euclid(256) as f64 / 256.,
+    )
+}
+
 // Authored visual arc; source simulation lighting keeps its existing rules.
 pub(crate) fn continuous_sun_direction(
     layer: &tore_formats::weather::Layer,
-    seconds: i32,
+    seconds: impl Into<f64>,
 ) -> Option<[f32; 3]> {
     let day = (layer.sunset_seconds - layer.sunrise_seconds) as f64;
     if day <= 0.0 || day > 86400.0 {
         return None;
     }
-    let elapsed = (f64::from(seconds) - f64::from(layer.sunrise_seconds)).rem_euclid(86400.0);
+    let elapsed = (seconds.into() - f64::from(layer.sunrise_seconds)).rem_euclid(86400.0);
     let phase = if elapsed <= day {
         std::f64::consts::PI * elapsed / day
     } else {
@@ -341,6 +369,31 @@ mod tests {
         assert_eq!(at(-0.5), 0.);
         assert_eq!(at(-5.), 0.);
     }
+    #[test]
+    fn visual_sun_advances_inside_a_whole_second() {
+        let mut world = crate::terrain::tests::world();
+        let module =
+            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
+                .unwrap();
+        let mut layer = module.layers[0].clone();
+        layer.sunrise_seconds = 7 * 3600;
+        layer.sunset_seconds = 19 * 3600;
+        let seconds = world.weather.seconds_of_day();
+        let before = visual_sun_direction(&layer, &world.weather).unwrap();
+        for _ in 0..60 {
+            world.weather.step();
+        }
+        assert_eq!(world.weather.seconds_of_day(), seconds);
+        let after = visual_sun_direction(&layer, &world.weather).unwrap();
+        assert_ne!(before, after);
+        assert!(
+            before
+                .iter()
+                .zip(after)
+                .all(|(a, b)| (a - b).abs() < 0.0001)
+        );
+    }
+
     #[test]
     fn continuous_sun_crosses_both_horizons_without_time_or_flag_cutoff() {
         let module =

@@ -35,6 +35,7 @@ mod roster_animation;
 mod scope;
 mod sim_renderer;
 mod smoke_renderer;
+mod surface_lighting;
 mod terrain;
 mod weapon_hud;
 mod weather;

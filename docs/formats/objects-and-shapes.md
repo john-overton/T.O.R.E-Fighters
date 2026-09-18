@@ -435,3 +435,9 @@ separate from this resource evidence.
 ground-explosion frames in three columns and four rows. The host samples 80x63
 cells and scales this down for debris contact. This is a reviewed original asset
 with fitted use; no claim is made that retail bullets selected this sheet.
+
+Opaque imported world geometry participates in the shared
+[surface lighting and shadow pass](../spec/surface-lighting.md). Smooth mode
+submits complete animated meshes so camera-hidden faces can cast shadows;
+stepped mode keeps the earlier face rejection and light maps. This does not
+interpret or execute original shadow-shape commands.

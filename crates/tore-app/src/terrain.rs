@@ -357,12 +357,7 @@ impl World {
         let visual_target = if self.smooth_weather && self.glare_enabled() {
             self.weather
                 .sample(altitude)
-                .and_then(|layer| {
-                    crate::celestial::continuous_sun_direction(
-                        &layer,
-                        self.weather.seconds_of_day(),
-                    )
-                })
+                .and_then(|layer| crate::celestial::visual_sun_direction(&layer, &self.weather))
                 .map_or(0., |sun| {
                     let view = camera.uniform(1., [0.; 4], [0; 3]);
                     let alignment: f64 = (0..3)

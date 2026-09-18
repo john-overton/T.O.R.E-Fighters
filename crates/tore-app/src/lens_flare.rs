@@ -1,6 +1,6 @@
 //! Source lens-flare circles over a completed world view, before cockpit/UI.
-//! Filtered GPU colors are resolved to their nearest live palette entry only
-//! within a flare circle; outside it the world image passes through unchanged.
+//! Smooth presentation adds continuous optical emission; stepped compatibility
+//! retains the imported palette remaps inside the original circles.
 use crate::terrain::{Camera, World};
 
 pub struct LensFlare {
@@ -45,9 +45,7 @@ pub fn circles(world: &World, camera: &Camera, size: [u32; 2]) -> Vec<[f32; 4]> 
         return vec![];
     };
     let sun = if world.smooth_weather {
-        let Some(sun) =
-            crate::celestial::continuous_sun_direction(&layer, world.weather.seconds_of_day())
-        else {
+        let Some(sun) = crate::celestial::visual_sun_direction(&layer, &world.weather) else {
             return vec![];
         };
         if crate::celestial::glare_strength(world, f64::from(camera.position[1]), sun) <= 0. {
@@ -208,19 +206,19 @@ impl LensFlare {
             world
                 .weather
                 .sample(f64::from(camera.position[1]))
-                .and_then(|layer| {
-                    crate::celestial::continuous_sun_direction(
-                        &layer,
-                        world.weather.seconds_of_day(),
-                    )
-                })
+                .and_then(|layer| crate::celestial::visual_sun_direction(&layer, &world.weather))
                 .map_or(0., |sun| {
                     crate::celestial::glare_strength(world, f64::from(camera.position[1]), sun)
                 })
         } else {
             1.
         };
-        let mut values = vec![circles.len() as f32, strength, 0., 0.];
+        let mut values = vec![
+            circles.len() as f32,
+            strength,
+            f32::from(world.smooth_weather),
+            0.,
+        ];
         values.extend(circles.into_iter().flatten());
         values.resize(68, 0.);
         let bytes: Vec<u8> = values.into_iter().flat_map(f32::to_le_bytes).collect();
@@ -268,5 +266,155 @@ impl LensFlare {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.backing.as_ref().unwrap().1, &[]);
         pass.draw(0..3, 0..1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn gpu_smooth_glare_preserves_gradient_without_palette_bands() {
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions::default())
+                .await
+                .unwrap();
+            let (device, queue) = adapter
+                .request_device(&wgpu::DeviceDescriptor::default())
+                .await
+                .unwrap();
+            let mut flare = LensFlare::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+            let input = texture(
+                &device,
+                [64, 1],
+                wgpu::TextureFormat::Rgba8Unorm,
+                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            );
+            let pixels: Vec<u8> = (0..64)
+                .flat_map(|i| [20 + i * 3, 80, 220 - i * 2, 255])
+                .collect();
+            queue.write_texture(
+                input.as_image_copy(),
+                &pixels,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+                input.size(),
+            );
+            // Deliberately useless maps: smooth glare must not consult them.
+            queue.write_texture(
+                flare.maps.as_image_copy(),
+                &[0; 512],
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(512),
+                    rows_per_image: Some(1),
+                },
+                flare.maps.size(),
+            );
+            let circles = [[16., 0.5, 9., 0.], [38., 0.5, 13., 1.]];
+            let mut uniform = vec![2., 1., 1., 0.];
+            uniform.extend(circles.into_iter().flatten());
+            uniform.resize(68, 0.);
+            let bytes: Vec<u8> = uniform.into_iter().flat_map(f32::to_le_bytes).collect();
+            queue.write_buffer(&flare.uniform, 0, &bytes);
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &flare.pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            &input.create_view(&Default::default()),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(
+                            &flare.palette.create_view(&Default::default()),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(
+                            &flare.maps.create_view(&Default::default()),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: flare.uniform.as_entire_binding(),
+                    },
+                ],
+            });
+            flare.backing = Some((input, bind));
+            let output = texture(
+                &device,
+                [64, 1],
+                wgpu::TextureFormat::Rgba8Unorm,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            );
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: 256,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let mut encoder = device.create_command_encoder(&Default::default());
+            flare.draw(&mut encoder, &output.create_view(&Default::default()));
+            encoder.copy_texture_to_buffer(
+                output.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(256),
+                        rows_per_image: Some(1),
+                    },
+                },
+                output.size(),
+            );
+            queue.submit([encoder.finish()]);
+            let (tx, rx) = std::sync::mpsc::channel();
+            buffer
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+            device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: None,
+                })
+                .unwrap();
+            rx.recv().unwrap().unwrap();
+            let actual = buffer.slice(..).get_mapped_range();
+            for x in 0..64 {
+                let mut emission = [0_f32; 3];
+                for (circle, tint, strength) in [
+                    (circles[0], [1., 0.55, 0.22], 0.12),
+                    (circles[1], [1., 0.32, 0.18], 0.08),
+                ] {
+                    let d = (x as f32 + 0.5 - circle[0]).abs();
+                    let t = ((d - circle[2] + 1.5) / 1.5).clamp(0., 1.);
+                    let coverage = 1. - t * t * (3. - 2. * t);
+                    for channel in 0..3 {
+                        emission[channel] += tint[channel] * strength * coverage;
+                    }
+                }
+                for channel in 0..3 {
+                    let base = f32::from(pixels[x * 4 + channel]) / 255.;
+                    let expected = ((base + (1. - base) * (1. - (-emission[channel]).exp())) * 255.)
+                        .round() as i32;
+                    assert!(
+                        (i32::from(actual[x * 4 + channel]) - expected).abs() <= 1,
+                        "gradient pixel {x}, channel {channel}"
+                    );
+                }
+                assert_eq!(actual[x * 4 + 3], 255);
+            }
+        });
     }
 }

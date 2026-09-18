@@ -32,7 +32,9 @@ The existing core receives the same light. Glow follows solar elevation, fading 
 horizon to zero at 6 degrees below it, symmetrically at sunrise and sunset.
 
 The atmospheric glow is restricted to visible sky, behind opaque clouds, terrain
-and the cockpit. Clouds receive the separate lighting response specified below. It does not brighten water or terrain, change lens flare or add a
+and the cockpit. Clouds receive the separate lighting response specified below.
+Opaque surfaces now share its solar tint through the [surface lighting pass](surface-lighting.md).
+The atmospheric glow itself does not brighten water or terrain, change lens flare or add a
 full-screen exposure effect. The source sky deck remains visible through it.
 
 Reference: the ignored USNF-ATF `Docs/environment-plan.md` sky section describes
@@ -81,7 +83,8 @@ the remaining night it advances pi..2pi. Elevation is asin(sin(phase)). The
 source morning/evening azimuths are selected on either side of zenith/nadir,
 where horizontal direction vanishes, keeping the direction continuous.
 The arc ignores the source sun-enable flag in smooth mode, leaving cloud/fog
-occlusion to the renderer. The stepped path and simulation lighting stay intact.
+occlusion to the renderer. The smooth sun, glare and shadow direction share fractional weather-clock time,
+including updates within each second. The stepped path and simulation lighting stay intact.
 
 For DAY2, sunrise is 07:00, sunset 19:00, and the unchanged quick-mission Sunset
 preset is 19:01. Its center is then about 0.25 degrees below horizontal; the
@@ -118,3 +121,17 @@ The existing roughly one-second whiteout smoothing uses the visual target;
 lens-flare strength follows elevation directly. Dense source cloud/fog bands
 between the camera and the sun suppress glare, using the 600-foot visibility
 limit. The twilight sky glow is independent and can remain after glare vanishes. These strengths are authored tuning.
+
+## Continuous lens-flare composition
+
+John requested removing the sky-gradient artifacts inside flare circles on
+2026-09-18. Smooth mode retains original circle positions, radii and the existing
+glare-strength envelope, but uses opinionated continuous optical emission.
+Two fills use linear RGB (1, 0.55, 0.22) at strength 0.12 and (1, 0.32, 0.18)
+at strength 0.08. These colors and strengths are agent decisions. Coverage
+feathers over the outer 1.5 pixels. Overlapping circles add emission; the result
+is `background + (1 - background) * (1 - exp(-emission))`, with alpha preserved.
+The underlying sky remains continuous through each circle, without palette
+lookup boundaries or wedges. Stepped mode retains original palette remapping.
+
+See the [gradient-composition GPU check](../baselines/aircraft-lighting.md).

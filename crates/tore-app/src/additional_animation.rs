@@ -159,6 +159,9 @@ impl Rig {
         // fitted one-third-foot scale, applying the source exponent difference.
         tore_sim::combat::debris::scale(self.id) as f32
     }
+    pub fn flame(&self, address: usize) -> bool {
+        self.parts.get(&address) == Some(&Part::Flame)
+    }
     pub fn cold_nozzle(&self, address: usize) -> bool {
         match self.id {
             AircraftId::F14 => matches!(address, 0x48a6 | 0x48d5 | 0x48fc | 0x491b),

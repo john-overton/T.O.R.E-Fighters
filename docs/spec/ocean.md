@@ -134,6 +134,17 @@ flat-water reflection. The envelope has Gaussian widths of disc radius plus
 1.5 degrees in azimuth and disc radius plus 6 degrees in elevation. Its peak
 is 0.55 of the direct reflection peak, avoiding an overly bright solid stripe.
 These are agent-selected approximation constants, not a physical scattering
-solution. Cloud sheet silhouettes and terrain shadows are not traced; visibility
-fraction describes the flat horizon, not terrain covering part of the sun.
+solution. The disc visibility fraction describes the flat horizon. The shared
+[geometric shadow pass](surface-lighting.md) additionally attenuates visible
+water under terrain and object shadows. At John's request on 2026-09-18,
+the direct sun-reflection contribution is also multiplied by geometric light
+visibility at the water point and cloud transmission before composition. A
+fully blocked point receives zero solar glint, including during partial sunset.
+Partial geometric visibility uses the shared distance-dependent penumbra filter,
+so land-shadow boundaries fade rather than cutting a hard stripe across water.
+The ordinary water color remains visible. This shares the finite shadow-map
+coverage and resolution limits; terrain outside that coverage is not traced.
+Cloud sheet silhouettes are not traced.
 Sky/cloud reflection remains at the selected 30% peak with its existing fade.
+
+See the [water-occlusion GPU checks](../baselines/aircraft-lighting.md).

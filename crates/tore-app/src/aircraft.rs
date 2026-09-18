@@ -474,7 +474,10 @@ impl Airframe {
             }) else {
                 continue;
             };
-            if let Some(n) = f.normal {
+            // Smooth mode submits complete geometry for camera-independent shadows.
+            if !world.smooth_weather
+                && let Some(n) = f.normal
+            {
                 let normal = orient(n);
                 let p = f.positions[0];
                 let p = orient([p[0] * model_scale, p[2] * model_scale, p[1] * model_scale]);
@@ -486,10 +489,11 @@ impl Airframe {
                 }
             }
 
-            // Native polygon subtype bit 0x20 selects per-normal light remapping.
+            // Stepped compatibility uses the imported per-normal light remapping.
+            // Smooth surfaces receive continuous GPU lighting instead.
             // Animated world normals and light angles use the host float rig;
             // the following Q15 dot, row selection and remap order are translated.
-            let light_row = if f.subtype & 0x20 != 0 {
+            let light_row = if !world.smooth_weather && f.subtype & 0x20 != 0 {
                 f.normal
                     .zip(lighting)
                     .zip(world.celestial.as_ref())
@@ -504,6 +508,15 @@ impl Airframe {
             } else {
                 0.
             };
+            let flame = damaged.is_none()
+                && if hornet_rig {
+                    crate::aircraft_animation::part(f.address)
+                        == crate::aircraft_animation::Part::Flame
+                } else if let Some(rig) = &self.rig {
+                    rig.flame(f.address)
+                } else {
+                    crate::rafale_animation::part(f.address) == crate::rafale_animation::Part::Flame
+                };
             let engine_face = damaged.is_none()
                 && self.engine_material.is_some()
                 && crate::engine_material::nozzle(self.profile.id, f.address);
@@ -554,7 +567,9 @@ impl Airframe {
                         self.palette[f.colors[j] as usize]
                     };
                     let textured = !f.uv.is_empty() && !cold_nozzle;
-                    let layer = if engine_face {
+                    let layer = if flame && world.smooth_weather {
+                        if textured { -7. } else { -6. }
+                    } else if engine_face {
                         -3. - crate::engine_material::heat(s)
                     } else if canopy {
                         -5.
