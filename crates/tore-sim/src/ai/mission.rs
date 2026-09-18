@@ -406,6 +406,12 @@ impl AiMission {
                 id: o.id,
                 position: o.position,
                 velocity: o.velocity,
+                planned_velocity: self
+                    .actors
+                    .iter()
+                    .find(|a| a.id() == o.id)
+                    .and_then(|a| a.controller().formation_trace())
+                    .and_then(|t| t.planned_velocity),
                 phase: self
                     .actors
                     .iter()
@@ -1838,6 +1844,7 @@ mod tests {
             leader.human_controlled = true;
             leader.position = [0., 20000., 0.];
             let mut last_error = 0.;
+            let mut maximum_altitude_error = 0.0_f64;
             for tick in 0..14400 {
                 let heading = (turn * (tick as f64 / 120. - 30.).max(0.)).to_radians();
                 leader.heading_deg = heading.to_degrees();
@@ -1854,6 +1861,11 @@ mod tests {
                     leader.position[2] - 512. * heading.sin() - 512. * heading.cos(),
                 ];
                 last_error = distance(mission.actor(1).unwrap().flight().position, slot);
+                if tick > 3600 && turn == 0. {
+                    maximum_altitude_error = maximum_altitude_error.max(
+                        (mission.actor(1).unwrap().flight().position[1] - leader.position[1]).abs(),
+                    );
+                }
                 if tick > 7200 {
                     assert!(
                         last_error < 150.,
@@ -1862,6 +1874,12 @@ mod tests {
                 }
             }
             assert!(last_error < 150.);
+            if turn == 0. {
+                eprintln!(
+                    "straight formation offset {initial_offset}: maximum altitude error {maximum_altitude_error:.2} ft"
+                );
+                assert!(maximum_altitude_error < 10.);
+            }
         }
     }
 
@@ -1883,6 +1901,8 @@ mod tests {
                     0.,
                 );
                 start.home_airport = None;
+                start.flight.speed = 800.;
+                start.flight.velocity = [0., 0., 800.];
                 m.push(AiActor::new(start).unwrap());
             }
             if reverse {
@@ -1890,27 +1910,45 @@ mod tests {
             }
             m
         }
-        let mut a = scene(false);
-        let mut b = scene(true);
-        let mut leader = object(a.actor(1).unwrap(), 1);
-        leader.id = 0;
-        leader.position = [0., 20000., 0.];
-        leader.heading_deg = 180.;
-        leader.velocity = [0., 0., -800.];
-        for _ in 0..1800 {
-            for mission in [&mut a, &mut b] {
-                let mut world = world_of(mission);
-                world.push(leader.clone());
-                mission.step(&world, &flat, TimeOfDay(0)).unwrap();
+        for initial_heading in [0., 180.] {
+            let mut a = scene(false);
+            let mut b = scene(true);
+            let mut leader = object(a.actor(1).unwrap(), 1);
+            leader.id = 0;
+            leader.position = [0., 20000., 0.];
+            leader.heading_deg = initial_heading;
+            leader.velocity = super::super::formation::velocity(initial_heading, 0., 800.);
+            for tick in 0..1800 {
+                for mission in [&mut a, &mut b] {
+                    if initial_heading == 0. && matches!(tick, 300 | 900) {
+                        mission
+                            .order_wing(
+                                Side(1),
+                                0,
+                                None,
+                                super::super::wing::WingRequest::FormationSelection(
+                                    if tick == 300 {
+                                        Formation::LineAbreast
+                                    } else {
+                                        Formation::LineAstern
+                                    },
+                                ),
+                            )
+                            .unwrap();
+                    }
+                    let mut world = world_of(mission);
+                    world.push(leader.clone());
+                    mission.step(&world, &flat, TimeOfDay(0)).unwrap();
+                }
+                for id in 1..=4 {
+                    assert_eq!(a.actor(id).unwrap().flight(), b.actor(id).unwrap().flight());
+                    assert_eq!(
+                        a.actor(id).unwrap().controller().formation_trace(),
+                        b.actor(id).unwrap().controller().formation_trace()
+                    );
+                }
+                leader.position[2] += leader.velocity[2] / 120.;
             }
-            for id in 1..=4 {
-                assert_eq!(a.actor(id).unwrap().flight(), b.actor(id).unwrap().flight());
-                assert_eq!(
-                    a.actor(id).unwrap().controller().formation_trace(),
-                    b.actor(id).unwrap().controller().formation_trace()
-                );
-            }
-            leader.position[2] -= 800. / 120.;
         }
     }
 
@@ -1947,7 +1985,7 @@ mod tests {
             leader.position = [0., 20000., 0.];
             leader.human_controlled = true;
             let mut minimum = f64::INFINITY;
-            let mut phases = [[false; 6]; 4];
+            let mut phases = [[false; 7]; 4];
             let mut last = [Phase::Close; 4];
             for tick in 0..36000 {
                 let t = tick as f64 / 120.;
@@ -2569,5 +2607,146 @@ mod tests {
         };
         assert_eq!(motion.heading_deg, (heading + 170).rem_euclid(360));
         assert!(motion.speed.0 > 0., "first-tick order needs real limits");
+    }
+    #[test]
+    fn routine_formation_changes_use_local_physical_paths() {
+        use super::super::{
+            formation::Phase,
+            wing::{WingRequest, formation_slot_point},
+        };
+        let mut cases = Vec::new();
+        for from in Formation::ALL {
+            for to in Formation::ALL {
+                if from != to {
+                    cases.push((from, to, 512, 512, 0, 0.0_f64));
+                }
+            }
+        }
+        cases.extend([
+            (Formation::Echelon, Formation::Echelon, 512, 2048, 0, 0.),
+            (Formation::Echelon, Formation::Echelon, 2048, 512, 0, 0.),
+            (
+                Formation::Echelon,
+                Formation::LineAbreast,
+                512,
+                512,
+                512,
+                0.,
+            ),
+            (
+                Formation::LineAbreast,
+                Formation::Echelon,
+                512,
+                512,
+                -512,
+                0.75,
+            ),
+            (
+                Formation::LineAbreast,
+                Formation::Echelon,
+                512,
+                512,
+                -512,
+                1.5,
+            ),
+        ]);
+        for (from, to, old_spacing, new_spacing, stacking, turn) in cases {
+            let mut mission = AiMission::new();
+            mission.set_spacing(old_spacing, 0);
+            mission.set_formation(from);
+            mission.set_external_leader(Side(1), 0, 0);
+            for member in 1..=4 {
+                let offset = formation_slot_point(from, member, old_spacing, 0).unwrap();
+                let mut start = setup(
+                    u32::from(member),
+                    1,
+                    member,
+                    [offset[0], 20000., offset[2]],
+                    0.,
+                );
+                start.home_airport = None;
+                start.flight.speed = 800.;
+                start.flight.velocity = [0., 0., 800.];
+                mission.push(AiActor::new(start).unwrap());
+            }
+            let mut leader = object(mission.actor(1).unwrap(), 1);
+            leader.id = 0;
+            leader.position = [0., 20000., 0.];
+            leader.human_controlled = true;
+            let mut minimum = f64::INFINITY;
+            let mut phases = [Phase::Close; 4];
+            let mut entered = [false; 4];
+            for tick in 0..36000 {
+                if tick == 1200 {
+                    mission
+                        .order_wing(Side(1), 0, None, WingRequest::FormationSelection(to))
+                        .unwrap();
+                    mission.set_spacing(new_spacing, stacking);
+                }
+                if turn > 0. {
+                    if tick == 3600 {
+                        mission
+                            .order_wing(
+                                Side(1),
+                                0,
+                                None,
+                                WingRequest::FormationSelection(Formation::LineAstern),
+                            )
+                            .unwrap();
+                        mission.set_spacing(512, 0);
+                    }
+                    let heading = (turn * (tick as f64 / 120. - 10.).clamp(0., 60.)).to_radians();
+                    leader.heading_deg = heading.to_degrees();
+                    leader.velocity = [800. * heading.sin(), 0., 800. * heading.cos()];
+                }
+                let mut world = world_of(&mission);
+                world.push(leader.clone());
+                let before: Vec<_> = mission
+                    .actors()
+                    .iter()
+                    .map(|a| a.flight().clone())
+                    .collect();
+                mission.step(&world, &flat, TimeOfDay(0)).unwrap();
+                for (position, velocity) in leader.position.iter_mut().zip(leader.velocity) {
+                    *position += velocity / 120.;
+                }
+                let mut achieved = world_of(&mission);
+                achieved.push(leader.clone());
+                for (i, actor) in mission.actors().iter().enumerate() {
+                    let mut replay = before[i].clone();
+                    replay.step_surface(actor.last_input(), |_, _| Surface::terrain(0.));
+                    assert_eq!(replay, *actor.flight());
+                    let trace = actor.controller().formation_trace().unwrap();
+                    entered[i] |= trace.phase == Phase::Reposition;
+                    if trace.phase != phases[i] {
+                        eprintln!(
+                            "{from:?}->{to:?} {old_spacing}->{new_spacing} V{stacking} turn={turn} t={:.1} actor={} phase={:?} error={:.0}",
+                            tick as f64 / 120.,
+                            actor.id(),
+                            trace.phase,
+                            trace.slot_distance_ft
+                        );
+                        phases[i] = trace.phase;
+                    }
+                    for other in achieved.iter().filter(|o| o.id != actor.id()) {
+                        minimum = minimum.min(distance(actor.flight().position, other.position));
+                    }
+                    assert!(
+                        turn > 0.75 || !matches!(trace.phase, Phase::Breakout | Phase::Intercept),
+                        "routine change entered recovery: {trace:?}"
+                    );
+                }
+            }
+            eprintln!(
+                "{from:?}->{to:?} {old_spacing}->{new_spacing} V{stacking} turn={turn}: minimum={minimum:.1}"
+            );
+            assert!(minimum > 250.);
+            for (i, actor) in mission.actors().iter().enumerate() {
+                let t = actor.controller().formation_trace().unwrap();
+                assert!(entered[i]);
+                assert_eq!(t.phase, Phase::Close, "unfinished: {t:?}");
+                assert!(t.slot_distance_ft < 100.);
+            }
+        }
     }
 }

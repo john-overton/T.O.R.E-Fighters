@@ -599,7 +599,12 @@ Missing recordings or an old cache leaves commands and text operational.
 Reimport user-owned media to load [verified radio mappings](formats/radio.md).
 
 Line abreast alternates right/left at one spacing, then right/left at two
-spacings, preserving the echelon sides.
+spacings, preserving the echelon sides. Routine formation, spacing and stacking
+changes now use controlled repositioning from each aircraft's current location.
+Aircraft coordinate conflicting paths and can establish aft clearance before
+moving inward. A new order replaces the pending path; real collision danger
+still permits breakout. Harder turns can therefore interrupt a transition.
+Normal vertical wandering now requests at most five feet, with smooth changes.
 
 Formation selection changes the slot setting; disengage stops the engagement
 and lets the safe rejoin procedure return the aircraft. Approaches assign the

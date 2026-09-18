@@ -415,7 +415,7 @@ stay right and even-numbered wingmen stay left, at ceil(n/2) H. There is no
 longitudinal offset. Vertical stacking remains n V. At 512 ft spacing, slots
 1 through 4 are respectively 512 ft right, 512 ft left, 1024 ft right and
 1024 ft left. This preserves their echelon lateral positions during a formation
-change. Transition planning and random slot variation are unchanged.
+change. Routine changes use the transition procedure below.
 
 The first wingman therefore flies one spacing right and one back in echelon,
 one spacing right in line abreast, and two spacings back in line astern. The
@@ -431,6 +431,47 @@ slot point: beyond 5000 ft own maximum; 1000 to 5000 ft leader speed plus
 100 ft/s; 250 to 1000 plus 50; 50 to 250 plus 25; within 50 ft leader speed;
 clamped to own minimum and maximum. The negative bands are reachable only
 through a lead-projection branch whose entry condition is open.
+
+### Normal formation variation and transitions
+
+**Opinionated, requested by John on 2026-09-18:** tighten normal vertical
+wandering and use coordinated local movement for routine formation changes.
+The following implementation values are **fitted, agent-authored**. The recovered
+variation draws remain documented above; live flight scales the vertical draw
+by 0.1, giving -5 through +4.9 ft. Lateral and longitudinal bounds remain -15
+through +14 and -50 through +49 ft. All three requested offsets pass through a
+3-second exponential smoothing filter. These bound requested wandering, not
+achieved aircraft error. No position, attitude or velocity is directly changed.
+
+A change of formation, spacing or stacking while close starts a Reposition
+phase from the aircraft's actual leader-relative position. A replacement order
+replans from that current position. Aircraft already separated continue their
+safe rejoin toward the new destination instead. A routine new slot more than
+1800 ft away does not itself trigger departure during Reposition.
+
+If lateral and vertical differences are both under 75 ft, move directly toward
+the new slot. Otherwise first establish aft clearance at the farther-aft of
+current and destination positions; if the destination is ahead, add 512 ft of
+aft clearance. Then move laterally/vertically, then forward to the slot. Stage
+completion needs position error under 60 ft and speed relative to the moving
+formation frame under 12 ft/s.
+Desired repositioning velocity is error / 8 seconds, capped at 40 ft/s, added
+to leader velocity and the velocity needed to follow its measured turn at the
+aircraft's relative position. Bank requests are capped at 20 degrees in straight
+flight. In a turn the cap allows the bank needed for the measured turn plus
+10 degrees, bounded to 20 through 60 degrees. Afterburner stays off. Loaded
+flight-model limits and terrain protection remain authoritative.
+
+Screen requested paths against current traffic over 12 seconds with 350 ft
+clearance. Previous-tick Reposition velocity requests provide shared intentions;
+when those requests conflict, the higher actor ID yields. Physical traffic
+clearance overrides that priority. A yielding aircraft holds its current relative
+position. A lateral route blocked by physical traffic can retreat behind that
+traffic before retrying. All decisions use one immutable traffic snapshot.
+Leader hard maneuvering still permits trailing/separation, and actual predicted
+clearance below 350 ft during Reposition triggers breakout early enough to
+allow physical response lag. Other phases retain the 220 ft emergency threshold.
+This is bounded local planning, not a guarantee that every formation is feasible.
 
 ### Physical departure and rejoin
 
@@ -471,7 +512,8 @@ The following implementation rules and thresholds are **fitted, agent-authored**
   physical steering request. This also avoids members already in formation.
 - Approach gates sit 256 ft outward of the assigned lateral offset (floored
   at 256 ft), and 1200 ft behind the assigned aft offset, at least 1800 ft aft
-  of the leader. This keeps inner capture paths inside the outer slots. Actual occupied side influences departure. Aircraft
+  of the leader. This keeps inner capture paths inside the outer slots. Actual occupied side influences departure. During intercept, a lateral slot
+  selects its assigned-side gate before inward capture. Aircraft
   within 450 ft laterally of a corridor yield to a nearer arrival within
   1800 ft of its gate, with stable actor IDs breaking distances within 100 ft.
   Capturing aircraft retain their reservation until close tracking or a safety
@@ -491,7 +533,9 @@ The following implementation rules and thresholds are **fitted, agent-authored**
   70 ft/s relative speed. Close tracking resumes within 200 ft of the slot and
   absolute closure below 40 ft/s.
 - Maneuvering, a conflicting arrival, or closure above 120 ft/s within 1200 ft
-  of the slot abandons stabilization/capture. Predicted collision clearance
+  of the slot abandons stabilization/capture. Once the gate-to-slot target has
+  fully advanced, drifting farther than 1800 ft from the slot also abandons
+  capture and establishes another approach. Predicted collision clearance
   overrides every phase. There is no teleport, attitude correction or velocity
   replacement in any transition.
 - Close tracking retains the 60-degree bank request limit. Other formation

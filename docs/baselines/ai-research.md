@@ -461,3 +461,41 @@ unchanged echelon lateral positions, with existing stacking and first-slot
 spacing checks retained. All required checks also pass for this geometry change;
 logs are in `.local/balanced-abreast-validation/`. Live formation transitions
 remain to be evaluated by John; no transition planner was added in this change.
+
+## Smooth formation and transition validation
+
+Implementation mode, 2026-09-18. Synthetic live-controller checks bound vertical
+requested variation to five feet and verify smooth changes and identical
+same-tick repeated queries. The existing 120-second straight-flight scenarios,
+starting 800 ft ahead, at the slot or 800 ft behind, measure maximum altitude
+error of 5.69, 5.70 and 5.69 ft after the first 30 seconds. These are physical
+model results, not hard limits on achieved altitude in all conditions.
+
+Eleven four-wingman scenarios cover all six changes between echelon, balanced
+line abreast and line astern; widening and tightening spacing; vertical stacking;
+and replacement orders during 0.75 and 1.5 degree/second leader turns. Each uses
+a 300-second observation window, not a tuned completion deadline. All finish
+in Close with slot error below 100 ft and exact full-flight-state input replay
+on every tick. The ten routine cases avoid breakout/intercept, with minimum
+separation at least 410.4 ft. The 1.5 degree/second turn initially exposed a late
+avoidance response. The documented earlier Reposition breakout margin now
+preserves 441.1 ft minimum separation; one aircraft uses the recovery procedure.
+This explicitly does not promise formation changes never require breakout.
+
+The existing diving/climbing 180 and repeated-reversal cases pass with minimum
+separations 426.6, 435.2, 315.2 and 264.8 ft, respectively. All finish close.
+Smoothing exposed a capture that could drift outside its approach without
+aborting; the new distance-based abort covers that case. Additional tests check
+conflicting intentions, deterministic yielding, physical danger overriding
+priority, replacement paths starting from actual position, and unchanged
+recovery when an already-separated aircraft receives a new slot. Reversed actor
+iteration produces identical states and traces for both recovery and routine
+replacement orders. Transition state does not produce a premature “In position”
+report.
+
+All required Linux checks pass: 867 Rust tests, 40 Python tests, formatting,
+Clippy with warnings denied, build, repository/binary asset guards and document
+headers. Logs are under `.local/formation-transition-validation/`; detailed
+maneuver traces remain in `.local/reposition-tests.log` and
+`.local/reposition-paths.log`. Rendering did not change. Human live-flight
+acceptance and Windows/macOS execution were not run for this change.

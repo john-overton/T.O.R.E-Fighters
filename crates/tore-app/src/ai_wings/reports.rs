@@ -18,6 +18,7 @@ impl Reports {
         let state = self.states.entry(id).or_default();
         let category = match trace.phase {
             Phase::Close => 0,
+            Phase::Reposition => return,
             Phase::Trail | Phase::Breakout => 1,
             Phase::Intercept | Phase::Stabilize | Phase::Capture => 2,
         };
@@ -98,6 +99,7 @@ mod tests {
             minimum_predicted_separation_ft: 1000.,
             yielding_to: None,
             aim: [0.; 3],
+            planned_velocity: None,
         };
         reports.observe(1, "Wingman 1", 0, &t);
         assert!(reports.take().is_none());
@@ -109,6 +111,13 @@ mod tests {
         assert!(reports.take().is_none());
         reports.observe(1, "Wingman 1", 1201, &t);
         assert!(reports.take().unwrap().contains("Rejoining"));
+        t.phase = Phase::Reposition;
+        reports.observe(1, "Wingman 1", 2500, &t);
+        assert!(
+            reports.take().is_none(),
+            "a slot transition is not completed capture"
+        );
+        t.phase = Phase::Intercept;
         t.phase_seconds = 30.;
         reports.observe(1, "Wingman 1", 3601, &t);
         assert!(reports.take().unwrap().contains("Request steady"));

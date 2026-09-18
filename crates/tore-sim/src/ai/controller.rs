@@ -494,6 +494,9 @@ pub struct Controller {
     random: DecisionRandom,
     service: weapon_service::WeaponService,
     variation: FormationVariation,
+    smooth_variation: [f64; 3],
+    variation_tick: Option<u64>,
+    formation_configuration: Option<(Formation, i32, i32)>,
     active: Option<ActiveManeuver>,
     target: Option<u32>,
     reason: Option<ScriptReason>,
@@ -557,6 +560,9 @@ impl Controller {
                 TimingProfile::for_aircraft(identity.aircraft),
             ),
             variation: FormationVariation::new(0),
+            smooth_variation: [0.; 3],
+            variation_tick: None,
+            formation_configuration: None,
             active: None,
             target: None,
             reason: None,
@@ -1318,6 +1324,23 @@ impl Controller {
             .wing
             .leader
             .expect("formation point requires a leader");
+        let configuration = (
+            self.recipient.formation.unwrap_or(frame.wing.formation),
+            self.recipient
+                .horizontal_spacing_ft
+                .unwrap_or(frame.wing.horizontal_spacing_ft),
+            self.recipient
+                .vertical_spacing_ft
+                .unwrap_or(frame.wing.vertical_spacing_ft),
+        );
+        if self
+            .formation_configuration
+            .is_some_and(|old| old != configuration)
+        {
+            self.formation_guidance
+                .change_slot(&frame.own, leader, point);
+        }
+        self.formation_configuration = Some(configuration);
         let guidance = self.formation_guidance.step(
             self.identity.actor.0,
             &frame.own,
@@ -1328,6 +1351,10 @@ impl Controller {
             1. / 120.,
         );
         let aim = guidance.aim;
+        let bank = guidance
+            .bank_deg
+            .map(|deg| Bank::Explicit(deg.round() as i32))
+            .unwrap_or(Bank::Unconstrained);
         let dx = aim[0] - frame.own.position[0];
         let dy = aim[1] - frame.own.position[1];
         let dz = aim[2] - frame.own.position[2];
@@ -1338,7 +1365,7 @@ impl Controller {
         let request = MotionRequest::new(
             heading_deg.round() as i32,
             PitchRequest::Explicit(pitch_deg.round() as i32),
-            Bank::Unconstrained,
+            bank,
             SpeedRequest::Explicit(speed),
             duration,
         );
@@ -1372,7 +1399,7 @@ impl Controller {
             heading_deg,
             flight_path_pitch_deg: pitch_deg,
             speed,
-            bank: Bank::Unconstrained,
+            bank,
             completion,
             steering_point: Some(aim),
             mode: CommandMode::OtherState,
@@ -2023,7 +2050,25 @@ impl Controller {
                 .vertical_spacing_ft
                 .unwrap_or(frame.wing.vertical_spacing_ft),
         )?;
-        let offset = wing::formation_point(slot, leader.heading_deg, &self.variation);
+        let raw = self.variation.offset_ft();
+        if self.variation_tick != Some(frame.tick) {
+            let dt = self.variation_tick.map_or(1. / 120., |last| {
+                frame.tick.saturating_sub(last) as f64 / 120.
+            });
+            let blend = 1. - (-dt / 3.).exp();
+            for (i, value) in raw.into_iter().enumerate() {
+                let target = f64::from(value) * if i == 2 { 0.1 } else { 1. };
+                self.smooth_variation[i] += (target - self.smooth_variation[i]) * blend;
+            }
+            self.variation_tick = Some(frame.tick);
+        }
+        let [lateral, longitudinal, vertical] = self.smooth_variation;
+        let h = leader.heading_deg.to_radians();
+        let offset = [
+            (slot[0] + lateral) * h.cos() + (slot[2] + longitudinal) * h.sin(),
+            slot[1] + vertical,
+            (slot[2] + longitudinal) * h.cos() - (slot[0] + lateral) * h.sin(),
+        ];
         Ok(Some([
             leader.position[0] + offset[0],
             leader.position[1] + offset[1],
@@ -3028,5 +3073,37 @@ mod tests {
             output.weapons.is_empty(),
             "lost approach target cannot trigger opportunistic fire"
         );
+    }
+    #[test]
+    fn live_formation_variation_is_smooth_and_vertical_target_stays_within_five_feet() {
+        let mut id = identity();
+        id.member = 1;
+        let mut c = Controller::new(id, profile(), resolved(Experience::Average), 5).unwrap();
+        let scene = Scene::new();
+        let mut frame = scene.frame(0, own());
+        frame.wing.leader = Some(LeaderView {
+            position: [0., 20000., 0.],
+            velocity: [0., 0., 800.],
+            heading_deg: 0.,
+            speed: ScalarSpeed(800.),
+            target: None,
+            recovering: false,
+        });
+        frame.wing.vertical_spacing_ft = 0;
+        let mut previous = [0.; 3];
+        for tick in 0..14400 {
+            frame.tick = tick;
+            let point = c.formation_point(&frame).unwrap().unwrap();
+            assert!((point[1] - 20000.).abs() <= 5.);
+            for (i, limit) in [0.09, 0.3, 0.03].into_iter().enumerate() {
+                assert!((c.smooth_variation[i] - previous[i]).abs() < limit);
+            }
+            previous = c.smooth_variation;
+            assert_eq!(
+                c.formation_point(&frame).unwrap().unwrap(),
+                point,
+                "repeated same-tick queries cannot advance the filter"
+            );
+        }
     }
 }

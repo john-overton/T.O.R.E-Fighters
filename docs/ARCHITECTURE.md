@@ -222,7 +222,7 @@ after reset. AI emits aircraft inputs and the flight model alone advances
 its pose; no steering pose overwrite follows physics. The bridge mirrors results into `combat::live::Target` for sensors,
 rendering and damage. Each wing follows its own leader from the shared world
 snapshot; the human leader remains outside the AI actor list.
-`ai::formation` owns persistent trailing, breakout, intercept, stabilization and
+`ai::formation` owns routine repositioning, trailing, breakout, intercept, stabilization and
 capture guidance. Traffic and arrival states are snapshotted before any actor
 advances, so iteration order cannot grant approach priority. Its trace hook is
 read-only; optional host CSV logging is described in
@@ -264,3 +264,10 @@ execution. `tore-formats::radio` reads reviewed inert phrase records during
 import; the existing archive and PCM readers load original recordings.
 [Command behavior](spec/ai.md#live-wing-command-and-radio-integration),
 [radio data](formats/radio.md), [controls](INPUT.md#player-wing-orders).
+
+Routine formation transitions share previous-tick velocity intentions through
+the immutable traffic snapshot. Each actor owns its staged route and yielding
+position; no coordinator moves aircraft directly. Live random slot offsets are
+smoothed in `Controller`, with vertical amplitude reduced to five feet. The
+[transition specification](spec/ai.md#normal-formation-variation-and-transitions)
+owns the fitted parameters and limits.
