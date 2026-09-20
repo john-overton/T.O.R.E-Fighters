@@ -624,3 +624,12 @@ For live testing, use a Quick Mission with at least three friendly aircraft:
    no false acknowledgment, paused order or replayed old radio.
 5. Repeat a diving reversal. Confirm separate safe rejoins, restrained status
    reports and no aircraft pose jumps. A request for steady flight is advisory.
+## Airport commands
+
+The controls editor exposes `airport-nav`, `airport-next`,
+`airport-request-landing`, `airport-repeat`, and `airport-cancel`. The default
+profile binds them to Shift-N, Shift-A, Shift-L, Shift-R, and Shift-C in that
+order. NAV mode, gear down, range, and airport-relative altitude govern automatic
+ILS guidance; a clearance is not required to display it. Airport selection remains
+explicit when supplied, otherwise the nearest usable runway is selected. Tower replies currently use deterministic text because no reviewed
+tower sample mapping is available.

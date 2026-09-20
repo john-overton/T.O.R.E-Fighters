@@ -7,6 +7,8 @@ use tore_input::Switch;
 pub enum Command {
     Wing(tore_sim::ai::wing::PlayerOrder),
     WingRecipient(Option<u8>),
+    Airport(tore_sim::airport::Command),
+    AirportNav,
     None,
     NextWeapon,
     Target,

@@ -307,3 +307,13 @@ keeps indexed remapping. Water's solar glint tests geometric light visibility
 before adding reflected sunlight; ordinary water shadow tint is a separate
 operation. See [glare](spec/sun-glow.md#continuous-lens-flare-composition) and
 [water reflection](spec/ocean.md#separate-sun-and-environment-reflection-trial).
+
+## Airport scenes
+
+Airport scenes are immutable imported data owned by `terrain::World`. Static
+GPU geometry is batched by placement and filtered each frame from combat-owned
+target HP, so destroyed objects disappear consistently in main and mirror
+views. The airport service derives availability from those combat targets and
+owns player selection, clearance, landing progress, and typed replies.
+Weather-only reconstruction preserves service and combat state. Theater changes
+and flight restart rebuild both from the imported scene.

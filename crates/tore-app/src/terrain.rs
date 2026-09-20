@@ -20,6 +20,10 @@ pub struct World {
     pub ocean_motion: crate::ocean::Motion,
     pub theater: Theater,
     pub environment: Environment,
+    /// Immutable imported placement/airport geometry. Mutable health belongs to combat.
+    pub airport_scene: tore_sim::airport::Scene,
+    /// Every source placement, including definitions the bounded SH projector cannot draw.
+    pub static_manifest: Vec<(u32, tore_formats::mission::SourceKey, String, bool)>,
     pub catalog: Vec<(String, String)>,
     /// Source palette indices, one byte per texel. Retail terrain and sky art is
     /// entirely weather-palette indexed, so the artwork is uploaded unresolved
@@ -30,6 +34,8 @@ pub struct World {
     pub deck_textures: BTreeMap<String, usize>,
     pub decks: [[f32; 4]; 2],
     pub vertices: Vec<f32>,
+    /// Per-placement geometry, rebuilt into the dynamic scene from combat HP.
+    pub static_vertices: BTreeMap<u32, Vec<f32>>,
     pub texture_indices: Vec<u8>,
     /// Authoritative environment. One instance per world, so every camera,
     /// mirror and panel resolves the same instant.
@@ -209,6 +215,8 @@ impl World {
             ocean_motion: crate::ocean::Motion::from_environment()?,
             theater,
             environment,
+            airport_scene: tore_sim::airport::Scene::default(),
+            static_manifest: Vec::new(),
             catalog,
             sky_indices,
             celestial,
@@ -216,6 +224,7 @@ impl World {
             deck_textures,
             decks: [[0., 1., -1., 0.]; 2],
             vertices: Vec::new(),
+            static_vertices: BTreeMap::new(),
             texture_indices,
             weather,
             visual_bands: Vec::new(),
@@ -236,7 +245,310 @@ impl World {
         };
         out.resolve_palette(0.);
         out.build_mesh();
+        out.build_airport_scene(resources, code)?;
         Ok(out)
+    }
+
+    fn build_airport_scene(
+        &mut self,
+        resources: &BTreeMap<String, Vec<u8>>,
+        code: &str,
+    ) -> AppResult<()> {
+        use tore_sim::airport::{
+            Airport, Allegiance, OrientedBox, Runway, SourceKey, StaticObject,
+        };
+        let layout_name = format!("{code}.MM");
+        let layout = tore_formats::mission::Layout::parse(
+            &layout_name,
+            resources
+                .get(&layout_name)
+                .ok_or_else(|| format!("missing airport layout {layout_name}"))?,
+        )?;
+        let mut definitions = BTreeMap::new();
+        let mut shapes = BTreeMap::new();
+        let mut shape_scales = BTreeMap::new();
+        let mut runway_anchors = BTreeMap::new();
+        for placement in &layout.placements {
+            if definitions.contains_key(&placement.object_type) {
+                continue;
+            }
+            let definition = tore_formats::static_object::Definition::parse(
+                resources.get(&placement.object_type).ok_or_else(|| {
+                    format!(
+                        "{}: missing placed definition {}; re-import media",
+                        layout_name, placement.object_type
+                    )
+                })?,
+            )?;
+            if let Some(main_shape) = &definition.main_shape {
+                let shape_bytes = resources.get(main_shape).ok_or_else(|| {
+                    format!(
+                        "{}: missing shape {} referred by {}; re-import media",
+                        layout_name, main_shape, placement.object_type
+                    )
+                })?;
+                let parsed = tore_formats::shape::Shape::parse(shape_bytes);
+                match parsed {
+                    Ok(shape) => {
+                        if definition.callbacks.iter().any(|name| name == "_STRIPProc")
+                            && let Some(boxes) = tore_formats::shape::contact_boxes(shape_bytes)?
+                            && let Some(anchor) = boxes.iter().find(|b| b.id == 0x11)
+                        {
+                            runway_anchors.insert(
+                                placement.object_type.clone(),
+                                anchor.midpoint().map(f64::from),
+                            );
+                        }
+                        shape_scales.insert(
+                            placement.object_type.clone(),
+                            tore_formats::shape::object_scale(shape_bytes)?,
+                        );
+                        shapes.insert(placement.object_type.clone(), shape);
+                    }
+                    Err(error) => eprintln!(
+                        "Airport scene: {main_shape} retained without visual geometry: {error}"
+                    ),
+                }
+            }
+            definitions.insert(placement.object_type.clone(), definition);
+        }
+        let mut objects = Vec::new();
+        let mut runways = Vec::new();
+        let mut airports = Vec::new();
+        let mut static_layers = BTreeMap::<String, (f32, f32, f32, f32)>::new();
+        let mut static_float_count = 0usize;
+        for placement in &layout.placements {
+            let definition = &definitions[&placement.object_type];
+            let shape = shapes.get(&placement.object_type);
+            let id = 0x4000_0000u32
+                .checked_add(placement.key.ordinal)
+                .ok_or("airport object ID overflow")?;
+            self.static_manifest.push((
+                id,
+                placement.key.clone(),
+                placement.object_type.clone(),
+                shape.is_some(),
+            ));
+            let Some(shape) = shape else {
+                continue;
+            };
+            let ground =
+                f64::from(self.height(placement.position[0] as f32, placement.position[2] as f32));
+            let heading = f64::from(placement.angles[0]).to_radians();
+            let runway = definition.callbacks.iter().any(|name| name == "_STRIPProc");
+            // The source runway plane stays at authored ground. The renderer
+            // applies a bounded static-surface depth bias without changing contact.
+            let support_height = ground;
+            let mut min = [f64::INFINITY; 3];
+            let mut max = [f64::NEG_INFINITY; 3];
+            for point in shape.faces.iter().flat_map(|face| &face.positions) {
+                let mapped = [
+                    f64::from(point[0]),
+                    f64::from(point[2]),
+                    f64::from(point[1]),
+                ];
+                for axis in 0..3 {
+                    min[axis] = min[axis].min(mapped[axis]);
+                    max[axis] = max[axis].max(mapped[axis]);
+                }
+            }
+            if min.iter().any(|value| !value.is_finite()) {
+                continue;
+            }
+            // The reviewed SH header exponent drives both visual and contact scale.
+            let scale = shape_scales
+                .get(&placement.object_type)
+                .copied()
+                .unwrap_or(1.0);
+            for axis in 0..3 {
+                min[axis] *= scale;
+                max[axis] *= scale;
+            }
+            let half = std::array::from_fn(|axis| ((max[axis] - min[axis]) * 0.5).max(1.0));
+            let pitch = f64::from(placement.angles[1]).to_radians();
+            let bank = f64::from(placement.angles[2]).to_radians();
+            let basis = tore_sim::attitude::Basis::new(heading, pitch, bank);
+            let local_center = std::array::from_fn::<_, 3, _>(|axis| (min[axis] + max[axis]) * 0.5);
+            let origin = [
+                f64::from(placement.position[0]),
+                support_height + f64::from(placement.position[1]),
+                f64::from(placement.position[2]),
+            ];
+            let center = std::array::from_fn(|axis| {
+                origin[axis]
+                    + basis.right[axis] * local_center[0]
+                    + basis.up[axis] * local_center[1]
+                    + basis.forward[axis] * local_center[2]
+            });
+            let bounds = OrientedBox {
+                center,
+                half,
+                heading,
+                pitch,
+                bank,
+            };
+            objects.push(StaticObject {
+                id,
+                source: SourceKey {
+                    layout: placement.key.layout.clone(),
+                    ordinal: placement.key.ordinal,
+                },
+                name: placement
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| definition.display_name.clone()),
+                object_type: placement.object_type.clone(),
+                bounds,
+                hit_points: definition.hit_points.unwrap_or(100),
+                runway,
+                category: definition.category,
+                radar_signature: f64::from(definition.radar_signature),
+                infrared_signature: f64::from(definition.infrared_signature),
+            });
+            if runway {
+                let airport_id = u32::try_from(airports.len() + 1)?;
+                // The whole airport mesh includes aprons and parallel strips.
+                // Use source anchor0x11 for the fitted primary approach line,
+                // rather than steering onto the overall mesh's midpoint.
+                let mut approach_center = center;
+                let mut length_ft = half[2] * 2.0;
+                if let Some(anchor) = runway_anchors.get(&placement.object_type)
+                    && anchor[2] < max[2]
+                    && anchor[2] >= min[2]
+                {
+                    let local = [anchor[0], 0.0, (anchor[2] + max[2]) * 0.5];
+                    approach_center = std::array::from_fn(|axis| {
+                        origin[axis] + basis.right[axis] * local[0] + basis.forward[axis] * local[2]
+                    });
+                    length_ft = max[2] - anchor[2];
+                }
+                runways.push(Runway {
+                    object: id,
+                    airport: airport_id,
+                    name: placement
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("Runway {airport_id}")),
+                    surface: bounds,
+                    approach_center,
+                    // ILS datum remains authored airport ground, independent of rendering bias.
+                    elevation_ft: ground,
+                    heading,
+                    length_ft,
+                });
+                airports.push(Airport {
+                    id: airport_id,
+                    name: placement
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("Airport {airport_id}")),
+                    runway_objects: vec![id],
+                    // Base free flight has no mission-side player assignment.
+                    // Treat imported fields as neutral with explicit host permission.
+                    allegiance: Allegiance::Neutral,
+                    neutral_permission: true,
+                });
+            }
+            let mut instance_vertices = Vec::new();
+            for face in &shape.faces {
+                if face.positions.len() < 3 {
+                    continue;
+                }
+                let (layer, texture_height, texture_scale_x, texture_scale_y) =
+                    if face.texture.is_empty() || face.uv.is_empty() {
+                        (-1.0, 1.0, 1.0, 1.0)
+                    } else if let Some(layer) =
+                        static_layers.get(&face.texture.to_ascii_uppercase())
+                    {
+                        *layer
+                    } else {
+                        let texture_name = face.texture.to_ascii_uppercase();
+                        let pic =
+                            Pic::parse(resources.get(&texture_name).ok_or_else(|| {
+                                format!("missing static texture {texture_name}")
+                            })?)?;
+                        let layer =
+                            (self.texture_indices.len() + self.sky_indices.len()) as f32 / 65536.0;
+                        let mut pixels = vec![255; 65536];
+                        // Fitted compatibility: oversized source sheets are sampled
+                        // into one 256-square layer. Retain their complete artwork
+                        // and original UV proportions; extracted media is unchanged.
+                        let resize = pic.width > 256 || pic.height > 256;
+                        let width = if resize { 256 } else { pic.width };
+                        let height = if resize { 256 } else { pic.height };
+                        for y in 0..height {
+                            for x in 0..width {
+                                let sx = if resize { x * pic.width / 256 } else { x };
+                                let sy = if resize { y * pic.height / 256 } else { y };
+                                let source = sy * pic.width + sx;
+                                if pic.mask[source] {
+                                    pixels[y * 256 + x] = pic.pixels[source];
+                                }
+                            }
+                        }
+                        self.sky_indices.extend(pixels);
+                        let entry = (
+                            layer,
+                            pic.height as f32,
+                            if resize {
+                                256.0 / pic.width as f32
+                            } else {
+                                1.0
+                            },
+                            if resize {
+                                256.0 / pic.height as f32
+                            } else {
+                                1.0
+                            },
+                        );
+                        static_layers.insert(texture_name, entry);
+                        entry
+                    };
+                for triangle in 1..face.positions.len() - 1 {
+                    static_float_count += 30;
+                    if static_float_count > 32 * 1024 * 1024 / 4 {
+                        return Err("static scene exceeds 32 MiB geometry budget".into());
+                    }
+                    for vertex_index in [0, triangle, triangle + 1] {
+                        let point = face.positions[vertex_index];
+                        let right = f64::from(point[0]) * scale;
+                        let up = f64::from(point[2]) * scale;
+                        let forward = f64::from(point[1]) * scale;
+                        let position = std::array::from_fn::<_, 3, _>(|axis| {
+                            origin[axis]
+                                + basis.right[axis] * right
+                                + basis.up[axis] * up
+                                + basis.forward[axis] * forward
+                                + basis.up[axis] * if layer >= 0.0 { 2.0 } else { 0.0 }
+                        });
+                        let uv = face.uv.get(vertex_index).copied().unwrap_or([0.0; 2]);
+                        let uv = [
+                            (uv[0] + 0.5) * texture_scale_x / 256.0,
+                            (texture_height - 0.5 - uv[1]) * texture_scale_y / 256.0,
+                        ];
+                        instance_vertices.extend_from_slice(&[
+                            position[0] as f32,
+                            position[1] as f32,
+                            position[2] as f32,
+                            uv[0],
+                            uv[1],
+                            layer,
+                            0.0,
+                            0.0,
+                            0.0,
+                            f32::from(face.colors[vertex_index]),
+                        ]);
+                    }
+                }
+            }
+            self.static_vertices.insert(id, instance_vertices);
+        }
+        self.airport_scene = tore_sim::airport::Scene {
+            objects,
+            runways,
+            airports,
+        };
+        self.airport_scene.validate().map_err(|error| error.into())
     }
     fn build_mesh(&mut self) {
         let t = &self.theater;
@@ -320,10 +632,75 @@ impl World {
 
     /// The terrain surface plus the environment's wind, for one fixed step.
     pub fn surface(&self, x: f64, z: f64) -> tore_sim::research::Surface {
+        if let Some((id, mut height)) = self.airport_scene.runway_surface(x, z) {
+            if let Some(object) = self
+                .airport_scene
+                .objects
+                .iter()
+                .find(|object| object.id == id)
+            {
+                let basis = tore_sim::attitude::Basis::new(
+                    object.bounds.heading,
+                    object.bounds.pitch,
+                    object.bounds.bank,
+                );
+                if basis.up[1].abs() > 1e-6 {
+                    height = object.bounds.center[1]
+                        - (basis.up[0] * (x - object.bounds.center[0])
+                            + basis.up[2] * (z - object.bounds.center[2]))
+                            / basis.up[1];
+                }
+            }
+            let mut surface = tore_sim::research::Surface::runway(height);
+            surface.wind = self.wind();
+            return surface;
+        }
         let mut surface =
             tore_sim::research::Surface::terrain(f64::from(self.height(x as f32, z as f32)));
         surface.wind = self.wind();
         surface
+    }
+
+    pub fn visible_static_vertices(&self, targets: &[tore_sim::combat::live::Target]) -> Vec<f32> {
+        let alive: BTreeSet<u32> = targets
+            .iter()
+            .filter(|target| target.hp > 0)
+            .map(|target| target.id)
+            .collect();
+        let total = self
+            .static_vertices
+            .iter()
+            .filter(|(id, _)| alive.contains(id))
+            .map(|(_, vertices)| vertices.len())
+            .sum();
+        let mut out = Vec::with_capacity(total);
+        for (id, vertices) in &self.static_vertices {
+            if alive.contains(id) {
+                out.extend_from_slice(vertices);
+            }
+        }
+        out
+    }
+
+    /// Earliest solid building contact. Runways remain a separate surface query.
+    pub fn solid_contact(
+        &self,
+        from: [f64; 3],
+        to: [f64; 3],
+        alive: impl IntoIterator<Item = u32>,
+    ) -> Option<(u32, f64)> {
+        let alive: BTreeSet<_> = alive.into_iter().collect();
+        self.airport_scene
+            .objects
+            .iter()
+            .filter(|object| !object.runway && alive.contains(&object.id))
+            .filter_map(|object| {
+                object
+                    .bounds
+                    .segment_fraction(from, to)
+                    .map(|at| (object.id, at))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
     }
 
     /// Exactly one 120 Hz tick of environment time. Pausing means not calling it.
@@ -595,8 +972,11 @@ pub(crate) mod tests {
                 coarse: vec![],
             },
             environment: Environment::default(),
+            airport_scene: tore_sim::airport::Scene::default(),
+            static_manifest: Vec::new(),
             catalog: vec![],
             vertices: vec![],
+            static_vertices: BTreeMap::new(),
             texture_indices: vec![],
             sky_indices: vec![],
             celestial: None,
@@ -676,6 +1056,47 @@ pub(crate) mod tests {
         w.theater.cells[0].elevation = 200;
         assert!(w.turbulence_reduced_surface(0., 0.));
         assert!(!w.turbulence_reduced_surface(f64::from(CELL_FEET), 0.));
+    }
+
+    #[test]
+    fn solid_contact_is_separate_from_runway_surface_and_respects_health_ids() {
+        let mut world = world();
+        world
+            .airport_scene
+            .objects
+            .push(tore_sim::airport::StaticObject {
+                id: 100,
+                source: tore_sim::airport::SourceKey {
+                    layout: "T.MM".into(),
+                    ordinal: 0,
+                },
+                name: "Hangar".into(),
+                object_type: "HANGR.OT".into(),
+                bounds: tore_sim::airport::OrientedBox {
+                    center: [50.0, 10.0, 50.0],
+                    half: [10.0; 3],
+                    heading: 0.0,
+                    pitch: 0.0,
+                    bank: 0.0,
+                },
+                hit_points: 100,
+                runway: false,
+                category: 0x2000,
+                radar_signature: 1.0,
+                infrared_signature: 0.0,
+            });
+        assert_eq!(
+            world
+                .solid_contact([0.0, 10.0, 50.0], [100.0, 10.0, 50.0], [100])
+                .map(|hit| hit.0),
+            Some(100)
+        );
+        assert!(
+            world
+                .solid_contact([0.0, 10.0, 50.0], [100.0, 10.0, 50.0], [])
+                .is_none()
+        );
+        assert!(!world.surface(50.0, 50.0).landable);
     }
 
     #[test]

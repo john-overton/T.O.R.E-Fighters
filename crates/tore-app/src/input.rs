@@ -16,7 +16,12 @@ bind keyboard flight-roll roll axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-yaw yaw axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-throttle throttle-rate axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-look-x look-x axis -1 0 1 0 1 1 100\n\
-bind keyboard flight-look-y look-y axis -1 0 1 0 1 1 100\n";
+bind keyboard flight-look-y look-y axis -1 0 1 0 1 1 100\n\
+bind keyboard Shift-n airport-nav press\n\
+bind keyboard Shift-a airport-next press\n\
+bind keyboard Shift-l airport-request-landing press\n\
+bind keyboard Shift-r airport-repeat press\n\
+bind keyboard Shift-c airport-cancel press\n";
 pub struct Input {
     pub resolver: Resolver,
     automatic: bool,
@@ -90,9 +95,12 @@ impl Input {
     }
     pub fn settings_profile(&self) -> Profile {
         let mut profile = self.resolver.profile.clone();
-        profile
-            .bindings
-            .retain(|b| !(b.device == "keyboard" && b.control.starts_with("flight-")));
+        profile.bindings.retain(|b| {
+            !(b.device == "keyboard"
+                && (b.control.starts_with("flight-")
+                    || ["Shift-n", "Shift-a", "Shift-l", "Shift-r", "Shift-c"]
+                        .contains(&b.control.as_str())))
+        });
         profile
     }
     pub fn save_settings(&mut self, profile: &Profile) -> Result<(), String> {

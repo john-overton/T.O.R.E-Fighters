@@ -103,6 +103,7 @@ pub struct Combat {
     mission_spawns: Option<Vec<crate::ai_wings::MissionSpawn>>,
     dummy_models: Vec<Airframe>,
     dummy_configs: Vec<live::Configuration>,
+    airport_objects: Vec<tore_sim::airport::StaticObject>,
     pub recorder: Option<crate::combat_tape::Recorder>,
     last_launcher: Option<Launcher>,
     shapes: BTreeMap<String, Shape>,
@@ -147,6 +148,35 @@ pub fn launcher(s: &flight::State) -> Launcher {
     }
 }
 impl Combat {
+    pub fn add_airport_targets(&mut self, scene: &tore_sim::airport::Scene) -> AppResult<()> {
+        scene.validate().map_err(std::io::Error::other)?;
+        // A new layout replaces static identities atomically in the staged state.
+        let mut staged = self.state.clone();
+        staged.remove_ground_targets();
+        for object in &scene.objects {
+            Self::register_airport_object(&mut staged, object)?;
+        }
+        self.state = staged;
+        self.airport_objects = scene.objects.clone();
+        Ok(())
+    }
+    fn register_airport_object(
+        state: &mut live::State,
+        object: &tore_sim::airport::StaticObject,
+    ) -> AppResult<()> {
+        state.add_ground_target(object.id, object.bounds, object.hit_points, object.category)?;
+        if let Some(target) = state.targets.iter_mut().find(|t| t.id == object.id) {
+            target.signature.radar = object.radar_signature;
+            target.signature.infrared = object.infrared_signature;
+        }
+        Ok(())
+    }
+    pub fn ground_name(&self, id: u32) -> Option<&str> {
+        self.airport_objects
+            .iter()
+            .find(|o| o.id == id)
+            .map(|o| o.name.as_str())
+    }
     pub fn new(h: &Airframe, data: &BTreeMap<String, Vec<u8>>, range: bool) -> AppResult<Self> {
         let config = live::Configuration::from_source(&h.profile, |name| {
             data.get(name)
@@ -214,6 +244,7 @@ impl Combat {
             mission_spawns: None,
             dummy_models: Vec::new(),
             dummy_configs: Vec::new(),
+            airport_objects: Vec::new(),
             input: FireInput::default(),
             controller: FireInput::default(),
             range,
@@ -354,7 +385,7 @@ impl Combat {
         self.presentation = TargetPresentation::default();
         let l = launcher(s);
         if let Some(r) = &mut self.recorder {
-            r.record("reset", l);
+            r.record(if self.range { "reset" } else { "reset-scene" }, l);
         }
         self.last_launcher = Some(l);
         let weapon_rules = self.state.weapon_rules;
@@ -393,6 +424,10 @@ impl Combat {
             self.state
                 .add_dummy(&self.dummy_configs[*model], position, basis);
             debug_assert_eq!(self.state.targets.last().unwrap().id as usize, index + 1);
+        }
+        // Aircraft are spawned first, preserving their roster ordering.
+        for object in &self.airport_objects {
+            Self::register_airport_object(&mut self.state, object)?;
         }
         Ok(())
     }
@@ -487,6 +522,11 @@ impl Combat {
                 .designated()
                 .and_then(|id| self.state.targets.iter().find(|t| t.id == id))
                 .map(|t| (t.id, t.hp, self.state.can_lock(launcher(s)))),
+            target_name: self
+                .state
+                .designated()
+                .and_then(|id| self.ground_name(id))
+                .map(str::to_owned),
             scope: crate::scope::scope(&self.state, s),
             rcs: crate::scope::rcs(&self.state, s, rcs_scale),
         }
@@ -503,7 +543,9 @@ impl Combat {
                         "DESTROYED".into()
                     } else {
                         format!(
-                            "T{id} HP {} {}",
+                            "{} HP {} {}",
+                            self.ground_name(id)
+                                .map_or_else(|| format!("T{id}"), str::to_owned),
                             t.hp,
                             if self.state.configuration().stations[i]
                                 .weapon

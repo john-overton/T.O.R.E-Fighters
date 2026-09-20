@@ -53,13 +53,22 @@ investigating or eventually editing it:
 | Put a building, ship or aircraft in a mission | M/MM object records, type resolution and native placement consumers | Position, allegiance, objectives or spawning from an SH filename |
 | Wing vapor attachment | SH CE record plus streamer consumers | Emission conditions and trail lifetime from coordinates alone |
 
-Our M/MM reader currently reads environment/tmap fields and skips indented
-object fields. The separate bounded STRIP reader can inspect one isolated
+The [Ukraine airport inventory](airport-placements.md) now identifies the first
+runway/building dependency set and its placement limits.
+
+The runtime importer follows base-layout placements through their OBJ_TYPE
+prefix to explicit SH and projected PIC references. Static geometry uses the SH
+CODE header exponent for rendering and contact. Unsupported shape opcodes are
+diagnosed while their placement identity remains available.
+
+The environment reader still handles environment/tmap fields independently.
+The bounded mission reader now parses object blocks for static scene construction;
+see [airport placements](airport-placements.md). The separate bounded STRIP reader can inspect one isolated
 eight-field placement record ([contract](native-strip.md#bounded-isolated-placement-ne-011b));
-it does not extend the mission reader. Importing a theater or finding its object names does not place
-those objects in the world. An eventual object integration must resolve the
-type, its visual dependencies, placement and mutable simulation state separately.
-This is a proposed development workflow, not a recovered native object manager.
+that diagnostic remains separate from the runtime scene loader. The current
+integration resolves type, visual dependencies, placement and mutable simulation
+state separately. Asset presence alone does not establish complete shape or
+behavior coverage; this is TORE's object model, not the original object manager.
 
 ### Main, damaged and shadow resources
 

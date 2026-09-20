@@ -15,7 +15,30 @@ use tore_sim::{
 /// Version 4 defines the spec missile rules and records world velocity and bay
 /// permission. Mode, heat and emitter changes are explicit commands. Versions
 /// 2/3 retain compatibility rules and their original control defaults.
-const VERSION: u32 = 5;
+const VERSION: u32 = 6;
+
+pub fn airport_command_name(command: tore_sim::airport::Command) -> String {
+    use tore_sim::airport::Command;
+    match command {
+        Command::SelectAirport(id) => format!("airport-select:{id}"),
+        Command::RequestLanding => "airport-request".into(),
+        Command::RepeatReply => "airport-repeat".into(),
+        Command::CancelApproach => "airport-cancel".into(),
+    }
+}
+
+fn airport_command(text: &str) -> Option<tore_sim::airport::Command> {
+    use tore_sim::airport::Command;
+    if let Some(id) = text.strip_prefix("airport-select:") {
+        return id.parse().ok().map(Command::SelectAirport);
+    }
+    match text {
+        "airport-request" => Some(Command::RequestLanding),
+        "airport-repeat" => Some(Command::RepeatReply),
+        "airport-cancel" => Some(Command::CancelApproach),
+        _ => None,
+    }
+}
 
 pub struct Recorder {
     out: std::io::BufWriter<std::fs::File>,
@@ -285,6 +308,7 @@ pub fn replay(
             fingerprint(data)
         ),
         |x, z| f64::from(world.height(x as f32, z as f32)),
+        Some(&world.airport_scene),
     )
 }
 fn replay_reader(
@@ -292,6 +316,7 @@ fn replay_reader(
     config: Configuration,
     header: &str,
     ground: impl Fn(f64, f64) -> f64,
+    airport_scene: Option<&tore_sim::airport::Scene>,
 ) -> AppResult<State> {
     use std::io::Read;
     let mut s = State::new(config, true)?;
@@ -300,6 +325,35 @@ fn replay_reader(
     let mut version = VERSION;
     let mut ticks = 0;
     let mut bytes = 0;
+    let mut airport_service = airport_scene
+        .map(tore_sim::airport::Service::new)
+        .transpose()
+        .map_err(std::io::Error::other)?;
+    let mut airport_nav = false;
+    let mut airport_gear = false;
+    let mut airport_supported = false;
+    let register_airports = |state: &mut State, enabled: bool| -> AppResult<()> {
+        if let Some(scene) = airport_scene.filter(|_| enabled) {
+            for object in &scene.objects {
+                state.add_ground_target(
+                    object.id,
+                    object.bounds,
+                    object.hit_points,
+                    object.category,
+                )?;
+                if let Some(target) = state
+                    .targets
+                    .iter_mut()
+                    .find(|target| target.id == object.id)
+                {
+                    target.signature.radar = object.radar_signature;
+                    target.signature.infrared = object.infrared_signature;
+                }
+            }
+        }
+        Ok(())
+    };
+    let mut last_aircraft = None;
     for count in 0..=432001 {
         buffer.clear();
         let n = reader.by_ref().take(4097).read_until(b'\n', &mut buffer)?;
@@ -320,6 +374,17 @@ fn replay_reader(
                 s.radar_failed,
                 s.ecm_failed
             );
+            if let (Some(service), Some(scene), Some(aircraft)) =
+                (&airport_service, airport_scene, last_aircraft)
+            {
+                println!(
+                    "airport replay: selected={:?} clearance={:?} reply={:?} guidance={:?}",
+                    service.selected(),
+                    service.clearance(),
+                    service.last_reply(),
+                    service.guidance(scene, aircraft)
+                );
+            }
             return Ok(s);
         }
         bytes += n;
@@ -339,39 +404,130 @@ fn replay_reader(
                     )
                 })
                 .ok_or("combat tape version/aircraft/theater/assets mismatch")?;
+            if version < 6 {
+                airport_service = None;
+            }
             continue;
         }
         let (action, launcher) = parse(line, version)?;
-        if !initialized && action != "reset" {
+        if !initialized && !matches!(action, "reset" | "reset-scene") {
             return Err("combat tape must start with reset".into());
         }
         match action {
-            "reset" => {
+            "reset" | "reset-scene" => {
+                if action == "reset-scene" && version < 6 {
+                    return Err("scene reset requires tape version6".into());
+                }
                 s = State::new(s.configuration().clone(), true)?;
+                register_airports(&mut s, version >= 6)?;
+                if let (Some(service), Some(scene)) = (&mut airport_service, airport_scene) {
+                    service.reset(scene).map_err(std::io::Error::other)?;
+                }
+                airport_nav = false;
+                airport_gear = false;
+                airport_supported = false;
                 s.weapon_rules = if version < 4 {
                     tore_sim::combat::missiles::Rules::Compatibility
                 } else {
                     tore_sim::combat::missiles::Rules::Spec
                 };
-                s.range_target(launcher);
+                if action == "reset" {
+                    s.range_target(launcher);
+                }
                 initialized = true;
             }
             "release" => s.release(),
             "fire" | "tick" => {
-                s.step(action == "fire", launcher, &ground);
+                let events = s.step(action == "fire", launcher, &ground);
+                if let (Some(service), Some(scene)) = (&mut airport_service, airport_scene) {
+                    let _ = events;
+                    service.synchronize_health(
+                        s.targets
+                            .iter()
+                            .filter(|target| {
+                                target.role == tore_sim::combat::missiles::TargetRole::Surface
+                            })
+                            .map(|target| (target.id, target.hp)),
+                    );
+                    let aircraft = tore_sim::airport::Aircraft {
+                        position: launcher.position,
+                        nav_mode: airport_nav,
+                        gear_down: airport_gear,
+                        supported: airport_supported,
+                        alive: launcher.alive,
+                        speed_fps: launcher.speed_fps,
+                    };
+                    service.step(scene, aircraft);
+                    let _ = service.guidance(scene, aircraft);
+                }
                 ticks += 1;
+            }
+            "airport-nav:0" => airport_nav = false,
+            "airport-nav:1" => airport_nav = true,
+            _ if action.starts_with("airport-state:") => {
+                let values: Vec<_> = action[14..].split(':').collect();
+                if values.len() != 3 || values.iter().any(|v| !matches!(*v, "0" | "1")) {
+                    return Err("invalid airport state record".into());
+                }
+                airport_nav = values[0] == "1";
+                airport_gear = values[1] == "1";
+                airport_supported = values[2] == "1";
+            }
+            _ if airport_command(action).is_some() => {
+                let service = airport_service
+                    .as_mut()
+                    .ok_or("airport command without scene")?;
+                let scene = airport_scene.unwrap();
+                service.command(
+                    scene,
+                    tore_sim::airport::Aircraft {
+                        position: launcher.position,
+                        nav_mode: airport_nav,
+                        gear_down: airport_gear,
+                        supported: airport_supported,
+                        alive: launcher.alive,
+                        speed_fps: launcher.speed_fps,
+                    },
+                    airport_command(action).unwrap(),
+                );
             }
             _ => s.command(
                 command(action).ok_or("unknown combat tape action")?,
                 launcher,
             ),
         }
+        last_aircraft = Some(tore_sim::airport::Aircraft {
+            position: launcher.position,
+            nav_mode: airport_nav,
+            gear_down: airport_gear,
+            supported: airport_supported,
+            alive: launcher.alive,
+            speed_fps: launcher.speed_fps,
+        });
     }
     Err("combat tape record bound".into())
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn version_six_airport_commands_have_stable_bounded_names() {
+        use tore_sim::airport::Command;
+        for command in [
+            Command::SelectAirport(17),
+            Command::RequestLanding,
+            Command::RepeatReply,
+            Command::CancelApproach,
+        ] {
+            assert_eq!(
+                airport_command(&airport_command_name(command)),
+                Some(command)
+            );
+        }
+        assert_eq!(airport_command("airport-select:not-a-number"), None);
+        assert_eq!(fields_for(5), 25);
+        assert_eq!(fields_for(6), 25);
+    }
     #[test]
     fn version_five_preserves_power_separately_from_transmission() {
         let line = "tick 0 1000 0 1 0 0 0 1 0 0 0 1 600 0 1 0 1 1 0 40 60 600 1";

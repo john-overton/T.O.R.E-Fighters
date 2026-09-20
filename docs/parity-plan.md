@@ -11,6 +11,11 @@
 One page. What is specified, what is built, what is next. Milestones live in
 [ROADMAP.md](ROADMAP.md); how agents work is in [AGENTS.md](../AGENTS.md).
 
+Airports are connected for the sixteen base theaters: source static placements,
+individual ground targets, runway support, tower text commands and automatic ILS
+at or below 4,000 feet above airport ground. Campaign overlays, tower recordings
+and further visual parity remain open. [Implementation slices and acceptance](ROADMAP.md#airport-and-ground-object-expansion).
+
 Parity is measured by **expression of feature**: does the player experience what
 they experience in Fighters Anthology? A behaviour's provenance, `spec-derived`,
 `native`, `fitted`, `opinionated`, records where it came from and never gates

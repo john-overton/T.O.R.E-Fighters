@@ -58,7 +58,10 @@ The terrain block builder at `0x4a9d00` copies the third byte of four corner cel
 
 Each placement covers four cells per side, or 32,768 feet. Quarter-turn UV selection starts at `0x4aa9ac`; texture scanning around `0x4aa72d` reverses source rows. Rust applies these rotations and a V flip. Index 255 is tested as cutout/water coverage at `0x4aa739`. The runtime now treats those texels as holes exposing the shared ocean/horizon pass; untextured color-255 cells also leave that pass visible. The former land-color fill and palette-223 water fallback caused rectangular green strips beyond beach artwork and have been removed. Bilinear coverage uses a fitted 0.5 cutoff, not a recovered native raster threshold. See [shoreline behavior](../spec/terrain-shorelines.md) and [validation](../baselines/ukraine-viewer.md#shoreline-correction-2026-09-16).
 
-Not yet recovered in the renderer: native adaptive subdivision/LOD, class-dependent material behavior, `tdic` coverage flags, exact shore/water geometry, native lighting and generic LAND/VLAND fallback mapping. Fixed triangles currently join each four-sample quad; the height query uses those same triangles. `UKR.MM` also contains 257 object placements, which are retained as raw source but not drawn. Texture artwork may depict buildings; there are no imported 3D buildings, airfields or aircraft yet.
+Not yet recovered in the renderer: native adaptive subdivision/LOD, class-dependent material behavior, `tdic` coverage flags, exact shore/water geometry, native lighting and generic LAND/VLAND fallback mapping. Fixed triangles currently join each four-sample quad; the height query uses those same triangles. `UKR.MM` contains 257 object placements, now imported into the static scene with
+original shapes/textures, target identity and contact geometry. The sixteen base
+theaters share this path. [Airport placement contract](airport-placements.md)
+records unsupported shape and campaign boundaries.
 
 The ocean now uses user-requested short ripples and distance/altitude filtering,
 retaining the original textures and weather colors. Whitecaps are removed. [Source contract and limits](ocean.md),
@@ -71,7 +74,8 @@ time and LAY time-window selection. The dynamic palette implementation and its
 remaining approximations are documented in [the full weather review](../baselines/weather-review.md);
 it supersedes the historical midday-only runtime descriptions below.
 
-The bounded `textFormat` reader exports top-level map, layer, layer parameter, clouds, wind, time and texture placements. It skips indented object fields. `UKR.MM` specifies `UKR.T2`, `DAY2.LAY 0`, clouds 0 and time 12:00; wind is absent and remains null. For example, `UKR01.M` specifies layer parameter 4, wind `160 7` and time 17:40. Wind units and the layer parameter's full semantics remain unverified.
+The bounded `textFormat` reader exports top-level map, layer, layer parameter, clouds, wind, time and texture placements. The separate bounded mission reader now parses the indented object fields for
+static scene construction. `UKR.MM` specifies `UKR.T2`, `DAY2.LAY 0`, clouds 0 and time 12:00; wind is absent and remains null. For example, `UKR01.M` specifies layer parameter 4, wind `160 7` and time 17:40. Wind units and the layer parameter's full semantics remain unverified.
 
 Campaign missions reference names such as `~UKR6.T2`. Preserve these names; do not silently redirect them to `UKR.T2`. The parser accepts `~` and `$` resource-name characters. Resolving generated campaign terrain aliases is future work.
 

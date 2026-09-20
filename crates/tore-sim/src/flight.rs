@@ -62,6 +62,19 @@ impl State {
             position,
         ))
     }
+    /// Actual support state, including the legacy adapter's wheel/CG floor.
+    pub fn supported_at(&self, height: f64) -> bool {
+        if self.native.is_some() || self.crashed {
+            return false;
+        }
+        self.research.as_ref().map_or_else(
+            || {
+                self.position[1]
+                    <= height + self.model.configuration().equipment.ground_clearance_ft + 1e-6
+            },
+            |research| research.on_ground,
+        )
+    }
     /// Shared presentation signal. Legacy has a fitted speed warning, not a spin state.
     pub fn stall_alert(
         &self,

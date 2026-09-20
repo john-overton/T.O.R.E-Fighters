@@ -165,6 +165,7 @@ pub struct CombatReadout {
     pub ammo: u16,
     pub loaded: bool,
     pub target: Option<(u32, i32, bool)>,
+    pub target_name: Option<String>,
     pub scope: scope::Scope,
     pub rcs: scope::Rcs,
 }
@@ -790,7 +791,13 @@ impl Instruments {
             }
             4 => {
                 if let Some((id, hp, locked)) = self.combat.as_ref().and_then(|c| c.target) {
-                    text(&mut r, &format!("TARGET {id}"), 30, 42);
+                    let label = self
+                        .combat
+                        .as_ref()
+                        .and_then(|combat| combat.target_name.as_deref())
+                        .map(|name| name.chars().take(22).collect::<String>())
+                        .unwrap_or_else(|| format!("CONTACT {id}"));
+                    text(&mut r, &label, 18, 42);
                     text(&mut r, &format!("HP {hp}"), 30, 62);
                     text(
                         &mut r,

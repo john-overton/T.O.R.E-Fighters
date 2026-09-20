@@ -161,6 +161,242 @@ Deliverable: free camera over Ukraine and one other retail theater.
 
 Exit: theater layout matches retail mission geography.  Frame time recorded per platform.
 
+### Airport and ground-object expansion
+
+**Implementation plan, requested by John on 2026-09-20.** The deliverable is a
+playable airport world in TORE: source-positioned runways and surrounding objects
+for every map, individually targetable ground structures, and player landing/tower
+radio commands with landing guidance. Ukraine is the first complete slice.
+Research serves implementation decisions. It is not a requirement to reconstruct
+the original engine, scheduling or every callback before shipping.
+
+[Behavior and fitted decisions](spec/airports.md),
+[placement/resource contracts](formats/airport-placements.md),
+[measured input coverage](baselines/ukraine-airports.md).
+Current implementation: base-layout import, static rendering/targets, runway
+surfaces, player tower commands, ILS and replay are connected. Independent review
+fixed target reset, source classes/signatures, altitude reference and rendering.
+The base-theater slice is implemented; campaign overlay/generated terrain handling,
+unsupported shape programs, original tower recordings, speed brackets and target
+camera imagery remain open. See the linked baseline for validation and limitations.
+
+These linked documents own constants and evidence; this section owns execution.
+All proposed type/file names below are agent design choices, not existing APIs.
+
+#### What we can build on
+
+| Existing TORE component | Reuse | Required extension |
+| --- | --- | --- |
+| `tore-formats::theater::Environment` | Bounded top-level M/MM environment parsing | Separate object-block reader; side tables and both nationality forms |
+| `tore-formats::aircraft::Brf` and OBJECT schema | Inert OT token/field parsing | General static object definition, explicit resources and reviewed scalar fields |
+| `tore-formats::strip`, SH contact boxes | Reviewed STRIP identity and runway anchors | Review all thirteen airport definitions and their actual shape contracts |
+| `tore-app/src/assets.rs`, `tore-extract` | Archive provenance, runtime imports and caches | One shared transitive object dependency resolver; import report/cache version |
+| `terrain::World` and `World::surface` | Source terrain, weather, grounding queries | Scene construction and runway surface query integration |
+| `tore-sim::combat::live::Target` | Stable IDs, ground roles, hit points, sensors and damage classes | Per-object configuration and building/runway contact geometry |
+| `combat.rs`, `sim_renderer.rs`, HUD/instruments | Current target display, geometry submission, palette and shadows | Static meshes, ground-object identity, ILS readout and airport selection |
+| `audio.rs`, `tore-formats::radio` | Serial recorded speech playback and reviewed phrase mappings | Airport response events; only independently reviewed tower phrases |
+| Pilot input and `combat_tape.rs` | Fixed-tick commands, replay and resource fingerprints | Airport selection/commands, scene identity and damage/clearance replay |
+
+The aircraft renderer currently uses an aircraft-specific scale. Do not reuse it
+for ground objects without measurement. Combat presentation also contains ID-to-
+aircraft-index assumptions; remove those assumptions at the shared scene boundary
+before adding ground targets. Current projectile tests use swept spheres; long
+runways and buildings need dedicated geometry rather than inflated target radii.
+
+#### Runtime shape and ownership
+
+Create an immutable imported scene containing definitions, placements, dependency
+identities and reviewed airport geometry. Keep GPU meshes/textures in the app.
+Keep mutable target health in the existing combat state, with a stable mapping
+from source placement to target ID. Keep airport selection, availability and player
+clearance in a renderer-independent `tore-sim` airport service. Do not create two
+independently writable health copies; derive airport availability from combat
+changes. A destroyed building remains identifiable for mission goals and replay.
+
+Use source layout identity plus record ordinal as the stable import key. Retain
+signed source aliases separately; they are not globally unique object IDs. Allocate
+runtime IDs deterministically through the existing ID owner, disjoint from player
+and aircraft IDs. Ground objects do not consume aircraft roster indices.
+
+Per fixed tick: apply recorded player commands, advance existing flight/combat
+with shared world-contact inputs, deliver damage/contact events to the airport
+service, and publish a readout plus radio events. Rendering interpolates poses
+and reads that snapshot. Audio playback never changes clearance timing. Build a
+new scene completely before switching theaters; failed loads leave the old scene
+intact. Flight reset reconstructs target and airport state from the same scene.
+
+#### Slice A: bounded importer and Kiev visible world
+
+**Prerequisites:** existing Ukraine T2/MM and reviewed initial assets are available.
+
+- Add object parsing alongside Environment rather than mixing mutable world state
+  into terrain metadata. Preserve position, orientation, name delimiters, flags,
+  speed, aliases, side tables, source order and unknown fields. Enforce existing
+  mission size limits plus explicit per-record/token bounds. Report malformed
+  records with resource and line context. Never execute mission scripts.
+- Add a general static OT reader using the existing schema. Expose explicit main,
+  damaged/shadow references only where their meanings are established. Unknown
+  callback names remain inert metadata. Keep the narrow STRIP diagnostic intact.
+- Share dependency discovery between CLI and app import. Traverse explicit OT/SH
+  references with cycle detection and bounds; retain exact archive provenance.
+  Missing resources name both the missing resource and referring object. Reimport
+  old caches when needed, with a clear diagnostic rather than invisible buildings.
+- Implement reusable static shape mesh/texture loading without aircraft rigs.
+  Apply one reviewed scale and placement transform to visual and contact geometry.
+  Batch shared type geometry and cull by camera bounds; avoid duplicating a mesh
+  for every instance. Reuse source palettes, lighting, cutouts and shadows.
+- Render Kiev's runway, four hangars and tower at their source coordinates. Inspect
+  low-altitude views from both runway ends and an overhead view. Compare numerical
+  transforms to the source, not modern geography or a nearby terrain-texture image.
+
+**Exit:** six expected instances, correct names/types/transforms, no unresolved
+required visual resources, no runway buried in terrain, no ID coupling to aircraft.
+Synthetic tests cover truncation, signed angles/aliases, unknown tokens, duplicate
+fields, resource cycles and transform consistency. This is a visible scene slice;
+landing and target operation arrive in subsequent slices.
+
+#### Slice B: complete Ukraine placement and every-map import
+
+**Depends on A.** Expand Ukraine to all fourteen runway records and the 99 objects
+in airport-labeled sections. Preserve the other 144 source objects in the scene
+manifest even when outside this airport-focused rendering scope. Keep association
+as metadata; it must not cause collective damage or ownership changes.
+
+The census already extracted all 75 MM layouts and thirteen airport definitions.
+Review each definition's shape geometry, scale, collision records and dependencies.
+Treat STRIP3A/5A/6A/7A as independent placed instances, not damaged versions or
+additional airports inferred from their names. Review their relationship to the
+other runway pieces before exposing airport groups in the UI.
+
+Implement `sides`/`sides2` and `nationality`/`nationality2` using their documented
+conversion. Inventory airport-associated objects in every base layout. Prefer
+explicit relations, then source authoring groups; ambiguous records remain
+unassigned and appear in the audit. Retain/render ambiguous static placements in
+the full scene rather than silently excluding a possible airport building. If
+that requires non-airport static types, process them through the same loader.
+Mobile/armed objects may have static placement/presentation, with no new behavior.
+
+Run a coverage pass over all sixteen base theaters, including all thirteen runway
+types. Resolve mission overlays separately: prove whether a source supplies a full
+layout or patches it, how signed aliases replace/delete records, and how generated
+`~` terrain names resolve. Never append two full layouts or redirect a campaign
+alias to a base terrain without evidence. Unsupported overlays get explicit errors.
+Campaign resolution remains in the final every-map scope, even if base maps ship
+first; do not call base-only support complete.
+
+**Exit:** every expected airport/associated object accounted for by source key;
+per-layout counts and dependency manifests reconcile; no unresolved required
+placements on accepted maps. Inspect every Ukraine airport and one view per other
+base theater plus each runway type. Numerically validate every placement even
+when visual checks are representative. Repeated import is unchanged and missing
+resources/ambiguous overlay operations are actionable errors.
+
+#### Slice C: runway surfaces and individual ground targets
+
+**Depends on A; finish Ukraine first, extend through B's shared definitions.**
+
+Add an airport surface query using reviewed extents/anchors and the fitted support
+policy in the spec. Wire it through all applicable World surface consumers so
+flight, target grounding and presentation agree. Building contact uses a separate
+solid-object query, not roof height returned as terrain. Verify both runway ends,
+edge transitions, taxi exits, gear contact and off-runway terrain. Preserve legacy,
+hybrid-default and restricted native-table adapter contracts and report which
+surface interactions each supports.
+
+Decode each OT's health, class and sensor-relevant fields. Construct zero-velocity
+ground targets with their own configuration. Use the current designation/sensor/
+weapon eligibility pipeline and target window. A control tower, hangar and runway
+must be distinct targets. Keep target identity after vector compaction/removal.
+
+Extend projectile contact with segment-versus-oriented-box or reviewed contact
+volumes, preserving earliest impact against terrain/objects and distinct fuze
+radius handling. Do not change aircraft hit volumes in this slice. Reuse damage
+classes, hit records and effects; connect destruction to airport availability by
+one event. Add a target-destroyed notification usable by future mission goals,
+without implementing the mission scripting engine here.
+
+**Exit:** designated tower is the object hit; adjacent structures remain unchanged;
+long runway geometry cannot intercept shots far outside its footprint; one
+threshold-crossing destruction event is emitted; destroyed objects do not respawn
+on camera changes. Synthetic deterministic tests cover high-speed tunneling,
+nearest impact, collision/terrain ties, repeated hits, reset, IDs and replay.
+Conduct a manual ground-attack and runway-contact pass on Ukraine.
+
+#### Slice D: player landing guidance and tower radio
+
+**Depends on C for runway availability; UI can develop against synthetic scenes.**
+
+Implement typed `SelectAirport`, `RequestLanding`, `RepeatReply` and
+`CancelApproach` actions, with one player clearance record and explicit response
+reasons. Resolve input bindings against `tore-input`/app shortcuts before assigning
+keys; expose configurable controls without taking an existing binding silently.
+Use the existing HUD/font/menu pieces for airport choice and radio text.
+
+Follow the spec's command and ILS rules. John's requested activation height is
+4,000 feet above airport ground level, including the threshold. Recovered retail
+evidence can refine other fitted rules without overriding this user choice. Requesting clearance sets guidance, not autopilot. Existing
+manual flight and autopilot controls retain their behavior. Land completion comes
+from actual contact and the fitted completion condition, not proximity alone.
+The service invalidates clearance if its runway becomes unusable. Changing airport,
+repeating a request, canceling and starting a new flight have explicit transitions.
+
+Publish threshold/end, bearing/range, clearance status, localizer/glide deviation
+and optional aircraft-specific speed brackets in a HUD readout. Test the published
+values independently of pixel rendering. Feed typed replies to existing serial
+radio playback and subtitles. Extend phrase extraction only for proven text/sample
+pairs. Do not repurpose wing formation phrases as tower dialogue.
+
+**Exit:** select an airport, request and receive an appropriate reply, fly an
+indicated approach, touch down and taxi manually. Repeat/cancel/reset and runway
+loss behave deterministically. Tests exercise ILS distance/altitude boundaries,
+gear/NAV gates, both ends, off-axis/behind-threshold cases and zero-distance math.
+No audio device or missing sample prevents the same clearance result. Replay
+reproduces selection, replies, target damage, guidance and landing completion.
+
+#### Research tasks bounded by implementation decisions
+
+Do these within the owning slice. Stop once a prose rule can be written. If the
+consumer remains unresolved, ship the documented fitted rule where available and
+keep the evidence gap visible.
+
+| Decision | Retail evidence to inspect | Implementation action |
+| --- | --- | --- |
+| Shape scale and runway extents | SH transform/header consumers and contact records for all thirteen types | Measure per type; inspect rendered/contact overlap before acceptance |
+| Compound airport layouts | MM records, explicit aliases and STRIP variant geometry | Preserve all records; group only confirmed relationships |
+| Allegiance/overlay semantics | Mission parser branches and actual base/campaign layouts | Typed conversion/patch rules; reject unresolved operations rather than guess |
+| ILS activation and symbols | HUD consumers near airport selection; manual pages 67/87 disagree | Keep John's 4,000-ft airport-relative choice; research remaining gates/symbols; test the boundary |
+| Radio request/reply repertoire | Player menu/input producers, APCommentProc, speech tables and sample mappings | Use the opinionated minimal command set with text fallback |
+| Targeting and damage | Relevant OT fields, sensor eligibility and damage-class consumers | Reuse current combat model with per-object inputs and labeled contact approximation |
+| Runway/tower destruction effects | Airport availability queries after object damage | Use the spec's independent service policy until stronger evidence exists |
+
+The nine slots in the earlier STRIP template are evidence for that template, not
+a universal capacity requirement. NPC traffic, holding patterns, autonomous taxi,
+automatic player landing, capture, repair/rearm/refuel and a mission editor are
+not required to deliver this plan. Existing AI must keep working alongside ground
+objects, but this plan adds no autonomous behavior.
+
+#### Release and verification
+
+Ship coherent increments A, Ukraine B/C, D, then complete B's every-map expansion
+and rerun C/D against all airport types. The every-map task remains open until the
+coverage report closes base and supported retail mission/campaign layouts.
+Do not label unsupported layouts as empty or successful. Record visual, interactive
+and headless acceptance separately. Keep all retail-derived meshes/captures local.
+
+Run the repository's required formatting, Clippy, locked tests/build, Python tests,
+asset guards and documentation checks for each completed implementation change.
+Rendering changes also require the real display smoke test and inspected captures.
+Exercise Linux now; record Windows/macOS runtime validation as performed or pending.
+Measure startup time, static mesh memory and frame time with airport scenes before
+and after on the same host; optimize measured regressions without reducing object
+coverage silently. Do not impose a speculative performance budget in advance.
+
+Update affected feature-matrix rows and guides for extraction, objects/shapes,
+theater, architecture, input and flight controls as each behavior lands. New replay
+records get an explicit version and compatible old-tape handling. Milestones are
+reported in the session. No commit, push or default-adapter change is authorized
+by creation of this plan.
+
 ### 1c. Free flight
 
 Aircraft: all twelve in the [ported roster](spec/ai-experience.md#currently-ported-aircraft).

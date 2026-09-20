@@ -133,6 +133,9 @@ impl Assets {
         if resources.get("TORE_COMBAT_V1").map(Vec::as_slice) != Some(b"RAW1") {
             return Err("cache predates combat dependencies; re-import media".into());
         }
+        if resources.get("TORE_AIRPORTS_V1").map(Vec::as_slice) != Some(b"SCENE1") {
+            return Err("cache predates airport scene dependencies; re-import media".into());
+        }
         for &name in tore_formats::aircraft::COMBAT_RESOURCES {
             if !resources.contains_key(name) {
                 return Err(
@@ -328,6 +331,14 @@ impl Assets {
             &tore_formats::aircraft::AircraftId::ALL,
             true,
         )?;
+        let scene_layouts: Vec<String> = tore_formats::theater::THEATERS
+            .iter()
+            .map(|(code, _)| format!("{code}.MM"))
+            .collect();
+        let scene_names = tore_formats::mission::scene_dependencies(
+            &aircraft_libs.iter().collect::<Vec<_>>(),
+            &scene_layouts,
+        )?;
         for (filename, names) in [("FA_1.LIB", ART), ("FA_2.LIB", DATA)] {
             let lib = archive(source, filename)?;
             report.push_str(&format!(
@@ -340,6 +351,7 @@ impl Assets {
                 .filter(|n| {
                     names.contains(&n.as_str())
                         || aircraft_names.contains(*n)
+                        || scene_names.contains(*n)
                         || tore_formats::ui::creator::resource(n)
                         || tore_formats::music::resource(n)
                         || tore_formats::radio::resource(n)
@@ -432,6 +444,7 @@ impl Assets {
         }
         resources.insert("TORE_MUSIC_V1".into(), b"PCM1".to_vec());
         resources.insert("TORE_COMBAT_V1".into(), b"RAW1".to_vec());
+        resources.insert("TORE_AIRPORTS_V1".into(), b"SCENE1".to_vec());
         let assets = Self::decode(&resources)?;
         fs::create_dir_all(destination)?;
         // Generation files keep the previous import usable until the new pack is complete.

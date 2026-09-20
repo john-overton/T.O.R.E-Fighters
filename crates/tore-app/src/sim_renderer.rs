@@ -11,6 +11,7 @@ pub struct SimRenderer {
     lens_flare: crate::lens_flare::LensFlare,
     smoke: crate::smoke_renderer::SmokeRenderer,
     battle: Option<(wgpu::Buffer, u32)>,
+    airports: Option<(wgpu::Buffer, u32)>,
     dummies: Vec<(tore_formats::aircraft::AircraftId, AircraftBatch)>,
     vapor: Option<(wgpu::Buffer, u32)>,
     vapor_pipeline: wgpu::RenderPipeline,
@@ -18,6 +19,7 @@ pub struct SimRenderer {
     palette: wgpu::Texture,
     weather_tiles: wgpu::TextureView,
     pipeline: wgpu::RenderPipeline,
+    airport_pipeline: wgpu::RenderPipeline,
     terrain_pipeline: wgpu::RenderPipeline,
     canopy_depth_pipeline: wgpu::RenderPipeline,
     canopy_pipeline: wgpu::RenderPipeline,
@@ -158,6 +160,16 @@ impl SimRenderer {
             cache: None,
         };
         let pipeline = device.create_render_pipeline(&surface_descriptor);
+        surface_descriptor.label = Some("Static airport depth-biased surfaces");
+        surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("airport_fragment");
+        surface_descriptor.depth_stencil.as_mut().unwrap().bias = wgpu::DepthBiasState {
+            constant: -4,
+            slope_scale: -1.0,
+            clamp: 0.0,
+        };
+        let airport_pipeline = device.create_render_pipeline(&surface_descriptor);
+        surface_descriptor.depth_stencil.as_mut().unwrap().bias = Default::default();
+        surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("fragment");
         let sky_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Sky layout"),
             bind_group_layouts: &[&material_layout, &lighting.layout],
@@ -421,12 +433,14 @@ impl SimRenderer {
             lens_flare: crate::lens_flare::LensFlare::new(device, format),
             smoke: crate::smoke_renderer::SmokeRenderer::new(device, format, &shader),
             battle: None,
+            airports: None,
             vapor: None,
             vapor_pipeline,
             vapor_bind,
             palette,
             weather_tiles: view,
             pipeline,
+            airport_pipeline,
             terrain_pipeline,
             canopy_depth_pipeline,
             canopy_pipeline,
@@ -470,6 +484,30 @@ impl SimRenderer {
         }
         if let Some((buffer, count)) = &mut self.battle {
             let length = vertices.len().min((8 * 1024 * 1024 / 4 / 30) * 30);
+            if length > 0 {
+                queue.write_buffer(buffer, 0, &bytes(&vertices[..length]));
+            }
+            *count = (length / 10) as u32;
+        }
+    }
+    pub fn airports(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
+        if self.airports.is_none() {
+            self.airports = Some((
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Imported static airport geometry"),
+                    size: 32 * 1024 * 1024,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                0,
+            ));
+        }
+        if let Some((buffer, count)) = &mut self.airports {
+            assert!(
+                vertices.len() * 4 <= 32 * 1024 * 1024,
+                "validated static scene exceeds GPU budget"
+            );
+            let length = vertices.len();
             if length > 0 {
                 queue.write_buffer(buffer, 0, &bytes(&vertices[..length]));
             }
@@ -841,6 +879,9 @@ impl SimRenderer {
                 .prepare(device, queue, world, camera, size, &weather.palette);
         if self.lighting.prepare(queue, camera, world) {
             let mut objects = Vec::new();
+            if let Some((buffer, count)) = &self.airports {
+                objects.push((&self.bind, buffer, *count));
+            }
             if let Some((bind, buffer, count)) = &self.aircraft {
                 objects.push((bind, buffer, *count));
                 if let Some((buffer, count)) = &self.battle {
@@ -901,6 +942,12 @@ impl SimRenderer {
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_vertex_buffer(1, self.terrain_normals.slice(..));
         pass.draw(0..self.count, 0..1);
+        if let Some((buffer, count)) = &self.airports {
+            pass.set_pipeline(&self.airport_pipeline);
+            pass.set_bind_group(0, &self.bind, &[]);
+            pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.draw(0..*count, 0..1);
+        }
         pass.set_pipeline(&self.pipeline);
         if let Some((bind, vertices, count)) = &self.aircraft {
             pass.set_bind_group(0, bind, &[]);

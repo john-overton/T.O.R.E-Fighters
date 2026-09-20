@@ -1,6 +1,17 @@
 //! Bounded nearest-detail static SH projection, not a complete native shape VM.
 use crate::{Result, invalid, module, slice, u16_at, u32_at};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Object-space scale selected by the reviewed SH CODE header exponent.
+/// Static scene geometry uses this directly; aircraft add their separate fitted rig scale.
+pub fn object_scale(data: &[u8]) -> Result<f64> {
+    let (code, _) = module::code(data)?;
+    let exponent = i32::from(u16_at(code, 6)? as i16);
+    if !(0..=16).contains(&exponent) {
+        return Err(invalid("shape object scale exponent outside bound"));
+    }
+    Ok(2f64.powi(exponent - 8))
+}
 /// SH opcode 0xca (FA 0x4d4288). Conditional fog is disabled when the
 /// sampled weather layer carries flag 0x40; all other nonzero words enable it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

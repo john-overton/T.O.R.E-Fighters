@@ -11,6 +11,7 @@ use super::{
 };
 use crate::attitude::{Basis, Vector, dot, unit};
 use crate::sensors::{self, Observable, Observer, Sensors, Support, passive};
+use std::collections::BTreeMap;
 use tore_formats::{
     Result,
     aircraft::{Aircraft, AircraftId},
@@ -475,6 +476,8 @@ pub struct State {
     pub emitters: Vec<passive::Emitter>,
     pub projectiles: Vec<Projectile>,
     pub targets: Vec<Target>,
+    /// Ground contact volumes keyed by stable target ID. Aircraft remain spheres.
+    ground_bounds: BTreeMap<u32, crate::airport::OrientedBox>,
     pub effects: Vec<Effect>,
     pub smoke: super::smoke::Smoke,
     pub debris: Vec<super::debris::Piece>,
@@ -570,6 +573,7 @@ impl State {
             emitters: vec![],
             projectiles: vec![],
             targets: vec![],
+            ground_bounds: BTreeMap::new(),
             effects: vec![],
             smoke: super::smoke::Smoke::default(),
             debris: Vec::new(),
@@ -613,14 +617,19 @@ impl State {
     pub fn command(&mut self, command: Command, launcher: Launcher) {
         match command {
             Command::ClearRange => {
-                self.targets.clear();
+                self.targets
+                    .retain(|t| self.ground_bounds.contains_key(&t.id));
                 self.sensors.clear_selection();
                 self.bore_observation = None;
                 self.mounted = Seeker::default();
             }
             Command::TargetDistance(distance) => {
                 if (1..=1_000_000).contains(&distance) {
-                    for target in &mut self.targets {
+                    for target in self
+                        .targets
+                        .iter_mut()
+                        .filter(|t| !self.ground_bounds.contains_key(&t.id))
+                    {
                         target.position = std::array::from_fn(|i| {
                             launcher.position[i] + launcher.basis.forward[i] * f64::from(distance)
                         });
@@ -634,7 +643,11 @@ impl State {
                 self.mounted = Seeker::default();
             }
             Command::TargetHeat(value) => {
-                for t in &mut self.targets {
+                for t in self
+                    .targets
+                    .iter_mut()
+                    .filter(|t| !self.ground_bounds.contains_key(&t.id))
+                {
                     t.heat = match value {
                         0 => Heat::Unknown,
                         1 => Heat::Engine {
@@ -661,7 +674,11 @@ impl State {
                 }
             }
             Command::ToggleTargetRadar => {
-                for t in &mut self.targets {
+                for t in self
+                    .targets
+                    .iter_mut()
+                    .filter(|t| !self.ground_bounds.contains_key(&t.id))
+                {
                     t.radar_emitting = !t.radar_emitting;
                 }
             }
@@ -700,7 +717,11 @@ impl State {
             Command::DamagePlayer => self.pending_damage = true,
             Command::ToggleTargetJammer => {
                 self.target_jammer = !self.target_jammer;
-                for t in &mut self.targets {
+                for t in self
+                    .targets
+                    .iter_mut()
+                    .filter(|t| !self.ground_bounds.contains_key(&t.id))
+                {
                     t.jammer_active = self.target_jammer;
                 }
             }
@@ -992,6 +1013,61 @@ impl State {
             category: config.target_category,
         });
     }
+    /// Replace imported scene objects without changing aircraft or fixture IDs.
+    pub fn remove_ground_targets(&mut self) {
+        self.projectiles.retain(|p| {
+            !p.target
+                .is_some_and(|id| self.ground_bounds.contains_key(&id))
+        });
+        self.targets
+            .retain(|t| !self.ground_bounds.contains_key(&t.id));
+        self.ground_bounds.clear();
+        self.sensors.clear_selection();
+    }
+    /// Register one imported, stationary surface object without consuming an
+    /// aircraft roster index. The caller owns the explicit disjoint ID range.
+    pub fn add_ground_target(
+        &mut self,
+        id: u32,
+        bounds: crate::airport::OrientedBox,
+        hit_points: i32,
+        category: u16,
+    ) -> Result<()> {
+        if id == 0
+            || !bounds.valid()
+            || hit_points <= 0
+            || self.targets.iter().any(|target| target.id == id)
+            || self.ground_bounds.contains_key(&id)
+        {
+            return Err(super::invalid("invalid or duplicate ground target"));
+        }
+        let basis = Basis::new(bounds.heading, bounds.pitch, bounds.bank);
+        // Aim inside the upper half of the solid volume so a planar ground
+        // object's own terrain endpoint does not occlude its sensor observation.
+        let aim = std::array::from_fn(|i| bounds.center[i] + basis.up[i] * bounds.half[1] * 0.5);
+        self.targets.push(Target {
+            role: TargetRole::Surface,
+            heat: Heat::Unknown,
+            radar_emitting: false,
+            id,
+            position: aim,
+            velocity: [0.; 3],
+            basis,
+            configuration: sensors::Configuration::CLEAN,
+            signature: sensors::SignatureProfile::default(),
+            jammer: None,
+            jammer_active: false,
+            airborne: false,
+            radius: bounds.half[0].max(bounds.half[1]).max(bounds.half[2]),
+            hp: hit_points,
+            initial_hp: hit_points,
+            fragment_offset: [0.; 3],
+            fragment_released: false,
+            category,
+        });
+        self.ground_bounds.insert(id, bounds);
+        Ok(())
+    }
     pub fn range_target(&mut self, launcher: Launcher) {
         let w = &self.config.stations[self.selected].weapon;
         let distance = if w.seeker.signature == 0 {
@@ -1006,7 +1082,8 @@ impl State {
         self.effects.clear();
         self.smoke = super::smoke::Smoke::default();
         self.debris.clear();
-        self.targets.clear();
+        self.targets
+            .retain(|t| self.ground_bounds.contains_key(&t.id));
         let id = self.next_target_id;
         self.next_target_id = self
             .next_target_id
@@ -1725,12 +1802,21 @@ impl State {
                     if p.guidance.as_ref().is_some_and(|f| !f.eligible(w, t)) {
                         continue;
                     }
-                    let radius = t.radius + f64::from(w.damage.fuze_radius.max(0));
-                    if let Some(at) = segment_sphere(
-                        sub(p.previous, old_targets[i]),
-                        sub(p.position, t.position),
-                        radius,
-                    ) && first.is_none_or(|f| at < f.0)
+                    let at = if let Some(bounds) = self.ground_bounds.get(&t.id) {
+                        // Contact uses the reviewed/fitted solid box. Fuze blast
+                        // radius remains a separate damage rule and does not turn
+                        // a long runway into a giant interception sphere.
+                        bounds.segment_fraction(p.previous, p.position)
+                    } else {
+                        let radius = t.radius + f64::from(w.damage.fuze_radius.max(0));
+                        segment_sphere(
+                            sub(p.previous, old_targets[i]),
+                            sub(p.position, t.position),
+                            radius,
+                        )
+                    };
+                    if let Some(at) = at
+                        && first.is_none_or(|f| at < f.0)
                     {
                         first = Some((at, Some(i)));
                     }
@@ -1774,7 +1860,7 @@ impl State {
                     let deception = super::systems::deception_chance(
                         self.config.ecm,
                         w.seeker.signature,
-                        self.target_jammer,
+                        self.target_jammer && !self.ground_bounds.contains_key(&t.id),
                     );
                     if deception != 0
                         && i32::from(draw(&mut self.rng, 100))
@@ -2316,6 +2402,65 @@ mod tests {
             fragment_released: false,
             category,
         }
+    }
+    #[test]
+    fn ground_projectile_damage_uses_object_class_and_destroys_once() {
+        let mut s = fixture(false);
+        s.targets.clear();
+        s.config.stations[0].weapon.damage.by_class[2] = 17;
+        let bounds = crate::airport::OrientedBox {
+            center: [0., 1000., 300.],
+            half: [30., 30., 30.],
+            heading: 0.,
+            pitch: 0.,
+            bank: 0.,
+        };
+        s.add_ground_target(0x40000000, bounds, 17, 0x100).unwrap();
+        let mut destroyed = 0;
+        for _ in 0..300 {
+            destroyed += s
+                .step(true, launcher(), |_, _| 0.)
+                .iter()
+                .filter(|e| **e == Event::Destroyed(0x40000000))
+                .count();
+        }
+        assert_eq!(destroyed, 1);
+        assert_eq!(s.targets[0].hp, 0);
+        assert_eq!(s.history[0].class, 2);
+        assert_eq!(s.history[0].applied, 17);
+    }
+    #[test]
+    fn range_controls_preserve_imported_ground_geometry_and_damage() {
+        let mut s = fixture(false);
+        let bounds = crate::airport::OrientedBox {
+            center: [100., 20., 500.],
+            half: [10., 10., 30.],
+            heading: 0.3,
+            pitch: 0.,
+            bank: 0.,
+        };
+        s.add_ground_target(0x40000000, bounds, 750, 0x100).unwrap();
+        s.targets
+            .iter_mut()
+            .find(|t| t.id == 0x40000000)
+            .unwrap()
+            .hp = 600;
+        s.range_target(launcher());
+        s.command(Command::TargetDistance(10000), launcher());
+        s.command(Command::CycleClass, launcher());
+        s.command(Command::ClearRange, launcher());
+        assert_eq!(s.targets.len(), 1);
+        let t = &s.targets[0];
+        assert_eq!((t.id, t.hp, t.category), (0x40000000, 600, 0x100));
+        assert_eq!(
+            t.position,
+            [
+                bounds.center[0],
+                bounds.center[1] + bounds.half[1] * 0.5,
+                bounds.center[2]
+            ]
+        );
+        assert_eq!(s.ground_bounds[&t.id], bounds);
     }
     #[test]
     fn swept_contact_handles_tunneling_moving_targets_and_nearest_root() {

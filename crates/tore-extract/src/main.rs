@@ -411,7 +411,8 @@ fn extract(options: Options) -> Result<bool> {
     }
     let mut profile_archives = Vec::new();
     let mut profile_paths = Vec::new();
-    if !options.aircraft.is_empty() || options.weapons || options.music {
+    if !options.aircraft.is_empty() || options.weapons || options.music || options.theater.is_some()
+    {
         for path in &archives {
             let relative = path
                 .strip_prefix(source_root)?
@@ -422,8 +423,18 @@ fn extract(options: Options) -> Result<bool> {
                 .iter()
                 .any(|p| wildcard(p, &relative))
             {
-                profile_archives.push(Archive::open(path)?);
-                profile_paths.push(path.clone());
+                match Archive::open(path) {
+                    Ok(archive) => {
+                        profile_archives.push(archive);
+                        profile_paths.push(path.clone());
+                    }
+                    Err(error)
+                        if !options.aircraft.is_empty() || options.weapons || options.music =>
+                    {
+                        return Err(error.into());
+                    }
+                    Err(_) => {} // The extraction pass below records unsupported archives.
+                }
             }
         }
     }
@@ -437,6 +448,22 @@ fn extract(options: Options) -> Result<bool> {
         options.weapons,
     )?;
     let aircraft_names = &dependency_report.resources;
+    let scene_names = if let Some(theater) = &options.theater {
+        let layouts: std::collections::BTreeSet<String> = profile_archives
+            .iter()
+            .flat_map(|a| a.entries.keys())
+            .filter(|name| {
+                name.ends_with(".MM") && tore_formats::theater::theater_resource(name, theater)
+            })
+            .cloned()
+            .collect();
+        tore_formats::mission::scene_dependencies(
+            &profile_archives.iter().collect::<Vec<_>>(),
+            &layouts.into_iter().collect::<Vec<_>>(),
+        )?
+    } else {
+        Default::default()
+    };
     let mut records = Vec::new();
     let mut errors = Vec::new();
     let mut selected = 0;
@@ -472,6 +499,7 @@ fn extract(options: Options) -> Result<bool> {
             let in_profile = (options.creator && tore_formats::ui::creator::resource(&entry.name))
                 || (options.music && tore_formats::music::resource(&entry.name))
                 || aircraft_names.contains(&entry.name)
+                || scene_names.contains(&entry.name)
                 || options
                     .theater
                     .as_ref()

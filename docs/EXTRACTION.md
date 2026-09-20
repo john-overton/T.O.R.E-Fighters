@@ -17,14 +17,12 @@ describe a full discovery/catalog/import pass, including conditional/dynamic
 references, missing-asset reason chains and separate visual/collision acceptance.
 That archive is kept for its recovered facts; sequencing lives in
 [the parity plan](parity-plan.md).
-Implementation research has started: the selected Ukraine/STRIP discovery
-extracts five resources across two filtered runs with provenance, including
-_RUNWAY.PIC. STRIP callback/box metadata is partly recovered; in research mode,
-full initialization, shape and contact closure remain unresolved. Ground, terrain
-and object contact in the game is opinionated authored behaviour and does not wait
-on that research. This is not a full census or new OT/runtime support.
-[First evidence](baselines/native-land-foundation.md),
-[STRIP continuation](baselines/native-strip.md).
+The shared theater dependency resolver now follows matching MM placements to
+OBJ_TYPE definitions, explicit main SH resources and projected PIC references.
+The app uses the same resolver for all sixteen base theaters. Supported bodies
+render and receive target/contact identity; unsupported shape programs remain
+manifest-only with diagnostics. Missing required assets name their referring
+resource. [Airport evidence and remaining scope](baselines/ukraine-airports.md).
 
 ## Two different workflows
 

@@ -146,6 +146,9 @@ impl Renderer {
     pub fn combat(&mut self, vertices: &[f32]) {
         self.sim.combat(&self.device, &self.queue, vertices);
     }
+    pub fn airports(&mut self, vertices: &[f32]) {
+        self.sim.airports(&self.device, &self.queue, vertices);
+    }
     pub fn smoke(&mut self, art: &crate::menu::Sprite, smoke: &tore_sim::combat::smoke::Smoke) {
         self.sim.smoke(&self.device, &self.queue, art, smoke);
     }

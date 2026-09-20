@@ -143,6 +143,7 @@ pub fn draw(
     weapons: bool,
     color: [u8; 3],
     zoom: f32,
+    ils: Option<(&tore_sim::airport::Guidance, &str, &str)>,
 ) {
     let mut p = Paint {
         pixels,
@@ -288,6 +289,34 @@ pub fn draw(
     if s.autopilot.mode() != tore_sim::autopilot::Mode::Off {
         p.text(font, "AUTO", 211, 133);
         p.text(font, &s.autopilot.label(), 211, 145);
+    }
+    if let Some((guidance, airport, runway)) = ils {
+        let airport: String = airport
+            .chars()
+            .filter(|c| c.is_ascii_graphic() || *c == ' ')
+            .take(24)
+            .collect();
+        let runway: String = runway
+            .chars()
+            .filter(|c| c.is_ascii_graphic() || *c == ' ')
+            .take(16)
+            .collect();
+        p.text(font, &format!("ILS {airport}"), 252, 106);
+        p.text(
+            font,
+            &format!("RWY {runway} {:.1}NM", guidance.range_ft / 6_076.12),
+            252,
+            118,
+        );
+        if guidance.active {
+            let vertical_x = 320. - guidance.localizer_normalized * 42.;
+            let horizontal_y = 240. + guidance.glide_normalized * 30.;
+            p.line((vertical_x, 207.), (vertical_x, 273.));
+            p.line((278., horizontal_y), (362., horizontal_y));
+            p.rect(318, 238, 5, 5);
+        } else {
+            p.text(font, "ILS ARM", 300, 258);
+        }
     }
     if s.stall_alert(ground).is_some() {
         p.text(font, "STALL", 301, 274);

@@ -31,8 +31,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     for f in shape.faces {
         println!(
-            "{:x} subtype={:x} texture={} positions={:?}",
-            f.address, f.subtype, f.texture, f.positions
+            "{:x} subtype={:x} texture={} positions={:?} uv={:?}",
+            f.address, f.subtype, f.texture, f.positions, f.uv
         );
     }
     Ok(())

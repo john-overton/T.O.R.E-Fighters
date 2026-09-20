@@ -278,7 +278,11 @@ impl SurfaceLighting {
                     depth_write_enabled: true,
                     depth_compare: wgpu::CompareFunction::Less,
                     stencil: Default::default(),
-                    bias: wgpu::DepthBiasState { constant: if terrain { 2 } else { 1 }, slope_scale: if terrain { 3. } else { 1. }, clamp: 0. },
+                    bias: wgpu::DepthBiasState {
+                        constant: if terrain { 2 } else { 1 },
+                        slope_scale: if terrain { 3. } else { 1. },
+                        clamp: 0.,
+                    },
                 }),
                 multisample: Default::default(),
                 multiview: None,
