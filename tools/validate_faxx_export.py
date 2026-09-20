@@ -27,9 +27,9 @@ def validate(donors, exported):
     subprocess.run(['cargo', 'build', '--locked', '-q', '-p', 'tore-extract', '--example', 'shape_json', '--target-dir', str(ROOT/'target')], cwd=ROOT, check=True)
     executable = ROOT/'target/debug/examples'/('shape_json.exe' if os.name == 'nt' else 'shape_json')
     stem = 'FAXX' if (exported/'FAXX.SH').is_file() else 'F22'
+    subprocess.run(['cargo', 'run', '--locked', '-q', '-p', 'tore-extract', '--example',
+                    'check_faxx_pt', '--', str(donors/'F22.PT'), str(exported/(stem+'.PT')), stem], cwd=ROOT, check=True)
     if stem == 'FAXX':
-        subprocess.run(['cargo', 'run', '--locked', '-q', '-p', 'tore-extract', '--example',
-                        'check_faxx_pt', '--', str(donors/'F22.PT'), str(exported/'FAXX.PT')], cwd=ROOT, check=True)
         for suffix in ['_B.SH','_D.SH','_S.SH']:
             assert (donors/('F22'+suffix)).read_bytes() == (exported/(stem+suffix)).read_bytes()
         assert not any((exported/name).exists() for name in DONORS)
@@ -70,7 +70,7 @@ def validate(donors, exported):
         original = project(executable, donors/name)
         actual = project(executable, exported/name.replace('F22',stem,1))
         assert Counter(map(key,actual)) == Counter(key(f) for f in original if f['address'] not in DONORS[name][1])
-    result = {'pose_comparisons': comparisons, 'damage_bodies': 2, 'identity': stem,
+    result = {'pose_comparisons': comparisons, 'damage_bodies': 2, 'identity': stem, 'hook_capability_enabled': True,
               'method': 'bounded static SH data projection, no original module execution',
               'original_game_tested': False, 'kapset_tested': False}
     (exported/'validation.json').write_text(json.dumps(result, indent=2)+'\n')

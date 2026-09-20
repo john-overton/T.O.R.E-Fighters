@@ -231,3 +231,14 @@ overlays but no center overlay. Missing required flight/cockpit resources still
 fail import or loading. VIS240 joins VIS340 as a reviewed source visual sensor
 for the new default stations. Default guns/stores join the existing manually
 controlled service and loadout allowlist, not a claim of all-JT support.
+
+## Hook capability in original-game exports
+
+The reviewed F22.PT PLANE_TYPE flags at assembled offset 0xba are 0x91. Bit
+0x02 enables the original hook command. The concept exporter changes only that
+bit to produce 0x93, retaining the other donor flags, including the clear carrier
+capability bit 0x40. The original hook command updates deployed flag 0x400 in
+the aircraft instance; the shape-state producer maps it to `_PLhook` 0 or 1.
+The [packaging baseline](../baselines/fa-xx-packaging.md) records the inspected
+addresses and the exporter validation. This does not alter T.O.R.E's flight
+adapters or establish complete carrier-operation support for the export.

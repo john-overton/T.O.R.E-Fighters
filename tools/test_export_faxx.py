@@ -4,7 +4,7 @@ import struct
 import unittest
 from unittest.mock import patch
 
-from export_faxx import independent_pt, jump, moved_face, stub, turn, vb
+from export_faxx import hook_equipped_pt, independent_pt, jump, moved_face, stub, turn, vb
 from openfa_tools import require_static
 
 
@@ -36,17 +36,27 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(raw[14:],result[14:])
         self.assertNotEqual(raw[5:11],result[5:11])
 
-    def test_separate_identity_edits_only_named_blocks(self):
+    def test_separate_identity_preserves_donor_except_names_and_hook(self):
         fixture = (b"[brent's_relocatable_format]\r\nword 636\r\n"
+                   b";--- START OF PLANE_TYPE ---\r\n\r\n    dword $91\r\n"
                    b':ot_names\r\n string "F-22"\r\n string "Donor"\r\n string "F22.PT"\r\n'
                    b':shape\r\n string "f22.SH"\r\n:shadowShape\r\n string "f22_s.SH"\r\n'
                    b':hudName\r\n string "f22.HUD"\r\nend\r\n')
         result = independent_pt(fixture)
+        self.assertIn(b'dword $93\r\n', result)
         self.assertIn(b'string "FAXX.PT"', result)
         self.assertIn(b'string "FAXX_S.SH"', result)
         self.assertIn(b':hudName\r\n string "f22.HUD"\r\nend\r\n', result)
         self.assertTrue(result.startswith(b"[brent's_relocatable_format]\r\nword 636\r\n"))
         self.assertIn(b'string "F22.PT"', fixture)
+
+    def test_hook_flag_is_idempotent_and_preserves_other_sections(self):
+        source = b"dword $91\n;--- START OF PLANE_TYPE ---\n\n dword $91\nword 17\n"
+        expected = b"dword $91\n;--- START OF PLANE_TYPE ---\n\n dword $93\nword 17\n"
+        self.assertEqual(hook_equipped_pt(source), expected)
+        self.assertEqual(hook_equipped_pt(expected), expected)
+        with self.assertRaises(ValueError):
+            hook_equipped_pt(source.replace(b' dword $91', b' dword $57'))
 
     def test_identity_rejects_missing_blocks(self):
         with self.assertRaises(ValueError):

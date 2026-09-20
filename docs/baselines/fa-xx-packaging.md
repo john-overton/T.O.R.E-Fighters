@@ -101,7 +101,7 @@ upstream all-shapes tests were not run.
 
 Implementation mode continuation, 2026-09-18. Contract:
 [F/A-XX export](../spec/fa-xx-export.md). The final local candidate is under
-`.local/exports/fa-xx-no-floating-decals/`. It contains a separate FAXX.PT
+`.local/exports/fa-xx-hook-enabled/`. It contains a separate FAXX.PT
 and six FAXX-named shapes, with no F22-named resource entries. The earlier
 replacement is retained as explicit `--identity f22` output.
 
@@ -126,8 +126,8 @@ The seven separate-aircraft resources are packed as stored EALIB entries by
 `check_lib.rs` validates the directory and compares every payload using the
 independent tore-formats reader; OpenFA also unpacks matching payloads. The
 ordinary extractor lists seven entries with zero errors. The generic BRF reader
-checks names and geometry references and confirms all other donor tokens are
-unchanged; B/D/S aliases match their donors.
+checks names, geometry references and the hook capability bit, and confirms
+all other donor tokens are unchanged; B/D/S aliases match their donors.
 
 The previous archive was invalid: OpenFA's writer reserved no sentinel directory
 entry and its own reader accepted that omission. Our earlier OpenFA-only round
@@ -141,7 +141,7 @@ ZIPs under `.local/exports/` are superseded. The checked definition contains
 F/A-XX / F/A-XX Concept, not F-22N; the origin of John's F-22N list entry is unknown.
 
 Reports include donor/output and exporter/tool hashes. The full ZIP contains the
-PT, six SH files, equivalent LIB, notes and reports. The corrected Windows test
+hook-enabled PT, six SH files, equivalent LIB, notes and reports. The corrected Windows test
 ZIP contains only FAXX.LIB and INSTALL.txt. No donor data is committed.
 
 Synthetic tests cover the 0.6-radian leaf geometry, fixed hinge, integer slot
@@ -153,8 +153,8 @@ Its explicit-jump option does not change the gameplay projection.
 The earlier reusable wrapper smoke test in `.local/faxx-toolset-smoke/` used
 OpenFA on both sides and missed the same sentinel fault. Current export validation
 uses the independent Rust archive reader in addition to OpenFA. Repository
-formatting, Clippy with warnings denied, all 875 Rust tests, locked workspace
-build, all 57 Python tests, documentation checks and source/binary asset checks
+formatting, Clippy with warnings denied, all 878 Rust tests, locked workspace
+build, all 58 Python tests, documentation checks and source/binary asset checks
 passed. No renderer changes were made, so a new GPU smoke test was not run.
 
 ## Separate aircraft registration evidence
@@ -179,7 +179,8 @@ baseline. Static inspection, no original code execution:
 Source evidence is the existing hash-reviewed
 `.local/weapons-research/native/fa-disassembly.txt`, its `symbols.json`, the
 original EXE data strings, and the extracted F22.PT. The independent reader
-comparison verifies that only `ot_names`, `shape`, and `shadowShape` change.
+comparison verifies the three identity/geometry blocks and the single hook-bit
+change, with all remaining donor tokens preserved.
 An external corroborating [PT reference](https://fighterscodex.com/fa/formats/PT/)
 documents those record fields; the local address observations above establish
 this build's catalog mechanism. No separate hard-coded aircraft-slot manifest
@@ -231,13 +232,44 @@ session on 2026-09-18. This closes the reported floating-decal issue at the
 user-observed level. It does not establish a full control/damage test matrix or
 Kapset compatibility.
 
+## Hook command correction
+
+John reported that the working aircraft did not show the hook. The export
+already had twelve hook faces conditional on `_PLhook == 1`, but its PT still
+inherited the donor's disabled hook capability. The previous geometry tests
+supplied the state directly, so they did not test whether FA could enable it.
+
+Static review of the same hash-reviewed original build establishes:
+
+- `_cpt` / `_curThingType` is at 0x50d268. The PLANE_TYPE flags are at +0xba,
+  matching the field read at 0x50d322 by `@FMHook@4` at 0x451c30.
+- 0x451c35 tests flag bit 0x02 and 0x451c37 returns without operating the hook
+  when it is absent. The remaining command sets/clears instance state bit 0x400
+  at 0x451c6b / 0x451c80.
+- The shape-state producer zeros BX at 0x4ab45c, clears `_PLhook` (0x580ba4)
+  at 0x4ab496, then sets it to 1 at 0x4ab724 when the instance has bit 0x400.
+
+The [aircraft format note](../formats/aircraft.md#hook-capability-in-original-game-exports)
+records the flag values. Both export identities now include a PT with hook
+capability enabled. The independent BRF comparison permits precisely this bit
+change plus the separate identity's names/references, and rejects other field
+changes. Synthetic tests check preservation of other sections, idempotence and
+rejection of another donor's flags. No original code was executed for this review.
+The previous flight/decal success remains user-confirmed; this hook correction
+needs a new Windows check with the hook command. The rebuilt separate
+aircraft passed all 24 geometry combinations, PT capability verification and both
+archive readers. The F-22 replacement mode also passed with its new PT payload.
+All six separate-aircraft SH files are byte-identical to the decal-fixed package;
+FAXX.PT differs by one ASCII byte, changing `$91` to `$93`. The Windows handoff is
+`.local/exports/fa-xx-hook-enabled/F-A-XX-FA-Windows-hook-fix.zip`.
+
 ## Remaining validation limits
 
 The candidate uses discrete poses, wider quantized hook geometry, neutral donor
 flap skins and bypassed C8 LOD branches, as documented in the export contract.
 F31/F14 import-table inspection identifies existing rudder/hook symbol names;
 OpenFA's state table informs their selected values. Original-game producer values,
-rudder sign, H availability on F-22, palette appearance, draw order, long-distance
+rudder sign, live hook appearance after the capability correction, palette appearance, draw order, long-distance
 behavior, a repeatable live-game acceptance run and Kapset compatibility were not validated.
 
 Static conversion and bounded pose checks alone do not demonstrate playability.

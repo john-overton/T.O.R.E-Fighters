@@ -18,8 +18,9 @@ It does not change T.O.R.E gameplay or any flight-adapter defaults.
 
 The default `--identity faxx` emits a separate aircraft: FAXX.PT plus FAXX.SH
 and FAXX_A/B/C/D/S.SH. The PT names it F/A-XX / F/A-XX Concept and identifies
-itself as FAXX.PT. Shape and shadow references point into the new family. All
-other definition fields, including flight settings, cockpit/HUD, equipment and
+itself as FAXX.PT. Shape and shadow references point into the new family. Enable
+the aircraft's hook capability; the donor F-22 disables that command. All other
+definition fields, including aerodynamic settings, cockpit/HUD, equipment and
 availability, remain donor values. The package has no F22-named resource entries.
 
 The original catalog enumerates `*.PT` definitions, so a per-aircraft PT supplies
@@ -42,7 +43,7 @@ the working directory. Install the LIB alone, not its duplicate loose payloads.
 John confirmed successful original FA flight and the decal-removal revision on
 2026-09-18. Detailed control/damage behavior and Kapset compatibility remain
 unverified.
-Retain `--identity f22` as the explicit earlier three-shape replacement mode.
+Retain `--identity f22` as the explicit F-22 replacement mode, now including a hook-enabled F22.PT.
 The separate default follows John's request on 2026-09-18; retaining donor
 settings and sharing resources are agent implementation choices.
 
@@ -58,8 +59,10 @@ The source files bind the authored branches to the existing `_PLrudder`,
 `_PLhook`, `_PLleftFlap` and `_PLrightFlap` symbols. F31 and F14 donor import
 tables establish the existence of rudder and hook symbol references. OpenFA's
 state table supplies the endpoint interpretation used for this candidate.
-Live original-game producer values, sign and hook availability on the F-22
-remain **unknown** until reviewed or tested by the recipient.
+Static original-code review establishes that the hook capability permits the
+hook command, which sets/clears the deployed state consumed as `_PLhook` 0/1.
+The exporter enables that capability in both identity modes. Live hook appearance
+after this correction and rudder sign still need recipient confirmation.
 
 The candidate's data contract is:
 
@@ -103,7 +106,8 @@ and compile the complete shape through OpenFA. Imported machine code is treated
 as data, never executed by the corrected toolchain.
 
 Acceptance for this **experimental candidate** includes a parsed PT check that
-only names and geometry references differ, matching B/D/S alias bytes, no F22
+only names, geometry references and the single hook capability bit differ,
+matching B/D/S alias bytes, no F22
 resource collisions, and decoded geometry agreement for
 24 gear/flap/rudder/hook combinations, finless damage-body agreement, and exact
 LIB payload recovery. Synthetic tests cover jump bounds, geometry constants and

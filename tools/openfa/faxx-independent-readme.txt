@@ -7,7 +7,7 @@ retail-free developer/source kit. No rights to the original game's assets are
 granted by this package.
 
 Contents
-  FAXX.PT: separate F/A-XX identity, retaining donor F-22 settings/equipment.
+  FAXX.PT: separate F/A-XX identity, retaining donor F-22 settings/equipment with hook capability enabled.
   FAXX.SH: finless intact shape, split flap leaves and conditional hook.
   FAXX_A.SH and FAXX_C.SH: finless damaged bodies.
   FAXX_B.SH, FAXX_D.SH and FAXX_S.SH: unchanged donor fragment/shadow aliases.
@@ -20,7 +20,7 @@ Independent identity
   FAXX.SH and FAXX_S.SH. FA's type catalog enumerates PT files. The shadow
   filename also provides the base for the damaged/fragment family, so its
   FAXX name is necessary even though the shadow geometry is unchanged.
-  Cockpit, HUD, textures, equipment and numeric flight settings remain the
+  Cockpit, HUD, textures, equipment and numeric aerodynamic settings remain the
   stock F-22 references/settings and require the recipient's own retail files.
   We do not claim FA handles like T.O.R.E's flight adapters.
 
@@ -49,6 +49,7 @@ What the export implements
   Rudder +1 opens right leaves, -1 opens left, 0 closes both.
   Full leaf opening is +/-0.6 radians around the source flap hinge.
   Flap state -1 adds the authored 0.4-radian midpoint.
+  PT hook capability is enabled (flags 0x91 -> 0x93), allowing FA to operate it.
   Hook state 1 draws a rigid deployed hook; 0 draws no hook.
   The deployed hook bottom reaches source z=-23, the wheel-bottom plane.
 
@@ -63,9 +64,9 @@ Fitted export differences and limits
   Lower-detail LOD jumps are bypassed to keep the reviewed finless near model
   visible at every distance. Original shadow and detached fragment shapes are
   unchanged. There is no new drag, finless stability, or arrestment simulation.
-  H availability, rudder sign in live FA, palette appearance, drawing order and
-  hook clearance in live FA remain unverified. Hook geometry is conditional on
-  the original game actually supplying the hook state for this aircraft.
+  Live hook appearance after the capability correction, rudder sign, drawing
+  order and hook clearance remain to be checked. Use FA's hook control in flight;
+  enabling capability does not make the hook permanently visible.
 
 Validation
   The patched OpenFA exporter disables its emulated-x86 shape analysis.

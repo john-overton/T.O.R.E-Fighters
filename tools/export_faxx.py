@@ -242,8 +242,19 @@ IDENTITY_DONORS = {
 }
 
 
+def hook_equipped_pt(data):
+    """Enable the reviewed PLANE_TYPE hook bit, preserving all other flags."""
+    text = data.decode('ascii')
+    pattern = r'(?m)(^;[- ]*START OF PLANE_TYPE[- ]*\r?\n[ \t\r\n]*dword[ \t]+\$)([0-9A-Fa-f]+)(?=[ \t\r\n;]|$)'
+    matches = list(re.finditer(pattern, text))
+    if len(matches) != 1 or int(matches[0][2], 16) not in (0x91, 0x93):
+        raise ValueError('unreviewed F22 plane capability flags')
+    flags = matches[0]
+    return (text[:flags.start(2)] + '93' + text[flags.end(2):]).encode('ascii')
+
+
 def independent_pt(data):
-    """Change only the three identity strings and two geometry references."""
+    """Give the concept its own identity/shape family and enable its hook."""
     text = data.decode('ascii')
     replacements = {
         'ot_names': ['F/A-XX', 'F/A-XX Concept', 'FAXX.PT'],
@@ -258,7 +269,7 @@ def independent_pt(data):
         newline = '\r\n' if '\r\n' in match[0] else '\n'
         replacement = ':' + label + newline + ''.join('\tstring "'+v+'"'+newline for v in values)
         text = text[:match.start()] + replacement + text[match.end():]
-    return text.encode('ascii')
+    return hook_equipped_pt(text.encode('ascii'))
 
 
 def main():
@@ -276,8 +287,8 @@ def main():
         if hashlib.sha256(data).hexdigest() != DONORS[name][0]:
             parser.error(f'unreviewed donor {name}')
     identity_inputs = {}
-    if args.identity == 'faxx':
-        for name, expected in IDENTITY_DONORS.items():
+    for name, expected in IDENTITY_DONORS.items():
+        if args.identity == 'faxx' or name == 'F22.PT':
             data = (args.donors/name).read_bytes()
             if hashlib.sha256(data).hexdigest() != expected:
                 parser.error(f'unreviewed identity donor {name}')
@@ -322,6 +333,16 @@ def main():
                 'donor_sha256': hashlib.sha256(original).hexdigest(),
                 'sha256': hashlib.sha256(data).hexdigest(),
             }
+    else:
+        original = identity_inputs['F22.PT']
+        data = hook_equipped_pt(original)
+        (out/'F22.PT').write_bytes(data)
+        resources.append('F22.PT')
+        report['identity_resources'] = {'F22.PT': {
+            'donor_sha256': hashlib.sha256(original).hexdigest(),
+            'sha256': hashlib.sha256(data).hexdigest(),
+        }}
+    report['hook_capability'] = {'donor_flags': '0x91', 'exported_flags': '0x93', 'enabled_bit': '0x02'}
     (out/'export-report.json').write_text(json.dumps(report, indent=2)+'\n')
     # Import here to avoid a cycle in the independent validator's CLI.
     from validate_faxx_export import validate

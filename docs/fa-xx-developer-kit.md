@@ -114,7 +114,8 @@ The default `--identity faxx` creates FAXX.PT and six FAXX-named shapes. It need
 F22.PT and F22_B/D/S.SH alongside the three reviewed edited donors. The exporter
 rejects unreviewed donor hashes. It writes editable YAML, compiled SH files,
 reports, FAXX.LIB and `F-A-XX-FA-experimental.zip`. Use `--identity f22` only when
-the recipient explicitly wants the earlier F-22 replacement. It automatically
+the recipient explicitly wants the F-22 replacement, including its hook-enabled
+PT. It automatically
 runs `tools/validate_faxx_export.py` and checks the LIB with an independent Rust reader and also compares OpenFA-unpacked
 payloads. The default ZIP contains the new PT, six SH files, equivalent LIB, reports and
 recipient notes. Stock donor textures, cockpit and equipment remain shared
@@ -130,7 +131,8 @@ python3 tools/check_shape_roundtrip.py --tool .local/tools/openfa/target/debug/o
 
 `crates/tore-extract/examples/shape_json.rs` supplies the bounded geometry
 projection used by validation. `check_faxx_pt.rs` independently parses the new
-PT and compares every unchanged donor block. Set `TORE_EXPORT_BRANCHES=1` for explicit SH jump
+PT and checks that only the intended identity/reference fields and hook
+capability bit differ from the donor. Set `TORE_EXPORT_BRANCHES=1` for explicit SH jump
 handling. The gameplay reader's existing projection is unchanged. This is not
 a general SH virtual machine and never executes x86. Generated JSON, YAML,
 meshes, SH and LIB files remain local retail derivatives.

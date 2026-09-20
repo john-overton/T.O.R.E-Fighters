@@ -8,25 +8,26 @@ granted by this package.
 Contents
   F22.SH: finless intact donor, split inboard flap leaves, added hidden hook.
   F22_A.SH and F22_C.SH: corresponding finless damaged bodies.
-  FAXX.LIB: the same three modified files packed together, not another mod.
+  F22.PT: donor definition with hook capability enabled.
+  FAXX.LIB: these four modified files packed together, not another mod.
   export-report.json and validation.json: file hashes and static checks.
 
 Target
-  An F-22 replacement using the reviewed stock FA_2.LIB shapes. The current
-  aircraft definition, cockpit, textures, stores, flight model, fragments and
+  An F-22 replacement using the reviewed stock FA_2.LIB shapes. The donor
+  aircraft definition with hook capability enabled, cockpit, textures, stores, flight model, fragments and
   shadow are supplied by the recipient's installation. There is no FAXX.PT or
   new aircraft registration. Select the existing F-22 after integration.
-  Original F-22 handling is retained through the unchanged aircraft definition.
+  Original F-22 handling is retained through the unchanged aerodynamic settings.
   We do not claim original FA handles like T.O.R.E's flight adapters.
 
 Integration for the recipient's FA library maintainer
   Back up the existing installation/library first. Use your established FA
-  library editor or override workflow to replace the three identically named
-  SH entries, keeping other resources intact. The loose files and FAXX.LIB are
+  library editor or override workflow to replace the four identically named
+  SH/PT entries, keeping other resources intact. The loose files and FAXX.LIB are
   alternatives. Do not install both or rename this archive over a stock LIB.
   FAXX.LIB is an interchange archive; automatic loading of that filename is not
   established. Installation load order and Kapset resource compatibility need
-  checking on your setup. Restore the backed-up three entries to undo the edit.
+  checking on your setup. Restore the backed-up four entries to undo the edit.
   Existing stock _F22 texture references are retained. A different Kapset skin
   or donor layout may need reconciliation. No Kapset files were available.
 
