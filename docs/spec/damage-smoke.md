@@ -29,8 +29,13 @@ Ownship emits while damaged and alive; residual puffs persist after destruction.
 No smoke is emitted by an undamaged aircraft or a motor before ignition or after
 burnout. Existing smoke continues to disperse after its source stops or disappears.
 
-Smoke samples use fixed 120 Hz simulation time. Missile puffs emit each tick and
-last 4 seconds; aircraft puffs emit every 2 ticks and last 8 seconds. Puff radii
+Smoke samples use fixed 120 Hz simulation time. Missile puffs emit every 2 ticks (60 per second) and
+last 4 seconds; aircraft puffs emit every 3 ticks (40 per second) and last 8 seconds.
+These agent-selected fitted rates increase separation between plumes, following
+John's 2026-09-20 request and supplied retail screenshot. The image is a visual
+reference only: original emission timing remains unknown. At 1,200 feet/second,
+missile puff centers are 20 feet apart; at 600 feet/second, aircraft puff centers
+are 15 feet apart before rise. Puff radii
 start at 4/8 feet and grow by 6/8 feet per second for missile/aircraft smoke.
 Puffs rise 2 feet per second, fade linearly, and have no gameplay sensor effect.
 The oldest puff is discarded above a total 8,192-puff budget. Reset clears smoke.

@@ -9,6 +9,12 @@ pub enum Kind {
     Aircraft,
 }
 impl Kind {
+    fn emission_interval(self) -> u64 {
+        match self {
+            Self::Missile => 2,
+            Self::Aircraft => 3,
+        }
+    }
     pub fn lifetime(self) -> u16 {
         match self {
             Self::Missile => 480,
@@ -49,7 +55,7 @@ impl Smoke {
         }
         self.puffs.retain(|p| p.age < p.kind.lifetime());
         for (position, kind) in sources {
-            if kind == Kind::Aircraft && !self.ticks.is_multiple_of(2) {
+            if !self.ticks.is_multiple_of(kind.emission_interval()) {
                 continue;
             }
             if self.puffs.len() == MAX_PUFFS {
@@ -69,10 +75,10 @@ mod tests {
     #[test]
     fn independent_fixed_step_cadence_lifetime_and_capacity() {
         let mut smoke = Smoke::default();
-        for _ in 0..120 {
+        for tick in 1..=120 {
             smoke.step([
-                ([0., 1000., 0.], Kind::Missile),
-                ([0., 2000., 0.], Kind::Aircraft),
+                ([0., 1000., f64::from(tick) * 10.], Kind::Missile),
+                ([0., 2000., f64::from(tick) * 5.], Kind::Aircraft),
             ]);
         }
         assert_eq!(
@@ -81,7 +87,7 @@ mod tests {
                 .iter()
                 .filter(|p| p.kind == Kind::Missile)
                 .count(),
-            120
+            60
         );
         assert_eq!(
             smoke
@@ -89,9 +95,15 @@ mod tests {
                 .iter()
                 .filter(|p| p.kind == Kind::Aircraft)
                 .count(),
-            60
+            40
         );
-        assert!((smoke.puffs[0].position[1] - 1000. - 119. * 2. / 120.).abs() < 1e-8);
+        assert!((smoke.puffs[0].position[1] - 1000. - 118. * 2. / 120.).abs() < 1e-8);
+        for (kind, spacing) in [(Kind::Missile, 20.), (Kind::Aircraft, 15.)] {
+            let positions: Vec<_> = smoke.puffs.iter().filter(|p| p.kind == kind).collect();
+            assert!(positions.windows(2).all(|pair| {
+                (pair[1].position[2] - pair[0].position[2] - spacing).abs() < 1e-8
+            }));
+        }
         for _ in 0..480 {
             smoke.step([]);
         }
@@ -100,6 +112,7 @@ mod tests {
             smoke.step([]);
         }
         assert!(smoke.puffs.is_empty());
+        smoke.step([]);
         smoke.step((0..MAX_PUFFS + 4).map(|i| ([i as f64, 0., 0.], Kind::Missile)));
         assert_eq!(smoke.puffs.len(), MAX_PUFFS);
         assert_eq!(smoke.puffs[0].position[0], 4.);
