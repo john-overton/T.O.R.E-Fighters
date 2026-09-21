@@ -97,9 +97,10 @@ unknown. Rendering continues at the normal frame rate.
 
 Engine contrails are an opinionated addition requested by John on 2026-09-21.
 Each engine emits 10 pale puffs per second behind its outlet, including healthy
-aircraft. The trail builds as the aircraft moves and retains 2 statute miles
-(10,560 feet) of traveled path. Opacity stays at 0.65 through 1.5 miles (7,920
-feet), then fades linearly to zero at 2 miles, per John's follow-up request.
+aircraft. The trail builds as the aircraft moves and retains 5 statute miles
+(26,400 feet) of traveled path. Opacity stays at 0.65 through 4 miles (21,120
+feet), then fades linearly to zero over the final mile, per John's follow-up
+request on 2026-09-21.
 Distance follows the outlet path through turns and speed changes. Puffs remain
 at their emitted world positions. Contrails use the reduced missile radius and
 growth, capped at 14 feet after four seconds, an agent-selected fit.
@@ -120,7 +121,7 @@ center of reviewed nozzle lateral/vertical bounds and the aftmost nozzle point,
 plus 2 feet aft. A-4E, Su-25, F-22 and F/A-XX use a fitted fallback: 2 feet behind
 the model's aftmost point, at body-center height, with twin outlets offset by
 15% of the model half-span. These fallback points are not recovered engine
-coordinates. Absent sources advance their residual trail distance by 22 feet
+coordinates. Absent sources advance their residual trail distance by 55 feet
 per tick, clearing it within four seconds, an agent-selected cleanup fit.
 
 All smoke has no gameplay sensor effect. Combat smoke and cosmetic contrail

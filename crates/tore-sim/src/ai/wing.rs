@@ -778,6 +778,8 @@ pub struct MotionSummary {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RejectReason {
+    /// Constant-motion training targets do not accept maneuver/formation orders.
+    Dummy,
     /// The maneuver eligibility gate rejected the recipient's state.
     IneligibleState(u32),
 }

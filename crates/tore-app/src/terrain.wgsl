@@ -1,6 +1,10 @@
 struct Band { info:vec4<f32>, ramp:vec4<f32> }
-struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32> }
+struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32> }
 @group(0) @binding(0) var<uniform> scene:Scene;
+// Only target-camera readbacks use alpha as scenery/subject coverage.
+fn scenery(color:vec3<f32>)->vec4<f32> {
+ return vec4<f32>(color,select(1.0,0.0,scene.view.y>0.5));
+}
 // Retail terrain and sky artwork is stored as weather-palette indices, so it is
 // uploaded unresolved and the live palette is applied here every frame.
 @group(0) @binding(1) var tiles:texture_2d_array<u32>;
@@ -216,7 +220,7 @@ fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec
 fn world_vertex(position:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec3<f32>,index:f32)->VertexOut {
  let p=position-scene.eye.xyz;
  let z=dot(p,scene.forward.xyz);
- let near=1.0;let far=2200000.0;let f=1.7320508*scene.up.w;
+ let near=max(scene.view.x,1.0);let far=2200000.0;let f=1.7320508*scene.up.w;
  var out:VertexOut;
  out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
  let fog_mode=(u32(max(index,0.0))/256u)%4u;
@@ -241,13 +245,13 @@ fn world_vertex(position:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec3<f32>,index:
 @fragment fn terrain_fragment(in:VertexOut)->@location(0) vec4<f32>{
  let receiver=surface_normal(in.direction);
  let normal=select(receiver,normalize(in.terrain_normal),dot(in.terrain_normal,in.terrain_normal)>0.1 && smooth_weather());
- if in.layer<0.0 {return vec4<f32>(aerial_perspective(surface_color(in.color,in.direction,normal,false,receiver),in.direction,in.altitude),1.0);}
+ if in.layer<0.0 {return scenery(aerial_perspective(surface_color(in.color,in.direction,normal,false,receiver),in.direction,in.altitude));}
  var remaps=vec2<f32>(-1.0);
  if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
  let tex=sample_tile(in.uv,i32(in.layer),0,-1,in.light_row,remaps);
  // Fitted bilinear coverage boundary; discarded water writes no depth.
  if tex.a<0.5 {discard;}
- return vec4<f32>(aerial_perspective(surface_color(tex.rgb,in.direction,normal,false,receiver),in.direction,in.altitude),1.0);
+ return scenery(aerial_perspective(surface_color(tex.rgb,in.direction,normal,false,receiver),in.direction,in.altitude));
 }
 // User-requested material. Pink is a mask; metal pixels retain their source RGB.
 fn engine_texel(at:vec2<i32>,heat:f32)->vec3<f32> {
@@ -677,13 +681,13 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
  var cloud_distance=2000000.0;
  if ray.y< -0.000001 {cloud_distance=min(cloud_distance,max(scene.eye.y,0.0)/(-ray.y));}
  color=cloud_occlusion(color,ray*cloud_distance,scene.eye.y+ray.y*cloud_distance);
- return vec4<f32>(color,1.0);
+ return scenery(color);
 }
 struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32>, @location(1) distance:f32 }
 @vertex fn vapor_vertex(@location(0) position:vec3<f32>,@location(1) color:vec4<f32>)->VaporOut {
  let p=position-scene.eye.xyz;
  let z=dot(p,scene.forward.xyz);
- let near=1.0;let far=2200000.0;let f=1.7320508*scene.up.w;
+ let near=max(scene.view.x,1.0);let far=2200000.0;let f=1.7320508*scene.up.w;
  var out:VaporOut;
  out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
  out.color=color;out.distance=length(p);return out;
@@ -710,14 +714,14 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
  let tex=weather_tile(in.uv,i32(in.layer),0,-1,-1,ray_rows(in.distance,in.altitude));
  if tex.a<0.5 {discard;}
  let lit=cloud_solar_glow(tex.rgb,normalize(in.direction),1.0-clamp(haze(length(in.direction)),0.0,1.0));
- return vec4<f32>(aerial_perspective(lit,in.direction,in.altitude),1.0);
+ return scenery(aerial_perspective(lit,in.direction,in.altitude));
 }
 
 struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) opacity:f32, @location(2) distance:f32 }
 @vertex fn smoke_vertex(@location(0) center:vec3<f32>,@location(1) offset:vec2<f32>,@location(2) uv:vec2<f32>,@location(3) opacity:f32)->SmokeOut {
  let position=center+scene.right.xyz*offset.x+scene.up.xyz*offset.y;
  let p=position-scene.eye.xyz;let z=dot(p,scene.forward.xyz);
- let near=1.0;let far=2200000.0;let f=1.7320508*scene.up.w;
+ let near=max(scene.view.x,1.0);let far=2200000.0;let f=1.7320508*scene.up.w;
  var out:SmokeOut;
  out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
  out.uv=uv;out.opacity=opacity;out.distance=length(p);return out;

@@ -43,7 +43,7 @@ pub struct World {
     pub smooth_weather: bool,
     pub visual_bands: Vec<tore_formats::weather::Layer>,
     pub no_sun_whiteout: bool,
-    pub auxiliary_presentations: [tore_sim::environment::Presentation; 3],
+    pub auxiliary_presentations: [tore_sim::environment::Presentation; 4],
     pub weather_presentation: tore_sim::environment::Presentation,
     /// The palette resolved for the presented camera altitude this frame.
     pub palette: [[u8; 3]; 256],
@@ -896,7 +896,7 @@ impl World {
     }
 }
 pub struct Camera {
-    /// 0 main, 1 rear mirror, 2 forward panel, 3 other panel.
+    /// 0 main, 1 rear mirror, 2 forward panel, 3 other panel, 4 target.
     pub weather_slot: usize,
     pub position: [f32; 3],
     pub yaw: f32,
@@ -904,6 +904,8 @@ pub struct Camera {
     pub roll: f32,
     pub view_fraction: f32,
     pub zoom: f32,
+    /// Near clipping distance in feet; target magnification fits it to the subject.
+    pub near_clip: f32,
     pub keys: BTreeSet<String>,
 }
 impl Camera {
@@ -916,6 +918,7 @@ impl Camera {
             roll: 0.,
             view_fraction: 1.,
             zoom: 1.,
+            near_clip: 1.,
             keys: BTreeSet::new(),
         }
     }

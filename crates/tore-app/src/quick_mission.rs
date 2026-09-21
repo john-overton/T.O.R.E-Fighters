@@ -88,6 +88,10 @@ impl QuickMission {
         // the duplicate. Draft indices below refer to this six-row list.
         options.fields[15]
             .retain(|label| !label.trim_end_matches('.').eq_ignore_ascii_case("overcast"));
+        for field in [5, 8, 11, 22, 25, 28] {
+            options.fields[field].truncate(4);
+            options.fields[field].push("Dummy (400 KTS)".into());
+        }
         // Metadata for the full retail catalog is also cached. Only expose the
         // exact aircraft identities whose flight profiles were imported.
         let mut catalog: Vec<(String, String)> = AircraftId::SELECTABLE
@@ -253,8 +257,8 @@ impl QuickMission {
     ///
     /// `fitted`: an out-of-range wing skill or count would make the payload an
     /// error, and this infallible signature has nowhere to put one, so it
-    /// launches nothing. Rule: the decoded setup screen offers exactly four
-    /// skills and counts 0 through 5 per wing (`docs/formats/quick-mission.md`),
+    /// launches nothing. Rule: the decoded setup screen offers four
+    /// experience levels plus Dummy and counts 0 through 5 per wing (`docs/formats/quick-mission.md`),
     /// so the menu cannot reach that state; the empty result is a visible
     /// failure rather than a silent clamp if it ever does.
     pub fn dummy_wings(&self) -> Vec<(AircraftId, usize)> {
@@ -991,6 +995,25 @@ mod tests {
         assert!(matches!(q.right(true), Action::None));
         q.right(false)
     }
+    #[test]
+    fn all_six_skill_selectors_launch_dummy_members() {
+        let mut q = setup();
+        for field in [4, 7, 10, 21, 24, 27] {
+            assert_eq!(q.values(field + 1)[4], "Dummy (400 KTS)");
+            q.draft.values[field] = 2;
+            q.draft.values[field + 1] = 4;
+            q.draft.values[field + 2] = 0;
+        }
+        let wings = q
+            .wing_launches(Some(EnemySkillOverride::AllAverage))
+            .unwrap();
+        assert_eq!(wings.len(), 6);
+        assert_eq!(wings[0].count(), 1); // Human slot is excluded.
+        assert!(wings.iter().all(|w| w.dummy));
+        q.draft.values[22] = 3;
+        assert!(!q.wing_launches(None).unwrap()[3].dummy);
+    }
+
     #[test]
     fn right_click_reverses_values_wraps_and_keeps_player_count_positive() {
         let mut q = setup();

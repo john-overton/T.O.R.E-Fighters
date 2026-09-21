@@ -38,6 +38,7 @@ mod scope;
 mod sim_renderer;
 mod smoke_renderer;
 mod surface_lighting;
+mod target_window;
 mod terrain;
 mod weapon_hud;
 mod weather;
@@ -111,6 +112,7 @@ struct App {
     screen: Screen,
     frame_time: Instant,
     instrument_time: Instant,
+    target_refresh: target_window::Refresh,
     menu: Menu,
     audio: Option<audio::Audio>,
     wing_recipient: Option<u8>,
@@ -1183,6 +1185,7 @@ impl App {
                         });
                     match built {
                         Ok(bridge) => {
+                            bridge.mirror_pose_out(&mut self.combat.state.targets);
                             self.combat.ai_poses = !bridge.is_empty();
                             if bridge.is_empty() {
                                 self.flight_ui
@@ -1853,6 +1856,9 @@ impl ApplicationHandler for App {
                                     self.flight.speed,
                                 );
                             }
+                            if let Some(camera) = self.combat.target_camera(&self.flight) {
+                                self.world.step_view_weather(&camera, self.flight.speed);
+                            }
                             let turbulence_cue = step_turbulence(
                                 &mut self.turbulence,
                                 &mut self.turbulence_rng,
@@ -2061,6 +2067,15 @@ impl ApplicationHandler for App {
                             Ok(previews) => {
                                 self.performance.completed_previews += previews.len();
                                 for (page, pixels) in previews {
+                                    if page == 4 {
+                                        let requested = self.instruments.target_preview.take();
+                                        if requested
+                                            != self.combat.state.display_target().map(|t| t.id)
+                                        {
+                                            continue;
+                                        }
+                                        self.instruments.camera_target = requested;
+                                    }
                                     self.instruments.cameras.insert(page, pixels);
                                 }
                             }
@@ -2070,25 +2085,44 @@ impl ApplicationHandler for App {
                                 return;
                             }
                         }
-                        renderer.dummies(self.combat.dummy_geometry(&self.camera, &self.world));
-                        renderer.combat(&self.combat.vertices(
-                            &self.hornet,
-                            &presented,
-                            &self.camera,
-                            &self.world,
-                        ));
                         renderer.airports(
                             &self
                                 .world
                                 .visible_static_vertices(&self.combat.state.targets),
                         );
-                        if now.duration_since(self.instrument_time).as_millis() >= 100
-                            || self.smoke_test
-                        {
-                            self.instrument_time = now;
-                            for page in [2, 3] {
-                                if self.instruments.pages.contains(&page) {
-                                    let camera = self.hornet.panel_camera(&presented, page);
+                        let target_due = self.target_refresh.due(now) || self.smoke_test;
+                        let other_due = now.duration_since(self.instrument_time).as_millis() >= 100
+                            || self.smoke_test;
+                        if target_due || other_due {
+                            if other_due {
+                                self.instrument_time = now;
+                            }
+                            for page in [2, 3, 4] {
+                                if self.instruments.pages.contains(&page)
+                                    && if page == 4 { target_due } else { other_due }
+                                {
+                                    let camera = if page == 4 {
+                                        let Some(camera) = self.combat.framed_target_camera(
+                                            &presented,
+                                            &self.hornet,
+                                            &self.world,
+                                        ) else {
+                                            self.instruments.cameras.remove(&4);
+                                            self.instruments.camera_target = None;
+                                            continue;
+                                        };
+                                        camera
+                                    } else {
+                                        self.hornet.panel_camera(&presented, page)
+                                    };
+                                    renderer
+                                        .dummies(self.combat.dummy_geometry(&camera, &self.world));
+                                    renderer.combat(&self.combat.vertices(
+                                        &self.hornet,
+                                        &presented,
+                                        &camera,
+                                        &self.world,
+                                    ));
                                     renderer.aircraft(
                                         &self.hornet,
                                         &presented,
@@ -2101,9 +2135,27 @@ impl ApplicationHandler for App {
                                             .scene_pixels(&camera, &self.world, 138, 114, false)
                                             .map(|p| {
                                                 self.instruments.cameras.insert(page, p);
+                                                if page == 4 {
+                                                    self.instruments.camera_target = self
+                                                        .combat
+                                                        .state
+                                                        .display_target()
+                                                        .map(|t| t.id);
+                                                }
+                                                true
                                             })
                                     } else {
-                                        renderer.request_preview(page, &camera, &self.world)
+                                        renderer
+                                            .request_preview(page, &camera, &self.world)
+                                            .inspect(|submitted| {
+                                                if page == 4 && *submitted {
+                                                    self.instruments.target_preview = self
+                                                        .combat
+                                                        .state
+                                                        .display_target()
+                                                        .map(|t| t.id);
+                                                }
+                                            })
                                     };
                                     if let Err(e) = result {
                                         self.error = Some(e);
@@ -2113,6 +2165,13 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
+                        renderer.dummies(self.combat.dummy_geometry(&self.camera, &self.world));
+                        renderer.combat(&self.combat.vertices(
+                            &self.hornet,
+                            &presented,
+                            &self.camera,
+                            &self.world,
+                        ));
                         renderer.aircraft(
                             &self.hornet,
                             &presented,
@@ -2125,6 +2184,15 @@ impl ApplicationHandler for App {
                             self.combat
                                 .readout(&self.flight, self.instruments.rcs_scale_nmi()),
                         );
+                        if let Some(target) = self
+                            .instruments
+                            .combat
+                            .as_mut()
+                            .and_then(|c| c.target.as_mut())
+                            && let Some(wings) = &self.ai_wings
+                        {
+                            target.with_activity(wings);
+                        }
                         // Hover feedback uses the same projection as the click,
                         // so the selector marks the contact a click would take.
                         let window = renderer.window.inner_size();
@@ -2488,6 +2556,7 @@ fn ai_probe_run(
         combat.state.configuration(),
         resources,
     )?;
+    bridge.mirror_pose_out(&mut combat.state.targets);
     println!(
         "AI probe: aircraft={} actors={} ticks={ticks} enemy_skill={enemy_skill:?}",
         hornet.profile.name,
@@ -4209,6 +4278,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         screen: initial_screen,
         frame_time: Instant::now(),
         instrument_time: Instant::now(),
+        target_refresh: target_window::Refresh::new(),
         menu,
         audio,
         wing_recipient: None,

@@ -562,15 +562,75 @@ impl Combat {
         }
         Ok(events)
     }
+    pub fn target_camera(&self, player: &flight::State) -> Option<Camera> {
+        let target = self.state.display_target()?;
+        let (position, _) = self.presentation.pose(target, self.ai_poses);
+        Some(crate::target_window::camera(player.position, position))
+    }
+
+    pub fn framed_target_camera(
+        &self,
+        player: &flight::State,
+        aircraft: &Airframe,
+        world: &World,
+    ) -> Option<Camera> {
+        let target = self.state.display_target()?;
+        let mut camera = self.target_camera(player)?;
+        if let Some(object) = self.airport_objects.iter().find(|o| o.id == target.id) {
+            let bounds = object.bounds;
+            let basis = Basis::new(bounds.heading, bounds.pitch, bounds.bank);
+            let corners = (0..8).map(|corner| {
+                let local: [f64; 3] = std::array::from_fn(|i| {
+                    bounds.half[i] * if corner & (1 << i) == 0 { -1. } else { 1. }
+                });
+                std::array::from_fn(|i| {
+                    bounds.center[i]
+                        + basis.right[i] * local[0]
+                        + basis.up[i] * local[1]
+                        + basis.forward[i] * local[2]
+                })
+            });
+            crate::target_window::fit(&mut camera, corners);
+        } else {
+            let model = self
+                .dummy_models
+                .iter()
+                .find(|h| Some(h.profile.id) == target.aircraft)
+                .unwrap_or(aircraft);
+            let mut pose = player.clone();
+            let (position, angles) = self.presentation.pose(target, self.ai_poses);
+            pose.position = position;
+            [pose.yaw, pose.pitch, pose.bank] = angles;
+            pose.damage_fraction = target.damage_fraction();
+            pose.damage_variant = target
+                .localized_damage
+                .structural_section
+                .map(|s| s as usize);
+            pose.damage_regions = target.localized_damage.fractions(target.initial_hp);
+            pose.gear = 0.;
+            pose.flaps = 0.;
+            pose.exhaust = 0.;
+            pose.bay = 0.;
+            pose.elevator = 0.;
+            pose.aileron = 0.;
+            pose.rudder = 0.;
+            pose.brake = 0.;
+            pose.hook = 0.;
+            let vertices = model.vertices(&pose, &camera, world);
+            crate::target_window::fit(
+                &mut camera,
+                vertices
+                    .chunks_exact(10)
+                    .map(|v| [f64::from(v[0]), f64::from(v[1]), f64::from(v[2])]),
+            );
+        }
+        Some(camera)
+    }
+
     pub fn readout(&self, s: &flight::State, rcs_scale: f64) -> crate::instruments::CombatReadout {
         let i = self.state.selected;
         crate::instruments::CombatReadout {
             weapon: self.state.configuration().stations[i].weapon.name.clone(),
-            guided: self.state.configuration().stations[i]
-                .weapon
-                .seeker
-                .signature
-                != 0,
             ammo: self.state.rounds(i),
             systems: format!(
                 "HP{} V{} R{} E{}",
@@ -602,16 +662,14 @@ impl Combat {
                     })
                 }),
             loaded: self.range,
-            target: self
-                .state
-                .designated()
-                .and_then(|id| self.state.targets.iter().find(|t| t.id == id))
-                .map(|t| (t.id, t.hp, self.state.can_lock(launcher(s)))),
-            target_name: self
-                .state
-                .designated()
-                .and_then(|id| self.ground_name(id))
-                .map(str::to_owned),
+            target: self.state.display_target().map(|target| {
+                let name = self
+                    .ground_name(target.id)
+                    .map(str::to_owned)
+                    .or_else(|| target.aircraft.map(|id| id.label().to_owned()))
+                    .unwrap_or_else(|| format!("CONTACT {}", target.id));
+                crate::target_window::Readout::new(target, s, name)
+            }),
             scope: crate::scope::scope(&self.state, s),
             rcs: crate::scope::rcs(&self.state, s, rcs_scale),
         }

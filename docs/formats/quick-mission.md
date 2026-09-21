@@ -32,7 +32,7 @@ constant-pointer grammar for static branches; it never executes code.
 | --- | --- | --- |
 | 3, 20 | Friendly/enemy nationality | Same 60-entry list, source order/spelling preserved |
 | 4, 7, 10; 21, 24, 27 | Wing counts | Six choices, 0 through 5 |
-| 5, 8, 11; 22, 25, 28 | Wing skills | Four choices, novice through ace |
+| 5, 8, 11; 22, 25, 28 | Wing skills | Four retail choices, novice through ace. The host appends [Dummy (400 KTS)](../spec/dummy-aircraft.md) as index 4. |
 | 6, 9, 12; 23, 26, 29 | Wing aircraft | Dynamic GetNames; ID 6 uses player filter, others use other-wing filter |
 | 13 | Theater | 16 source names; source index 14 is Ukraine |
 | 14 | Altitude | 5,000 / 10,000 / 20,000 / 40,000 feet |

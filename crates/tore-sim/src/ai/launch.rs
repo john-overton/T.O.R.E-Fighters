@@ -36,6 +36,9 @@ pub const WINGS_PER_SIDE: u8 = 3;
 /// most four AI members because the player occupies one slot, which is the
 /// host's subtraction, not this module's.
 pub const MAX_WING_MEMBERS: usize = 5;
+/// User-requested training mode, not a fifth experience-table entry.
+pub const DUMMY_SKILL: i32 = 4;
+pub const DUMMY_SPEED_FPS: f64 = 400. * crate::sensors::FEET_PER_NAUTICAL_MILE / 3600.;
 
 /// Seed for the local draw state required by [`resolve_experience`].
 ///
@@ -111,8 +114,10 @@ pub struct WingLaunch {
     pub aircraft: AircraftId,
     /// The level chosen for this wing on the setup screen, kept even when the
     /// enemy override has replaced the members' levels, so the origin of the
-    /// setting stays visible to the host.
+    /// setting stays visible to the host. Dummy uses an inactive Novice placeholder.
     pub selected_level: Experience,
+    /// Constant-heading 400-knot training target, independent of experience.
+    pub dummy: bool,
     pub members: Vec<MemberLaunch>,
 }
 
@@ -136,7 +141,7 @@ impl WingLaunch {
 
 /// One raw row of the setup screen, as a host reads it out of the menu.
 ///
-/// `skill_level` is the menu position 0 Novice through 3 Ace; it is validated,
+/// `skill_level` is the menu position 0 Novice through 3 Ace, or 4 Dummy; it is validated,
 /// never clamped. `count` is the number of aircraft this wing launches, after
 /// the host has removed any slot the player occupies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,7 +161,7 @@ pub struct WingSelection {
 /// [`ExperienceOrigin::EnemyOverride`], and friendly wings are untouched.
 ///
 /// Wings are returned in the order given, empty wings included, so a host can
-/// keep its own wing numbering. A skill level outside 0..3 is
+/// keep its own wing numbering. A skill selection outside 0..=4 is
 /// [`AiError::InvalidInput`], as is a count above [`MAX_WING_MEMBERS`].
 ///
 /// [`ExperienceOrigin::EnemyOverride`]: super::experience::ExperienceOrigin::EnemyOverride
@@ -176,12 +181,21 @@ pub fn resolve_wings(
         }
         let resolved = resolve_experience(
             ExperienceRequest::QuickMission {
-                selected: selection.skill_level,
+                selected: if selection.skill_level == DUMMY_SKILL {
+                    0
+                } else {
+                    selection.skill_level
+                },
             },
             &mut random,
         )?;
         let is_enemy = selection.wing.side.is_enemy();
-        let experience = apply_enemy_override(resolved, is_enemy, enemy_override);
+        let dummy = selection.skill_level == DUMMY_SKILL;
+        let experience = if dummy {
+            resolved
+        } else {
+            apply_enemy_override(resolved, is_enemy, enemy_override)
+        };
         let members = (0..selection.count)
             .map(|member| MemberLaunch {
                 member: member as u8,
@@ -193,6 +207,7 @@ pub fn resolve_wings(
             wing: selection.wing,
             aircraft: selection.aircraft,
             selected_level: resolved.level,
+            dummy,
             members,
         });
     }
@@ -223,6 +238,24 @@ mod tests {
             count,
             skill_level,
         }
+    }
+
+    #[test]
+    fn dummy_is_a_mode_not_an_experience_table_index() {
+        let wings = resolve_wings(
+            &[selection(Side::Enemy, 0, 2, DUMMY_SKILL)],
+            Some(EnemySkillOverride::AllAverage),
+        )
+        .unwrap();
+        assert!(wings[0].dummy);
+        assert_eq!(wings[0].selected_level, Experience::Novice);
+        assert!(
+            wings[0]
+                .members
+                .iter()
+                .all(|m| m.experience.level == Experience::Novice)
+        );
+        assert!(!resolve_wings(&[selection(Side::Enemy, 0, 2, 3)], None).unwrap()[0].dummy);
     }
 
     #[test]
@@ -284,7 +317,7 @@ mod tests {
 
     #[test]
     fn invalid_levels_and_sizes_are_errors_not_clamps() {
-        for level in [-1, 4, 99] {
+        for level in [-1, 5, 99] {
             assert_eq!(
                 resolve_wings(&[selection(Side::Friendly, 0, 1, level)], None),
                 Err(AiError::InvalidInput("experience level outside 0..3"))

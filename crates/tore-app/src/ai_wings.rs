@@ -462,7 +462,11 @@ impl AiWings {
                         z: target.position[2],
                     }),
                 };
-                mission.push(AiActor::new(setup).map_err(|e| e.to_string())?);
+                let mut actor = AiActor::new(setup).map_err(|e| e.to_string())?;
+                if wing.dummy {
+                    actor.set_dummy();
+                }
+                mission.push(actor);
                 slots.push(Slot {
                     id: target.id,
                     side: wing.wing.side,
@@ -854,7 +858,7 @@ impl AiWings {
     /// The AI pose becomes the target pose, so the renderer, the player's
     /// sensors, the missile collision sweep and the damage model all see one
     /// world with one authority per aircraft.
-    fn mirror_pose_out(&self, targets: &mut [live::Target]) {
+    pub fn mirror_pose_out(&self, targets: &mut [live::Target]) {
         for slot in &self.slots {
             let Some(actor) = self.mission.actor(slot.id) else {
                 continue;
@@ -1573,6 +1577,48 @@ mod tests {
             target(3, [0., 20000., 40000.], std::f64::consts::PI),
             target(4, [1500., 20000., 40000.], std::f64::consts::PI),
         ]
+    }
+
+    #[test]
+    fn dummy_mode_reaches_live_targets_without_changing_other_wings() {
+        let mut payload = payload(None);
+        payload[1].dummy = true;
+        let mut targets = spawned();
+        let mut wings =
+            AiWings::build_with(&payload, &targets, 0, |_| Ok((aircraft(), None))).unwrap();
+        wings.mirror_pose_out(&mut targets);
+        assert!(!wings.mission.actor(1).unwrap().is_dummy());
+        assert!(wings.mission.actor(3).unwrap().is_dummy());
+        let start = targets[2].position;
+        let velocity = targets[2].velocity;
+        for _ in 0..120 {
+            wings
+                .advance(
+                    player_object([0., 20000., -20000.]),
+                    &mut targets,
+                    &|_, _| 0.,
+                )
+                .unwrap();
+        }
+        for i in 0..3 {
+            assert!((targets[2].position[i] - start[i] - velocity[i]).abs() < 1e-7);
+        }
+        assert_eq!(targets[2].velocity, velocity);
+        assert!(
+            (tore_sim::attitude::dot(velocity, velocity).sqrt() - launch::DUMMY_SPEED_FPS).abs()
+                < 1e-9
+        );
+        targets[2].hp = 0;
+        let stopped = targets[2].position;
+        wings
+            .advance(
+                player_object([0., 20000., -20000.]),
+                &mut targets,
+                &|_, _| 0.,
+            )
+            .unwrap();
+        assert_eq!(targets[2].position, stopped);
+        assert!(!wings.mission.actor(3).unwrap().alive());
     }
 
     fn build(enemy_override: Option<EnemySkillOverride>) -> (AiWings, Vec<live::Target>) {

@@ -179,6 +179,7 @@ pub struct AiActor {
     activity: Activity,
     last_input: PilotInput,
     alive: bool,
+    dummy: bool,
 }
 
 impl AiActor {
@@ -201,7 +202,25 @@ impl AiActor {
             activity: Activity::Idle,
             last_input: PilotInput::default(),
             alive: true,
+            dummy: false,
         })
+    }
+
+    /// Opinionated training target requested on 2026-09-21.
+    pub fn set_dummy(&mut self) {
+        self.dummy = true;
+        self.sensors = None;
+        self.flight.radar = false;
+        self.flight.pitch = 0.;
+        self.flight.bank = 0.;
+        self.flight.speed = super::launch::DUMMY_SPEED_FPS;
+        self.flight.velocity = crate::attitude::Basis::new(self.flight.yaw, 0., 0.)
+            .forward
+            .map(|v| v * super::launch::DUMMY_SPEED_FPS);
+    }
+
+    pub fn is_dummy(&self) -> bool {
+        self.dummy
     }
 
     pub fn id(&self) -> u32 {
@@ -297,6 +316,11 @@ impl AiActor {
         request: super::wing::WingRequest,
         tick: u64,
     ) -> Result<super::wing::ReceiverOutcome> {
+        if self.dummy {
+            return Ok(super::wing::ReceiverOutcome::Rejected(
+                super::wing::RejectReason::Dummy,
+            ));
+        }
         self.controller
             .prepare_order(self.flight.yaw.to_degrees(), self.speed_limits());
         self.controller.receive_order(request, tick)
@@ -467,6 +491,18 @@ impl AiMission {
         if !actor.alive() {
             actor.activity = Activity::Destroyed;
             output.activities.push((actor_id, Activity::Destroyed));
+            return Ok(());
+        }
+
+        if actor.dummy {
+            for i in 0..3 {
+                actor.flight.position[i] += actor.flight.velocity[i] * flight::DT;
+            }
+            actor.flight.ticks += 1;
+            actor.pending_threats.clear();
+            actor.pending_events.clear();
+            actor.activity = Activity::Idle;
+            output.activities.push((actor_id, Activity::Idle));
             return Ok(());
         }
 
@@ -1410,6 +1446,68 @@ mod tests {
 
     fn flat(_x: f64, _z: f64) -> f64 {
         0.0
+    }
+
+    #[test]
+    fn dummy_holds_400_knots_without_decisions_and_stops_on_death() {
+        let mut mission = one_v_one();
+        for actor in mission.actors_mut() {
+            actor.set_dummy();
+        }
+        let initial: Vec<_> = mission
+            .actors()
+            .iter()
+            .map(|a| {
+                (
+                    a.flight.position,
+                    a.flight.velocity,
+                    a.flight.fuel,
+                    a.rounds_remaining(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            mission
+                .actor_mut(1)
+                .unwrap()
+                .order(
+                    super::super::wing::WingRequest::Break {
+                        heading_offset_deg: 90,
+                        pitch_deg: 0
+                    },
+                    0
+                )
+                .unwrap(),
+            super::super::wing::ReceiverOutcome::Rejected(super::super::wing::RejectReason::Dummy)
+        );
+        for tick in 0..1200 {
+            mission.actor_mut(1).unwrap().report_hit();
+            let world = world_of(&mission);
+            let output = mission.step(&world, &|_, _| 0., TimeOfDay(tick)).unwrap();
+            assert!(
+                output.launches.is_empty() && output.devices.is_empty() && output.wing.is_empty()
+            );
+        }
+        for (actor, (position, velocity, fuel, rounds)) in mission.actors().iter().zip(initial) {
+            for i in 0..3 {
+                assert!((actor.flight.position[i] - position[i] - velocity[i] * 10.).abs() < 1e-6);
+            }
+            assert_eq!(actor.flight.velocity, velocity);
+            assert_eq!(actor.flight.speed, super::super::launch::DUMMY_SPEED_FPS);
+            assert_eq!(actor.flight.fuel, fuel);
+            assert_eq!(actor.rounds_remaining(), rounds);
+            assert_eq!(actor.controller.target(), None);
+            assert_eq!(actor.flight.ticks, 1200);
+            assert_eq!(actor.flight.pitch, 0.);
+            assert_eq!(actor.flight.bank, 0.);
+        }
+        let position = mission.actor(1).unwrap().flight.position;
+        mission.actor_mut(1).unwrap().set_alive(false);
+        mission
+            .step(&world_of(&mission), &|_, _| 0., TimeOfDay(1200))
+            .unwrap();
+        assert_eq!(mission.actor(1).unwrap().flight.position, position);
+        assert_eq!(mission.actor(1).unwrap().activity(), Activity::Destroyed);
     }
 
     /// Two aircraft, opposite sides, converging head on.

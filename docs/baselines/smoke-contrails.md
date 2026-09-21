@@ -16,15 +16,15 @@ changes, not a claim of retail parity.
 Synthetic tests verify missile and damage-smoke emission counts and spacing,
 missile radius at birth and during growth, powered-motor and damage gates,
 expiration and capacity. Contrail tests verify two outlets at ten puffs per
-second, constant initial opacity, the 1.5-mile fade boundary, half opacity at
-1.75 miles and removal at two miles. A turn changes the path direction between
+second, constant initial opacity, the four-mile fade boundary, half opacity at
+4.5 miles and removal at five miles. A turn changes the path direction between
 checks, exercising accumulated travel rather than straight-line distance.
 Removing sources clears residual contrails within four seconds. Onset tests
 check the 30,000-35,000-foot range, stable per-aircraft values and variation
 between aircraft and sorties.
 
 All required checks passed: formatting, workspace Clippy with warnings denied,
-workspace tests (958 passed, two ignored), workspace build, 68 Python tests,
+workspace tests, workspace build, 68 Python tests,
 source and both executable asset scans, and documentation headers. The required
 `cargo run --locked -p tore-app -- --smoke-test` presented successfully.
 
@@ -33,7 +33,7 @@ Local captures used `--free-flight --no-audio --combat-probe-ticks 2400
 With `TORE_FLIGHT_AGL=40000`, the F/A-18D shows pale puffs following its engine
 outlets. With the default low-altitude start, the same view has no contrail.
 These captures verify rendering and the broad altitude gate, not measured
-two-mile length or an exact threshold crossing. The distance boundaries and
+trail length or an exact threshold crossing. The distance boundaries and
 onset range are checked by synthetic tests. Images and logs remain ignored in
 `.local/smoke-contrails/high.*` and `.local/smoke-contrails/low.*`.
 

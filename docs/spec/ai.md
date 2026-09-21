@@ -1209,3 +1209,7 @@ and explicitly identify the branches still preventing complete behavioral closur
 Surface engagement follows its separate source map. Broader maneuver and
 family coverage remains open. This document can grow by complete behavior
 sections without waiting for byte-level closure of the entire executable.
+
+The user-requested [Dummy training mode](dummy-aircraft.md) bypasses the combat
+controller and aerodynamic flight. Its constant 400-knot motion is an explicit
+exception to the normal AI flight-model path described above.

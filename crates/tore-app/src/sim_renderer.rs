@@ -70,7 +70,7 @@ impl SimRenderer {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(1344),
+                        min_binding_size: wgpu::BufferSize::new(1360),
                     },
                     count: None,
                 },
@@ -349,7 +349,7 @@ impl SimRenderer {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera and atmosphere"),
-            size: 1344,
+            size: 1360,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -874,6 +874,12 @@ impl SimRenderer {
                 .uniform(world.weather.ticks(), [true, false], pixel_angle)[1];
         reflection[3] = world.ocean_motion.environment_reflection;
         uniform.extend(reflection);
+        uniform.extend([
+            camera.near_clip,
+            f32::from(camera.weather_slot == 4),
+            0.,
+            0.,
+        ]);
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         self.smoke.update(queue, camera);
         let mut entries = Vec::with_capacity(11 * 1024);
@@ -943,7 +949,7 @@ impl SimRenderer {
                         r: linear(sky[0]),
                         g: linear(sky[1]),
                         b: linear(sky[2]),
-                        a: 1.0,
+                        a: if camera.weather_slot == 4 { 0. } else { 1. },
                     }),
                     store: wgpu::StoreOp::Store,
                 },

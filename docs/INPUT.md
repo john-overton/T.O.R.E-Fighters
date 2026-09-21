@@ -669,3 +669,9 @@ the last available value. Left-click retains forward cycling and the existing
 list pickers. The player's wing never cycles below one. Right-click requires a
 matching press/release and cannot launch, cancel or select through a modal list.
 The ordnance view retains right-click quantity decrement.
+
+View 4 target-camera fields and status meanings are described in the
+[flight controls guide](FLIGHT-CONTROLS.md#target-camera-view-4).
+
+Quick Mission wing skill menus include **Dummy (400 KTS)** for straight-flying
+training targets. See [behavior](spec/dummy-aircraft.md).

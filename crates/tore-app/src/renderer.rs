@@ -54,9 +54,9 @@ impl Readback {
         for row in data.chunks_exact(self.stride as usize) {
             for pixel in row[..self.width as usize * 4].chunks_exact(4) {
                 pixels.extend_from_slice(&if self.bgra {
-                    [pixel[2], pixel[1], pixel[0], 255]
+                    [pixel[2], pixel[1], pixel[0], pixel[3]]
                 } else {
-                    [pixel[0], pixel[1], pixel[2], 255]
+                    [pixel[0], pixel[1], pixel[2], pixel[3]]
                 });
             }
         }
@@ -381,15 +381,16 @@ impl Renderer {
         page: u8,
         camera: &crate::terrain::Camera,
         world: &crate::terrain::World,
-    ) -> AppResult<()> {
-        if !matches!(page, 2 | 3) {
+    ) -> AppResult<bool> {
+        if !matches!(page, 2..=4) {
             return Err("invalid camera instrument".into());
         }
         if !self.previews.contains_key(&page) {
             let pending = self.submit_readback(camera, world, 138, 114, false)?;
             self.previews.insert(page, pending);
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
     fn submit_readback(
         &mut self,

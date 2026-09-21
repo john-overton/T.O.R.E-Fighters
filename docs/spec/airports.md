@@ -166,7 +166,7 @@ runway damage from the same imported scene. Version 6 distinguishes a scene rese
 from an explicit range-fixture reset; older tapes retain their range-only behavior.
 
 Aircraft-specific ILS speed brackets and target-relative camera imagery remain
-open. The target window currently shows object name, health and lock state.
+open. The [target window](target-window.md) shows the object camera, name, damage, bearing and range/speed.
 Ground radar/infrared signatures and damage category come from the OT fields;
 the existing host aspect/visibility model remains fitted. Unknown shape programs
 stay manifest-only with a diagnostic, without invisible target/collision proxies.

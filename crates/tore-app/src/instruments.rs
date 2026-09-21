@@ -159,13 +159,11 @@ impl Layout {
 pub struct CombatReadout {
     pub weapon: String,
     pub systems: String,
-    pub guided: bool,
     pub readiness: &'static str,
     pub damage: Option<String>,
     pub ammo: u16,
     pub loaded: bool,
-    pub target: Option<(u32, i32, bool)>,
-    pub target_name: Option<String>,
+    pub target: Option<crate::target_window::Readout>,
     pub scope: scope::Scope,
     pub rcs: scope::Rcs,
 }
@@ -175,6 +173,8 @@ pub struct Instruments {
     pub selected: usize,
     pub layout: Layout,
     pub(crate) other_pages: Vec<u8>,
+    pub target_preview: Option<u32>,
+    pub camera_target: Option<u32>,
     pub cameras: std::collections::BTreeMap<u8, Vec<u8>>,
     pub rwr_range: usize,
     pub radar_range: usize,
@@ -200,6 +200,8 @@ impl Default for Instruments {
             layout: Layout::Large,
             other_pages: vec![7, 5, 6, 4, 9, 8],
             cameras: Default::default(),
+            target_preview: None,
+            camera_target: None,
             rwr_range: 4,
             radar_range: tore_sim::sensors::DEFAULT_RANGE_INDEX,
             rcs_range: tore_sim::sensors::passive::DEFAULT_SCALE_INDEX,
@@ -448,7 +450,7 @@ impl Instruments {
             1 => "ENVELOPE",
             2 => "FRONT VIEW",
             3 => "OTHER VIEW",
-            4 => "RADAR/VISUAL",
+            4 => "TARGET CAM",
             5 => "RWR",
             6 => "NAV INFO",
             7 => "SYSTEMS",
@@ -790,29 +792,67 @@ impl Instruments {
                 text(&mut r, "FT / FT/SEC", 20, 25);
             }
             4 => {
-                if let Some((id, hp, locked)) = self.combat.as_ref().and_then(|c| c.target) {
-                    let label = self
-                        .combat
-                        .as_ref()
-                        .and_then(|combat| combat.target_name.as_deref())
-                        .map(|name| name.chars().take(22).collect::<String>())
-                        .unwrap_or_else(|| format!("CONTACT {id}"));
-                    text(&mut r, &label, 18, 42);
-                    text(&mut r, &format!("HP {hp}"), 30, 62);
-                    text(
-                        &mut r,
-                        if hp == 0 {
-                            "DESTROYED"
-                        } else if self.combat.as_ref().is_some_and(|c| !c.guided) {
-                            "VISUAL"
-                        } else if locked {
-                            "LOCK"
-                        } else {
-                            "NO LOCK"
-                        },
-                        30,
-                        82,
-                    );
+                if let Some(target) = self.combat.as_ref().and_then(|c| c.target.as_ref()) {
+                    r.rect(11, 21, 138, 114, [185, 185, 185, 255]);
+                    if self.camera_target == Some(target.id)
+                        && let Some(pixels) = self.cameras.get(&4)
+                    {
+                        let mut gray = pixels.clone();
+                        crate::target_window::monochrome(&mut gray);
+                        r.sprite(
+                            &Sprite {
+                                width: 138,
+                                height: 114,
+                                rgba: gray,
+                                glyphs: vec![],
+                            },
+                            11,
+                            21,
+                            138,
+                            114,
+                        );
+                    }
+                    let ink = [20, 20, 20, 255];
+                    let fit = |value: &str, limit: usize| {
+                        let mut width = 0;
+                        value
+                            .bytes()
+                            .take_while(|ch| {
+                                width += f.glyphs[*ch as usize].advance;
+                                width <= limit
+                            })
+                            .map(char::from)
+                            .collect::<String>()
+                    };
+                    let width = |value: &str| {
+                        value
+                            .bytes()
+                            .map(|ch| f.glyphs[ch as usize].advance as i32)
+                            .sum::<i32>()
+                    };
+                    let label = fit(&target.name.to_ascii_uppercase(), 108);
+                    r.text(f, &label, 12 + (119 - width(&label)) / 2, 24, ink);
+                    let activity = fit(&target.activity, 119);
+                    r.text(f, &activity, 12 + (119 - width(&activity)) / 2, 37, ink);
+                    r.text(f, target.goal, 135, 24, ink);
+                    if target.player_goal {
+                        r.rect(135, 34, 6, 1, ink);
+                    }
+                    for dot in 0..target.skill.unwrap_or(0) {
+                        r.rect(133 + i32::from(dot) * 4, 11, 2, 2, [230, 230, 230, 255]);
+                    }
+                    r.rect(144, 22, 4, 48, [240, 240, 240, 255]);
+                    r.rect(145, 23, 2, 46, [0, 0, 0, 255]);
+                    let filled = (target.damage * 46.).round() as i32;
+                    r.rect(145, 69 - filled, 2, filled, [255, 255, 255, 255]);
+                    let objective = match target.objective {
+                        Some(true) => "MISSION OBJECTIVE",
+                        Some(false) => "",
+                        None => "OBJECTIVE ?",
+                    };
+                    r.text(f, objective, 12 + (134 - width(objective)) / 2, 111, ink);
+                    r.text(f, &target.bearing, 12, 124, ink);
+                    r.text(f, &target.metric, 147 - width(&target.metric), 124, ink);
                 } else {
                     text(&mut r, "NO TARGET", 48, 73);
                 }

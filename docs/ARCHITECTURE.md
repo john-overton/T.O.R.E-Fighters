@@ -383,3 +383,20 @@ filter only presentation. An explicit structural-resource allowlist hides
 buildings by default, including unidentified returns, while preserving defenses
 and other surface objects. Original MCICONS artwork
 is optional for older caches. [Display rules](spec/flight-map.md).
+
+The [target window](spec/target-window.md) builds read-only presentation data in
+`tore-app::target_window`. It uses the same retained selection as the HUD,
+existing aircraft activity, and an independent weather slot. Its asynchronous
+camera results carry the requested target identity so a changed selection cannot
+reuse another target's picture. No display state feeds combat decisions.
+
+Quick Mission [Dummy aircraft](spec/dummy-aircraft.md) carry a separate launch
+mode. The mission actor moves them at a fixed 400 knots instead of invoking its
+combat controller or aerodynamic flight. They retain the existing world snapshot,
+damage mirror and target identities alongside normal AI aircraft.
+
+Target-camera readbacks preserve a scenery coverage mask in alpha for the 10%
+background darkening, then restore opaque panel pixels. Camera-specific near
+clipping improves magnified subject depth precision. Target preview requests use
+an independent 24 Hz phase clock; the other camera panels retain their existing
+refresh interval.

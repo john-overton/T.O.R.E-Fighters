@@ -17,6 +17,10 @@ live in [AI source notes](../formats/ai.md). Delivery stages live in
 The [main AI specification](ai.md) defines behavior and proposed host API inputs;
 this companion owns experience numbers and the ported roster.
 
+The creator additionally offers an opinionated [Dummy training mode](dummy-aircraft.md),
+requested by John on 2026-09-21. It is separate from the four experience levels
+below and is not changed by the enemy-skill override.
+
 ## Experience channels
 
 An individual aircraft has one experience level: 0 Novice, 1 Average,

@@ -291,6 +291,19 @@ It follows aircraft attitude, including full rolls, independently of head-look.
 The readout outlines are transparent. Combat debug status and range hints are no longer overlaid on
 flight; normal HUD and instrument windows remain available.
 
+## Target camera (view 4)
+
+View 4 automatically magnifies the target to fill the image from the player
+aircraft's position, including the relative elevation. It shows a grayscale live
+target image, aircraft/object type, damage bar,
+clock bearing with Hi/Lo, and range/speed alternating every three simulation
+seconds. HI/LO appears only beyond 10 degrees above/below the horizontal
+plane through your aircraft, independent of pitch and bank. A black bar is undamaged; white grows with damage. Existing pilot skill
+and activity appear for mission aircraft. An underlined A means attacking you;
+plain A means another target. Objective assignments are not yet available in
+launch data, so the panel says `OBJECTIVE ?`. This does not mark every enemy as
+an objective. See [behavior and remaining limits](spec/target-window.md).
+
 ## Sun glare cheat
 
 **Escape → Cheat → No sun whiteout?** toggles glare suppression. **On** removes
@@ -301,8 +314,10 @@ The developer override `TORE_SUN_GLARE=0` also disables these effects.
 
 Main, mirror and instrument camera scenes now resolve their own altitude, fog,
 palette and glare from the same weather clock. Mirror rendering stays GPU-only;
-camera instruments retain their asynchronous, roughly 10 Hz feed and can show
-an older completed image. [Evidence and remaining work](baselines/weather-cameras.md).
+camera instruments use asynchronous feeds and can show an older completed image.
+The target camera requests 24 frames per second; other camera panels retain
+their roughly 10 Hz feed. Target-camera scenery is 10% darker for contrast,
+with aircraft, static objects and text brightness preserved. [Evidence and remaining work](baselines/weather-cameras.md).
 
 ### Wind/turbulence continuation
 
@@ -436,6 +451,12 @@ cue. Their assignment is fitted. Effects mute, pause, safe, empty and failed
 stations silence them. `TORE_SEEKER_VOLUME=0..1` sets maximum amplitude, default
 0.30. Re-import media to add the four samples to an older cache.
 [Rules and constants](spec/missiles.md), [validation](baselines/hud-cleanup.md).
+
+Each wing's skill selector also offers **Dummy (400 KTS)**. These training targets
+hold their launch heading and altitude at 400 knots ground speed. They do not
+fight, evade or follow wing commands, but remain damageable. Select a normal
+skill to restore combat behavior. The player's aircraft remains under your
+control. [Dummy mode specification](spec/dummy-aircraft.md).
 
 Quick Mission wing counts launch independent AI aircraft by default, up to 29
 plus the player. They use the selected aircraft and skill, with separate wing

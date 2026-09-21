@@ -2,8 +2,8 @@
 use crate::attitude::Vector;
 use std::collections::{BTreeMap, VecDeque};
 
-pub const CONTRAIL_LENGTH_FT: f64 = 10560.;
-pub const CONTRAIL_FADE_START_FT: f64 = 7920.;
+pub const CONTRAIL_LENGTH_FT: f64 = 26400.;
+pub const CONTRAIL_FADE_START_FT: f64 = 21120.;
 
 /// Opinionated onset altitude in feet MSL. Stable per aircraft and sortie so
 /// visual randomness is reproducible and never flickers between simulation ticks.
@@ -180,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn contrails_follow_distance_and_fade_only_after_one_and_a_half_miles() {
+    fn contrails_follow_distance_and_fade_over_the_fifth_mile() {
         let mut smoke = Smoke::default();
         for tick in 1..=120 {
             smoke.step([]);
@@ -202,17 +202,20 @@ mod tests {
         puff.trail = Some((1, 0.));
         smoke.puffs.clear();
         smoke.puffs.push_back(puff);
-        for (position, opacity) in [([10., 1000., 8520.], 0.65), ([1330., 1000., 8520.], 0.325)] {
+        for (position, opacity) in [
+            ([10., 1000., 21720.], 0.65),
+            ([2650., 1000., 21720.], 0.325),
+        ] {
             smoke.step([]);
             smoke.contrails([(1, position)]);
             assert!((smoke.puffs[0].opacity() - opacity).abs() < 1e-6);
         }
         smoke.step([]);
-        smoke.contrails([(1, [2650., 1000., 8520.])]);
+        smoke.contrails([(1, [5290., 1000., 21720.])]);
         assert!(smoke.puffs.is_empty());
         for tick in 1..=120 {
             smoke.step([]);
-            smoke.contrails([(1, [2650. + f64::from(tick), 1000., 8520.])]);
+            smoke.contrails([(1, [5290. + f64::from(tick), 1000., 21720.])]);
         }
         assert!(!smoke.puffs.is_empty());
         for _ in 0..480 {
