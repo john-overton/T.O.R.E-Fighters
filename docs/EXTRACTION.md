@@ -102,7 +102,7 @@ The extractor is format-based, not tied to `FA_1.LIB` or another title's filenam
 
 It unpacks **all resource types** as their original decompressed bytes. It does not claim to decode every resource: a `.SH` remains a shape resource, `.PIC` remains an indexed game image, `.FNT` remains a compiled resource, and `.11K` remains PCM. Nothing extracted is executed. The app interprets its menu subset and the initial T2/mission/weather data subset described in [theater recovery](formats/theater.md).
 
-ISO images, ESA installer containers, coded-literal DCL mode 1, missing/truncated media repair, general PNG/WAV/model conversion, and cross-title gameplay import are not implemented by this command. The explicit `--music --wav-previews` option described below supports lossless music PCM WAV wrapping. Supply loose archives from your own installed or extracted media. Unknown/non-EALIB `.LIB` files are reported as errors rather than silently accepted.
+ISO images, ESA installer containers (format recovered in [SETUP.ESA notes](formats/esa-installer.md); reader planned in [M1g](ROADMAP.md#1g-installer-and-first-run-import)), coded-literal DCL mode 1, missing/truncated media repair, general PNG/WAV/model conversion, and cross-title gameplay import are not implemented by this command. The explicit `--music --wav-previews` option described below supports lossless music PCM WAV wrapping. Supply loose archives from your own installed or extracted media. Unknown/non-EALIB `.LIB` files are reported as errors rather than silently accepted.
 
 ## Native command and tests
 

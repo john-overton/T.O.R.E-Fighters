@@ -23,6 +23,7 @@ T.O.R.E-Fighters in the Repo - Tasteful Opinionated Reverse Engineered
   - [1d. Quick fight loop](#1d-quick-fight-loop)
   - [1e. AI](#1e-ai)
   - [1f. Sensors and weapons](#1f-sensors-and-weapons)
+  - [1g. Installer and first-run import](#1g-installer-and-first-run-import)
 - [Milestone 2: Missions and campaigns](#milestone-2-missions-and-campaigns)
 - [Milestone 3: Tools](#milestone-3-tools)
 - [Milestone 4: Remaster layer](#milestone-4-remaster-layer)
@@ -635,6 +636,47 @@ Exit: **Milestone 1 tagged.**  A stranger can install it on any of the three pla
 
 ---
 
+### 1g. Installer and first-run import
+
+Planned 2026-09-21 at John's request. A player installs T.O.R.E on Windows,
+macOS or Linux, points it at their own Fighters Anthology, and reaches the main
+menu without a terminal. Behaviour: [first-run import](spec/first-run-import.md).
+Container research: [SETUP.ESA notes](formats/esa-installer.md).
+
+What the research settled:
+- The importer needs five files (`FA_1.LIB`, `FA_2.LIB`, `FA.EXE`, optional
+  `FA_4B.LIB`, `FA_4D.LIB`). On the retail discs they live inside
+  `disc1/SETUP.ESA`, a flat container whose compressed entries use the DCL mode
+  the LIB reader already decodes. Disc 2 is not needed.
+- The disc's 1.0 executable carries the same creator, cloud, flare and radio
+  tables as the reviewed 1.02F build at shifted addresses; content is identical.
+  The patch changes no gameplay resource the app reads.
+
+Slices, in order:
+
+1. **Media sources.** `tore-formats::esa` reader with synthetic tests. A
+   `MediaSource` in `tore-app` that yields the five files from an installed
+   folder or a disc folder, detected by content. Second executable fingerprint
+   with its address set in the four table readers. Import report names the
+   build. CLI: `--import` accepts either kind; `tore-extract` gains
+   `--source` support for a disc folder.
+2. **First-run screen.** Locate screen in original menu art, path field,
+   drag-and-drop through winit's file-drop event, automatic detection of
+   volumes and conventional folders, progress, error text, Pref re-import,
+   remembered source. No new runtime dependency; a native file dialog is
+   deferred until drag-and-drop has been tried by players.
+3. **Packages.** CI job producing MSI, DMG and AppImage plus tar.gz from one
+   tag, unsigned, each scanned by `tools/check_assets.py` before upload.
+   Signing is a later, separate change.
+
+Decisions recorded 2026-09-21 (John): mounted disc or copied folder, no raw
+ISO reader; proper installers rather than portable archives; unsigned first
+builds.
+
+Deliverable: on each platform, install, choose a mounted disc 1 or an
+installed folder, and fly the README free-flight check without using a
+terminal.
+
 ## Milestone 2: Missions and campaigns
 
 This is the base game.  Tagged as 1.0.
@@ -736,3 +778,4 @@ Formats: ESA, LIB, DCL, PAL, PIC, FNT, DLG, MNU, LAY, XMI, MUS, 5K, 11K, T2, PT,
 | Multiplayer in 1.0 or after | Before M2 tag |
 | Initial aircraft scope | Expanded to the twelve ported aircraft listed in M1c |
 | Save format and mod manifest schema | M3 |
+| Installer scope: mounted disc or folder, proper installers, unsigned first builds | Settled 2026-09-21, see M1g |
