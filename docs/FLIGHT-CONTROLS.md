@@ -94,7 +94,9 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized. This is
 Space now holds the selected player trigger. Semicolon selects the next PT weapon
 slot; T or Enter designates an actual range target. `--live-fire` enables the
 explicit PT-default test range; backslash resets its target at a suitable range
-for the selected weapon. Ordinary free flight loads the aircraft's supported default weapons. The restricted native research adapter stays clean.
+for the selected weapon. Ordinary free flight loads the aircraft's supported default weapons. Airborne
+starts select the canonical gun with master arm SAFE; ground starts enter NAV
+and SAFE. Explicit weapon cycling leaves NAV. [Startup rules](spec/hud-layout.md). The restricted native research adapter stays clean.
 The complete native weapon/countermeasure dispatch remains unverified.
 [Live-fire scope and approximations](baselines/live-fire.md). USNF manual bindings are reference evidence pending FA-specific verification; FA menu labels take precedence.
 
@@ -108,14 +110,14 @@ Working menu actions include views, instrument windows, time/pause, cockpit, pit
 
 ## HUD and presentation limits
 
-The HUD uses imported `HUD11.FNT`; instrument/menu text uses `WIN11.FNT`. It shows wrapped heading, true airspeed in knots, MSL altitude, terrain-relative AGL, vertical speed in ft/min, G, throttle, afterburner and actual gear/flap/brake/hook state. The pitch ladder uses five-degree steps, dashed below zero, and the renderer's perspective/bank convention. The flight-path marker comes from current kinematic vertical speed and airspeed. No target, weapon solution or navigation waypoint is invented.
+The HUD uses imported `HUD11.FNT`; instrument/menu text uses `WIN11.FNT`. It shows wrapped heading, true airspeed in knots, MSL altitude, G, throttle, afterburner and actual gear/flap/brake/hook state. AGL and vertical speed are reserved for ILS approaches. The enlarged pitch ladder uses five-degree steps, dashed below zero, and a 25% tighter display spacing that follows bank. The flight-path marker comes from current kinematic vertical speed and airspeed. No target, weapon solution or navigation waypoint is invented.
 
 Layout, line symbology, frame scaling, pan, zoom and camera placement are authored. `~F18H.PIC` is uniformly scaled to cover the actual flight aspect ratio, showing more side artwork on wider screens and cropping only what is required to avoid stretching. Mirrors render live rear views every visible frame. The airport service publishes tested localizer and glide deviations, but dedicated ILS HUD art remains open. Native F18 HUD callers, HUDSYM glyph meanings, full cockpit composition, corner-speed/weapon modes and native pixel parity remain open. The HUD remains aligned with the aircraft-forward datum and pans opposite head-look with the cockpit. External views omit it.
 
 See [recovery details](formats/aircraft.md), [progress](research/progress.md), and [validation](baselines/cockpit-controls.md).
 
 
-The flight overlay is independent of the fixed menu canvas and tracks the window aspect. It is composed at the physical drawable size, proportionally capped at 1920×1080 for bounded CPU/GPU work. At centered forward view, cockpit art covers that entire overlay; menus remain centered at their original proportions. The HUD uses a 0.7225 layout scale, an additional 15% reduction from the previous 0.85 scale, with projection compensation keeping the pitch ladder aligned with the camera. TAS and MSL primary numbers have transparent backgrounds; nearby tape labels are suppressed instead of drawing dark backing rectangles. Static cockpit artwork and unchanged instrument rasters are cached.
+The flight overlay is independent of the fixed menu canvas and tracks the window aspect. It is composed at the physical drawable size, proportionally capped at 1920×1080 for bounded CPU/GPU work. At centered forward view, cockpit art covers that entire overlay; menus remain centered at their original proportions. The HUD uses a 0.7225 layout scale, an additional 15% reduction from the previous 0.85 scale, with projection compensation for angular cues; the pitch ladder adds its requested 25% spacing compression. TAS and MSL primary numbers have transparent backgrounds; surrounding tape numbers and hash marks are omitted. Static cockpit artwork and unchanged instrument rasters are cached.
 
 `--window-size 1280x720` selects an initial logical window size for inspection (minimum 640×480). Flight captures now preserve that window's aspect and the capped overlay resolution; terrain-only captures remain 960×720. See [responsive validation](baselines/responsive-flight-ui.md).
 
@@ -274,7 +276,8 @@ The primary ink comes from each aircraft's HUD module; layout remains authored.
 Version-1 preferences migrate the old setting relative to its neutral value 7;
 version 2 persists the new signed amount. Other saved display choices are retained.
 
-The main HUD shows outlined current TAS/MSL values and a curved bank scale at
+The main HUD shows outlined current TAS/MSL values without surrounding tape
+numbers or hash marks, plus a curved bank scale at
 the bottom (crash/engine-off alerts take priority). The scale rotates past a
 fixed triangular index, with 10-degree ticks and numbers every 30 degrees.
 It follows aircraft attitude, including full rolls, independently of head-look.
@@ -346,9 +349,26 @@ speed deficit and back-stick. No fixed rudder percentage suddenly enables full
 spin torque in hybrid flight. A-4 researched flight also uses a faster fitted
 roll response; see [A-4 roll tuning](spec/additional-aircraft.md#a-4-roll-tuning).
 
-With master arm off, an operating radar still draws a HUD box around the selected
-current radar contact. Clearing selection, losing the observation or turning
-radar off removes it. Weapon cues remain hidden while safe.
+## Gun pipper and target direction
+
+Selected guns show ammunition and a ballistic pipper. With no usable radar
+observation, `1000 FT` marks the manual's fixed reference distance. With radar
+on and a current targeted aircraft observation, `RADAR` marks automatic range,
+lead and drop correction. Place the pipper over the target. Its thick range arc
+grows as the target closes; numeric range is in nautical miles. SAFE, empty and
+failed guns hide the firing pipper.
+
+The selected target has a square inside the HUD and a directional chevron at the
+HUD edge when outside, including behind the aircraft. The display selection
+survives sensor loss, but radar lead and weapon support do not. **L** or
+**RELEASE LOCK** clears both selections. Destroying/removing the target or
+resetting the mission also removes its cue. The marker works with guns,
+missiles and master arm off. The [specification](spec/gunsight-targeting.md)
+separates manual behavior from fitted projection and targeting rules.
+
+For a controlled capture, `--hud-target-preview bearing,elevation,feet` first
+selects a visible range aircraft, then repositions it relative to ownship. Use
+with `--capture-flight`; the fixture cannot record or replay a mission.
 
 ## Missile seeker control
 
@@ -367,8 +387,8 @@ triangle remains visible outside range, clamped to the appropriate scale end.
 IN RNG reflects predicted reach and release readiness, independent of percentage
 rounding. [Band rules](spec/missiles.md#favorable-firing-range-bars).
 
-Weapon-mode tape labels stop above the weapon rows. The altitude box sits just
-outside its ticks with the same gap as the speed box. TARGET DESTROYED remains
+The TAS/MSL boxes sit slightly lower, with the surrounding tape numbers removed.
+Their horizontal positions remain on either side of the ladder. TARGET DESTROYED remains
 in diagnostics and release logic but is omitted from the HUD.
 
 Armed independent air-to-air missiles automatically enter BORESIGHT when radar power is on and no target is
@@ -399,7 +419,8 @@ and target aspect angle are in the upper-right debug window. The HUD layout
 is 15 percent smaller; ARM, count/weapon and percentage with blinking IN RNG
 align below speed. The range scale sits inside altitude; radar R/C/A sits below it. BORE READY is omitted. Neither clearing selection nor changing mode redirects an airborne shot.
 An internal bay opens for BORESIGHT and release waits until 95 percent open.
-Armed missile readouts replace AGL, vertical speed and bank scale. CUED radar
+Weapon readouts occupy the lower HUD; NAV retains the bank scale. AGL and
+vertical speed appear only with non-weapon ILS guidance. [Layout and startup modes](spec/hud-layout.md). CUED radar
 lock diamonds blink when ready to fire. The radar instrument replaces the mouse
 arrow with a crosshair across the entire black screen, up to the bezel.
 
@@ -415,12 +436,24 @@ formations. `--fixture-wings` retains straight-flight practice. Restart restores
 the initial actors, stores, formations and damage state. Player wing shortcuts
 are listed in [the input guide](INPUT.md#player-wing-orders).
 
-Aircraft at half health or below now display an original damaged body and trail
-dark smoke. Destroyed targets remain visible during their existing fall.
+Gun rounds have a 0.5-degree full spread cone (up to 0.25 degrees from aim),
+with luminous warm cores and soft amber halos. Spread affects hits and repeats
+deterministically on replay. See the [gun rules](spec/damage-smoke.md#gun-dispersion-and-luminous-tracers).
+
+Aircraft accumulate damage in nose, cockpit, core, left wing, right wing and
+tail regions. Light hits add persistent local marks. Concentrated damage grows
+into local wing or fin tears, and a reviewed original damaged body appears only
+when its missing region matches the hit. Global half-health still starts dark
+smoke. Destroyed targets remain visible during their existing fall.
 Powered missiles leave white smoke that disperses after burnout or impact.
-Reset restores intact aircraft and clears smoke. Visual thresholds and smoke
-timing are fitted. Detached pieces inherit aircraft motion, fall, then disappear
-with a brief ground-hit animation. AI damage uses the fitted health-to-authority rule in the [AI spec](spec/ai.md#live-integration-and-authored-boundaries); player damage handling is unchanged. See [damage and smoke behavior](spec/damage-smoke.md).
+Reset restores intact aircraft and clears smoke. Regional thresholds, visual changes and smoke timing are fitted. Detached reviewed pieces inherit aircraft motion, fall, then disappear
+with a brief ground-hit animation. AI damage uses the fitted health-to-authority rule in the [AI spec](spec/ai.md#live-integration-and-authored-boundaries); the player retains the existing flight adapters. See [damage and smoke behavior](spec/damage-smoke.md).
+
+Damage appearance can be inspected with `--damage-preview 0..1` and
+`--damage-preview-section nose|cockpit|core|left-wing|right-wing|tail`, together
+with `--capture-flight PATH`. The fraction populates the selected region in
+this presentation fixture; it does not simulate a shot. See the
+[damage specification](spec/damage-smoke.md) for fitted thresholds.
 
 ## Starting on a runway
 
@@ -430,3 +463,26 @@ with brakes applied. Press **B** to release brakes, then increase throttle and
 use the normal pitch controls for takeoff. Ground start uses the researched model;
 no flight adapter is switched automatically. Wing aircraft retain their airborne
 start. [Start behavior and fitted settings](spec/quick-mission-menu.md#player-ground-start).
+
+While on a runway or using ILS, `XW` shows signed crosswind and the aircraft's
+MTOW-class limit in knots. `NOTICE`, `ROUGH` and `LIMIT` identify increasing
+difficulty. `TW` appears for tailwind, with a universal 10-knot limit. Positive
+XW pushes toward runway right. These cues help choose a runway and manage rollout;
+normal controls and tower clearance remain available. Parked tire grip remains.
+[Wind thresholds and ground response](spec/runway-wind.md).
+
+For takeoff, leave flaps extended, release **B**, apply full throttle (afterburner
+only where available), and use gentle back pressure as the aircraft accelerates.
+Ease the pull after liftoff and retract gear when clear. Flaps now add low-speed
+lift instead of acting only as drag. Low-speed trim no longer pulls the nose
+toward the former steep airborne target while accelerating on the runway. Ease
+back pressure after liftoff to control the climb. There is no new takeoff-flap detent.
+Headwind changes the ground speed needed for liftoff; the runway wind warnings
+remain difficulty guidance. Land with controlled airspeed and settle the nose
+after touchdown; overspeed full-flap approaches can float.
+[Implementation and limits](spec/takeoff-ground-contact.md).
+
+Developer takeoff captures can combine `--ground-start N`,
+`--flight-probe-ticks TICKS`, `--maneuver takeoff` and `--capture-flight PATH`.
+The level maneuver also supports an idle ground capture. Other ground pose
+overrides remain rejected. [Acceptance and human test notes](baselines/takeoff-acceptance.md).

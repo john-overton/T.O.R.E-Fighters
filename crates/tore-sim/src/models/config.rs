@@ -28,6 +28,8 @@ pub struct Aerodynamics {
     pub loaded_elevator_percent: f64,
     pub g_pull_drag_f8: f64,
     pub roll_limit_rad_per_second: f64,
+    /// Imported fixed8 flap-lift coefficient.
+    pub flaps_lift_f8: f64,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Equipment {
@@ -121,6 +123,7 @@ impl Configuration {
                 loaded_elevator_percent: number("loadedElevator")?,
                 g_pull_drag_f8: number("_gpullDrag")?,
                 roll_limit_rad_per_second: number("_brv.x.max")?.to_radians(),
+                flaps_lift_f8: number("flapsLift")?,
             },
             turbulence_percent: i16::try_from(
                 a.fields
@@ -149,6 +152,7 @@ impl Configuration {
             || n.drag_loading as f64 != self.aerodynamics.loaded_drag_percent
             || n.elevator_loading as f64 != self.aerodynamics.loaded_elevator_percent
             || n.pull_drag as f64 != self.aerodynamics.g_pull_drag_f8
+            || n.flaps_lift as f64 != self.aerodynamics.flaps_lift_f8
             || (n.axes[0][1] as f64).to_radians() != self.aerodynamics.roll_limit_rad_per_second
         {
             return Err(std::io::Error::other(
@@ -176,6 +180,7 @@ impl Configuration {
             a.loaded_drag_percent,
             a.loaded_elevator_percent,
             a.g_pull_drag_f8,
+            a.flaps_lift_f8,
             e.throttle_rate_per_second,
             e.ground_clearance_ft,
         ];

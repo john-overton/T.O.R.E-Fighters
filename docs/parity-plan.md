@@ -27,6 +27,13 @@ Heading/altitude autopilot and toggleable waypoint guidance are implemented from
 the requested USNF-ATF behavior. Waypoint mode currently falls back to heading
 hold; route selection is pending. See [scope and provenance](spec/autopilot.md).
 
+Takeoff/flap/contact and low-speed rotation corrections are implemented
+([acceptance](baselines/takeoff-acceptance.md)). Cannons now release individual
+bullets with intermittent tracers across the roster
+([rules](spec/damage-smoke.md#individual-cannon-rounds)). Human testing should
+focus on runway rotation, easing the stick after liftoff, continuous gun fire,
+and the [expanded HUD with NAV/gun startup defaults](spec/hud-layout.md).
+
 ## The decision this plan follows
 
 **D30, 2026-09-15. Parity by expression of feature.** Recorded from John's

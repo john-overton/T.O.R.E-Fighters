@@ -163,6 +163,8 @@ fn shot(w: &Weapon, mode: LaunchMode, target: Option<u32>) -> Projectile {
         launched_t: 0,
         target,
         fall: FallState::default(),
+        gun_round: None,
+        tracer: false,
     }
 }
 #[test]

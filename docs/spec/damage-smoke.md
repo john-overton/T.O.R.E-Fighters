@@ -13,18 +13,74 @@ aircraft shapes/textures and smoke artwork. Local source inspection establishes
 resource availability and visible geometry, not original damage thresholds or
 smoke scheduling. [Resource evidence](../formats/objects-and-shapes.md#combat-damage-and-smoke-resource-review).
 
-Agent-selected fitted rules: show a damaged body once remaining hit points are
-at most 50% of starting hit points. Choose one of the reviewed A or C bodies by
-supported-aircraft roster index parity, and retain it through destruction. These
-are alternate appearances, not alphabetical severity levels. Render destroyed
-target bodies while airborne, using their existing ballistic motion. Do not add
-control failures, AI or change damage amounts. The corresponding B/D piece detaches once at this transition. Use each shape's own texture; never apply intact animation address ranges
-to a damaged shape. The original model scale is retained; variant scale parity
-remains unverified.
+John requested incremental localized damage on 2026-09-20. The six-region
+model below is an agent-selected fit. Each direct aircraft hit is projected into the aircraft basis and
+assigned to one of six regions: nose, cockpit, central fuselage, left wing,
+right wing or tail. Region damage accumulates independently. A structural body
+and its paired fragment appear only when one region has received at least 75%
+of the aircraft's starting hit points. Damage elsewhere cannot make the F/A-18D
+nose disappear. The first region to cross the threshold owns the retained
+breakup choice through destruction.
+
+The reviewed F/A-18D A/B pair represents nose and cockpit loss and its C/D pair
+represents inner or trailing wing loss. The reviewed Rafale A/B pair represents
+major left-wing loss and C/D represents vertical-fin loss. The reviewed F-22
+A/B pair has the clearer left-wing loss. These reviewed bodies are selected only
+for F/A-18D nose/cockpit or left-wing damage, Rafale left-wing or tail damage,
+and F-22 left-wing damage. All other aircraft and regions retain the intact body
+with fitted surface marks or mesh tears. These are
+alternate appearances, not alphabetical severity levels. Render destroyed
+target bodies while airborne, using their existing ballistic motion. The paired
+B/D piece detaches once at the structural transition. Use each shape's own
+texture and never apply intact animation address ranges to a damaged shape. The
+original model scale is retained; variant scale parity remains unverified.
+
+Before breakup, persistent local marks use the reviewed dark patch from
+`_F18_A.PIC` on every supported aircraft. This cross-aircraft reuse and placement
+are agent-selected fitted presentation rules, not evidence that the original
+shared this texture. Both textured and flat-colored aircraft surfaces receive
+marks, including the Rafale's flat-colored wings. Marks begin at 4% regional damage. Their deterministic face
+density is one fifth at 4%, two fifths at 15%, and four fifths at 35%.
+Panels of at least eight square feet always receive a mark, an agent-selected
+fit so low-polygon aircraft such as the Su-27 cannot omit all light wing damage.
+Patch size
+is respectively 22%, 40%, and 58% of the marked face. At 35% regional damage,
+wing and vertical-fin surfaces begin fitted face clipping. Source-mesh
+face centers classify wings beyond 30% of maximum absolute lateral extent and
+tail faces behind 25% of maximum absolute longitudinal extent. Elevated aft
+faces above 35% of maximum height also count as fins, covering aircraft such as
+the Su-35 whose fin centers sit ahead of that longitudinal boundary. They retain
+82% of span or height at 35% and 52% at the 75% structural threshold. The
+renderer mirrors side-specific clipping, so a right-wing hit does not remove a
+reviewed left-wing chunk. Reviewed whole-body pairs are used only for the exact
+region mappings above. Other wing and tail regions use the fitted tear and do
+not spawn an unrelated B/D fragment. Nose, cockpit and core damage without a
+matching reviewed body retain marks without removing unrelated geometry.
+
+Cockpit contact from a gun round is a fitted pilot kill. Direct-hit tests use
+bounded volumes inside the broad aircraft collision sphere: cockpit right/up/
+forward coordinates are -0.22..0.22, 0.08..0.48 and 0.08..0.48 aircraft radii;
+the central critical volume is -0.28..0.28, -0.28..0.22 and -0.38..0.18. The
+nose volume is -0.32..0.32, -0.30..0.32 and 0.42..0.92; left and right wing
+volumes are -0.92..-0.25 and 0.25..0.92 laterally, -0.18..0.18 vertically and
+-0.28..0.38 longitudinally. The tail volume is -0.34..0.34, -0.25..0.40 and
+-0.92..-0.34. A gun
+round through the central volume is a fitted critical kill when its reduced
+damage is at least half the aircraft's starting hit points. Missile blast
+contact does not use these direct-hit kill regions. Global hit points and
+existing subsystem damage continue to accumulate normally. A critical kill
+records only the round's reduced physical damage in its region, so killing the
+pilot does not by itself tear off the nose or another structure.
+
+Gun damage is an opinionated change requested by John on 2026-09-20. The six
+reviewed aircraft-gun records apply the integer floor of one third of their
+configured damage. Values below three therefore apply zero damage. Missile,
+bomb and rocket damage is unchanged. The source weapon records remain unchanged. Original runtime regional
+thresholds remain unknown.
 
 Emit white missile smoke only during the movement model's powered interval,
 including supported compatibility weapons. Guns emit none. Emit dark aircraft
-smoke at or below the same 50% health threshold, while the target remains airborne.
+smoke at or below 50% remaining health, while the target remains airborne.
 Ownship emits while damaged and alive; residual puffs persist after destruction.
 No smoke is emitted by an undamaged aircraft or a motor before ignition or after
 burnout. Existing smoke continues to disperse after its source stops or disappears.
@@ -46,6 +102,77 @@ back to front. Size, lifetime, placement and opacity are fitted, not retail pari
 Load Ordnance does not show the straight-flight dummy description. Validation
 errors and useful loading feedback remain.
 
+
+## Gun dispersion and luminous tracers
+
+John requested glowing tracers and a 0.5-degree gun cone on 2026-09-20.
+The agent-selected convention is a 0.5-degree full cone, at most 0.25 degrees
+from the commanded firing direction. Each reviewed gun projectile samples a
+uniform solid angle within this cone once at release, deterministically from
+its projectile identity. The shared rule covers player and other gun releases for every identity in the
+selectable roster: all twelve retail imports plus the F/A-XX concept. Gun
+recognition comes from each identity's canonical gun record;
+missiles, rockets and bombs retain their existing trajectories. It changes the
+actual round trajectory and hit location, not only the drawn tracer. At 1,000
+feet, the spread circle is approximately 8.73 feet across.
+
+Tracer luminosity is an agent-selected fitted presentation: an additive warm
+white core with a soft amber halo around the actual swept gun segment. The
+halo half-width is 1.2 feet and the core is approximately 0.18 feet wide at
+half brightness. Soft end fading avoids rectangular streak ends. When viewed end-on, a fitted
+0.5-foot-long camera-facing glow preserves visible area. Tracers are
+self-lit in daylight and darkness, depth-tested against solid geometry, and
+attenuated by fog and dense cloud. They do not write depth or cast shadows.
+The halo simulates optical glow; it does not illuminate nearby aircraft or
+terrain. No original tracer glow or dispersion value is claimed.
+
+### Individual cannon rounds
+
+John requested a steady stream of individual bullets and intermittent tracers
+on 2026-09-21. The agent-selected spacing is one tracer every three bullets,
+starting with the first bullet. A visible gun round draws one luminous ribbon;
+it does not also draw the source projectile shape. The other two bullets remain
+physical collision projectiles without a luminous marker.
+
+The fitted rate preserves the existing host ammunition consumption:
+`4 * gameRoundsInBurst * actualRoundsPerGame / gameBurstT` bullets per second,
+with zero-valued count/timing fields treated as one. This interprets the existing
+quarter-second host burst interval, not an established retail timing unit.
+[Source timing uncertainty](../formats/weapons.md#confirmed-gaps-and-fa-checks)
+remains unresolved. Individual release times are quantized to the fixed 120 Hz
+simulation, with fractional intervals retained across shots. Trigger release
+must stop pending bullets; pressing again must not bypass the rate limit.
+
+The six selected canonical records, M61, DEFA, MK12, GSH301, GSH23 and GSH6_30,
+all contain four representative rounds, two ammunition units per representative
+round and a burst interval of one. Their fitted rate is therefore 32 bullets
+per second, with 3- or 4-tick gaps and about 10.67 visible tracers per second.
+These are game-model rates, not claims about real cannon cyclic rates.
+
+Each physical bullet consumes one ammunition unit. Over each
+`actualRoundsPerGame` group, its damage shares sum to the previous representative
+projectile's reduced damage, `floor(configured damage / 3)`. Integer division
+assigns the quotient to every bullet and one extra point to the first remainder
+bullets. This preserves aggregate all-hit damage instead of multiplying it when
+splitting a representative shot. Bullet ordinals persist between trigger pulls.
+This exact sum describes the weapon's damage budget against a target class;
+the ownship damage path also applies its existing per-hit random attenuation
+and rounding, so realized damage is not guaranteed identical to a representative
+hit. For class zero, M61/DEFA expected ownship damage per pair changes from
+7.475 to 7.0; MK12/GSH23 changes from 2.5 to 2.0. This is a known fitted
+difference from independently hittable physical bullets, not an additional
+configured damage multiplier. Critical cockpit hits remain lethal physical contacts even when the
+target-class damage share rounds to zero. Such contacts do not add fictitious
+regional structural damage. Gun dispersion applies to each bullet independently.
+Missile, rocket and bomb release rules are unchanged.
+
+Actor-owned guns use the same spacing for physical bullets within an authorized
+release. Existing actor decisions still determine when a release is authorized,
+so short groups may have longer gaps between them. Their ammunition is already
+debited by that service before the bridge receives a release. The bridge must
+not debit it again. Existing allocation failures can therefore drop paid-for
+bullets; they cannot create free rounds. No autonomous targeting or engagement
+policy is changed by this weapon-mechanics correction.
 
 ## Detached pieces and ground cleanup
 

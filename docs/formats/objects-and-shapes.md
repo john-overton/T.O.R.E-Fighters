@@ -435,6 +435,14 @@ F22_D, which has no texture reference. The current import closure already select
 these aircraft-prefixed resources. Local inventory, bounds and texture previews:
 `.local/damage-smoke/`. No retail bytes or previews are committed.
 
+Local geometry/texture inspection on 2026-09-20 also confirms Rafale A removes
+the left wing area and C reduces vertical-fin height. F-22 A visibly damages
+left-wing geometry. These observations identify suitable appearances, not the
+original hit-selection rules. The 256x418 `_F18_A.PIC` contains a dark damage
+patch in the top-origin rectangle x=141..193, y=180..236. Local wireframe and
+texture comparisons are in `.local/damage-profile-review/`. Reusing that patch
+on other aircraft is a fitted rendering choice described in the damage spec.
+
 `SMOKE.PIC` is 256x43 with no private palette, containing dark, grey and pale puff
 art in three cells. Visually inspected 43x43 crops begin at x=0, 47 and 94.
 The sheet uses palette index 255 for its background despite the generic PIC mask

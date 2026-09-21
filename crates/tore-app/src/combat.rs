@@ -148,6 +148,13 @@ pub fn launcher(s: &flight::State) -> Launcher {
     }
 }
 impl Combat {
+    /// Player startup convention: canonical gun selected with master arm safe.
+    pub fn apply_startup_weapons(&mut self) {
+        apply_startup_weapon_state(&mut self.state);
+    }
+    pub fn uses_normal_startup_defaults(&self) -> bool {
+        !self.range && self.recorder.is_none() && !self.clean_recording
+    }
     pub fn add_airport_targets(&mut self, scene: &tore_sim::airport::Scene) -> AppResult<()> {
         scene.validate().map_err(std::io::Error::other)?;
         // A new layout replaces static identities atomically in the staged state.
@@ -281,6 +288,11 @@ impl Combat {
                     let (position, angles) = self.presentation.pose(target, self.ai_poses);
                     pose.position = position;
                     pose.damage_fraction = target.damage_fraction();
+                    pose.damage_variant = target
+                        .localized_damage
+                        .structural_section
+                        .map(|section| section as usize);
+                    pose.damage_regions = target.localized_damage.fractions(target.initial_hp);
                     [pose.yaw, pose.pitch, pose.bank] = angles;
                     pose.gear = 0.;
                     pose.flaps = 0.;
@@ -297,6 +309,13 @@ impl Combat {
                 }) {
                     let mut pose = model.start(world);
                     pose.position = piece.position;
+                    pose.damage_variant = self
+                        .state
+                        .targets
+                        .iter()
+                        .find(|target| target.id == piece.owner)
+                        .and_then(|target| target.localized_damage.structural_section)
+                        .map(|section| section as usize);
                     [pose.yaw, pose.pitch, pose.bank] = piece.basis.angles();
                     vertices.extend(model.fragment_vertices(&pose, camera, world));
                 }
@@ -406,6 +425,8 @@ impl Combat {
         self.controller.cancel();
         s.set_payload(self.state.payload_lbs())?;
         s.damage_fraction = 0.;
+        s.damage_variant = None;
+        s.damage_regions = [0.; live::DAMAGE_SECTIONS];
         s.bay = 0.;
         s.bay_open = false;
         s.bay_auto_open = false;
@@ -472,6 +493,11 @@ impl Combat {
             - f64::from(self.state.player_hp)
                 / f64::from(self.state.configuration().damage_capacity))
         .clamp(0., 1.);
+        s.damage_variant = self
+            .state
+            .player_damage_section()
+            .map(|section| section as usize);
+        s.damage_regions = self.state.player_damage_regions();
         if self.state.player_hp == 0 {
             s.crashed = true;
         }
@@ -613,6 +639,11 @@ impl Combat {
             let (position, angles) = self.presentation.pose(t, self.ai_poses);
             pose.position = position;
             pose.damage_fraction = t.damage_fraction();
+            pose.damage_variant = t
+                .localized_damage
+                .structural_section
+                .map(|section| section as usize);
+            pose.damage_regions = t.localized_damage.fractions(t.initial_hp);
             [pose.yaw, pose.pitch, pose.bank] = angles;
             pose.exhaust = 0.;
             pose.gear = 0.;
@@ -634,6 +665,15 @@ impl Combat {
         {
             let mut pose = s.clone();
             pose.position = piece.position;
+            if piece.owner != 0 {
+                pose.damage_variant = self
+                    .state
+                    .targets
+                    .iter()
+                    .find(|target| target.id == piece.owner)
+                    .and_then(|target| target.localized_damage.structural_section)
+                    .map(|section| section as usize);
+            }
             [pose.yaw, pose.pitch, pose.bank] = piece.basis.angles();
             v.extend(h.fragment_vertices(&pose, camera, world));
         }
@@ -641,11 +681,13 @@ impl Combat {
         // rendering pass. Loadout/flight state and launched projectiles remain
         // independent of this presentation decision in every camera.
         for p in &self.state.projectiles {
-            if let Some(shape) = p
-                .weapon(self.state.configuration())
-                .shape
-                .as_ref()
-                .and_then(|name| self.shapes.get(name))
+            let gun = live::is_gun(p.weapon(self.state.configuration()));
+            if !gun
+                && let Some(shape) = p
+                    .weapon(self.state.configuration())
+                    .shape
+                    .as_ref()
+                    .and_then(|name| self.shapes.get(name))
             {
                 let right = unit([p.direction[2], 0., -p.direction[0]]);
                 mesh(
@@ -658,12 +700,16 @@ impl Combat {
                     &h.palette,
                 );
             }
-            // A visible thin strip marks the actual swept projectile segment.
-            let right = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.).right;
-            let a: Vector = std::array::from_fn(|i| p.previous[i] + right[i] * 0.4);
-            let b: Vector = std::array::from_fn(|i| p.previous[i] - right[i] * 0.4);
-            for pos in [a, b, p.position] {
-                vertex(&mut v, pos, [1., 0.8, 0.3]);
+            if gun && p.tracer {
+                tracer(&mut v, p.previous, p.position, camera);
+            } else if !gun {
+                // A visible thin strip marks the actual swept projectile segment.
+                let right = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.).right;
+                let a: Vector = std::array::from_fn(|i| p.previous[i] + right[i] * 0.4);
+                let b: Vector = std::array::from_fn(|i| p.previous[i] - right[i] * 0.4);
+                for pos in [a, b, p.position] {
+                    vertex(&mut v, pos, [1., 0.8, 0.3]);
+                }
             }
         }
         let basis = Basis::new(
@@ -735,6 +781,18 @@ impl Combat {
         v
     }
 }
+
+pub(crate) fn apply_startup_weapon_state(state: &mut live::State) {
+    if let Some(index) = state
+        .configuration()
+        .stations
+        .iter()
+        .position(|station| live::is_gun(&station.weapon))
+    {
+        state.selected = index;
+    }
+    state.armed = false;
+}
 fn effect_frames(
     pic: &Pic,
     base: &[[u8; 3]; 256],
@@ -800,6 +858,53 @@ fn mesh(
         }
     }
 }
+/// Camera-facing luminous ribbon over the actual swept gun segment.
+fn tracer(out: &mut Vec<f32>, previous: Vector, position: Vector, camera: &Camera) {
+    let segment: Vector = std::array::from_fn(|i| position[i] - previous[i]);
+    if tore_sim::attitude::dot(segment, segment) < 1e-12 {
+        return;
+    }
+    let view: Vector = std::array::from_fn(|i| f64::from(camera.position[i]) - position[i]);
+    let cross = tore_sim::attitude::cross(segment, view);
+    let (start, ribbon, side) = if tore_sim::attitude::dot(cross, cross)
+        > 0.25 * tore_sim::attitude::dot(view, view).max(1e-12)
+    {
+        (previous, segment, unit(cross))
+    } else {
+        // Viewed along its path, retain a small glow instead of collapsing
+        // the ribbon into a line with zero screen area.
+        let basis = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.);
+        (
+            std::array::from_fn(|i| position[i] - basis.up[i] * 0.25),
+            basis.up.map(|v| v * 0.5),
+            basis.right,
+        )
+    };
+    for [along, across] in [
+        [0., -1.],
+        [1., -1.],
+        [1., 1.],
+        [0., -1.],
+        [1., 1.],
+        [0., 1.],
+    ] {
+        let pos: Vector =
+            std::array::from_fn(|i| start[i] + ribbon[i] * along + side[i] * across * 1.2);
+        out.extend([
+            pos[0] as f32,
+            pos[1] as f32,
+            pos[2] as f32,
+            along as f32,
+            across as f32,
+            -8.,
+            1.,
+            1.,
+            1.,
+            -1.,
+        ]);
+    }
+}
+
 fn vertex(out: &mut Vec<f32>, pos: Vector, color: [f32; 3]) {
     // Trailing -1 opts out of the weather palette: this color is already resolved.
     out.extend([
@@ -1077,22 +1182,46 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             }
             if index != 0 {
                 let mut no_target = combat.state.clone();
-                no_target.command(live::Command::ClearDesignation, l);
+                // Remove the fixture contact as well as its designation. A
+                // bare ClearDesignation may reacquire the same aircraft in
+                // boresight during this step, which is a valid launch rather
+                // than an undesignated negative case.
+                no_target.command(live::Command::ClearRange, l);
                 no_target.step(true, l, |_, _| 0.);
-                if no_target.ammo[index] != initial {
-                    return Err("undesignated launch consumed ammo".into());
+                // Seeker service may validly switch a supported weapon into
+                // boresight during the step. The captured release gate, not the
+                // stale pre-service readiness, decides whether any debit was legal.
+                if no_target.release_readiness != live::Readiness::Ready
+                    && no_target.ammo[index] != initial
+                {
+                    return Err("inhibited targetless launch consumed ammo".into());
                 }
                 let weapon = &combat.state.configuration().stations[index].weapon;
                 let mut too_close = combat.state.clone();
-                let distance = f64::from(weapon.seeker.zones[1].minimum_range) - 1.;
-                too_close.targets[0].position =
-                    std::array::from_fn(|k| l.position[k] + l.basis.forward[k] * distance);
-                let close_reason = too_close.readiness(l);
-                too_close.step(true, l, |_, _| 0.);
-                if too_close.rounds(index) != initial
-                    || close_reason != live::Readiness::MinimumRange
+                too_close.launch_mode = tore_sim::combat::missiles::LaunchMode::Cued;
+                if weapon.seeker.zones[1].minimum_range > 0
+                    && combat.state.readiness(l) == live::Readiness::Ready
                 {
-                    return Err("source minimum-range launch was not inhibited".into());
+                    // Leave enough margin for the 300 ft/s range target to
+                    // advance during the observation refresh below.
+                    let distance = f64::from(weapon.seeker.zones[1].minimum_range) - 100.;
+                    too_close.targets[0].position =
+                        std::array::from_fn(|k| l.position[k] + l.basis.forward[k] * distance);
+                    too_close.step(false, l, |_, _| 0.);
+                    let close_reason = too_close.readiness(l);
+                    if close_reason != live::Readiness::MinimumRange {
+                        return Err(format!(
+                            "source minimum-range launch was not inhibited: slot={} minimum={} reason={close_reason:?} mode={:?} designated={:?}",
+                            index + 1,
+                            weapon.seeker.zones[1].minimum_range,
+                            too_close.launch_mode,
+                            too_close.designated()
+                        ).into());
+                    }
+                    too_close.step(true, l, |_, _| 0.);
+                    if too_close.rounds(index) != initial {
+                        return Err("minimum-range inhibited shot consumed ammunition".into());
+                    }
                 }
                 let mut tracking = combat.state.clone();
                 tracking.step(true, l, |_, _| 0.);
@@ -1416,6 +1545,27 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
 mod tests {
     use super::*;
     #[test]
+    fn tracer_ribbon_is_finite_camera_facing_and_visible_end_on() {
+        let mut camera = Camera::new();
+        camera.position = [0., 0., -100.];
+        camera.yaw = 0.;
+        camera.pitch = 0.;
+        for end in [[20., 0., 0.], [0., 0., 20.]] {
+            let mut output = Vec::new();
+            tracer(&mut output, [0.; 3], end, &camera);
+            assert_eq!(output.len(), 60);
+            assert!(output.iter().all(|v| v.is_finite()));
+            let points: Vec<[f32; 2]> = output.chunks_exact(10).map(|v| [v[0], v[1]]).collect();
+            let a = [points[1][0] - points[0][0], points[1][1] - points[0][1]];
+            let b = [points[2][0] - points[0][0], points[2][1] - points[0][1]];
+            assert!((a[0] * b[1] - a[1] * b[0]).abs() > 0.1);
+            assert!(output.chunks_exact(10).all(|v| v[5] == -8.));
+        }
+        let mut output = Vec::new();
+        tracer(&mut output, [0.; 3], [0.; 3], &camera);
+        assert!(output.is_empty());
+    }
+    #[test]
     fn fire_requires_unmodified_press_and_release_after_interruption() {
         let mut f = FireInput::default();
         f.space(true, false, true);
@@ -1469,6 +1619,7 @@ mod tests {
 #[cfg(test)]
 mod ai_pose_tests {
     use super::*;
+    use tore_formats::aircraft::AircraftId;
     use tore_sim::{
         combat::missiles::{TargetRole, seeker::Heat},
         sensors,
@@ -1476,6 +1627,7 @@ mod ai_pose_tests {
 
     fn target(velocity: Vector, basis: Basis) -> live::Target {
         live::Target {
+            aircraft: Some(AircraftId::F18),
             role: TargetRole::Aircraft,
             heat: Heat::Unknown,
             radar_emitting: false,
@@ -1491,8 +1643,9 @@ mod ai_pose_tests {
             radius: 28.,
             hp: 100,
             initial_hp: 100,
-            fragment_offset: [0.; 3],
+            fragment_offsets: [[0.; 3]; 2],
             fragment_released: false,
+            localized_damage: live::LocalizedDamage::default(),
             category: 0,
         }
     }

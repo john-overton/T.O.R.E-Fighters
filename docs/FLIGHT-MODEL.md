@@ -98,8 +98,8 @@ rate independence, wind, mass validation and ground behavior without retail data
 | Controls | Original roll-rate maximum in the hybrid path; G authority from aircraft envelopes/loading. Response filtering, pitch/yaw coupling and actuator travel are fitted. |
 | Departure | Source warning/stall transitions and spin entry, with connected severity/control/lift attenuation. Initial stall classification uses a fitted below-clean-envelope gate. Hybrid spin torque, damping, surface response and threshold recovery are fitted; PT maximum yaw rate bounds angular velocity. The original two reviewed aircraft use spinExit −2; X-31 additionally disables spin entry. |
 | Propulsion/fuel/devices | Per-aircraft military/AB thrust and fuel consumption; engine/fuel/throttle gates; gear, flaps, brake, hook and burner state. Lapse, exhaust ramp and three-second actuator travel remain fitted. |
-| Ground contact | Native landing limits classify touchdown. Hybrid accepts only caller-declared landable ground with gear deployed and within limits; water and unsafe touchdowns crash. Eight-foot CG clearance, flat-runway tire scrub, rolling/brake friction, pitch support and crash severity policy are fitted. |
-| Wind | Explicit world wind in ft/s via `research::Surface`; aerodynamic forces use air-relative velocity, position uses ground velocity. Synthetic advection test holds airspeed unchanged and checks 400-foot drift over ten seconds at 40 ft/s. |
+| Ground contact | Native landing limits classify touchdown. Hybrid accepts only caller-declared landable ground with gear deployed and within limits; water and unsafe touchdowns crash. Aircraft-owned CG clearance, load-scaled tire scrub/friction, smooth wheel unloading and crash severity policy are fitted ([takeoff rules](spec/takeoff-ground-contact.md)). |
+| Wind | Explicit world wind in ft/s via `research::Surface`; airborne aerodynamic forces use air-relative velocity and position uses ground velocity. Hybrid aerodynamics also use full wind during rollout; the [MTOW crosswind/tailwind rule](spec/runway-wind.md) affects tire grip and difficulty cues, with static parked hold. Synthetic advection test holds airspeed unchanged and checks 400-foot drift over ten seconds at 40 ft/s. |
 | Payload | `State::set_payload` validates finite, nonnegative mass against current fuel + empty weight and MTOW. Added mass affects loading/forces. This is mass-only: UI loadout, station release, external fuel transfer and store-specific drag are not implemented. |
 | Time/replay | Fixed 120 Hz simulation; authored fractional bridge to native 256-unit time; seeded native RNG helper. Same-host deterministic replay is tested. Original scheduler/global RNG draw ordering and cross-architecture bit identity are not established. |
 
@@ -362,3 +362,20 @@ brakes applied and engine at idle. The adapter starts supported, so initializati
 is not misclassified as a gear-up or hard touchdown. Legacy/native adapters reject
 this setup rather than changing mode. Ground motion and takeoff then use the same
 existing simulation. [UI and fitted defaults](spec/quick-mission-menu.md#player-ground-start).
+
+Ground crosswind difficulty uses the imported maximum takeoff weight, not the
+current fuel/load mass. The user-specified noticeable/rough/limit thresholds and
+universal ten-knot tailwind limit replace the earlier ground-speed wind ramp.
+The fitted tire-grip transition ends at five knots ground speed; parked aircraft
+retain position and attitude with brakes either applied or released. Full wind
+still determines aerodynamic airspeed, including headwind during takeoff. Thresholds classify difficulty
+and drive drift, without automatically crashing or denying control.
+[Exact rules and provenance](spec/runway-wind.md).
+
+Hybrid flaps now reduce the low-speed stall reference and add lift as well as
+airflow-dependent drag. The lowest positive-G band is interpolated through
+rotation and liftoff. Tire forces decrease as the wheels unload, and positive
+height gains no longer require six feet/second of upward velocity. The existing
+binary flap control is retained. Low-speed nose alignment now blends a modest,
+stick-dependent trim target into the airborne response without a wheel-release
+angle jump. [Rules and fitted constants](spec/takeoff-ground-contact.md).

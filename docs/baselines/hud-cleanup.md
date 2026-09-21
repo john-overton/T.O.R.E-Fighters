@@ -71,8 +71,9 @@ Validation on Linux with a display-capable host:
   shrink, weapon/percentage alignment with speed, compact right-aligned range
   scale beneath altitude, and aspect in debug. BORE READY and EST HIT text are
   absent. The physical seven-degree bore is preserved.
-  Earlier safe and 720x1000 IR captures remain local. Bore has a provisional blinking diamond without a target box; safe restores
-  AGL, vertical speed and bank scale.
+  Earlier safe and 720x1000 IR captures remain local. Bore has a provisional blinking diamond without a target box; the former safe-flight layout restored
+  AGL, vertical speed and bank scale. Current visibility follows the
+  [expanded layout](../spec/hud-layout.md).
   Upper-right diagnostics no longer overlap the large instrument there.
 - Minimum-engagement regressions cover AIM-120 and AIM-9 release below, at and
   above an imported 1,000-foot synthetic minimum, unchanged ammunition on
@@ -99,7 +100,7 @@ Validation on Linux with a display-capable host:
   range scale inside altitude, and radar R/C/A below altitude. The new bore
   half-angle is five degrees. Surface weapons still reject practice aircraft.
 - The 1280x720 `/tmp/safe-hud.ppm` capture confirms a selected radar-contact
-  box with master arm SAFE, restored AGL/VS/bank readouts, no weapon HUD cues,
+  box with master arm SAFE and the former AGL/VS/bank arrangement, no weapon HUD cues,
   and zero shots fired.
 - The 1280x720 `/tmp/hud-spacing.ppm` capture checks the altitude-box gap
   and separation between tape labels and weapon rows. TARGET DESTROYED is
@@ -113,3 +114,40 @@ interactive crosshair screenshot, human sound comparison or retail parity test
 was run. The original probability formula remains unknown. The bare HUD percentage uses the
 specified fitted heuristic, with numeric regression tests, not a calibrated
 claim of actual hit frequency.
+
+## Expanded HUD and startup review
+
+Implementation mode, 2026-09-21. Sol agents implemented the flight layout and
+startup routing; the root agent integrated weapon readouts, target bounds and
+NAV presentation, then reviewed the code and captures. The requested constants
+have one home in the [HUD spec](../spec/hud-layout.md).
+
+Expanded-layout evidence is `.local/hud-layout-review/`; compact ladder and
+boxed-only readout checks are in `.local/hud-compact-review/`. Captures cover ground NAV and
+airborne gun/SAFE starts for all thirteen selectable identities, armed guns,
+missile readouts, a target below the former lower boundary, a banked NAV view,
+and wide/tall windows. The fixed aircraft datum and surrounding speed/altitude tape marks and numbers
+are absent. The flight-path marker remains, and the boxed current values move
+down twelve reference pixels. Ladder spacing is compressed by 25%, with rung
+width, five-degree labels and bank orientation preserved. The ladder window
+subsequently trims from 208 to 166 pixels high, preserving its upper edge. NAV retains the selected-target cue. AGL/VS are absent in
+ordinary NAV, including an inactive armed ILS, and retained for active ILS.
+The common layout is not clipped to each aircraft's differently shaped glass;
+low rows can overlay cockpit frames on aircraft with shorter HUD apertures.
+
+Review corrected negative TAS graduations exposed by the extended tape and
+ensured inactive ILS does not restore AGL/VS during normal NAV. Startup review
+caught an unconditional default slot overriding canonical gun selection and a
+default NAV resolution ignoring an explicit diagnostic NAV=0. Explicit options
+now take precedence. A synthetic reordered loadout verifies gun selection and
+master-arm safety independently of slot zero. Bank and targeting regressions
+cover full rolls and the expanded lower boundary.
+
+No retail comparison or Windows/macOS runtime check was run. Runtime checks and measured results below refer to Linux/Vulkan.
+
+All required checks pass: 948 Rust tests, 68 Python tests, formatting,
+warnings-denied workspace/all-target Clippy, locked workspace build, source and
+both executable asset guards, and documentation headers. Two optional GPU unit
+tests remain ignored; the explicit display smoke passes on NVIDIA RTX 4070/Vulkan.
+Thirty-eight captured scenarios cover the roster and mode/layout combinations;
+final NAV/GUN label captures confirm the displayed startup mode.

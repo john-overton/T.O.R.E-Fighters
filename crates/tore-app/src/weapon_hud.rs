@@ -7,16 +7,17 @@ use tore_formats::font::Font;
 use tore_sim::{
     attitude::{Basis, Vector, dot},
     combat::{
-        live,
+        gunsight, live,
         missiles::{self, Guidance, LaunchMode, seeker::Status},
     },
 };
 
+/// Reserve the weapon readout area even for a safe gun, keeping flight text clear.
 pub fn active(state: &live::State) -> bool {
-    state.armed
-        && missiles::Profile::for_weapon(&state.configuration().stations[state.selected].weapon)
-            .is_some()
+    let weapon = &state.configuration().stations[state.selected].weapon;
+    live::is_gun(weapon) || (state.armed && missiles::Profile::for_weapon(weapon).is_some())
 }
+
 fn debug_point(point: (f64, f64), size: [f64; 2]) -> (f64, f64) {
     let scale = (size[0] / 640.).min(size[1] / 480.);
     (
@@ -69,27 +70,15 @@ pub fn draw(
     font: &Font,
     color: [u8; 3],
     zoom: f64,
+    nav_mode: bool,
 ) {
-    if !state.armed
-        && combat::launcher(s).radar
-        && state.sensors.operating(tore_sim::sensors::Channel::Radar)
-        && let Some(contact) = state.designated().and_then(|id| state.sensors.contact(id))
-        && contact.channel == tore_sim::sensors::Channel::Radar
-        && let Some((x, y)) = projected(missiles::sub(contact.position, s.position), s, zoom)
-    {
-        let mut paint = Paint {
-            pixels,
-            clip: (174, 96, 292, 325),
-            color: [color[0], color[1], color[2], 255],
-        };
-        for (a, b) in [
-            ((-7., -7.), (7., -7.)),
-            ((7., -7.), (7., 7.)),
-            ((7., 7.), (-7., 7.)),
-            ((-7., 7.), (-7., -7.)),
-        ] {
-            paint.line((x + a.0, y + a.1), (x + b.0, y + b.1));
-        }
+    draw_target(pixels, s, state, color, zoom);
+    if nav_mode {
+        return;
+    }
+    if live::is_gun(&state.configuration().stations[state.selected].weapon) {
+        draw_gun(pixels, s, state, font, color, zoom);
+        return;
     }
     if !active(state) {
         return;
@@ -102,7 +91,7 @@ pub fn draw(
     let l = combat::launcher(s);
     let mut paint = Paint {
         pixels,
-        clip: (174, 96, 292, 325),
+        clip: hud::HUD_CLIP,
         color: [color[0], color[1], color[2], 255],
     };
     let bore = state.guidance_available(l) && state.launch_mode == LaunchMode::Boresight;
@@ -158,16 +147,6 @@ pub fn draw(
     if let Some(observation) = observed {
         let position = observation.position;
         if let Some((x, y)) = projected(missiles::sub(position, s.position), s, zoom) {
-            if !bore {
-                for (a, b) in [
-                    ((-7., -7.), (7., -7.)),
-                    ((7., -7.), (7., 7.)),
-                    ((7., 7.), (-7., 7.)),
-                    ((-7., 7.), (-7., -7.)),
-                ] {
-                    paint.line((x + a.0, y + a.1), (x + b.0, y + b.1));
-                }
-            }
             let radar_in_range =
                 matches!(profile.guidance, Guidance::Active | Guidance::Supported) && in_range;
             if diamond_visible(
@@ -225,34 +204,34 @@ pub fn draw(
             paint.line((x - 8., y + 3.), (x - 8., y - 3.));
         }
     }
-    paint.text(font, "ARM", 207, 279);
+    paint.text(font, "ARM", 207, 395);
     paint.text(
         font,
         &format!("{} {}", state.rounds(state.selected), w.hud_name),
         207,
-        291,
+        407,
     );
     let ready = state.readiness(l);
     let percent = format!("{}%", state.estimated_hit_percent(l));
-    paint.text(font, &percent, 207, 306);
+    paint.text(font, &percent, 207, 422);
     if in_range && state.sensors.tick() % 60 < 30 {
         let width: usize = percent
             .bytes()
             .map(|c| font.glyphs[c as usize].advance)
             .sum();
-        paint.text(font, "IN RNG", 211 + width as i32, 306);
+        paint.text(font, "IN RNG", 211 + width as i32, 422);
     } else if !matches!(
         ready,
         live::Readiness::Ready | live::Readiness::TargetDestroyed
     ) {
-        paint.text(font, ready.label(), 207, 321);
+        paint.text(font, ready.label(), 207, 437);
     }
     if matches!(profile.guidance, Guidance::Active | Guidance::Supported)
         && let Some(o) = observed
     {
         let closure = missiles::closure(s.position, s.velocity, o.position, o.velocity) / 1.68781;
-        paint.text(font, &format!("R {:.1}", o.range / missiles::NMI), 402, 291);
-        paint.text(font, &format!("C {closure:+.0}"), 402, 303);
+        paint.text(font, &format!("R {:.1}", o.range / missiles::NMI), 402, 407);
+        paint.text(font, &format!("C {closure:+.0}"), 402, 419);
         let aspect = if missiles::length(o.velocity) > 1e-9 {
             let forward = tore_sim::attitude::unit(o.velocity);
             let los = tore_sim::attitude::unit(missiles::sub(s.position, o.position));
@@ -266,9 +245,198 @@ pub fn draw(
         } else {
             "A --".into()
         };
-        paint.text(font, &aspect, 402, 315);
+        paint.text(font, &aspect, 402, 431);
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum TargetCue {
+    Square((f64, f64)),
+    Chevron {
+        point: (f64, f64),
+        direction: (f64, f64),
+    },
+}
+
+/// The rear hemisphere keeps the bearing's sign instead of perspective-flipping.
+fn target_cue(direction: Vector, basis: Basis, zoom: f64) -> Option<TargetCue> {
+    if !direction.iter().all(|v| v.is_finite()) || dot(direction, direction) < 1e-12 {
+        return None;
+    }
+    let x = dot(direction, basis.right);
+    let y = -dot(direction, basis.up);
+    let z = dot(direction, basis.forward);
+    if z > 1e-9 {
+        let focal = 240. * 3f64.sqrt() * zoom;
+        let point = (320. + focal * x / z, 240. + focal * y / z);
+        if (184. ..=456.).contains(&point.0)
+            && (106. ..=f64::from(hud::AIM_BOTTOM - 10)).contains(&point.1)
+        {
+            return Some(TargetCue::Square(point));
+        }
+    }
+    let length = x.hypot(y);
+    let (dx, dy) = if length < 1e-9 {
+        (1., 0.)
+    } else {
+        (x / length, y / length)
+    };
+    let tx = if dx.abs() < 1e-12 {
+        f64::INFINITY
+    } else {
+        136. / dx.abs()
+    };
+    let ty = if dy.abs() < 1e-12 {
+        f64::INFINITY
+    } else if dy > 0. {
+        (f64::from(hud::AIM_BOTTOM - 10) - 240.) / dy
+    } else {
+        -134. / dy
+    };
+    let distance = tx.min(ty);
+    Some(TargetCue::Chevron {
+        point: (320. + dx * distance, 240. + dy * distance),
+        direction: (dx, dy),
+    })
+}
+fn draw_target(
+    pixels: &mut [u8],
+    s: &flight::State,
+    state: &live::State,
+    color: [u8; 3],
+    zoom: f64,
+) {
+    let Some(target) = state.display_target() else {
+        return;
+    };
+    let Some(cue) = target_cue(
+        missiles::sub(target.position, s.position),
+        Basis::new(s.yaw, s.pitch, s.bank),
+        zoom,
+    ) else {
+        return;
+    };
+    let mut paint = Paint {
+        pixels,
+        clip: (174, 96, 292, hud::AIM_BOTTOM - 96),
+        color: [color[0], color[1], color[2], 255],
+    };
+    match cue {
+        TargetCue::Square((x, y)) => {
+            for (a, b) in [
+                ((-7., -7.), (7., -7.)),
+                ((7., -7.), (7., 7.)),
+                ((7., 7.), (-7., 7.)),
+                ((-7., 7.), (-7., -7.)),
+            ] {
+                paint.line((x + a.0, y + a.1), (x + b.0, y + b.1));
+            }
+        }
+        TargetCue::Chevron {
+            point: (x, y),
+            direction: (dx, dy),
+        } => {
+            for side in [-1., 1.] {
+                paint.line(
+                    (x - dx * 8. - dy * side * 4., y - dy * 8. + dx * side * 4.),
+                    (x, y),
+                );
+            }
+        }
+    }
+}
+fn draw_gun(
+    pixels: &mut [u8],
+    s: &flight::State,
+    state: &live::State,
+    font: &Font,
+    color: [u8; 3],
+    zoom: f64,
+) {
+    let mut paint = Paint {
+        pixels,
+        clip: hud::HUD_CLIP,
+        color: [color[0], color[1], color[2], 255],
+    };
+    let station = &state.configuration().stations[state.selected];
+    paint.text(
+        font,
+        &format!(
+            "{} {}",
+            state.rounds(state.selected),
+            station.weapon.hud_name
+        ),
+        207,
+        407,
+    );
+    paint.text(font, if state.armed { "ARM" } else { "SAFE" }, 207, 395);
+    let l = combat::launcher(s);
+    if !state.armed
+        || !l.alive
+        || state.rounds(state.selected) == 0
+        || state.readiness(l) == live::Readiness::StationFailed
+    {
+        return;
+    }
+    let observation = state
+        .designated()
+        .and_then(|id| state.sensors.observation(id))
+        .filter(|c| !c.destroyed);
+    let radar = observation
+        .filter(|c| {
+            c.channel == tore_sim::sensors::Channel::Radar
+                && state.sensors.operating(tore_sim::sensors::Channel::Radar)
+                && l.radar
+        })
+        .map(|c| gunsight::TargetObservation {
+            position: c.position,
+            velocity: c.velocity,
+        });
+    let solution = gunsight::solve(&station.weapon, &l, station.mount, radar)
+        .ok()
+        .flatten();
+    let Some(solution) = solution else {
+        paint.text(font, "NO SOL", 207, 422);
+        return;
+    };
+    paint.text(
+        font,
+        if solution.radar { "RADAR" } else { "1000 FT" },
+        207,
+        422,
+    );
+    let range = observation.map(|c| missiles::length(missiles::sub(c.position, s.position)));
+    if let Some(range) = range {
+        paint.text(font, &format!("R {:.2}", range / missiles::NMI), 402, 407);
+    }
+    let Some((x, y)) = projected(missiles::sub(solution.point, s.position), s, zoom) else {
+        return;
+    };
+    if !(184. ..=456.).contains(&x) || !(106. ..=f64::from(hud::AIM_BOTTOM - 10)).contains(&y) {
+        return;
+    }
+    paint.clip = (174, 96, 292, hud::AIM_BOTTOM - 96);
+    let arc = range.map_or(0., |r| {
+        gunsight::range_arc_fraction(r, solution.maximum_range_ft)
+    });
+    for segment in 0..64 {
+        let a = f64::from(segment) * std::f64::consts::TAU / 64. - std::f64::consts::FRAC_PI_2;
+        let b = f64::from(segment + 1) * std::f64::consts::TAU / 64. - std::f64::consts::FRAC_PI_2;
+        paint.line(
+            (x + 9. * a.cos(), y + 9. * a.sin()),
+            (x + 9. * b.cos(), y + 9. * b.sin()),
+        );
+        if f64::from(segment) / 64. < arc {
+            for radius in [10., 11.] {
+                paint.line(
+                    (x + radius * a.cos(), y + radius * a.sin()),
+                    (x + radius * b.cos(), y + radius * b.sin()),
+                );
+            }
+        }
+    }
+    paint.rect(x.round() as i32, y.round() as i32, 2, 2);
+}
+
 /// Diagnostic state and controls are composed at the window's upper right.
 pub fn debug(
     pixels: &mut [u8],
@@ -276,6 +444,7 @@ pub fn debug(
     s: &flight::State,
     font: &Font,
     color: [u8; 3],
+    nav_mode: bool,
 ) {
     let mut paint = Paint {
         pixels,
@@ -286,7 +455,11 @@ pub fn debug(
     paint.color = [color[0], color[1], color[2], 255];
     paint.text(
         font,
-        if state.weapon_rules == missiles::Rules::Compatibility {
+        if nav_mode {
+            "NAV"
+        } else if live::is_gun(&state.configuration().stations[state.selected].weapon) {
+            "GUN"
+        } else if state.weapon_rules == missiles::Rules::Compatibility {
             "COMPATIBILITY"
         } else {
             state.launch_mode.label()
@@ -368,6 +541,65 @@ pub fn debug(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn target_square_and_chevron_follow_full_three_dimensional_attitude() {
+        let basis = Basis::new(0., 0., 0.);
+        assert_eq!(
+            target_cue([0., 0., 1000.], basis, 1.),
+            Some(TargetCue::Square((320., 240.)))
+        );
+        for (point, expected) in [
+            ([1000., 0., 1000.], (456., 240.)),
+            ([-1000., 0., 1000.], (184., 240.)),
+            ([0., 1000., 1000.], (320., 106.)),
+            ([0., -1000., 1000.], (320., f64::from(hud::AIM_BOTTOM - 10))),
+            ([0., 0., -1000.], (456., 240.)),
+            ([1000., 0., -1000.], (456., 240.)),
+        ] {
+            let Some(TargetCue::Chevron { point, .. }) = target_cue(point, basis, 1.) else {
+                panic!("missing off-HUD chevron");
+            };
+            assert_eq!(point, expected);
+        }
+        for (yaw, pitch, bank) in [
+            (1., 0.8, 1.4),
+            (2., -1.5, 3.0),
+            (0., 0., std::f64::consts::FRAC_PI_2),
+        ] {
+            let body = Basis::new(yaw, pitch, bank);
+            assert!(matches!(
+                target_cue(body.forward.map(|v| v * 1000.), body, 1.),
+                Some(TargetCue::Square(_))
+            ));
+            let direction = std::array::from_fn(|i| {
+                body.forward[i] * 1000. + body.right[i] * 500. + body.up[i] * 100.
+            });
+            let Some(TargetCue::Chevron { point, direction }) = target_cue(direction, body, 1.)
+            else {
+                panic!("rotated cue");
+            };
+            assert!((point.0 - 456.).abs() < 1e-8 && point.1 < 240.);
+            assert!(direction.0 > 0. && direction.1 < 0.);
+        }
+        assert_eq!(target_cue([0.; 3], basis, 1.), None);
+        assert_eq!(target_cue([f64::NAN, 0., 1.], basis, 1.), None);
+    }
+    #[test]
+    fn target_cue_crosses_hud_edge_without_reversing_or_clamping_a_box() {
+        let basis = Basis::new(0., 0., 0.);
+        for zoom in [0.5, 1., 2., 4.] {
+            let edge = 136. / (240. * 3f64.sqrt() * zoom);
+            assert!(matches!(
+                target_cue([edge - 1e-6, 0., 1.], basis, zoom),
+                Some(TargetCue::Square(_))
+            ));
+            assert!(matches!(
+                target_cue([edge + 1e-6, 0., 1.], basis, zoom),
+                Some(TargetCue::Chevron { .. })
+            ));
+        }
+    }
+
     #[test]
     fn radar_ready_diamond_blinks_twice_per_simulation_second() {
         for tick in 0..120 {

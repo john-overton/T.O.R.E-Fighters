@@ -290,8 +290,21 @@ fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
 // nearest surface, avoiding compounded opacity through overlapping glass.
 @fragment fn fragment(in:VertexOut)->@location(0) vec4<f32>{
  let normal=surface_normal(in.direction);
- if in.layer == -5.0 {discard;}
+ if in.layer == -5.0 || in.layer == -8.0 {discard;}
  return aircraft_color(in,normal);
+}
+// Fitted optical glow. Additive radiance is independent of surface lighting.
+@fragment fn tracer_fragment(in:VertexOut)->@location(0) vec4<f32>{
+ if in.layer != -8.0 {discard;}
+ let edge=1.0-smoothstep(0.8,1.0,abs(in.uv.y));
+ let ends=smoothstep(0.0,0.12,in.uv.x)*(1.0-smoothstep(0.88,1.0,in.uv.x));
+ let core=3.0*exp(-120.0*in.uv.y*in.uv.y);
+ let halo=0.65*exp(-5.0*in.uv.y*in.uv.y);
+ let cloud=clamp(cloud_occlusion(vec3<f32>(1.0),in.direction,in.altitude)
+     -cloud_occlusion(vec3<f32>(0.0),in.direction,in.altitude),vec3<f32>(0.0),vec3<f32>(1.0));
+ let visibility=(1.0-clamp(haze(in.distance),0.0,1.0))*(1.0-air_opacity(in.distance,in.altitude));
+ let radiance=(core*vec3<f32>(1.0,0.92,0.68)+halo*vec3<f32>(1.0,0.25,0.025))*edge*ends*visibility*cloud;
+ return vec4<f32>(radiance,0.0);
 }
 // Static world textures use index255/mask cutouts without opaque backing color.
 @fragment fn airport_solid_fragment(in:VertexOut)->@location(0) vec4<f32>{

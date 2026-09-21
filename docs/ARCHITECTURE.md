@@ -160,6 +160,13 @@ reviewed ECM probability and damage-selection helpers. Unknown native subsystem
 side effects remain explicit gaps; the service reproduces combat behaviour rather
 than reconstructing the original executable's combat tick.
 
+`combat::gunsight` supplies a renderer-independent fixed-step gun solution using
+live projectile speed/drop helpers and current radar observations. `weapon_hud`
+draws its pipper/range arc and projects a selected target into a square or edge
+chevron. Combat retains a separate display-only target identity through sensor
+loss; this never substitutes for `sensors` launch support or radar observations.
+[Behavior and evidence](spec/gunsight-targeting.md).
+
 The app merges independent keyboard/controller trigger holds, dispatches explicit
 commands and consumes confirmed events for instruments, graphics, audio and the
 bounded feedback mixer. Two-control modifier bindings consume their base controls
@@ -266,11 +273,22 @@ restricted native research flight keeps its clean configuration.
 `combat::smoke` owns bounded, fixed-step puff histories independently of rendering
 and guidance. The app's smoke pass sorts original keyed sprite billboards for
 each camera, blends them without depth writes, and depth-tests against the world.
-Aircraft damage uses the existing hit points. `damage_art` packs intact and damaged
-PICs losslessly into one runtime atlas per identity; each SH face retains its own
-texture region. Damaged shapes bypass intact-model animation address maps.
+Gun release dispersion is sampled once in the shared fixed-step projectile
+path using a stable projectile-identity hash. Cannons release individual physical
+bullets at a fixed-step cadence; every third bullet draws one tracer ribbon,
+without a duplicate projectile mesh. Ribbons follow the actual swept segments. A separate additive material pass supplies self-lit cores and halos
+without depth writes or shadow casting; solid depth and atmospheric attenuation
+still obscure them. [Gun behavior](spec/damage-smoke.md#gun-dispersion-and-luminous-tracers).
+Aircraft damage keeps six aircraft-local accumulators beside the existing hit
+points. Gun segments intersect fitted nose, cockpit, core, wing and tail volumes;
+surface objects remain on their ordinary object damage path. `damage_art` packs
+intact and damaged PICs losslessly into one runtime atlas per identity. It adds
+persistent imported-texture marks at light regional damage, then selects a
+reviewed A/C body only when its missing region matches the hit. Other regions
+use fitted, mirrored face clipping. Damaged shapes bypass intact-model animation
+address maps.
 
-`combat::debris` computes a fitted attachment from inert shape bounds and advances
+`combat::debris` computes both fitted A/B and C/D attachments from inert shape bounds and advances
 pieces at 120 Hz with inherited velocity, gravity and tumble. First swept terrain
 contact retires a piece and creates a short visual ground impact. The runtime
 atlas also contains the matching fragment textures. Fragment state belongs to
@@ -327,3 +345,23 @@ Static solid and textured detail passes use separate depth bias, keeping the
 visible pavement at the shared contact height. A per-shape vertical normalization
 aligns the dominant horizontal paving layer with the placement's runway plane;
 building height does not move that plane.
+
+`runway_wind` classifies imported MTOW and decomposes wind relative to a supplied
+heading. Hybrid aerodynamics consume full wind; wheel physics consumes the bounded
+crosswind/tailwind difficulty fraction as a tire-grip adjustment;
+HUD departure/ILS cues consume its unscaled assessment using the active runway
+end. It leaves airborne wind, flight-adapter selection and clearance logic
+independent. [Rules](spec/runway-wind.md).
+
+Hybrid takeoff combines an airflow-dependent device-drag factor, imported flap
+lift, and continuous low-speed lift allowance. Contact receives remaining wheel
+load from world-vertical support forces, classifies touchdown before changing
+velocity, then resolves post-tire movement or wheel release. This keeps parked
+stability separate from aerodynamic airflow and avoids discarding small climbs.
+[Takeoff/contact behavior](spec/takeoff-ground-contact.md).
+
+The shared [HUD layout and startup rules](spec/hud-layout.md) keep projected
+flight and targeting geometry separate from fixed readouts. NAV presentation
+hides weapon-specific symbols while retaining the selected target cue. Player
+startup applies gun/SAFE selection after loadout reset, with ground NAV chosen
+by the application; explicit diagnostic overrides are resolved afterward.

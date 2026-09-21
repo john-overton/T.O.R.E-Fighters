@@ -9,7 +9,7 @@ use super::{
     EnginePhase, FallState, PlayerTrigger, axial_speed, commanded_speed, engine_phase,
     launch_speed, removal_due, unload,
 };
-use crate::attitude::{Basis, Vector, dot, unit};
+use crate::attitude::{Basis, Vector, cross, dot, unit};
 use crate::sensors::{self, Observable, Observer, Sensors, Support, passive};
 use std::collections::BTreeMap;
 use tore_formats::{
@@ -138,7 +138,7 @@ pub struct Configuration {
     pub ecm: tore_formats::weapons::Countermeasures,
     pub system_damage: [u8; 45],
     pub damage_capacity: i32,
-    pub fragment_offset: Vector,
+    pub fragment_offsets: [Vector; 2],
     pub afterburner_available: bool,
     pub hardpoint_slots: Vec<Option<usize>>,
     pub radar_hardpoint: usize,
@@ -158,7 +158,11 @@ impl Configuration {
         if self.stations.is_empty()
             || self.stations.len() > 32
             || self.damage_capacity <= 0
-            || !self.fragment_offset.iter().all(|v| v.is_finite())
+            || !self
+                .fragment_offsets
+                .iter()
+                .flatten()
+                .all(|v| v.is_finite())
             || self.hit_points <= 0
             || self.external_equipment_lbs < 0
         {
@@ -324,7 +328,10 @@ impl Configuration {
             .filter(|v| *v <= i32::from(i16::MAX))
             .ok_or_else(|| super::invalid("native player damage capacity"))?;
         Ok(Self {
-            fragment_offset: super::debris::attachment(a.id, &mut read)?,
+            fragment_offsets: [
+                super::debris::attachment(a.id, 0, &mut read)?,
+                super::debris::attachment(a.id, 1, &mut read)?,
+            ],
             ecm,
             system_damage,
             damage_capacity,
@@ -354,6 +361,7 @@ impl Configuration {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Target {
+    pub aircraft: Option<AircraftId>,
     pub role: TargetRole,
     pub heat: Heat,
     pub radar_emitting: bool,
@@ -371,9 +379,121 @@ pub struct Target {
     pub radius: f64,
     pub hp: i32,
     pub initial_hp: i32,
-    pub fragment_offset: Vector,
+    pub fragment_offsets: [Vector; 2],
     pub fragment_released: bool,
+    pub localized_damage: LocalizedDamage,
     pub category: u16,
+}
+
+pub const DAMAGE_SECTIONS: usize = 6;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DamageSection {
+    Nose = 0,
+    Cockpit = 1,
+    Core = 2,
+    LeftWing = 3,
+    RightWing = 4,
+    Tail = 5,
+}
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LocalizedDamage {
+    pub amounts: [i32; DAMAGE_SECTIONS],
+    /// First reviewed A/C breakup pair whose local threshold was crossed.
+    pub structural_variant: Option<usize>,
+    pub structural_section: Option<DamageSection>,
+}
+impl LocalizedDamage {
+    pub fn fractions(&self, initial_hp: i32) -> [f64; DAMAGE_SECTIONS] {
+        self.amounts
+            .map(|amount| (f64::from(amount) / f64::from(initial_hp.max(1))).clamp(0., 1.))
+    }
+    pub fn section(position: Vector, target: &Target) -> DamageSection {
+        let offset = sub(position, target.position);
+        let forward = crate::attitude::dot(offset, target.basis.forward) / target.radius.max(1.);
+        let right = crate::attitude::dot(offset, target.basis.right) / target.radius.max(1.);
+        let up = crate::attitude::dot(offset, target.basis.up) / target.radius.max(1.);
+        if forward > 0.28 && up > 0.18 && right.abs() < 0.28 {
+            DamageSection::Cockpit
+        } else if forward > 0.45 {
+            DamageSection::Nose
+        } else if forward < -0.48 {
+            DamageSection::Tail
+        } else if right < -0.38 {
+            DamageSection::LeftWing
+        } else if right > 0.38 {
+            DamageSection::RightWing
+        } else {
+            DamageSection::Core
+        }
+    }
+    pub fn section_segment(from: Vector, to: Vector, target: &Target) -> DamageSection {
+        Self::contact(from, to, target)
+            .map(|(_, section)| section)
+            .unwrap_or_else(|| Self::section(to, target))
+    }
+    fn contact(from: Vector, to: Vector, target: &Target) -> Option<(f64, DamageSection)> {
+        let local = |point: Vector| {
+            let offset = sub(point, target.position);
+            let radius = target.radius.max(1.);
+            [
+                crate::attitude::dot(offset, target.basis.right) / radius,
+                crate::attitude::dot(offset, target.basis.up) / radius,
+                crate::attitude::dot(offset, target.basis.forward) / radius,
+            ]
+        };
+        let a = local(from);
+        let b = local(to);
+        let boxes = [
+            (
+                DamageSection::Cockpit,
+                [-0.22, 0.08, 0.08],
+                [0.22, 0.48, 0.48],
+            ),
+            (
+                DamageSection::Core,
+                [-0.28, -0.28, -0.38],
+                [0.28, 0.22, 0.18],
+            ),
+            (
+                DamageSection::Nose,
+                [-0.32, -0.30, 0.42],
+                [0.32, 0.32, 0.92],
+            ),
+            (
+                DamageSection::LeftWing,
+                [-0.92, -0.18, -0.28],
+                [-0.25, 0.18, 0.38],
+            ),
+            (
+                DamageSection::RightWing,
+                [0.25, -0.18, -0.28],
+                [0.92, 0.18, 0.38],
+            ),
+            (
+                DamageSection::Tail,
+                [-0.34, -0.25, -0.92],
+                [0.34, 0.40, -0.34],
+            ),
+        ];
+        boxes
+            .into_iter()
+            .filter_map(|(section, lo, hi)| {
+                segment_box_fraction(a, b, lo, hi).map(|at| (at, section))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+    fn record(&mut self, section: DamageSection, amount: i32, initial_hp: i32) {
+        let slot = section as usize;
+        self.amounts[slot] = self.amounts[slot].saturating_add(amount.max(0));
+        let threshold = (initial_hp.max(1) * 3 + 3) / 4;
+        if self.amounts[slot] >= threshold && self.structural_variant.is_none() {
+            self.structural_variant = match section {
+                DamageSection::Nose | DamageSection::Cockpit | DamageSection::Core => Some(0),
+                DamageSection::LeftWing | DamageSection::RightWing | DamageSection::Tail => Some(1),
+            };
+            self.structural_section = Some(section);
+        }
+    }
 }
 impl Target {
     pub fn damage_fraction(&self) -> f64 {
@@ -402,6 +522,10 @@ pub struct Projectile {
     pub launched_t: u16,
     pub target: Option<u32>,
     pub fall: FallState,
+    /// Physical gun-round position within the source representative debit.
+    pub gun_round: Option<u8>,
+    /// Fitted presentation marker: every third physical gun round.
+    pub tracer: bool,
 }
 impl Projectile {
     pub fn weapon<'a>(&'a self, config: &'a Configuration) -> &'a Weapon {
@@ -472,6 +596,8 @@ pub struct State {
     pub ammo: Vec<u16>,
     pub selected: usize,
     pub sensors: Sensors,
+    /// Presentation-only selection survives sensor loss; never grants weapon support.
+    hud_selection: Option<u32>,
     /// Passive emitters received this step, for the exposure instrument.
     pub emitters: Vec<passive::Emitter>,
     pub projectiles: Vec<Projectile>,
@@ -482,6 +608,7 @@ pub struct State {
     pub smoke: super::smoke::Smoke,
     pub debris: Vec<super::debris::Piece>,
     player_fragment_released: bool,
+    player_localized_damage: LocalizedDamage,
     pub shots: u32,
     pub hits: u32,
     pub kills: u32,
@@ -507,6 +634,13 @@ pub struct State {
     tick: u64,
     service_remainder: u16,
     triggers: Vec<PlayerTrigger>,
+    gun_cadence: Vec<GunCadence>,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct GunCadence {
+    pending: u16,
+    next_scaled: u64,
+    ordinal: u64,
 }
 #[derive(Clone, Copy)]
 pub struct Launcher {
@@ -526,6 +660,28 @@ pub struct Launcher {
     pub controls: sensors::Controls,
 }
 impl State {
+    pub fn player_damage_section(&self) -> Option<DamageSection> {
+        self.player_localized_damage.structural_section
+    }
+    pub fn player_damage_regions(&self) -> [f64; DAMAGE_SECTIONS] {
+        self.player_localized_damage
+            .fractions(self.config.damage_capacity)
+    }
+    /// Development-only visual fixture. Gameplay damage always arrives through impacts.
+    pub fn preview_localized_damage(&mut self, section: DamageSection, fraction: f64) {
+        let fraction = fraction.clamp(0., 1.);
+        let amount = (f64::from(self.config.damage_capacity) * fraction).round() as i32;
+        self.player_localized_damage = LocalizedDamage::default();
+        self.player_localized_damage
+            .record(section, amount, self.config.damage_capacity);
+        for target in &mut self.targets {
+            let amount = (f64::from(target.initial_hp) * fraction).round() as i32;
+            target.localized_damage = LocalizedDamage::default();
+            target
+                .localized_damage
+                .record(section, amount, target.initial_hp);
+        }
+    }
     pub fn configuration(&self) -> &Configuration {
         &self.config
     }
@@ -537,6 +693,7 @@ impl State {
             .map(|s| if s.internal || external { s.count } else { 0 })
             .collect();
         let triggers = vec![PlayerTrigger::default(); config.stations.len()];
+        let gun_cadence = vec![GunCadence::default(); config.stations.len()];
         let range_category = config.target_category;
         let sensors = Sensors::new(config.sensors.clone());
         Ok(Self {
@@ -545,6 +702,7 @@ impl State {
             mounted: Seeker::default(),
             bore_observation: None,
             mounted_key: None,
+            hud_selection: None,
             weapon_rules: Rules::Spec,
             chaff: config.ecm.chaff[0],
             flares: config.ecm.flare[0],
@@ -578,17 +736,22 @@ impl State {
             smoke: super::smoke::Smoke::default(),
             debris: Vec::new(),
             player_fragment_released: false,
+            player_localized_damage: LocalizedDamage::default(),
             shots: 0,
             hits: 0,
             kills: 0,
             tick: 0,
             service_remainder: 0,
             triggers,
+            gun_cadence,
         })
     }
     pub fn release(&mut self) {
         for t in &mut self.triggers {
             t.release();
+        }
+        for cadence in &mut self.gun_cadence {
+            cadence.pending = 0;
         }
     }
     pub fn select_next(&mut self) {
@@ -607,6 +770,7 @@ impl State {
     /// eligibility, including selectable RWS contacts.
     pub fn designate_next(&mut self) {
         self.sensors.cycle(true);
+        self.hud_selection = self.designated();
         if self.designated().is_some() {
             self.launch_mode = LaunchMode::Cued;
         }
@@ -614,12 +778,19 @@ impl State {
     pub fn designated(&self) -> Option<u32> {
         self.sensors.selected()
     }
+    pub fn display_target(&self) -> Option<&Target> {
+        let id = self.designated().or(self.hud_selection)?;
+        self.targets
+            .iter()
+            .find(|target| target.id == id && target.hp > 0)
+    }
     pub fn command(&mut self, command: Command, launcher: Launcher) {
         match command {
             Command::ClearRange => {
                 self.targets
                     .retain(|t| self.ground_bounds.contains_key(&t.id));
                 self.sensors.clear_selection();
+                self.hud_selection = None;
                 self.bore_observation = None;
                 self.mounted = Seeker::default();
             }
@@ -711,6 +882,8 @@ impl State {
                             None
                         },
                         fall: FallState::default(),
+                        gun_round: None,
+                        tracer: false,
                     });
                 }
             }
@@ -753,13 +926,16 @@ impl State {
             Command::NextWeapon => self.select_next(),
             Command::Designate => self.designate_next(),
             Command::DesignateTarget(id) => {
-                self.sensors.designate(id);
+                if self.sensors.designate(id) {
+                    self.hud_selection = Some(id);
+                }
                 if self.designated().is_some() {
                     self.launch_mode = LaunchMode::Cued;
                 }
             }
             Command::ClearDesignation => {
                 self.sensors.clear_selection();
+                self.hud_selection = None;
                 self.bore_observation = None;
                 self.mounted = Seeker::default();
                 self.mounted_key = None;
@@ -989,6 +1165,7 @@ impl State {
         let id = self.next_target_id;
         self.next_target_id = id.checked_add(1).expect("target ID exhaustion");
         self.targets.push(Target {
+            aircraft: Some(config.aircraft),
             role: TargetRole::Aircraft,
             id,
             position,
@@ -1008,8 +1185,9 @@ impl State {
             radius: 28.,
             hp: config.hit_points,
             initial_hp: config.hit_points,
-            fragment_offset: config.fragment_offset,
+            fragment_offsets: config.fragment_offsets,
             fragment_released: false,
+            localized_damage: LocalizedDamage::default(),
             category: config.target_category,
         });
     }
@@ -1023,6 +1201,7 @@ impl State {
             .retain(|t| !self.ground_bounds.contains_key(&t.id));
         self.ground_bounds.clear();
         self.sensors.clear_selection();
+        self.hud_selection = None;
     }
     /// Register one imported, stationary surface object without consuming an
     /// aircraft roster index. The caller owns the explicit disjoint ID range.
@@ -1046,6 +1225,7 @@ impl State {
         // object's own terrain endpoint does not occlude its sensor observation.
         let aim = std::array::from_fn(|i| bounds.center[i] + basis.up[i] * bounds.half[1] * 0.5);
         self.targets.push(Target {
+            aircraft: None,
             role: TargetRole::Surface,
             heat: Heat::Unknown,
             radar_emitting: false,
@@ -1061,8 +1241,9 @@ impl State {
             radius: bounds.half[0].max(bounds.half[1]).max(bounds.half[2]),
             hp: hit_points,
             initial_hp: hit_points,
-            fragment_offset: [0.; 3],
+            fragment_offsets: [[0.; 3]; 2],
             fragment_released: false,
+            localized_damage: LocalizedDamage::default(),
             category,
         });
         self.ground_bounds.insert(id, bounds);
@@ -1093,6 +1274,7 @@ impl State {
         // signatures and ECM record. No AI or autonomous behaviour is added.
         let yaw = launcher.basis.forward[0].atan2(launcher.basis.forward[2]);
         self.targets.push(Target {
+            aircraft: Some(self.config.aircraft),
             role: TargetRole::Aircraft,
             heat: Heat::Unknown,
             radar_emitting: false,
@@ -1111,10 +1293,12 @@ impl State {
             radius: 28.,
             hp: self.config.hit_points,
             initial_hp: self.config.hit_points,
-            fragment_offset: self.config.fragment_offset,
+            fragment_offsets: self.config.fragment_offsets,
             fragment_released: false,
+            localized_damage: LocalizedDamage::default(),
         });
         self.sensors.clear_selection();
+        self.hud_selection = None;
     }
     /// Any current observation of this object, on the selected scope channel
     /// or visually. Channels are never collapsed into one another.
@@ -1311,10 +1495,19 @@ impl State {
         if std::mem::take(&mut self.pending_damage) && self.player_hp > 0 {
             // Explicit no-AI hit fixture uses this aircraft's gun damage. Native
             // percent input is 100; deterministic adapter RNG is not native RNG.
-            let base = self.config.stations[0].weapon.damage.by_class
-                [damage_class(self.config.target_category)]
-            .max(0) as u16;
+            let base = scaled_weapon_damage(
+                &self.config.stations[0].weapon,
+                i32::from(
+                    self.config.stations[0].weapon.damage.by_class
+                        [damage_class(self.config.target_category)],
+                ),
+            ) as u16;
             let amount = super::systems::damage_amount(base, 100, draw(&mut self.rng, 40) as u8);
+            self.player_localized_damage.record(
+                DamageSection::Core,
+                amount,
+                self.config.damage_capacity,
+            );
             self.apply_player_damage(amount, &mut events);
         }
         let now = (self.tick / 30) as u16;
@@ -1361,6 +1554,9 @@ impl State {
             obscured: &obscured,
         };
         self.sensors.step(&observer, &observables, &environment);
+        if let Some(id) = self.designated() {
+            self.hud_selection = Some(id);
+        }
         self.emitters = passive::emitters(
             &observer,
             &observables,
@@ -1515,18 +1711,62 @@ impl State {
         let station = &self.config.stations[index];
         let w = &station.weapon;
         let guided = w.seeker.signature != 0;
-        let due =
-            self.triggers[index].poll(held && launcher.alive, w.flags, w.burst.game_burst_t, now);
-        if due && allowed {
-            // Representative burst grouping is provisional. Debit source rounds
-            // per representative projectile, including a partial last debit.
-            let count = usize::from(w.burst.game_rounds_in_burst.max(1)).min(32);
+        let gun = is_gun(w);
+        let pressed = held && launcher.alive && !self.triggers[index].was_held;
+        let due = self.triggers[index].poll(held && launcher.alive, w.flags, w.burst.game_burst_t, now)
+                // A gun repress uses the retained physical-round deadline,
+                // not the old representative burst's quarter-second deadline.
+                || (gun && pressed);
+        let (count, debit, gun_round, tracer) = if gun {
+            let cadence = &mut self.gun_cadence[index];
+            let physical_rounds = u16::from(w.burst.game_rounds_in_burst.max(1))
+                .saturating_mul(u16::from(w.burst.actual_rounds_per_game.max(1)));
+            if due && allowed {
+                cadence.pending = cadence
+                    .pending
+                    .saturating_add(physical_rounds)
+                    .min(physical_rounds);
+                cadence.next_scaled = cadence
+                    .next_scaled
+                    .max(self.tick.saturating_mul(u64::from(physical_rounds)));
+            }
+            if !held || !launcher.alive {
+                cadence.pending = 0;
+            }
+            if !allowed && cadence.pending > 0 {
+                cadence.next_scaled = self
+                    .tick
+                    .saturating_mul(u64::from(physical_rounds))
+                    .saturating_add(u64::from(w.burst.game_burst_t.max(1)).saturating_mul(30));
+            }
+            let ready = cadence.pending > 0
+                && allowed
+                && self.tick.saturating_mul(u64::from(physical_rounds)) >= cadence.next_scaled;
+            if ready {
+                let ordinal = cadence.ordinal;
+                (
+                    1,
+                    1,
+                    Some((ordinal % u64::from(w.burst.actual_rounds_per_game.max(1))) as u8),
+                    ordinal.is_multiple_of(3),
+                )
+            } else {
+                (0, 1, None, false)
+            }
+        } else if due && allowed {
+            (
+                usize::from(w.burst.game_rounds_in_burst.max(1)).min(32),
+                u16::from(w.burst.actual_rounds_per_game),
+                None,
+                false,
+            )
+        } else {
+            (0, u16::from(w.burst.actual_rounds_per_game), None, false)
+        };
+        if count > 0 {
             for _ in 0..count {
                 if self.projectiles.len() == MAX_PROJECTILES
-                    || !unload(
-                        &mut self.ammo[index],
-                        u16::from(w.burst.actual_rounds_per_game),
-                    )
+                    || !unload(&mut self.ammo[index], debit)
                 {
                     break;
                 }
@@ -1593,6 +1833,8 @@ impl State {
                     launched_t: now,
                     target: if guided { target } else { None },
                     fall: FallState::default(),
+                    gun_round,
+                    tracer,
                 });
                 if let Some(flight) = self.projectiles.last().and_then(|p| p.guidance.as_ref())
                     && flight.profile.guidance == Guidance::Active
@@ -1605,6 +1847,14 @@ impl State {
                 }
                 self.shots += 1;
                 events.push(Event::Fired(index));
+                if gun {
+                    let cadence = &mut self.gun_cadence[index];
+                    cadence.pending -= 1;
+                    cadence.ordinal = cadence.ordinal.wrapping_add(1);
+                    cadence.next_scaled = cadence
+                        .next_scaled
+                        .saturating_add(u64::from(w.burst.game_burst_t.max(1)).saturating_mul(30));
+                }
             }
         }
         if events.iter().any(|e| matches!(e, Event::Fired(_))) {
@@ -1640,6 +1890,7 @@ impl State {
             .replace(launcher.position)
             .unwrap_or(launcher.position);
         let player = Target {
+            aircraft: Some(self.config.aircraft),
             role: TargetRole::Aircraft,
             heat: Heat::Unknown,
             radar_emitting: launcher.radar,
@@ -1655,8 +1906,9 @@ impl State {
             radius: 28.,
             hp: if launcher.alive { self.player_hp } else { 0 },
             initial_hp: self.config.damage_capacity,
-            fragment_offset: self.config.fragment_offset,
+            fragment_offsets: self.config.fragment_offsets,
             fragment_released: self.player_fragment_released,
+            localized_damage: self.player_localized_damage.clone(),
             category: self.config.target_category,
         };
         let mut player_hits = Vec::new();
@@ -1667,6 +1919,9 @@ impl State {
             let w = owned
                 .as_ref()
                 .unwrap_or_else(|| &self.config.stations[p.station].weapon);
+            if p.age == 0 {
+                p.direction = projectile_launch_direction(w, p.direction, p.id, p.owner, p.station);
+            }
             let m = &w.movement;
             if if p.motion.is_some() {
                 missiles::removed(m, p.age) || p.position[1] > 100000.
@@ -1789,11 +2044,18 @@ impl State {
                 && p.incoming
                 && p.guidance.as_ref().is_none_or(|f| f.eligible(w, &player))
                 && player.hp > 0
-                && let Some(at) = segment_sphere(
-                    sub(p.previous, previous_player),
-                    sub(p.position, player.position),
-                    player.radius + f64::from(w.damage.fuze_radius.max(0)),
-                )
+                && let Some(at) = if is_gun(w) {
+                    let previous = std::array::from_fn(|i| {
+                        p.previous[i] + player.position[i] - previous_player[i]
+                    });
+                    LocalizedDamage::contact(previous, p.position, &player).map(|v| v.0)
+                } else {
+                    segment_sphere(
+                        sub(p.previous, previous_player),
+                        sub(p.position, player.position),
+                        player.radius + f64::from(w.damage.fuze_radius.max(0)),
+                    )
+                }
             {
                 first = Some((at, Some(usize::MAX)));
             }
@@ -1807,6 +2069,11 @@ impl State {
                         // radius remains a separate damage rule and does not turn
                         // a long runway into a giant interception sphere.
                         bounds.segment_fraction(p.previous, p.position)
+                    } else if is_gun(w) && t.role == TargetRole::Aircraft {
+                        let previous = std::array::from_fn(|axis| {
+                            p.previous[axis] + t.position[axis] - old_targets[i][axis]
+                        });
+                        LocalizedDamage::contact(previous, p.position, t).map(|v| v.0)
                     } else {
                         let radius = t.radius + f64::from(w.damage.fuze_radius.max(0));
                         segment_sphere(
@@ -1844,13 +2111,19 @@ impl State {
                     {
                         events.push(Event::Defeated(0));
                     } else {
-                        let base = w.damage.by_class[damage_class(self.config.target_category)]
-                            .max(0) as u16;
-                        player_hits.push(super::systems::damage_amount(
-                            base,
-                            100,
-                            draw(&mut self.rng, 40) as u8,
-                        ));
+                        let base = projectile_damage(
+                            p,
+                            w,
+                            i32::from(w.damage.by_class[damage_class(self.config.target_category)]),
+                        ) as u16;
+                        let amount =
+                            super::systems::damage_amount(base, 100, draw(&mut self.rng, 40) as u8);
+                        let previous = std::array::from_fn(|i| {
+                            p.previous[i] + player.position[i] - previous_player[i]
+                        });
+                        let section =
+                            LocalizedDamage::section_segment(previous, p.position, &player);
+                        player_hits.push((amount, section, is_gun(w)));
                         impacts.push((position, EffectKind::Hit));
                     }
                     return false;
@@ -1871,8 +2144,17 @@ impl State {
                     }
                     let class = damage_class(t.category);
                     let nominal = i32::from(w.damage.by_class[class]).max(0);
-                    let applied = nominal.min(t.hp);
+                    let previous = std::array::from_fn(|axis| {
+                        p.previous[axis] + t.position[axis] - old_targets[i][axis]
+                    });
+                    let section = LocalizedDamage::section_segment(previous, p.position, t);
+                    let scaled = projectile_damage(p, w, nominal);
+                    let critical = critical_hit(t, w, section, scaled);
+                    let applied = if critical { t.hp } else { scaled.min(t.hp) };
                     t.hp -= applied;
+                    if t.role == TargetRole::Aircraft {
+                        t.localized_damage.record(section, scaled, t.initial_hp);
+                    }
                     if self.history.len() == MAX_HIT_RECORDS {
                         self.history.remove(0);
                     }
@@ -1915,7 +2197,18 @@ impl State {
             }
             true
         });
-        for amount in player_hits {
+        for (amount, section, direct_gun) in player_hits {
+            self.player_localized_damage
+                .record(section, amount, self.config.damage_capacity);
+            let amount = if direct_gun
+                && (section == DamageSection::Cockpit
+                    || (section == DamageSection::Core
+                        && amount >= self.config.damage_capacity / 2))
+            {
+                self.player_hp
+            } else {
+                amount
+            };
             self.apply_player_damage(amount, &mut events);
         }
         for (p, kind) in impacts {
@@ -1954,28 +2247,47 @@ impl State {
             self.effect(p, EffectKind::DebrisImpact);
         }
         for t in &mut self.targets {
-            if t.airborne && t.damage_fraction() >= 0.5 && !t.fragment_released {
+            if t.airborne && t.localized_damage.structural_section.is_some() && !t.fragment_released
+            {
                 t.fragment_released = true;
-                if self.debris.len() < super::debris::MAX_PIECES {
+                let variant = t.aircraft.and_then(|aircraft| {
+                    super::debris::damage_variant(
+                        aircraft,
+                        t.localized_damage.structural_section.unwrap() as usize,
+                    )
+                });
+                if self.debris.len() < super::debris::MAX_PIECES
+                    && let Some(variant) = variant
+                {
                     self.debris.push(super::debris::Piece::new(
                         t.id,
+                        variant,
                         t.position,
                         t.velocity,
                         t.basis,
-                        t.fragment_offset,
+                        t.fragment_offsets[variant],
                     ));
                 }
             }
         }
-        if self.player_hp <= self.config.damage_capacity / 2 && !self.player_fragment_released {
+        if self.player_localized_damage.structural_section.is_some()
+            && !self.player_fragment_released
+        {
             self.player_fragment_released = true;
-            if self.debris.len() < super::debris::MAX_PIECES {
+            let variant = super::debris::damage_variant(
+                self.config.aircraft,
+                self.player_localized_damage.structural_section.unwrap() as usize,
+            );
+            if self.debris.len() < super::debris::MAX_PIECES
+                && let Some(variant) = variant
+            {
                 self.debris.push(super::debris::Piece::new(
                     0,
+                    variant,
                     launcher.position,
                     launcher.velocity,
                     launcher.basis,
-                    self.config.fragment_offset,
+                    self.config.fragment_offsets[variant],
                 ));
             }
         }
@@ -1984,6 +2296,101 @@ impl State {
 }
 fn sub(a: Vector, b: Vector) -> Vector {
     std::array::from_fn(|i| a[i] - b[i])
+}
+
+fn segment_box_fraction(from: Vector, to: Vector, lo: Vector, hi: Vector) -> Option<f64> {
+    let mut enter: f64 = 0.;
+    let mut exit: f64 = 1.;
+    for axis in 0..3 {
+        let delta = to[axis] - from[axis];
+        if delta.abs() < 1e-12 {
+            if from[axis] < lo[axis] || from[axis] > hi[axis] {
+                return None;
+            }
+            continue;
+        }
+        let a = (lo[axis] - from[axis]) / delta;
+        let b = (hi[axis] - from[axis]) / delta;
+        enter = enter.max(a.min(b));
+        exit = exit.min(a.max(b));
+        if enter > exit {
+            return None;
+        }
+    }
+    Some(enter.max(0.))
+}
+
+fn scaled_weapon_damage(w: &Weapon, damage: i32) -> i32 {
+    let damage = damage.max(0);
+    if is_gun(w) { damage / 3 } else { damage }
+}
+
+fn projectile_damage(p: &Projectile, w: &Weapon, damage: i32) -> i32 {
+    let total = scaled_weapon_damage(w, damage);
+    let Some(round) = p.gun_round else {
+        return total;
+    };
+    let divisor = i32::from(w.burst.actual_rounds_per_game.max(1));
+    total / divisor + i32::from(i32::from(round) < total.rem_euclid(divisor))
+}
+
+fn critical_hit(target: &Target, weapon: &Weapon, section: DamageSection, damage: i32) -> bool {
+    target.role == TargetRole::Aircraft
+        && is_gun(weapon)
+        && (section == DamageSection::Cockpit
+            || (section == DamageSection::Core && damage >= target.initial_hp / 2))
+}
+
+pub fn is_gun(w: &Weapon) -> bool {
+    AircraftId::ALL
+        .into_iter()
+        .chain([AircraftId::Faxx])
+        .any(|aircraft| w.source.eq_ignore_ascii_case(aircraft.gun()))
+}
+
+const GUN_DISPERSION_HALF_ANGLE: f64 = 0.25_f64.to_radians();
+
+fn projectile_launch_direction(
+    weapon: &Weapon,
+    direction: Vector,
+    id: u32,
+    owner: u32,
+    station: usize,
+) -> Vector {
+    if !is_gun(weapon) {
+        return direction;
+    }
+    let forward = unit(direction);
+    let seed = id
+        .wrapping_mul(0x9e37_79b9)
+        .wrapping_add(owner.rotate_left(13))
+        .wrapping_add((station as u32).wrapping_mul(0x85eb_ca6b));
+    let azimuth_u = f64::from(mix32(seed ^ 0xa511_e9b3)) / f64::from(u32::MAX);
+    let radius_u = f64::from(mix32(seed ^ 0x63d8_3595)) / f64::from(u32::MAX);
+    let azimuth = azimuth_u * std::f64::consts::TAU;
+    let min_cos = GUN_DISPERSION_HALF_ANGLE.cos();
+    let cos_theta = 1. - radius_u * (1. - min_cos);
+    let sin_theta = (1. - cos_theta * cos_theta).max(0.).sqrt();
+    let reference = if forward[1].abs() < 0.9 {
+        [0., 1., 0.]
+    } else {
+        [1., 0., 0.]
+    };
+    let right = unit(cross(reference, forward));
+    let up = unit(cross(forward, right));
+    unit(std::array::from_fn(|i| {
+        forward[i] * cos_theta
+            + right[i] * sin_theta * azimuth.cos()
+            + up[i] * sin_theta * azimuth.sin()
+    }))
+}
+
+fn mix32(mut value: u32) -> u32 {
+    value ^= value >> 16;
+    value = value.wrapping_mul(0x7feb_352d);
+    value ^= value >> 15;
+    value = value.wrapping_mul(0x846c_a68b);
+    value ^ (value >> 16)
 }
 fn acquisition(
     w: &Weapon,
@@ -2169,7 +2576,7 @@ mod tests {
         };
         State::new(
             Configuration {
-                fragment_offset: [0.; 3],
+                fragment_offsets: [[0.; 3]; 2],
                 ecm: tore_formats::weapons::Countermeasures {
                     weight: 0,
                     flags: 0,
@@ -2206,6 +2613,397 @@ mod tests {
             true,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn localized_sections_follow_aircraft_basis_and_accumulate_before_breakup() {
+        let mut target = target(1, [10., 20., 30.], 100, 0x80);
+        target.basis = Basis::new(std::f64::consts::FRAC_PI_2, 0., 0.);
+        let nose = std::array::from_fn(|i| target.position[i] + target.basis.forward[i] * 20.);
+        let left = std::array::from_fn(|i| target.position[i] - target.basis.right[i] * 20.);
+        let tail = std::array::from_fn(|i| target.position[i] - target.basis.forward[i] * 20.);
+        assert_eq!(LocalizedDamage::section(nose, &target), DamageSection::Nose);
+        assert_eq!(
+            LocalizedDamage::section(left, &target),
+            DamageSection::LeftWing
+        );
+        assert_eq!(LocalizedDamage::section(tail, &target), DamageSection::Tail);
+        let cockpit_center: Vector = std::array::from_fn(|i| {
+            target.position[i] + target.basis.up[i] * 6. + target.basis.forward[i] * 7.
+        });
+        let cockpit_from = std::array::from_fn(|i| cockpit_center[i] + target.basis.right[i] * 10.);
+        let cockpit_to = std::array::from_fn(|i| cockpit_center[i] - target.basis.right[i] * 10.);
+        assert_eq!(
+            LocalizedDamage::section_segment(cockpit_from, cockpit_to, &target),
+            DamageSection::Cockpit
+        );
+        let movement = [40., -12., 25.];
+        let old_projectile: Vector = std::array::from_fn(|i| cockpit_from[i] - movement[i]);
+        let relative_previous: Vector = std::array::from_fn(|i| old_projectile[i] + movement[i]);
+        assert_eq!(
+            LocalizedDamage::contact(relative_previous, cockpit_to, &target).map(|v| v.1),
+            Some(DamageSection::Cockpit)
+        );
+        let core_from = std::array::from_fn(|i| target.position[i] - target.basis.right[i] * 5.);
+        let core_to = std::array::from_fn(|i| target.position[i] + target.basis.right[i] * 5.);
+        assert_eq!(
+            LocalizedDamage::section_segment(core_from, core_to, &target),
+            DamageSection::Core
+        );
+        let first_from: Vector =
+            std::array::from_fn(|i| cockpit_center[i] + target.basis.right[i] * 20.);
+        let first_to: Vector =
+            std::array::from_fn(|i| cockpit_center[i] + target.basis.right[i] * 10.);
+        let second_to: Vector =
+            std::array::from_fn(|i| cockpit_center[i] - target.basis.right[i] * 10.);
+        assert_eq!(
+            LocalizedDamage::contact(first_from, first_to, &target),
+            None
+        );
+        assert_eq!(
+            LocalizedDamage::contact(first_to, second_to, &target).map(|v| v.1),
+            Some(DamageSection::Cockpit)
+        );
+        target.localized_damage.record(DamageSection::Nose, 74, 100);
+        assert_eq!(target.localized_damage.structural_variant, None);
+        target.localized_damage.record(DamageSection::Nose, 1, 100);
+        assert_eq!(target.localized_damage.structural_variant, Some(0));
+        assert_eq!(
+            target.localized_damage.structural_section,
+            Some(DamageSection::Nose)
+        );
+        assert_eq!(target.localized_damage.fractions(100)[0], 0.75);
+    }
+
+    #[test]
+    fn hud_selection_survives_sensor_loss_without_granting_weapon_support() {
+        let mut state = fixture(true);
+        let ownship = launcher();
+        state.range_target(ownship);
+        for _ in 0..120 {
+            state.step(false, ownship, |_, _| 0.);
+        }
+        state.designate_next();
+        let id = state.designated().expect("fixture contact");
+        assert_eq!(state.display_target().map(|t| t.id), Some(id));
+        state
+            .targets
+            .iter_mut()
+            .find(|t| t.id == id)
+            .unwrap()
+            .position = [0., 1000., -5000.];
+        for _ in 0..120 {
+            state.step(false, ownship, |_, _| 0.);
+        }
+        assert_eq!(state.designated(), None);
+        assert!(state.weapon_observation(ownship).is_none());
+        assert_eq!(state.display_target().map(|t| t.id), Some(id));
+        state.targets.iter_mut().find(|t| t.id == id).unwrap().hp = 0;
+        assert!(state.display_target().is_none());
+        state.targets.iter_mut().find(|t| t.id == id).unwrap().hp = 10;
+        state.command(Command::ClearDesignation, ownship);
+        assert!(state.display_target().is_none());
+    }
+
+    #[test]
+    fn guns_take_exact_integer_third_while_missiles_keep_damage() {
+        let mut gun = fixture(false).configuration().stations[0].weapon.clone();
+        gun.source = "M61.JT".into();
+        assert_eq!(scaled_weapon_damage(&gun, 11), 3);
+        assert_eq!(scaled_weapon_damage(&gun, 2), 0);
+        let missile = fixture(true).configuration().stations[0].weapon.clone();
+        assert_eq!(scaled_weapon_damage(&missile, 11), 11);
+        let aircraft = target(1, [0.; 3], 20, 0x80);
+        let mut surface = aircraft.clone();
+        surface.role = TargetRole::Surface;
+        assert!(critical_hit(&aircraft, &gun, DamageSection::Cockpit, 1));
+        assert!(!critical_hit(&surface, &gun, DamageSection::Cockpit, 20));
+    }
+    #[test]
+    fn gun_dispersion_is_bounded_normalized_symmetric_and_deterministic() {
+        let mut gun = fixture(false).configuration().stations[0].weapon.clone();
+        gun.source = "M61.JT".into();
+        let forward = [0., 0., 1.];
+        let first = projectile_launch_direction(&gun, forward, 42, 7, 0);
+        assert_eq!(first, projectile_launch_direction(&gun, forward, 42, 7, 0));
+        let mut mean = [0.; 3];
+        let samples = 20_000;
+        for id in 0..samples {
+            let direction = projectile_launch_direction(&gun, forward, id, 7, 0);
+            let length = dot(direction, direction).sqrt();
+            let angle = dot(direction, forward).clamp(-1., 1.).acos();
+            assert!((length - 1.).abs() < 1e-12);
+            assert!(angle <= GUN_DISPERSION_HALF_ANGLE + 1e-12);
+            for axis in 0..3 {
+                mean[axis] += direction[axis] / f64::from(samples);
+            }
+        }
+        assert!(mean[0].abs() < 5e-5, "lateral bias {}", mean[0]);
+        assert!(mean[1].abs() < 5e-5, "vertical bias {}", mean[1]);
+        let expected_cos = (1. + GUN_DISPERSION_HALF_ANGLE.cos()) * 0.5;
+        assert!((mean[2] - expected_cos).abs() < 2e-7);
+        let missile = fixture(true).configuration().stations[0].weapon.clone();
+        assert_eq!(
+            projectile_launch_direction(&missile, forward, 42, 7, 0),
+            forward
+        );
+    }
+
+    #[test]
+    fn live_gun_release_applies_dispersion_once() {
+        let mut s = fixture(false);
+        s.config.stations[0].weapon.source = "M61.JT".into();
+        let launcher = launcher();
+        s.step(true, launcher, |_, _| 0.);
+        let projectile = s.projectiles.first().expect("gun round was not released");
+        let angle = dot(projectile.direction, launcher.basis.forward)
+            .clamp(-1., 1.)
+            .acos();
+        assert!(angle > 0. && angle <= GUN_DISPERSION_HALF_ANGLE + 1e-12);
+        let direction = projectile.direction;
+        s.step(false, launcher, |_, _| 0.);
+        assert_eq!(s.projectiles[0].direction, direction);
+    }
+
+    #[test]
+    fn physical_gun_rounds_are_evenly_paced_and_preserve_ammo_rate() {
+        let mut s = fixture(false);
+        let w = &mut s.config.stations[0].weapon;
+        w.source = "M61.JT".into();
+        w.burst.actual_rounds_per_game = 2;
+        w.burst.game_rounds_in_burst = 4;
+        w.burst.game_burst_t = 1;
+        s.ammo[0] = 1000;
+        let launcher = launcher();
+        let mut fired_ticks = Vec::new();
+        let mut tracers = 0;
+        for tick in 0..120 {
+            let events = s.step(true, launcher, |_, _| -10000.);
+            let fired = events
+                .iter()
+                .filter(|event| matches!(event, Event::Fired(0)))
+                .count();
+            assert!(fired <= 1, "gun emitted simultaneous rounds at tick {tick}");
+            if fired == 1 {
+                fired_ticks.push(tick);
+                tracers += usize::from(s.projectiles.last().unwrap().tracer);
+            }
+        }
+        assert_eq!(fired_ticks.len(), 32);
+        assert_eq!(s.rounds(0), 968);
+        assert_eq!(tracers, 11);
+        assert!(
+            fired_ticks
+                .windows(2)
+                .all(|pair| (3..=4).contains(&(pair[1] - pair[0])))
+        );
+    }
+
+    #[test]
+    fn gun_cadence_keeps_fractional_rate_and_repress_phase() {
+        let mut s = fixture(false);
+        let w = &mut s.config.stations[0].weapon;
+        w.source = "M61.JT".into();
+        w.burst.actual_rounds_per_game = 3;
+        w.burst.game_rounds_in_burst = 7;
+        w.burst.game_burst_t = 2;
+        s.ammo[0] = 2000;
+        let launcher = launcher();
+        let mut fired = 0;
+        for _ in 0..1200 {
+            let events = s.step(true, launcher, |_, _| -10000.);
+            let count = events
+                .iter()
+                .filter(|event| matches!(event, Event::Fired(0)))
+                .count();
+            assert!(count <= 1);
+            fired += count;
+        }
+        assert_eq!(fired, 420);
+        assert_eq!(s.rounds(0), 2000 - fired as u16);
+        assert_eq!(s.gun_cadence[0].ordinal, fired as u64);
+
+        let before = s.shots;
+        s.release();
+        for _ in 0..1 {
+            assert!(
+                !s.step(false, launcher, |_, _| -10000.)
+                    .iter()
+                    .any(|event| matches!(event, Event::Fired(0)))
+            );
+        }
+        let first = (0..120)
+            .find(|_| {
+                s.step(true, launcher, |_, _| -10000.)
+                    .iter()
+                    .any(|event| matches!(event, Event::Fired(0)))
+            })
+            .unwrap();
+        assert!(first < 4);
+        assert_eq!(s.shots, before + 1);
+
+        // A release shorter than the physical shot gap cannot accelerate fire.
+        let mut s = fixture(false);
+        let w = &mut s.config.stations[0].weapon;
+        w.source = "M61.JT".into();
+        w.burst.actual_rounds_per_game = 2;
+        w.burst.game_rounds_in_burst = 4;
+        w.burst.game_burst_t = 1;
+        assert!(
+            s.step(true, launcher, |_, _| -10000.)
+                .contains(&Event::Fired(0))
+        );
+        s.release();
+        s.step(false, launcher, |_, _| -10000.);
+        for _ in 0..2 {
+            assert!(
+                !s.step(true, launcher, |_, _| -10000.)
+                    .contains(&Event::Fired(0))
+            );
+        }
+        assert!(
+            s.step(true, launcher, |_, _| -10000.)
+                .contains(&Event::Fired(0))
+        );
+    }
+
+    #[test]
+    fn physical_round_damage_partitions_without_rounding_inflation() {
+        let mut s = fixture(false);
+        let w = &mut s.config.stations[0].weapon;
+        w.source = "M61.JT".into();
+        w.burst.actual_rounds_per_game = 2;
+        let mut p = Projectile {
+            id: 0,
+            owner: PLAYER_OWNER,
+            weapon: None,
+            guidance: None,
+            motion: None,
+            guidance_ticks: None,
+            age: 0,
+            incoming: false,
+            station: 0,
+            position: [0.; 3],
+            previous: [0.; 3],
+            direction: [0., 0., 1.],
+            speed_f8: 0,
+            launched_t: 0,
+            target: None,
+            fall: FallState::default(),
+            gun_round: Some(0),
+            tracer: true,
+        };
+        assert_eq!(projectile_damage(&p, w, 10), 2);
+        p.gun_round = Some(1);
+        assert_eq!(projectile_damage(&p, w, 10), 1);
+        assert_eq!(projectile_damage(&p, w, 2), 0);
+    }
+
+    #[test]
+    fn station_cycle_discards_queued_gun_rounds() {
+        let mut s = fixture(false);
+        s.config.stations[0].weapon.source = "M61.JT".into();
+        s.config.stations[0].weapon.burst.game_rounds_in_burst = 4;
+        s.step(true, launcher(), |_, _| -10000.);
+        assert!(s.gun_cadence[0].pending > 0);
+        s.select_next();
+        assert_eq!(s.gun_cadence[0].pending, 0);
+    }
+
+    #[test]
+    fn every_supported_aircraft_uses_its_canonical_gun_damage_and_dispersion() {
+        let aircraft = AircraftId::ALL
+            .into_iter()
+            .chain([AircraftId::Faxx])
+            .collect::<Vec<_>>();
+        assert_eq!(aircraft.len(), 13);
+        let launcher = launcher();
+        for (number, id) in aircraft.into_iter().enumerate() {
+            let mut state = fixture(false);
+            state.config.aircraft = id;
+            state.config.stations[0].weapon.source = id.gun().into();
+            let gun = &state.config.stations[0].weapon;
+            assert!(is_gun(gun), "{} gun was not recognized", id.label());
+            assert_eq!(scaled_weapon_damage(gun, 11), 3, "{} damage", id.label());
+            let expected = projectile_launch_direction(
+                gun,
+                launcher.basis.forward,
+                number as u32,
+                PLAYER_OWNER,
+                0,
+            );
+            assert_eq!(
+                expected,
+                projectile_launch_direction(
+                    gun,
+                    launcher.basis.forward,
+                    number as u32,
+                    PLAYER_OWNER,
+                    0,
+                ),
+                "{} deterministic direction",
+                id.label()
+            );
+            let angle = dot(expected, launcher.basis.forward).clamp(-1., 1.).acos();
+            assert!(
+                angle <= GUN_DISPERSION_HALF_ANGLE + 1e-12,
+                "{} dispersion angle {angle}",
+                id.label()
+            );
+            state.shots = number as u32;
+            state.step(true, launcher, |_, _| 0.);
+            assert_eq!(
+                state.projectiles[0].direction,
+                expected,
+                "{} live gun path",
+                id.label()
+            );
+        }
+        let mut missile = fixture(true).configuration().stations[0].weapon.clone();
+        missile.source = "AIM120.JT".into();
+        assert!(!is_gun(&missile));
+        assert_eq!(scaled_weapon_damage(&missile, 11), 11);
+        assert_eq!(
+            projectile_launch_direction(&missile, launcher.basis.forward, 9, 4, 1),
+            launcher.basis.forward
+        );
+    }
+    #[test]
+    fn live_gun_crosses_narrowphase_before_cockpit_kill_without_structural_loss() {
+        let mut s = fixture(false);
+        s.config.stations[0].weapon.source = "M61.JT".into();
+        s.config.stations[0].weapon.damage.by_class[0] = 6;
+        s.targets.clear();
+        let target_position = [0., 1000., 300.];
+        s.targets.push(target(9, target_position, 20, 0x80));
+        let position = [10., target_position[1] + 6., target_position[2] + 7.];
+        s.projectiles.push(Projectile {
+            id: 99,
+            owner: PLAYER_OWNER,
+            weapon: None,
+            guidance: None,
+            motion: None,
+            guidance_ticks: None,
+            age: 0,
+            incoming: false,
+            station: 0,
+            position,
+            previous: position,
+            direction: [-1., 0., 0.],
+            speed_f8: 1200 * 256,
+            launched_t: 0,
+            target: None,
+            fall: FallState::default(),
+            gun_round: None,
+            tracer: false,
+        });
+        let events = s.step(false, launcher(), |_, _| 0.);
+        assert!(events.contains(&Event::Destroyed(9)));
+        assert_eq!(
+            s.targets[0].localized_damage.amounts[DamageSection::Cockpit as usize],
+            2
+        );
+        assert_eq!(s.targets[0].localized_damage.structural_section, None);
     }
     #[test]
     fn preflight_draft_capacity_fuel_mass_and_clone_isolation() {
@@ -2383,6 +3181,7 @@ mod tests {
     }
     pub(super) fn target(id: u32, position: Vector, hp: i32, category: u16) -> Target {
         Target {
+            aircraft: Some(AircraftId::F18),
             role: TargetRole::Aircraft,
             heat: Heat::Unknown,
             radar_emitting: false,
@@ -2398,8 +3197,9 @@ mod tests {
             radius: 20.,
             hp,
             initial_hp: hp,
-            fragment_offset: [0.; 3],
+            fragment_offsets: [[0.; 3]; 2],
             fragment_released: false,
+            localized_damage: LocalizedDamage::default(),
             category,
         }
     }
@@ -2407,6 +3207,7 @@ mod tests {
     fn ground_projectile_damage_uses_object_class_and_destroys_once() {
         let mut s = fixture(false);
         s.targets.clear();
+        s.config.stations[0].weapon.source = "M61.JT".into();
         s.config.stations[0].weapon.damage.by_class[2] = 17;
         let bounds = crate::airport::OrientedBox {
             center: [0., 1000., 300.],
@@ -2427,7 +3228,10 @@ mod tests {
         assert_eq!(destroyed, 1);
         assert_eq!(s.targets[0].hp, 0);
         assert_eq!(s.history[0].class, 2);
-        assert_eq!(s.history[0].applied, 17);
+        assert_eq!(s.history[1].class, 2);
+        assert_eq!([s.history[0].applied, s.history[1].applied], [3, 2]);
+        assert_eq!(s.history[0].applied + s.history[1].applied, 5);
+        assert_eq!(s.targets[0].localized_damage, LocalizedDamage::default());
     }
     #[test]
     fn range_controls_preserve_imported_ground_geometry_and_damage() {
@@ -2576,6 +3380,8 @@ mod tests {
     #[test]
     fn capacity_failure_does_not_debit_and_dead_launcher_cannot_fire() {
         let mut s = fixture(false);
+        s.config.stations[0].weapon.source = "M61.JT".into();
+        s.config.stations[0].weapon.movement.remove_t = u16::MAX;
         let mut l = launcher();
         l.alive = false;
         s.step(true, l, |_, _| 0.);
@@ -2589,6 +3395,20 @@ mod tests {
             s.step(true, l, |_, _| 0.);
         }
         assert_eq!(s.ammo, ammo);
+        s.projectiles.clear();
+        for _ in 0..14 {
+            assert!(
+                !s.step(true, l, |_, _| -10000.)
+                    .iter()
+                    .any(|event| matches!(event, Event::Fired(0)))
+            );
+        }
+        assert!(
+            s.step(true, l, |_, _| -10000.)
+                .iter()
+                .any(|event| matches!(event, Event::Fired(0)))
+        );
+        assert_eq!(s.rounds(0), ammo[0] - 1);
     }
     #[test]
     fn motor_smoke_uses_powered_phase_and_aircraft_smoke_uses_health() {
@@ -2644,6 +3464,9 @@ mod tests {
         let l = launcher();
         s.targets.push(target(7, [0., 5., 100000.], 100, 0x8000));
         s.targets[0].hp = 50;
+        s.targets[0]
+            .localized_damage
+            .record(DamageSection::LeftWing, 75, 100);
         s.targets[0].velocity = [30., 0., 10.];
         s.step(false, l, |_, _| 0.);
         assert_eq!(s.debris.len(), 1);
@@ -2674,6 +3497,11 @@ mod tests {
             "further damage must not duplicate the same lost part"
         );
         s.player_hp = s.config.damage_capacity / 2;
+        s.player_localized_damage.record(
+            DamageSection::Nose,
+            s.config.damage_capacity,
+            s.config.damage_capacity,
+        );
         s.step(false, l, |_, _| 0.);
         assert_eq!(s.debris.len(), 1);
         assert_eq!(s.debris[0].owner, 0);

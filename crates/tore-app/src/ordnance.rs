@@ -6,7 +6,7 @@ use crate::{
 };
 use std::collections::BTreeMap;
 use tore_formats::{Pic, weapons::Weapon};
-use tore_sim::combat::loadout::Loadout;
+use tore_sim::{combat::loadout::Loadout, models::FlightModel};
 type Rect = (i32, i32, i32, i32);
 pub struct Ordnance {
     pub loadout: Loadout,
@@ -515,7 +515,7 @@ pub fn validate_sources(
     data: &BTreeMap<String, Vec<u8>>,
     world: &crate::terrain::World,
 ) -> AppResult<()> {
-    for id in tore_formats::aircraft::AircraftId::ALL {
+    for id in tore_formats::aircraft::AircraftId::SELECTABLE {
         let airframe = crate::aircraft::Airframe::load(data, id)?;
         let mut load = Loadout::new(&airframe.profile, |n| {
             data.get(n)
@@ -525,6 +525,14 @@ pub fn validate_sources(
         load.validate()?;
         let mut normal = crate::combat::Combat::new(&airframe, data, false)?;
         let mut flight = airframe.start(world);
+        let mtow = flight.model().configuration().mass.max_takeoff_lbs;
+        let wind_limits =
+            tore_sim::runway_wind::limits(mtow).ok_or("invalid imported MTOW wind class")?;
+        println!(
+            "{id:?} runway wind: MTOW={mtow:.0} lb noticeable={} rough={} limit={} kt tailwind=10 kt",
+            wind_limits.noticeable_knots, wind_limits.rough_knots, wind_limits.limit_knots
+        );
+
         normal.reset(&mut flight)?;
         if normal.state.ammo != load.quantities || normal.range || !normal.state.targets.is_empty()
         {
@@ -561,10 +569,69 @@ pub fn validate_sources(
             return Err("dummy model identity or geometry mismatch".into());
         }
         let intact = airframe.vertices(&flight, &camera, world);
-        flight.damage_fraction = 0.6;
+        // Exercise the shared effects against every imported mesh and gun,
+        // including variants, rather than inferring coverage from F/A-18D.
+        for region in [3usize, 4, 5] {
+            for fraction in [0.1, 0.4, 0.8] {
+                flight.damage_fraction = fraction;
+                flight.damage_variant = (fraction >= 0.75).then_some(region);
+                flight.damage_regions = [0.; tore_sim::combat::live::DAMAGE_SECTIONS];
+                flight.damage_regions[region] = fraction;
+                let mesh = airframe.vertices(&flight, &camera, world);
+                if mesh.is_empty() || mesh.iter().any(|v| !v.is_finite()) || mesh == intact {
+                    return Err(format!("{id:?}: damage region {region} at {fraction} has no distinct finite geometry").into());
+                }
+            }
+        }
+        let mut gun = crate::combat::Combat::new(&airframe, data, false)?;
+        gun.state.armed = true;
+        let gun_flight = airframe.start(world);
+        let launcher = crate::combat::launcher(&gun_flight);
+        for _ in 0..120 {
+            gun.state.step(true, launcher, |_, _| 0.);
+            if !gun.state.projectiles.is_empty() {
+                break;
+            }
+        }
+        let round = gun
+            .state
+            .projectiles
+            .first()
+            .ok_or("imported gun failed to fire")?;
+        if !tore_sim::combat::live::is_gun(round.weapon(gun.state.configuration())) {
+            return Err(format!("{id:?}: imported gun is missing shared gun behavior").into());
+        }
+        let gun_station = &gun.state.configuration().stations[gun.state.selected];
+        let pipper = tore_sim::combat::gunsight::solve(
+            &gun_station.weapon,
+            &launcher,
+            gun_station.mount,
+            None,
+        )?
+        .ok_or_else(|| format!("{id:?}: imported gun has no 1000-foot sight solution"))?;
+        if !pipper.point.iter().all(|v| v.is_finite())
+            || (pipper.range_ft - 1000.).abs() > 0.01
+            || pipper.maximum_range_ft <= 100.
+        {
+            return Err(format!("{id:?}: invalid imported gun sight/range").into());
+        }
+        let tracer = gun.vertices(&airframe, &gun_flight, &camera, world);
+        if !tracer.chunks_exact(10).any(|v| v[5] == -8.) {
+            return Err(format!("{id:?}: imported gun has no luminous tracer geometry").into());
+        }
+        flight.damage_fraction = 0.8;
+        flight.damage_variant = Some(tore_sim::combat::live::DamageSection::LeftWing as usize);
+        flight.damage_regions = [0.; tore_sim::combat::live::DAMAGE_SECTIONS];
+        flight.damage_regions[tore_sim::combat::live::DamageSection::LeftWing as usize] = 0.8;
         let damaged = airframe.vertices(&flight, &camera, world);
         let fragment = airframe.fragment_vertices(&flight, &camera, world);
-        if fragment.is_empty() || fragment == damaged {
+        if tore_sim::combat::debris::damage_variant(
+            id,
+            tore_sim::combat::live::DamageSection::LeftWing as usize,
+        )
+        .is_some()
+            && (fragment.is_empty() || fragment == damaged)
+        {
             return Err("detached model missing or substituted".into());
         }
         if intact == damaged
@@ -576,6 +643,8 @@ pub fn validate_sources(
             return Err("damaged body did not produce distinct valid geometry".into());
         }
         flight.damage_fraction = 0.;
+        flight.damage_variant = None;
+        flight.damage_regions = [0.; tore_sim::combat::live::DAMAGE_SECTIONS];
         normal.state.targets[0].hp = 0;
         normal.step(&mut flight, world)?;
         if normal.dummy_geometry(&camera, world)[0].1.is_empty() {
@@ -647,7 +716,7 @@ pub fn validate_sources(
             return Err("empty loadout gained ammunition".into());
         }
         println!(
-            "{}: {alternatives} supported store/placement cases, edited fuel, empty stations, normal weapons, 29 dummy models and restart passed",
+            "{}: {alternatives} supported store/placement cases, edited fuel, empty stations, normal weapons, 1000-foot gun sights, glowing gun tracers, nine regional damage stages, 29 dummy models and restart passed",
             id.label()
         );
     }

@@ -9,6 +9,23 @@ pub fn variant(id: AircraftId) -> usize {
         .unwrap()
         % 2
 }
+/// Reviewed whole-body/fragment pair for a localized region. Other regions use
+/// renderer-side fitted tears and must not spawn an unrelated original piece.
+pub fn damage_variant(id: AircraftId, section: usize) -> Option<usize> {
+    use super::live::DamageSection;
+    match (id, section) {
+        (AircraftId::F18, x)
+            if x == DamageSection::Nose as usize || x == DamageSection::Cockpit as usize =>
+        {
+            Some(0)
+        }
+        (AircraftId::F18, x) if x == DamageSection::LeftWing as usize => Some(1),
+        (AircraftId::Rafale, x) if x == DamageSection::LeftWing as usize => Some(0),
+        (AircraftId::Rafale, x) if x == DamageSection::Tail as usize => Some(1),
+        (AircraftId::F22, x) if x == DamageSection::LeftWing as usize => Some(0),
+        _ => None,
+    }
+}
 pub fn scale(id: AircraftId) -> f64 {
     match id {
         AircraftId::F14 => 4. / 3.,
@@ -18,9 +35,13 @@ pub fn scale(id: AircraftId) -> f64 {
 }
 /// Place the fragment center in the largest extent removed from the intact body.
 /// This is a geometric fit, not a recovered original attachment transform.
-pub fn attachment(id: AircraftId, mut read: impl FnMut(&str) -> Result<Vec<u8>>) -> Result<Vector> {
-    let body_suffix = ["A", "C"][variant(id)];
-    let piece_suffix = ["B", "D"][variant(id)];
+pub fn attachment(
+    id: AircraftId,
+    variant: usize,
+    mut read: impl FnMut(&str) -> Result<Vec<u8>>,
+) -> Result<Vector> {
+    let body_suffix = ["A", "C"][variant];
+    let piece_suffix = ["B", "D"][variant];
     let intact = Shape::parse(&read(&format!("{}.SH", id.stem()))?)?;
     let body = Shape::parse(&read(&format!("{}_{body_suffix}.SH", id.stem()))?)?;
     let piece = Shape::parse(&read(&format!("{}_{piece_suffix}.SH", id.stem()))?)?;
@@ -62,6 +83,7 @@ fn bounds(shape: &Shape) -> Result<(Vector, Vector)> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Piece {
     pub owner: u32,
+    pub variant: usize,
     pub position: Vector,
     pub velocity: Vector,
     pub basis: Basis,
@@ -69,6 +91,7 @@ pub struct Piece {
 impl Piece {
     pub fn new(
         owner: u32,
+        variant: usize,
         position: Vector,
         velocity: Vector,
         basis: Basis,
@@ -76,6 +99,7 @@ impl Piece {
     ) -> Self {
         Self {
             owner,
+            variant,
             position: std::array::from_fn(|i| {
                 position[i]
                     + basis.right[i] * offset[0]
@@ -109,6 +133,7 @@ mod tests {
     fn debris_inherits_full_motion_and_hits_sloping_ground() {
         let mut p = Piece::new(
             7,
+            0,
             [0., 100., 0.],
             [80., 10., 300.],
             Basis::new(0., 0., 0.),

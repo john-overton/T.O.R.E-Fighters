@@ -15,6 +15,7 @@ pub struct SimRenderer {
     dummies: Vec<(tore_formats::aircraft::AircraftId, AircraftBatch)>,
     vapor: Option<(wgpu::Buffer, u32)>,
     vapor_pipeline: wgpu::RenderPipeline,
+    tracer_pipeline: wgpu::RenderPipeline,
     vapor_bind: wgpu::BindGroup,
     palette: wgpu::Texture,
     weather_tiles: wgpu::TextureView,
@@ -224,6 +225,31 @@ impl SimRenderer {
         depth.depth_write_enabled = false;
         depth.depth_compare = wgpu::CompareFunction::Equal;
         let canopy_pipeline = device.create_render_pipeline(&surface_descriptor);
+        surface_descriptor.label = Some("Additive luminous gun tracers");
+        surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("tracer_fragment");
+        let tracer_target = [Some(wgpu::ColorTargetState {
+            format,
+            blend: Some(wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::Zero,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                },
+            }),
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
+        surface_descriptor.fragment.as_mut().unwrap().targets = &tracer_target;
+        surface_descriptor
+            .depth_stencil
+            .as_mut()
+            .unwrap()
+            .depth_compare = wgpu::CompareFunction::Less;
+        let tracer_pipeline = device.create_render_pipeline(&surface_descriptor);
         let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Retail sky preview"),
             layout: Some(&sky_layout),
@@ -446,6 +472,7 @@ impl SimRenderer {
             airports: None,
             vapor: None,
             vapor_pipeline,
+            tracer_pipeline,
             vapor_bind,
             palette,
             weather_tiles: view,
@@ -1009,6 +1036,12 @@ impl SimRenderer {
             pass.set_vertex_buffer(0, buffer.slice(..));
             pass.draw(0..*count, 0..1);
         }
+        if let Some((buffer, count)) = &self.battle {
+            pass.set_pipeline(&self.tracer_pipeline);
+            pass.set_bind_group(0, &self.bind, &[]);
+            pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.draw(0..*count, 0..1);
+        }
         self.smoke.draw(&mut pass);
         drop(pass);
         if flare_target.is_some() {
@@ -1431,7 +1464,7 @@ mod lighting_tests {
                 );
             }
             let clear = render(9 * 60, false, false, true, false, -1., 0., false, 30., 0);
-            for material in [-2., -5., -6., -7.] {
+            for material in [-2., -5., -6., -7., -8.] {
                 let transparent = render(
                     9 * 60,
                     false,

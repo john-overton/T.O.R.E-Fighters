@@ -3,6 +3,7 @@
 //! No renderer, resource lookup, native execution, wall clock or hidden randomness.
 use std::io::{Error, ErrorKind};
 pub mod debris;
+pub mod gunsight;
 pub mod loading;
 pub mod loadout;
 pub mod missiles;

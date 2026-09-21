@@ -433,10 +433,10 @@ impl Airframe {
             });
         let model_scale = self.rig.as_ref().map_or(1. / 3., |r| r.scale());
         let hornet_rig = self.profile.id == tore_formats::aircraft::AircraftId::F18;
-        let damaged = crate::damage_art::DamageArt::variant(
-            self.profile.id,
-            if fragment { 1. } else { s.damage_fraction },
-        );
+        let damaged = crate::damage_art::DamageArt::variant(self.profile.id, s.damage_variant);
+        if fragment && damaged.is_none() {
+            return result;
+        }
         let shape = if let Some(index) = damaged {
             if fragment {
                 &self.damage_art.fragments[index]
@@ -474,132 +474,141 @@ impl Airframe {
             }) else {
                 continue;
             };
-            // Smooth mode submits complete geometry for camera-independent shadows.
-            if !world.smooth_weather
-                && let Some(n) = f.normal
-            {
-                let normal = orient(n);
-                let p = f.positions[0];
-                let p = orient([p[0] * model_scale, p[2] * model_scale, p[1] * model_scale]);
-                let dot: f32 = (0..3)
-                    .map(|i| normal[i] * (camera.position[i] - s.position[i] as f32 - p[i]))
-                    .sum();
-                if dot <= 0. {
-                    continue;
-                }
-            }
-
-            // Stepped compatibility uses the imported per-normal light remapping.
-            // Smooth surfaces receive continuous GPU lighting instead.
-            // Animated world normals and light angles use the host float rig;
-            // the following Q15 dot, row selection and remap order are translated.
-            let light_row = if !world.smooth_weather && f.subtype & 0x20 != 0 {
-                f.normal
-                    .zip(lighting)
-                    .zip(world.celestial.as_ref())
-                    .map(|((normal, light), celestial)| {
-                        let normal =
-                            orient(normal).map(|v| v.round().clamp(-32767., 32767.) as i16);
-                        let amount = tore_formats::weather::lighting::amount(normal, light);
-                        let (bank, row) = world.weather.configuration().lighting().row(amount);
-                        (celestial.light_rows[bank] + row + 1) as f32
-                    })
-                    .unwrap_or(0.)
+            let surfaces = if fragment {
+                vec![f]
             } else {
-                0.
+                self.damage_art.surfaces(&f, &s.damage_regions, model_scale)
             };
-            let flame = damaged.is_none()
-                && if hornet_rig {
-                    crate::aircraft_animation::part(f.address)
-                        == crate::aircraft_animation::Part::Flame
-                } else if let Some(rig) = &self.rig {
-                    rig.flame(f.address)
+            for f in surfaces {
+                // Smooth mode submits complete geometry for camera-independent shadows.
+                if !world.smooth_weather
+                    && let Some(n) = f.normal
+                {
+                    let normal = orient(n);
+                    let p = f.positions[0];
+                    let p = orient([p[0] * model_scale, p[2] * model_scale, p[1] * model_scale]);
+                    let dot: f32 = (0..3)
+                        .map(|i| normal[i] * (camera.position[i] - s.position[i] as f32 - p[i]))
+                        .sum();
+                    if dot <= 0. {
+                        continue;
+                    }
+                }
+
+                // Stepped compatibility uses the imported per-normal light remapping.
+                // Smooth surfaces receive continuous GPU lighting instead.
+                // Animated world normals and light angles use the host float rig;
+                // the following Q15 dot, row selection and remap order are translated.
+                let light_row = if !world.smooth_weather && f.subtype & 0x20 != 0 {
+                    f.normal
+                        .zip(lighting)
+                        .zip(world.celestial.as_ref())
+                        .map(|((normal, light), celestial)| {
+                            let normal =
+                                orient(normal).map(|v| v.round().clamp(-32767., 32767.) as i16);
+                            let amount = tore_formats::weather::lighting::amount(normal, light);
+                            let (bank, row) = world.weather.configuration().lighting().row(amount);
+                            (celestial.light_rows[bank] + row + 1) as f32
+                        })
+                        .unwrap_or(0.)
                 } else {
-                    crate::rafale_animation::part(f.address) == crate::rafale_animation::Part::Flame
+                    0.
                 };
-            let engine_face = damaged.is_none()
-                && self.engine_material.is_some()
-                && crate::engine_material::nozzle(self.profile.id, f.address);
-            let engine_group = crate::engine_material::outlet_group(self.profile.id, &f.positions);
-            let canopy = damaged.is_none()
-                && self.profile.id.source() == tore_formats::aircraft::AircraftId::F22
-                && crate::roster_animation::canopy(f.address);
-            for i in 1..f.positions.len() - 1 {
-                for j in [0, i, i + 1] {
-                    let p = f.positions[j];
-                    let scale = model_scale;
-                    let (x, y, z) = (p[0] * scale, p[2] * scale, p[1] * scale);
-                    let (x, y) = (x * cb + y * sb, -x * sb + y * cb);
-                    let (y, z) = (y * cp + z * sp, -y * sp + z * cp);
-                    let pos = [x * cy + z * sy, y, -x * sy + z * cy];
-                    let uv = if engine_face {
-                        let b = self.nozzle_bounds[engine_group];
-                        [(p[0] - b[0]) / (b[1] - b[0]), (b[3] - p[2]) / (b[3] - b[2])]
-                    } else if f.uv.is_empty() {
-                        [0.; 2]
+                let flame = damaged.is_none()
+                    && if hornet_rig {
+                        crate::aircraft_animation::part(f.address)
+                            == crate::aircraft_animation::Part::Flame
+                    } else if let Some(rig) = &self.rig {
+                        rig.flame(f.address)
                     } else {
-                        let region = self
-                            .damage_art
-                            .regions
-                            .get(&f.texture)
-                            .expect("reviewed aircraft texture");
-                        [
-                            (f.uv[j][0] + 0.5) / self.atlas.width as f32,
-                            (region[2] as f32 + region[1] as f32 - 0.5 - f.uv[j][1])
-                                / self.atlas.height as f32,
-                        ]
+                        crate::rafale_animation::part(f.address)
+                            == crate::rafale_animation::Part::Flame
                     };
-                    let cold_nozzle = damaged.is_none()
-                        && !engine_face
-                        && s.exhaust <= 0.
-                        && if hornet_rig {
-                            crate::aircraft_animation::part(f.address)
-                                == crate::aircraft_animation::Part::Nozzle
-                        } else if let Some(rig) = &self.rig {
-                            rig.cold_nozzle(f.address)
+                let engine_face = damaged.is_none()
+                    && self.engine_material.is_some()
+                    && crate::engine_material::nozzle(self.profile.id, f.address);
+                let engine_group =
+                    crate::engine_material::outlet_group(self.profile.id, &f.positions);
+                let canopy = damaged.is_none()
+                    && self.profile.id.source() == tore_formats::aircraft::AircraftId::F22
+                    && crate::roster_animation::canopy(f.address);
+                for i in 1..f.positions.len() - 1 {
+                    for j in [0, i, i + 1] {
+                        let p = f.positions[j];
+                        let scale = model_scale;
+                        let (x, y, z) = (p[0] * scale, p[2] * scale, p[1] * scale);
+                        let (x, y) = (x * cb + y * sb, -x * sb + y * cb);
+                        let (y, z) = (y * cp + z * sp, -y * sp + z * cp);
+                        let pos = [x * cy + z * sy, y, -x * sy + z * cy];
+                        let uv = if engine_face {
+                            let b = self.nozzle_bounds[engine_group];
+                            [(p[0] - b[0]) / (b[1] - b[0]), (b[3] - p[2]) / (b[3] - b[2])]
+                        } else if f.uv.is_empty() {
+                            [0.; 2]
                         } else {
-                            crate::rafale_animation::part(f.address)
-                                == crate::rafale_animation::Part::Nozzle
+                            let region = self
+                                .damage_art
+                                .regions
+                                .get(&f.texture)
+                                .expect("reviewed aircraft texture");
+                            [
+                                (f.uv[j][0] + 0.5) / self.atlas.width as f32,
+                                (region[2] as f32 + region[1] as f32 - 0.5 - f.uv[j][1])
+                                    / self.atlas.height as f32,
+                            ]
                         };
-                    let color = if cold_nozzle {
-                        [35, 36, 38]
-                    } else {
-                        self.palette[f.colors[j] as usize]
-                    };
-                    let textured = !f.uv.is_empty() && !cold_nozzle;
-                    let layer = if flame && world.smooth_weather {
-                        if textured { -7. } else { -6. }
-                    } else if engine_face {
-                        -3. - crate::engine_material::heat(s)
-                    } else if canopy {
-                        -5.
-                    } else if textured {
-                        if matches!(f.subtype, 0x4c | 0x5c | 0x6c | 0x7c) {
-                            -2.
+                        let cold_nozzle = damaged.is_none()
+                            && !engine_face
+                            && s.exhaust <= 0.
+                            && if hornet_rig {
+                                crate::aircraft_animation::part(f.address)
+                                    == crate::aircraft_animation::Part::Nozzle
+                            } else if let Some(rig) = &self.rig {
+                                rig.cold_nozzle(f.address)
+                            } else {
+                                crate::rafale_animation::part(f.address)
+                                    == crate::rafale_animation::Part::Nozzle
+                            };
+                        let color = if cold_nozzle {
+                            [35, 36, 38]
                         } else {
-                            0.
-                        }
-                    } else {
-                        -1.
-                    };
-                    result.extend_from_slice(&[
-                        pos[0] + s.position[0] as f32,
-                        pos[1] + s.position[1] as f32,
-                        pos[2] + s.position[2] as f32,
-                        uv[0],
-                        uv[1],
-                        layer,
-                        color[0] as f32 / 255.,
-                        color[1] as f32 / 255.,
-                        color[2] as f32 / 255.,
-                        // Preserve source indices for native weather remapping.
-                        // The cold-nozzle material remains an authored exception.
-                        if cold_nozzle || engine_face {
+                            self.palette[f.colors[j] as usize]
+                        };
+                        let textured = !f.uv.is_empty() && !cold_nozzle;
+                        let layer = if flame && world.smooth_weather {
+                            if textured { -7. } else { -6. }
+                        } else if engine_face {
+                            -3. - crate::engine_material::heat(s)
+                        } else if canopy {
+                            -5.
+                        } else if textured {
+                            if matches!(f.subtype, 0x4c | 0x5c | 0x6c | 0x7c) {
+                                -2.
+                            } else {
+                                0.
+                            }
+                        } else {
                             -1.
-                        } else {
-                            f.colors[j] as f32 + 256. * f.fog as u8 as f32 + 1024. * light_row
-                        },
-                    ]);
+                        };
+                        result.extend_from_slice(&[
+                            pos[0] + s.position[0] as f32,
+                            pos[1] + s.position[1] as f32,
+                            pos[2] + s.position[2] as f32,
+                            uv[0],
+                            uv[1],
+                            layer,
+                            color[0] as f32 / 255.,
+                            color[1] as f32 / 255.,
+                            color[2] as f32 / 255.,
+                            // Preserve source indices for native weather remapping.
+                            // The cold-nozzle material remains an authored exception.
+                            if cold_nozzle || engine_face {
+                                -1.
+                            } else {
+                                f.colors[j] as f32 + 256. * f.fog as u8 as f32 + 1024. * light_row
+                            },
+                        ]);
+                    }
                 }
             }
         }

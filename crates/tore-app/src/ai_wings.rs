@@ -25,7 +25,7 @@
 mod orders;
 mod reports;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use tore_formats::aircraft::{Aircraft, AircraftId};
 use tore_sim::{
@@ -42,7 +42,7 @@ use tore_sim::{
         route,
         targeting::Side,
         threat::{SeekerClass, TimeOfDay},
-        weapon_service::ActorId,
+        weapon_service::{ActorId, RequestId},
     },
     attitude::{Basis, Vector, unit},
     combat::{
@@ -221,6 +221,13 @@ pub struct AiWings {
     threat_reports: Vec<(u32, u32)>,
     /// A line for `FlightUi::message`, taken by the host once.
     pending_message: Option<String>,
+    pending_guns: BTreeMap<(u32, u8), PendingGun>,
+}
+
+struct PendingGun {
+    groups: VecDeque<(u32, u16)>,
+    next_scaled: u64,
+    ordinal: u64,
 }
 
 /// `fitted`: the per-actor decision seed.
@@ -491,6 +498,7 @@ impl AiWings {
             realised_launches: 0,
             threat_reports: Vec::new(),
             pending_message: None,
+            pending_guns: BTreeMap::new(),
         })
     }
 
@@ -543,16 +551,98 @@ impl AiWings {
         let output = self.advance(object, &mut state.targets, &ground)?;
         for event in &output.launches {
             if let Some(weapon) = self.weapons.get(&(event.actor, event.station.0)).cloned() {
-                self.realise(
-                    event,
-                    &mut state.projectiles,
-                    &weapon,
-                    usize::from(event.station.0),
-                    player.position,
-                );
+                if live::is_gun(&weapon) {
+                    let rounds = u16::from(weapon.burst.actual_rounds_per_game.max(1))
+                        .saturating_mul(event.projectiles.min(u32::from(u16::MAX)) as u16);
+                    let now = self.mission.tick();
+                    let physical = u64::from(weapon.burst.actual_rounds_per_game.max(1))
+                        * u64::from(weapon.burst.game_rounds_in_burst.max(1));
+                    let pending = self
+                        .pending_guns
+                        .entry((event.actor, event.station.0))
+                        .or_insert(PendingGun {
+                            groups: VecDeque::new(),
+                            next_scaled: now.saturating_mul(physical),
+                            ordinal: 0,
+                        });
+                    if pending.groups.is_empty() {
+                        pending.next_scaled = pending.next_scaled.max(now.saturating_mul(physical));
+                    }
+                    let queued: usize = pending
+                        .groups
+                        .iter()
+                        .map(|(_, remaining)| usize::from(*remaining))
+                        .sum();
+                    let accepted = usize::from(rounds).min(MAX_PROJECTILES.saturating_sub(queued));
+                    self.dropped_launches += u32::from(rounds) - accepted as u32;
+                    if accepted > 0 {
+                        pending.groups.push_back((event.target, accepted as u16));
+                    }
+                } else {
+                    self.realise(
+                        event,
+                        &mut state.projectiles,
+                        &weapon,
+                        usize::from(event.station.0),
+                        player.position,
+                        None,
+                    );
+                }
             } else {
                 self.dropped_launches += event.projectiles;
             }
+        }
+        let now = self.mission.tick();
+        let keys: Vec<_> = self.pending_guns.keys().copied().collect();
+        for key @ (actor, station) in keys {
+            let Some(weapon) = self.weapons.get(&key).cloned() else {
+                continue;
+            };
+            let physical = u64::from(weapon.burst.actual_rounds_per_game.max(1))
+                * u64::from(weapon.burst.game_rounds_in_burst.max(1));
+            let Some(mut pending) = self.pending_guns.remove(&key) else {
+                continue;
+            };
+            if self.mission.actor(actor).is_none_or(|actor| !actor.alive()) {
+                self.dropped_launches += pending
+                    .groups
+                    .iter()
+                    .map(|(_, remaining)| u32::from(*remaining))
+                    .sum::<u32>();
+                pending.groups.clear();
+            }
+            if let Some((target, remaining)) = pending.groups.front_mut()
+                && now.saturating_mul(physical) >= pending.next_scaled
+            {
+                let event = LaunchEvent {
+                    actor,
+                    station: tore_sim::ai::weapon_service::StationId(station),
+                    target: *target,
+                    request_id: RequestId(0),
+                    projectiles: 1,
+                };
+                self.realise(
+                    &event,
+                    &mut state.projectiles,
+                    &weapon,
+                    usize::from(station),
+                    player.position,
+                    Some(pending.ordinal),
+                );
+                *remaining -= 1;
+                pending.ordinal = pending.ordinal.wrapping_add(1);
+                pending.next_scaled = pending
+                    .next_scaled
+                    .saturating_add(u64::from(weapon.burst.game_burst_t.max(1)).saturating_mul(30));
+            }
+            if pending
+                .groups
+                .front()
+                .is_some_and(|(_, remaining)| *remaining == 0)
+            {
+                pending.groups.pop_front();
+            }
+            self.pending_guns.insert(key, pending);
         }
         for event in &output.devices {
             self.realise_device(event, state)?;
@@ -794,10 +884,11 @@ impl AiWings {
         weapon: &tore_formats::weapons::Weapon,
         station: usize,
         player_position: Vector,
-    ) {
+        gun_ordinal: Option<u64>,
+    ) -> u32 {
         let Some(actor) = self.mission.actor(event.actor) else {
             self.dropped_launches += event.projectiles;
-            return;
+            return 0;
         };
         let origin = actor.flight().position;
         let aim = if event.target == PLAYER_ID {
@@ -806,16 +897,16 @@ impl AiWings {
             other.flight().position
         } else {
             self.dropped_launches += event.projectiles;
-            return;
+            return 0;
         };
         let direction = unit([aim[0] - origin[0], aim[1] - origin[1], aim[2] - origin[2]]);
         if direction.iter().any(|v| !v.is_finite()) {
             self.dropped_launches += event.projectiles;
-            return;
+            return 0;
         }
         let Ok(speed) = launch_speed(&weapon.movement, (actor.flight().speed * 256.) as i32) else {
             self.dropped_launches += event.projectiles;
-            return;
+            return 0;
         };
         // `fitted`: an AI shot uses the unguided steering branch of
         // `live::State::step`, never the spec guidance model. Rule: the
@@ -829,6 +920,7 @@ impl AiWings {
         // combat step will use for this projectile's age.
         let launched = (self.mission.tick() / 30) as u16;
         let incoming = event.target == PLAYER_ID;
+        let mut emitted = 0;
         for _ in 0..event.projectiles {
             if projectiles.len() >= MAX_PROJECTILES {
                 self.dropped_launches += 1;
@@ -855,10 +947,16 @@ impl AiWings {
                 launched_t: launched,
                 target: (weapon.seeker.signature != 0).then_some(event.target),
                 fall: FallState::default(),
+                gun_round: gun_ordinal.map(|ordinal| {
+                    (ordinal % u64::from(weapon.burst.actual_rounds_per_game.max(1))) as u8
+                }),
+                tracer: gun_ordinal.is_some_and(|ordinal| ordinal.is_multiple_of(3)),
             });
             self.ai_shots.insert(id, event.actor);
             self.realised_launches += 1;
+            emitted += 1;
         }
+        emitted
     }
 
     fn realise_device(
@@ -1187,6 +1285,7 @@ pub fn roster_probe(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terrain::tests::world;
     use tore_sim::{
         ai::{
             Experience,
@@ -1366,7 +1465,7 @@ mod tests {
         };
         State::new(
             Configuration {
-                fragment_offset: [0.; 3],
+                fragment_offsets: [[0.; 3]; 2],
                 ecm: tore_formats::weapons::Countermeasures {
                     weight: 0,
                     flags: 0,
@@ -1422,6 +1521,7 @@ mod tests {
     fn target(id: u32, position: Vector, yaw: f64) -> live::Target {
         let basis = Basis::new(yaw, 0., 0.);
         live::Target {
+            aircraft: Some(AircraftId::F18),
             role: TargetRole::Aircraft,
             heat: Heat::Engine {
                 on: true,
@@ -1441,8 +1541,9 @@ mod tests {
             radius: 28.,
             hp: 100,
             initial_hp: 100,
-            fragment_offset: [0.; 3],
+            fragment_offsets: [[0.; 3]; 2],
             fragment_released: false,
+            localized_damage: live::LocalizedDamage::default(),
             category: 0,
         }
     }
@@ -1792,6 +1893,8 @@ mod tests {
             launched_t: 0,
             target: Some(3),
             fall: FallState::default(),
+            gun_round: None,
+            tracer: false,
         };
         wings.report_threats(std::slice::from_ref(&shot), |_| Some(SeekerClass::Radar));
         // Only actor 3 was told; the others, its wingman included, were not.
@@ -1866,7 +1969,14 @@ mod tests {
             projectiles: 10,
         };
         let player = flight::State::new(&aircraft(), [0.0, 20000.0, -5000.0]).unwrap();
-        wings.realise(&event, &mut combat.projectiles, &gun, 1, player.position);
+        wings.realise(
+            &event,
+            &mut combat.projectiles,
+            &gun,
+            1,
+            player.position,
+            None,
+        );
         assert_eq!(combat.projectiles.len(), 10);
         assert!(
             combat
@@ -1882,6 +1992,86 @@ mod tests {
                 .iter()
                 .all(|p| p.weapon(combat.configuration()).seeker.signature == 0)
         );
+    }
+
+    #[test]
+    fn canonical_gun_queue_preserves_fifo_phase_and_stops_for_dead_actor() {
+        let (mut wings, targets) = build(None);
+        for actor in wings.mission.actors_mut() {
+            actor.set_stations(Vec::new());
+        }
+        let mut combat = combat_fixture(false);
+        combat.targets = targets;
+        let mut gun = combat.configuration().stations[0].weapon.clone();
+        gun.source = "M61.JT".into();
+        gun.burst.actual_rounds_per_game = 2;
+        gun.burst.game_rounds_in_burst = 4;
+        gun.burst.game_burst_t = 1;
+        wings.weapons.insert((3, 0), gun);
+        wings.pending_guns.insert(
+            (3, 0),
+            PendingGun {
+                groups: VecDeque::from([(PLAYER_ID, 2), (4, 2)]),
+                next_scaled: wings.mission.tick() * 8,
+                ordinal: 0,
+            },
+        );
+        let player = flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
+        let mut release_ticks = Vec::new();
+        for tick in 0..16 {
+            let before = combat.projectiles.len();
+            wings.step(&mut combat, &player, &world()).unwrap();
+            let count = combat.projectiles.len() - before;
+            assert!(count <= 1);
+            if count == 1 {
+                release_ticks.push(tick);
+            }
+        }
+        assert!(
+            release_ticks
+                .windows(2)
+                .all(|pair| (3..=4).contains(&(pair[1] - pair[0])))
+        );
+        let rounds: Vec<_> = combat.projectiles.iter().filter(|p| p.owner == 3).collect();
+        assert_eq!(rounds.len(), 4);
+        assert_eq!(
+            rounds.iter().map(|p| p.incoming).collect::<Vec<_>>(),
+            [true, true, false, false]
+        );
+        assert_eq!(
+            rounds.iter().map(|p| p.gun_round).collect::<Vec<_>>(),
+            [Some(0), Some(1), Some(0), Some(1)]
+        );
+        assert_eq!(
+            rounds.iter().map(|p| p.tracer).collect::<Vec<_>>(),
+            [true, false, false, true]
+        );
+        assert!(wings.pending_guns[&(3, 0)].groups.is_empty());
+        assert_eq!(wings.pending_guns[&(3, 0)].ordinal, 4);
+
+        wings.pending_guns.get_mut(&(3, 0)).unwrap().groups = VecDeque::from([(PLAYER_ID, 2)]);
+        wings.mission.actor_mut(3).unwrap().set_alive(false);
+        let dropped = wings.dropped_launches;
+        wings.step(&mut combat, &player, &world()).unwrap();
+        assert!(wings.pending_guns[&(3, 0)].groups.is_empty());
+        assert_eq!(wings.dropped_launches, dropped + 2);
+        assert_eq!(wings.pending_guns[&(3, 0)].ordinal, 4);
+    }
+
+    #[test]
+    fn normal_startup_selects_canonical_gun_and_safes_master_arm() {
+        let fixture = combat_fixture(false);
+        let mut config = fixture.configuration().clone();
+        config.stations[0].weapon.source = "M61.JT".into();
+        let mut missile = config.stations[0].clone();
+        missile.weapon.source = "AIM9M.JT".into();
+        config.stations.insert(0, missile);
+        let mut state = live::State::new(config, true).unwrap();
+        state.selected = 0;
+        state.armed = true;
+        crate::combat::apply_startup_weapon_state(&mut state);
+        assert_eq!(state.selected, 1);
+        assert!(!state.armed);
     }
 
     #[test]
@@ -1909,6 +2099,7 @@ mod tests {
                 &weapon,
                 0,
                 [0.0; 3],
+                None,
             );
         }
         let mut radar = combat.projectiles[0].clone();
@@ -1977,6 +2168,7 @@ mod tests {
                     weapon,
                     usize::from(event.station.0),
                     [0.0, 20000.0, 0.0],
+                    None,
                 );
             }
             if wings.mission.actor(3).unwrap().rounds_remaining() == 0 {

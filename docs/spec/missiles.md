@@ -387,37 +387,38 @@ lock from an airborne missile as though the next round had acquired it.
 ## Weapon HUD delivery
 
 **Opinionated cleanup requested by John, 2026-09-17.** Armed missile selection
-replaces AGL, vertical speed and bank scale with short weapon/count, readiness warnings and a bare `n%` hit estimate.
+shows short weapon/count, readiness warnings and a bare `n%` hit estimate.
+The later [HUD layout](hud-layout.md) moves these rows below the expanded
+ladder and limits AGL/vertical speed to non-weapon ILS guidance.
 John's annotated layout request reduces the HUD text and fixed layout by 15%
 from the previous size (scale 0.85 to 0.7225). Angular cues retain their actual
 world alignment and five-degree bore geometry. Weapon/count and percentage
 start at reference x=207, aligned with the speed box's left edge. The range scale
 is 52 reference pixels tall at x=390, y=230..282, inside the altitude tape.
-The altitude box's left border is x=401, two pixels beyond the tick endpoint
-x=399, matching the speed-side gap. Its text starts at x=405. While weapon
-readouts are active, tape ticks end before y=275 and numeric labels must fit
-fully above y=275, leaving space before the weapon rows. TARGET DESTROYED is
-omitted from the HUD; its simulation release inhibit and debug status remain.
-These spacing changes follow John's 2026-09-17 screenshot adjustment.
-ARM sits at (207,279), count/weapon at (207,291), percentage and blinking
-IN RNG at y=306. Radar R/C/A rows start at x=402, y=291/303/315. Suppress the redundant BORE READY
+The altitude box's left border is x=401, two pixels beyond the former tick endpoint
+x=399, matching the speed-side gap. Its text starts at x=405. Tape extent and lower readout coordinates
+follow the expanded [HUD layout](hud-layout.md). TARGET DESTROYED is omitted
+from the HUD; its simulation release inhibit and debug status remain.
+Suppress the redundant BORE READY
 message, but retain release-inhibiting warnings and CUED IN RNG. Use the imported first `si_names` string for the HUD,
 even when loadout menus use the second, longer description. Manual pp. 83-84
 establish the readout meanings; our probability rule and layout are fitted.
-Stall, engine-off and crash warnings remain visible. Safe restores flight readouts. With master arm off and radar operating, a selected
-current radar contact still receives the existing 14 by 14 reference-pixel HUD
-box. This opinionated addition was requested by John on 2026-09-17. It does not
-require a missile selection or weapon lock. It uses the observed contact position
-and the forward HUD projection. Clear selection, loss of the current radar
-observation, or radar off removes the box; visual-only and stale contacts do not
-supply it. Safe does not display missile range, probability, diamond or ARM cues.
+Stall, engine-off and crash warnings remain visible. Safe retains flight
+readouts for missile selection, with AGL/VS restricted to active ILS, and hides missile range, probability, diamond
+and ARM cues. The selected target's square or off-HUD chevron is independent of
+master arm, selected weapon and current radar observation; its presentation-only
+selection does not supply missile support. See the shared
+[gun and target-cue specification](gunsight-targeting.md). Safe guns retain their
+ammunition/SAFE text but hide the firing pipper.
 
 All weapon symbology is drawn in the same aircraft-forward HUD layer as flight
 symbology. Circle, labels, estimate and range scale translate and fade together
 when looking away, and zoom together. Clip in forward HUD coordinates before
 applying head-look, never against a stationary screen-centred HUD rectangle.
 
-BORE shows a blinking diamond on one provisional contact, not a target box.
+BORE shows a blinking diamond on one provisional contact, without creating a
+target box for that provisional return. A separately selected HUD target may
+still have its own square or edge chevron.
 It blinks at 2 Hz with 50 percent duty, using simulation ticks so pause freezes
 it. This is an estimate, not an aircraft designation or seeker lock. Active radar
 launches still have no preassigned target and acquire independently after release.

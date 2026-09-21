@@ -214,10 +214,25 @@ impl Research {
         s: &mut State,
         surface: Surface,
         c: &crate::models::config::Configuration,
+        wheel_load_fraction: f64,
+        runway_wind_fraction: f64,
+        previous_position: [f64; 3],
     ) {
         let floor = surface.height + c.equipment.ground_clearance_ft; // Fitted wheel/CG clearance; not recovered geometry.
-        if s.position[1] > floor + 0.05 {
+        let wheel_load = wheel_load_fraction.clamp(0., 1.);
+        // A surface drop removes support regardless of aerodynamic load. This
+        // clearance is only a geometry tolerance, not the liftoff criterion.
+        if self.on_ground && s.position[1] > floor + 0.05 {
             self.on_ground = false;
+            return;
+        }
+        // Fitted wheel-unloading hysteresis. Once released, contact state stays
+        // authoritative until the aircraft descends back to the support plane.
+        if self.on_ground && s.position[1] >= floor && wheel_load <= 0.02 && s.velocity[1] > 0.1 {
+            self.on_ground = false;
+            return;
+        }
+        if !self.on_ground && s.position[1] > floor {
             return;
         }
         let basis = Basis::new(s.yaw, s.pitch, s.bank);
@@ -248,19 +263,31 @@ impl Research {
             s.velocity[1] = s.velocity[1].max(0.);
             // Fitted tire contact: lateral scrub, rolling resistance and wheel brakes.
             let tuning = c.tuning;
-            let scrub = (tuning.tire_scrub_rate * DT).min(1.);
+            let v = (s.velocity[0] * s.velocity[0] + s.velocity[2] * s.velocity[2]).sqrt();
+            let wind_grip = 1. - 0.5 * runway_wind_fraction.clamp(0., 1.);
+            let scrub = (tuning.tire_scrub_rate * wheel_load * wind_grip * DT).min(1.);
             for i in [0, 2] {
                 s.velocity[i] -= basis.right[i] * side * scrub;
             }
-            let v = (s.velocity[0] * s.velocity[0] + s.velocity[2] * s.velocity[2]).sqrt();
             let decel = if s.brake_out {
                 tuning.brake_deceleration
             } else {
                 tuning.rolling_deceleration
-            };
+            } * wheel_load;
             let factor = (1. - decel * DT / v.max(0.01)).max(0.);
             for i in [0, 2] {
                 s.velocity[i] *= factor;
+                // Position was integrated before contact. Reapply this tick's
+                // supported movement using the post-tire velocity.
+                s.position[i] = previous_position[i] + s.velocity[i] * DT;
+            }
+            if s.brake_out && v <= decel * DT {
+                // Static wheel brakes hold a parked aircraft against forces
+                // accumulated during this tick.
+                for i in [0, 2] {
+                    s.position[i] = previous_position[i];
+                    s.velocity[i] = 0.;
+                }
             }
             s.bank = 0.;
             s.pitch = s.pitch.clamp(0., 20f64.to_radians());
@@ -291,6 +318,147 @@ mod tests {
         r.spin_rate = rate;
         r.departure.mode = DepartureMode::Spinning;
         r
+    }
+    fn contact_state(c: &crate::models::config::Configuration) -> State {
+        let mut s = State::new(&profile(), [0., c.equipment.ground_clearance_ft, 0.]).unwrap();
+        s.gear = 1.;
+        s.gear_down = true;
+        s.velocity = [0.; 3];
+        s.speed = 0.;
+        s
+    }
+
+    #[test]
+    fn unloaded_wheels_release_gently_and_do_not_reattach_above_floor() {
+        let c = config();
+        let mut s = contact_state(&c);
+        let mut r = Research::new(1).unwrap();
+        r.on_ground = true;
+        s.velocity[1] = 0.11;
+        s.position[1] += s.velocity[1] * DT;
+        let previous = [
+            s.position[0],
+            s.position[1] - s.velocity[1] * DT,
+            s.position[2],
+        ];
+        r.contact(&mut s, Surface::runway(0.), &c, 0.02, 0., previous);
+        assert!(!r.on_ground);
+        let released_height = s.position[1];
+
+        let previous = s.position;
+        r.contact(&mut s, Surface::runway(0.), &c, 1., 0., previous);
+        assert!(!r.on_ground);
+        assert_eq!(s.position[1], released_height);
+    }
+
+    #[test]
+    fn surface_drop_releases_contact_without_snapping_down() {
+        let c = config();
+        let mut s = contact_state(&c);
+        let integrated_height = s.position[1];
+        let previous = s.position;
+        let mut r = Research::new(1).unwrap();
+        r.on_ground = true;
+        r.contact(&mut s, Surface::runway(-10.), &c, 1., 0., previous);
+        assert!(!r.on_ground);
+        assert_eq!(s.position[1], integrated_height);
+        assert_eq!(s.velocity[1], 0.);
+    }
+
+    #[test]
+    fn rising_surface_resolves_before_wheel_unload_release() {
+        let c = config();
+        let mut s = contact_state(&c);
+        s.velocity[1] = 0.11;
+        let previous = s.position;
+        let mut r = Research::new(1).unwrap();
+        r.on_ground = true;
+        r.contact(&mut s, Surface::runway(1.), &c, 0., 0., previous);
+        assert!(r.on_ground);
+        assert_eq!(s.position[1], 1. + c.equipment.ground_clearance_ft);
+        assert!(s.position[1] >= 1. + c.equipment.ground_clearance_ft);
+    }
+
+    #[test]
+    fn wheel_load_scales_rolling_resistance() {
+        let c = config();
+        let mut full = contact_state(&c);
+        full.yaw = 0.;
+        full.velocity = [0., 0., 100.];
+        full.position[2] = 100. * DT;
+        let mut light = full.clone();
+        let mut full_contact = Research::new(1).unwrap();
+        full_contact.on_ground = true;
+        let mut light_contact = full_contact.clone();
+        full_contact.contact(&mut full, Surface::runway(0.), &c, 1., 0., [0.; 3]);
+        light_contact.contact(&mut light, Surface::runway(0.), &c, 0.5, 0., [0.; 3]);
+        assert!(light.speed > full.speed);
+        assert!((light.speed - full.speed - c.tuning.rolling_deceleration * 0.5 * DT).abs() < 1e-9);
+        assert_eq!(full.position[2], full.velocity[2] * DT);
+        assert_eq!(light.position[2], light.velocity[2] * DT);
+    }
+
+    #[test]
+    fn runway_wind_reduces_only_lateral_tire_grip() {
+        let c = config();
+        let mut calm = contact_state(&c);
+        calm.yaw = 0.;
+        calm.velocity = [10., 0., 100.];
+        calm.position = [10. * DT, calm.position[1], 100. * DT];
+        let mut wind = calm.clone();
+        let mut calm_contact = Research::new(1).unwrap();
+        calm_contact.on_ground = true;
+        let mut wind_contact = calm_contact.clone();
+        calm_contact.contact(&mut calm, Surface::runway(0.), &c, 1., 0., [0.; 3]);
+        wind_contact.contact(&mut wind, Surface::runway(0.), &c, 1., 1., [0.; 3]);
+        assert!(wind.velocity[0].abs() > calm.velocity[0].abs());
+        assert_eq!(wind.velocity[2], calm.velocity[2]);
+    }
+
+    #[test]
+    fn brakes_hold_against_sub_tick_creep() {
+        let c = config();
+        let mut s = contact_state(&c);
+        s.brake_out = true;
+        s.velocity = [0.01, 0., 0.02];
+        let previous = [12., s.position[1], 34.];
+        s.position = [
+            previous[0] + s.velocity[0] * DT,
+            previous[1],
+            previous[2] + s.velocity[2] * DT,
+        ];
+        let mut r = Research::new(1).unwrap();
+        r.on_ground = true;
+        r.contact(&mut s, Surface::runway(0.), &c, 1., 0., previous);
+        assert_eq!([s.position[0], s.position[2]], [12., 34.]);
+        assert_eq!([s.velocity[0], s.velocity[2]], [0., 0.]);
+    }
+
+    #[test]
+    fn touchdown_keeps_safety_classification() {
+        let c = config();
+        for (surface, gear, vertical_speed, crashes) in [
+            (Surface::runway(0.), 1., 0., false),
+            (Surface::runway(0.), 0., 0., true),
+            (
+                Surface {
+                    water: true,
+                    ..Surface::runway(0.)
+                },
+                1.,
+                0.,
+                true,
+            ),
+            (Surface::runway(0.), 1., -100., true),
+        ] {
+            let mut s = contact_state(&c);
+            s.gear = gear;
+            s.velocity[1] = vertical_speed;
+            let mut r = Research::new(1).unwrap();
+            let previous = s.position;
+            r.contact(&mut s, surface, &c, 1., 0., previous);
+            assert_eq!(s.crashed, crashes);
+        }
     }
     #[test]
     fn soft_entry_scales_with_depth_and_has_no_old_rudder_step() {

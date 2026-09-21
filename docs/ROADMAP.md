@@ -666,6 +666,15 @@ Deliverable: a user can build and share a mission and a sound profile without to
 
 ---
 
+## Cannon cadence correction
+
+Requested by John on 2026-09-21 and implemented with individual physical rounds
+at the fitted source-derived host rate, plus one luminous tracer every three
+bullets. Ammunition, target damage budgets, trigger boundaries and rendering are
+validated together. Actor-owned release mechanics use the same shot spacing
+without changing autonomous decisions. [Rules and known damage-rounding difference](spec/damage-smoke.md#individual-cannon-rounds);
+[validation](baselines/damage-smoke.md).
+
 ## Milestone 4: Remaster layer
 
 Everything here ships as toggleable layers over classic.

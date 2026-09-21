@@ -67,20 +67,24 @@ impl Paint<'_> {
 }
 // Authored F-16-style bank scale requested by the user. The graduated arc
 // rotates past a fixed index, keeping full rolls readable through +/-180.
+pub const HUD_CLIP: (i32, i32, i32, i32) = (174, 96, 292, 354);
+pub const AIM_BOTTOM: i32 = 390;
+const BANK_CENTER_Y: f64 = 201.;
+const BANK_RADIUS: f64 = 223.;
+fn bank_point(angle: f64, radius: f64) -> (f64, f64) {
+    let a = angle.to_radians();
+    (320. + radius * a.sin(), BANK_CENTER_Y + radius * a.cos())
+}
 fn bank_scale(p: &mut Paint<'_>, font: &Font, bank: f64) {
-    let point = |angle: f64, radius: f64| {
-        let a = angle.to_radians();
-        (320. + radius * a.sin(), 285. + radius * a.cos())
-    };
     for mark in (-180i32..180).step_by(10) {
         let angle = bank_tick_angle(mark, bank);
-        if angle.abs() > 60. {
+        if angle.abs() > 30. {
             continue;
         }
         let major = mark % 30 == 0;
         p.line(
-            point(angle, if major { 35. } else { 38. }),
-            point(angle, 42.),
+            bank_point(angle, if major { 216. } else { 219. }),
+            bank_point(angle, BANK_RADIUS),
         );
         if major {
             let text = mark.abs().to_string();
@@ -88,7 +92,7 @@ fn bank_scale(p: &mut Paint<'_>, font: &Font, bank: f64) {
                 .bytes()
                 .map(|c| font.glyphs[c as usize].advance)
                 .sum::<usize>() as i32;
-            let (x, y) = point(angle, 58.);
+            let (x, y) = bank_point(angle, 239.);
             p.text(
                 font,
                 &text,
@@ -97,9 +101,9 @@ fn bank_scale(p: &mut Paint<'_>, font: &Font, bank: f64) {
             );
         }
     }
-    p.line((320., 329.), (316., 336.));
-    p.line((316., 336.), (324., 336.));
-    p.line((324., 336.), (320., 329.));
+    p.line((320., 425.), (316., 432.));
+    p.line((316., 432.), (324., 432.));
+    p.line((324., 432.), (320., 425.));
 }
 fn bank_tick_angle(mark: i32, bank: f64) -> f64 {
     (f64::from(mark) - bank.to_degrees() + 180.).rem_euclid(360.) - 180.
@@ -132,6 +136,22 @@ pub fn project(
         240. - (x * sr + y * cr) * scale,
     ))
 }
+fn ladder_project(
+    pitch: f64,
+    bank: f64,
+    bearing: f64,
+    elevation: f64,
+    zoom: f64,
+) -> Option<(f64, f64)> {
+    let point = project(pitch, bank, bearing, elevation, zoom)?;
+    let normal = [bank.sin(), bank.cos()];
+    let delta = [point.0 - 320., point.1 - 240.];
+    let distance = delta[0] * normal[0] + delta[1] * normal[1];
+    Some((
+        point.0 - normal[0] * distance * 0.25,
+        point.1 - normal[1] * distance * 0.25,
+    ))
+}
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     pixels: &mut [u8],
@@ -144,10 +164,11 @@ pub fn draw(
     color: [u8; 3],
     zoom: f32,
     ils: Option<(&tore_sim::airport::Guidance, &str, &str)>,
+    wind: Option<&tore_sim::runway_wind::Assessment>,
 ) {
     let mut p = Paint {
         pixels,
-        clip: (174, 96, 292, 222),
+        clip: HUD_CLIP,
         color: [color[0], color[1], color[2], 255],
     };
     let hdg = heading(s.yaw);
@@ -170,7 +191,7 @@ pub fn draw(
     p.text(font, &format!("{:03}", hdg.round() as u32 % 360), 311, 162);
     // Ladder is perspective projected and clipped away from the fixed tapes.
     if ladder {
-        p.clip = (250, 182, 140, 104);
+        p.clip = (250, 182, 140, 166);
         for degrees in (-85..=85).step_by(5) {
             let el = (degrees as f64).to_radians();
             for side in [-1., 1.] {
@@ -181,32 +202,29 @@ pub fn draw(
                 };
                 for &(a, b) in spans {
                     if let (Some(a), Some(b)) = (
-                        project(s.pitch, s.bank, (side * a).to_radians(), el, zoom as f64),
-                        project(s.pitch, s.bank, (side * b).to_radians(), el, zoom as f64),
+                        ladder_project(s.pitch, s.bank, (side * a).to_radians(), el, zoom as f64),
+                        ladder_project(s.pitch, s.bank, (side * b).to_radians(), el, zoom as f64),
                     ) {
                         p.line(a, b);
                     }
                 }
             }
             if degrees != 0
-                && let Some((x, y)) = project(s.pitch, s.bank, 3.5f64.to_radians(), el, zoom as f64)
+                && let Some((x, y)) =
+                    ladder_project(s.pitch, s.bank, 3.5f64.to_radians(), el, zoom as f64)
             {
                 p.text(font, &degrees.to_string(), x as i32, y as i32 - 4);
             }
         }
     }
-    p.clip = (174, 96, 292, 222);
-    // Fixed aircraft datum and kinematic flight path; no synthetic target cues.
-    p.line((303., 240.), (313., 240.));
-    p.line((327., 240.), (337., 240.));
-    p.line((313., 240.), (320., 243.));
-    p.line((320., 243.), (327., 240.));
+    p.clip = HUD_CLIP;
+    // Kinematic flight path marker; no fixed aircraft-datum bars.
     if s.speed > 10. {
         let gamma = s.velocity[1].atan2(s.velocity[0].hypot(s.velocity[2]));
         let bearing = s.velocity[0].atan2(s.velocity[2]) - s.yaw;
         if let Some((x, y)) = project(s.pitch, s.bank, bearing, gamma, zoom as f64)
             && (235. ..405.).contains(&x)
-            && (155. ..285.).contains(&y)
+            && (155. ..380.).contains(&y)
         {
             for i in 0..36 {
                 let t = i as f64 * std::f64::consts::TAU / 36.;
@@ -218,35 +236,10 @@ pub fn draw(
         }
     }
     let speed = air.map_or(s.speed / 1.68781, |d| d.true_airspeed_knots);
-    let tape_bottom = if weapons { 275. } else { 282. };
-    for i in -3..=3 {
-        let v = (speed / 10.).floor() * 10. + i as f64 * 10.;
-        let y = 228. - (v - speed) * 2.;
-        if (205. ..tape_bottom).contains(&y) {
-            p.line((240., y), (246., y));
-            if i % 2 == 0
-                && (y - 228.).abs() > 12.
-                && (!weapons || y as i32 - 4 + font.height as i32 <= 275)
-            {
-                p.text(font, &format!("{v:.0}"), 211, y as i32 - 4);
-            }
-        }
-        let a = (s.position[1] / 100.).floor() * 100. + i as f64 * 100.;
-        let y = 228. - (a - s.position[1]) * 0.2;
-        if (205. ..tape_bottom).contains(&y) {
-            p.line((393., y), (399., y));
-            if i % 2 == 0
-                && (y - 228.).abs() > 12.
-                && (!weapons || y as i32 - 4 + font.height as i32 <= 275)
-            {
-                p.text(font, &format!("{a:.0}"), 402, y as i32 - 4);
-            }
-        }
-    }
     p.text(font, "TAS", 211, 190);
     p.text(font, "MSL", 402, 190);
-    p.readout_box(font, &format!("{speed:.0}"), 211, 223);
-    p.readout_box(font, &format!("{:.0}", s.position[1]), 405, 223);
+    p.readout_box(font, &format!("{speed:.0}"), 211, 235);
+    p.readout_box(font, &format!("{:.0}", s.position[1]), 405, 235);
     p.text(font, &format!("{:.1}G", s.g), 235, 164);
     p.text(font, &format!("{:.0}%", s.throttle * 100.), 235, 178);
     if s.afterburner_active() {
@@ -265,7 +258,7 @@ pub fn draw(
             p.text(font, label, 388, 140 + i as i32 * 11);
         }
     }
-    if !weapons {
+    if !weapons && ils.is_some_and(|(guidance, _, _)| guidance.active) {
         p.text(
             font,
             &format!(
@@ -273,8 +266,8 @@ pub fn draw(
                 air.map_or(s.position[1] - ground, |d| d.altitude_agl_ft)
                     .max(0.)
             ),
-            244,
-            291,
+            211,
+            426,
         );
         p.text(
             font,
@@ -282,13 +275,21 @@ pub fn draw(
                 "V/S {:+.0}",
                 air.map_or(s.vertical_speed * 60., |d| d.vertical_speed_fpm)
             ),
-            336,
-            291,
+            360,
+            426,
         );
     }
     if s.autopilot.mode() != tore_sim::autopilot::Mode::Off {
         p.text(font, "AUTO", 211, 133);
         p.text(font, &s.autopilot.label(), 211, 145);
+    }
+    if let Some(wind) = wind {
+        p.text(
+            font,
+            &wind_label(wind),
+            244,
+            if ils.is_some() { 96 } else { 106 },
+        );
     }
     if let Some((guidance, airport, runway)) = ils {
         let airport: String = airport
@@ -326,13 +327,56 @@ pub fn draw(
     } else if !s.engine {
         p.text(font, "ENGINE OFF", 283, 306);
     } else if !weapons {
-        p.clip = (174, 96, 292, 254);
+        p.clip = HUD_CLIP;
         bank_scale(&mut p, font, s.bank);
     }
 }
+fn wind_label(wind: &tore_sim::runway_wind::Assessment) -> String {
+    let tail = if wind.tailwind_knots >= 0.5 {
+        format!(
+            " TW {:.0}/10{}",
+            wind.tailwind_knots,
+            if wind.tailwind_knots >= 10. {
+                " LIMIT"
+            } else {
+                ""
+            }
+        )
+    } else {
+        String::new()
+    };
+    let cross = if wind.crosswind_knots.abs() < 0.5 {
+        0.
+    } else {
+        wind.crosswind_knots
+    };
+    format!(
+        "XW {cross:+.0}/{:.0} {}{tail} KT",
+        wind.limit_knots,
+        wind.severity.label()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn wind_readout_distinguishes_crosswind_tailwind_and_ignored_headwind() {
+        use tore_sim::runway_wind::{FEET_PER_SECOND_PER_KNOT as K, assessment};
+        assert_eq!(
+            wind_label(&assessment(40_000., [31. * K, 0., 0.], 0.).unwrap()),
+            "XW +31/30 LIMIT KT"
+        );
+        assert_eq!(
+            wind_label(&assessment(40_000., [0., 0., 10. * K], 0.).unwrap()),
+            "XW +0/30 CALM TW 10/10 LIMIT KT"
+        );
+        assert_eq!(
+            wind_label(&assessment(40_000., [0., 0., -40. * K], 0.).unwrap()),
+            "XW +0/30 CALM KT"
+        );
+    }
+
     #[test]
     fn bank_scale_tracks_aircraft_attitude_through_full_rolls() {
         assert_eq!(bank_tick_angle(30, 30f64.to_radians()), 0.);
@@ -340,6 +384,12 @@ mod tests {
         assert_eq!(bank_tick_angle(0, 360f64.to_radians()), 0.);
         assert!((bank_tick_angle(-180, 179f64.to_radians()) - 1.).abs() < 1e-9);
         assert!((bank_tick_angle(-180, 181f64.to_radians()) + 1.).abs() < 1e-9);
+        let left = bank_point(-30., BANK_RADIUS);
+        let center = bank_point(0., BANK_RADIUS);
+        let right = bank_point(30., BANK_RADIUS);
+        assert!((right.0 - left.0 - 223.).abs() < 1e-9);
+        assert!((center.1 - left.1 - 223. * (1. - 30f64.to_radians().cos())).abs() < 1e-9);
+        assert_eq!(center.1, 424.);
     }
     #[test]
     fn heading_wrap_and_horizon_projection() {
@@ -350,6 +400,34 @@ mod tests {
         let a = project(0., 0., 0.1, 0., 1.).unwrap();
         let b = project(0., std::f64::consts::FRAC_PI_2, 0.1, 0., 1.).unwrap();
         assert!(a.0 > 320. && (b.0 - 320.).abs() < 0.001 && b.1 < 240.);
+    }
+    #[test]
+    fn ladder_compresses_only_bank_normal_spacing() {
+        for bank in [0., 45f64.to_radians(), 90f64.to_radians()] {
+            let normal = [bank.sin(), bank.cos()];
+            let tangent = [bank.cos(), -bank.sin()];
+            let base = project(0., bank, 0., 0., 1.).unwrap();
+            let raised = project(0., bank, 0., 5f64.to_radians(), 1.).unwrap();
+            let compact_base = ladder_project(0., bank, 0., 0., 1.).unwrap();
+            let compact_raised = ladder_project(0., bank, 0., 5f64.to_radians(), 1.).unwrap();
+            let spacing = (raised.0 - base.0) * normal[0] + (raised.1 - base.1) * normal[1];
+            let compact_spacing = (compact_raised.0 - compact_base.0) * normal[0]
+                + (compact_raised.1 - compact_base.1) * normal[1];
+            assert!((compact_spacing - spacing * 0.75).abs() < 1e-9);
+
+            let left = project(0., bank, -3f64.to_radians(), 5f64.to_radians(), 1.).unwrap();
+            let right = project(0., bank, 3f64.to_radians(), 5f64.to_radians(), 1.).unwrap();
+            let compact_left =
+                ladder_project(0., bank, -3f64.to_radians(), 5f64.to_radians(), 1.).unwrap();
+            let compact_right =
+                ladder_project(0., bank, 3f64.to_radians(), 5f64.to_radians(), 1.).unwrap();
+            let width = (right.0 - left.0) * tangent[0] + (right.1 - left.1) * tangent[1];
+            let compact_width = (compact_right.0 - compact_left.0) * tangent[0]
+                + (compact_right.1 - compact_left.1) * tangent[1];
+            assert!((compact_width - width).abs() < 1e-9);
+            assert!(compact_left.0.is_finite() && compact_left.1.is_finite());
+        }
+        assert!(ladder_project(0., 0., std::f64::consts::PI, 0., 1.).is_none());
     }
     #[test]
     fn velocity_marker_matches_body_axes_through_banked_pulls() {

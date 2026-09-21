@@ -222,6 +222,40 @@ fn airport_aircraft(
     }
 }
 
+fn airport_wind(
+    world: &terrain::World,
+    flight: &flight::State,
+    guidance: Option<&tore_sim::airport::Guidance>,
+) -> Option<tore_sim::runway_wind::Assessment> {
+    if flight.crashed {
+        return None;
+    }
+    let heading = if let Some((id, height)) = world
+        .airport_scene
+        .runway_surface(flight.position[0], flight.position[2])
+        && flight.supported_at(height)
+    {
+        let runway = world.airport_scene.runway(id)?;
+        let near = runway.heading;
+        if (flight.yaw - near).cos() >= 0. {
+            near
+        } else {
+            near + std::f64::consts::PI
+        }
+    } else {
+        let guidance = guidance?;
+        world
+            .airport_scene
+            .runway(guidance.runway)?
+            .approach_heading(guidance.end)
+    };
+    tore_sim::runway_wind::assessment(
+        flight.model().configuration().mass.max_takeoff_lbs,
+        world.wind(),
+        heading,
+    )
+}
+
 fn airport_reply(world: &terrain::World, reply: &tore_sim::airport::Reply) -> String {
     use tore_sim::airport::Reply;
     match reply {
@@ -604,6 +638,7 @@ impl App {
                 Action::None
             }
             Command::NextWeapon => {
+                self.airport_nav_mode = false;
                 self.combat.cancel();
                 self.combat.command(
                     tore_sim::combat::live::Command::NextWeapon,
@@ -846,6 +881,9 @@ impl App {
                             )
                             .and_then(|mut c| {
                                 c.reset(&mut self.flight)?;
+                                if c.uses_normal_startup_defaults() {
+                                    c.apply_startup_weapons();
+                                }
                                 c.add_airport_targets(&self.world.airport_scene)?;
                                 Ok(c)
                             }) {
@@ -1092,6 +1130,9 @@ impl App {
                     event_loop.exit();
                     return;
                 }
+                if self.combat.uses_normal_startup_defaults() {
+                    self.combat.apply_startup_weapons();
+                }
                 let ground_airport = if let Some(object) = self.ground_start {
                     match quick_mission::apply_ground_start(&self.world, &mut self.flight, object) {
                         Ok(airport) => Some(airport),
@@ -1109,12 +1150,12 @@ impl App {
                     event_loop.exit();
                     return;
                 }
-                self.airport_nav_mode = false;
+                self.airport_nav_mode = ground_airport.is_some();
                 self.airport_commands.clear();
                 if let Some(airport) = ground_airport {
                     self.airport_service.command(
                         &self.world.airport_scene,
-                        airport_aircraft(&self.world, &self.flight, false),
+                        airport_aircraft(&self.world, &self.flight, self.airport_nav_mode),
                         tore_sim::airport::Command::SelectAirport(airport),
                     );
                 }
@@ -2104,10 +2145,11 @@ impl ApplicationHandler for App {
                                 ) as f64,
                                 self.world.air_data(&presented).ok().as_ref(),
                                 self.flight_ui.ladder,
-                                weapon_hud::active(&self.combat.state),
+                                !self.airport_nav_mode && weapon_hud::active(&self.combat.state),
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                                 self.flight_canvas.hud_zoom(1.),
                                 ils,
+                                airport_wind(&self.world, &presented, guidance.as_ref()).as_ref(),
                             );
                         }
                         if self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4) {
@@ -2118,6 +2160,7 @@ impl ApplicationHandler for App {
                                 &self.hornet.hud_font,
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                                 f64::from(self.flight_canvas.hud_zoom(1.)),
+                                self.airport_nav_mode,
                             );
                         }
                         renderer.cockpit(
@@ -2136,6 +2179,7 @@ impl ApplicationHandler for App {
                                 &presented,
                                 &self.hornet.hud_font,
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
+                                self.airport_nav_mode,
                             );
                             self.flight_canvas.weapon_debug(&self.menu.pixels);
                         }
@@ -2455,7 +2499,7 @@ fn main() -> AppResult<()> {
     // written to the preferences file and does not survive a restart.
     let mut enemy_skill = None;
     let mut combat_commands = Vec::new();
-    let mut weapon_slot = 1usize;
+    let mut weapon_slot: Option<usize> = None;
     let mut input_profile = None;
     let mut native_input = true;
     let mut record_input = None;
@@ -2492,6 +2536,8 @@ fn main() -> AppResult<()> {
     let mut flight_throttle = None;
     let mut flight_bay = None;
     let mut damage_preview = None;
+    let mut hud_target_preview: Option<[f64; 3]> = None;
+    let mut damage_preview_section = tore_sim::combat::live::DamageSection::Nose;
     let mut damage_preview_ticks = 240usize;
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
@@ -2569,6 +2615,15 @@ fn main() -> AppResult<()> {
                 live_fire = true;
                 initial_screen = Screen::Flight;
             }
+            "--hud-target-preview" => {
+                let values: Vec<f64> = args.next().ok_or("--hud-target-preview needs bearing,elevation,feet")?
+                    .split(',').map(str::parse).collect::<Result<_,_>>()?;
+                if values.len()!=3 || values.iter().any(|v| !v.is_finite()) || values[0].abs()>180. || values[1].abs()>90. || !(100. ..=60000.).contains(&values[2]) {
+                    return Err("--hud-target-preview needs bearing +/-180, elevation +/-90, range 100..60000 feet".into());
+                }
+                hud_target_preview = Some([values[0],values[1],values[2]]);
+                live_fire = true;
+            }
             "--damage-preview-ticks" => {
                 damage_preview_ticks = args.next().ok_or("--damage-preview-ticks needs 1..7200")?.parse()?;
                 if !(1..=7200).contains(&damage_preview_ticks) { return Err("--damage-preview-ticks needs 1..7200".into()); }
@@ -2578,6 +2633,17 @@ fn main() -> AppResult<()> {
                 if !fraction.is_finite() || !(0. ..=1.).contains(&fraction) { return Err("--damage-preview needs 0..1".into()); }
                 damage_preview = Some(fraction);
                 initial_screen = Screen::Flight;
+            }
+            "--damage-preview-section" => {
+                damage_preview_section = match args.next().as_deref() {
+                    Some("nose") => tore_sim::combat::live::DamageSection::Nose,
+                    Some("cockpit") => tore_sim::combat::live::DamageSection::Cockpit,
+                    Some("core") => tore_sim::combat::live::DamageSection::Core,
+                    Some("left-wing") => tore_sim::combat::live::DamageSection::LeftWing,
+                    Some("right-wing") => tore_sim::combat::live::DamageSection::RightWing,
+                    Some("tail") => tore_sim::combat::live::DamageSection::Tail,
+                    _ => return Err("--damage-preview-section needs nose|cockpit|core|left-wing|right-wing|tail".into()),
+                };
             }
             "--dummy-aircraft" => {
                 let value = args.next().ok_or("--dummy-aircraft needs ID,COUNT")?;
@@ -2622,10 +2688,11 @@ fn main() -> AppResult<()> {
                 combat_smoke = true;
             }
             "--weapon-slot" => {
-                weapon_slot = args
-                    .next()
-                    .ok_or("--weapon-slot requires a 1-based PT weapon slot")?
-                    .parse()?;
+                weapon_slot = Some(
+                    args.next()
+                        .ok_or("--weapon-slot requires a 1-based PT weapon slot")?
+                        .parse()?,
+                );
             }
             "--combat-probe-ticks" => {
                 let ticks: usize = args
@@ -2906,7 +2973,7 @@ fn main() -> AppResult<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..72000 runs a headless AI mission and prints a deterministic per-actor summary.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..72000 runs a headless AI mission and prints a deterministic per-actor summary.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -2969,6 +3036,16 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             || replay_input.is_some())
     {
         return Err("--damage-preview requires --capture-flight and cannot record/replay or use native research flight".into());
+    }
+    if hud_target_preview.is_some()
+        && (capture_terrain.is_none()
+            || native_tables_path.is_some()
+            || record_input.is_some()
+            || record_combat.is_some()
+            || replay_combat.is_some()
+            || replay_input.is_some())
+    {
+        return Err("--hud-target-preview requires --capture-flight without recording/replay or native research flight".into());
     }
     let researched_flight = flight_mode_arg.unwrap_or(native_tables_path.is_none());
     let native_tables = if let Some(path) = native_tables_path {
@@ -3043,6 +3120,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     };
     let data = assets::data_directory()?;
     if ground_start_airport.is_some() {
+        let ground_capture_probe = flight_probe_ticks.is_some()
+            && capture_terrain.is_some()
+            && initial_screen == Screen::Flight
+            && matches!(maneuver.as_str(), "level" | "takeoff");
         if !researched_flight || native_tables.is_some() {
             return Err("Ground start requires the researched flight model; choose Airborne for this adapter.".into());
         }
@@ -3050,7 +3131,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             || flight_devices.is_some()
             || flight_controls.is_some()
             || damage_preview.is_some()
-            || flight_probe_ticks.is_some()
+            || (flight_probe_ticks.is_some() && !ground_capture_probe)
             || flight_throttle.is_some()
             || flight_bay.is_some()
         {
@@ -3563,7 +3644,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         tore_sim::vapor::Vapor::seeded(hornet.streamer_points(&flight).unwrap_or([[0.; 3]; 2]));
     let mut probe_turbulence = tore_sim::turbulence::Turbulence::default();
     let mut probe_turbulence_rng = tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?;
-    if let Some(ticks) = flight_probe_ticks {
+    if ground_start.is_none()
+        && let Some(ticks) = flight_probe_ticks
+    {
         let keys = setup_maneuver(&mut flight);
         if matches!(maneuver.as_str(), "stall" | "spin") {
             for (v, wind) in flight.velocity.iter_mut().zip(world.wind()) {
@@ -3704,9 +3787,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     flight.sensors = sensor_controls(sensor_channel, scope_range, scope_history);
     let mut combat = combat::Combat::new(&hornet, &theater_resources, live_fire)?;
     combat.add_airport_targets(&world.airport_scene)?;
-    if let Some(path) = record_combat {
+    if let Some(ref path) = record_combat {
         combat.recorder = Some(combat_tape::Recorder::new(
-            &path,
+            path,
             &theater_resources,
             combat.state.configuration(),
             &theater_code,
@@ -3720,10 +3803,49 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     combat.mission_dummies(&dummy_aircraft, 5280., &theater_resources)?;
     combat.reset(&mut flight)?;
+    let normal_startup_defaults = !live_fire
+        && record_input.is_none()
+        && replay_frames.is_none()
+        && combat_probe.is_none()
+        && record_combat.is_none();
+    if normal_startup_defaults {
+        combat.apply_startup_weapons();
+    }
     if let Some(object) = ground_start {
         quick_mission::apply_ground_start(&world, &mut flight, object)?;
         probe_vapor =
             tore_sim::vapor::Vapor::seeded(hornet.streamer_points(&flight).unwrap_or([[0.; 3]; 2]));
+        if let Some(ticks) = flight_probe_ticks {
+            let keys = setup_maneuver(&mut flight);
+            for _ in 0..ticks {
+                flight.step_surface(&keys, |x, z| world.surface(x, z));
+                if let Some(error) = flight.native_fault() {
+                    return Err(error.into());
+                }
+                let mut weather_view = hornet.camera(&flight, flight_view, Default::default());
+                look::apply(
+                    &mut weather_view,
+                    flight.position.map(|v| v as f32),
+                    flight_look.map(f32::to_radians),
+                    matches!(flight_view, 1 | 2),
+                );
+                world.step_weather(flight.speed, &weather_view);
+                world.step_view_weather(&mirrors::camera(&flight), flight.speed);
+                for page in [2, 3] {
+                    world.step_view_weather(&hornet.panel_camera(&flight, page), flight.speed);
+                }
+                step_turbulence(
+                    &mut probe_turbulence,
+                    &mut probe_turbulence_rng,
+                    &mut flight,
+                    &world,
+                    turbulence_enabled,
+                );
+                if let Some(points) = hornet.streamer_points(&flight) {
+                    probe_vapor.step(world.weather.ticks(), points);
+                }
+            }
+        }
     }
     if let Some((_, aircraft)) = airport_probe {
         flight.position = aircraft.position;
@@ -3738,16 +3860,19 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         flight.bay_open = value > 0.;
     }
 
-    if weapon_slot == 0 || weapon_slot > combat.state.ammo.len() {
-        return Err("weapon slot outside this aircraft's PT loadout".into());
-    }
-    for _ in 1..weapon_slot {
-        combat.command(
-            tore_sim::combat::live::Command::NextWeapon,
-            combat::launcher(&flight),
-        );
+    if let Some(weapon_slot) = weapon_slot {
+        if weapon_slot == 0 || weapon_slot > combat.state.ammo.len() {
+            return Err("weapon slot outside this aircraft's PT loadout".into());
+        }
+        while combat.state.selected != weapon_slot - 1 {
+            combat.command(
+                tore_sim::combat::live::Command::NextWeapon,
+                combat::launcher(&flight),
+            );
+        }
     }
     if live_fire {
+        combat.state.armed = true;
         combat.command(
             tore_sim::combat::live::Command::ReplaceTarget,
             combat::launcher(&flight),
@@ -3805,7 +3930,54 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             combat.state.ammo
         );
     }
+    if let Some([bearing, elevation, range]) = hud_target_preview {
+        for _ in 0..120 {
+            combat.step(&mut flight, &world)?;
+        }
+        let id = combat
+            .state
+            .targets
+            .iter()
+            .find(|t| t.role == tore_sim::combat::missiles::TargetRole::Aircraft)
+            .ok_or("HUD preview requires range aircraft")?
+            .id;
+        combat.command(
+            tore_sim::combat::live::Command::DesignateTarget(id),
+            combat::launcher(&flight),
+        );
+        if combat.state.designated() != Some(id) {
+            return Err("HUD preview target could not be observed before repositioning".into());
+        }
+        let body = tore_sim::attitude::Basis::new(flight.yaw, flight.pitch, flight.bank);
+        let (bearing, elevation) = (bearing.to_radians(), elevation.to_radians());
+        let target = combat
+            .state
+            .targets
+            .iter_mut()
+            .find(|t| t.id == id)
+            .unwrap();
+        target.position = std::array::from_fn(|i| {
+            flight.position[i]
+                + range
+                    * (body.forward[i] * bearing.cos() * elevation.cos()
+                        + body.right[i] * bearing.sin() * elevation.cos()
+                        + body.up[i] * elevation.sin())
+        });
+        for _ in 0..24 {
+            combat.step(&mut flight, &world)?;
+        }
+        println!(
+            "HUD target preview: bearing={} elevation={} display={:?} sensor={:?}",
+            bearing.to_degrees(),
+            elevation.to_degrees(),
+            combat.state.display_target().map(|t| t.id),
+            combat.state.designated()
+        );
+    }
     if let Some(fraction) = damage_preview {
+        combat
+            .state
+            .preview_localized_damage(damage_preview_section, fraction);
         combat.state.player_hp = (f64::from(combat.state.configuration().damage_capacity)
             * (1. - fraction))
             .round() as i32;
@@ -3863,15 +4035,18 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && std::env::var_os("TORE_PERF_FRAMES").is_none();
     let mut airport_service =
         tore_sim::airport::Service::new(&world.airport_scene).map_err(std::io::Error::other)?;
+    let airport_nav_mode = airport_probe.map_or_else(
+        || ground_start.is_some() && weapon_slot.is_none() && !live_fire,
+        |(_, aircraft)| aircraft.nav_mode,
+    );
     if let Some(object) = ground_start {
         let airport = world.airport_scene.runway(object).unwrap().airport;
         airport_service.command(
             &world.airport_scene,
-            airport_aircraft(&world, &flight, false),
+            airport_aircraft(&world, &flight, airport_nav_mode),
             tore_sim::airport::Command::SelectAirport(airport),
         );
     }
-    let airport_nav_mode = airport_probe.is_some_and(|(_, aircraft)| aircraft.nav_mode);
     if let Some((airport, aircraft)) = airport_probe {
         airport_service.command(
             &world.airport_scene,

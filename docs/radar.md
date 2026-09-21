@@ -806,3 +806,9 @@ mouse and uses the same scaling as contact selection. Takeover starts at the
 screen edge, including margins outside the contact plot, and ends at the bezel.
 It remains visible with the radar off. [Screen bounds](spec/missiles.md#radar-cursor-screen-boundary). L or the upper-right
 RELEASE LOCK button clears designation. [HUD rules](spec/missiles.md#weapon-hud-delivery).
+
+The HUD additionally remembers the explicitly selected target for its square or
+edge chevron, independent of sensor selection and weapon support. Loss of
+observation still expires sensor selection normally. The display-only cue
+never supplies radar gun lead or missile guidance. L/RELEASE LOCK clears both.
+[Target-cue behavior](spec/gunsight-targeting.md#target-square-and-edge-chevron).

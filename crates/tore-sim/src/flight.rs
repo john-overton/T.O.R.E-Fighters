@@ -51,6 +51,9 @@ pub struct State {
     pub sensors: crate::sensors::Controls,
     /// Combat presentation health, no additional flight-force coupling.
     pub damage_fraction: f64,
+    /// Fitted localized damage body pair selected by combat impact location.
+    pub damage_variant: Option<usize>,
+    pub damage_regions: [f64; crate::combat::live::DAMAGE_SECTIONS],
     pub autopilot: crate::autopilot::Autopilot,
     pub crashed: bool,
     pub ticks: u64,
@@ -159,6 +162,8 @@ impl State {
             jammer: false,
             sensors: crate::sensors::Controls::default(),
             damage_fraction: 0.,
+            damage_variant: None,
+            damage_regions: [0.; crate::combat::live::DAMAGE_SECTIONS],
             autopilot: Default::default(),
             crashed: false,
             ticks: 0,
@@ -421,11 +426,37 @@ impl State {
         if self.crashed {
             return;
         }
-        // Wind is pure advection in both adapters: it displaces the aircraft
-        // and never changes airspeed, so the legacy path honors it too.
-        let wind = ground(self.position[0], self.position[2]).wind;
-        for (v, w) in self.velocity.iter_mut().zip(wind) {
+        // Fitted tire grip suppresses wind coupling at low ground speed. Once
+        // airborne, wind remains pure advection and does not change airspeed.
+        let initial_surface = ground(self.position[0], self.position[2]);
+        let wheel_contact = self.research.as_ref().is_some_and(|r| r.on_ground);
+        let horizontal_speed = self.velocity[0].hypot(self.velocity[2]);
+        let static_attitude_hold = wheel_contact
+            && horizontal_speed <= 1e-9
+            && self.throttle <= 0.
+            && input.pitch.abs() <= 1e-9
+            && input.roll.abs() <= 1e-9
+            && input.yaw.abs() <= 1e-9;
+        let runway_wind_fraction = if wheel_contact {
+            let assessment = crate::runway_wind::assessment(
+                c.mass.max_takeoff_lbs,
+                initial_surface.wind,
+                self.yaw,
+            )
+            .expect("validated aircraft mass and surface wind");
+            assessment
+                .crosswind_fraction
+                .max(assessment.tailwind_fraction)
+                * crate::runway_wind::ground_motion_fraction(horizontal_speed)
+        } else {
+            0.
+        };
+        let air_wind = initial_surface.wind;
+        for (v, w) in self.velocity.iter_mut().zip(air_wind) {
             *v -= w;
+        }
+        if self.research.is_some() {
+            self.speed = dot(self.velocity, self.velocity).sqrt();
         }
         self.ticks += 1;
         self.throttle = (self.throttle
@@ -466,7 +497,12 @@ impl State {
             self.fuel = (self.fuel - rate * DT).max(0.);
         }
         let env = c.aerodynamics.envelopes.iter().find(|e| e.g == 1).unwrap();
-        let (stall, vmax) = env.speeds(self.position[1]).unwrap_or((900., 1000.));
+        let (clean_stall, vmax) = env.speeds(self.position[1]).unwrap_or((900., 1000.));
+        let stall = if self.research.is_some() {
+            clean_stall * (1. - 0.25 * self.flaps)
+        } else {
+            clean_stall
+        };
         let authority = (self.speed / stall.max(1.)).powi(2).clamp(0., 1.);
         let (mut lo, mut hi) = (-1., 1.);
         for e in &c.aerodynamics.envelopes {
@@ -481,9 +517,31 @@ impl State {
         let loading = (self.fuel + self.payload_lbs) / c.mass.empty_lbs;
         hi /= 1. + loading * c.aerodynamics.loaded_elevator_percent / 100.;
         lo /= 1. + loading * c.aerodynamics.loaded_elevator_percent / 100.;
+        if self.research.is_some()
+            && let Some(continuous) =
+                low_speed_positive_g_ceiling(c, self.position[1], self.speed, stall)
+        {
+            hi = continuous / (1. + loading * c.aerodynamics.loaded_elevator_percent / 100.);
+        }
         let mut command = (1. + input.pitch * if input.pitch > 0. { hi - 1. } else { 1. - lo })
             .clamp(lo, hi)
             * authority;
+        let drag_percent = tore_formats::flight_model::drag_percent(
+            (self.speed * 256.) as i32,
+            (self.position[1] * 256.) as i32,
+            vmax.round().clamp(1., f64::from(i16::MAX)) as i16,
+        )
+        .unwrap_or_else(|_| ((self.speed / vmax.max(1.)) * 100.).round() as i32)
+        .clamp(0, 100) as f64;
+        if self.research.is_some() {
+            let scaled_flap_lift = drag_percent * c.aerodynamics.flaps_lift_f8 / 100.;
+            let flap_lift_f8 = if wheel_contact {
+                scaled_flap_lift * 0.5
+            } else {
+                c.aerodynamics.flaps_lift_f8 * (1. - self.gear) + scaled_flap_lift * self.gear
+            };
+            command *= 1. + self.flaps * flap_lift_f8 / 256.;
+        }
         let requested_g = command;
         if let Some(r) = &mut self.research {
             r.advance(
@@ -582,7 +640,16 @@ impl State {
             tas_fps: self.speed,
             load_factor: self.lift_g,
         });
-        let alpha = response.trim_aoa_rad;
+        let alpha = if self.research.is_some()
+            && let Some(blend) = low_speed_alignment_fraction(self.speed, stall, clean_stall)
+        {
+            let low_speed = (tuning.trim_degrees + 8. * self.elevator)
+                .clamp(0., 10.)
+                .to_radians();
+            low_speed + (response.trim_aoa_rad - low_speed) * blend
+        } else {
+            response.trim_aoa_rad
+        };
         let desired_nose =
             std::array::from_fn(|i| direction[i] * alpha.cos() + lift_axis[i] * alpha.sin());
         let alignment = cross(basis.forward, desired_nose);
@@ -607,6 +674,9 @@ impl State {
             for (i, v) in rotation.iter_mut().enumerate() {
                 *v += DT * basis.up[i] * r.spin_rate;
             }
+        }
+        if static_attitude_hold {
+            rotation = [0.; 3];
         }
         self.maneuver = crate::telemetry::Maneuver {
             tick: self.ticks,
@@ -646,6 +716,11 @@ impl State {
         // rudder command or the native display-slip offset. Aircraft-owned tuning.
         let slip_fraction = dot(unit(self.velocity), basis.right);
         let slip_drag = weight * tuning.sideslip_drag * slip_fraction.powi(2) * authority;
+        let device_drag_fraction = if self.research.is_some() {
+            drag_percent / 100.
+        } else {
+            1.
+        };
         let drag = slip_drag
             + max_thrust
                 * lapse
@@ -653,9 +728,11 @@ impl State {
                 * (1. + loading * c.aerodynamics.loaded_drag_percent / 100.)
             + weight
                 * (c.aerodynamics.g_pull_drag_f8 * (self.lift_g.abs() - 1.).max(0.)
-                    + c.native.drag.gear as f64 * self.gear
-                    + c.native.drag.flaps as f64 * self.flaps
-                    + c.native.drag.airbrake as f64 * self.brake)
+                    + c.native.drag.gear as f64
+                        * self.gear
+                        * f64::from(!(self.research.is_some() && wheel_contact))
+                    + c.native.drag.flaps as f64 * self.flaps * device_drag_fraction
+                    + c.native.drag.airbrake as f64 * self.brake * device_drag_fraction)
                 / 256.;
         let drag = if self.research.is_some() {
             drag.min(weight * self.speed / 32.174 / DT)
@@ -669,6 +746,13 @@ impl State {
         // a normal component when attitude differs from the air-relative path.
         self.g = dot(lift, basis.up) * self.lift_g * lift_scale
             - dot(direction, basis.up) * drag / weight;
+        let support_g = basis.forward[1] * thrust / weight - direction[1] * drag / weight
+            + lift[1] * self.lift_g * lift_scale;
+        let wheel_load_fraction = (1. - support_g).clamp(0., 1.);
+        let static_hold = wheel_contact
+            && horizontal_speed <= 1e-9
+            && self.throttle <= 0.
+            && wheel_load_fraction > 0.02;
         self.maneuver.achieved_g = self.g;
         for i in 0..3 {
             self.velocity[i] += (basis.forward[i] * thrust / weight * 32.174
@@ -682,16 +766,36 @@ impl State {
             self.velocity = self.velocity.map(|v| v * 6000. / self.speed);
             self.speed = 6000.;
         }
-        for (v, w) in self.velocity.iter_mut().zip(wind) {
+        for (v, w) in self.velocity.iter_mut().zip(air_wind) {
             *v += w;
         }
+        if static_hold {
+            self.velocity[0] = 0.;
+            self.velocity[2] = 0.;
+            self.speed = self.velocity[1].abs();
+        }
         self.vertical_speed = self.velocity[1];
+        let previous_position = self.position;
         for i in 0..3 {
             self.position[i] += self.velocity[i] * DT;
         }
         let surface = ground(self.position[0], self.position[2]);
         if let Some(mut r) = self.research.take() {
-            r.contact(self, surface, c);
+            r.contact(
+                self,
+                surface,
+                c,
+                wheel_load_fraction,
+                runway_wind_fraction,
+                previous_position,
+            );
+            if static_hold && r.on_ground {
+                self.position[0] = previous_position[0];
+                self.position[2] = previous_position[2];
+                self.velocity[0] = 0.;
+                self.velocity[2] = 0.;
+                self.speed = air_wind[0].hypot(air_wind[2]);
+            }
             self.research = Some(r);
             return;
         }
@@ -707,6 +811,46 @@ impl State {
         }
     }
 }
+
+fn low_speed_positive_g_ceiling(
+    c: &crate::models::config::Configuration,
+    altitude_ft: f64,
+    speed_fps: f64,
+    effective_stall_fps: f64,
+) -> Option<f64> {
+    let next = c
+        .aerodynamics
+        .envelopes
+        .iter()
+        .filter(|envelope| envelope.g > 1)
+        .filter_map(|envelope| {
+            envelope
+                .speeds(altitude_ft)
+                .map(|speeds| (speeds.0, envelope.g))
+        })
+        .filter(|(minimum, _)| *minimum > effective_stall_fps)
+        .min_by(|a, b| a.0.total_cmp(&b.0))?;
+    if speed_fps >= next.0 {
+        return None;
+    }
+    let fraction =
+        ((speed_fps - effective_stall_fps) / (next.0 - effective_stall_fps)).clamp(0., 1.);
+    Some(1. + fraction * (f64::from(next.1) - 1.))
+}
+
+fn low_speed_alignment_fraction(
+    speed_fps: f64,
+    effective_stall_fps: f64,
+    clean_stall_fps: f64,
+) -> Option<f64> {
+    let end = clean_stall_fps * 2.;
+    if speed_fps >= end || end <= effective_stall_fps {
+        None
+    } else {
+        Some(((speed_fps - effective_stall_fps) / (end - effective_stall_fps)).clamp(0., 1.))
+    }
+}
+
 pub struct Clock {
     pub remainder: f64,
 }
@@ -1018,6 +1162,7 @@ pub(crate) mod integration_tests {
             ("maxTakeoffWeight", 15000),
             ("gearDrag", 23),
             ("flapsDrag", 70),
+            ("flapsLift", 51),
             ("airBrakesDrag", 256),
             ("loadedElevator", 40),
             ("loadedDrag", 0),
@@ -1380,6 +1525,217 @@ pub(crate) mod integration_tests {
             s.position[0] > start[0] + 100.,
             "takeoff roll must advance along runway"
         );
+    }
+    #[test]
+    fn full_flaps_provide_low_speed_lift_and_continuous_rotation() {
+        let run = |flaps: bool| {
+            let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
+            s.enable_research(1).unwrap();
+            s.start_on_runway([0., 1024., 0.], 0.).unwrap();
+            s.brake_out = false;
+            s.brake = 0.;
+            s.flaps_down = flaps;
+            s.flaps = f64::from(flaps);
+            s.throttle = 1.;
+            s.burner = true;
+            for tick in 0..3600 {
+                s.step_surface(
+                    &PilotInput {
+                        pitch: 0.35,
+                        ..Default::default()
+                    },
+                    |_, _| crate::research::Surface::runway(1024.),
+                );
+                if !s.research.as_ref().unwrap().on_ground {
+                    return (tick + 1, s.speed, s.maneuver.commanded_g, s.pitch);
+                }
+            }
+            panic!("aircraft did not unload its wheels");
+        };
+        let flapped = run(true);
+        let clean = run(false);
+        assert!(
+            flapped.0 < clean.0,
+            "flaps did not shorten takeoff: {flapped:?} vs {clean:?}"
+        );
+        assert!(flapped.1 < clean.1, "flaps did not lower release speed");
+        assert!(flapped.2 > 1. && flapped.3 > 0. && flapped.3 < 6f64.to_radians());
+
+        let state = State::new(&profile(), [0., 1024., 0.]).unwrap();
+        let c = state.model().configuration();
+        let clean_stall = c
+            .aerodynamics
+            .envelopes
+            .iter()
+            .find(|envelope| envelope.g == 1)
+            .unwrap()
+            .speeds(1024.)
+            .unwrap()
+            .0;
+        let effective = clean_stall * 0.75;
+        assert_eq!(
+            low_speed_positive_g_ceiling(c, 1024., effective, effective),
+            Some(1.)
+        );
+        let next = c
+            .aerodynamics
+            .envelopes
+            .iter()
+            .filter(|envelope| envelope.g > 1)
+            .filter_map(|envelope| envelope.speeds(1024.).map(|speeds| speeds.0))
+            .filter(|minimum| *minimum > effective)
+            .min_by(f64::total_cmp)
+            .unwrap();
+        let below = low_speed_positive_g_ceiling(c, 1024., next - 1e-6, effective).unwrap();
+        assert!(below > 1. && below < 2.);
+        assert_eq!(
+            low_speed_positive_g_ceiling(c, 1024., next, effective),
+            None
+        );
+        assert_eq!(
+            low_speed_alignment_fraction(effective, effective, clean_stall),
+            Some(0.)
+        );
+        let alignment_end = clean_stall * 2.;
+        assert!(
+            (low_speed_alignment_fraction(
+                (effective + alignment_end) * 0.5,
+                effective,
+                clean_stall,
+            )
+            .unwrap()
+                - 0.5)
+                .abs()
+                < 1e-12
+        );
+        assert_eq!(
+            low_speed_alignment_fraction(alignment_end, effective, clean_stall),
+            None
+        );
+    }
+    #[test]
+    fn tire_grip_holds_stationary_aircraft_in_wind_with_or_without_brakes() {
+        for brakes in [true, false] {
+            let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
+            s.enable_research(1).unwrap();
+            s.start_on_runway([100., 1024., 200.], 0.).unwrap();
+            s.brake_out = brakes;
+            s.throttle = 0.;
+            let start = s.position;
+            let attitude = [s.yaw, s.pitch, s.bank];
+            let mut surface = crate::research::Surface::runway(1024.);
+            surface.wind = [40., 0., -25.];
+            for _ in 0..1200 {
+                s.step_surface(&Default::default(), |_, _| surface);
+            }
+            assert!(!s.crashed && s.research.as_ref().unwrap().on_ground);
+            assert!(
+                s.position[0] == start[0] && s.position[2] == start[2],
+                "stationary aircraft drifted with brakes={brakes}: {:?}",
+                s.position
+            );
+            assert_eq!([s.velocity[0], s.velocity[2]], [0., 0.]);
+            assert_eq!([s.yaw, s.pitch, s.bank], attitude, "parked attitude moved");
+        }
+
+        let mut moving = State::new(&profile(), [0., 5000., 0.]).unwrap();
+        moving.enable_research(1).unwrap();
+        moving.start_on_runway([0., 1024., 0.], 0.).unwrap();
+        moving.brake_out = false;
+        moving.velocity = [0., 0., 40.];
+        moving.speed = 40.;
+        for _ in 0..120 {
+            moving.step_surface(
+                &PilotInput {
+                    yaw: 1.,
+                    ..Default::default()
+                },
+                |_, _| crate::research::Surface::runway(1024.),
+            );
+        }
+        assert!(moving.research.as_ref().unwrap().on_ground);
+        assert!(
+            moving.yaw.abs() > 0.01,
+            "moving rudder steering was suppressed"
+        );
+    }
+
+    #[test]
+    fn mtow_runway_wind_is_continuous_during_takeoff_roll() {
+        let fps = |knots: f64| knots * crate::runway_wind::FEET_PER_SECOND_PER_KNOT;
+        let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.start_on_runway([0., 1024., 0.], 0.).unwrap();
+        s.brake_out = false;
+        s.throttle = 1.;
+        let mut surface = crate::research::Surface::runway(1024.);
+        surface.wind = [30., 0., 0.];
+        let mut previous = s.position;
+        let mut crossed_ten = false;
+        for _ in 0..1800 {
+            s.step_surface(&Default::default(), |_, _| surface);
+            let displacement = (s.position[0] - previous[0]).hypot(s.position[2] - previous[2]);
+            assert!(
+                displacement < 5.,
+                "crosswind rollout jumped {displacement} ft"
+            );
+            previous = s.position;
+            crossed_ten |= s.velocity[0].hypot(s.velocity[2]) >= fps(10.);
+        }
+        assert!(crossed_ten, "takeoff roll never entered the wind ramp");
+        assert!(s.position[2] > 100., "takeoff roll did not advance");
+    }
+    #[test]
+    fn mtow_crosswind_causes_signed_rollout_drift_and_headwind_changes_airflow() {
+        let fps = |knots: f64| knots * crate::runway_wind::FEET_PER_SECOND_PER_KNOT;
+        let base = State::new(&profile(), [0., 5000., 0.]).unwrap();
+        let maximum = base.model().configuration().mass.max_takeoff_lbs;
+        let limits = crate::runway_wind::limits(maximum).unwrap();
+        let run = |crosswind_knots: f64, headwind_knots: f64| {
+            let mut s = base.clone();
+            s.enable_research(1).unwrap();
+            s.start_on_runway([0., 1024., 0.], 0.).unwrap();
+            s.brake_out = false;
+            s.throttle = 0.;
+            s.velocity = [0., 0., fps(15.)];
+            s.speed = fps(15.);
+            let mut surface = crate::research::Surface::runway(1024.);
+            surface.wind = [fps(crosswind_knots), 0., -fps(headwind_knots)];
+            let mut maximum_lateral = 0_f64;
+            for _ in 0..300 {
+                s.step_surface(&Default::default(), |_, _| surface);
+                maximum_lateral = maximum_lateral.max(s.position[0].abs());
+            }
+            assert!(!s.crashed && s.research.as_ref().unwrap().on_ground);
+            (s, maximum_lateral)
+        };
+        let (calm, calm_drift) = run(0., 0.);
+        let (_, low_drift) = run(limits.noticeable_knots - 1., 0.);
+        let (_, rough_drift) = run(limits.rough_knots, 0.);
+        let (limit, limit_drift) = run(limits.limit_knots, 0.);
+        let (mirrored, mirrored_drift) = run(-limits.limit_knots, 0.);
+        assert_eq!(calm_drift, 0.);
+        assert!(low_drift > calm_drift);
+        assert!(rough_drift > low_drift);
+        assert!(limit_drift > rough_drift);
+        assert_eq!(limit.position[0].signum(), -mirrored.position[0].signum());
+        assert!((limit_drift - mirrored_drift).abs() < 1e-8);
+
+        let (headwind, _) = run(0., limits.limit_knots * 2.);
+        assert_ne!(headwind.position, calm.position);
+        assert_ne!(headwind.speed, calm.speed);
+
+        let assessment = crate::runway_wind::assessment(maximum, [fps(30.), 0., 0.], 0.).unwrap();
+        let mut loaded = base.clone();
+        loaded.fuel *= 0.25;
+        loaded.set_payload(1000.).unwrap();
+        let loaded_assessment = crate::runway_wind::assessment(
+            loaded.model().configuration().mass.max_takeoff_lbs,
+            [fps(30.), 0., 0.],
+            0.,
+        )
+        .unwrap();
+        assert_eq!(assessment.limits(), loaded_assessment.limits());
     }
     #[test]
     fn runway_start_does_not_switch_legacy_adapter() {

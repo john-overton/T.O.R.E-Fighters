@@ -21,7 +21,7 @@ fn shadow_cutout(uv:vec2<f32>,layer:i32) {
 }
 @fragment fn shadow_fragment(in:ShadowOut) {
  // Glass, flame sheets and emissive effects must not cast solid silhouettes.
- if in.layer == -5.0 || in.layer == -6.0 || in.layer == -7.0 {discard;}
+ if in.layer == -5.0 || in.layer == -6.0 || in.layer == -7.0 || in.layer == -8.0 {discard;}
  if in.layer == -2.0 {shadow_cutout(in.uv,0);}
  // Ordinary aircraft textures blend transparent texels with their base polygon.
 }

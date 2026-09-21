@@ -67,6 +67,7 @@ pub(crate) mod animation_tests {
         }
 
         for key in [
+            "flapsLift",
             "turbulencePercent",
             "rudderDrag",
             "bayDrag",

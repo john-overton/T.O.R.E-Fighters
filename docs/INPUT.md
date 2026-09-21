@@ -535,7 +535,10 @@ priority for IR and forces CUED acquisition against that identity, even when a
 stronger bore return exists. Clear the track to return to BORESIGHT; airborne
 missiles keep their own targets. Select a target to return to CUED. Press **L**, the existing
 `clear-designation` action, or click **RELEASE LOCK** at the upper right to clear
-selection. The manual's targeting list does not establish a retail release key.
+both sensor and HUD display selection. A selected target outside the HUD has a
+direction chevron even after sensor coverage is lost; this grants no weapon
+lock. [HUD target rules](spec/gunsight-targeting.md). The manual's targeting list
+does not establish a retail release key.
 `weapon-seeker-mode` remains rebindable, and the upper-right mode label remains
 clickable. Supported radar weapons still need aircraft lock.
 
@@ -550,7 +553,8 @@ and target aspect angle are in the upper-right debug window. The HUD layout
 is 15 percent smaller; ARM, count/weapon and percentage with blinking IN RNG
 align below speed. The range scale sits inside altitude; radar R/C/A sits below it. BORE READY is omitted. Neither clearing selection nor changing mode redirects an airborne shot.
 An internal bay opens for BORESIGHT and release waits until 95 percent open.
-Armed missile readouts replace AGL, vertical speed and bank scale. CUED radar
+Weapon readouts occupy the lower HUD; NAV retains the bank scale. AGL and
+vertical speed appear only with non-weapon ILS guidance. [Layout and startup modes](spec/hud-layout.md). CUED radar
 lock diamonds blink when ready to fire. The radar instrument replaces the mouse
 arrow with a crosshair while the pointer is over its plotting area.
 
@@ -625,6 +629,10 @@ For live testing, use a Quick Mission with at least three friendly aircraft:
 5. Repeat a diving reversal. Confirm separate safe rejoins, restrained status
    reports and no aircraft pose jumps. A request for steady flight is advisory.
 ## Airport commands
+
+Normal ground starts enter NAV with master arm SAFE. Airborne starts select
+the canonical gun with master arm SAFE. Weapon cycling leaves NAV; NAV keeps
+target cues while suppressing weapon readouts. [Layout and defaults](spec/hud-layout.md).
 
 The controls editor exposes `airport-nav`, `airport-next`,
 `airport-request-landing`, `airport-repeat`, and `airport-cancel`. The default
