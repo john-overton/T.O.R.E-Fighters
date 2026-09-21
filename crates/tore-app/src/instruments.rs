@@ -717,24 +717,23 @@ impl Instruments {
                                 continue;
                             }
                             let colour = if contact.selected { BRIGHT } else { GREEN };
-                            r.rect(x - 2, y - 2, 5, 1, colour);
-                            r.rect(x - 2, y + 2, 5, 1, colour);
-                            r.rect(x - 2, y - 2, 1, 5, colour);
-                            r.rect(x + 2, y - 2, 1, 5, colour);
-                            if contact.track_eligible {
-                                let tail = (
-                                    x + (contact.heading_rad.sin() * 6.) as i32,
-                                    y - (contact.heading_rad.cos() * 6.) as i32,
+                            r.rect(x - 2, y - 2, 5, 5, colour);
+                            if scope.mode == Some("TWS")
+                                && let Some(heading) = contact.heading_rad
+                            {
+                                let tip = (
+                                    x + (heading.sin() * 9.).round() as i32,
+                                    y - (heading.cos() * 9.).round() as i32,
                                 );
-                                r.line((x, y), tail, DIM);
+                                r.line((x, y), tip, colour);
                             }
-                            if contact.selected || self.hovered == Some(contact.id) {
+                            if contact.selected {
+                                r.rect(x - 7, y - 3, 2, 7, colour);
+                                r.rect(x + 6, y - 3, 2, 7, colour);
+                            } else if self.hovered == Some(contact.id) {
                                 for (dx, dy) in [(-4, -4), (4, -4), (-4, 4), (4, 4)] {
                                     r.rect(x + dx, y + dy, 1, 1, colour);
                                 }
-                            }
-                            if contact.acquired {
-                                r.rect(x - 1, y - 1, 3, 3, colour);
                             }
                         }
                         text(&mut r, scope.mode.unwrap_or(scope.channel), 17, 25);
@@ -1107,7 +1106,7 @@ mod picking_tests {
             id,
             bearing_rad,
             distance_ft,
-            heading_rad: 0.,
+            heading_rad: Some(0.),
             track_eligible: true,
             destroyed: false,
             selected: false,

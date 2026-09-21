@@ -187,3 +187,17 @@ observation. John's report that retail hides dead contacts is recorded as
 user-provided behaviour, not a newly verified executable finding. The
 single-track requirement is likewise a product constraint; this pass does not
 claim to survey every Jane's title.
+
+## FA manual contact symbols
+
+Research inspection, 2026-09-21: local `.local/missile-update/manual.pdf`,
+SHA-256 `1a082378a8e8cd163ed6b398efcc1df80b67c2f104f6b90ac0733c88d58e26c3`.
+The page header identifies `1999 EDOC FA Ch4.qxd`, 5/24/99 11:26 AM.
+Printed page 97 is PDF page 101. Read its Radar Contacts paragraph and rendered
+the complete page with Poppler at 1500 pixels for visual inspection of both scope
+figures. Aircraft symbols are filled in the figures. The prose distinguishes
+small aircraft squares from single-pixel large surface contacts, names the
+selection bars, and describes TWS motion flags relative to own heading.
+The resulting [symbol contract](../spec/radar.md#air-and-surface-contact-symbols)
+records the behavior and remaining ground-symbol uncertainty. No executable was
+run to establish these manual findings.

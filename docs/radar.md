@@ -39,7 +39,7 @@ or autonomous target selection.
 | --- | --- |
 | Retail inputs | Exact PT equipment and target signatures; SEE range/angles; ECM capability/statistics |
 | Our detection rules | Square-root signature scaling, geometric look-down, radar/jammer generation matchups, notch and directional interference |
-| Controls | Automatic RWS/TWS, installed IR air-to-air, M/O channel cycle, Y history, hover selector, selection and acquired-track markers, persistent clicked selection and bearing-only jammer noise |
+| Controls | Automatic RWS/TWS, installed IR air-to-air, M/O channel cycle, Y history, hover selector, selection bars and track-status text, persistent clicked selection and bearing-only jammer noise |
 | Track timing | Immediate selection; 0.5-second weapon-track acquisition; selection clears on observation loss; 1-second unselected stale plot |
 | Tracking limit | One selected target and at most one acquired fire-control track across radar and IR; other returns are search observations |
 | Missile support | One target for launcher illumination; fire-and-forget radar/IR missiles retain separate launch targets |
@@ -598,6 +598,9 @@ and an inside-contour contact implies no lock.
 
 ## Mouse designation and missiles
 
+[Contact symbology](spec/radar.md#selected-contact-bars-and-movement-line) defines
+the requested bars and motion line, including fitted raster dimensions.
+
 Interaction: hovering a contact draws the selector corners around it, and a click
 and release on the same visible contact designates its stable ID. Drawing,
 hovering and picking share one projection at every window size and in both
@@ -609,7 +612,8 @@ any pending press, as do layout and channel changes and window exit. The
 simulation revalidates the requested target when applying the command, so a click
 can never select a target it does not observe.
 
-The page shows a selection marker, a separate acquired-track marker and an
+The page shows two vertical selection bars, a movement-direction line for each
+moving current TWS contact, solid air-contact squares and an
 actionable inhibit reason: radar off, failed, RWS search only, acquiring, beyond
 tracking coverage, or outside the missile envelope. Terrain masking is not one of
 them any more, because masking clears the observation and the selection, so the

@@ -239,3 +239,43 @@ IFF remains the existing gamified target view. Next research should
 inspect only the handlers needed for the next player interaction, then add its
 observable rules here. Do not hold basic radar profiles or shared contact state
 behind complete byte-level closure. No AI work is included.
+
+## Selected-contact bars and movement line
+
+**Spec-derived, requested by John on 2026-09-21:** a selected current contact has
+one vertical bar on each side, following the supplied radar image and the
+[manual evidence](#air-and-surface-contact-symbols). Every moving current contact
+in TWS has a line pointing in its observed horizontal direction of travel
+relative to own-aircraft heading, without requiring selection or weapon lock.
+RWS has no direction line. Up means
+travel along own heading, right means travel to own right. Use observed velocity,
+not aircraft nose direction or relative closing velocity. Stationary and stale
+contacts have no movement line. History visibility does not affect this line.
+Selection bars appear immediately, independently of weapon-track acquisition;
+all current air contacts are filled, whether acquired or not. The track-status
+text reports acquisition, and unselected hover corners remain distinct.
+
+**Fitted, agent decision:** on the 160 by 156 instrument raster, each bar is
+2 pixels wide and 7 high, centred vertically on the contact. Their left edges
+are at contact x minus 7 and x plus 6. The direction line is 1 pixel wide and
+9 pixels long from the contact centre, with rounded endpoints, in the contact's
+colour. Its length indicates direction only, not speed. Exact retail dimensions
+remain unknown; inspecting the FA contact drawing
+handler is the next research step if those details are needed.
+
+## Air and surface contact symbols
+
+**Spec-derived:** the FA manual, chapter 4, printed page 97, describes aircraft
+as small squares and illustrates filled aircraft symbols. Large surface targets
+are single-pixel dots, not hollow squares. It describes TWS motion flags relative
+to own heading and two vertical captain's bars around the selected target.
+[Manual identity and inspection](../formats/radar.md#fa-manual-contact-symbols).
+This establishes the documented presentation, not an executed-retail comparison.
+
+**Fitted:** current air contacts use a solid 5 by 5 raster-pixel square regardless
+of selection or acquisition. Stale contacts retain their dim cross. Direction
+lines follow the TWS rule above. IR direction-line behavior is not established
+by this passage and is left disabled as an agent decision.
+Surface-symbol implementation remains deferred with A2G. The inspected passage
+specifies large surface targets only; other ground-symbol distinctions remain
+unknown and require inspecting the ground-radar examples before implementation.

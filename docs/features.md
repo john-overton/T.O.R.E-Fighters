@@ -102,7 +102,7 @@ Passing our tests is not a claim of demonstrated retail parity.
 
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
-| Radar search/tracking modes and contact history | ☑ | ☐ | Completed for the current air-to-air scope. Pointer takeover covers the full black screen up to the bezel, including radar-off display. | Manual pp. 96-99; [radar](radar.md) |
+| Radar search/tracking modes and contact history | ☑ | ☐ | Completed for the current air-to-air scope, with solid air-contact squares, selected-contact side bars and TWS movement-direction lines. Pointer takeover covers the full black screen up to the bezel, including radar-off display. | Manual pp. 96-99; [radar](radar.md) |
 | RCS exposure display | ☑ | ☑ | Completed. Uses the same aircraft exposure calculation as detection. | Manual pp. 94-95; [RCS display](spec/rcs.md) |
 | Radar notching and generation-based jammer tuning | ☐ | ☑ | Partially implemented. Detection effects work; side-by-side aircraft tuning remains. | [Radar tuning](radar.md#deliberate-departures-and-known-approximations) |
 | Target camera and target information | ☑ | ☑ | Partially implemented. 24 fps grayscale scene with darker scenery, improved depth precision and automatic framing along the player sight line within 1 nm of the target, type, damage, clock bearing with 10-degree Hi/Lo, skill/activity and three-second speed/range cycle work. Objective assignment and player-specific evade identity remain unavailable. | Manual p. 101; [target window](spec/target-window.md) |
