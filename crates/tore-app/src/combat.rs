@@ -646,6 +646,12 @@ impl Combat {
                     .unwrap_or_else(|| format!("CONTACT {}", target.id));
                 crate::target_window::Readout::new(target, s, name)
             }),
+            envelope_target: self.state.display_target().and_then(|target| {
+                self.dummy_models
+                    .iter()
+                    .find(|h| Some(h.profile.id) == target.aircraft)
+                    .map(|h| h.profile.envelopes.clone())
+            }),
             scope: crate::scope::scope(&self.state, s),
             rcs: crate::scope::rcs(&self.state, s, rcs_scale),
         }

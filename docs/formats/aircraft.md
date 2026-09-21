@@ -97,7 +97,7 @@ The supplied `rwr-50nm.png`, `systems.png` and `target-view.png` are the current
 
 | Page | Current input/behavior | Remaining parity |
 | --- | --- | --- |
-| 1 Envelope | Actual PT G polygons and current speed/altitude marker | Native row selection, comparison, exact plot |
+| 1 Envelope | Filled PT G bands, current/all/locked-target comparison modes, live readouts and cycling square, scaled per aircraft | Exact retail palette, scaling and animation cadence remain fitted; [behavior spec](../spec/envelope.md) |
 | 2 Front View | GPU terrain view from ownship, rasterized at 138×114 | Native projection, cockpit/mirror variants |
 | 3 Other View | GPU exterior view of imported ownship | Native capture/follow modes |
 | 4 Radar/Visual | NO TARGET in target-free flight | Target acquisition, zoom, damage/skill overlays |

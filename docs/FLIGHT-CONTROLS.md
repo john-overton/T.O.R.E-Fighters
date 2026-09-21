@@ -65,6 +65,8 @@ Heading hold shows `AUTO` above `HDG ALT`, beside the heading tape.
 
 Small places six windows across the bottom in two groups of three. Their reference size is 96×94, with six-pixel gaps and eight-pixel outer margins. Each group anchors to its screen edge; the center gutter grows on wider displays. Its initial pages are Systems/RWR/Nav on the left and Radar/Visual/Radar/Weapons on the right. Each layout remembers its own selected pages for the session. Shift-0…9 toggles pages; opening beyond a layout's capacity replaces its oldest page. Switching layouts cancels any pending instrument click. Button hit testing uses the same scaling and rectangles as rendering.
 
+The Envelope window (Shift-1) uses U for the current G curve, A for all positive-G curves, and C for locked-target comparison. Red marks the target's advantage. It shows clean-aircraft capability, with live altitude, G and speed readouts and a color-cycling square. Each aircraft sets its own chart scale. Missing comparison data is labeled explicitly. See the [envelope spec](spec/envelope.md) for fitted colors, scale and marker timing.
+
 The instrument contents retain their original 160×156 raster and are resampled directly to the flight overlay resolution. There is no intermediate 96×94 reduction, so small-window text retains source strokes on larger displays. These are fitted layouts, not recovered native placement rules. Sizes and margins scale by the smaller of width/640 and height/480. Use `--instrument-layout large` or `--instrument-layout small` for startup or repeatable GPU captures.
 
 

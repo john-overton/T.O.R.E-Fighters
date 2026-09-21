@@ -1,5 +1,6 @@
 //! Small independent raster instruments. Layout fitted to supplied retail captures;
 //! data is live, unsupported native sensors/camera modes are explicit.
+mod envelope;
 use crate::{aircraft::Airframe, flight::State, menu::Sprite, scope};
 use tore_formats::font::Font;
 pub const WIDTH: usize = 160;
@@ -163,10 +164,12 @@ pub struct CombatReadout {
     pub target: Option<crate::target_window::Readout>,
     pub scope: scope::Scope,
     pub rcs: scope::Rcs,
+    pub envelope_target: Option<Vec<tore_formats::aircraft::Envelope>>,
 }
 pub struct Instruments {
     pub navigation: crate::navigation::Navigation,
     pub weapon_page: usize,
+    envelope_mode: envelope::Mode,
     pub weapon_controls: Vec<usize>,
     pub combat: Option<CombatReadout>,
     pub pages: Vec<u8>,
@@ -196,6 +199,7 @@ impl Default for Instruments {
         Self {
             navigation: Default::default(),
             weapon_page: 0,
+            envelope_mode: envelope::Mode::All,
             weapon_controls: Vec::new(),
             combat: None,
             pages: vec![7, 5, 9, 4],
@@ -391,6 +395,13 @@ impl Instruments {
         let last = tore_sim::sensors::RANGE_LADDER_NMI.len() - 1;
         let scales = tore_sim::sensors::passive::SCALE_LADDER_NMI.len() - 1;
         match (self.pages.get(slot), button) {
+            (Some(1), 0..=2) => {
+                self.envelope_mode = [
+                    envelope::Mode::Current,
+                    envelope::Mode::All,
+                    envelope::Mode::Compare,
+                ][button];
+            }
             (Some(0), 0) => self.rcs_range = self.rcs_range.saturating_sub(1),
             (Some(0), 1) => self.rcs_range = (self.rcs_range + 1).min(scales),
             (Some(5), 0) => self.rwr_range = self.rwr_range.saturating_sub(1),
@@ -496,6 +507,9 @@ impl Instruments {
                 r.rect(x + 23, 137, 2, 17, [170, 187, 203, 255]);
             }
             let label = match (id, b) {
+                (1, 0) => "U",
+                (1, 1) => "A",
+                (1, 2) => "C",
                 (0 | 5 | 6 | 8 | 9, 0) => "-",
                 (0 | 5 | 6 | 8 | 9, 1) => "+",
                 (6, 2) => {
@@ -868,29 +882,14 @@ impl Instruments {
                     text(&mut r, "ETA --:--", 52, 122);
                 }
             }
-            1 => {
-                for e in &h.profile.envelopes {
-                    for i in 0..e.points.len() {
-                        let a = e.points[i];
-                        let b = e.points[(i + 1) % e.points.len()];
-                        let point = |p: [f64; 2]| {
-                            (
-                                17 + (p[0] / 2000. * 126.) as i32,
-                                130 - (p[1] / 70000. * 98.) as i32,
-                            )
-                        };
-                        r.line(point(a), point(b), if e.g == 1 { GREEN } else { DIM });
-                    }
-                }
-                r.rect(
-                    17 + (s.speed / 2000. * 126.) as i32,
-                    130 - (s.position[1] / 70000. * 98.) as i32,
-                    3,
-                    3,
-                    [240, 240, 170, 255],
-                );
-                text(&mut r, "FT / FT/SEC", 20, 25);
-            }
+            1 => envelope::draw(
+                &mut r,
+                f,
+                &h.profile.envelopes,
+                s,
+                self.envelope_mode,
+                self.combat.as_ref(),
+            ),
             4 => {
                 if let Some(target) = self.combat.as_ref().and_then(|c| c.target.as_ref()) {
                     r.rect(11, 21, 138, 114, [185, 185, 185, 255]);
