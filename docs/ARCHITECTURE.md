@@ -365,3 +365,9 @@ flight and targeting geometry separate from fixed readouts. NAV presentation
 hides weapon-specific symbols while retaining the selected target cue. Player
 startup applies gun/SAFE selection after loadout reset, with ground NAV chosen
 by the application; explicit diagnostic overrides are resolved afterward.
+
+Airport guidance receives the aircraft body-forward vector from live flight or
+recorded launcher pose. It filters threshold candidates through the shared
+90-degree forward cone and range/airport-altitude band before returning either
+armed or active ILS data. Head-look is not an input, and replay needs no new
+wire field. [Arming contract](spec/airports.md#ils-arming-envelope).

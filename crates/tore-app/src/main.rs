@@ -215,6 +215,7 @@ fn airport_aircraft(
         .is_some_and(|(_, height)| flight.supported_at(height));
     tore_sim::airport::Aircraft {
         position: flight.position,
+        forward: attitude::Basis::new(flight.yaw, flight.pitch, flight.bank).forward,
         nav_mode,
         gear_down: flight.gear_down,
         supported,
@@ -2546,7 +2547,7 @@ fn main() -> AppResult<()> {
     let mut sensor_summary = false;
     let mut validate_weather = false;
     let mut weather_condition: Option<usize> = None;
-    let mut airport_probe: Option<(u32, tore_sim::airport::Aircraft)> = None;
+    let mut airport_probe: Option<(u32, tore_sim::airport::Aircraft, Option<[f64; 2]>)> = None;
     let mut ground_start_airport: Option<u32> = None;
     let mut launch_creator = false;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
@@ -2558,24 +2559,37 @@ fn main() -> AppResult<()> {
                 ground_start_airport=Some(args.next().ok_or("--ground-start needs an airport number")?.parse()?);
             }
             "--airport-probe" => {
-                let value = args.next().ok_or("--airport-probe needs ID,X,Y,Z,NAV,GEAR")?;
+                let value = args.next().ok_or("--airport-probe needs ID,X,Y,Z,NAV,GEAR[,HEADING,PITCH]")?;
                 let fields: Vec<_> = value.split(',').collect();
-                if fields.len() != 6 {
-                    return Err("--airport-probe needs ID,X,Y,Z,NAV,GEAR".into());
+                if !matches!(fields.len(), 6 | 8) {
+                    return Err("--airport-probe needs ID,X,Y,Z,NAV,GEAR[,HEADING,PITCH]".into());
                 }
                 let flag = |text: &str| match text { "0" => Ok(false), "1" => Ok(true), _ => Err("airport probe flags need 0 or 1") };
                 let position = [fields[1].parse()?, fields[2].parse()?, fields[3].parse()?];
                 if position.iter().any(|value: &f64| !value.is_finite()) {
                     return Err("airport probe position must be finite".into());
                 }
+                let angles = if fields.len() == 8 {
+                    let angles = [fields[6].parse::<f64>()?, fields[7].parse::<f64>()?];
+                    if !angles.iter().all(|value| value.is_finite())
+                        || angles[0].abs() > 360_000.
+                        || !(-90. ..=90.).contains(&angles[1])
+                    {
+                        return Err("airport probe heading/pitch outside bounded degree range".into());
+                    }
+                    Some(angles)
+                } else {
+                    None
+                };
                 airport_probe = Some((fields[0].parse()?, tore_sim::airport::Aircraft {
                     position,
+                    forward: [0., 0., 1.],
                     nav_mode: flag(fields[4])?,
                     gear_down: flag(fields[5])?,
                     supported: false,
                     alive: true,
                     speed_fps: 140.0,
-                }));
+                }, angles));
             }
             "--record-input" => {
                 record_input = Some(PathBuf::from(
@@ -3459,12 +3473,21 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     let theater_resources = assets.theater_resources.clone();
     let creator_options = assets.creator_options.clone();
-    if let Some((airport_id, aircraft)) = airport_probe
+    if let Some((airport_id, mut aircraft, angles)) = airport_probe
         && !(smoke_test && initial_screen == Screen::Flight)
     {
         let mut combat = combat::Combat::new(&hornet, &theater_resources, false)?;
         combat.add_airport_targets(&world.airport_scene)?;
         let mut flight = hornet.start(&world);
+        flight.position = aircraft.position;
+        flight.gear_down = aircraft.gear_down;
+        flight.gear = f64::from(aircraft.gear_down);
+        if let Some([heading, pitch]) = angles {
+            flight.yaw = heading.to_radians();
+            flight.pitch = pitch.to_radians();
+            flight.bank = 0.;
+        }
+        aircraft.forward = attitude::Basis::new(flight.yaw, flight.pitch, flight.bank).forward;
         combat.reset(&mut flight)?;
         let live_targets = combat
             .state
@@ -3487,8 +3510,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         );
         let guidance = service.guidance(&world.airport_scene, aircraft);
         println!(
-            "airport probe: theater={theater_code} scene_objects={} live_targets={live_targets} visible_vertices={visible_vertices} selected={:?} clearance={:?} reply={reply:?} guidance={guidance:?}",
+            "airport probe: theater={theater_code} scene_objects={} live_targets={live_targets} visible_vertices={visible_vertices} forward={:?} heading_deg={:.3} pitch_deg={:.3} selected={:?} clearance={:?} reply={reply:?} guidance={guidance:?}",
             world.airport_scene.objects.len(),
+            aircraft.forward,
+            flight.yaw.to_degrees(),
+            flight.pitch.to_degrees(),
             service.selected(),
             service.clearance(),
         );
@@ -3848,10 +3874,24 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             }
         }
     }
-    if let Some((_, aircraft)) = airport_probe {
+    if let Some((airport, mut aircraft, angles)) = airport_probe {
         flight.position = aircraft.position;
         flight.gear_down = aircraft.gear_down;
         flight.gear = f64::from(aircraft.gear_down);
+        if let Some([heading, pitch]) = angles {
+            flight.yaw = heading.to_radians();
+            flight.pitch = pitch.to_radians();
+            flight.bank = 0.;
+        }
+        aircraft.forward = attitude::Basis::new(flight.yaw, flight.pitch, flight.bank).forward;
+        airport_probe = Some((airport, aircraft, angles));
+        println!(
+            "airport_probe_pose position={:?} forward={:?} heading_deg={:.3} pitch_deg={:.3}",
+            aircraft.position,
+            aircraft.forward,
+            flight.yaw.to_degrees(),
+            flight.pitch.to_degrees()
+        );
     }
     if let Some(value) = flight_bay {
         if !flight.bay_available() {
@@ -4038,7 +4078,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         tore_sim::airport::Service::new(&world.airport_scene).map_err(std::io::Error::other)?;
     let airport_nav_mode = airport_probe.map_or_else(
         || ground_start.is_some() && weapon_slot.is_none() && !live_fire,
-        |(_, aircraft)| aircraft.nav_mode,
+        |(_, aircraft, _)| aircraft.nav_mode,
     );
     if let Some(object) = ground_start {
         let airport = world.airport_scene.runway(object).unwrap().airport;
@@ -4048,7 +4088,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             tore_sim::airport::Command::SelectAirport(airport),
         );
     }
-    if let Some((airport, aircraft)) = airport_probe {
+    if let Some((airport, aircraft, _)) = airport_probe {
         airport_service.command(
             &world.airport_scene,
             aircraft,

@@ -638,7 +638,9 @@ The controls editor exposes `airport-nav`, `airport-next`,
 `airport-request-landing`, `airport-repeat`, and `airport-cancel`. The default
 profile binds them to Shift-N, Shift-A, Shift-L, Shift-R, and Shift-C in that
 order. NAV mode, gear down, range, and airport-relative altitude govern automatic
-ILS guidance; a clearance is not required to display it. Airport selection remains
+ILS guidance; the threshold must also be within the aircraft's 90-degree
+forward cone. Outside the 5-NM/4,000-foot-above-airport band, even ILS ARM is
+hidden. A clearance is not required to display eligible guidance. Airport selection remains
 explicit when supplied, otherwise the nearest usable runway is selected. A
 successful landing request and its repeat play the reviewed retail clear-to-land
 recording. Landing completion plays the reviewed welcome-home recording, and

@@ -268,6 +268,7 @@ pub enum Event {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Aircraft {
     pub position: [f64; 3],
+    pub forward: [f64; 3],
     pub nav_mode: bool,
     pub gear_down: bool,
     pub supported: bool,
@@ -287,6 +288,55 @@ pub struct Guidance {
     pub localizer_normalized: f64,
     pub glide_normalized: f64,
     pub active: bool,
+}
+
+fn ils_eligible(
+    aircraft: Aircraft,
+    runway: &Runway,
+    end: ApproachEnd,
+) -> Option<(f64, f64, f64, f64)> {
+    if aircraft
+        .position
+        .iter()
+        .chain(&aircraft.forward)
+        .any(|v| !v.is_finite())
+    {
+        return None;
+    }
+    let threshold = runway.threshold(end);
+    let toward = std::array::from_fn::<_, 3, _>(|i| threshold[i] - aircraft.position[i]);
+    let forward_length = aircraft.forward.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let toward_length = toward.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if !forward_length.is_finite()
+        || !toward_length.is_finite()
+        || forward_length <= 1e-12
+        || toward_length <= 1e-12
+    {
+        return None;
+    }
+    let facing = aircraft
+        .forward
+        .iter()
+        .zip(toward)
+        .map(|(a, b)| a * b)
+        .sum::<f64>()
+        / (forward_length * toward_length);
+    // A full 90-degree cone includes 45 degrees either side of the nose.
+    if !facing.is_finite() || facing + 1e-12 < std::f64::consts::FRAC_1_SQRT_2 {
+        return None;
+    }
+    let heading = runway.approach_heading(end);
+    let dx = aircraft.position[0] - threshold[0];
+    let dz = aircraft.position[2] - threshold[2];
+    let approach_forward = -(dx * heading.sin() + dz * heading.cos());
+    let range = dx.hypot(dz);
+    if approach_forward <= 0.
+        || range > ILS_RANGE_FT
+        || aircraft.position[1] - runway.elevation_ft > ILS_ALTITUDE_AGL_FT
+    {
+        return None;
+    }
+    Some((dx, dz, approach_forward, range))
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Clearance {
@@ -512,9 +562,9 @@ impl Service {
                     .iter()
                     .filter_map(|a| {
                         let (runway, end) = self.choose(scene, aircraft, a.id)?;
-                        let distance =
-                            distance2(aircraft.position, scene.runway(runway)?.threshold(end));
-                        (distance <= ILS_RANGE_FT.powi(2)).then_some((a.id, runway, end, distance))
+                        let r = scene.runway(runway)?;
+                        let (_, _, _, range) = ils_eligible(aircraft, r, end)?;
+                        Some((a.id, runway, end, range * range))
                     })
                     .min_by(|a, b| a.3.total_cmp(&b.3).then(a.1.cmp(&b.1)))
                     .map(|(airport, runway, end, _)| (airport, runway, end))?
@@ -532,24 +582,14 @@ impl Service {
         let r = scene.runway(c.runway)?;
         let threshold = r.threshold(c.end);
         let heading = r.approach_heading(c.end);
-        let dx = aircraft.position[0] - threshold[0];
-        let dz = aircraft.position[2] - threshold[2];
-        let forward = -(dx * heading.sin() + dz * heading.cos());
-        if forward <= 0. {
-            return None;
-        }
+        let (dx, dz, forward, range) = ils_eligible(aircraft, r, c.end)?;
         let lateral = dx * heading.cos() - dz * heading.sin();
-        let range = (dx * dx + dz * dz).sqrt();
         let localizer = (lateral / forward).atan().to_degrees();
         let glide = ((aircraft.position[1] - r.elevation_ft) / forward)
             .atan()
             .to_degrees()
             - 3.;
-        let active = aircraft.alive
-            && aircraft.nav_mode
-            && aircraft.gear_down
-            && range <= ILS_RANGE_FT
-            && aircraft.position[1] - r.elevation_ft <= ILS_ALTITUDE_AGL_FT;
+        let active = aircraft.alive && aircraft.nav_mode && aircraft.gear_down;
         Some(Guidance {
             airport: c.airport,
             runway: c.runway,
@@ -656,6 +696,7 @@ mod tests {
     fn plane(z: f64, alt: f64) -> Aircraft {
         Aircraft {
             position: [0., alt, z],
+            forward: [0., 0., 1.],
             nav_mode: true,
             gear_down: true,
             supported: false,
@@ -693,7 +734,7 @@ mod tests {
         x.command(&s, plane(-10000., 4100.), Command::SelectAirport(7));
         x.command(&s, plane(-10000., 4100.), Command::RequestLanding);
         assert!(x.guidance(&s, plane(-10000., 4100.)).unwrap().active);
-        assert!(!x.guidance(&s, plane(-10000., 4100.01)).unwrap().active);
+        assert!(x.guidance(&s, plane(-10000., 4100.01)).is_none());
     }
     #[test]
     fn gates_behind_and_range_nav_gear() {
@@ -705,7 +746,7 @@ mod tests {
         let mut p = plane(-5000. - ILS_RANGE_FT, 1000.);
         assert!(x.guidance(&s, p).unwrap().active);
         p.position[2] -= 0.01;
-        assert!(!x.guidance(&s, p).unwrap().active);
+        assert!(x.guidance(&s, p).is_none());
         p = plane(-10000., 1000.);
         p.gear_down = false;
         assert!(!x.guidance(&s, p).unwrap().active);
@@ -720,10 +761,99 @@ mod tests {
         assert!(g.bearing.abs() < 1e-12);
         assert_eq!(x.clearance(), None);
         p.position[1] = 4100.001;
-        assert!(!x.guidance(&s, p).unwrap().active);
+        assert!(x.guidance(&s, p).is_none());
         p.position[1] = 1000.;
         p.nav_mode = false;
         assert!(!x.guidance(&s, p).unwrap().active);
+    }
+    #[test]
+    fn ils_forward_cone_is_inclusive_and_uses_normalized_three_dimensional_vectors() {
+        let s = scene();
+        let mut x = Service::new(&s).unwrap();
+        let mut p = plane(-6000., 100.);
+        x.command(&s, p, Command::SelectAirport(7));
+        x.command(&s, p, Command::RequestLanding);
+        let q = std::f64::consts::FRAC_1_SQRT_2;
+        for forward in [[q, 0., q], [-q, 0., q], [10. * q, 0., 10. * q]] {
+            p.forward = forward;
+            assert!(x.guidance(&s, p).is_some(), "boundary forward={forward:?}");
+        }
+        p.forward = [q + 1e-6, 0., q - 1e-6];
+        assert!(x.guidance(&s, p).is_none());
+
+        p.position[1] = 1100.;
+        p.forward = [0., -1., 1.];
+        assert!(x.guidance(&s, p).is_some());
+        p.forward = [0., 1., 0.];
+        assert!(x.guidance(&s, p).is_none());
+        for bad in [
+            [0.; 3],
+            [f64::NAN, 0., 1.],
+            [f64::INFINITY, 0., 1.],
+            [f64::MAX, 0., f64::MAX],
+        ] {
+            p.forward = bad;
+            assert!(x.guidance(&s, p).is_none());
+        }
+        p.position[1] = 100.;
+        p.forward = [0., 0., 1.];
+        assert!(x.guidance(&s, p).is_some());
+        assert_eq!(x.clearance(), Some((7, 1000, ApproachEnd::Near)));
+
+        let mut wrap = Service::new(&s).unwrap();
+        let mut p = plane(6000., 100.);
+        wrap.command(&s, p, Command::SelectAirport(7));
+        wrap.command(&s, p, Command::RequestLanding);
+        for degrees in [-179_f64, 179.] {
+            let yaw = degrees.to_radians();
+            p.forward = [yaw.sin(), 0., yaw.cos()];
+            assert!(wrap.guidance(&s, p).is_some(), "yaw wrap {degrees}");
+        }
+    }
+
+    #[test]
+    fn ils_leaves_and_reenters_range_and_altitude_band() {
+        let s = scene();
+        let mut x = Service::new(&s).unwrap();
+        let mut p = plane(-5000. - ILS_RANGE_FT, 4100.);
+        x.command(&s, p, Command::SelectAirport(7));
+        x.command(&s, p, Command::RequestLanding);
+        assert!(x.guidance(&s, p).is_some());
+        p.position[2] -= 0.01;
+        assert!(x.guidance(&s, p).is_none());
+        p.position[2] += 0.01;
+        p.position[1] += 0.01;
+        assert!(x.guidance(&s, p).is_none());
+        p.position[1] -= 0.01;
+        assert!(x.guidance(&s, p).is_some());
+    }
+
+    #[test]
+    fn automatic_search_ignores_nearer_airport_behind_aircraft() {
+        let mut s = scene();
+        let mut behind = s.runways[0].clone();
+        behind.object = 2000;
+        behind.airport = 8;
+        // Its far threshold is behind the aircraft but on a valid approach
+        // side, so rejection must exercise the nose cone rather than the
+        // already-existing behind-threshold gate.
+        behind.surface.center[2] = -16000.;
+        behind.approach_center[2] = -16000.;
+        let mut object = s.objects[0].clone();
+        object.id = 2000;
+        object.bounds.center[2] = -16000.;
+        s.objects.push(object);
+        s.runways.push(behind);
+        s.airports.push(Airport {
+            id: 8,
+            name: "Behind".into(),
+            runway_objects: vec![2000],
+            allegiance: Allegiance::Friendly,
+            neutral_permission: false,
+        });
+        let x = Service::new(&s).unwrap();
+        let guidance = x.guidance(&s, plane(-10000., 1000.)).unwrap();
+        assert_eq!(guidance.airport, 7);
     }
     #[test]
     fn repeating_preserves_reply_and_approach_end() {

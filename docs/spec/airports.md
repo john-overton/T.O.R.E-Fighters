@@ -65,6 +65,33 @@ Next step: trace the ILS activation/display consumers in the identified FA.EXE,
 using those two candidate altitude values and existing airport geometry as leads.
 Do not generalize a tutorial's aircraft-specific approach speeds to every aircraft.
 
+### ILS arming envelope
+
+John requested a 90-degree forward cone and ILS-band restriction after the HUD
+checkpoint `cfd35e5`. The interpretation is a full 90-degree cone, inclusive
+of 45 degrees from the aircraft's body-forward direction. Compare the real
+three-dimensional nose vector with the line of sight to the chosen runway
+threshold. Head-look, bank about the nose axis and velocity/sideslip do not
+change which way the nose points. Pitch does affect the cone. Reject missing,
+zero-length or non-finite direction data.
+
+The existing geometric band is horizontal range at most 5 nautical miles,
+altitude at or below 4,000 feet above the airport's ground elevation, and the
+approach side of the runway threshold. Outside this band or the forward cone,
+return no ILS guidance: neither `ILS ARM` nor active ILS indicators appear.
+Inside it, existing NAV, gear-down and alive gates still control active guidance.
+An eligible NAV approach with gear up may show `ILS ARM` while awaiting gear.
+The 2.5-degree localizer and 0.7-degree glide values remain display scaling,
+not newly invented capture limits.
+
+Apply the same eligibility to explicit selections, cleared approaches and
+automatic discovery. Explicit selection/clearance persists while out of the
+cone or band and can regain guidance on re-entry. Automatic discovery filters
+ineligible airports before choosing the nearest valid candidate, so a closer
+airport behind the aircraft cannot hide one in front. Tower requests and
+clearance behavior are unchanged. These are requested gameplay rules with
+fitted geometry, not assertions about retail or real-world ILS receivers.
+
 ## Commands and ownership
 
 John clarified on 2026-09-20 that commands means landing/tower radio commands.
@@ -99,10 +126,10 @@ reverse engineering. Later measured evidence can replace a fitted rule locally.
 | Ground wind grip | Imported maximum-takeoff-weight crosswind thresholds, universal 10-knot tailwind limit and fitted rollout coupling; stationary tire grip is retained. Headwind has no ground-rule penalty. | [Runway-wind specification](runway-wind.md), opinionated user request 2026-09-21 |
 | Runway support | Use reviewed runway extents and a plane through the grounded origin. Inside the surface footprint, aircraft contact and the visual runway use that plane. Terrain remains unchanged outside it. No automatic large-area flattening. | Fitted contact |
 | Unresolved collision shapes | Use an oriented bounding box of the reviewed scaled mesh for buildings, never one huge sphere for a runway. Contact and blast rules are distinct. | Fitted collision |
-| ILS entry | NAV mode, gear down, selected usable runway, horizontal threshold distance at most 5 nautical miles, altitude at or below 4,000 ft above the selected airport's ground elevation. Use 6,076.12 ft per nautical mile. | User-requested opinionated altitude/reference, 2026-09-20; agent-selected inclusive boundary; manual-derived NAV/gear/range gates; fitted distance metric and conversion |
+| ILS entry | NAV mode, gear down, selected usable runway, horizontal threshold distance at most 5 nautical miles, altitude at or below 4,000 ft above the selected airport's ground elevation, and threshold inside the aircraft's full 90-degree forward cone. No armed indication outside that geometric envelope. Use 6,076.12 ft per nautical mile. | User-requested opinionated altitude/reference, 2026-09-20; agent-selected inclusive boundary; manual-derived NAV/gear/range gates; fitted distance metric and conversion |
 | ILS path | Fitted primary centerline through source contact anchor 0x11, extending toward the projected shape's forward bound, with an opposite approach end. Fall back to mesh centerline only if that anchor is absent/outside the longitudinal footprint. A 3-degree straight approach to the selected threshold. Localizer displacement is lateral error divided by forward approach distance; glide error is elevation angle minus 3 degrees. Suppress behind-threshold guidance and guard zero distance. | Fitted geometry |
 | ILS display | Full-scale lateral indication at 2.5 degrees and vertical at 0.7 degrees error, clamped to the existing HUD area; centered at zero. | Fitted presentation |
-| Runway selection | Explicit user selection persists. Otherwise choose the nearest usable threshold within ILS range, breaking equal distances by stable ID; choose the approach end nearest ownship. No wind-based automatic switching during final. | Opinionated selection |
+| Runway selection | Explicit user selection persists. Otherwise choose the nearest usable threshold eligible for the ILS band and forward cone, breaking equal distances by stable ID; choose the approach end nearest ownship. No wind-based automatic switching during final. | Opinionated selection |
 | Tower command set | Select airport, request approach/landing, repeat last reply, cancel approach. A reply identifies the airport and selected runway/end. | Opinionated player interface pending recovered menu evidence |
 | Tower availability | The current base-layout free-flight host assigns airports neutral status with explicit landing permission because it has no mission player-side assignment. The service can also reject hostile, unknown or unpermitted neutral airports when a mission supplies those states. Disabled runways decline. | Opinionated base-layout policy, agent choice 2026-09-20; fitted mission service policy |
 | Clearance lifetime | Stays with the selected runway until cancellation, airport selection change, runway disablement, flight reset or landing completion. Repeating a request repeats status rather than allocating another clearance. | Opinionated |

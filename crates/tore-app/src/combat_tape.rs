@@ -451,6 +451,7 @@ fn replay_reader(
                     );
                     let aircraft = tore_sim::airport::Aircraft {
                         position: launcher.position,
+                        forward: launcher.basis.forward,
                         nav_mode: airport_nav,
                         gear_down: airport_gear,
                         supported: airport_supported,
@@ -482,6 +483,7 @@ fn replay_reader(
                     scene,
                     tore_sim::airport::Aircraft {
                         position: launcher.position,
+                        forward: launcher.basis.forward,
                         nav_mode: airport_nav,
                         gear_down: airport_gear,
                         supported: airport_supported,
@@ -498,6 +500,7 @@ fn replay_reader(
         }
         last_aircraft = Some(tore_sim::airport::Aircraft {
             position: launcher.position,
+            forward: launcher.basis.forward,
             nav_mode: airport_nav,
             gear_down: airport_gear,
             supported: airport_supported,

@@ -269,3 +269,44 @@ logs and lossless sample WAV wrappers. No imported bytes were committed.
 Mixer output was validated with synthetic signals; no new live-speaker listening
 session or Windows/macOS audio-device check is claimed. No commit or push was
 performed for this audio pass.
+
+## ILS arming-envelope validation
+
+Implementation mode, 2026-09-21, following pushed HUD checkpoint `cfd35e5`.
+Sol implemented the eligibility rule and body-orientation plumbing; root review
+checked the service, replay path and actual application probes. The
+[arming contract](../spec/airports.md#ils-arming-envelope) defines the full
+90-degree cone and existing band, including their provenance.
+
+Fourteen source-airport probes use Simferopol's threshold at
+(1107332, 1024, 587544) feet. The front reference is at
+(1107332, 2024, 568468), about 3.14 NM away. Facing forward activates ILS with
+gear down; gear up retains eligible armed guidance. Facing 90 or 180 degrees,
+or pitching 80 degrees away, produces no guidance. At airport elevation,
+headings ±45 degrees are eligible and ±45.001 are not. Exactly 5 NM and
+4,000 feet above airport elevation are included; 0.01 foot beyond either bound
+is rejected. A 360-degree heading gives the same eligibility as zero.
+
+Synthetic tests additionally cover invalid/nonunit/overflow direction vectors,
+±179-degree wrap, loss/re-entry without losing clearance, and automatic
+selection when a nearer valid-approach airport is behind the aircraft. Root
+strengthened that fixture so it exercises the nose cone rather than merely the
+pre-existing behind-threshold rule. Replay derives the same vector from its
+recorded aircraft basis without changing the tape format.
+
+Local logs and eight HUD captures are in `.local/ils-envelope-review/`. The
+captures use the existing paused flight-probe path before applying the airport
+pose, preventing motion into the band while the screenshot loads. They check active, eligible gear-up, side/rear/pitch-away and out-of-band cases;
+head-look preserves eligibility because it does not turn the aircraft's nose.
+The optional diagnostic pose syntax is
+`--airport-probe ID,X,Y,Z,NAV,GEAR,HEADING,PITCH`, with angles in degrees.
+The original six-field form remains supported and uses the current body pose.
+No retail ILS receiver, traffic behavior or real-world coverage pattern is
+claimed. Windows/macOS runtime checks were not run.
+
+All required checks pass for this change: 955 Rust tests, 68 Python tests,
+formatting, warnings-denied workspace/all-target Clippy, locked workspace build,
+source and both executable asset guards, and documentation headers. Two optional
+GPU unit tests remain ignored; explicit display smoke and the frozen-pose HUD
+captures pass on NVIDIA RTX 4070/Vulkan. The legacy six-field airport probe also
+passes with orientation taken from the aircraft's current body pose.
