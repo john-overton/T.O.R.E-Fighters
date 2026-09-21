@@ -398,6 +398,64 @@ impl Airframe {
         }
         c
     }
+    /// Fitted attachment behind reviewed nozzle bounds, with a bounds-based
+    /// fallback for aircraft whose outlet faces have not been reviewed.
+    pub fn contrail_offsets(&self) -> Vec<[f64; 3]> {
+        use tore_formats::aircraft::AircraftId;
+        let count = match self.profile.id {
+            AircraftId::A4E | AircraftId::X31 | AircraftId::Mig21 | AircraftId::Mig23 => 1,
+            _ => 2,
+        };
+        let scale = f64::from(self.rig.as_ref().map_or(1. / 3., |r| r.scale()));
+        (0..count)
+            .map(|group| {
+                let positions: Vec<_> = self.poses[0]
+                    .faces
+                    .iter()
+                    .filter(|f| {
+                        crate::engine_material::nozzle(self.profile.id, f.address)
+                            && crate::engine_material::outlet_group(self.profile.id, &f.positions)
+                                == group
+                    })
+                    .flat_map(|f| f.positions.iter())
+                    .collect();
+                if !positions.is_empty() {
+                    let min: [f64; 3] = std::array::from_fn(|i| {
+                        positions
+                            .iter()
+                            .map(|p| f64::from(p[i]))
+                            .fold(f64::INFINITY, f64::min)
+                    });
+                    let max: [f64; 3] = std::array::from_fn(|i| {
+                        positions
+                            .iter()
+                            .map(|p| f64::from(p[i]))
+                            .fold(f64::NEG_INFINITY, f64::max)
+                    });
+                    [
+                        (min[0] + max[0]) * 0.5 * scale,
+                        (min[2] + max[2]) * 0.5 * scale,
+                        min[1] * scale - 2.,
+                    ]
+                } else {
+                    let positions = self.poses[0].faces.iter().flat_map(|f| &f.positions);
+                    let mut aft = 0_f64;
+                    let mut span = 0_f64;
+                    for p in positions {
+                        aft = aft.min(f64::from(p[1]) * scale);
+                        span = span.max(f64::from(p[0]).abs() * scale);
+                    }
+                    let lateral = if count == 1 {
+                        0.
+                    } else {
+                        span * 0.15 * if group == 0 { -1. } else { 1. }
+                    };
+                    [lateral, 0., aft - 2.]
+                }
+            })
+            .collect()
+    }
+
     pub fn vertices(&self, s: &flight::State, camera: &Camera, world: &World) -> Vec<f32> {
         self.visual_vertices(s, camera, world, false)
     }

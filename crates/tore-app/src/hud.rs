@@ -146,8 +146,13 @@ fn ladder_project(
     zoom: f64,
 ) -> Option<(f64, f64)> {
     let point = project(pitch, bank, bearing, elevation, zoom)?;
+    // Keep the true horizon fixed so a level velocity marker still meets it.
+    // Near vertical attitudes the horizon has no usable forward projection.
+    let Some(horizon) = project(pitch, bank, 0., 0., zoom) else {
+        return Some(point);
+    };
     let normal = [bank.sin(), bank.cos()];
-    let delta = [point.0 - 320., point.1 - 240.];
+    let delta = [point.0 - horizon.0, point.1 - horizon.1];
     let distance = delta[0] * normal[0] + delta[1] * normal[1];
     Some((
         point.0 - normal[0] * distance * 0.25,
@@ -431,6 +436,46 @@ mod tests {
         }
         assert!(ladder_project(0., 0., std::f64::consts::PI, 0., 1.).is_none());
     }
+    #[test]
+    fn compact_ladder_preserves_true_horizon_with_pitch_bank_and_zoom() {
+        for pitch in [-60_f64, -4., 0., 4., 60.].map(f64::to_radians) {
+            for bank in [0_f64, 45., 90., 180.].map(f64::to_radians) {
+                for zoom in [0.5, 1., 4.] {
+                    let normal = [bank.sin(), bank.cos()];
+                    let marker = project(pitch, bank, 0., 0., zoom).unwrap();
+                    for bearing in [-3_f64, 0., 3.].map(f64::to_radians) {
+                        let horizon = project(pitch, bank, bearing, 0., zoom).unwrap();
+                        let compact = ladder_project(pitch, bank, bearing, 0., zoom).unwrap();
+                        assert!((compact.0 - horizon.0).abs() < 1e-9);
+                        assert!((compact.1 - horizon.1).abs() < 1e-9);
+                        assert!(
+                            ((compact.0 - marker.0) * normal[0]
+                                + (compact.1 - marker.1) * normal[1])
+                                .abs()
+                                < 1e-9
+                        );
+                        for elevation in [-5_f64, 5.].map(f64::to_radians) {
+                            let full = project(pitch, bank, bearing, elevation, zoom).unwrap();
+                            let rung =
+                                ladder_project(pitch, bank, bearing, elevation, zoom).unwrap();
+                            let spacing =
+                                (full.0 - horizon.0) * normal[0] + (full.1 - horizon.1) * normal[1];
+                            let compact_spacing =
+                                (rung.0 - horizon.0) * normal[0] + (rung.1 - horizon.1) * normal[1];
+                            assert!((compact_spacing - spacing * 0.75).abs() < 1e-9);
+                        }
+                    }
+                }
+            }
+        }
+        // Preserve visible attitude cues when the horizon cannot be projected.
+        let vertical = std::f64::consts::FRAC_PI_2;
+        assert_eq!(
+            ladder_project(vertical, 0., 0., vertical, 1.),
+            project(vertical, 0., 0., vertical, 1.)
+        );
+    }
+
     #[test]
     fn velocity_marker_matches_body_axes_through_banked_pulls() {
         use crate::attitude::{Basis, dot};

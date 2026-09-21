@@ -88,6 +88,9 @@ impl TargetPresentation {
 pub struct Combat {
     pub state: live::State,
     pub smoke_art: crate::menu::Sprite,
+    contrail_offsets: Vec<Vector>,
+    contrail_sortie: u64,
+    pub contrails: tore_sim::combat::smoke::Smoke,
     pub input: FireInput,
     pub controller: FireInput,
     pub range: bool,
@@ -103,6 +106,7 @@ pub struct Combat {
     mission_spawns: Option<Vec<crate::ai_wings::MissionSpawn>>,
     dummy_models: Vec<Airframe>,
     dummy_configs: Vec<live::Configuration>,
+    dummy_contrail_offsets: Vec<Vec<Vector>>,
     airport_objects: Vec<tore_sim::airport::StaticObject>,
     pub recorder: Option<crate::combat_tape::Recorder>,
     last_launcher: Option<Launcher>,
@@ -246,11 +250,15 @@ impl Combat {
         };
         Ok(Self {
             smoke_art,
+            contrail_offsets: h.contrail_offsets(),
+            contrail_sortie: 0,
+            contrails: Default::default(),
             state: live::State::new(config, true)?,
             dummies: Vec::new(),
             mission_spawns: None,
             dummy_models: Vec::new(),
             dummy_configs: Vec::new(),
+            dummy_contrail_offsets: Vec::new(),
             airport_objects: Vec::new(),
             input: FireInput::default(),
             controller: FireInput::default(),
@@ -358,6 +366,7 @@ impl Combat {
                     })?);
                 self.shapes
                     .extend(weapon_shapes(self.dummy_configs.last().unwrap(), data));
+                self.dummy_contrail_offsets.push(h.contrail_offsets());
                 self.dummy_models.push(h);
                 self.dummy_models.len() - 1
             };
@@ -402,6 +411,8 @@ impl Combat {
     }
     pub fn reset(&mut self, s: &mut flight::State) -> AppResult<()> {
         self.presentation = TargetPresentation::default();
+        self.contrails = Default::default();
+        self.contrail_sortie = self.contrail_sortie.wrapping_add(1);
         let l = launcher(s);
         if let Some(r) = &mut self.recorder {
             r.record(if self.range { "reset" } else { "reset-scene" }, l);
@@ -472,6 +483,54 @@ impl Combat {
             .step(self.input.held || self.controller.held, l, |x, z| {
                 f64::from(world.height(x as f32, z as f32))
             });
+        use tore_sim::combat::smoke::contrail_altitude_ft;
+        let mut outlets = Vec::new();
+        let mut add = |id: u32, position: Vector, basis: Basis, offsets: &[Vector]| {
+            if position[1] < contrail_altitude_ft(self.contrail_sortie, id) {
+                return;
+            }
+            for (engine, offset) in offsets.iter().enumerate() {
+                let point = std::array::from_fn(|i| {
+                    position[i]
+                        + basis.right[i] * offset[0]
+                        + basis.up[i] * offset[1]
+                        + basis.forward[i] * offset[2]
+                });
+                outlets.push((u64::from(id) * 2 + engine as u64, point));
+            }
+        };
+        let height = f64::from(world.height(s.position[0] as f32, s.position[2] as f32));
+        if !s.crashed
+            && s.engine
+            && s.fuel > 0.
+            && self.state.player_hp > 0
+            && !s.supported_at(height)
+        {
+            add(0, s.position, l.basis, &self.contrail_offsets);
+        }
+        for target in self.state.targets.iter().filter(|t| t.airborne && t.hp > 0) {
+            if let Some(id) = target.aircraft {
+                if id == self.state.configuration().aircraft {
+                    add(
+                        target.id,
+                        target.position,
+                        target.basis,
+                        &self.contrail_offsets,
+                    );
+                } else if let Some(index) =
+                    self.dummy_models.iter().position(|h| h.profile.id == id)
+                {
+                    add(
+                        target.id,
+                        target.position,
+                        target.basis,
+                        &self.dummy_contrail_offsets[index],
+                    );
+                }
+            }
+        }
+        self.contrails.step([]);
+        self.contrails.contrails(outlets);
         s.set_payload(self.state.payload_lbs())?;
         s.bay_auto_open = s.bay_available()
             && self.state.armed

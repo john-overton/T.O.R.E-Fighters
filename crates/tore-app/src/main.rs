@@ -2027,7 +2027,10 @@ impl ApplicationHandler for App {
                             self.hornet.streamer_points(&presented),
                         );
                         renderer.vapor(&vapor);
-                        renderer.smoke(&self.combat.smoke_art, &self.combat.state.smoke);
+                        renderer.smoke(
+                            &self.combat.smoke_art,
+                            [&self.combat.state.smoke, &self.combat.contrails],
+                        );
                         match renderer.poll_previews() {
                             Ok(previews) => {
                                 self.performance.completed_previews += previews.len();

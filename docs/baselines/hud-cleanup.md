@@ -129,7 +129,18 @@ missile readouts, a target below the former lower boundary, a banked NAV view,
 and wide/tall windows. The fixed aircraft datum and surrounding speed/altitude tape marks and numbers
 are absent. The flight-path marker remains, and the boxed current values move
 down twelve reference pixels. Ladder spacing is compressed by 25%, with rung
-width, five-degree labels and bank orientation preserved. The ladder window
+width, five-degree labels and bank orientation preserved. The compression anchor
+is the true projected zero-degree line. A synthetic regression checks zero-line
+alignment with a level velocity marker for pitches from -60 to +60 degrees,
+banks through 180 degrees and zooms from 0.5 to 4. It also checks 75% spacing
+on both sides of zero and the uncompressed vertical-flight fallback. The
+2026-09-21 implementation check passed all required workspace, Python, asset,
+documentation and display checks (959 Rust tests passed, two ignored; 68 Python
+tests passed). A high-altitude cockpit capture is local to
+`.local/hud-zero-review/high.ppm`, generated with `TORE_FLIGHT_AGL=40000`,
+`--flight-probe-ticks 2400 --maneuver level --flight-view 0`. The capture verifies
+visible layout; the synthetic test establishes exact level-path alignment.
+The ladder window
 subsequently trims from 208 to 166 pixels high, preserving its upper edge. NAV retains the selected-target cue. AGL/VS are absent in
 ordinary NAV, including an inactive armed ILS, and retained for active ILS.
 The common layout now clips to each aircraft's reviewed glass aperture and

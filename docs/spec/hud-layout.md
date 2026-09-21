@@ -23,9 +23,14 @@ the expanded 208-pixel height to 166 pixels, about 20% less area, while
 retaining its width and upper edge. Other HUD elements keep their positions.
 At John's further request, compress spacing between ladder marks to 75% of its
 previous value. After perspective projection, scale only the component normal
-to the banked rungs about HUD center (320,240). Apply the same transform to
-rung labels. Rung width and five-degree labels stay unchanged. This is a compact
-attitude scale, so ladder marks no longer line up directly with world angles;
+to the banked rungs about the true projected zero-degree line, preserving its
+world position as requested by John on 2026-09-21. A level flight-path marker
+therefore meets the zero line even with nose-up attitude. Apply the same transform
+to rung labels. Rung width and five-degree labels stay unchanged. When the
+zero line has no usable forward projection (forward component below 0.05),
+retain uncompressed projection for visible rungs, an agent-selected fallback
+that preserves attitude cues near vertical flight. This is a compact
+attitude scale, so nonzero ladder marks no longer line up directly with world angles;
 the flight-path marker, target cues and weapon pipper retain their existing
 world projection.
 

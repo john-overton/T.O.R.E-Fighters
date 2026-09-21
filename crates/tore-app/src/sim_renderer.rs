@@ -504,7 +504,7 @@ impl SimRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         art: &crate::menu::Sprite,
-        smoke: &tore_sim::combat::smoke::Smoke,
+        smoke: [&tore_sim::combat::smoke::Smoke; 2],
     ) {
         self.smoke.prepare(device, queue, &self.uniform, art, smoke);
     }

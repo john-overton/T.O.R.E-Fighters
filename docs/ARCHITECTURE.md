@@ -271,7 +271,10 @@ the three player flight adapters are unchanged. Normal flight loads supported de
 restricted native research flight keeps its clean configuration.
 
 `combat::smoke` owns bounded, fixed-step puff histories independently of rendering
-and guidance. The app's smoke pass sorts original keyed sprite billboards for
+and guidance. The app supplies engine outlet positions once per combat tick;
+contrails retain traveled-path distance and share the smoke budget.
+[Smoke and contrail rules](spec/damage-smoke.md) define rates, size and fade.
+The app's smoke pass sorts original keyed sprite billboards for
 each camera, blends them without depth writes, and depth-tests against the world.
 Gun release dispersion is sampled once in the shared fixed-step projectile
 path using a stable projectile-identity hash. Cannons release individual physical

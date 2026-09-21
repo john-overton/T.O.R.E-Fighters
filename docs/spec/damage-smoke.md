@@ -82,19 +82,53 @@ Emit white missile smoke only during the movement model's powered interval,
 including supported compatibility weapons. Guns emit none. Emit dark aircraft
 smoke at or below 50% remaining health, while the target remains airborne.
 Ownship emits while damaged and alive; residual puffs persist after destruction.
-No smoke is emitted by an undamaged aircraft or a motor before ignition or after
-burnout. Existing smoke continues to disperse after its source stops or disappears.
+No dark damage smoke is emitted by an undamaged aircraft. Missile motors emit
+no smoke before ignition or after burnout. Existing smoke continues to disperse after its source stops or disappears.
 
-Smoke samples use fixed 120 Hz simulation time. Missile puffs emit every 2 ticks (60 per second) and
-last 4 seconds; aircraft puffs emit every 3 ticks (40 per second) and last 8 seconds.
-These agent-selected fitted rates increase separation between plumes, following
-John's 2026-09-20 request and supplied retail screenshot. The image is a visual
-reference only: original emission timing remains unknown. At 1,200 feet/second,
-missile puff centers are 20 feet apart; at 600 feet/second, aircraft puff centers
-are 15 feet apart before rise. Puff radii
-start at 4/8 feet and grow by 6/8 feet per second for missile/aircraft smoke.
-Puffs rise 2 feet per second, fade linearly, and have no gameplay sensor effect.
-The oldest puff is discarded above a total 8,192-puff budget. Reset clears smoke.
+Smoke samples use fixed 120 Hz simulation time. As an opinionated change requested
+by John on 2026-09-21, missile puffs emit every 8 ticks (15 per second), aircraft
+damage puffs every 12 ticks (10 per second), and missile puff radius is halved
+throughout its life. Missile/aircraft damage puffs last 4/8 seconds. At 1,200
+feet/second missile centers are 80 feet apart; at 600 feet/second aircraft damage
+centers are 60 feet apart before rise. Missile/aircraft damage radii start at
+2/8 feet and grow by 3/8 feet per second. These retain fitted lifetimes, rise of
+2 feet per second and linear fade from 0.65 opacity. Original timing remains
+unknown. Rendering continues at the normal frame rate.
+
+Engine contrails are an opinionated addition requested by John on 2026-09-21.
+Each engine emits 10 pale puffs per second behind its outlet, including healthy
+aircraft. The trail builds as the aircraft moves and retains 2 statute miles
+(10,560 feet) of traveled path. Opacity stays at 0.65 through 1.5 miles (7,920
+feet), then fades linearly to zero at 2 miles, per John's follow-up request.
+Distance follows the outlet path through turns and speed changes. Puffs remain
+at their emitted world positions. Contrails use the reduced missile radius and
+growth, capped at 14 feet after four seconds, an agent-selected fit.
+
+Player emission requires an airborne, living aircraft with engine power and
+fuel. Other living airborne aircraft emit from their rendered engine positions;
+individual target engine power is unavailable, so their emission is fitted.
+As requested by John on 2026-09-21, each aircraft has a randomly selected onset
+altitude between 30,000 and 35,000 feet above sea level. Both engines share that
+threshold. Emission begins at or above it and stops below it, with residual
+puffs clearing by the existing absent-source rule. The agent-selected fit uses
+a deterministic pseudorandom hash of aircraft instance ID and sortie counter,
+starting at zero and incrementing on reset. This keeps the threshold stable
+within a sortie and headless runs reproducible. No weather threshold is imposed.
+One outlet is used for A-4E,
+X-31, MiG-21 and MiG-23; other supported types have two. Attachment uses the
+center of reviewed nozzle lateral/vertical bounds and the aftmost nozzle point,
+plus 2 feet aft. A-4E, Su-25, F-22 and F/A-XX use a fitted fallback: 2 feet behind
+the model's aftmost point, at body-center height, with twin outlets offset by
+15% of the model half-span. These fallback points are not recovered engine
+coordinates. Absent sources advance their residual trail distance by 22 feet
+per tick, clearing it within four seconds, an agent-selected cleanup fit.
+
+All smoke has no gameplay sensor effect. Combat smoke and cosmetic contrail
+histories each discard their oldest puff above 8,192 puffs. The renderer shows
+at most 8,192 combined puffs, giving combat smoke priority and selecting newest
+contrail puffs first. This can shorten contrails in crowded scenes. Reset clears
+all smoke and outlet history. Cosmetic contrails are separate from combat-service
+replay state, whose tapes do not record engine power.
 Original 43-pixel smoke cells at x=0 (dark) and x=94 (pale), with
 palette index 255 keyed transparent, are camera-facing, blended, depth-tested and ordered
 back to front. Size, lifetime, placement and opacity are fitted, not retail parity.

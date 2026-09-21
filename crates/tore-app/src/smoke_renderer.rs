@@ -45,7 +45,7 @@ impl SmokeRenderer {
         queue: &wgpu::Queue,
         uniform: &wgpu::Buffer,
         art: &Sprite,
-        smoke: &Smoke,
+        smoke: [&Smoke; 2],
     ) {
         if self.bind.is_none() {
             let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -95,8 +95,13 @@ impl SmokeRenderer {
             }));
         }
         self.puffs.clear();
-        self.puffs
-            .extend(smoke.puffs.iter().take(MAX_PUFFS).cloned());
+        self.puffs.extend(
+            smoke
+                .into_iter()
+                .flat_map(|s| s.puffs.iter().rev())
+                .take(MAX_PUFFS)
+                .cloned(),
+        );
     }
     pub fn update(&mut self, queue: &wgpu::Queue, camera: &Camera) {
         let distance = |p: &Puff| {
@@ -110,7 +115,7 @@ impl SmokeRenderer {
         for p in &self.puffs {
             let start = match p.kind {
                 Kind::Aircraft => 0.,
-                Kind::Missile => 94.,
+                Kind::Missile | Kind::Contrail => 94.,
             };
             let radius = p.radius() as f32;
             for [x, y] in [[0., 0.], [1., 0.], [1., 1.], [0., 0.], [1., 1.], [0., 1.]] {

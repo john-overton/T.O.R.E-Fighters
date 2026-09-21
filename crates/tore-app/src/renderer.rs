@@ -149,7 +149,11 @@ impl Renderer {
     pub fn airports(&mut self, vertices: &[f32]) {
         self.sim.airports(&self.device, &self.queue, vertices);
     }
-    pub fn smoke(&mut self, art: &crate::menu::Sprite, smoke: &tore_sim::combat::smoke::Smoke) {
+    pub fn smoke(
+        &mut self,
+        art: &crate::menu::Sprite,
+        smoke: [&tore_sim::combat::smoke::Smoke; 2],
+    ) {
         self.sim.smoke(&self.device, &self.queue, art, smoke);
     }
     pub fn vapor(&mut self, vertices: &[f32]) {
