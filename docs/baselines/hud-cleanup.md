@@ -129,17 +129,13 @@ missile readouts, a target below the former lower boundary, a banked NAV view,
 and wide/tall windows. The fixed aircraft datum and surrounding speed/altitude tape marks and numbers
 are absent. The flight-path marker remains, and the boxed current values move
 down twelve reference pixels. Ladder spacing is compressed by 25%, with rung
-width, five-degree labels and bank orientation preserved. The compression anchor
-is the true projected zero-degree line. A synthetic regression checks zero-line
-alignment with a level velocity marker for pitches from -60 to +60 degrees,
-banks through 180 degrees and zooms from 0.5 to 4. It also checks 75% spacing
-on both sides of zero and the uncompressed vertical-flight fallback. The
-2026-09-21 implementation check passed all required workspace, Python, asset,
-documentation and display checks (959 Rust tests passed, two ignored; 68 Python
-tests passed). A high-altitude cockpit capture is local to
-`.local/hud-zero-review/high.ppm`, generated with `TORE_FLIGHT_AGL=40000`,
-`--flight-probe-ticks 2400 --maneuver level --flight-view 0`. The capture verifies
-visible layout; the synthetic test establishes exact level-path alignment.
+width, five-degree labels and bank orientation preserved. The compression now applies to rung-to-aircraft pitch differences about the
+forward point. This corrects the horizon-anchored version, which made the
+85-degree mark cross the center at about 57.44 degrees of pitch and left steep
+attitudes without usable markings. Pitch calibration, constant-motion, finite-width and full-loop
+visibility/continuity checks cover numbered rungs, including +/-90. The zero
+bar separately retains true-horizon alignment with the level velocity marker.
+Current validation and artifacts are recorded in the [pitch calibration pass](hud-pitch-calibration.md).
 The ladder window
 subsequently trims from 208 to 166 pixels high, preserving its upper edge. NAV retains the selected-target cue. AGL/VS are absent in
 ordinary NAV, including an inactive armed ILS, and retained for active ILS.

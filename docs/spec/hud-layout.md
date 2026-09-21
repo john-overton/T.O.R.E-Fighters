@@ -22,17 +22,36 @@ bank orientation. Its visible window spans reference y=182..348 and x=250..390. 
 the expanded 208-pixel height to 166 pixels, about 20% less area, while
 retaining its width and upper edge. Other HUD elements keep their positions.
 At John's further request, compress spacing between ladder marks to 75% of its
-previous value. After perspective projection, scale only the component normal
-to the banked rungs about the true projected zero-degree line, preserving its
-world position as requested by John on 2026-09-21. A level flight-path marker
-therefore meets the zero line even with nose-up attitude. Apply the same transform
-to rung labels. Rung width and five-degree labels stay unchanged. When the
-zero line has no usable forward projection (forward component below 0.05),
-retain uncompressed projection for visible rungs, an agent-selected fallback
-that preserves attitude cues near vertical flight. This is a compact
-attitude scale, so nonzero ladder marks no longer line up directly with world angles;
-the flight-path marker, target cues and weapon pipper retain their existing
-world projection.
+previous value. His 2026-09-21 correction requires the displayed pitch to match
+actual aircraft orientation throughout a climb, dive and vertical transition.
+For numbered, nonzero rungs, use the angular difference between rung elevation and aircraft pitch,
+then apply the same 0.75 factor to its bank-normal screen displacement about
+the aircraft's forward point (320,240). This scales spacing and motion together:
+the 70-degree rung crosses that point at 70 degrees, not earlier. At bank zero
+and unit zoom, a rung five degrees above pitch is about 27.28 pixels above it.
+
+Agent geometry decision: project rung bearing in a local zero-pitch frame using
+the relative elevation. This retains level-flight rung widths at steep attitudes,
+rather than shrinking them to zero at the poles. Rotate the complete scale by
+bank. Draw marks from -90 through +90 inclusive in five-degree steps, preserving
+negative dashes and applying the same transform to labels. There is no special
+vertical fallback or discontinuous change in compression. The +/-90 rung passes
+through the forward point at vertical climb/dive, including through a full loop.
+
+The zero-degree bar is a separate world-projected horizon reference, requested
+by John on 2026-09-21 after reviewing level flight. Draw it with the same
+uncompressed world projection as the flight-path marker. A level velocity vector
+therefore lies on this bar even when positive angle of attack puts the nose
+above the horizon. Bank, zoom and head-look apply consistently. Do not draw a
+second compact zero bar. The gap between the true horizon bar and nearby compact
+numbered marks is consequently not uniformly compressed, an agent implementation
+choice that preserves both horizon alignment and accurate numbered pitch readings.
+
+Do not anchor the numbered scale to the horizon: that previously produced false
+pitch readings and a steep-flight gap. Keep its corrected calibration and +/-90
+marks unchanged. The flight-path marker, target cues and weapon pipper retain
+their world projection. No aircraft orientation, flight response, HUD zoom or
+head-look behavior is changed.
 
 Remove both the surrounding TAS/MSL numbers and their hash marks. Keep the
 TAS/MSL labels and boxed current values. Move both boxes from reference y=223
@@ -105,3 +124,5 @@ combat probes retain their established diagnostic setup, and live-fire remains
 armed. These exceptions are developer facilities, not alternate player defaults.
 
 [Validation and visual evidence](../baselines/hud-cleanup.md#expanded-hud-and-startup-review).
+
+[Horizon reference validation](../baselines/horizon-creator.md).

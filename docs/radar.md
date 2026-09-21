@@ -812,3 +812,8 @@ edge chevron, independent of sensor selection and weapon support. Loss of
 observation still expires sensor selection normally. The display-only cue
 never supplies radar gun lead or missile guidance. L/RELEASE LOCK clears both.
 [Target-cue behavior](spec/gunsight-targeting.md#target-square-and-edge-chevron).
+
+The map also observes surface entities with the existing active-channel search
+and visual rules. These presentation-only observations never enter the airborne
+scope, designation or weapon support. Visual observation supplies map identity;
+radar/IR alone supplies an unknown marker. [Map rules](spec/flight-map.md).

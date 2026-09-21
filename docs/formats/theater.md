@@ -144,3 +144,7 @@ existing terrain triangles, with shared area-weighted vertex normals for
 continuous lighting across their edges. Shadow positions and height queries
 still use the source triangles. This is an authored renderer, not newly recovered
 terrain behavior. See the [shared surface spec](../spec/surface-lighting.md).
+
+The in-flight map fits the original briefing image to the T2 grid extents,
+with positive world Z at image north. T2 cell colors provide a fallback. This
+is fitted cartography; the exact source projection has not been recovered. See the [map specification](../spec/flight-map.md).

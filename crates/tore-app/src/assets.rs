@@ -212,7 +212,7 @@ impl Assets {
         }
         for (name, bytes) in resources.iter().filter(|(n, _)| {
             n.starts_with('$') && n.ends_with(".PIC")
-                || ["FNTWPNB.PIC", "FNTWPNY.PIC"].contains(&n.as_str())
+                || ["MCICONS.PIC", "FNTWPNB.PIC", "FNTWPNY.PIC"].contains(&n.as_str())
         }) {
             pics.insert(name.clone(), Pic::parse(bytes)?);
         }
@@ -350,6 +350,7 @@ impl Assets {
                 .keys()
                 .filter(|n| {
                     names.contains(&n.as_str())
+                        || n.as_str() == "MCICONS.PIC"
                         || aircraft_names.contains(*n)
                         || scene_names.contains(*n)
                         || tore_formats::ui::creator::resource(n)

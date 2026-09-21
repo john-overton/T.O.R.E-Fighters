@@ -24,6 +24,17 @@ fields; other scalar fields retain click-to-cycle and Shift-to-open. Direct
 opening for theaters is an agent decision. Selecting a row is provisional until
 OK; Cancel and Escape preserve the draft. Empty lists cannot be accepted.
 
+John requested reverse cycling with right-click on 2026-09-21. Right-clicking an
+inline option selects its previous available value, wrapping to the last value.
+This also works for aircraft/theater/airport fields without opening their list;
+their existing left-click behavior is unchanged. The player's wing count wraps
+from one to its maximum, never through zero. Empty lists do nothing. Existing
+field dependencies, including clearing defenses when ground targets are none,
+continue to apply. Require a matching right press/release on the same field.
+Right-click cannot activate OK, Cancel, Exit, popup rows or controls behind a
+selector/help menu. Focus loss cancels a pending press. In the ordnance view,
+right-click retains its existing station-quantity decrement.
+
 The selector shows 15 rows per page, black inset wells, blue diagonal markers,
 a gold selected marker, a page count, a Prev/Next rocker, and beveled OK/Cancel
 buttons. Arrow keys move selection, Home/End reach the ends, and Page Up/Down
@@ -157,3 +168,5 @@ not grant landing clearance or announce that a landing has completed.
 
 [Ground-start validation](../baselines/ground-start.md) records creator launch,
 restart, real runway support, takeoff probes and rendering checks.
+
+[Reverse-cycling validation](../baselines/horizon-creator.md).

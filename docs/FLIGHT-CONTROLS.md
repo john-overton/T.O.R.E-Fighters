@@ -22,6 +22,7 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | Key | Action | Evidence/status |
 | --- | --- | --- |
 | Arrows | Pitch/bank; Down pulls up | Keyboard flight adapter |
+| Shift-M | Toggle live map; Escape closes it | Right-side category toggles, buildings off; [map rules](spec/flight-map.md) |
 | Z / X | Left/right rudder | Development mapping |
 | PageUp / PageDown | Increase/decrease throttle while held | Development mapping |
 | 1…9 / 0 | 10…90% / full throttle | Development mapping |
@@ -102,15 +103,15 @@ The complete native weapon/countermeasure dispatch remains unverified.
 
 ## In-flight menu
 
-The runtime reads **? / Control / Pref / View / Window / Cheat / Multi / Map / Pos**, including nested options, from the imported FA menu module. Arrows/Tab and Enter/Space navigate; Right opens a child menu, Left backs out or changes the top menu, and Escape backs out before closing. Mouse activation requires a matching press and release. Hover/focus remains silent.
+The runtime reads **? / Control / Pref / View / Window / Cheat / Multi / Pos**, including nested options, from the imported FA menu module. Arrows/Tab and Enter/Space navigate; Right opens a child menu, Left backs out or changes the top menu, and Escape backs out before closing. Mouse activation requires a matching press and release. Hover/focus remains silent.
 
 The menu pauses flight and engine loops. Focus loss pauses and clears held controls; resume explicitly with Ctrl-P or the menu. Closing the menu preserves a pre-existing explicit/focus pause. Opening menus never advances a hidden backlog of simulation time.
 
-Working menu actions include views, instrument windows, time/pause, cockpit, pitch ladder, HUD brightness, ending flight and exiting. Sound currently toggles effects; the original volume mixer is not implemented. Other preferences, cheats, multiplayer, map and position commands are navigable placeholders with feedback. The bottom Resume / Restart / Keyboard Shortcuts actions are documented development additions. Menus do not silently enable unsupported cheats or alter the aircraft when an unrelated modifier shortcut is pressed.
+Working menu actions include views, instrument windows, time/pause, cockpit, pitch ladder, HUD brightness, ending flight and exiting. Sound currently toggles effects; the original volume mixer is not implemented. Other preferences, cheats, multiplayer and position commands are navigable placeholders with feedback. The bottom Resume / Restart / Keyboard Shortcuts actions are documented development additions. Menus do not silently enable unsupported cheats or alter the aircraft when an unrelated modifier shortcut is pressed.
 
 ## HUD and presentation limits
 
-The HUD uses imported `HUD11.FNT`; instrument/menu text uses `WIN11.FNT`. It shows wrapped heading, true airspeed in knots, MSL altitude, G, throttle, afterburner and actual gear/flap/brake/hook state. AGL and vertical speed are reserved for ILS approaches. The enlarged pitch ladder uses five-degree steps, dashed below zero, and a 25% tighter display spacing that follows bank. The flight-path marker comes from current kinematic vertical speed and airspeed. No target, weapon solution or navigation waypoint is invented.
+The HUD uses imported `HUD11.FNT`; instrument/menu text uses `WIN11.FNT`. It shows wrapped heading, true airspeed in knots, MSL altitude, G, throttle, afterburner and actual gear/flap/brake/hook state. AGL and vertical speed are reserved for ILS approaches. The enlarged pitch ladder uses five-degree steps, dashed below zero, and a 25% tighter attitude scale whose spacing and motion follow actual pitch and bank, including readable +/-90-degree marks. The zero bar separately projects the true horizon and aligns with level-flight velocity. The flight-path marker comes from current kinematic vertical speed and airspeed. No target, weapon solution or navigation waypoint is invented.
 
 Layout, line symbology, frame scaling, pan, zoom and camera placement are authored. `~F18H.PIC` is uniformly scaled to cover the actual flight aspect ratio, showing more side artwork on wider screens and cropping only what is required to avoid stretching. Mirrors render live rear views every visible frame. ILS appears only with the runway threshold inside the aircraft's full 90-degree
 forward cone and existing 5-NM/4,000-foot airport-relative band. The airport
@@ -492,3 +493,11 @@ Developer takeoff captures can combine `--ground-start N`,
 `--flight-probe-ticks TICKS`, `--maneuver takeoff` and `--capture-flight PATH`.
 The level maneuver also supports an idle ground capture. Other ground pose
 overrides remain rejected. [Acceptance and human test notes](baselines/takeoff-acceptance.md).
+
+The original Map filter menu is omitted by request. Shift-M shows known runways
+and current aircraft detections. Right-side buttons toggle Aircraft, Airfields,
+Buildings, Surface and Emitters. Buildings start off; the other categories start
+on. Unknown contacts use placeholders. Plus/minus zoom, arrows pan and Home follows the player. Flight
+continues; map pointer input cannot operate the covered instruments.
+`--flight-map --capture-flight PATH` captures this view. Map projection,
+identification and surface detection are fitted rules in the [map spec](spec/flight-map.md).

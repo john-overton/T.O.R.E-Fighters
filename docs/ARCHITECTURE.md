@@ -374,3 +374,12 @@ recorded launcher pose. It filters threshold candidates through the shared
 90-degree forward cone and range/airport-altitude band before returning either
 armed or active ILS data. Head-look is not an input, and replay needs no new
 wire field. [Arming contract](spec/airports.md#ils-arming-envelope).
+
+`flight_map.rs` draws the Shift-M map as an opaque flight overlay. Simulation
+map observations combine the active sensor and visual returns, including surface
+objects, without adding surface targets to air-to-air selection. The renderer
+receives observed positions and identification flags. Right-side map buttons
+filter only presentation. An explicit structural-resource allowlist hides
+buildings by default, including unidentified returns, while preserving defenses
+and other surface objects. Original MCICONS artwork
+is optional for older caches. [Display rules](spec/flight-map.md).

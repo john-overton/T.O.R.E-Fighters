@@ -656,3 +656,16 @@ throttle and flight controls to take off. Other selected aircraft start airborne
 at the displayed wing altitude. Restart restores the accepted airport/start.
 Airborne remains the default. Ground start requires the researched flight model;
 legacy and restricted native modes remain available for airborne starts.
+
+Shift-M toggles the live map. Escape closes it, plus/minus zoom, arrows pan and
+Home resumes following the player. Map navigation takes priority over keyboard
+flight bindings for those keys while open. Other flight controls remain live.
+Right-side map buttons toggle categories, with Buildings off by default.
+Selections last until flight restart; no category settings appear in Escape. See the
+[map specification](spec/flight-map.md).
+
+Quick Mission inline options support right-click to cycle backward, wrapping to
+the last available value. Left-click retains forward cycling and the existing
+list pickers. The player's wing never cycles below one. Right-click requires a
+matching press/release and cannot launch, cancel or select through a modal list.
+The ordnance view retains right-click quantity decrement.

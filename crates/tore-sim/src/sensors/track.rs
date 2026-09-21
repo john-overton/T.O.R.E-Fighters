@@ -222,6 +222,14 @@ pub enum Event {
     ContactLost(u32),
 }
 
+/// A presentation-only map observation. Identification requires a visual return.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MapContact {
+    pub contact: Contact,
+    pub identified: bool,
+    pub airborne: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sensors {
     pub profiles: SensorProfiles,
@@ -239,6 +247,7 @@ pub struct Sensors {
     visual_failed: bool,
     contacts: Vec<Contact>,
     visual: Vec<Contact>,
+    map_contacts: Vec<MapContact>,
     strobes: Vec<Strobe>,
     fading: Vec<(Strobe, u32)>,
     plots: Vec<Plot>,
@@ -261,12 +270,16 @@ impl Sensors {
             visual_failed: false,
             contacts: Vec::new(),
             visual: Vec::new(),
+            map_contacts: Vec::new(),
             strobes: Vec::new(),
             fading: Vec::new(),
             plots: Vec::new(),
             history: Vec::new(),
             tick: 0,
         }
+    }
+    pub fn map_contacts(&self) -> &[MapContact] {
+        &self.map_contacts
     }
     pub fn contacts(&self) -> &[Contact] {
         &self.contacts
@@ -527,17 +540,25 @@ impl Sensors {
         let mut sorted: Vec<&Observable> = targets.iter().collect();
         sorted.sort_by_key(|t| t.id);
         self.visual.clear();
+        self.map_contacts.clear();
         let visual = !observer.visual_failed;
         for target in &sorted {
-            if let Some(channel) = channel
-                && let Some(contact) = self.observe(observer, target, channel, environment)
-            {
-                self.contacts.push(contact);
+            let sensed =
+                channel.and_then(|channel| self.observe(observer, target, channel, environment));
+            let seen = visual
+                .then(|| self.observe(observer, target, Channel::Visual, environment))
+                .flatten();
+            if let Some(contact) = seen.as_ref().or(sensed.as_ref()) {
+                self.map_contacts.push(MapContact {
+                    contact: *contact,
+                    identified: seen.is_some(),
+                    airborne: target.airborne,
+                });
             }
-            if visual
-                && let Some(contact) = self.observe(observer, target, Channel::Visual, environment)
-            {
-                self.visual.push(contact);
+            // Surface returns are map-only and never enter targeting or the scope.
+            if target.airborne {
+                self.contacts.extend(sensed);
+                self.visual.extend(seen);
             }
         }
         // Selection survives only while the active sensor still observes it.
@@ -639,9 +660,6 @@ impl Sensors {
         channel: Channel,
         environment: &Environment<'_>,
     ) -> Option<Contact> {
-        if !target.airborne {
-            return None;
-        }
         let sighting = Sighting::new(observer.position, &observer.basis, target.position);
         if !sighting.distance_ft.is_finite()
             || (environment.obscured)(observer.position, target.position)

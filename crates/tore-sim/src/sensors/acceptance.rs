@@ -969,3 +969,47 @@ fn received_noise_fades_over_a_quarter_second_and_stops_with_the_radar() {
     assert!(sensors.strobes().is_empty());
     assert!(sensors.display_strobes().is_empty());
 }
+
+#[test]
+fn map_surface_returns_do_not_grant_air_to_air_selection() {
+    let mut sensors = Sensors::new(with_visual(profiles(Some(radar(90., 50.)), None), 10.));
+    let mut surface = ahead(7, 5.);
+    surface.airborne = false;
+    sensors.step(&observer(), &[surface.clone()], &clear_air());
+    assert_eq!(sensors.map_contacts().len(), 1);
+    assert!(sensors.map_contacts()[0].identified);
+    assert!(!sensors.map_contacts()[0].airborne);
+    assert!(sensors.contacts().is_empty());
+    assert!(sensors.visual().is_empty());
+    assert!(!sensors.designate(7));
+    surface.position[2] = 20. * NMI;
+    sensors.step(&observer(), &[surface.clone()], &clear_air());
+    assert_eq!(sensors.map_contacts().len(), 1);
+    assert!(!sensors.map_contacts()[0].identified);
+    let mut off = observer();
+    off.radar_powered = false;
+    sensors.step(&off, &[surface.clone()], &clear_air());
+    assert!(sensors.map_contacts().is_empty());
+    sensors.step(&observer(), &[surface], &masked_air());
+    assert!(sensors.map_contacts().is_empty());
+}
+
+#[test]
+fn map_identity_requires_visual_and_lost_contacts_disappear() {
+    let mut sensors = Sensors::new(with_visual(profiles(Some(radar(90., 50.)), None), 10.));
+    let mut target = ahead(3, 20.);
+    sensors.step(&observer(), &[target.clone()], &clear_air());
+    assert!(!sensors.map_contacts()[0].identified);
+    target.position[2] = 5. * NMI;
+    target.destroyed = true;
+    sensors.step(&observer(), &[target.clone()], &clear_air());
+    assert!(sensors.map_contacts()[0].identified);
+    assert!(sensors.map_contacts()[0].contact.destroyed);
+    assert_eq!(sensors.map_contacts()[0].contact.position, target.position);
+    let mut failed = observer();
+    failed.visual_failed = true;
+    sensors.step(&failed, &[target], &clear_air());
+    assert!(!sensors.map_contacts()[0].identified);
+    sensors.step(&observer(), &[], &clear_air());
+    assert!(sensors.map_contacts().is_empty());
+}

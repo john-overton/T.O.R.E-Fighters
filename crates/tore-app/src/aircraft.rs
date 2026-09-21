@@ -188,7 +188,7 @@ impl Airframe {
             atlas.height,
             font.height
         );
-        let flight_menu = tore_formats::ui::flight_menu(get("FMENUD.MNU")?)?;
+        let mut flight_menu = tore_formats::ui::flight_menu(get("FMENUD.MNU")?)?;
         if flight_menu
             .iter()
             .map(|n| n.label.as_str())
@@ -200,6 +200,9 @@ impl Airframe {
         {
             return Err("unreviewed FA in-flight menu structure".into());
         }
+        // John requested all map categories with no Escape-menu filters.
+        flight_menu.retain(|node| node.label != "Map");
+
         let engine_material = if crate::engine_material::outlet_count(id) > 0 {
             crate::engine_material::Image::load()?
         } else {

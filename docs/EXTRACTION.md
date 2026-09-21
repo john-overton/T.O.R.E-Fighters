@@ -427,3 +427,7 @@ For reviewed F/A-XX replacement exports and generic SH/YAML or LIB workflows, us
 the [export toolset guide](fa-xx-developer-kit.md). These tools build a patched
 static OpenFA utility under `.local/`; they do not change the extractor's format
 coverage. Generated shapes, archives and editable donor YAML stay local.
+
+The application importer also selects `MCICONS.PIC` for the in-flight map. It is
+read as bounded PIC data at runtime, never embedded. Older caches keep working
+with geometric map symbols; re-import user-owned media to add the original sheet.

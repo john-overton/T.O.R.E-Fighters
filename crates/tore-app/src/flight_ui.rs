@@ -41,6 +41,7 @@ pub enum Command {
 type Control = (usize, (i32, i32, i32, i32), String);
 pub struct FlightUi {
     pub menu: bool,
+    pub map: crate::flight_map::Map,
     pub paused: bool,
     pub cockpit: bool,
     pub hud: bool,
@@ -65,6 +66,7 @@ impl Default for FlightUi {
     fn default() -> Self {
         Self {
             menu: false,
+            map: Default::default(),
             paused: false,
             cockpit: true,
             hud: true,
@@ -111,6 +113,7 @@ impl FlightUi {
         }
     }
     pub fn cancel_press(&mut self) {
+        self.map.cancel_press();
         self.pressed = None;
         if let Some(editor) = &mut self.controls_editor {
             editor.cancel_capture();
@@ -254,6 +257,33 @@ impl FlightUi {
         if let Some(editor) = &mut self.controls_editor {
             let result = editor.key(key, shift, ctrl, alt);
             return self.editor_result(result);
+        }
+        if !self.menu && !ctrl && !alt && shift && key == "m" {
+            self.map.open = !self.map.open;
+            return Command::Click;
+        }
+        if self.map.open && !self.menu {
+            if key == "Escape" {
+                self.map.open = false;
+                return Command::Click;
+            }
+            if !ctrl
+                && !alt
+                && matches!(
+                    key,
+                    "+" | "="
+                        | "-"
+                        | "_"
+                        | "ArrowLeft"
+                        | "ArrowRight"
+                        | "ArrowUp"
+                        | "ArrowDown"
+                        | "Home"
+                )
+            {
+                self.map.key(key);
+                return Command::None;
+            }
         }
         if key == "Escape" {
             self.pressed = None;
@@ -637,7 +667,7 @@ impl FlightUi {
                     "1..9: 10..90%, 0: full | Shift-B: burner | E: engine".into(),
                     "G: gear | F: flaps | B: brake | H: hook | J: jammer".into(),
                     "Shift/Ctrl-arrows: look/orbit | Shift-/: center | F1: cockpit".into(),
-                    "Comma/period: scope range | M/O: sensor channel | Shift-U: HUD".into(),
+                    "Shift-M: map | M/O: sensor channel | Shift-U: HUD".into(),
                     "Ctrl-Tab/Ctrl-Shift-Tab: instrument | Ctrl-1..6: slot".into(),
                     "Ctrl-Shift-1..4: stock instrument buttons (T.O.R.E)".into(),
                     "T/Shift-T: target | Enter/apostrophe: designate | Space: fire".into(),
@@ -739,6 +769,20 @@ impl FlightUi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn map_shortcut_pan_and_escape_do_not_pause_or_switch_sensors() {
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.key("m", true, false, false, &[]), Command::Click);
+        assert!(ui.map.open);
+        assert!(!ui.frozen());
+        assert_eq!(ui.key("ArrowUp", false, false, false, &[]), Command::None);
+        assert_eq!(ui.key("Escape", false, false, false, &[]), Command::Click);
+        assert!(!ui.map.open);
+        assert!(!ui.menu);
+        ui.menu = true;
+        ui.key("m", true, false, false, &tree());
+        assert!(!ui.map.open);
+    }
     fn tree() -> Vec<MenuNode> {
         vec![MenuNode {
             label: "?".into(),

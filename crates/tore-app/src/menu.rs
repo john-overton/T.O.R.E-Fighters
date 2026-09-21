@@ -402,6 +402,17 @@ impl Menu {
                 },
             );
         }
+        if let Some(p) = assets.pics.get("MCICONS.PIC") {
+            quick_sprites.insert(
+                "MCICONS.PIC".into(),
+                Sprite {
+                    width: p.width,
+                    height: p.height,
+                    rgba: p.rgba(&quick_palette),
+                    glyphs: vec![],
+                },
+            );
+        }
         quick_sprites.insert("QUICKFONT".into(), flat_font([232, 233, 230]));
         for (name, bytes) in &assets.theater_resources {
             if name.ends_with(".T2") {

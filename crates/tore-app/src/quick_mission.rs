@@ -47,6 +47,7 @@ pub struct QuickMission {
     pub ordnance: Option<crate::ordnance::Ordnance>,
     pub hover: Option<usize>,
     pressed: Option<usize>,
+    right_pressed: Option<usize>,
     pub focus: usize,
     pub selection: usize,
     pub aircraft_selection: usize,
@@ -143,6 +144,7 @@ impl QuickMission {
             airport_objects,
             hover: None,
             pressed: None,
+            right_pressed: None,
             focus: 6,
             selection: 0,
             aircraft_selection: selected,
@@ -342,6 +344,7 @@ impl QuickMission {
         self.scroll = self.cursor / ROWS * ROWS;
         self.hover = None;
         self.pressed = None;
+        self.right_pressed = None;
         self.help = false;
     }
     pub fn preview_selector(&mut self, name: &str) -> crate::AppResult<()> {
@@ -376,6 +379,7 @@ impl QuickMission {
         });
     }
     pub fn down(&mut self) {
+        self.right_pressed = None;
         if let Some(o) = self.ordnance.as_mut().filter(|o| o.visible) {
             o.down();
             return;
@@ -393,11 +397,51 @@ impl QuickMission {
             Action::None
         }
     }
+    pub fn right(&mut self, down: bool) -> Action {
+        if let Some(o) = self.ordnance.as_mut().filter(|o| o.visible) {
+            self.right_pressed = None;
+            return o.right(down);
+        }
+        if self.selector.is_some() || self.help {
+            self.right_pressed = None;
+            return Action::None;
+        }
+        if down {
+            self.pressed = None;
+            self.right_pressed = self.hover.filter(|id| (3..=34).contains(id));
+            return Action::None;
+        }
+        let Some(id) = self
+            .right_pressed
+            .take()
+            .filter(|id| Some(*id) == self.hover)
+        else {
+            return Action::None;
+        };
+        if id == 34 && !self.ground_start() {
+            return Action::None;
+        }
+        let n = self.values(id).len();
+        let minimum = usize::from(id == 4);
+        if n <= minimum {
+            return Action::None;
+        }
+        let current = self.draft.values[id];
+        let previous = if current <= minimum || current >= n {
+            n - 1
+        } else {
+            current - 1
+        };
+        self.focus = id;
+        self.apply(id, previous);
+        Action::Click
+    }
     pub fn cancel(&mut self) {
         if let Some(o) = &mut self.ordnance {
             o.cancel();
         }
         self.pressed = None;
+        self.right_pressed = None;
         self.hover = None;
         self.selector = None;
         self.help = false;
@@ -941,6 +985,59 @@ mod tests {
         q.aircraft_names = vec!["Hornet".into(), "Rafale".into(), "Other".into()];
         q.aircraft_files = vec!["F18.PT".into(), "RAFALE.PT".into(), "OTHER.PT".into()];
         q
+    }
+    fn right_click(q: &mut QuickMission, id: usize) -> Action {
+        q.hover = Some(id);
+        assert!(matches!(q.right(true), Action::None));
+        q.right(false)
+    }
+    #[test]
+    fn right_click_reverses_values_wraps_and_keeps_player_count_positive() {
+        let mut q = setup();
+        q.apply(4, 2);
+        assert!(matches!(right_click(&mut q, 4), Action::Click));
+        assert_eq!(q.draft.values[4], 1);
+        right_click(&mut q, 4);
+        assert_eq!(q.draft.values[4], 5);
+        q.apply(15, 1);
+        right_click(&mut q, 15);
+        assert_eq!(q.value(15), "dawn");
+        right_click(&mut q, 15);
+        assert_eq!(q.value(15), "night");
+        q.activate(15); // Existing forward cycle reverses the last change.
+        assert_eq!(q.value(15), "dawn");
+        q.apply(30, 1);
+        q.apply(31, 2);
+        q.apply(32, 2);
+        right_click(&mut q, 30);
+        assert_eq!(&q.draft.values[30..33], &[0, 0, 0]);
+        q.options.fields[14].clear();
+        assert!(matches!(right_click(&mut q, 14), Action::None));
+    }
+    #[test]
+    fn right_click_cannot_activate_actions_or_fields_behind_a_popup() {
+        let mut q = setup();
+        let before = q.draft.values;
+        for id in [0, OK, CANCEL, 60, 61, POP_OK, POP_CANCEL, ROW_BASE] {
+            assert!(matches!(right_click(&mut q, id), Action::None));
+            assert_eq!(q.draft.values, before);
+        }
+        q.hover = Some(15);
+        q.right(true);
+        q.hover = Some(14);
+        assert!(matches!(q.right(false), Action::None));
+        q.hover = Some(15);
+        q.right(true);
+        q.cancel();
+        q.hover = Some(15);
+        assert!(matches!(q.right(false), Action::None));
+        q.open(15);
+        assert!(matches!(right_click(&mut q, 15), Action::None));
+        assert_eq!(q.draft.values, before);
+        q.cancel();
+        q.help = true;
+        assert!(matches!(right_click(&mut q, 15), Action::None));
+        assert_eq!(q.draft.values, before);
     }
     #[test]
     fn ground_start_airport_picker_cancels_and_resets_on_theater_change() {

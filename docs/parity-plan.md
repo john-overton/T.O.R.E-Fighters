@@ -59,6 +59,10 @@ only native functionality":
 > which leaves every existing link and reference intact. See
 > [the realignment report](doc-realignment-2026-09-15.md).
 
+The [live map](spec/flight-map.md) is implemented as a requested addition: Shift-M,
+right-side category toggles, buildings off by default, current detections and
+unknown markers, without Escape-menu filters. Surface detection and cartography remain fitted.
+
 ## Specs
 
 Behaviour specs live in [`spec/`](spec/). One file per feature a player would

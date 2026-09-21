@@ -15,6 +15,7 @@ mod damage_art;
 mod engine_material;
 mod flight;
 mod flight_canvas;
+mod flight_map;
 mod flight_ui;
 mod hud;
 mod hud_aperture;
@@ -1466,18 +1467,21 @@ impl ApplicationHandler for App {
                 state,
                 button: MouseButton::Right,
                 ..
-            } if self.screen == Screen::Quick => self
-                .quick
-                .ordnance
-                .as_mut()
-                .filter(|o| o.visible)
-                .map_or(Action::None, |o| o.right(state == ElementState::Pressed)),
+            } if self.screen == Screen::Quick => self.quick.right(state == ElementState::Pressed),
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
                 ..
             } => {
-                if self.screen == Screen::Flight && self.flight_ui.menu {
+                if self.screen == Screen::Flight && self.flight_ui.map.open && !self.flight_ui.menu
+                {
+                    self.flight_ui.map.pointer(
+                        self.pointer
+                            .and_then(|(x, y)| renderer.viewport().point(x, y)),
+                        state == ElementState::Pressed,
+                    );
+                    Action::None
+                } else if self.screen == Screen::Flight && self.flight_ui.menu {
                     let command = self.flight_ui.pointer(
                         &self.hornet.flight_menu,
                         self.pointer
@@ -1574,6 +1578,21 @@ impl ApplicationHandler for App {
                     name = flight_key(event.physical_key, &name);
                 }
                 if self.screen == Screen::Flight
+                    && !(event.state == ElementState::Pressed
+                        && self.flight_ui.map.open
+                        && matches!(
+                            name.as_str(),
+                            "m" | "Escape"
+                                | "+"
+                                | "="
+                                | "-"
+                                | "_"
+                                | "ArrowLeft"
+                                | "ArrowRight"
+                                | "ArrowUp"
+                                | "ArrowDown"
+                                | "Home"
+                        ))
                     && (event.state == ElementState::Released
                         || (self.flight_ui.controls_editor.is_none()
                             && !(self.flight_ui.menu
@@ -1624,6 +1643,7 @@ impl ApplicationHandler for App {
                 {
                     Action::Exit
                 } else if self.screen == Screen::Flight {
+                    let map_before = self.flight_ui.map.open;
                     let before = self.flight_ui.frozen();
                     let command = if event.repeat || self.modifiers.super_key() {
                         flight_ui::Command::None
@@ -1636,6 +1656,12 @@ impl ApplicationHandler for App {
                             &self.hornet.flight_menu,
                         )
                     };
+                    if self.flight_ui.map.open != map_before {
+                        self.flight_ui.map.cancel_press();
+                        self.camera.keys.clear();
+                        self.combat.cancel();
+                        self.instruments.cancel_press();
+                    }
                     if self.flight_ui.frozen() || before != self.flight_ui.frozen() {
                         self.camera.keys.clear();
                         self.combat.cancel();
@@ -1643,7 +1669,7 @@ impl ApplicationHandler for App {
                         self.flight_clock.remainder = 0.;
                         self.previous_flight.clone_from(&self.flight);
                         self.frame_time = Instant::now();
-                    } else {
+                    } else if !self.flight_ui.map.open {
                         look::press(&mut self.camera.keys, &name, self.modifiers);
                     }
                     self.flight_command(command)
@@ -2109,7 +2135,9 @@ impl ApplicationHandler for App {
                             [f64::from(window.width), f64::from(window.height)],
                         );
                         renderer.window.set_cursor_visible(
-                            self.instruments.crosshair.is_none() || self.flight_ui.menu,
+                            self.instruments.crosshair.is_none()
+                                || self.flight_ui.menu
+                                || self.flight_ui.map.open,
                         );
                         self.flight_canvas.begin(
                             renderer.flight_size(),
@@ -2189,6 +2217,22 @@ impl ApplicationHandler for App {
                             self.flight_canvas.weapon_debug(&self.menu.pixels);
                         }
                         self.menu.pixels.fill(0);
+                        if self.flight_ui.map.open {
+                            self.flight_ui.map.draw(
+                                &mut self.menu.pixels,
+                                &self.world,
+                                &presented,
+                                &self.combat.state,
+                                &self.hornet.font,
+                                &self.menu.quick_sprites,
+                            );
+                            // Opaque letterbox prevents the cockpit leaking around the map.
+                            for pixel in self.flight_canvas.pixels.chunks_exact_mut(4) {
+                                pixel.copy_from_slice(&[72, 72, 72, 255]);
+                            }
+                            self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
+                            self.menu.pixels.fill(0);
+                        }
                         self.flight_ui.draw(
                             &mut self.menu.pixels,
                             &self.hornet.font,
@@ -2522,6 +2566,7 @@ fn main() -> AppResult<()> {
     let mut flight_look = [0f32; 2];
     let mut flight_zoom = 1f32;
     let mut flight_menu = false;
+    let mut flight_map = false;
     let mut controls_menu = false;
     let mut flight_mode_arg = None;
     let mut native_tables_path: Option<PathBuf> = None;
@@ -2830,6 +2875,7 @@ fn main() -> AppResult<()> {
                     return Err("--flight-view needs 0, 1, 2, 3 or 4".into());
                 }
             }
+            "--flight-map" => { flight_map = true; initial_screen = Screen::Flight; }
             "--capture-flight" => {
                 capture_terrain = Some(PathBuf::from(
                     args.next().ok_or("--capture-flight needs a PPM path")?,
@@ -2998,7 +3044,7 @@ fn main() -> AppResult<()> {
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35 and F-22A assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
             }
@@ -4138,6 +4184,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             let mut ui = flight_ui::FlightUi::default();
             ui.no_turbulence = !turbulence_enabled;
             ui.menu = flight_menu;
+            ui.map.open = flight_map;
             ui.paused = animation_capture || combat_probe.is_some();
             ui.look = flight_look.map(f32::to_radians);
             ui.zoom = flight_zoom;

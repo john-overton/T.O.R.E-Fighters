@@ -145,19 +145,32 @@ fn ladder_project(
     elevation: f64,
     zoom: f64,
 ) -> Option<(f64, f64)> {
-    let point = project(pitch, bank, bearing, elevation, zoom)?;
-    // Keep the true horizon fixed so a level velocity marker still meets it.
-    // Near vertical attitudes the horizon has no usable forward projection.
-    let Some(horizon) = project(pitch, bank, 0., 0., zoom) else {
-        return Some(point);
-    };
+    // A compact attitude ruler: compress the relative angle and its motion
+    // about the forward point together. Horizon anchoring makes labels lead
+    // the aircraft, with a rapidly growing error as pitch approaches vertical.
+    // Local bearing keeps rung width finite at +/-90 degrees.
+    let point = project(0., bank, bearing, elevation - pitch, zoom)?;
     let normal = [bank.sin(), bank.cos()];
-    let delta = [point.0 - horizon.0, point.1 - horizon.1];
+    let delta = [point.0 - 320., point.1 - 240.];
     let distance = delta[0] * normal[0] + delta[1] * normal[1];
     Some((
         point.0 - normal[0] * distance * 0.25,
         point.1 - normal[1] * distance * 0.25,
     ))
+}
+/// The zero bar is the true horizon; numbered marks form the compact ruler.
+fn rung_project(
+    pitch: f64,
+    bank: f64,
+    bearing: f64,
+    elevation: f64,
+    zoom: f64,
+) -> Option<(f64, f64)> {
+    if elevation == 0. {
+        project(pitch, bank, bearing, 0., zoom)
+    } else {
+        ladder_project(pitch, bank, bearing, elevation, zoom)
+    }
 }
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
@@ -199,7 +212,7 @@ pub fn draw(
     // Ladder is perspective projected and clipped away from the fixed tapes.
     if ladder {
         p.clip = (250, 182, 140, 166);
-        for degrees in (-85..=85).step_by(5) {
+        for degrees in (-90..=90).step_by(5) {
             let el = (degrees as f64).to_radians();
             for side in [-1., 1.] {
                 let spans: &[(f64, f64)] = if degrees < 0 {
@@ -209,8 +222,8 @@ pub fn draw(
                 };
                 for &(a, b) in spans {
                     if let (Some(a), Some(b)) = (
-                        ladder_project(s.pitch, s.bank, (side * a).to_radians(), el, zoom as f64),
-                        ladder_project(s.pitch, s.bank, (side * b).to_radians(), el, zoom as f64),
+                        rung_project(s.pitch, s.bank, (side * a).to_radians(), el, zoom as f64),
+                        rung_project(s.pitch, s.bank, (side * b).to_radians(), el, zoom as f64),
                     ) {
                         p.line(a, b);
                     }
@@ -218,7 +231,7 @@ pub fn draw(
             }
             if degrees != 0
                 && let Some((x, y)) =
-                    ladder_project(s.pitch, s.bank, 3.5f64.to_radians(), el, zoom as f64)
+                    rung_project(s.pitch, s.bank, 3.5f64.to_radians(), el, zoom as f64)
             {
                 p.text(font, &degrees.to_string(), x as i32, y as i32 - 4);
             }
@@ -437,43 +450,226 @@ mod tests {
         assert!(ladder_project(0., 0., std::f64::consts::PI, 0., 1.).is_none());
     }
     #[test]
-    fn compact_ladder_preserves_true_horizon_with_pitch_bank_and_zoom() {
-        for pitch in [-60_f64, -4., 0., 4., 60.].map(f64::to_radians) {
-            for bank in [0_f64, 45., 90., 180.].map(f64::to_radians) {
+    fn true_horizon_bar_meets_level_velocity_without_moving_numbered_marks() {
+        for pitch in [-60_f64, -10., -4., 0., 4., 10., 60.].map(f64::to_radians) {
+            for bank in [-180_f64, -90., -45., 0., 45., 90., 180.].map(f64::to_radians) {
                 for zoom in [0.5, 1., 4.] {
                     let normal = [bank.sin(), bank.cos()];
-                    let marker = project(pitch, bank, 0., 0., zoom).unwrap();
-                    for bearing in [-3_f64, 0., 3.].map(f64::to_radians) {
-                        let horizon = project(pitch, bank, bearing, 0., zoom).unwrap();
-                        let compact = ladder_project(pitch, bank, bearing, 0., zoom).unwrap();
-                        assert!((compact.0 - horizon.0).abs() < 1e-9);
-                        assert!((compact.1 - horizon.1).abs() < 1e-9);
+                    let velocity = project(pitch, bank, 0., 0., zoom).unwrap();
+                    for bearing in [-3_f64, -0.7, 0.7, 3.].map(f64::to_radians) {
+                        let bar = rung_project(pitch, bank, bearing, 0., zoom).unwrap();
+                        assert_eq!(Some(bar), project(pitch, bank, bearing, 0., zoom));
                         assert!(
-                            ((compact.0 - marker.0) * normal[0]
-                                + (compact.1 - marker.1) * normal[1])
+                            ((bar.0 - velocity.0) * normal[0] + (bar.1 - velocity.1) * normal[1])
                                 .abs()
                                 < 1e-9
                         );
-                        for elevation in [-5_f64, 5.].map(f64::to_radians) {
-                            let full = project(pitch, bank, bearing, elevation, zoom).unwrap();
-                            let rung =
-                                ladder_project(pitch, bank, bearing, elevation, zoom).unwrap();
-                            let spacing =
-                                (full.0 - horizon.0) * normal[0] + (full.1 - horizon.1) * normal[1];
-                            let compact_spacing =
-                                (rung.0 - horizon.0) * normal[0] + (rung.1 - horizon.1) * normal[1];
-                            assert!((compact_spacing - spacing * 0.75).abs() < 1e-9);
+                        for degrees in [-90_f64, -85., -5., 5., 70., 85., 90.] {
+                            let elevation = degrees.to_radians();
+                            assert_eq!(
+                                rung_project(pitch, bank, bearing, elevation, zoom),
+                                ladder_project(pitch, bank, bearing, elevation, zoom)
+                            );
                         }
                     }
                 }
             }
         }
-        // Preserve visible attitude cues when the horizon cannot be projected.
-        let vertical = std::f64::consts::FRAC_PI_2;
-        assert_eq!(
-            ladder_project(vertical, 0., 0., vertical, 1.),
-            project(vertical, 0., 0., vertical, 1.)
+        // At nose-up level flight, the true bar must not leave a second compact zero.
+        let pitch = 4f64.to_radians();
+        assert!(
+            (rung_project(pitch, 0., 0., 0., 1.).unwrap().1
+                - ladder_project(pitch, 0., 0., 0., 1.).unwrap().1)
+                > 7.
         );
+    }
+
+    #[test]
+    fn compact_ladder_reads_actual_pitch_and_has_constant_motion() {
+        for pitch_deg in (-90..=90).step_by(5) {
+            let pitch = (pitch_deg as f64).to_radians();
+            for bank in [-180_f64, -90., -45., 0., 45., 90., 180.].map(f64::to_radians) {
+                for zoom in [0.5, 1., 4.] {
+                    let normal = [bank.sin(), bank.cos()];
+                    let center = ladder_project(pitch, bank, 0., pitch, zoom).unwrap();
+                    assert!((center.0 - 320.).abs() < 1e-9 && (center.1 - 240.).abs() < 1e-9);
+                    // A five-degree error has the same displacement at 0,70,85,90
+                    // and while inverted. Pitch motion cannot run ahead of labels.
+                    let next =
+                        ladder_project(pitch, bank, 0., pitch + 5f64.to_radians(), zoom).unwrap();
+                    let moved =
+                        ladder_project(pitch + 5f64.to_radians(), bank, 0., pitch, zoom).unwrap();
+                    let offset =
+                        |(x, y): (f64, f64)| (x - 320.) * normal[0] + (y - 240.) * normal[1];
+                    assert!((offset(next) + 27.27626585637572 * zoom).abs() < 1e-8);
+                    assert!((offset(next) + offset(moved)).abs() < 1e-8);
+                    let left =
+                        ladder_project(pitch, bank, -3f64.to_radians(), pitch, zoom).unwrap();
+                    let right =
+                        ladder_project(pitch, bank, 3f64.to_radians(), pitch, zoom).unwrap();
+                    let level_left =
+                        ladder_project(0., bank, -3f64.to_radians(), 0., zoom).unwrap();
+                    let level_right =
+                        ladder_project(0., bank, 3f64.to_radians(), 0., zoom).unwrap();
+                    assert!(((right.0 - left.0) - (level_right.0 - level_left.0)).abs() < 1e-9);
+                    assert!(((right.1 - left.1) - (level_right.1 - level_left.1)).abs() < 1e-9);
+                }
+            }
+        }
+        let premature = ladder_project(70f64.to_radians(), 0., 0., 85f64.to_radians(), 1.).unwrap();
+        assert!(premature.1 < 160.); // 85 is still fifteen degrees above the nose.
+    }
+
+    #[test]
+    fn compact_ladder_has_visible_rungs_and_continuous_poles_through_a_loop() {
+        use crate::attitude::Basis;
+        let mut basis = Basis::new(0., 0., 0.);
+        let mut previous_pole: Option<(f64, f64)> = None;
+        for _ in 0..1440 {
+            basis = basis.rotated(basis.right.map(|v| -v * std::f64::consts::TAU / 1440.));
+            let [_, pitch, bank] = basis.angles();
+            let visible = (-90..=90).step_by(5).any(|degree| {
+                let elevation = (degree as f64).to_radians();
+                [-3_f64, 3.].iter().all(|side| {
+                    rung_project(pitch, bank, side.to_radians(), elevation, 1.).is_some_and(
+                        |(x, y)| (250. ..390.).contains(&x) && (182. ..348.).contains(&y),
+                    )
+                })
+            });
+            assert!(
+                visible,
+                "empty ladder at pitch {} bank {}",
+                pitch.to_degrees(),
+                bank.to_degrees()
+            );
+            if pitch.abs() > 80f64.to_radians() {
+                let pole = rung_project(
+                    pitch,
+                    bank,
+                    0.,
+                    pitch.signum() * std::f64::consts::FRAC_PI_2,
+                    1.,
+                )
+                .unwrap();
+                if let Some(previous) = previous_pole {
+                    assert!((pole.0 - previous.0).hypot(pole.1 - previous.1) < 2.);
+                }
+                previous_pole = Some(pole);
+            } else {
+                previous_pole = None;
+            }
+        }
+    }
+
+    #[test]
+    fn rendered_ladder_marks_the_actual_pitch_at_the_forward_point() {
+        let mut state =
+            State::new(&crate::flight::animation_tests::profile(), [0., 5000., 0.]).unwrap();
+        let font = Font {
+            height: 8,
+            glyphs: (0..256)
+                .map(|_| tore_formats::font::Glyph {
+                    advance: 6,
+                    pixels: vec![],
+                })
+                .collect(),
+        };
+        for degrees in (-90..=90).step_by(5) {
+            state.pitch = (degrees as f64).to_radians();
+            let mut with = vec![0; 640 * 480 * 4];
+            let mut without = with.clone();
+            draw(
+                &mut with,
+                &state,
+                &font,
+                0.,
+                None,
+                true,
+                false,
+                [0, 255, 0],
+                1.,
+                None,
+                None,
+            );
+            draw(
+                &mut without,
+                &state,
+                &font,
+                0.,
+                None,
+                false,
+                false,
+                [0, 255, 0],
+                1.,
+                None,
+                None,
+            );
+            let visible = (297..316).any(|x| {
+                let at = (240 * 640 + x) * 4;
+                with[at..at + 4] != without[at..at + 4]
+            });
+            assert!(
+                visible,
+                "actual {degrees}-degree rung missing at the forward point"
+            );
+        }
+    }
+
+    #[test]
+    fn rendered_horizon_replaces_the_compact_zero_bar() {
+        let mut state =
+            State::new(&crate::flight::animation_tests::profile(), [0., 5000., 0.]).unwrap();
+        state.pitch = 4f64.to_radians();
+        let font = Font {
+            height: 8,
+            glyphs: (0..256)
+                .map(|_| tore_formats::font::Glyph {
+                    advance: 6,
+                    pixels: vec![],
+                })
+                .collect(),
+        };
+        let mut with = vec![0; 640 * 480 * 4];
+        let mut without = with.clone();
+        draw(
+            &mut with,
+            &state,
+            &font,
+            0.,
+            None,
+            true,
+            false,
+            [0, 255, 0],
+            1.,
+            None,
+            None,
+        );
+        draw(
+            &mut without,
+            &state,
+            &font,
+            0.,
+            None,
+            false,
+            false,
+            [0, 255, 0],
+            1.,
+            None,
+            None,
+        );
+        let horizon = project(state.pitch, 0., 0., 0., 1.).unwrap().1.round() as usize;
+        let compact = ladder_project(state.pitch, 0., 0., 0., 1.)
+            .unwrap()
+            .1
+            .round() as usize;
+        let difference = |row: usize| {
+            (298..306).any(|x| {
+                let at = (row * 640 + x) * 4;
+                with[at..at + 4] != without[at..at + 4]
+            })
+        };
+        assert!(difference(horizon));
+        assert!(!difference(compact));
     }
 
     #[test]
