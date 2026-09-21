@@ -317,3 +317,13 @@ views. The airport service derives availability from those combat targets and
 owns player selection, clearance, landing progress, and typed replies.
 Weather-only reconstruction preserves service and combat state. Theater changes
 and flight restart rebuild both from the imported scene.
+
+The creator stores its accepted ground-start runway identity separately from the
+editable draft. It constructs the existing airborne wing launch reference first,
+then initializes the player on the shared runway surface. Restart repeats that
+sequence while preserving the accepted airport, fuel and stores. Building height
+inside a composite runway shape never supplies the support-plane elevation.
+Static solid and textured detail passes use separate depth bias, keeping the
+visible pavement at the shared contact height. A per-shape vertical normalization
+aligns the dominant horizontal paving layer with the placement's runway plane;
+building height does not move that plane.

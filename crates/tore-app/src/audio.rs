@@ -16,6 +16,15 @@ struct Voice {
     clip: Arc<Clip>,
     position: f64,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RadioSource {
+    Wing,
+    Airport,
+}
+struct RadioVoice {
+    source: RadioSource,
+    voice: Voice,
+}
 struct Mixer {
     seeker: seeker::Tone,
     seeker_voice: Option<Voice>,
@@ -33,7 +42,7 @@ struct Mixer {
     burner_gain: f32,
     voices: Vec<Voice>,
     ui_voices: Vec<Voice>,
-    radio: VecDeque<Voice>,
+    radio: VecDeque<RadioVoice>,
     music_on: bool,
     effects_on: bool,
 }
@@ -156,29 +165,62 @@ impl Audio {
             config.sample_rate.0,
             config.channels
         );
+        let radio_phrases: BTreeMap<_, _> = tore_formats::radio::STEMS
+            .iter()
+            .filter_map(|(stem, _)| {
+                let bytes = resources.get(&format!("TORE_RADIO_{stem}"))?;
+                if bytes.is_empty()
+                    || bytes.len() > 127
+                    || !bytes.iter().all(|b| (32..127).contains(b))
+                {
+                    return None;
+                }
+                Some((stem.to_string(), String::from_utf8(bytes.clone()).ok()?))
+            })
+            .collect();
+        let missing = missing_airport_audio(&clips, &radio_phrases);
+        if !missing.is_empty() {
+            eprintln!(
+                "Optional airport radio unavailable for {}. Reimport retail media to refresh the cache; tower text remains available.",
+                missing.join(", ")
+            );
+        }
         Ok(Self {
             _stream: stream,
             mixer,
             clips,
-            radio_phrases: tore_formats::radio::STEMS
-                .iter()
-                .filter_map(|(stem, _)| {
-                    let bytes = resources.get(&format!("TORE_RADIO_{stem}"))?;
-                    if bytes.is_empty()
-                        || bytes.len() > 127
-                        || !bytes.iter().all(|b| (32..127).contains(b))
-                    {
-                        return None;
-                    }
-                    Some((stem.to_string(), String::from_utf8(bytes.clone()).ok()?))
-                })
-                .collect(),
+            radio_phrases,
         })
     }
     /// A new order supersedes pending radio, never flight execution.
     pub fn radio(&self, stems: &[&str], interrupt: bool) {
         if let Ok(mut mixer) = self.mixer.lock() {
-            mixer.enqueue_radio(&self.clips, &self.radio_phrases, stems, interrupt);
+            mixer.enqueue_radio(
+                &self.clips,
+                &self.radio_phrases,
+                stems,
+                RadioSource::Wing,
+                interrupt,
+            );
+        }
+    }
+
+    /// Airport speech supersedes stale airport speech without cancelling wing radio.
+    pub fn airport_radio(&self, stems: &[&str]) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.enqueue_radio(
+                &self.clips,
+                &self.radio_phrases,
+                stems,
+                RadioSource::Airport,
+                true,
+            );
+        }
+    }
+
+    pub fn cancel_airport_radio(&self) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.cancel_radio(RadioSource::Airport);
         }
     }
 
@@ -399,6 +441,18 @@ impl Audio {
         }
     }
 }
+fn missing_airport_audio(
+    clips: &BTreeMap<String, Arc<Clip>>,
+    phrases: &BTreeMap<String, String>,
+) -> Vec<&'static str> {
+    [
+        tore_formats::radio::AIRPORT_CLEAR_TO_LAND,
+        tore_formats::radio::AIRPORT_WELCOME_HOME,
+    ]
+    .into_iter()
+    .filter(|stem| !phrases.contains_key(*stem) || !clips.contains_key(&format!("{stem}.5K")))
+    .collect()
+}
 fn actuator_cues(
     before: &crate::flight::State,
     after: &crate::flight::State,
@@ -446,10 +500,11 @@ impl Mixer {
         clips: &BTreeMap<String, Arc<Clip>>,
         phrases: &BTreeMap<String, String>,
         stems: &[&str],
+        source: RadioSource,
         interrupt: bool,
     ) {
         if interrupt {
-            self.radio.clear();
+            self.cancel_radio(source);
         }
         if !self.effects_on || self.flight_paused {
             return;
@@ -461,12 +516,18 @@ impl Mixer {
             if phrases.contains_key(*stem)
                 && let Some(clip) = clips.get(&format!("{stem}.5K"))
             {
-                self.radio.push_back(Voice {
-                    clip: clip.clone(),
-                    position: 0.,
+                self.radio.push_back(RadioVoice {
+                    source,
+                    voice: Voice {
+                        clip: clip.clone(),
+                        position: 0.,
+                    },
                 });
             }
         }
+    }
+    fn cancel_radio(&mut self, source: RadioSource) {
+        self.radio.retain(|voice| voice.source != source);
     }
     fn sample(&mut self, rate: f64) -> f32 {
         let mut value = self.seeker.sample(
@@ -499,8 +560,8 @@ impl Mixer {
                 value += voice.next(rate, false) * 0.4;
             }
             if let Some(voice) = self.radio.front_mut() {
-                value += voice.next(rate, false) * 0.4;
-                if voice.finished() {
+                value += voice.voice.next(rate, false) * 0.4;
+                if voice.voice.finished() {
                     self.radio.pop_front();
                 }
             }
@@ -715,24 +776,111 @@ mod tests {
             ("^SECOND".into(), "Second".into()),
             ("^MISSING".into(), "Missing".into()),
         ]);
-        m.enqueue_radio(&clips, &phrases, &["^FIRST", "^MISSING", "^SECOND"], true);
+        m.enqueue_radio(
+            &clips,
+            &phrases,
+            &["^FIRST", "^MISSING", "^SECOND"],
+            RadioSource::Wing,
+            true,
+        );
         assert_eq!(m.radio.len(), 2);
         assert!((m.sample(4.) - 0.2).abs() < 1e-6);
         m.flight_paused = true;
         assert_eq!(m.sample(4.), 0.);
-        assert_eq!(m.radio.front().unwrap().position, 1.);
+        assert_eq!(m.radio.front().unwrap().voice.position, 1.);
         m.flight_paused = false;
         assert!((m.sample(4.) - 0.2).abs() < 1e-6);
         assert!((m.sample(4.) + 0.2).abs() < 1e-6);
-        m.enqueue_radio(&clips, &phrases, &["^FIRST"], true);
+        m.enqueue_radio(&clips, &phrases, &["^FIRST"], RadioSource::Wing, true);
         assert_eq!(m.radio.len(), 1);
         assert!((m.sample(4.) - 0.2).abs() < 1e-6);
-        m.enqueue_radio(&clips, &BTreeMap::new(), &["^FIRST"], true);
+        m.enqueue_radio(
+            &clips,
+            &BTreeMap::new(),
+            &["^FIRST"],
+            RadioSource::Wing,
+            true,
+        );
         assert!(m.radio.is_empty());
-        m.enqueue_radio(&clips, &phrases, &["^FIRST"; 20], true);
+        m.enqueue_radio(&clips, &phrases, &["^FIRST"; 20], RadioSource::Wing, true);
         assert_eq!(m.radio.len(), 16);
         m.effects_on = false;
-        m.enqueue_radio(&clips, &phrases, &["^SECOND"], true);
+        m.enqueue_radio(&clips, &phrases, &["^SECOND"], RadioSource::Wing, true);
         assert!(m.radio.is_empty());
+    }
+
+    #[test]
+    fn airport_radio_replaces_only_airport_speech() {
+        let mut m = test_mixer();
+        m.stall = None;
+        let clip = Arc::new(Clip {
+            samples: vec![192; 2],
+            rate: 4.,
+        });
+        let clips = BTreeMap::from([
+            ("^WING.5K".into(), clip.clone()),
+            ("^TOWER.5K".into(), clip),
+        ]);
+        let phrases = BTreeMap::from([
+            ("^WING".into(), "Wing".into()),
+            ("^TOWER".into(), "Tower".into()),
+        ]);
+        m.enqueue_radio(&clips, &phrases, &["^WING"], RadioSource::Wing, false);
+        m.enqueue_radio(&clips, &phrases, &["^TOWER"], RadioSource::Airport, true);
+        m.enqueue_radio(&clips, &phrases, &["^TOWER"], RadioSource::Airport, true);
+        assert_eq!(m.radio.len(), 2);
+        assert_eq!(m.radio.front().unwrap().source, RadioSource::Wing);
+        m.cancel_radio(RadioSource::Airport);
+        assert_eq!(m.radio.len(), 1);
+        assert_eq!(m.radio.front().unwrap().source, RadioSource::Wing);
+    }
+
+    #[test]
+    fn airport_playback_is_serial_and_cancellation_keeps_wing_progress() {
+        let mut m = test_mixer();
+        m.stall = None;
+        let clips = BTreeMap::from([
+            (
+                "^WING.5K".into(),
+                Arc::new(Clip {
+                    samples: vec![192; 2],
+                    rate: 4.,
+                }),
+            ),
+            (
+                "^TOWER.5K".into(),
+                Arc::new(Clip {
+                    samples: vec![64; 2],
+                    rate: 4.,
+                }),
+            ),
+        ]);
+        let phrases = BTreeMap::from([
+            ("^WING".into(), "Wing".into()),
+            ("^TOWER".into(), "Tower".into()),
+        ]);
+        m.enqueue_radio(&clips, &phrases, &["^WING"], RadioSource::Wing, false);
+        assert!((m.sample(4.) - 0.2).abs() < 1e-6);
+        m.enqueue_radio(&clips, &phrases, &["^TOWER"], RadioSource::Airport, true);
+        assert_eq!(m.radio.front().unwrap().voice.position, 1.);
+        assert!((m.sample(4.) - 0.2).abs() < 1e-6);
+        m.flight_paused = true;
+        assert_eq!(m.sample(4.), 0.);
+        assert_eq!(m.radio.front().unwrap().voice.position, 0.);
+        m.flight_paused = false;
+        assert!((m.sample(4.) + 0.2).abs() < 1e-6);
+        m.cancel_radio(RadioSource::Airport);
+        assert_eq!(m.sample(4.), 0.);
+        assert!(m.radio.is_empty());
+        m.effects_on = false;
+        m.enqueue_radio(&clips, &phrases, &["^TOWER"], RadioSource::Airport, true);
+        assert!(m.radio.is_empty());
+    }
+    #[test]
+    fn old_cache_reports_optional_airport_audio_as_missing() {
+        assert_eq!(
+            missing_airport_audio(&BTreeMap::new(), &BTreeMap::new()),
+            vec!["^CLRLAND", "^WELHOME"]
+        );
     }
 }

@@ -125,3 +125,35 @@ by John on 2026-09-17. The range flag adds diagnostic fixtures; it is no longer
 needed for ammunition. The restricted native research adapter and pilot-only input recordings remain
 clean to preserve their existing initial conditions.
 Weapon compatibility, custom loads and the guns-only creator choice still apply.
+
+## Player ground start
+
+John requested a ground-start choice in the Quick Mission creator on 2026-09-20.
+The creator adds Start (Airborne/Ground) and a named airport/runway selector.
+Airborne remains the default. Airport choices belong to the selected theater;
+changing theater resets the airport choice. Popup cancel preserves the draft.
+The accepted start is retained through ordnance setup and mission restart.
+
+Ground start places only the player on the selected runway, facing its primary
+approach heading. The fitted starting point is 5% of runway length inward from
+its primary threshold, capped at 100 feet. Aircraft height includes its own
+wheel/CG clearance above the runway. Initial speed and velocity are zero, engine
+is running at idle, gear and flaps are fully down, brakes are applied, afterburner
+and autopilot are off. Existing B releases brakes and throttle controls begin
+the takeoff roll. No cold-start sequence or autonomous ground traffic is added.
+These initial settings and the new UI layout are agent-selected host behavior,
+not recovered retail Quick Mission rules.
+
+Other selected aircraft retain the existing airborne wing launch path at the
+chosen altitude, positioned relative to the airport. No AI takeoff/taxi behavior
+is added. Their starting altitude must clear the airport ground by at least
+100 feet; unsupported choices produce a creator notice instead of a crash.
+Ground mode ignores the altitude setting for the player. Airborne mode retains
+its existing behavior. Only the default researched flight model supports ground
+start; legacy and restricted native research modes report that incompatibility
+without silently changing adapters. Missing or obstructed runway starts are
+rejected. Choosing ground start selects the airport for tower commands but does
+not grant landing clearance or announce that a landing has completed.
+
+[Ground-start validation](../baselines/ground-start.md) records creator launch,
+restart, real runway support, takeoff probes and rendering checks.

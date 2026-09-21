@@ -351,3 +351,14 @@ payload mass and releases reduce it. The controller and its fitted limits are
 specified in [input-only AI control](spec/ai.md#input-only-aircraft-control).
 The three player adapters stay distinct. Exact input-replay validation is
 recorded in the [AI baseline](baselines/ai-research.md).
+
+## Creator ground initialization
+
+The player ground-start path requires the existing researched adapter. It retains
+selected fuel and payload, resolves a source runway departure point, and adds the
+aircraft model's wheel/CG clearance to the shared runway surface height. All
+velocity components and rotation rates start at zero; gear/flaps are fully deployed,
+brakes applied and engine at idle. The adapter starts supported, so initialization
+is not misclassified as a gear-up or hard touchdown. Legacy/native adapters reject
+this setup rather than changing mode. Ground motion and takeoff then use the same
+existing simulation. [UI and fitted defaults](spec/quick-mission-menu.md#player-ground-start).

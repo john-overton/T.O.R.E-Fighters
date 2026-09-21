@@ -97,6 +97,9 @@ struct App {
     camera: terrain::Camera,
     quick: quick_mission::QuickMission,
     mission: Option<(f64, f64)>,
+    /// Accepted player runway start, retained independently of editor changes.
+    ground_start: Option<u32>,
+    launch_creator: bool,
     /// Quick Mission uses AI by default. `--fixture-wings` retains the
     /// straight-flight compatibility setup.
     ai_wings_enabled: bool,
@@ -252,6 +255,15 @@ fn airport_reply(world: &terrain::World, reply: &tore_sim::airport::Reply) -> St
             };
             format!("{name}: cleared to land, {runway_name}, {end}")
         }
+        Reply::Landed { airport, .. } => {
+            let name = world
+                .airport_scene
+                .airports
+                .iter()
+                .find(|a| a.id == *airport)
+                .map_or("Airport", |a| a.name.as_str());
+            format!("{name}: welcome home, landing complete")
+        }
         Reply::Declined { reason, .. } => {
             use tore_sim::airport::DeclineReason::*;
             let reason = match reason {
@@ -266,6 +278,16 @@ fn airport_reply(world: &terrain::World, reply: &tore_sim::airport::Reply) -> St
         }
         Reply::Repeated(reply) => airport_reply(world, reply),
         Reply::Cancelled { .. } => "Approach cancelled".into(),
+    }
+}
+
+fn airport_reply_audio(reply: &tore_sim::airport::Reply) -> Option<&'static str> {
+    use tore_sim::airport::Reply;
+    match reply {
+        Reply::Cleared { .. } => Some(tore_formats::radio::AIRPORT_CLEAR_TO_LAND),
+        Reply::Landed { .. } => Some(tore_formats::radio::AIRPORT_WELCOME_HOME),
+        Reply::Repeated(reply) => airport_reply_audio(reply),
+        Reply::Selected { .. } | Reply::Declined { .. } | Reply::Cancelled { .. } => None,
     }
 }
 
@@ -776,6 +798,7 @@ impl App {
                 if let Some((code, _)) = self.world.catalog.get(index) {
                     match terrain::World::for_theater(&self.theater_resources, code) {
                         Ok(world) => {
+                            self.ground_start = None;
                             let service =
                                 match tore_sim::airport::Service::new(&world.airport_scene) {
                                     Ok(service) => service,
@@ -928,14 +951,35 @@ impl App {
                     return;
                 }
                 let altitude = [5000., 10000., 20000., 40000.][self.quick.draft.values[14]];
-                let start = self.hornet.start(&self.world);
+                let selected_ground = self.quick.ground_runway();
+                if selected_ground.is_some()
+                    && (!self.researched_flight || self.native_tables.is_some())
+                {
+                    self.quick.ordnance.as_mut().unwrap().message=Some("Ground start requires the researched flight model. Choose Airborne for this adapter.".into());
+                    return;
+                }
+                let mut start = self.hornet.start(&self.world);
+                if let Some(object) = selected_ground {
+                    let result = start
+                        .enable_research(1)
+                        .map_err(|e| -> Box<dyn Error> { e.into() })
+                        .and_then(|()| {
+                            quick_mission::apply_ground_start(&self.world, &mut start, object)
+                                .map(|_| ())
+                        });
+                    if let Err(error) = result {
+                        self.quick.ordnance.as_mut().unwrap().message = Some(error.to_string());
+                        return;
+                    }
+                }
                 let ground = f64::from(
                     self.world
                         .height(start.position[0] as f32, start.position[2] as f32),
                 );
-                if altitude < ground + 100. {
+                let airborne_wings = self.quick.dummy_wings().iter().any(|(_, count)| *count > 0);
+                if (selected_ground.is_none() || airborne_wings) && altitude < ground + 100. {
                     self.quick.ordnance.as_mut().unwrap().message = Some(format!(
-                        "Selected altitude is below safe terrain clearance ({:.0} feet). Select a higher altitude.",
+                        "Airborne altitude must exceed {:.0} feet here. Choose a higher altitude.",
                         ground + 100.
                     ));
                     return;
@@ -972,6 +1016,7 @@ impl App {
                         }
                         self.combat = c;
                         self.mission = Some((altitude, fuel));
+                        self.ground_start = selected_ground;
                         // Rebuild the world on the mission's own weather choice
                         // before entering flight, so palette, clock and wind
                         // all start from it.
@@ -1000,6 +1045,27 @@ impl App {
                     self.flight.position[1] = altitude;
                     self.flight.fuel = fuel;
                 }
+                if let Some(object) = self.ground_start {
+                    let (position, heading) = match quick_mission::runway_pose(&self.world, object)
+                    {
+                        Ok(pose) => pose,
+                        Err(error) => {
+                            self.error = Some(error);
+                            event_loop.exit();
+                            return;
+                        }
+                    };
+                    self.flight.position[0] = position[0];
+                    self.flight.position[2] = position[2];
+                    if self.mission.is_none() {
+                        self.flight.position[1] = self.flight.position[1].max(position[1] + 5000.);
+                    }
+                    self.flight.yaw = heading;
+                    let basis = attitude::Basis::new(heading, 0., 0.);
+                    self.flight.velocity = std::array::from_fn(|i| {
+                        basis.forward[i] * self.flight.speed + self.world.wind()[i]
+                    });
+                }
                 if self.researched_flight
                     && let Err(error) = self.flight.enable_research(1)
                 {
@@ -1026,6 +1092,18 @@ impl App {
                     event_loop.exit();
                     return;
                 }
+                let ground_airport = if let Some(object) = self.ground_start {
+                    match quick_mission::apply_ground_start(&self.world, &mut self.flight, object) {
+                        Ok(airport) => Some(airport),
+                        Err(error) => {
+                            self.error = Some(error);
+                            event_loop.exit();
+                            return;
+                        }
+                    }
+                } else {
+                    None
+                };
                 if let Err(error) = self.airport_service.reset(&self.world.airport_scene) {
                     self.error = Some(std::io::Error::other(error).into());
                     event_loop.exit();
@@ -1033,6 +1111,13 @@ impl App {
                 }
                 self.airport_nav_mode = false;
                 self.airport_commands.clear();
+                if let Some(airport) = ground_airport {
+                    self.airport_service.command(
+                        &self.world.airport_scene,
+                        airport_aircraft(&self.world, &self.flight, false),
+                        tore_sim::airport::Command::SelectAirport(airport),
+                    );
+                }
                 // The AI bridge is built from the targets the existing spawner
                 // just placed, so the AI aircraft start exactly where the
                 // straight-flight fixtures would have started.
@@ -1087,6 +1172,10 @@ impl App {
                     &mut self.menu.state,
                 );
                 self.flight_ui.effects = self.menu.state.effects;
+                if self.ground_start.is_some() {
+                    self.flight_ui
+                        .message("Ground start: B releases brakes; PageUp adds throttle.");
+                }
                 self.screen = Screen::Flight;
                 self.camera.keys.clear();
                 self.combat.cancel();
@@ -1192,6 +1281,76 @@ impl ApplicationHandler for App {
                 renderer.prepare_aircraft(&self.hornet);
                 renderer.window.request_redraw();
                 self.renderer = Some(renderer);
+                if std::mem::take(&mut self.launch_creator) {
+                    let view = self.flight_view;
+                    self.action(event_loop, Action::Mission);
+                    if self.smoke_test && self.mission.is_some() && self.error.is_none() {
+                        let initial = (
+                            self.flight.position,
+                            self.flight.yaw,
+                            self.flight.speed,
+                            self.flight.gear,
+                            self.flight.fuel,
+                            self.flight.payload_lbs,
+                            self.airport_service.selected(),
+                        );
+                        let targets: Vec<_> = self
+                            .combat
+                            .state
+                            .targets
+                            .iter()
+                            .map(|t| (t.id, t.position, t.hp))
+                            .collect();
+                        self.action(event_loop, Action::FreeFlight);
+                        let restarted = (
+                            self.flight.position,
+                            self.flight.yaw,
+                            self.flight.speed,
+                            self.flight.gear,
+                            self.flight.fuel,
+                            self.flight.payload_lbs,
+                            self.airport_service.selected(),
+                        );
+                        let restarted_targets: Vec<_> = self
+                            .combat
+                            .state
+                            .targets
+                            .iter()
+                            .map(|t| (t.id, t.position, t.hp))
+                            .collect();
+                        if initial != restarted || targets != restarted_targets {
+                            self.error = Some(
+                                "Quick Mission restart did not restore the accepted start".into(),
+                            );
+                            event_loop.exit();
+                        } else {
+                            println!("Quick Mission restart: PASS");
+                        }
+                    }
+                    self.flight_view = view;
+                    if self.mission.is_none() && self.error.is_none() {
+                        self.error =
+                            Some("Quick Mission could not launch the selected setup".into());
+                        event_loop.exit();
+                    } else if self.error.is_none() {
+                        println!(
+                            "Quick Mission launch: ground={:?} player_position={:?} supported={} airborne_targets={}",
+                            self.ground_start,
+                            self.flight.position,
+                            self.flight.supported_at(
+                                self.world
+                                    .surface(self.flight.position[0], self.flight.position[2])
+                                    .height
+                            ),
+                            self.combat
+                                .state
+                                .targets
+                                .iter()
+                                .filter(|t| t.airborne)
+                                .count()
+                        );
+                    }
+                }
             }
             Err(error) => {
                 self.error = Some(error);
@@ -1547,6 +1706,14 @@ impl ApplicationHandler for App {
                                             if let tore_sim::airport::Event::Reply(reply) = event {
                                                 self.flight_ui
                                                     .message(airport_reply(&self.world, &reply));
+                                                if let Some(audio) = &self.audio {
+                                                    if let Some(stem) = airport_reply_audio(&reply)
+                                                    {
+                                                        audio.airport_radio(&[stem]);
+                                                    } else {
+                                                        audio.cancel_airport_radio();
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1679,6 +1846,9 @@ impl ApplicationHandler for App {
                                 ) {
                                     self.flight_ui
                                         .message("Landing clearance cancelled: runway unavailable");
+                                    if let Some(audio) = &self.audio {
+                                        audio.cancel_airport_radio();
+                                    }
                                 }
                             }
                             for event in self.airport_service.step(
@@ -1688,6 +1858,11 @@ impl ApplicationHandler for App {
                                 if matches!(event, tore_sim::airport::Event::LandingComplete { .. })
                                 {
                                     self.flight_ui.message("Landing complete");
+                                    if let Some(audio) = &self.audio {
+                                        audio.airport_radio(&[
+                                            tore_formats::radio::AIRPORT_WELCOME_HOME,
+                                        ]);
+                                    }
                                 }
                             }
                             let mut sounds = std::collections::BTreeSet::new();
@@ -2325,10 +2500,16 @@ fn main() -> AppResult<()> {
     let mut validate_weather = false;
     let mut weather_condition: Option<usize> = None;
     let mut airport_probe: Option<(u32, tore_sim::airport::Aircraft)> = None;
+    let mut ground_start_airport: Option<u32> = None;
+    let mut launch_creator = false;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--no-controllers" => native_input = false,
+            "--launch-quick-mission" => { launch_creator=true; initial_screen=Screen::Flight; },
+            "--ground-start" => {
+                ground_start_airport=Some(args.next().ok_or("--ground-start needs an airport number")?.parse()?);
+            }
             "--airport-probe" => {
                 let value = args.next().ok_or("--airport-probe needs ID,X,Y,Z,NAV,GEAR")?;
                 let fields: Vec<_> = value.split(',').collect();
@@ -2627,10 +2808,11 @@ fn main() -> AppResult<()> {
             }
             "--maneuver" => {
                 maneuver = args.next().ok_or(
-                    "--maneuver needs level, pull, loop, roll, stall, spin, bank-left or bank-right",
+                    "--maneuver needs level, takeoff, pull, loop, roll, stall, spin, bank-left or bank-right",
                 )?;
                 if ![
                     "level",
+                    "takeoff",
                     "pull",
                     "loop",
                     "roll",
@@ -2730,7 +2912,7 @@ fn main() -> AppResult<()> {
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
                 );
                 println!(
-                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35 and F-22A assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
+                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35 and F-22A assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
 Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
@@ -2860,6 +3042,27 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         None
     };
     let data = assets::data_directory()?;
+    if ground_start_airport.is_some() {
+        if !researched_flight || native_tables.is_some() {
+            return Err("Ground start requires the researched flight model; choose Airborne for this adapter.".into());
+        }
+        if airport_probe.is_some()
+            || flight_devices.is_some()
+            || flight_controls.is_some()
+            || damage_preview.is_some()
+            || flight_probe_ticks.is_some()
+            || flight_throttle.is_some()
+            || flight_bay.is_some()
+        {
+            return Err("ground start cannot combine with other pose overrides".into());
+        }
+        if initial_screen == Screen::Viewer {
+            return Err("ground start is for flight or the Quick Mission creator".into());
+        }
+        if initial_screen == Screen::Main {
+            initial_screen = Screen::Flight;
+        }
+    }
     let mut assets = if let Some(source) = import {
         Assets::import(&source, &data)?
     } else {
@@ -2934,6 +3137,20 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         return Ok(());
     }
+    let ground_object = |world: &terrain::World| -> AppResult<Option<u32>> {
+        ground_start_airport
+            .map(|id| {
+                world
+                    .airport_scene
+                    .airports
+                    .iter()
+                    .find(|a| a.id == id)
+                    .and_then(|a| a.runway_objects.first())
+                    .copied()
+                    .ok_or_else(|| "Selected ground-start airport is unavailable".into())
+            })
+            .transpose()
+    };
     let setup_maneuver = |state: &mut flight::State| {
         let mut keys = flight::PilotInput::default();
         match maneuver.as_str() {
@@ -2954,6 +3171,17 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 state.throttle = 1.;
                 state.burner = true;
                 keys.pitch = 1.;
+            }
+            "takeoff" => {
+                state.brake_out = false;
+                state.throttle = 1.;
+                state.burner = state
+                    .model()
+                    .configuration()
+                    .propulsion
+                    .afterburner_thrust_lbf
+                    > 0.;
+                keys.pitch = 0.35;
             }
             "roll" => {
                 keys.roll = 1.;
@@ -2982,10 +3210,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         if ticks > 120 * 3600 {
             return Err("headless flight limited to one hour".into());
         }
-        let replay_world = replay_frames
-            .as_ref()
-            .map(|_| terrain::World::for_theater(&assets.theater_resources, &theater_code))
-            .transpose()?;
+        let replay_world = if replay_frames.is_some() || ground_start_airport.is_some() {
+            Some(terrain::World::for_theater(
+                &assets.theater_resources,
+                &theater_code,
+            )?)
+        } else {
+            None
+        };
         let mut state = if let Some(world) = &replay_world {
             hornet.start(world)
         } else {
@@ -3004,6 +3236,22 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 "legacy"
             }
         );
+        if let Some(world) = &replay_world
+            && let Some(object) = ground_object(world)?
+        {
+            if replay_frames.is_none() {
+                let load = combat::Combat::new(&hornet, &assets.theater_resources, false)?;
+                state.set_payload(load.state.payload_lbs())?;
+            }
+            quick_mission::apply_ground_start(world, &mut state, object)?;
+            println!(
+                "ground_start={object} position={:?} heading={:.3} gear={} brakes={}",
+                state.position,
+                state.yaw.to_degrees(),
+                state.gear,
+                state.brake_out
+            );
+        }
         let keys = setup_maneuver(&mut state);
         if let Some(tables) = &native_tables {
             state.enable_native(tables.clone(), 1)?;
@@ -3012,13 +3260,16 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let (mut vertical, mut inverted, mut completed) = (false, false, false);
         for tick in 0..ticks {
             let keys = replay_frames.as_ref().map_or(&keys, |frames| &frames[tick]);
-            state.step(keys, |x, z| {
-                if let Some(world) = &replay_world {
-                    world.height(x as f32, z as f32) as f64
-                } else {
-                    0.
-                }
-            });
+            if ground_start_airport.is_some() {
+                let world = replay_world.as_ref().unwrap();
+                state.step_surface(keys, |x, z| world.surface(x, z));
+            } else {
+                state.step(keys, |x, z| {
+                    replay_world
+                        .as_ref()
+                        .map_or(0., |world| f64::from(world.height(x as f32, z as f32)))
+                });
+            }
             if let Some(error) = state.native_fault() {
                 return Err(error.into());
             }
@@ -3028,6 +3279,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             completed |= inverted
                 && basis.up[1] > 0.9
                 && attitude::dot(basis.forward, initial_forward) > 0.98;
+            if maneuver == "takeoff" && ground_start_airport.is_some() {
+                let world = replay_world.as_ref().unwrap();
+                let object = ground_object(world)?.unwrap();
+                let height = world.airport_scene.runway(object).unwrap().elevation_ft;
+                if !state.crashed && state.position[1] > height + 100. {
+                    println!("takeoff_complete=true airport_ground_ft={height}");
+                    break;
+                }
+            }
             if maneuver == "loop" && completed {
                 break;
             }
@@ -3098,6 +3358,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     let mut world =
         terrain::World::for_mission(&assets.theater_resources, &theater_code, weather_condition)?;
+    let ground_start = ground_object(&world)?;
     if std::env::var_os("TORE_AIRPORT_PROBE").is_some() {
         println!(
             "airport scene: theater={} airports={} runways={} objects={} targets={}",
@@ -3171,6 +3432,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 .position(|(code, _)| code == &theater_code)
                 .unwrap_or(0);
             quick.theater(selection);
+            if let Some(object) = ground_start {
+                quick.choose_ground_runway(object)?;
+            }
             if snapshot_state == "ordnance" {
                 quick.ordnance = Some(ordnance::Ordnance::new(
                     tore_sim::combat::loadout::Loadout::new(&hornet.profile, |n| {
@@ -3232,6 +3496,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let mut quick =
         quick_mission::QuickMission::new(aircraft_id, creator_options.clone(), &theater_resources);
     quick.theater(selection);
+    if let Some(object) = ground_start {
+        quick.choose_ground_runway(object)?;
+    }
     if let Some(ticks) = ai_probe {
         if ai_roster_probe {
             return ai_wings::roster_probe(ticks, &theater_resources, &world);
@@ -3277,6 +3544,18 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     if let Some(tables) = &native_tables {
         flight.enable_native(tables.clone(), 1)?;
+    }
+    if let Some(object) = ground_start {
+        let (position, heading) = quick_mission::runway_pose(&world, object)?;
+        flight.position = [
+            position[0],
+            flight.position[1].max(position[1] + 5000.),
+            position[2],
+        ];
+        flight.yaw = heading;
+        let basis = attitude::Basis::new(heading, 0., 0.);
+        flight.velocity =
+            std::array::from_fn(|i| basis.forward[i] * flight.speed + world.wind()[i]);
     }
     // The probe advances weather and vapor with the flight so captures taken
     // after it show the same environment and trail history a live run would.
@@ -3441,6 +3720,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     combat.mission_dummies(&dummy_aircraft, 5280., &theater_resources)?;
     combat.reset(&mut flight)?;
+    if let Some(object) = ground_start {
+        quick_mission::apply_ground_start(&world, &mut flight, object)?;
+        probe_vapor =
+            tore_sim::vapor::Vapor::seeded(hornet.streamer_points(&flight).unwrap_or([[0.; 3]; 2]));
+    }
     if let Some((_, aircraft)) = airport_probe {
         flight.position = aircraft.position;
         flight.gear_down = aircraft.gear_down;
@@ -3579,6 +3863,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && std::env::var_os("TORE_PERF_FRAMES").is_none();
     let mut airport_service =
         tore_sim::airport::Service::new(&world.airport_scene).map_err(std::io::Error::other)?;
+    if let Some(object) = ground_start {
+        let airport = world.airport_scene.runway(object).unwrap().airport;
+        airport_service.command(
+            &world.airport_scene,
+            airport_aircraft(&world, &flight, false),
+            tore_sim::airport::Command::SelectAirport(airport),
+        );
+    }
     let airport_nav_mode = airport_probe.is_some_and(|(_, aircraft)| aircraft.nav_mode);
     if let Some((airport, aircraft)) = airport_probe {
         airport_service.command(
@@ -3594,6 +3886,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     let mut app = App {
         mission: None,
+        ground_start,
+        launch_creator,
         ai_wings_enabled: !fixture_wings,
         enemy_skill,
         ai_wings: None,
@@ -3802,5 +4096,31 @@ mod input_tests {
         assert_eq!(flight_key(PhysicalKey::Code(KeyCode::KeyE), "é"), "e");
         assert_eq!(flight_key(PhysicalKey::Code(KeyCode::Equal), "+"), "=");
         assert_eq!(flight_key(PhysicalKey::Code(KeyCode::Slash), "?"), "/");
+    }
+
+    #[test]
+    fn airport_replies_route_verified_recordings_and_text_fallback() {
+        use tore_sim::airport::{ApproachEnd, DeclineReason, Reply};
+        let cleared = Reply::Cleared {
+            airport: 1,
+            runway: 2,
+            end: ApproachEnd::Near,
+        };
+        assert_eq!(airport_reply_audio(&cleared), Some("^CLRLAND"));
+        assert_eq!(
+            airport_reply_audio(&Reply::Repeated(Box::new(cleared))),
+            Some("^CLRLAND")
+        );
+        assert_eq!(
+            airport_reply_audio(&Reply::Declined {
+                airport: Some(1),
+                reason: DeclineReason::RunwayDisabled,
+            }),
+            None
+        );
+        assert_eq!(
+            airport_reply_audio(&Reply::Cancelled { airport: Some(1) }),
+            None
+        );
     }
 }

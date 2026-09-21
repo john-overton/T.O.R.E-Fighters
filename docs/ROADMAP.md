@@ -177,8 +177,11 @@ Current implementation: base-layout import, static rendering/targets, runway
 surfaces, player tower commands, ILS and replay are connected. Independent review
 fixed target reset, source classes/signatures, altitude reference and rendering.
 The base-theater slice is implemented; campaign overlay/generated terrain handling,
-unsupported shape programs, original tower recordings, speed brackets and target
+unsupported shape programs, additional tower speech, speed brackets and target
 camera imagery remain open. See the linked baseline for validation and limitations.
+Ground start is now connected to the creator's player start and airport selectors;
+other wings remain airborne and restart preserves
+the accepted start. [Behavior](spec/quick-mission-menu.md#player-ground-start).
 
 These linked documents own constants and evidence; this section owns execution.
 All proposed type/file names below are agent design choices, not existing APIs.

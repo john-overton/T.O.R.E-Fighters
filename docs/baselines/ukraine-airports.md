@@ -216,7 +216,7 @@ to isolate this feature from the existing negative default-wind issue in some ma
 This completes the base-airport implementation slice, not the whole original
 parity target. Mission/campaign overlay replacement and generated terrain alias
 resolution remain unsupported. No automatic substitution of base terrain is made.
-Some source shape programs, original tower speech mappings, destroyed replacement
+Some source shape programs, additional tower speech mappings, destroyed replacement
 art, aircraft-specific speed brackets and target-relative camera imagery remain
 open. Large PIC sheets use documented nearest-sampled GPU layers. Airport grouping,
 contact volumes, service policy and guidance scaling remain fitted where stated.
@@ -227,3 +227,45 @@ No manual joystick landing session, audible tower acceptance, Windows/macOS
 runtime check, before/after performance benchmark or retail side-by-side comparison
 was performed. The synthetic
 service/contact checks and captured guidance are not a claim of those validations.
+
+## Airport speech verification and hookup
+
+Implementation mode, 2026-09-20. Sol connected two verified retail speech pairs;
+the parent independently checked the executable pointers, extracted sample hashes,
+reviewed the consumer call sites and tested the integration. [Source mappings and
+remaining retail timing questions](../formats/radio.md) own that evidence.
+
+`^CLRLAND.5K` is 4,307 unsigned PCM8 mono samples at 5,512 Hz (about 0.781 s).
+`^WELHOME.5K` is 4,032 samples at the same rate (about 0.731 s). Both extraction
+requests succeeded with zero errors. Their original resource bytes and phrase
+metadata were independently verified again inside the final installed cache.
+No substitute or synthesized recording is used.
+
+Successful clearance and repeating that reply select clear-to-land. Landing
+completion selects welcome-home; repeat after completion now repeats welcome-home
+rather than the obsolete clearance. Other replies remain text only. These are
+fitted host event/timing choices, not claims that retail used TORE's command menu.
+Airport speech is serialized with wing speech but has separate cancellation
+ownership. Tests cover preserved wing playback position, serial sample output,
+airport cancellation/replacement, pause/resume, mute, missing optional resources,
+reply routing, repeat after landing and reset.
+
+Final required checks passed: formatting, warnings-denied workspace/all-target
+Clippy, **901 Rust tests**, locked workspace build, **68 Python tests**, repository
+and both binary asset guards, documentation headers and diff whitespace. Two
+existing GPU unit tests remain ignored. No renderer code changed in this audio
+pass, so the previous GPU captures were not repeated.
+
+The actual default cache at `~/.local/share/T.O.R.E-Fighters` was refreshed using
+`--import gameassets/fighters-anthology --import-only`. The report contains both
+sample entries and **26 verified phrase mappings**. Its two PCM hashes and two
+phrase strings match the independently extracted evidence. Input and preference
+files were preserved. A subsequent headless startup loaded that cache and retained
+Simferopol's 1,024-ft airport ground and active ILS at 5,024 ft MSL.
+
+Evidence is local under `.local/airport-audio-review/`: `source-sha256.txt`,
+`verified-samples.json`, `verified-cache.json`, `checks.json`, the import/startup
+logs and lossless sample WAV wrappers. No imported bytes were committed.
+Mixer output was validated with synthetic signals; no new live-speaker listening
+session or Windows/macOS audio-device check is claimed. No commit or push was
+performed for this audio pass.

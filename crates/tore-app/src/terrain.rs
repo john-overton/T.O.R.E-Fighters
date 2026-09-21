@@ -53,6 +53,39 @@ pub struct World {
     pub fog: [f32; 4],
     pub haze: [u8; 3],
 }
+/// Fitted grounding: align the largest aggregate horizontal pavement layer,
+/// not a terminal roof or the whole mesh's midpoint, with airport ground.
+fn pavement_height(shape: &tore_formats::shape::Shape) -> f64 {
+    let mut areas = BTreeMap::<u32, f64>::new();
+    for face in &shape.faces {
+        if face.positions.len() < 3 {
+            continue;
+        }
+        let height = face.positions[0][2];
+        if face.positions.iter().any(|p| (p[2] - height).abs() > 0.01) {
+            continue;
+        }
+        let area = face
+            .positions
+            .iter()
+            .zip(face.positions.iter().cycle().skip(1))
+            .map(|(a, b)| f64::from(a[0]) * f64::from(b[1]) - f64::from(b[0]) * f64::from(a[1]))
+            .sum::<f64>()
+            .abs()
+            * 0.5;
+        if area > 0. {
+            *areas.entry(height.to_bits()).or_default() += area;
+        }
+    }
+    areas
+        .into_iter()
+        .max_by(|a, b| {
+            a.1.total_cmp(&b.1)
+                .then_with(|| f32::from_bits(b.0).total_cmp(&f32::from_bits(a.0)))
+        })
+        .map_or(0., |(height, _)| f64::from(f32::from_bits(height)))
+}
+
 impl World {
     pub fn for_theater(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> AppResult<Self> {
         Self::for_mission(resources, code, None)
@@ -369,11 +402,19 @@ impl World {
             let bank = f64::from(placement.angles[2]).to_radians();
             let basis = tore_sim::attitude::Basis::new(heading, pitch, bank);
             let local_center = std::array::from_fn::<_, 3, _>(|axis| (min[axis] + max[axis]) * 0.5);
-            let origin = [
+            let support_origin = [
                 f64::from(placement.position[0]),
                 support_height + f64::from(placement.position[1]),
                 f64::from(placement.position[2]),
             ];
+            let grounding_offset = if runway {
+                -pavement_height(shape) * scale
+            } else {
+                0.
+            };
+            let origin = std::array::from_fn::<_, 3, _>(|axis| {
+                support_origin[axis] + basis.up[axis] * grounding_offset
+            });
             let center = std::array::from_fn(|axis| {
                 origin[axis]
                     + basis.right[axis] * local_center[0]
@@ -411,6 +452,14 @@ impl World {
                 // Use source anchor0x11 for the fitted primary approach line,
                 // rather than steering onto the overall mesh's midpoint.
                 let mut approach_center = center;
+                // Even a fallback centerline belongs to the plane through the
+                // placement origin, not the whole airport mesh's vertical center.
+                if basis.up[1].abs() > 1e-6 {
+                    approach_center[1] = support_origin[1]
+                        - (basis.up[0] * (center[0] - support_origin[0])
+                            + basis.up[2] * (center[2] - support_origin[2]))
+                            / basis.up[1];
+                }
                 let mut length_ft = half[2] * 2.0;
                 if let Some(anchor) = runway_anchors.get(&placement.object_type)
                     && anchor[2] < max[2]
@@ -418,7 +467,9 @@ impl World {
                 {
                     let local = [anchor[0], 0.0, (anchor[2] + max[2]) * 0.5];
                     approach_center = std::array::from_fn(|axis| {
-                        origin[axis] + basis.right[axis] * local[0] + basis.forward[axis] * local[2]
+                        support_origin[axis]
+                            + basis.right[axis] * local[0]
+                            + basis.forward[axis] * local[2]
                     });
                     length_ft = max[2] - anchor[2];
                 }
@@ -519,7 +570,6 @@ impl World {
                                 + basis.right[axis] * right
                                 + basis.up[axis] * up
                                 + basis.forward[axis] * forward
-                                + basis.up[axis] * if layer >= 0.0 { 2.0 } else { 0.0 }
                         });
                         let uv = face.uv.get(vertex_index).copied().unwrap_or([0.0; 2]);
                         let uv = [
@@ -632,25 +682,7 @@ impl World {
 
     /// The terrain surface plus the environment's wind, for one fixed step.
     pub fn surface(&self, x: f64, z: f64) -> tore_sim::research::Surface {
-        if let Some((id, mut height)) = self.airport_scene.runway_surface(x, z) {
-            if let Some(object) = self
-                .airport_scene
-                .objects
-                .iter()
-                .find(|object| object.id == id)
-            {
-                let basis = tore_sim::attitude::Basis::new(
-                    object.bounds.heading,
-                    object.bounds.pitch,
-                    object.bounds.bank,
-                );
-                if basis.up[1].abs() > 1e-6 {
-                    height = object.bounds.center[1]
-                        - (basis.up[0] * (x - object.bounds.center[0])
-                            + basis.up[2] * (z - object.bounds.center[2]))
-                            / basis.up[1];
-                }
-            }
+        if let Some((_, height)) = self.airport_scene.runway_surface(x, z) {
             let mut surface = tore_sim::research::Surface::runway(height);
             surface.wind = self.wind();
             return surface;
@@ -1008,6 +1040,41 @@ pub(crate) mod tests {
             weather_presentation: tore_sim::environment::Presentation::seeded(1).unwrap(),
             fog_palette: vec![[[100; 3]; 256]; 10],
         }
+    }
+    #[test]
+    fn dominant_pavement_not_roof_controls_grounding() {
+        use tore_formats::shape::{Face, FogMode, Shape};
+        let face = |width: f32, length: f32, height: f32| Face {
+            positions: vec![
+                [0., 0., height],
+                [width, 0., height],
+                [width, length, height],
+                [0., length, height],
+            ],
+            colors: vec![1; 4],
+            fog: FogMode::Enabled,
+            uv: vec![],
+            texture: String::new(),
+            subtype: 0x59,
+            normal: None,
+            address: 0,
+        };
+        let shape = Shape {
+            faces: vec![
+                face(40., 100., -1.),
+                face(40., 100., -1.),
+                face(50., 100., 20.),
+            ],
+            state_words: Default::default(),
+        };
+        assert_eq!(pavement_height(&shape), -1.);
+        assert_eq!(
+            pavement_height(&Shape {
+                faces: vec![],
+                state_words: Default::default()
+            }),
+            0.
+        );
     }
     #[test]
     fn water_has_no_opaque_fallback_but_shore_art_keeps_its_geometry() {

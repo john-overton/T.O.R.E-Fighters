@@ -294,7 +294,12 @@ fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
  return aircraft_color(in,normal);
 }
 // Static world textures use index255/mask cutouts without opaque backing color.
+@fragment fn airport_solid_fragment(in:VertexOut)->@location(0) vec4<f32>{
+ if in.layer>=0.0 {discard;}
+ return aircraft_color(in,surface_normal(in.direction));
+}
 @fragment fn airport_fragment(in:VertexOut)->@location(0) vec4<f32>{
+ if in.layer<0.0 {discard;}
  if in.layer>=0.0 {
   let tex=sample_tile(in.uv,i32(in.layer),0,-1,in.light_row,vec2<f32>(-1.0));
   if tex.a<0.5 {discard;}

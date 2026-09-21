@@ -11,8 +11,9 @@
 Implementation status, 2026-09-20. Base-layout placements, static scenes,
 runway surfaces, individual targets and the deterministic landing service are
 implemented. The HUD displays airport and runway names, range, and automatic
-localizer/glide bars. Original tower recordings, campaign overlay application,
-and destroyed replacement art remain open.
+localizer/glide bars. The reviewed clear-to-land and welcome-home recordings are
+connected to the player landing service. Campaign overlay application and
+destroyed replacement art remain open.
 [Input identities and measured extraction](../baselines/ukraine-airports.md).
 [Placement contract](../formats/airport-placements.md).
 
@@ -105,7 +106,7 @@ reverse engineering. Later measured evidence can replace a fitted rule locally.
 | Tower availability | The current base-layout free-flight host assigns airports neutral status with explicit landing permission because it has no mission player-side assignment. The service can also reject hostile, unknown or unpermitted neutral airports when a mission supplies those states. Disabled runways decline. | Opinionated base-layout policy, agent choice 2026-09-20; fitted mission service policy |
 | Clearance lifetime | Stays with the selected runway until cancellation, airport selection change, runway disablement, flight reset or landing completion. Repeating a request repeats status rather than allocating another clearance. | Opinionated |
 | Landing completion | Existing flight state reports supported, alive, on-runway contact and speed below 30 knots for 240 consecutive 120 Hz ticks. Taxi remains manual. | Fitted service completion, not flight damage criteria |
-| Radio output | Typed response and subtitle immediately at a simulation tick; original recording only when its phrase mapping is reviewed. Missing audio gives text-only operation. | Opinionated integration |
+| Radio output | Typed response and subtitle immediately at a simulation tick. A successful landing request and repeat use reviewed `^CLRLAND`. Deterministic landing completion and repeating its latest reply use reviewed `^WELHOME`. These event bindings are fitted because retail player-menu producers remain unresolved. Selection, cancellation, rejection and invalidation stay text only. Missing or old caches preserve text operation and report that a retail reimport is needed for optional airport audio. | Reviewed phrase/sample identity with fitted event binding |
 | Runway damage | At zero imported hit points disable new clearance and ILS; preserve its surface for physical contact. Individual tower/building loss does not disable other runway services in this first host policy. | Fitted service consequence |
 | Missing destruction artwork | Remove the intact mesh when combat HP reaches zero, retain target/mission identity, and use the existing impact effect. Do not infer an A-suffix replacement. | Fitted visual fallback |
 
@@ -116,8 +117,13 @@ anchors near -2512 through 3090 feet and avoids an invisible support footprint.
 
 Runway support and the ILS datum use the authored airport ground elevation.
 A dedicated static-surface rendering depth bias avoids terrain overlap without
-changing that elevation. Textured coplanar detail faces have a fitted visual-only
-2-foot separation from their backing polygons. Building collision remains a separate
+changing that elevation. Textured coplanar detail faces use a separate depth-biased
+render pass, without a separate physical face lift. For composite runway shapes,
+the horizontal layer with the greatest aggregate polygon area defines pavement.
+The mesh is translated vertically so that layer meets the runway surface, with
+all relative geometry retained. For example, RNWY1's source paving at -4 feet
+receives a fitted +4-foot mesh offset. This aligns pavement and wheel contact
+without changing the airport-ground ILS datum. Building collision remains a separate
 solid OBB query and never raises terrain to roof height. The restricted native
 research adapter continues to reject unsupported ground contact.
 
@@ -162,3 +168,10 @@ aircraft's configuration. An unresolved field gets an individually documented
 fitted value and synthetic acceptance case during its implementation slice.
 Tower commands provide guidance and responses only. They do not take control of
 the player's aircraft, add autonomous airport traffic or guarantee a safe landing.
+Airport speech is serial and has its own cancellation ownership. A new airport
+reply replaces stale queued airport speech without removing wing radio. Cancel,
+selection change, runway invalidation and flight reset remove stale airport
+speech. Pause freezes it, and muting effects clears it with the other effects.
+After landing, repeat replays the welcome reply, not an obsolete clearance.
+Verified phrase/sample identity and airport-consumer evidence are recorded in
+[radio metadata](../formats/radio.md).

@@ -631,5 +631,18 @@ The controls editor exposes `airport-nav`, `airport-next`,
 profile binds them to Shift-N, Shift-A, Shift-L, Shift-R, and Shift-C in that
 order. NAV mode, gear down, range, and airport-relative altitude govern automatic
 ILS guidance; a clearance is not required to display it. Airport selection remains
-explicit when supplied, otherwise the nearest usable runway is selected. Tower replies currently use deterministic text because no reviewed
-tower sample mapping is available.
+explicit when supplied, otherwise the nearest usable runway is selected. A
+successful landing request and its repeat play the reviewed retail clear-to-land
+recording. Landing completion plays the reviewed welcome-home recording, and
+repeat then replays that welcome. Other
+tower replies remain text only.
+
+## Quick Mission ground start
+
+In the creator, set **Start** to **Ground**, then choose **Airport**. Continue
+through the normal loadout screen. The player starts on that runway with engine
+idling, gear/flaps down and brakes applied. **B** releases brakes; use the normal
+throttle and flight controls to take off. Other selected aircraft start airborne
+at the displayed wing altitude. Restart restores the accepted airport/start.
+Airborne remains the default. Ground start requires the researched flight model;
+legacy and restricted native modes remain available for airborne starts.

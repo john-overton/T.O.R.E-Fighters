@@ -164,6 +164,51 @@ impl State {
             ticks: 0,
         }
     }
+    /// Fitted creator ground start. The caller verifies the chosen runway surface.
+    pub fn start_on_runway(
+        &mut self,
+        position: [f64; 3],
+        heading: f64,
+    ) -> tore_formats::Result<()> {
+        if self.native.is_some() || self.research.is_none() {
+            return Err(std::io::Error::other(
+                "Ground start requires the researched flight model; choose Airborne for this adapter.",
+            ));
+        }
+        if position.iter().any(|v| !v.is_finite()) || !heading.is_finite() {
+            return Err(std::io::Error::other("Invalid runway start pose"));
+        }
+        self.position = position;
+        self.position[1] += self.model.configuration().equipment.ground_clearance_ft;
+        self.yaw = heading;
+        self.pitch = 0.;
+        self.bank = 0.;
+        self.speed = 0.;
+        self.velocity = [0.; 3];
+        self.vertical_speed = 0.;
+        self.roll_rate = 0.;
+        self.pitch_rate = 0.;
+        self.auxiliary_rates = [0.; 3];
+        self.throttle = 0.;
+        self.engine = true;
+        self.burner = false;
+        self.exhaust = 0.;
+        self.gear_down = true;
+        self.gear = 1.;
+        self.flaps_down = true;
+        self.flaps = 1.;
+        self.brake_out = true;
+        self.brake = 1.;
+        self.hook_down = false;
+        self.hook = 0.;
+        self.rudder = 0.;
+        self.elevator = 0.;
+        self.aileron = 0.;
+        self.autopilot = Default::default();
+        self.crashed = false;
+        self.research.as_mut().unwrap().on_ground = true;
+        Ok(())
+    }
     /// Interpolate presentation only, leaving fixed-tick state and discrete controls untouched.
     pub fn presented(&self, previous: &Self, alpha: f64) -> Self {
         if self.crashed {
@@ -1295,6 +1340,53 @@ pub(crate) mod integration_tests {
         e.atmosphere.temperature_k = 0.;
         assert!(AirData::sample(&s, e).is_err());
         assert!(Atmosphere::standard(f64::NAN).is_err());
+    }
+    #[test]
+    fn runway_start_is_supported_stationary_and_can_accelerate() {
+        let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.fuel = 500.;
+        s.set_payload(1000.).unwrap();
+        s.start_on_runway([100., 1024., 200.], std::f64::consts::FRAC_PI_2)
+            .unwrap();
+        let start = s.position;
+        assert_eq!(s.velocity, [0.; 3]);
+        assert_eq!(s.gear, 1.);
+        assert!(s.gear_down && s.brake_out && s.flaps_down);
+        assert!(s.engine && !s.burner && !s.crashed);
+        assert_eq!(s.fuel, 500.);
+        assert_eq!(s.payload_lbs, 1000.);
+        assert!(s.supported_at(1024.));
+        assert!(
+            (s.position[1] - 1024. - s.model().configuration().equipment.ground_clearance_ft).abs()
+                < 1e-9
+        );
+        for _ in 0..600 {
+            s.step_surface(&Default::default(), |_, _| {
+                crate::research::Surface::runway(1024.)
+            });
+        }
+        assert!(!s.crashed && s.research.as_ref().unwrap().on_ground);
+        assert!((s.position[0] - start[0]).abs() < 0.01 && (s.position[2] - start[2]).abs() < 0.01);
+        s.brake_out = false;
+        s.throttle = 1.;
+        for _ in 0..1200 {
+            s.step_surface(&Default::default(), |_, _| {
+                crate::research::Surface::runway(1024.)
+            });
+        }
+        assert!(!s.crashed);
+        assert!(
+            s.position[0] > start[0] + 100.,
+            "takeoff roll must advance along runway"
+        );
+    }
+    #[test]
+    fn runway_start_does_not_switch_legacy_adapter() {
+        let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
+        let before = s.clone();
+        assert!(s.start_on_runway([0.; 3], 0.).is_err());
+        assert_eq!(s, before);
     }
     #[test]
     fn hybrid_wind_is_advection_and_payload_is_bounded() {

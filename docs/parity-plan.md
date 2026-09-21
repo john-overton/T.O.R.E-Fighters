@@ -12,9 +12,11 @@ One page. What is specified, what is built, what is next. Milestones live in
 [ROADMAP.md](ROADMAP.md); how agents work is in [AGENTS.md](../AGENTS.md).
 
 Airports are connected for the sixteen base theaters: source static placements,
-individual ground targets, runway support, tower text commands and automatic ILS
-at or below 4,000 feet above airport ground. Campaign overlays, tower recordings
-and further visual parity remain open. [Implementation slices and acceptance](ROADMAP.md#airport-and-ground-object-expansion).
+individual ground targets, runway support, tower text/verified recorded replies,
+and automatic ILS at or below 4,000 feet above airport ground. Campaign overlays,
+additional tower speech and further visual parity remain open. The creator now
+supports player ground starts with named airport selection and preserved restart;
+[validation](baselines/ground-start.md). [Implementation slices and acceptance](ROADMAP.md#airport-and-ground-object-expansion).
 
 Parity is measured by **expression of feature**: does the player experience what
 they experience in Fighters Anthology? A behaviour's provenance, `spec-derived`,

@@ -421,3 +421,12 @@ Powered missiles leave white smoke that disperses after burnout or impact.
 Reset restores intact aircraft and clears smoke. Visual thresholds and smoke
 timing are fitted. Detached pieces inherit aircraft motion, fall, then disappear
 with a brief ground-hit animation. AI damage uses the fitted health-to-authority rule in the [AI spec](spec/ai.md#live-integration-and-authored-boundaries); player damage handling is unchanged. See [damage and smoke behavior](spec/damage-smoke.md).
+
+## Starting on a runway
+
+Quick Mission's **Start: Ground** choice exposes an airport selector for the
+current theater. The player starts stationary, engine idling, gear and flaps down,
+with brakes applied. Press **B** to release brakes, then increase throttle and
+use the normal pitch controls for takeoff. Ground start uses the researched model;
+no flight adapter is switched automatically. Wing aircraft retain their airborne
+start. [Start behavior and fitted settings](spec/quick-mission-menu.md#player-ground-start).

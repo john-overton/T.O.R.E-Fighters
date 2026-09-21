@@ -20,6 +20,7 @@ pub struct SimRenderer {
     weather_tiles: wgpu::TextureView,
     pipeline: wgpu::RenderPipeline,
     airport_pipeline: wgpu::RenderPipeline,
+    airport_decal_pipeline: wgpu::RenderPipeline,
     terrain_pipeline: wgpu::RenderPipeline,
     canopy_depth_pipeline: wgpu::RenderPipeline,
     canopy_pipeline: wgpu::RenderPipeline,
@@ -161,13 +162,22 @@ impl SimRenderer {
         };
         let pipeline = device.create_render_pipeline(&surface_descriptor);
         surface_descriptor.label = Some("Static airport depth-biased surfaces");
-        surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("airport_fragment");
+        surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("airport_solid_fragment");
         surface_descriptor.depth_stencil.as_mut().unwrap().bias = wgpu::DepthBiasState {
             constant: -4,
             slope_scale: -1.0,
             clamp: 0.0,
         };
         let airport_pipeline = device.create_render_pipeline(&surface_descriptor);
+        surface_descriptor.label = Some("Static airport coplanar texture details");
+        surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("airport_fragment");
+        surface_descriptor
+            .depth_stencil
+            .as_mut()
+            .unwrap()
+            .bias
+            .constant = -8;
+        let airport_decal_pipeline = device.create_render_pipeline(&surface_descriptor);
         surface_descriptor.depth_stencil.as_mut().unwrap().bias = Default::default();
         surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("fragment");
         let sky_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -441,6 +451,7 @@ impl SimRenderer {
             weather_tiles: view,
             pipeline,
             airport_pipeline,
+            airport_decal_pipeline,
             terrain_pipeline,
             canopy_depth_pipeline,
             canopy_pipeline,
@@ -946,6 +957,8 @@ impl SimRenderer {
             pass.set_pipeline(&self.airport_pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
             pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.draw(0..*count, 0..1);
+            pass.set_pipeline(&self.airport_decal_pipeline);
             pass.draw(0..*count, 0..1);
         }
         pass.set_pipeline(&self.pipeline);

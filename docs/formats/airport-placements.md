@@ -74,3 +74,9 @@ STRIP3A/5A/6A/7A are separate placement types, not assumed damaged appearances.
 Preserve each instance until its spatial/operational relationship is established.
 FRA.MM also requires `sides2` and `nationality2`. Resolve allegiance using their
 actual conversion contracts. Source record counts are not unique-airport counts.
+
+Composite runway SH bounds include structures above the pavement. For example,
+RNWY1's dominant flat faces are at local up -1 with header exponent 10, or -4 ft
+under the host scale. The whole-shape midpoint is not a runway-height record.
+[Host plane and visual normalization](../spec/airports.md) keep that source
+geometry fact separate from the fitted placement rule.

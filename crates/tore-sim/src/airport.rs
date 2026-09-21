@@ -118,6 +118,30 @@ impl Runway {
             self.approach_center[2] + self.heading.cos() * self.length_ft * 0.5 * sign,
         ]
     }
+    /// The runway plane is independent of buildings included in its shape bounds.
+    pub fn support_height(&self, x: f64, z: f64) -> Option<f64> {
+        let up = crate::attitude::Basis::new(
+            self.surface.heading,
+            self.surface.pitch,
+            self.surface.bank,
+        )
+        .up;
+        if up[1].abs() < 1e-6 {
+            return None;
+        }
+        Some(
+            self.approach_center[1]
+                - (up[0] * (x - self.approach_center[0]) + up[2] * (z - self.approach_center[2]))
+                    / up[1],
+        )
+    }
+    pub fn departure_pose(&self) -> ([f64; 3], f64) {
+        let mut position = self.threshold(ApproachEnd::Near);
+        let inset = (self.length_ft * 0.05).min(100.);
+        position[0] += self.heading.sin() * inset;
+        position[2] += self.heading.cos() * inset;
+        (position, self.heading)
+    }
     pub fn approach_heading(&self, end: ApproachEnd) -> f64 {
         if end == ApproachEnd::Near {
             self.heading
@@ -178,8 +202,8 @@ impl Scene {
         self.runways
             .iter()
             .filter(|r| r.surface.contains_horizontal(x, z))
-            .min_by_key(|r| r.object)
-            .map(|r| (r.object, r.elevation_ft))
+            .filter_map(|r| r.support_height(x, z).map(|height| (r.object, height)))
+            .min_by_key(|(object, _)| *object)
     }
     pub fn earliest_object_hit(&self, from: [f64; 3], to: [f64; 3]) -> Option<(ObjectId, f64)> {
         self.objects
@@ -219,6 +243,10 @@ pub enum Reply {
         airport: u32,
         runway: ObjectId,
         end: ApproachEnd,
+    },
+    Landed {
+        airport: u32,
+        runway: ObjectId,
     },
     Declined {
         airport: Option<u32>,
@@ -562,6 +590,10 @@ impl Service {
         if self.landing_ticks >= LANDING_TICKS {
             self.clearance = None;
             self.landing_ticks = 0;
+            self.last_reply = Some(Reply::Landed {
+                airport: c.airport,
+                runway: c.runway,
+            });
             vec![Event::LandingComplete {
                 airport: c.airport,
                 runway: c.runway,
@@ -630,6 +662,29 @@ mod tests {
             alive: true,
             speed_fps: 100.,
         }
+    }
+    #[test]
+    fn runway_plane_does_not_use_the_height_of_attached_buildings() {
+        let mut s = scene();
+        s.runways[0].surface.center[1] = 500.;
+        s.runways[0].surface.half[1] = 400.;
+        assert_eq!(s.runway_surface(0., 0.), Some((1000, 100.)));
+        s.runways[0].surface.pitch = 0.1;
+        let height = s.runways[0].support_height(0., 100.).unwrap();
+        assert!(height.is_finite() && (height - 100.).abs() > 1.);
+    }
+    #[test]
+    fn departure_pose_is_inset_on_the_primary_runway() {
+        let s = scene();
+        let r = &s.runways[0];
+        assert_eq!(r.departure_pose(), ([0., 100., -4900.], 0.));
+        let mut short = r.clone();
+        short.length_ft = 600.;
+        assert_eq!(short.departure_pose().0, [0., 100., -270.]);
+        short.heading = std::f64::consts::FRAC_PI_2;
+        let (point, heading) = short.departure_pose();
+        assert!((point[0] + 270.).abs() < 1e-9 && point[2].abs() < 1e-9);
+        assert_eq!(heading, short.heading);
     }
     #[test]
     fn ils_uses_selected_airport_elevation_and_inclusive_4000_gate() {
@@ -760,6 +815,29 @@ mod tests {
                 runway: 1000
             }]
         );
+    }
+    #[test]
+    fn repeat_after_landing_returns_completion_not_old_clearance() {
+        let s = scene();
+        let mut service = Service::new(&s).unwrap();
+        let mut p = plane(0., 100.);
+        p.supported = true;
+        p.speed_fps = 10.;
+        service.command(&s, p, Command::SelectAirport(7));
+        service.command(&s, p, Command::RequestLanding);
+        for _ in 0..LANDING_TICKS {
+            service.step(&s, p);
+        }
+        assert_eq!(
+            service.command(&s, p, Command::RepeatReply),
+            vec![Event::Reply(Reply::Repeated(Box::new(Reply::Landed {
+                airport: 7,
+                runway: 1000
+            })))]
+        );
+        assert!(service.step(&s, p).is_empty());
+        service.reset(&s).unwrap();
+        assert!(service.last_reply().is_none());
     }
     #[test]
     fn oriented_box_segment_uses_earliest_contact() {

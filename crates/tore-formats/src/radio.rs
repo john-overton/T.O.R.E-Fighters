@@ -1,4 +1,4 @@
-//! Reviewed wing-radio data only. See docs/formats/radio.md.
+//! Reviewed wing and airport speech metadata. See docs/formats/radio.md.
 use crate::{Result, invalid, slice, u16_at, u32_at};
 use std::collections::BTreeMap;
 
@@ -27,7 +27,13 @@ pub const STEMS: &[(&str, usize)] = &[
     ("^ATTACK", 0x4ff230),
     ("^ENGAGE", 0x4ff3d8),
     ("^SHWTIME", 0x4ff3e8),
+    // Airport/approach phrases in the same reviewed pointer-pair table.
+    ("^CLRLAND", 0x4ff8c8),
+    ("^WELHOME", 0x4ff980),
 ];
+
+pub const AIRPORT_CLEAR_TO_LAND: &str = "^CLRLAND";
+pub const AIRPORT_WELCOME_HOME: &str = "^WELHOME";
 
 pub fn resource(name: &str) -> bool {
     name.strip_suffix(".5K")
@@ -99,12 +105,12 @@ pub fn phrases(data: &[u8]) -> Result<BTreeMap<String, Vec<u8>>> {
 mod tests {
     use super::*;
     fn fixture() -> Vec<u8> {
-        let mut b = crate::module::fixture(&vec![0; 2048]);
+        let mut b = crate::module::fixture(&vec![0; 8192]);
         b[64..68].copy_from_slice(b"PE\0\0");
         b[116..120].copy_from_slice(&0x400000u32.to_le_bytes());
         b[120..128].copy_from_slice(b".data\0\0\0");
         b[132..136].copy_from_slice(&0xff000u32.to_le_bytes());
-        let mut pos = 1100;
+        let mut pos = 5000;
         for (stem, va) in STEMS {
             let at = 256 + va - 0x4ff000;
             for (slot, text) in [(0, "Synthetic phrase"), (4, *stem)] {
@@ -127,7 +133,7 @@ mod tests {
         bad[256 + 0x170..256 + 0x174].fill(255);
         assert!(phrases(&bad).is_err());
         let mut bad = b;
-        bad[256 + 1100] = 0;
+        bad[256 + 5000] = 0;
         assert!(phrases(&bad).is_err());
         assert!(!resource("^UNKNOWN.5K"));
         assert!(resource("^ENGAGE.5K"));

@@ -23,11 +23,11 @@ const UP: usize = 72;
 const DOWN: usize = 73;
 #[derive(Clone, Debug)]
 pub struct Draft {
-    pub values: [usize; 33],
+    pub values: [usize; 35],
 }
 impl Default for Draft {
     fn default() -> Self {
-        let mut values = [0; 33];
+        let mut values = [0; 35];
         for (id, value) in [
             (4, 1),
             (5, 1),
@@ -54,6 +54,9 @@ pub struct QuickMission {
     pub aircraft_files: Vec<String>,
     pub draft: Draft,
     options: Options,
+    start_modes: Vec<String>,
+    airport_names: Vec<Vec<String>>,
+    airport_objects: Vec<Vec<u32>>,
     selector: Option<usize>,
     cursor: usize,
     scroll: usize,
@@ -105,8 +108,39 @@ impl QuickMission {
         for i in [6, 9, 12, 23, 26, 29] {
             draft.values[i] = selected;
         }
+        let mut airport_names = Vec::new();
+        let mut airport_objects = Vec::new();
+        let mut definitions = BTreeMap::new();
+        for code in source_theaters() {
+            let name = format!("{code}.MM");
+            let mut names = Vec::new();
+            let mut ids = Vec::new();
+            if let Some(bytes) = data.get(&name)
+                && let Ok(layout) = tore_formats::mission::Layout::parse(&name, bytes)
+            {
+                for p in layout.placements {
+                    let airport = *definitions.entry(p.object_type.clone()).or_insert_with(|| {
+                        data.get(&p.object_type)
+                            .and_then(|b| tore_formats::static_object::Definition::parse(b).ok())
+                            .is_some_and(|d| {
+                                d.main_shape.is_some()
+                                    && d.callbacks.iter().any(|c| c == "_STRIPProc")
+                            })
+                    });
+                    if airport {
+                        names.push(p.name.unwrap_or(p.object_type));
+                        ids.push(0x4000_0000 + p.key.ordinal);
+                    }
+                }
+            }
+            airport_names.push(names);
+            airport_objects.push(ids);
+        }
         Self {
             ordnance: None,
+            start_modes: vec!["Airborne".into(), "Ground".into()],
+            airport_names,
+            airport_objects,
             hover: None,
             pressed: None,
             focus: 6,
@@ -126,6 +160,9 @@ impl QuickMission {
         }
     }
     pub fn theater(&mut self, index: usize) {
+        if self.selection != index {
+            self.draft.values[34] = 0;
+        }
         self.selection = index;
         // Source order differs from the app's theater catalog.
         if let Some((code, _)) = tore_formats::theater::THEATERS.get(index) {
@@ -156,6 +193,10 @@ impl QuickMission {
     fn values(&self, id: usize) -> &[String] {
         if matches!(id, 6 | 9 | 12 | 23 | 26 | 29) {
             &self.aircraft_names
+        } else if id == 33 {
+            &self.start_modes
+        } else if id == 34 {
+            &self.airport_names[self.draft.values[13]]
         } else if id == 30 {
             &self.options.targets[self.draft.values[13]]
         } else {
@@ -219,6 +260,27 @@ impl QuickMission {
             .map(|wings| legacy_pairs(&wings))
             .unwrap_or_default()
     }
+    pub fn ground_start(&self) -> bool {
+        self.draft.values[33] == 1
+    }
+    pub fn ground_runway(&self) -> Option<u32> {
+        self.ground_start()
+            .then(|| {
+                self.airport_objects[self.draft.values[13]]
+                    .get(self.draft.values[34])
+                    .copied()
+            })
+            .flatten()
+    }
+    pub fn choose_ground_runway(&mut self, object: u32) -> Result<(), String> {
+        let index = self.airport_objects[self.draft.values[13]]
+            .iter()
+            .position(|id| *id == object)
+            .ok_or_else(|| "No imported runway matches the chosen airport".to_string())?;
+        self.apply(33, 1);
+        self.apply(34, index);
+        Ok(())
+    }
     pub fn separation_feet(&self) -> f64 {
         [1., 2., 5., 10., 20., 50.][self.draft.values[17]] * 5280.
     }
@@ -227,6 +289,11 @@ impl QuickMission {
             return Some(
                 "This aircraft is available for setup only. Choose an imported aircraft from the player list to fly."
                     .into(),
+            );
+        }
+        if self.ground_start() && self.ground_runway().is_none() {
+            return Some(
+                "No imported runways are available in this theater. Choose Airborne.".into(),
             );
         }
         let v = &self.draft.values;
@@ -261,6 +328,7 @@ impl QuickMission {
             self.draft.values[32] = 0;
         }
         if id == 13 {
+            self.draft.values[34] = 0;
             self.draft.values[30] = 0;
             self.nationalities();
         }
@@ -282,8 +350,13 @@ impl QuickMission {
             "aircraft" => self.open(6),
             "theaters" => self.open(13),
             "help" => self.help = true,
+            "ground-start" => self.apply(33, 1),
+            "airports" => {
+                self.apply(33, 1);
+                self.open(34);
+            }
             _ => {
-                let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..33).contains(v)).ok_or("snapshot states: normal, aircraft, theaters, help, field-3 through field-32")?;
+                let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..35).contains(v)).ok_or("snapshot states: normal, aircraft, theaters, help, field-3 through field-34")?;
                 self.open(id);
             }
         }
@@ -376,9 +449,12 @@ impl QuickMission {
                 }
             }
             CANCEL => return Action::Back,
-            3..=32 => {
+            3..=34 => {
+                if id == 34 && !self.ground_start() {
+                    return Action::None;
+                }
                 self.focus = id;
-                if matches!(id, 6 | 9 | 12 | 13 | 23 | 26 | 29) ^ self.shift {
+                if matches!(id, 6 | 9 | 12 | 13 | 23 | 26 | 29 | 34) ^ self.shift {
                     self.open(id);
                 } else {
                     let n = self.values(id).len();
@@ -425,10 +501,15 @@ impl QuickMission {
         match key {
             "Tab" | "ArrowDown" | "ArrowUp" => {
                 let backwards = shift || key == "ArrowUp";
+                let last = if self.ground_start() { 34 } else { 33 };
                 self.focus = if backwards {
-                    if self.focus <= 1 { 32 } else { self.focus - 1 }
+                    if self.focus <= 1 {
+                        last
+                    } else {
+                        self.focus - 1
+                    }
                 } else {
-                    self.focus % 32 + 1
+                    self.focus % last + 1
                 };
                 self.hover = Some(self.focus);
             }
@@ -503,7 +584,14 @@ impl QuickMission {
             (
                 235,
                 vec![
-                    ("You are at ", None),
+                    (
+                        if self.ground_start() {
+                            "Airborne wings at "
+                        } else {
+                            "You are at "
+                        },
+                        None,
+                    ),
                     ("", Some(14)),
                     (" feet. It is ", None),
                     ("", Some(15)),
@@ -522,6 +610,16 @@ impl QuickMission {
             (305, vec![("Air combat is with ", None), ("", Some(19))]),
         ] {
             self.line(&mut c, font, 35, y, &parts);
+        }
+        self.line(&mut c, font, 35, 277, &[("Start: ", None), ("", Some(33))]);
+        if self.ground_start() {
+            self.line(
+                &mut c,
+                font,
+                35,
+                319,
+                &[("Airport: ", None), ("", Some(34))],
+            );
         }
         let (mut x, mut y) = (340, 221);
         for (text, id) in [
@@ -624,7 +722,7 @@ impl QuickMission {
             self.controls
                 .extend([(UP, (410, 393, 18, 17)), (DOWN, (410, 410, 18, 17))]);
             if self.values(field).is_empty() {
-                c.text(font, "No imported aircraft available.", 209, 118, None);
+                c.text(font, "No available choices.", 209, 118, None);
             }
             self.button(&mut c, sprites, POP_OK, "OK", (217, 437, 85, 24));
             self.button(&mut c, sprites, POP_CANCEL, "Cancel", (312, 437, 85, 24));
@@ -719,6 +817,44 @@ fn source_theaters() -> [&'static str; 16] {
         "NSK", "WTA", "UKR", "VLA",
     ]
 }
+pub fn runway_pose(world: &World, object: u32) -> crate::AppResult<([f64; 3], f64)> {
+    let runway = world
+        .airport_scene
+        .runway(object)
+        .ok_or("Selected runway is unavailable; choose another airport.")?;
+    let (position, heading) = runway.departure_pose();
+    if !runway.surface.contains_horizontal(position[0], position[2]) {
+        return Err("Selected runway has no supported departure point".into());
+    }
+    Ok((position, heading))
+}
+pub fn apply_ground_start(
+    world: &World,
+    flight: &mut tore_sim::flight::State,
+    object: u32,
+) -> crate::AppResult<u32> {
+    let (mut position, heading) = runway_pose(world, object)?;
+    let surface = world.surface(position[0], position[2]);
+    if !surface.landable {
+        return Err("Selected runway does not provide a ground surface".into());
+    }
+    position[1] = surface.height;
+    let mut candidate = flight.clone();
+    candidate.start_on_runway(position, heading)?;
+    if world
+        .solid_contact(
+            candidate.position,
+            candidate.position,
+            world.airport_scene.objects.iter().map(|o| o.id),
+        )
+        .is_some()
+    {
+        return Err("The runway start is obstructed. Choose another airport.".into());
+    }
+    *flight = candidate;
+    Ok(world.airport_scene.runway(object).unwrap().airport)
+}
+
 fn inside(p: (f64, f64), r: Rect) -> bool {
     p.0 >= r.0 as f64 && p.1 >= r.1 as f64 && p.0 < (r.0 + r.2) as f64 && p.1 < (r.1 + r.3) as f64
 }
@@ -805,6 +941,45 @@ mod tests {
         q.aircraft_names = vec!["Hornet".into(), "Rafale".into(), "Other".into()];
         q.aircraft_files = vec!["F18.PT".into(), "RAFALE.PT".into(), "OTHER.PT".into()];
         q
+    }
+    #[test]
+    fn ground_start_airport_picker_cancels_and_resets_on_theater_change() {
+        let mut q = setup();
+        q.airport_names[0] = vec!["First Field".into(), "Second Field".into()];
+        q.airport_objects[0] = vec![0x40000000, 0x40000003];
+        assert!(!q.ground_start());
+        q.activate(33);
+        assert!(q.ground_start());
+        q.activate(34);
+        assert_eq!(q.selector, Some(34));
+        q.activate(ROW_BASE + 1);
+        q.activate(POP_CANCEL);
+        assert_eq!(q.ground_runway(), Some(0x40000000));
+        q.activate(34);
+        q.activate(ROW_BASE + 1);
+        q.activate(POP_OK);
+        assert_eq!(q.ground_runway(), Some(0x40000003));
+        q.apply(13, 1);
+        assert_eq!(q.draft.values[34], 0);
+        assert!(q.ground_runway().is_none());
+        assert!(q.unsupported().unwrap().contains("No imported runways"));
+        q.apply(33, 0);
+        assert!(q.unsupported().is_none());
+    }
+    #[test]
+    fn tab_reaches_ground_controls_without_focusing_hidden_airport() {
+        let mut q = setup();
+        q.focus = 32;
+        q.key("Tab", false);
+        assert_eq!(q.focus, 33);
+        q.key("Tab", false);
+        assert_eq!(q.focus, 1);
+        q.apply(33, 1);
+        q.focus = 33;
+        q.key("Tab", false);
+        assert_eq!(q.focus, 34);
+        q.key("Tab", false);
+        assert_eq!(q.focus, 1);
     }
     #[test]
     fn selectors_page_and_cancel_without_changing_the_draft() {
