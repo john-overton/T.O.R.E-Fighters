@@ -24,9 +24,10 @@ establish timing or hidden behavior. John requested a three-second alternation
 on 2026-09-21, an opinionated timing choice.
 
 - Type appears at the top; the camera shows the selected object's live geometry.
-- John clarified on 2026-09-21 that the target must fill the view from the player
-  aircraft's perspective. The camera therefore stays at the player position and
-  looks along the complete player-to-target line, including elevation. Automatic
+- John requested on 2026-09-21 that the target fill the view along the player's
+  sight line, with the camera between player and target and no farther than
+  one nautical mile from the target. The camera moves along the complete
+  player-to-target line, including elevation, and faces the target. Automatic
   magnification fits the target regardless of range or aspect.
 - John requested on 2026-09-21 a background about 10% darker. After grayscale
   conversion, scenery (sky, terrain and clouds) uses 90% of its former brightness.
@@ -56,7 +57,13 @@ on 2026-09-21, an opinionated timing choice.
 Agent choices: round clock bearing to the nearest hour and speed to whole
 knots; range has one decimal.
 Damage is one minus current/initial hit points, clamped to 0..1, filling upward.
-The camera uses the player's position and the interpolated target position.
+The camera uses the player's position and interpolated target position to
+establish the viewing line. It sits one nautical mile (6,076 feet using the
+existing simulation convention) behind the target along that line. Agent choice:
+when player-to-target range is at or below one nautical mile, it stays at the
+player position rather than moving behind the player. Coincident positions
+remain finite and use that same position. Displayed range, bearing and Hi/Lo
+still measure from the player, never from this presentation camera.
 Agent-chosen framing keeps image roll level and fits aircraft mesh vertices into
 90% of image width and 52% of image height, reserving the top/bottom text rows.
 One dimension fills that area without cropping the other. Zoom follows projected

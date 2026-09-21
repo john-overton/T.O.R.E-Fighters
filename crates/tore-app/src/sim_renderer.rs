@@ -503,10 +503,17 @@ impl SimRenderer {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        art: &crate::menu::Sprite,
+        art: &tore_formats::Pic,
         smoke: [&tore_sim::combat::smoke::Smoke; 2],
     ) {
-        self.smoke.prepare(device, queue, &self.uniform, art, smoke);
+        self.smoke.prepare(
+            device,
+            queue,
+            &self.uniform,
+            (&self.palette, &self.weather_tiles),
+            art,
+            smoke,
+        );
     }
     pub fn combat(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
         if self.battle.is_none() {
@@ -881,7 +888,11 @@ impl SimRenderer {
             0.,
         ]);
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
-        self.smoke.update(queue, camera);
+        self.smoke.update(
+            queue,
+            camera,
+            size[0] as f32 / (size[1] as f32 * camera.view_fraction),
+        );
         let mut entries = Vec::with_capacity(11 * 1024);
         for row in std::iter::once(&weather.palette).chain(weather.fog_palette.iter()) {
             for rgb in row {

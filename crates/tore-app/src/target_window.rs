@@ -26,12 +26,18 @@ impl Refresh {
     }
 }
 
-/// Player-eye view with the target at the center. Roll stays level for readable
-/// instrument imagery, while yaw and elevation follow the actual sight line.
+/// Camera on the player-to-target segment, at most one nautical mile from the
+/// subject. Nearby targets retain the player-eye position. Roll stays level.
 pub fn camera(eye: [f64; 3], target: [f64; 3]) -> crate::terrain::Camera {
     let delta: [f64; 3] = std::array::from_fn(|i| target[i] - eye[i]);
     let mut camera = crate::terrain::Camera::new();
-    camera.position = eye.map(|v| v as f32);
+    let distance = delta.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let maximum = tore_sim::sensors::FEET_PER_NAUTICAL_MILE;
+    camera.position = if distance > maximum {
+        std::array::from_fn(|i| (target[i] - delta[i] * maximum / distance) as f32)
+    } else {
+        eye.map(|v| v as f32)
+    };
     camera.yaw = delta[0].atan2(delta[2]) as f32;
     camera.pitch = delta[1].atan2(delta[0].hypot(delta[2])) as f32;
     camera.weather_slot = 4;
@@ -204,15 +210,15 @@ mod tests {
     fn distant_target_surfaces_retain_distinct_depths() {
         let mut camera = camera([0.; 3], [0., 0., 60000.]);
         fit(&mut camera, [[-20., -10., 59950.], [20., 10., 60050.]]);
-        assert_eq!(camera.near_clip, 29975.);
+        assert_eq!(camera.near_clip, 3013.);
         let depth = |near: f32, z: f32| {
             let far = 2200000_f32;
             (far / (far - near) * z - near * far / (far - near)) / z
         };
         // The old one-foot near plane cannot resolve surfaces 1.5 inches apart.
         assert_eq!(depth(1., 60000.), depth(1., 60000.125));
-        assert!(depth(camera.near_clip, 60000.) < depth(camera.near_clip, 60000.125));
-        assert!(camera.near_clip < 59950.);
+        assert!(depth(camera.near_clip, 6076.) < depth(camera.near_clip, 6076.125));
+        assert!(camera.near_clip < 6026.);
         assert_eq!(crate::terrain::Camera::new().near_clip, 1.);
     }
 
@@ -243,22 +249,37 @@ mod tests {
     }
 
     #[test]
-    fn camera_uses_player_eye_and_full_sight_line() {
+    fn camera_stays_on_the_sight_line_within_one_nautical_mile() {
         use tore_sim::attitude::{Basis, dot};
         let eye = [1200., 4500., -300.];
         for target in [
             [1800., 6500., 400.],
             [0., 500., -5000.],
             [1200., 9000., -300.],
+            [18000., -6500., 40000.],
+            [1200., 4500., 5776.], // Exactly one nautical mile.
         ] {
             let camera = camera(eye, target);
-            assert_eq!(camera.position, eye.map(|v| v as f32));
-            let basis = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.);
             let delta = std::array::from_fn(|i| target[i] - eye[i]);
-            assert!(dot(delta, basis.right).abs() < 0.001);
-            assert!(dot(delta, basis.up).abs() < 0.001);
-            assert!(dot(delta, basis.forward) > 0.);
+            let distance = dot(delta, delta).sqrt();
+            let to_target = std::array::from_fn(|i| target[i] - f64::from(camera.position[i]));
+            let remaining = dot(to_target, to_target).sqrt();
+            assert!((remaining - distance.min(6076.)).abs() < 0.01);
+            if distance <= 6076. {
+                assert_eq!(camera.position, eye.map(|v| v as f32));
+            }
+            let along = dot(to_target, delta) / dot(delta, delta);
+            assert!((0. ..=1.).contains(&along));
+            let off_line: [f64; 3] = std::array::from_fn(|i| to_target[i] - along * delta[i]);
+            assert!(dot(off_line, off_line).sqrt() < 0.01);
+            let basis = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.);
+            assert!(dot(to_target, basis.right).abs() < 0.01);
+            assert!(dot(to_target, basis.up).abs() < 0.01);
+            assert!(dot(to_target, basis.forward) > 0.);
         }
+        let coincident = camera(eye, eye);
+        assert_eq!(coincident.position, eye.map(|v| v as f32));
+        assert!(coincident.yaw.is_finite() && coincident.pitch.is_finite());
     }
 
     #[test]

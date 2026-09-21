@@ -272,10 +272,16 @@ restricted native research flight keeps its clean configuration.
 
 `combat::smoke` owns bounded, fixed-step puff histories independently of rendering
 and guidance. The app supplies engine outlet positions once per combat tick;
-contrails retain traveled-path distance and share the smoke budget.
+contrails retain two minutes of history in a separate 72,000-puff budget.
 [Smoke and contrail rules](spec/damage-smoke.md) define rates, size and fade.
-The app's smoke pass sorts original keyed sprite billboards for
-each camera, blends them without depth writes, and depth-tests against the world.
+The app's smoke pass retains original indexed smoke artwork and resolves it
+through each camera's current weather palette and haze remaps. Clouds and smoke
+share directional sunset lighting and air/cloud occlusion. It sorts keyed
+billboards for each camera, blends them without depth writes, and depth-tests
+against the world. It culls offscreen puffs without deleting their history,
+then uploads one 24-byte instance per visible puff; the vertex shader builds
+its six billboard vertices. Age and expiry remain fixed-step CPU state.
+Coverage is premultiplied only after lighting to preserve transparent edges.
 Gun release dispersion is sampled once in the shared fixed-step projectile
 path using a stable projectile-identity hash. Cannons release individual physical
 bullets at a fixed-step cadence; every third bullet draws one tracer ribbon,

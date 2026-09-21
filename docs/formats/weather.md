@@ -324,10 +324,18 @@ indirect coupling is not excluded. A renderer-independent service should take
 explicit terrain, neighbor geometry, time and aircraft coefficient, with
 per-aircraft mutable disturbance state rather than an invented global gust field.
 
+The app's [smoke and contrail lighting](../spec/damage-smoke.md) now consumes
+these same per-view palettes/remaps and the cloud lighting treatment instead of
+freezing smoke colors at import. [GPU and visual checks](../baselines/smoke-contrails.md#cloud-matched-lighting)
+cover the shared rendering path.
+
 ## Turbulence generator and wind-line contracts
 
-The mission `wind` line is a compass heading in whole degrees and a speed in
-feet per second. `0x481e70` multiplies the heading by 182 into a binary angle
+The mission `wind` line is a signed compass heading in whole degrees and a speed
+in feet per second. Local `FA_2.LIB` theater metadata confirms `TVIET.MM` uses
+`wind -76 20` and `VLA.MM` uses `wind -155 20`; negative headings are valid data.
+[Load validation and input hashes](../baselines/mission-wind.md) record the check.
+`0x481e70` multiplies the heading by 182 into a binary angle
 and stores the speed unscaled; `0x476f3d` then advances position by
 `speed * ticks` rotated by that angle, and `_Rotate2@8` turns `(0, d)` into
 `(d sin h, d cos h)`, so zero is north and ninety is east. A mission without a

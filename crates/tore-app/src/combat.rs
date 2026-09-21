@@ -87,7 +87,7 @@ impl TargetPresentation {
 
 pub struct Combat {
     pub state: live::State,
-    pub smoke_art: crate::menu::Sprite,
+    pub smoke_art: Pic,
     contrail_offsets: Vec<Vector>,
     contrail_sortie: u64,
     pub contrails: tore_sim::combat::smoke::Smoke,
@@ -236,20 +236,8 @@ impl Combat {
         if smoke.width != 256 || smoke.height != 43 {
             return Err("unreviewed smoke sheet dimensions".into());
         }
-        let mut smoke_rgba = smoke.rgba(&h.palette);
-        for (index, color) in smoke.pixels.iter().zip(smoke_rgba.chunks_exact_mut(4)) {
-            if *index == 255 {
-                color.fill(0);
-            }
-        }
-        let smoke_art = crate::menu::Sprite {
-            width: smoke.width,
-            height: smoke.height,
-            rgba: smoke_rgba,
-            glyphs: smoke.glyphs,
-        };
         Ok(Self {
-            smoke_art,
+            smoke_art: smoke,
             contrail_offsets: h.contrail_offsets(),
             contrail_sortie: 0,
             contrails: Default::default(),

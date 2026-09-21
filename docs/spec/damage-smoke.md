@@ -97,21 +97,22 @@ unknown. Rendering continues at the normal frame rate.
 
 Engine contrails are an opinionated addition requested by John on 2026-09-21.
 Each engine emits 10 pale puffs per second behind its outlet, including healthy
-aircraft. The trail builds as the aircraft moves and retains 5 statute miles
-(26,400 feet) of traveled path. Opacity stays at 0.65 through 4 miles (21,120
-feet), then fades linearly to zero over the final mile, per John's follow-up
-request on 2026-09-21.
-Distance follows the outlet path through turns and speed changes. Puffs remain
-at their emitted world positions. Contrails use the reduced missile radius and
-growth, capped at 14 feet after four seconds, an agent-selected fit.
+aircraft. As requested by John on 2026-09-21, each puff now lasts two minutes
+(14,400 simulation ticks). It keeps opacity 0.65 through one minute (7,200
+ticks), then fades linearly to zero over the final minute. At 1:30 its opacity
+is 0.325; at 2:00 it is removed. This replaces the distance-based trail limit.
+Speed, turns and distance from the aircraft do not affect puff opacity or life.
+Pausing freezes puff age. Puffs remain at their emitted world positions.
+Contrails use the reduced missile radius and growth, capped at 14 feet after
+four seconds, an agent-selected fit.
 
 Player emission requires an airborne, living aircraft with engine power and
 fuel. Other living airborne aircraft emit from their rendered engine positions;
 individual target engine power is unavailable, so their emission is fitted.
 As requested by John on 2026-09-21, each aircraft has a randomly selected onset
 altitude between 30,000 and 35,000 feet above sea level. Both engines share that
-threshold. Emission begins at or above it and stops below it, with residual
-puffs clearing by the existing absent-source rule. The agent-selected fit uses
+threshold. Emission begins at or above it and stops below it, with previously emitted
+puffs continuing their normal two-minute life and fade. The agent-selected fit uses
 a deterministic pseudorandom hash of aircraft instance ID and sortie counter,
 starting at zero and incrementing on reset. This keeps the threshold stable
 within a sortie and headless runs reproducible. No weather threshold is imposed.
@@ -121,15 +122,30 @@ center of reviewed nozzle lateral/vertical bounds and the aftmost nozzle point,
 plus 2 feet aft. A-4E, Su-25, F-22 and F/A-XX use a fitted fallback: 2 feet behind
 the model's aftmost point, at body-center height, with twin outlets offset by
 15% of the model half-span. These fallback points are not recovered engine
-coordinates. Absent sources advance their residual trail distance by 55 feet
-per tick, clearing it within four seconds, an agent-selected cleanup fit.
+coordinates. Stopping emission or losing the source does not shorten existing
+puffs' lives. Restart clears them.
 
-All smoke has no gameplay sensor effect. Combat smoke and cosmetic contrail
-histories each discard their oldest puff above 8,192 puffs. The renderer shows
-at most 8,192 combined puffs, giving combat smoke priority and selecting newest
-contrail puffs first. This can shorten contrails in crowded scenes. Reset clears
-all smoke and outlet history. Cosmetic contrails are separate from combat-service
-replay state, whose tapes do not record engine power.
+As requested by John on 2026-09-21, contrails, aircraft damage smoke and missile
+motor smoke use the same weather lighting as cloud layers. Preserve the original
+palette indices until rendering so every view applies its current weather/time
+palette, altitude-dependent haze remaps, directional sunset glow and cloud/air
+occlusion. White trails must darken or tint with the surrounding clouds at dusk
+and night instead of retaining the launch-time aircraft palette. Dark damage
+smoke retains its source dark tones under that same lighting. The shared cloud
+lighting is fitted host presentation, not newly recovered retail behavior.
+Transparency, emission, size and lifetime rules above are unchanged. Bilinear
+sampling filters coverage separately from color; apply lighting to the covered
+color, then premultiply it by final coverage/opacity for blending. Transparent
+edges must not become glowing rectangles when fog or sunset light is applied.
+
+All smoke has no gameplay sensor effect. Combat smoke retains its 8,192-puff
+budget. Agent choice: contrails have a separate 72,000-puff budget, enough for
+all 30 Quick Mission aircraft with two engines each, 10 puffs per second, and
+120 seconds of history. Only populations beyond that bound evict old puffs.
+The renderer supports both budgets together, submitting one instance per visible
+puff and culling billboards outside each camera view without removing history.
+Reset clears all smoke and outlet history. Cosmetic contrails are separate from
+combat-service replay state, whose tapes do not record engine power.
 Original 43-pixel smoke cells at x=0 (dark) and x=94 (pale), with
 palette index 255 keyed transparent, are camera-facing, blended, depth-tested and ordered
 back to front. Size, lifetime, placement and opacity are fitted, not retail parity.

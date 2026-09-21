@@ -2,8 +2,10 @@
 use crate::attitude::Vector;
 use std::collections::{BTreeMap, VecDeque};
 
-pub const CONTRAIL_LENGTH_FT: f64 = 26400.;
-pub const CONTRAIL_FADE_START_FT: f64 = 21120.;
+pub const CONTRAIL_LIFETIME_TICKS: u16 = 120 * 120;
+pub const CONTRAIL_FADE_START_TICKS: u16 = 60 * 120;
+/// All 30 Quick Mission aircraft, two engines each, ten puffs/s for two minutes.
+pub const MAX_CONTRAIL_PUFFS: usize = 30 * 2 * 10 * 120;
 
 /// Opinionated onset altitude in feet MSL. Stable per aircraft and sortie so
 /// visual randomness is reproducible and never flickers between simulation ticks.
@@ -29,7 +31,7 @@ impl Kind {
         match self {
             Self::Missile => 480,
             Self::Aircraft => 960,
-            Self::Contrail => u16::MAX,
+            Self::Contrail => CONTRAIL_LIFETIME_TICKS,
         }
     }
 }
@@ -38,7 +40,6 @@ pub struct Puff {
     pub position: Vector,
     pub kind: Kind,
     pub age: u16,
-    trail: Option<(u64, f64)>,
 }
 impl Puff {
     pub fn radius(&self) -> f64 {
@@ -56,10 +57,11 @@ impl Puff {
                 }
     }
     pub fn opacity(&self) -> f32 {
-        if let Some((_, distance)) = self.trail {
+        if self.kind == Kind::Contrail {
             return 0.65
-                * ((CONTRAIL_LENGTH_FT - distance) / (CONTRAIL_LENGTH_FT - CONTRAIL_FADE_START_FT))
-                    .clamp(0., 1.) as f32;
+                * ((f32::from(CONTRAIL_LIFETIME_TICKS) - f32::from(self.age))
+                    / f32::from(CONTRAIL_LIFETIME_TICKS - CONTRAIL_FADE_START_TICKS))
+                .clamp(0., 1.);
         }
         0.65 * (1. - f32::from(self.age) / f32::from(self.kind.lifetime()))
     }
@@ -80,8 +82,7 @@ impl Smoke {
                 puff.position[1] += 2. / 120.;
             }
         }
-        self.puffs
-            .retain(|p| p.kind == Kind::Contrail || p.age < p.kind.lifetime());
+        self.puffs.retain(|p| p.age < p.kind.lifetime());
         for (position, kind) in sources {
             if !self
                 .ticks
@@ -96,49 +97,29 @@ impl Smoke {
                 position,
                 kind,
                 age: 0,
-                trail: None,
             });
         }
     }
-    /// App bridge supplies world-space engine outlets once after each `step`.
-    /// Distance follows each outlet's actual path, including turns and speed changes.
+    /// App bridge supplies moving world-space engine outlets once per `step`.
+    /// Source motion controls emission only; existing puffs expire by age.
     pub fn contrails(&mut self, sources: impl IntoIterator<Item = (u64, Vector)>) {
         let current: BTreeMap<_, _> = sources.into_iter().collect();
-        let distances: BTreeMap<_, _> = current
-            .iter()
-            .map(|(&id, &p)| {
-                let previous = self.outlets.get(&id).copied().unwrap_or(p);
-                let distance = (0..3)
-                    .map(|i| (p[i] - previous[i]).powi(2))
-                    .sum::<f64>()
-                    .sqrt();
-                (id, distance)
-            })
-            .collect();
-        for puff in &mut self.puffs {
-            if let Some((id, distance)) = &mut puff.trail {
-                // A stopped source fades its remaining trail over at most four seconds.
-                *distance += distances
-                    .get(id)
-                    .copied()
-                    .unwrap_or(CONTRAIL_LENGTH_FT / 480.);
-            }
-        }
-        self.puffs
-            .retain(|p| p.trail.is_none_or(|(_, d)| d < CONTRAIL_LENGTH_FT));
         if self.ticks.is_multiple_of(12) {
             for (&id, &position) in &current {
-                if distances[&id] <= 0. {
+                if self
+                    .outlets
+                    .get(&id)
+                    .is_none_or(|previous| *previous == position)
+                {
                     continue;
                 }
-                if self.puffs.len() == MAX_PUFFS {
+                if self.puffs.len() == MAX_CONTRAIL_PUFFS {
                     self.puffs.pop_front();
                 }
                 self.puffs.push_back(Puff {
                     position,
                     kind: Kind::Contrail,
                     age: 0,
-                    trail: Some((id, 0.)),
                 });
             }
         }
@@ -170,7 +151,6 @@ mod tests {
             position: [0.; 3],
             kind: Kind::Missile,
             age: 0,
-            trail: None,
         };
         assert_eq!(puff.radius(), 2.);
         puff.age = 240;
@@ -180,50 +160,78 @@ mod tests {
     }
 
     #[test]
-    fn contrails_follow_distance_and_fade_over_the_fifth_mile() {
+    fn contrails_fade_after_one_minute_and_expire_at_two() {
         let mut smoke = Smoke::default();
-        for tick in 1..=120 {
+        for tick in 1..=12 {
             smoke.step([]);
             smoke.contrails([
                 (0, [0., 1000., f64::from(tick) * 5.]),
-                (1, [10., 1000., f64::from(tick) * 5.]),
+                (1, [10., 1000., f64::from(tick) * 20.]),
             ]);
         }
-        assert_eq!(smoke.puffs.len(), 20);
-        assert!(
-            smoke
-                .puffs
-                .iter()
-                .all(|p| p.opacity() == 0.65 && p.position[1] == 1000.)
-        );
-        // Retain just the newest puff, then move around a corner. Distance is
-        // accumulated along the path, not measured straight back to the aircraft.
-        let mut puff = smoke.puffs.back().unwrap().clone();
-        puff.trail = Some((1, 0.));
-        smoke.puffs.clear();
-        smoke.puffs.push_back(puff);
-        for (position, opacity) in [
-            ([10., 1000., 21720.], 0.65),
-            ([2650., 1000., 21720.], 0.325),
-        ] {
-            smoke.step([]);
-            smoke.contrails([(1, position)]);
-            assert!((smoke.puffs[0].opacity() - opacity).abs() < 1e-6);
-        }
-        smoke.step([]);
-        smoke.contrails([(1, [5290., 1000., 21720.])]);
-        assert!(smoke.puffs.is_empty());
-        for tick in 1..=120 {
-            smoke.step([]);
-            smoke.contrails([(1, [5290. + f64::from(tick), 1000., 21720.])]);
-        }
-        assert!(!smoke.puffs.is_empty());
-        for _ in 0..480 {
+        assert_eq!(smoke.puffs.len(), 2);
+        let positions: Vec<_> = smoke.puffs.iter().map(|p| p.position).collect();
+        // Disappearing outlets must not accelerate the fade. These two puffs
+        // were emitted at different speeds but have the same age and opacity.
+        for age in 1..=14400 {
             smoke.step([]);
             smoke.contrails([]);
+            if [480, 7200, 10800, 14399].contains(&age) {
+                assert_eq!(
+                    smoke.puffs.iter().map(|p| p.position).collect::<Vec<_>>(),
+                    positions
+                );
+                let expected = match age {
+                    10800 => 0.325,
+                    14399 => 0.65 / 7200.,
+                    _ => 0.65,
+                };
+                for puff in &smoke.puffs {
+                    assert!((puff.opacity() - expected).abs() < 1e-6);
+                }
+            }
         }
         assert!(smoke.puffs.is_empty());
         assert!(smoke.outlets.is_empty());
+        let mut puff = Puff {
+            position: [0.; 3],
+            kind: Kind::Contrail,
+            age: 7201,
+        };
+        assert!(puff.opacity() < 0.65 && puff.opacity() > 0.64);
+        puff.age = 14400;
+        assert_eq!(puff.opacity(), 0.);
+    }
+
+    #[test]
+    fn contrail_budget_keeps_the_fading_minute_for_a_full_mission() {
+        assert_eq!(MAX_CONTRAIL_PUFFS, 60 * 10 * 120);
+        let mut smoke = Smoke::default();
+        smoke.puffs.resize(
+            12000,
+            Puff {
+                position: [0.; 3],
+                kind: Kind::Contrail,
+                age: 7200,
+            },
+        );
+        smoke.ticks = 11;
+        smoke.outlets.insert(0, [0.; 3]);
+        smoke.step([]);
+        smoke.contrails([(0, [0., 0., 1.])]);
+        assert_eq!(smoke.puffs.len(), 12001);
+        assert_eq!(smoke.puffs[0].age, 7201);
+        assert!(smoke.puffs[0].opacity() < 0.65);
+        smoke.puffs.resize(
+            MAX_CONTRAIL_PUFFS,
+            Puff {
+                position: [0.; 3],
+                kind: Kind::Contrail,
+                age: 14399,
+            },
+        );
+        smoke.step([]);
+        assert_eq!(smoke.puffs.len(), 12001);
     }
 
     #[test]

@@ -293,9 +293,10 @@ flight; normal HUD and instrument windows remain available.
 
 ## Target camera (view 4)
 
-View 4 automatically magnifies the target to fill the image from the player
-aircraft's position, including the relative elevation. It shows a grayscale live
-target image, aircraft/object type, damage bar,
+View 4 automatically magnifies the target to fill the image along the player's
+sight line, including elevation. The camera sits no farther than one nautical
+mile from the target, staying at the player position for nearer targets. It shows
+a grayscale live target image, aircraft/object type, damage bar,
 clock bearing with Hi/Lo, and range/speed alternating every three simulation
 seconds. HI/LO appears only beyond 10 degrees above/below the horizontal
 plane through your aircraft, independent of pitch and bank. A black bar is undamaged; white grows with damage. Existing pilot skill
@@ -474,6 +475,11 @@ into local wing or fin tears, and a reviewed original damaged body appears only
 when its missing region matches the hit. Global half-health still starts dark
 smoke. Destroyed targets remain visible during their existing fall.
 Powered missiles leave white smoke that disperses after burnout or impact.
+Contrails, aircraft damage smoke and missile smoke share the clouds' live weather
+palette, sunset lighting and haze, so they darken and tint at dusk and night.
+Contrails last two simulation minutes: steady opacity for one minute, then
+fade smoothly to invisible during the last minute. Pausing freezes their age;
+stopping emission leaves existing puffs to finish their normal lifetime.
 Reset restores intact aircraft and clears smoke. Regional thresholds, visual changes and smoke timing are fitted. Detached reviewed pieces inherit aircraft motion, fall, then disappear
 with a brief ground-hit animation. AI damage uses the fitted health-to-authority rule in the [AI spec](spec/ai.md#live-integration-and-authored-boundaries); the player retains the existing flight adapters. See [damage and smoke behavior](spec/damage-smoke.md).
 

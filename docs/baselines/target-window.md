@@ -23,8 +23,10 @@ damage endpoints/clamping, and player-directed attack underlining. Hi/Lo tests
 cover just inside, exactly at, and just outside +/-10 degrees at several ranges,
 plus overhead, directly below and coincident targets. Camera tests
 project a synthetic model through the render camera matrix at multiple ranges,
-from above/below and overhead. They verify the player-eye position, full sight
-line, fit within the text margins, and filling at least one image dimension.
+from above/below and overhead. They verify the camera stays on the player-target
+segment within one nautical mile of the subject, retains player position for
+nearby targets, handles coincident positions, preserves the full sight line,
+and fills one image dimension without entering the text margins.
 
 Dummy tests cover all six skill menus, exclusion of the human slot, immunity to
 enemy-skill overrides, mixed normal/Dummy missions, and the live target mirror.
@@ -44,6 +46,11 @@ rates, and skip missed updates without catch-up bursts.
 The display-capable Linux host passed `cargo run --locked -p tore-app --
 --smoke-test`. These captures were visually inspected:
 
+- One-nautical-mile camera limit: `--live-fire --hud-target-preview -90,-2,60000
+  --capture-flight .local/target-one-nm-far.ppm` and the same command with
+  `30,15,4000` written to `.local/target-one-nm-near.ppm`. Both targets fill the
+  view. The far readout remains 9.9 NM from the player while the camera is within
+  1 NM of the target; the nearer target reads 0.7 NM and uses player position.
 - Player-perspective elevated target, large windows: `--live-fire
   --hud-target-preview 30,15,12000 --capture-flight
   .local/target-player-perspective.ppm`.

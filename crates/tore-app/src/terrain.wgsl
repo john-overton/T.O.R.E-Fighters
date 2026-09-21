@@ -710,29 +710,35 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
  return vec4<f32>(in.color,1.0);
 }
 
+// Shared non-emissive lighting for clouds and every smoke/contrail family.
+fn cloud_lighting(color:vec3<f32>,direction:vec3<f32>,altitude:f32)->vec3<f32> {
+ let ray=direction/max(length(direction),0.00001);
+ let lit=cloud_solar_glow(color,ray,1.0-clamp(haze(length(direction)),0.0,1.0));
+ return aerial_perspective(lit,direction,altitude);
+}
+
 @fragment fn cloud_fragment(in:VertexOut)->@location(0) vec4<f32>{
  let tex=weather_tile(in.uv,i32(in.layer),0,-1,-1,ray_rows(in.distance,in.altitude));
  if tex.a<0.5 {discard;}
- let lit=cloud_solar_glow(tex.rgb,normalize(in.direction),1.0-clamp(haze(length(in.direction)),0.0,1.0));
- return scenery(aerial_perspective(lit,in.direction,in.altitude));
+ return scenery(cloud_lighting(tex.rgb,in.direction,in.altitude));
 }
 
-struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) opacity:f32, @location(2) distance:f32 }
-@vertex fn smoke_vertex(@location(0) center:vec3<f32>,@location(1) offset:vec2<f32>,@location(2) uv:vec2<f32>,@location(3) opacity:f32)->SmokeOut {
+struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) opacity:f32, @location(2) distance:f32, @location(3) direction:vec3<f32>, @location(4) altitude:f32 }
+@vertex fn smoke_vertex(@builtin(vertex_index) vertex:u32,@location(0) center:vec3<f32>,@location(1) radius:f32,@location(2) cell:f32,@location(3) opacity:f32)->SmokeOut {
+ let corners=array<vec2<f32>,6>(vec2(0.0,0.0),vec2(1.0,0.0),vec2(1.0,1.0),vec2(0.0,0.0),vec2(1.0,1.0),vec2(0.0,1.0));
+ let corner=corners[vertex];
+ let offset=vec2<f32>(corner.x*2.0-1.0,1.0-corner.y*2.0)*radius;
+ let uv=vec2<f32>((cell+0.5+corner.x*42.0)/256.0,(0.5+corner.y*42.0)/43.0);
  let position=center+scene.right.xyz*offset.x+scene.up.xyz*offset.y;
  let p=position-scene.eye.xyz;let z=dot(p,scene.forward.xyz);
  let near=max(scene.view.x,1.0);let far=2200000.0;let f=1.7320508*scene.up.w;
  var out:SmokeOut;
  out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
- out.uv=uv;out.opacity=opacity;out.distance=length(p);return out;
+ out.uv=uv;out.opacity=opacity;out.distance=length(p);out.direction=p;out.altitude=position.y;return out;
 }
 @fragment fn smoke_fragment(in:SmokeOut)->@location(0) vec4<f32> {
- let size=vec2<i32>(textureDimensions(engine_art));
- let p=in.uv*vec2<f32>(size)-vec2(0.5);let base=floor(p);let f=p-base;
- var color=vec4(0.0);
- for(var y=0;y<2;y++){for(var x=0;x<2;x++){
-  let c=textureLoad(engine_art,clamp(vec2<i32>(base)+vec2(x,y),vec2(0),size-vec2(1)),0);
-  color+=c*select(1.-f.x,f.x,x==1)*select(1.-f.y,f.y,y==1);
- }}
- return color*in.opacity*(1.0-haze(in.distance));
+ let color=sample_tile(in.uv,0,0,-1,-1,ray_rows(in.distance,in.altitude));
+ let alpha=color.a*in.opacity*(1.0-clamp(haze(in.distance),0.0,1.0));
+ let lit=cloud_lighting(color.rgb,in.direction,in.altitude);
+ return vec4<f32>(lit*alpha,alpha);
 }

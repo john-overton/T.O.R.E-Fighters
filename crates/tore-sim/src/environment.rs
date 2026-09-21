@@ -696,8 +696,11 @@ mod tests {
         for (hour, minute, parameter) in [(24, 0, 0), (-1, 0, 0), (0, 60, 0), (0, 0, 256)] {
             assert!(Configuration::new(module.clone(), hour, minute, parameter, None).is_err());
         }
-        for wind in [[-1, 7], [361, 7], [160, -1], [160, 201]] {
+        for wind in [[-361, 7], [361, 7], [160, -1], [160, 201]] {
             assert!(Configuration::new(module.clone(), 12, 0, 0, Some(wind)).is_err());
+        }
+        for wind in [[-360, 20], [-155, 20], [-76, 20], [-1, 7], [360, 200]] {
+            assert!(Configuration::new(module.clone(), 12, 0, 0, Some(wind)).is_ok());
         }
         assert!(Configuration::new(module, 23, 59, 255, None).is_ok());
     }
