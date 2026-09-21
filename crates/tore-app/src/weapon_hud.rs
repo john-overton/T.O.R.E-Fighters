@@ -204,34 +204,34 @@ pub fn draw(
             paint.line((x - 8., y + 3.), (x - 8., y - 3.));
         }
     }
-    paint.text(font, "ARM", 207, 395);
+    paint.text(font, "ARM", 207, 259);
     paint.text(
         font,
         &format!("{} {}", state.rounds(state.selected), w.hud_name),
         207,
-        407,
+        271,
     );
     let ready = state.readiness(l);
     let percent = format!("{}%", state.estimated_hit_percent(l));
-    paint.text(font, &percent, 207, 422);
+    paint.text(font, &percent, 207, 283);
     if in_range && state.sensors.tick() % 60 < 30 {
         let width: usize = percent
             .bytes()
             .map(|c| font.glyphs[c as usize].advance)
             .sum();
-        paint.text(font, "IN RNG", 211 + width as i32, 422);
+        paint.text(font, "IN RNG", 211 + width as i32, 283);
     } else if !matches!(
         ready,
         live::Readiness::Ready | live::Readiness::TargetDestroyed
     ) {
-        paint.text(font, ready.label(), 207, 437);
+        paint.text(font, ready.label(), 207, 295);
     }
     if matches!(profile.guidance, Guidance::Active | Guidance::Supported)
         && let Some(o) = observed
     {
         let closure = missiles::closure(s.position, s.velocity, o.position, o.velocity) / 1.68781;
-        paint.text(font, &format!("R {:.1}", o.range / missiles::NMI), 402, 407);
-        paint.text(font, &format!("C {closure:+.0}"), 402, 419);
+        paint.text(font, &format!("R {:.1}", o.range / missiles::NMI), 402, 259);
+        paint.text(font, &format!("C {closure:+.0}"), 402, 271);
         let aspect = if missiles::length(o.velocity) > 1e-9 {
             let forward = tore_sim::attitude::unit(o.velocity);
             let los = tore_sim::attitude::unit(missiles::sub(s.position, o.position));
@@ -245,7 +245,7 @@ pub fn draw(
         } else {
             "A --".into()
         };
-        paint.text(font, &aspect, 402, 431);
+        paint.text(font, &aspect, 402, 283);
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -366,9 +366,9 @@ fn draw_gun(
             station.weapon.hud_name
         ),
         207,
-        407,
+        271,
     );
-    paint.text(font, if state.armed { "ARM" } else { "SAFE" }, 207, 395);
+    paint.text(font, if state.armed { "ARM" } else { "SAFE" }, 207, 259);
     let l = combat::launcher(s);
     if !state.armed
         || !l.alive
@@ -395,18 +395,18 @@ fn draw_gun(
         .ok()
         .flatten();
     let Some(solution) = solution else {
-        paint.text(font, "NO SOL", 207, 422);
+        paint.text(font, "NO SOL", 207, 283);
         return;
     };
     paint.text(
         font,
         if solution.radar { "RADAR" } else { "1000 FT" },
         207,
-        422,
+        283,
     );
     let range = observation.map(|c| missiles::length(missiles::sub(c.position, s.position)));
     if let Some(range) = range {
-        paint.text(font, &format!("R {:.2}", range / missiles::NMI), 402, 407);
+        paint.text(font, &format!("R {:.2}", range / missiles::NMI), 402, 259);
     }
     let Some((x, y)) = projected(missiles::sub(solution.point, s.position), s, zoom) else {
         return;

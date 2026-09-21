@@ -239,6 +239,28 @@ impl CockpitRenderer {
             },
             mask.size(),
         );
+        let aperture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Source HUD glass aperture"),
+            size: art.size(),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let aperture_pixels = crate::hud_aperture::mask(source, id);
+        debug_assert_eq!(aperture_pixels.len(), source.width * source.height);
+        queue.write_texture(
+            aperture.as_image_copy(),
+            &aperture_pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(self.art_size[0]),
+                rows_per_image: Some(self.art_size[1]),
+            },
+            aperture.size(),
+        );
         self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Body-fixed cockpit art and HUD"),
             layout: &self.pipeline.get_bind_group_layout(0),
@@ -280,6 +302,12 @@ impl CockpitRenderer {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: self.uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(
+                        &aperture.create_view(&Default::default()),
+                    ),
                 },
             ],
         }));

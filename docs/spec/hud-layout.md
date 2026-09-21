@@ -35,18 +35,49 @@ to y=235, a fitted twelve-pixel downward adjustment that leaves clear space
 above and below. Their horizontal positions stay unchanged.
 
 Normal navigation omits AGL and vertical speed. Retain them for active ILS
-approaches when weapon readouts are inactive, at reference y=426. The bank
-scale remains the non-weapon display's bottom cue. Make it a shallow circular
+approaches when weapon readouts are inactive: AGL at (402,259) beneath altitude
+and V/S at (207,259) beneath airspeed. No fixed readout occupies the space
+between the ladder and bank scale in ordinary NAV. The bank scale sits just
+below the ladder: its center tick is at y=358, the fixed index spans y=359..366,
+and the centered numeric label sits at y=374. This raises the scale by 66
+reference pixels without changing its width or bank-angle mapping. Make it a shallow circular
 arc 223 reference pixels wide, showing angular offsets within plus/minus
 30 degrees of the current bank. Ticks remain ten degrees apart, with numeric
 labels every thirty degrees and full-roll wrapping. The fixed index is below
 the arc. These are display geometry choices, not aircraft bank limits.
 
-Weapon status, ammunition and mode/estimate rows move down by 116 reference
-pixels, beginning at y=395. Radar range/closure/aspect move down with them.
+At John's request, weapon information sits directly below the boxed values.
+Status, ammunition, mode/estimate and readiness occupy x=207, y=259/271/283/295
+below airspeed. Range, closure and aspect occupy x=402, y=259/271/283 below
+altitude. These fitted positions retain a gap after the current-value boxes.
 The full HUD clip extends through y=450. The target cue and gun-pipper inset
 extends downward through y=380; off-HUD cues retain true three-dimensional
 bearing. Zoom, window aspect and head-look use the existing HUD transform.
+
+## Cockpit glass and layer order
+
+Requested by John after the layout checkpoint was committed. When cockpit
+artwork is visible, confine the forward HUD to the aircraft's reviewed glass
+aperture in source-art coordinates. Use the cockpit's existing translation,
+cover-fit scale and zoom for the aperture; it must follow the glass during
+head-look and resizing rather than remain at a fixed screen rectangle.
+The aperture is a fitted polygon based on visual inspection of the user's
+imported cockpit image, not recovered original clipping behavior.
+
+Composite the world first, then the masked HUD, then the premultiplied cockpit
+art and live mirror contents. Opaque frame pixels must cover HUD symbols;
+transparent glass must reveal them. Preserve smooth artwork edges, shared
+cockpit/HUD fading, palette lighting and independent instrument/menu overlays.
+Apply this to flight symbols, weapon cues and target markers alike. Clipping
+can hide lower rows on smaller glass apertures; this pass does not reflow them.
+
+When the cockpit is switched off or hidden by the existing below-1x wide-view
+mode, retain the independent HUD without the invisible glass mask. Turning off
+the HUD must leave cockpit art and mirrors intact. Cache the source-size mask
+per prepared aircraft; do not rebuild or read back it every frame. Only the
+reviewed cockpit dimensions are accepted. An unreviewed source uses no cockpit
+HUD aperture until its glass is reviewed, rather than leaking across the frame.
+No imported picture or generated mask is committed.
 
 ## Startup and navigation mode
 

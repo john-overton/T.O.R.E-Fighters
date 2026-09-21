@@ -69,7 +69,7 @@ impl Paint<'_> {
 // rotates past a fixed index, keeping full rolls readable through +/-180.
 pub const HUD_CLIP: (i32, i32, i32, i32) = (174, 96, 292, 354);
 pub const AIM_BOTTOM: i32 = 390;
-const BANK_CENTER_Y: f64 = 201.;
+const BANK_CENTER_Y: f64 = 135.;
 const BANK_RADIUS: f64 = 223.;
 fn bank_point(angle: f64, radius: f64) -> (f64, f64) {
     let a = angle.to_radians();
@@ -101,9 +101,11 @@ fn bank_scale(p: &mut Paint<'_>, font: &Font, bank: f64) {
             );
         }
     }
-    p.line((320., 425.), (316., 432.));
-    p.line((316., 432.), (324., 432.));
-    p.line((324., 432.), (320., 425.));
+    let tip_y = BANK_CENTER_Y + BANK_RADIUS + 1.;
+    let base_y = tip_y + 7.;
+    p.line((320., tip_y), (316., base_y));
+    p.line((316., base_y), (324., base_y));
+    p.line((324., base_y), (320., tip_y));
 }
 fn bank_tick_angle(mark: i32, bank: f64) -> f64 {
     (f64::from(mark) - bank.to_degrees() + 180.).rem_euclid(360.) - 180.
@@ -266,8 +268,8 @@ pub fn draw(
                 air.map_or(s.position[1] - ground, |d| d.altitude_agl_ft)
                     .max(0.)
             ),
-            211,
-            426,
+            402,
+            259,
         );
         p.text(
             font,
@@ -275,8 +277,8 @@ pub fn draw(
                 "V/S {:+.0}",
                 air.map_or(s.vertical_speed * 60., |d| d.vertical_speed_fpm)
             ),
-            360,
-            426,
+            207,
+            259,
         );
     }
     if s.autopilot.mode() != tore_sim::autopilot::Mode::Off {
@@ -389,7 +391,7 @@ mod tests {
         let right = bank_point(30., BANK_RADIUS);
         assert!((right.0 - left.0 - 223.).abs() < 1e-9);
         assert!((center.1 - left.1 - 223. * (1. - 30f64.to_radians().cos())).abs() < 1e-9);
-        assert_eq!(center.1, 424.);
+        assert_eq!(center.1, 358.);
     }
     #[test]
     fn heading_wrap_and_horizon_projection() {

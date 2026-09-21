@@ -17,6 +17,7 @@ mod flight;
 mod flight_canvas;
 mod flight_ui;
 mod hud;
+mod hud_aperture;
 mod input;
 mod instruments;
 mod lens_flare;

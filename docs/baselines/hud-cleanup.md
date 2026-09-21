@@ -132,8 +132,9 @@ down twelve reference pixels. Ladder spacing is compressed by 25%, with rung
 width, five-degree labels and bank orientation preserved. The ladder window
 subsequently trims from 208 to 166 pixels high, preserving its upper edge. NAV retains the selected-target cue. AGL/VS are absent in
 ordinary NAV, including an inactive armed ILS, and retained for active ILS.
-The common layout is not clipped to each aircraft's differently shaped glass;
-low rows can overlay cockpit frames on aircraft with shorter HUD apertures.
+The common layout now clips to each aircraft's reviewed glass aperture and
+composites behind cockpit art. Lower rows outside smaller apertures are hidden,
+rather than drawn across cockpit frames.
 
 Review corrected negative TAS graduations exposed by the extended tape and
 ensured inactive ILS does not restore AGL/VS during normal NAV. Startup review
@@ -151,3 +152,63 @@ both executable asset guards, and documentation headers. Two optional GPU unit
 tests remain ignored; the explicit display smoke passes on NVIDIA RTX 4070/Vulkan.
 Thirty-eight captured scenarios cover the roster and mode/layout combinations;
 final NAV/GUN label captures confirm the displayed startup mode.
+
+## Cockpit glass and weapon rows
+
+The prior layout/damage/flight checkpoint was committed and pushed as
+`a067752`. This pass adds per-cockpit glass masks, cockpit-over-HUD composition,
+and weapon information immediately below the boxed speed/altitude values.
+Source-space aperture polygons are fitted from ten visually inspected cockpit
+images covering all thirteen selectable aircraft. F22/F/A-XX use a 1000x490
+source; the other reviewed families use 1280x490. SU33 artwork is shared by
+MiG-29, Su-25 and MiG-23. Source hashes and mask observations are retained in
+`.local/hud-layer-review/source-mask-review.csv`; no imported images or generated
+masks are tracked. Exact constants live in `hud_aperture.rs`, and visible rules
+in the [HUD spec](../spec/hud-layout.md#cockpit-glass-and-layer-order).
+
+Root review inspected both polygon overlays and the actual source-alpha-clipped
+masks. Actual cockpit captures exposed an A-4 transparent gap below the glass
+that admitted a small bank tick. Its lower boundary was corrected from source
+y=356 to y=337, and the other lower edges were reviewed conservatively against
+their support bars. Opaque frames and mirrors are excluded from the mask and
+composite above HUD pixels. The masks are cached once per aircraft preparation.
+
+Runtime evidence in `.local/hud-layer-review/` covers all aircraft on the ground
+and airborne, plus head-look, enlarged zoom, below-1x wide view, portrait/wide
+windows, armed guns and missile readouts. Head-look/zoom use the artwork's
+coordinates for clipping. Below-1x wide view exercises the shared cockpit-off
+mask bypass; an interactive cockpit-toggle test was not separately run.
+Screen-anchored instruments and diagnostic panels retain their overlay order.
+Weapon rows and active-ILS AGL/V/S sit below TAS/MSL at the normal view.
+The bank scale is raised 66 reference pixels to follow the bottom of the ladder,
+clearing the formerly empty NAV gap.
+There is no automatic reflow of other clipped symbols.
+
+Reviewed source identities and final mask coverage:
+
+| Cockpit family | Source PIC SHA-256 | Visible mask pixels |
+| --- | --- | ---: |
+| F18 | `6502dc3695e275143ece58989f5221f4c5f9f53d5ccddfe4b82217532c357d73` | 53180 |
+| RAF | `e3dbd581e23afadfc669783693cdc6f0ddb30f3741344c5112ea5baa925b1444` | 60533 |
+| F14 | `3b43ddf9b6fe3b0ea40605aaae4be2742787c450089e677e4053c276294a19da` | 60388 |
+| F4 | `5f5314c72f5915d1377cccaa1f6f7712607e4d615923ef76c94284c86a7eea93` | 48523 |
+| F31 | `e7d3231598da4b50e8d2566b37acde6866684a059c1c1fd9f74e17282f364df0` | 57946 |
+| SU33 | `8f78b9183360988a093d5d0411a25624bc49613ee409e3acd02bce8b88ab7d47` | 66681 |
+| AV8 | `46b08a208c44c386f42a96b98e5f033660bd0437bf49321374f3e0b5eba2d352` | 47713 |
+| M21 | `19aebf7d2c0262ac8e4ef7e27544a16480d045c92052d77b0018010d5bc96dad` | 65089 |
+| SU35 | `f4ec7353c647db7f9bc983802b27f138113cde2dbc480dbee4d0cc938c5e38b6` | 57939 |
+| F22 | `5e48702df093f3793b5b98f52abf9de24af9a33bb5a7f13d2ff74b9f81371477` | 99968 |
+
+This layering/readout pass passes all required checks: 952 Rust tests, 68 Python
+tests, warnings-denied Clippy, formatting, locked build, source and both binary
+asset guards, and documentation headers. Two optional GPU unit tests remain
+ignored. The required display smoke passes on NVIDIA RTX 4070/Vulkan. Thirty-three
+runtime captures cover the final roster and view cases. No separate synthetic
+GPU blend/readback regression was added; shader composition was code-reviewed
+and validated through actual application captures.
+
+The NAV spacing follow-up has six view checks in
+`.local/hud-nav-spacing-review/`. Root visual review raised the bank another ten
+pixels to keep the Hornet's index and zero label above the combiner support.
+Active ILS data now appears beneath the matching speed/altitude boxes; ordinary
+NAV has no fixed readout between ladder and bank scale.

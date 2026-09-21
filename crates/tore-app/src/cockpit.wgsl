@@ -9,6 +9,7 @@ struct Cockpit {
 @group(0) @binding(4) var mirror_mask:texture_2d<u32>;
 @group(0) @binding(5) var rear:texture_2d<f32>;
 @group(0) @binding(6) var art_palette:texture_2d<f32>;
+@group(0) @binding(7) var hud_aperture:texture_2d<u32>;
 fn frame_sample(uv:vec2<f32>)->vec4<f32> {
  let size=vec2<i32>(textureDimensions(frame));
  let p=uv*vec2<f32>(size)-vec2(0.5);let base=floor(p);let f=p-base;
@@ -33,11 +34,14 @@ struct Output { @builtin(position) position:vec4<f32>, @location(0) screen:vec2<
  let art_uv=(pixel-origin)/(cockpit.art.xy*cockpit.placement.z);
  // CPU supplies the same centered zoom anchor at every magnification.
  let hud_uv=vec2(.5)+(pixel-cockpit.hud.zw)/cockpit.hud.xy;
- var color=vec4(0.);
+ var art_color=vec4(0.);
+ var aperture=0.;
  if cockpit.art.z>0. && all(art_uv>=vec2(0.)) && all(art_uv<=vec2(1.)) {
-     color=frame_sample(art_uv);
+     art_color=frame_sample(art_uv);
      let source=art_uv*cockpit.art.xy;
-     let id=textureLoad(mirror_mask,vec2<i32>(source),0).r;
+     let source_pixel=clamp(vec2<i32>(source),vec2(0),vec2<i32>(cockpit.art.xy)-vec2(1));
+     aperture=f32(textureLoad(hud_aperture,source_pixel,0).r);
+     let id=textureLoad(mirror_mask,source_pixel,0).r;
      if id>0u && id<=3u {
          let rect=cockpit.mirrors[id-1u];
          let uv=(source-rect.xy)/rect.zw;
@@ -46,12 +50,18 @@ struct Output { @builtin(position) position:vec4<f32>, @location(0) screen:vec2<
          let crop_height=min(1.,2.*rect.w/rect.z);
          let center=array<f32,3>(.5,.8,.2)[id-1u];
          let start=clamp(center-crop_width*.5,0.,1.-crop_width);
-         color=vec4(textureSampleLevel(rear,filtering,vec2(start+(1.-uv.x)*crop_width,.5+(uv.y-.5)*crop_height),0.).rgb,1.);
+         art_color=vec4(textureSampleLevel(rear,filtering,vec2(start+(1.-uv.x)*crop_width,.5+(uv.y-.5)*crop_height),0.).rgb,1.);
      }
  }
+ var hud_color=vec4(0.);
  if cockpit.art.w>0. && all(hud_uv>=vec2(0.)) && all(hud_uv<=vec2(1.)) {
-     let text=textureSampleLevel(symbols,filtering,hud_uv,0.);
-     color=text+color*(1.-text.a);
+     hud_color=textureSampleLevel(symbols,filtering,hud_uv,0.);
+ }
+ var color=hud_color;
+ if cockpit.art.z>0. {
+     hud_color*=aperture;
+     // Original cockpit frame and mirrors are in front of the glass-clipped HUD.
+     color=art_color+hud_color*(1.-art_color.a);
  }
  return color*cockpit.placement.w; // Premultiplied filtering/compositing preserves transparent edge colors.
 }

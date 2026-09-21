@@ -553,7 +553,7 @@ and target aspect angle are in the upper-right debug window. The HUD layout
 is 15 percent smaller; ARM, count/weapon and percentage with blinking IN RNG
 align below speed. The range scale sits inside altitude; radar R/C/A sits below it. BORE READY is omitted. Neither clearing selection nor changing mode redirects an airborne shot.
 An internal bay opens for BORESIGHT and release waits until 95 percent open.
-Weapon readouts occupy the lower HUD; NAV retains the bank scale. AGL and
+Weapon readouts sit just below the airspeed and altitude boxes; NAV retains the bank scale. AGL and
 vertical speed appear only with non-weapon ILS guidance. [Layout and startup modes](spec/hud-layout.md). CUED radar
 lock diamonds blink when ready to fire. The radar instrument replaces the mouse
 arrow with a crosshair while the pointer is over its plotting area.

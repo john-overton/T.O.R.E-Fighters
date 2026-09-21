@@ -117,7 +117,10 @@ Layout, line symbology, frame scaling, pan, zoom and camera placement are author
 See [recovery details](formats/aircraft.md), [progress](research/progress.md), and [validation](baselines/cockpit-controls.md).
 
 
-The flight overlay is independent of the fixed menu canvas and tracks the window aspect. It is composed at the physical drawable size, proportionally capped at 1920×1080 for bounded CPU/GPU work. At centered forward view, cockpit art covers that entire overlay; menus remain centered at their original proportions. The HUD uses a 0.7225 layout scale, an additional 15% reduction from the previous 0.85 scale, with projection compensation for angular cues; the pitch ladder adds its requested 25% spacing compression. TAS and MSL primary numbers have transparent backgrounds; surrounding tape numbers and hash marks are omitted. Static cockpit artwork and unchanged instrument rasters are cached.
+The flight overlay is independent of the fixed menu canvas and tracks the window aspect. It is composed at the physical drawable size, proportionally capped at 1920×1080 for bounded CPU/GPU work. At centered forward view, cockpit art covers that entire overlay; menus remain centered at their original proportions. The HUD uses a 0.7225 layout scale, an additional 15% reduction from the previous 0.85 scale, with projection compensation for angular cues; the pitch ladder adds its requested 25% spacing compression. TAS and MSL primary numbers have transparent backgrounds; surrounding tape numbers and hash marks are omitted. With the cockpit visible, HUD symbols are clipped to its reviewed glass aperture
+and drawn behind the cockpit frame. Cockpit-off and below-1x wide views retain
+the independent HUD. Static cockpit artwork, glass masks and unchanged
+instrument rasters are cached.
 
 `--window-size 1280x720` selects an initial logical window size for inspection (minimum 640×480). Flight captures now preserve that window's aspect and the capped overlay resolution; terrain-only captures remain 960×720. See [responsive validation](baselines/responsive-flight-ui.md).
 
@@ -277,8 +280,9 @@ Version-1 preferences migrate the old setting relative to its neutral value 7;
 version 2 persists the new signed amount. Other saved display choices are retained.
 
 The main HUD shows outlined current TAS/MSL values without surrounding tape
-numbers or hash marks, plus a curved bank scale at
-the bottom (crash/engine-off alerts take priority). The scale rotates past a
+numbers or hash marks, plus a curved bank scale immediately beneath the
+pitch ladder (crash/engine-off alerts take priority). Active ILS places AGL below
+the altitude box and V/S below the airspeed box. The scale rotates past a
 fixed triangular index, with 10-degree ticks and numbers every 30 degrees.
 It follows aircraft attitude, including full rolls, independently of head-look.
 The readout outlines are transparent. Combat debug status and range hints are no longer overlaid on
@@ -419,7 +423,7 @@ and target aspect angle are in the upper-right debug window. The HUD layout
 is 15 percent smaller; ARM, count/weapon and percentage with blinking IN RNG
 align below speed. The range scale sits inside altitude; radar R/C/A sits below it. BORE READY is omitted. Neither clearing selection nor changing mode redirects an airborne shot.
 An internal bay opens for BORESIGHT and release waits until 95 percent open.
-Weapon readouts occupy the lower HUD; NAV retains the bank scale. AGL and
+Weapon readouts sit just below the airspeed and altitude boxes; NAV retains the bank scale. AGL and
 vertical speed appear only with non-weapon ILS guidance. [Layout and startup modes](spec/hud-layout.md). CUED radar
 lock diamonds blink when ready to fire. The radar instrument replaces the mouse
 arrow with a crosshair across the entire black screen, up to the bezel.
