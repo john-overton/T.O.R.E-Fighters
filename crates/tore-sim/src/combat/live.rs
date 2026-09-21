@@ -96,6 +96,9 @@ impl Readiness {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     NextWeapon,
+    NextSelection,
+    PreviousSelection,
+    SelectNav,
     ToggleSeekerMode,
     CompatibilityWeapons,
     TargetHeat(u8),
@@ -754,6 +757,26 @@ impl State {
             cadence.pending = 0;
         }
     }
+    /// Player selection ring: NAV, then each configured weapon station.
+    /// Legacy range commands retain their old station-only behavior for tapes.
+    pub fn cycle_selection(&mut self, forward: bool) {
+        let count = self.ammo.len();
+        let current = if self.armed { self.selected + 1 } else { 0 };
+        let next = if forward {
+            (current + 1) % (count + 1)
+        } else {
+            (current + count) % (count + 1)
+        };
+        self.release();
+        self.bore_observation = None;
+        self.mounted = Seeker::default();
+        self.mounted_key = None;
+        self.launch_mode = LaunchMode::Cued;
+        self.armed = next != 0;
+        if self.armed {
+            self.selected = next - 1;
+        }
+    }
     pub fn select_next(&mut self) {
         self.release();
         self.bore_observation = None;
@@ -924,6 +947,16 @@ impl State {
                 self.release();
             }
             Command::NextWeapon => self.select_next(),
+            Command::NextSelection => self.cycle_selection(true),
+            Command::PreviousSelection => self.cycle_selection(false),
+            Command::SelectNav => {
+                self.release();
+                self.armed = false;
+                self.bore_observation = None;
+                self.mounted = Seeker::default();
+                self.mounted_key = None;
+                self.launch_mode = LaunchMode::Cued;
+            }
             Command::Designate => self.designate_next(),
             Command::DesignateTarget(id) => {
                 if self.sensors.designate(id) {
@@ -1327,7 +1360,8 @@ impl State {
 
     pub fn seeker_tone(&self, launcher: Launcher) -> Option<SeekerTone> {
         let w = &self.config.stations[self.selected].weapon;
-        if self.weapon_rules != Rules::Spec
+        if (self.launch_mode == LaunchMode::Boresight && self.designated().is_none())
+            || self.weapon_rules != Rules::Spec
             || !self.guidance_available(launcher)
             || !self.armed
             || !launcher.alive
@@ -2613,6 +2647,34 @@ mod tests {
             true,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn player_selection_wraps_through_nav_and_arms_only_weapons() {
+        let initial = fixture(false);
+        let mut config = initial.configuration().clone();
+        config.stations.push(config.stations[0].clone());
+        let mut state = State::new(config, true).unwrap();
+        let l = launcher();
+        state.command(Command::SelectNav, l);
+        assert!(!state.armed);
+        assert!(
+            !state
+                .step(true, l, |_, _| 0.)
+                .iter()
+                .any(|e| matches!(e, Event::Fired(_)))
+        );
+        for (command, selected, armed) in [
+            (Command::NextSelection, 0, true),
+            (Command::NextSelection, 1, true),
+            (Command::NextSelection, 1, false),
+            (Command::PreviousSelection, 1, true),
+            (Command::PreviousSelection, 0, true),
+            (Command::PreviousSelection, 0, false),
+        ] {
+            state.command(command, l);
+            assert_eq!((state.selected, state.armed), (selected, armed));
+        }
     }
 
     #[test]

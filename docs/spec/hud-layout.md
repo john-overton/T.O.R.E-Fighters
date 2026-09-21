@@ -60,8 +60,7 @@ above and below. Their horizontal positions stay unchanged.
 
 Normal navigation omits AGL and vertical speed. Retain them for active ILS
 approaches when weapon readouts are inactive: AGL at (402,259) beneath altitude
-and V/S at (207,259) beneath airspeed. No fixed readout occupies the space
-between the ladder and bank scale in ordinary NAV. The bank scale sits just
+and V/S at (207,271) beneath airspeed, below the NAV status label. The bank scale sits just
 below the ladder: its center tick is at y=358, the fixed index spans y=359..366,
 and the centered numeric label sits at y=374. This raises the scale by 66
 reference pixels without changing its width or bank-angle mapping. Make it a shallow circular
@@ -105,17 +104,14 @@ No imported picture or generated mask is committed.
 
 ## Startup and navigation mode
 
-Normal ground starts select NAV and master arm SAFE. Normal airborne starts
-select the aircraft's canonical gun with master arm SAFE. Apply these defaults
-to a new flight and restart, including Quick Mission. A safe selected gun shows
-its ammunition and SAFE label without a firing pipper. The status overlay
-identifies NAV and GUN explicitly instead of showing a missile seeker mode.
-
-NAV suppresses weapon-specific HUD symbology and retains the selected target
-cue. Explicit weapon cycling leaves NAV. Master-arm changes do not themselves
-change the selected navigation mode. NAV remains the existing navigation/display
-mode; it is not an additional weapon-release interlock. Master arm controls
-release safety.
+Normal ground starts select NAV, with weapons disarmed. Normal airborne starts
+select and arm the canonical gun. New flights and restarts, including Quick
+Mission, use these defaults. NAV suppresses weapon-specific HUD symbols and
+retains selected-target cues. The shared status position (207,259) shows NAV in
+navigation mode, LCOS for the armed gun, and ARM for missiles, as requested by
+John on 2026-09-21. Active ILS vertical speed sits one row below NAV to avoid overlap.
+Bracket keys cycle through NAV and weapon slots;
+arming follows selection. See [selection and instrument rules](weapon-navigation-selection.md).
 
 Explicit command-line weapon selection overrides the default gun. An explicit
 weapon slot or live-fire range suppresses the implicit ground NAV default;

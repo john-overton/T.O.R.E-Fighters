@@ -296,7 +296,7 @@ pub fn draw(
                 air.map_or(s.vertical_speed * 60., |d| d.vertical_speed_fpm)
             ),
             207,
-            259,
+            271,
         );
     }
     if s.autopilot.mode() != tore_sim::autopilot::Mode::Off {

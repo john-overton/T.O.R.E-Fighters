@@ -25,7 +25,8 @@ acceptance.
 
 Heading/altitude autopilot and toggleable waypoint guidance are implemented from
 the requested USNF-ATF behavior. Waypoint mode currently falls back to heading
-hold; route selection is pending. See [scope and provenance](spec/autopilot.md).
+hold; mission route import is pending. NAV INFO can select eligible airports
+by distance, with a separate empty mission mode. See [scope and provenance](spec/autopilot.md).
 
 Takeoff/flap/contact and low-speed rotation corrections are implemented
 ([acceptance](baselines/takeoff-acceptance.md)). Cannons now release individual

@@ -152,7 +152,7 @@ pub fn launcher(s: &flight::State) -> Launcher {
     }
 }
 impl Combat {
-    /// Player startup convention: canonical gun selected with master arm safe.
+    /// Player airborne startup convention: canonical gun selected and armed.
     pub fn apply_startup_weapons(&mut self) {
         apply_startup_weapon_state(&mut self.state);
     }
@@ -616,40 +616,28 @@ impl Combat {
     }
 
     pub fn readout(&self, s: &flight::State, rcs_scale: f64) -> crate::instruments::CombatReadout {
-        let i = self.state.selected;
+        let mut groups: Vec<(String, String, u32, bool)> = Vec::new();
+        for (index, station) in self.state.configuration().stations.iter().enumerate() {
+            let selected = self.state.armed && index == self.state.selected;
+            if let Some(group) = groups.iter_mut().find(|g| g.0 == station.weapon.source) {
+                group.2 += u32::from(self.state.rounds(index));
+                group.3 |= selected;
+            } else {
+                groups.push((
+                    station.weapon.source.clone(),
+                    station.weapon.hud_name.clone(),
+                    u32::from(self.state.rounds(index)),
+                    selected,
+                ));
+            }
+        }
         crate::instruments::CombatReadout {
-            weapon: self.state.configuration().stations[i].weapon.name.clone(),
-            ammo: self.state.rounds(i),
-            systems: format!(
-                "HP{} V{} R{} E{}",
-                self.state.player_hp,
-                if self.state.visual_failed { "!" } else { "+" },
-                if self.state.radar_failed {
-                    "!"
-                } else if launcher(s).radar {
-                    "+"
-                } else {
-                    "-"
-                },
-                if self.state.ecm_failed {
-                    "!"
-                } else if launcher(s).jammer {
-                    "+"
-                } else {
-                    "-"
-                }
-            ),
-            readiness: self.state.readiness(launcher(s)).label(),
-            damage: self
-                .state
-                .last_subsystem
-                .map(|i| format!("SOURCE FAULT {i}"))
-                .or_else(|| {
-                    self.state.history.last().map(|hit| {
-                        format!("C{} HIT {} HP {}", hit.class, hit.applied, hit.hp_after)
-                    })
-                }),
-            loaded: self.range,
+            weapons: groups
+                .into_iter()
+                .map(|(_, name, count, selected)| (name, count, selected))
+                .collect(),
+            chaff: self.state.chaff,
+            flares: self.state.flares,
             target: self.state.display_target().map(|target| {
                 let name = self
                     .ground_name(target.id)
@@ -896,7 +884,7 @@ pub(crate) fn apply_startup_weapon_state(state: &mut live::State) {
     {
         state.selected = index;
     }
-    state.armed = false;
+    state.armed = true;
 }
 fn effect_frames(
     pic: &Pic,

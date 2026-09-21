@@ -145,6 +145,9 @@ pub fn command_name(c: Command) -> String {
     }
     match c {
         Command::NextWeapon => "next",
+        Command::NextSelection => "selection-next",
+        Command::PreviousSelection => "selection-previous",
+        Command::SelectNav => "selection-nav",
         Command::ToggleSeekerMode => "seeker-mode",
         Command::CompatibilityWeapons => "compatibility-weapons",
         Command::ToggleTargetRadar => "target-radar",
@@ -184,6 +187,9 @@ pub fn command(s: &str) -> Option<Command> {
     }
     [
         Command::NextWeapon,
+        Command::NextSelection,
+        Command::PreviousSelection,
+        Command::SelectNav,
         Command::ToggleSeekerMode,
         Command::CompatibilityWeapons,
         Command::ToggleTargetRadar,
@@ -548,6 +554,9 @@ mod tests {
         assert!(!launcher.bay_ready);
         assert!(parse(&line.replace("40 60 600", "NaN 60 600"), 4).is_err());
         for c in [
+            Command::NextSelection,
+            Command::PreviousSelection,
+            Command::SelectNav,
             Command::ToggleSeekerMode,
             Command::CompatibilityWeapons,
             Command::TargetHeat(4),

@@ -26,6 +26,7 @@ mod look;
 mod menu;
 mod mirrors;
 mod missile_acceptance;
+mod navigation;
 mod ocean;
 mod ordnance;
 mod performance;
@@ -479,6 +480,7 @@ impl App {
         }
         let command = match name.as_str() {
             "weapon-next" => Command::NextWeapon,
+            "weapon-previous" => Command::PreviousWeapon,
             "weapon-seeker-mode" => {
                 Command::Combat(tore_sim::combat::live::Command::ToggleSeekerMode)
             }
@@ -486,7 +488,7 @@ impl App {
             "clear-designation" => {
                 Command::Combat(tore_sim::combat::live::Command::ClearDesignation)
             }
-            "master-arm" => Command::Combat(tore_sim::combat::live::Command::ToggleArm),
+            "master-arm" => Command::None, // Retired binding in older profiles.
             "jettison" => Command::Combat(tore_sim::combat::live::Command::Jettison),
             "range-target" => Command::RangeReset,
             "damage-class" => Command::Combat(tore_sim::combat::live::Command::CycleClass),
@@ -642,12 +644,13 @@ impl App {
                 }
                 Action::None
             }
-            Command::NextWeapon => {
-                self.airport_nav_mode = false;
-                self.combat.cancel();
-                self.combat.command(
-                    tore_sim::combat::live::Command::NextWeapon,
-                    combat::launcher(&self.flight),
+            Command::NextWeapon | Command::PreviousWeapon => {
+                cycle_player_weapon(
+                    &mut self.combat,
+                    &self.flight,
+                    &mut self.instruments,
+                    &mut self.airport_nav_mode,
+                    command == Command::NextWeapon,
                 );
                 Action::None
             }
@@ -892,7 +895,11 @@ impl App {
                                 c.add_airport_targets(&self.world.airport_scene)?;
                                 Ok(c)
                             }) {
-                                Ok(c) => self.combat = c,
+                                Ok(c) => {
+                                    self.combat = c;
+                                    self.airport_nav_mode = false;
+                                    self.instruments.navigation = navigation::Navigation::default();
+                                }
                                 Err(e) => {
                                     self.error = Some(e);
                                     event_loop.exit();
@@ -1156,7 +1163,9 @@ impl App {
                     return;
                 }
                 self.airport_nav_mode = ground_airport.is_some();
+                self.combat.state.armed = !self.airport_nav_mode;
                 self.airport_commands.clear();
+                self.instruments.navigation = navigation::Navigation::default();
                 if let Some(airport) = ground_airport {
                     self.airport_service.command(
                         &self.world.airport_scene,
@@ -1738,10 +1747,40 @@ impl ApplicationHandler for App {
                         // reproduces every change and the labels never lag.
                         self.flight.sensors = self.instruments.controls();
                         for _ in 0..steps {
+                            for button in std::mem::take(&mut self.instruments.weapon_controls) {
+                                cycle_player_weapon(
+                                    &mut self.combat,
+                                    &self.flight,
+                                    &mut self.instruments,
+                                    &mut self.airport_nav_mode,
+                                    button == 1,
+                                );
+                            }
+                            self.instruments.navigation.refresh(
+                                &self.world.airport_scene,
+                                &self.airport_service,
+                                self.flight.position,
+                            );
+                            for button in std::mem::take(&mut self.instruments.navigation.pending) {
+                                if let Some(id) = self.instruments.navigation.control(button) {
+                                    self.airport_commands.push(flight_ui::Command::Airport(
+                                        tore_sim::airport::Command::SelectAirport(id),
+                                    ));
+                                }
+                            }
                             for command in std::mem::take(&mut self.airport_commands) {
                                 match command {
                                     flight_ui::Command::AirportNav => {
                                         self.airport_nav_mode = !self.airport_nav_mode;
+                                        self.combat.cancel();
+                                        self.combat.command(
+                                            if self.airport_nav_mode {
+                                                tore_sim::combat::live::Command::SelectNav
+                                            } else {
+                                                tore_sim::combat::live::Command::NextSelection
+                                            },
+                                            combat::launcher(&self.flight),
+                                        );
                                         if let Some(recorder) = &mut self.combat.recorder {
                                             recorder.record(
                                                 if self.airport_nav_mode {
@@ -2262,6 +2301,16 @@ impl ApplicationHandler for App {
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                                 f64::from(self.flight_canvas.hud_zoom(1.)),
                                 self.airport_nav_mode,
+                                self.combat.state.display_target().is_some_and(|target| {
+                                    self.ai_wings.as_ref().and_then(|wings| wings.slot(target.id))
+                                        .is_some_and(|slot| slot.side == tore_sim::ai::launch::Side::Friendly)
+                                        || self.world.airport_scene.runway(target.id).is_some_and(|runway| {
+                                            self.world.airport_scene.airports.iter().any(|airport| {
+                                                airport.id == runway.airport
+                                                    && airport.allegiance == tore_sim::airport::Allegiance::Friendly
+                                            })
+                                        })
+                                }),
                             );
                         }
                         renderer.cockpit(
@@ -3106,7 +3155,7 @@ fn main() -> AppResult<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; semicolon cycles weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. U arm/safe; K jettison selected external group; L clears designation; ] cycles damage-class fixture; [ fails selected station (restart repairs). D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..72000 runs a headless AI mission and prints a deterministic per-actor summary.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. K jettison selected external group; L clears designation; Use --combat-command class/fail for damage-class and station-fault fixtures. D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..72000 runs a headless AI mission and prints a deterministic per-actor summary.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -4198,6 +4247,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         || ground_start.is_some() && weapon_slot.is_none() && !live_fire,
         |(_, aircraft, _)| aircraft.nav_mode,
     );
+    if airport_nav_mode {
+        combat.state.command(
+            tore_sim::combat::live::Command::SelectNav,
+            combat::launcher(&flight),
+        );
+    }
     if let Some(object) = ground_start {
         let airport = world.airport_scene.runway(object).unwrap().airport;
         airport_service.command(
@@ -4416,6 +4471,29 @@ fn flight_key(physical: winit::keyboard::PhysicalKey, fallback: &str) -> String 
         .into();
     }
     fallback.into()
+}
+
+fn cycle_player_weapon(
+    combat: &mut combat::Combat,
+    flight: &flight::State,
+    instruments: &mut instruments::Instruments,
+    nav_mode: &mut bool,
+    forward: bool,
+) {
+    combat.cancel();
+    combat.command(
+        if forward {
+            tore_sim::combat::live::Command::NextSelection
+        } else {
+            tore_sim::combat::live::Command::PreviousSelection
+        },
+        combat::launcher(flight),
+    );
+    *nav_mode = !combat.state.armed;
+    let readout = combat.readout(flight, instruments.rcs_scale_nmi());
+    if let Some(index) = readout.weapons.iter().position(|row| row.2) {
+        instruments.weapon_page = index / 6;
+    }
 }
 
 #[cfg(test)]

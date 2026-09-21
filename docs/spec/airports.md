@@ -92,6 +92,9 @@ airport behind the aircraft cannot hide one in front. Tower requests and
 clearance behavior are unchanged. These are requested gameplay rules with
 fitted geometry, not assertions about retail or real-world ILS receivers.
 
+NAV INFO now offers distance-ordered selection of landing-eligible airports.
+[Instrument controls and eligibility rules](weapon-navigation-selection.md).
+
 ## Commands and ownership
 
 John clarified on 2026-09-20 that commands means landing/tower radio commands.

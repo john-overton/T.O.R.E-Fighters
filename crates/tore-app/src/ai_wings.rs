@@ -2105,7 +2105,7 @@ mod tests {
     }
 
     #[test]
-    fn normal_startup_selects_canonical_gun_and_safes_master_arm() {
+    fn normal_startup_selects_and_arms_canonical_gun() {
         let fixture = combat_fixture(false);
         let mut config = fixture.configuration().clone();
         config.stations[0].weapon.source = "M61.JT".into();
@@ -2117,7 +2117,7 @@ mod tests {
         state.armed = true;
         crate::combat::apply_startup_weapon_state(&mut state);
         assert_eq!(state.selected, 1);
-        assert!(!state.armed);
+        assert!(state.armed);
     }
 
     #[test]

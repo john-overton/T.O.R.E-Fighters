@@ -157,17 +157,17 @@ impl Layout {
 }
 #[derive(Default)]
 pub struct CombatReadout {
-    pub weapon: String,
-    pub systems: String,
-    pub readiness: &'static str,
-    pub damage: Option<String>,
-    pub ammo: u16,
-    pub loaded: bool,
+    pub weapons: Vec<(String, u32, bool)>,
+    pub chaff: u8,
+    pub flares: u8,
     pub target: Option<crate::target_window::Readout>,
     pub scope: scope::Scope,
     pub rcs: scope::Rcs,
 }
 pub struct Instruments {
+    pub navigation: crate::navigation::Navigation,
+    pub weapon_page: usize,
+    pub weapon_controls: Vec<usize>,
     pub combat: Option<CombatReadout>,
     pub pages: Vec<u8>,
     pub selected: usize,
@@ -194,6 +194,9 @@ pub struct Instruments {
 impl Default for Instruments {
     fn default() -> Self {
         Self {
+            navigation: Default::default(),
+            weapon_page: 0,
+            weapon_controls: Vec::new(),
             combat: None,
             pages: vec![7, 5, 9, 4],
             selected: 0,
@@ -392,6 +395,23 @@ impl Instruments {
             (Some(0), 1) => self.rcs_range = (self.rcs_range + 1).min(scales),
             (Some(5), 0) => self.rwr_range = self.rwr_range.saturating_sub(1),
             (Some(5), 1) => self.rwr_range = (self.rwr_range + 1).min(4),
+            (Some(8), 0..=1) => {
+                if self.weapon_controls.len() < 32 {
+                    self.weapon_controls.push(button);
+                }
+            }
+            (Some(8), 2) => {
+                let pages = self
+                    .combat
+                    .as_ref()
+                    .map_or(1, |c| c.weapons.len().div_ceil(6).max(1));
+                self.weapon_page = (self.weapon_page + 1) % pages;
+            }
+            (Some(6), 0..=2) => {
+                if self.navigation.pending.len() < 32 {
+                    self.navigation.pending.push(button);
+                }
+            }
             (Some(9), 0) => self.radar_range = self.radar_range.saturating_sub(1),
             (Some(9), 1) => self.radar_range = (self.radar_range + 1).min(last),
             (Some(9), 2) => self.cycle_channel(),
@@ -476,8 +496,16 @@ impl Instruments {
                 r.rect(x + 23, 137, 2, 17, [170, 187, 203, 255]);
             }
             let label = match (id, b) {
-                (0 | 5 | 9, 0) => "-",
-                (0 | 5 | 9, 1) => "+",
+                (0 | 5 | 6 | 8 | 9, 0) => "-",
+                (0 | 5 | 6 | 8 | 9, 1) => "+",
+                (6, 2) => {
+                    if self.navigation.airports_mode {
+                        "2"
+                    } else {
+                        "1"
+                    }
+                }
+                (8, 2) => "P",
                 (9, 2) => "M",
                 (9, 3) => "Y",
                 _ => "",
@@ -739,34 +767,107 @@ impl Instruments {
             }
             8 => {
                 if let Some(c) = &self.combat {
-                    text(&mut r, &c.weapon, 20, 35);
-                    text(&mut r, &format!("{} RDS", c.ammo), 94, 35);
-                    text(
-                        &mut r,
-                        if c.loaded {
-                            "PT STORES LOADED"
-                        } else {
-                            "EXTERNAL: CLEAN"
-                        },
-                        20,
-                        56,
-                    );
-                    text(&mut r, c.readiness, 20, 77);
-                    if let Some(damage) = &c.damage {
-                        text(&mut r, damage, 20, 94);
+                    let page = self.weapon_page % c.weapons.len().div_ceil(6).max(1);
+                    for (row, (name, count, selected)) in
+                        c.weapons.iter().skip(page * 6).take(6).enumerate()
+                    {
+                        let y = 26 + row as i32 * 14;
+                        let colour = if *selected { BRIGHT } else { GREEN };
+                        if *selected {
+                            r.text(f, ">", 16, y, colour);
+                        }
+                        let count = count.to_string();
+                        let width: usize =
+                            count.bytes().map(|ch| f.glyphs[ch as usize].advance).sum();
+                        r.text(f, &count, 59 - width as i32, y, colour);
+                        let mut width = 0;
+                        let name: String = name
+                            .bytes()
+                            .take_while(|ch| {
+                                width += f.glyphs[*ch as usize].advance;
+                                width <= 80
+                            })
+                            .map(char::from)
+                            .collect();
+                        r.text(f, &name, 65, y, colour);
                     }
-                    text(&mut r, &c.systems, 20, 110);
+                    text(&mut r, &format!("{} CHAFF", c.chaff), 15, 122);
+                    let flare = format!("{} FLARE", c.flares);
+                    let width: usize = flare.bytes().map(|ch| f.glyphs[ch as usize].advance).sum();
+                    text(&mut r, &flare, 146 - width as i32, 122);
                 } else {
-                    text(&mut r, "WEAPONS SAFE", 20, 35);
+                    text(&mut r, "NO WEAPONS", 20, 35);
                 }
             }
             6 => {
-                text(&mut r, "HDG", 20, 35);
-                text(&mut r, &format!("{:03.0}", s.yaw.to_degrees()), 105, 35);
-                text(&mut r, "ALT", 20, 53);
-                text(&mut r, &format!("{:.0}", s.position[1]), 94, 53);
-                text(&mut r, "NO WAYPOINT", 20, 81);
-                text(&mut r, "FREE FLIGHT", 20, 105);
+                let nav = &self.navigation;
+                if let Some(selected) = nav.index() {
+                    let page = selected / 3 * 3;
+                    for (index, entry) in nav.entries().iter().enumerate().skip(page).take(3) {
+                        let y = 25 + (index - page) as i32 * 28;
+                        let colour = if index == selected { BRIGHT } else { GREEN };
+                        let label = format!(
+                            "{}. {}",
+                            (b'A' + (index % 26) as u8) as char,
+                            entry.name.to_ascii_uppercase()
+                        );
+                        let mut width = 0;
+                        let label: String = label
+                            .bytes()
+                            .take_while(|ch| {
+                                width += f.glyphs[*ch as usize].advance;
+                                width <= 130
+                            })
+                            .map(char::from)
+                            .collect();
+                        r.text(f, &label, 15, y, colour);
+                        let bearing = format!("{:03}", entry.bearing(s.position));
+                        r.text(f, &bearing, 27, y + 12, colour);
+                        let width: usize = bearing
+                            .bytes()
+                            .map(|ch| f.glyphs[ch as usize].advance)
+                            .sum();
+                        r.circle(29 + width as i32, y + 14, 1., colour);
+                        r.text(
+                            f,
+                            &format!(", {:.1} NM", entry.distance(s.position) / 6076.12),
+                            32 + width as i32,
+                            y + 12,
+                            colour,
+                        );
+                    }
+                    let speed = s.velocity[0].hypot(s.velocity[2]);
+                    let eta = if speed >= 1. {
+                        let seconds =
+                            (nav.entries()[selected].distance(s.position) / speed).round() as u64;
+                        format!("ETA {}:{:02}", seconds / 60, seconds % 60)
+                    } else {
+                        "ETA --:--".into()
+                    };
+                    text(&mut r, &eta, 52, 122);
+                } else {
+                    text(
+                        &mut r,
+                        if nav.airports_mode {
+                            "NO SAFE AIRPORTS"
+                        } else {
+                            "NO WAYPOINTS"
+                        },
+                        17,
+                        65,
+                    );
+                    text(
+                        &mut r,
+                        if nav.airports_mode {
+                            "2 AIRPORTS"
+                        } else {
+                            "1 MISSION"
+                        },
+                        30,
+                        89,
+                    );
+                    text(&mut r, "ETA --:--", 52, 122);
+                }
             }
             1 => {
                 for e in &h.profile.envelopes {
@@ -889,6 +990,31 @@ mod tests {
             x as f64 + (35. + b as f64 * 29.) * w as f64 / 160.,
             y as f64 + 145. * h as f64 / 156.,
         )
+    }
+    #[test]
+    fn nav_and_weapon_buttons_share_pointer_and_hardware_controls() {
+        let mut i = Instruments::new(Layout::Large, Some(6));
+        for button_id in 0..3 {
+            let point = Some(button(&i, 0, button_id));
+            i.pointer(point, true);
+            assert!(i.pointer(point, false));
+        }
+        assert_eq!(i.navigation.pending, [0, 1, 2]);
+        i.pages[0] = 8;
+        assert!(i.control(0, 0));
+        assert!(i.control(0, 1));
+        assert_eq!(i.weapon_controls, [0, 1]);
+        assert!(i.control(0, 2));
+        assert_eq!(i.weapon_page, 0);
+        i.combat = Some(CombatReadout {
+            weapons: vec![("TEST".into(), 1, false); 7],
+            ..Default::default()
+        });
+        assert!(i.control(0, 2));
+        assert_eq!(i.weapon_page, 1);
+        assert!(i.control(0, 2));
+        assert_eq!(i.weapon_page, 0);
+        assert!(!i.control(0, 3));
     }
     #[test]
     fn responsive_edges_and_right_hand_buttons_match_the_screen() {

@@ -71,9 +71,16 @@ pub fn draw(
     color: [u8; 3],
     zoom: f64,
     nav_mode: bool,
+    target_friendly: bool,
 ) {
-    draw_target(pixels, s, state, color, zoom);
+    draw_target(pixels, s, state, color, zoom, target_friendly);
     if nav_mode {
+        Paint {
+            pixels,
+            clip: hud::HUD_CLIP,
+            color: [color[0], color[1], color[2], 255],
+        }
+        .text(font, "NAV", 207, 259);
         return;
     }
     if live::is_gun(&state.configuration().stations[state.selected].weapon) {
@@ -304,6 +311,7 @@ fn draw_target(
     state: &live::State,
     color: [u8; 3],
     zoom: f64,
+    friendly: bool,
 ) {
     let Some(target) = state.display_target() else {
         return;
@@ -322,14 +330,7 @@ fn draw_target(
     };
     match cue {
         TargetCue::Square((x, y)) => {
-            for (a, b) in [
-                ((-7., -7.), (7., -7.)),
-                ((7., -7.), (7., 7.)),
-                ((7., 7.), (-7., 7.)),
-                ((-7., 7.), (-7., -7.)),
-            ] {
-                paint.line((x + a.0, y + a.1), (x + b.0, y + b.1));
-            }
+            draw_target_box(&mut paint, (x, y), friendly);
         }
         TargetCue::Chevron {
             point: (x, y),
@@ -344,6 +345,21 @@ fn draw_target(
         }
     }
 }
+fn draw_target_box(paint: &mut Paint<'_>, (x, y): (f64, f64), friendly: bool) {
+    for (a, b) in [
+        ((-7., -7.), (7., -7.)),
+        ((7., -7.), (7., 7.)),
+        ((7., 7.), (-7., 7.)),
+        ((-7., 7.), (-7., -7.)),
+    ] {
+        paint.line((x + a.0, y + a.1), (x + b.0, y + b.1));
+    }
+    if friendly {
+        paint.line((x - 3., y - 3.), (x + 3., y + 3.));
+        paint.line((x - 3., y + 3.), (x + 3., y - 3.));
+    }
+}
+
 fn draw_gun(
     pixels: &mut [u8],
     s: &flight::State,
@@ -368,7 +384,7 @@ fn draw_gun(
         207,
         271,
     );
-    paint.text(font, if state.armed { "ARM" } else { "SAFE" }, 207, 259);
+    paint.text(font, if state.armed { "LCOS" } else { "SAFE" }, 207, 259);
     let l = combat::launcher(s);
     if !state.armed
         || !l.alive
@@ -541,6 +557,39 @@ pub fn debug(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn friendly_target_box_adds_only_a_centered_x() {
+        let render = |friendly| {
+            let mut pixels = vec![0; 640 * 480 * 4];
+            draw_target_box(
+                &mut Paint {
+                    pixels: &mut pixels,
+                    clip: hud::HUD_CLIP,
+                    color: [0, 255, 0, 255],
+                },
+                (320., 240.),
+                friendly,
+            );
+            pixels
+        };
+        let ordinary = render(false);
+        let friendly = render(true);
+        for y in 233usize..=247 {
+            for x in 313usize..=327 {
+                let alpha = (y * 640 + x) * 4 + 3;
+                let dx = x as i32 - 320;
+                let dy = y as i32 - 240;
+                let cross = dx.abs() <= 3 && dy.abs() <= 3 && dx.abs() == dy.abs();
+                if cross {
+                    assert_eq!(ordinary[alpha], 0);
+                    assert_eq!(friendly[alpha], 255);
+                } else {
+                    assert_eq!(ordinary[alpha], friendly[alpha]);
+                }
+            }
+        }
+    }
+
     #[test]
     fn target_square_and_chevron_follow_full_three_dimensional_attitude() {
         let basis = Basis::new(0., 0., 0.);

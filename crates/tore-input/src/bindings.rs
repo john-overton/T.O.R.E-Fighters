@@ -91,6 +91,7 @@ impl Action {
             "fire"
                 | "weapon-seeker-mode"
                 | "weapon-next"
+                | "weapon-previous"
                 | "designate"
                 | "clear-designation"
                 | "master-arm"

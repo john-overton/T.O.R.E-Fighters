@@ -435,17 +435,17 @@ new bindings or regenerate a profile deliberately. No saved file is overwritten.
 | While holding Select | Keyboard equivalent / action |
 | --- | --- |
 | Right shoulder | Space: hold fire/release |
-| Left shoulder | Semicolon: next weapon |
+| Left shoulder | ] next NAV/weapon |
 | South (A) | T/Enter: designate |
 | East (B) | L: clear designation |
-| West (X) | U: master arm/safe |
+| West (X) | [ previous NAV/weapon |
 | North (Y) | J: own jammer toggle |
 | Left-stick click | R: radar toggle |
 | Right-stick click | K: selected external group jettison |
 | D-pad up | Backslash: replace range target |
 | D-pad down | D: explicit player-hit fixture |
-| D-pad left | `]`: next damage class fixture |
-| D-pad right | `[`: selected station failure fixture |
+| D-pad left | Next damage class fixture |
+| D-pad right | Selected station failure fixture |
 | Start | Shift-Y: target jammer fixture |
 | Guide | Shift-I: one incoming selected source weapon fixture |
 
@@ -526,7 +526,7 @@ including the original imported warning samples.
 
 ## Missile seeker control
 
-Radar power OFF disables radar-missile bore and tones; IR remains independent; master arm permits a permanently
+Radar power OFF disables radar-missile bore and tones; IR remains independent; weapon selection permits a permanently
 unguided DUMB release. Selecting passive IR alone does not switch power off.
 Surface weapons cannot use the A2A bore toggle; surface designation remains deferred.
 Armed independent air-to-air missiles automatically enter BORESIGHT when radar power is on and no target is
@@ -630,8 +630,8 @@ For live testing, use a Quick Mission with at least three friendly aircraft:
    reports and no aircraft pose jumps. A request for steady flight is advisory.
 ## Airport commands
 
-Normal ground starts enter NAV with master arm SAFE. Airborne starts select
-the canonical gun with master arm SAFE. Weapon cycling leaves NAV; NAV keeps
+Normal ground starts enter NAV with weapons disarmed. Airborne starts select
+and arm the canonical gun. Bracket keys cycle NAV and weapons; NAV keeps
 target cues while suppressing weapon readouts. [Layout and defaults](spec/hud-layout.md).
 
 The controls editor exposes `airport-nav`, `airport-next`,
@@ -675,3 +675,13 @@ View 4 target-camera fields and status meanings are described in the
 
 Quick Mission wing skill menus include **Dummy (400 KTS)** for straight-flying
 training targets. See [behavior](spec/dummy-aircraft.md).
+
+## NAV and weapon selection
+
+`[` and `]` cycle backward/forward through NAV and weapons. Selection controls
+arming; U and semicolon have no action. Old `master-arm` profile entries are
+accepted but do nothing. The editor offers `weapon-next` and `weapon-previous`.
+NAV INFO minus/plus select destinations; button 3 switches mission/airport mode.
+WEAPONS minus/plus select NAV/weapons; button 3 pages the store list.
+Boresight has no seeker tone without a designated contact.
+[Behavior and current route limitations](spec/weapon-navigation-selection.md).

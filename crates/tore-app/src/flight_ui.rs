@@ -11,6 +11,7 @@ pub enum Command {
     AirportNav,
     None,
     NextWeapon,
+    PreviousWeapon,
     Target,
     RangeReset,
     Combat(tore_sim::combat::live::Command),
@@ -517,14 +518,12 @@ impl FlightUi {
             }
             "d" => Command::Combat(tore_sim::combat::live::Command::DamagePlayer),
             "y" => Command::SensorHistory,
-            "u" => Command::Combat(tore_sim::combat::live::Command::ToggleArm),
             "k" => Command::Combat(tore_sim::combat::live::Command::Jettison),
             "l" => Command::Combat(tore_sim::combat::live::Command::ClearDesignation),
-            "]" => Command::Combat(tore_sim::combat::live::Command::CycleClass),
-            "[" => Command::Combat(tore_sim::combat::live::Command::FailStation),
+            "]" => Command::NextWeapon,
+            "[" => Command::PreviousWeapon,
 
             "t" => Command::Target,
-            ";" => Command::NextWeapon,
             "\\" => Command::RangeReset,
             "w" => self.unavailable("Next waypoint"),
             "n" => self.unavailable("Navigation / weapons mode"),
@@ -675,9 +674,9 @@ impl FlightUi {
                     "I: infrared | R: radar | Y: contact history | J: own ECM".into(),
                     "Click a contact to designate it; L clears the designation".into(),
                     "Range: Shift-I incoming | D player hit | Shift-Y target ECM".into(),
-                    "U arm/safe | K jettison | L clear | ; weapon | [ fault | ] class".into(),
+                    "[ / ] NAV/weapons | K jettison | L clear".into(),
                     "Pad: hold Select, RB fire / LB weapon / A target / B clear".into(),
-                    "Select+X arm / Y ECM / L3 radar / R3 jettison".into(),
+                    "Select+X previous weapon / Y ECM / L3 radar / R3 jettison".into(),
                     "Select+Dpad: up target / down hit / left class / right fault".into(),
                     "Select+Start target ECM / Guide incoming; F10 external".into(),
                     "SOURCE MENU SHORTCUTS:".into(),
@@ -965,16 +964,23 @@ mod tests {
         assert_eq!(u.pointer(&t, Some((160., 55.)), false), Command::End);
     }
     #[test]
+    fn brackets_cycle_selection_and_retired_keys_are_inert() {
+        let mut ui = FlightUi::default();
+        let tree = tree();
+        for (key, command) in [
+            ("[", Command::PreviousWeapon),
+            ("]", Command::NextWeapon),
+            (";", Command::None),
+            ("u", Command::None),
+        ] {
+            assert_eq!(ui.key(key, false, false, false, &tree), command);
+        }
+    }
+    #[test]
     fn manual_combat_commands_preserve_modifier_and_menu_isolation() {
         use tore_sim::combat::live::Command as C;
         let tree = tree();
-        for (key, command) in [
-            ("u", C::ToggleArm),
-            ("k", C::Jettison),
-            ("l", C::ClearDesignation),
-            ("]", C::CycleClass),
-            ("[", C::FailStation),
-        ] {
+        for (key, command) in [("k", C::Jettison), ("l", C::ClearDesignation)] {
             let mut ui = FlightUi::default();
             assert_eq!(
                 ui.key(key, false, false, false, &tree),

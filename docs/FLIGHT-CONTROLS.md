@@ -92,12 +92,10 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized. This is
 | Alt-1…9 | Wingman straight/level, break and approach directions |
 | Alt-B/C/T/H/V/E/W/R/P/D | Wingman return, scope/formation/spacing, engagement, protection and disengagement |
 
-Space now holds the selected player trigger. Semicolon selects the next PT weapon
-slot; T or Enter designates an actual range target. `--live-fire` enables the
+Space now holds the selected player trigger. Bracket keys select the previous/next weapon or NAV; T or Enter designates an actual range target. `--live-fire` enables the
 explicit PT-default test range; backslash resets its target at a suitable range
 for the selected weapon. Ordinary free flight loads the aircraft's supported default weapons. Airborne
-starts select the canonical gun with master arm SAFE; ground starts enter NAV
-and SAFE. Explicit weapon cycling leaves NAV. [Startup rules](spec/hud-layout.md). The restricted native research adapter stays clean.
+starts select and arm the canonical gun; ground starts enter NAV with weapons disarmed. [Startup rules](spec/hud-layout.md). The restricted native research adapter stays clean.
 The complete native weapon/countermeasure dispatch remains unverified.
 [Live-fire scope and approximations](baselines/live-fire.md). USNF manual bindings are reference evidence pending FA-specific verification; FA menu labels take precedence.
 
@@ -231,11 +229,12 @@ sessions and survive aircraft changes/restarts. [Full settings contract](INPUT.m
 
 ## Manual weapons follow-up
 
-The explicit live range adds **U** arm/safe, **L** clear designation, **K** jettison
-selected external weapon group, **]** cycle damage-class fixture and **[** fail
-selected station. Restart repairs/reloads. These are development bindings;
-Shift/Ctrl/Alt combinations retain their prior meanings. Firing stops on weapon,
-arm, jettison and fixture transitions and requires release before another press.
+`[` and `]` cycle NAV and weapons. Weapon selection arms; NAV disarms.
+The HUD status reads NAV, LCOS for the armed gun, or ARM for missiles.
+There is no separate master-arm control. **L** clears designation and **K**
+jettisons the selected external group in the live range. Class and station-fault
+fixtures remain available through the controls editor and command-line setup.
+Restart repairs/reloads. Selection releases the trigger before another press.
 T/Enter cycles the contacts the selected channel currently observes, on the same
 eligibility a mouse click uses, and a mouse click on the scope designates one
 directly. SAFE/EMPTY/STATION FAILED and the sensor and range inhibits are shown
@@ -255,12 +254,11 @@ In the explicit `--live-fire` range, **D** requests a gun-strength player hit,
 target ECM. Those two fixtures moved off I and Y when those keys took over
 infrared selection and contact history; D is also a development binding.
 **J** controls own ECM and **R** radar. The incoming fixture does
-not command AI or spend player ammunition. U arm/safe, K selected-group jettison,
-L clear designation, semicolon next weapon, T/Enter designate, Space hold fire,
-backslash target replacement and bracket fault/class controls remain available.
+not command AI or spend player ammunition. K selected-group jettison, L clear designation, bracket NAV/weapon cycling,
+T/Enter designate, Space hold fire and backslash target replacement remain available.
 
 Standard Linux pads use **held Select** as the combat layer: RB fire, LB weapon,
-A designate, B clear, X arm, Y own ECM, L3 radar, R3 jettison. D-pad up replaces
+A designate, B clear, X previous NAV/weapon, Y own ECM, L3 radar, R3 jettison. D-pad up replaces
 target, down requests a player hit, left cycles class, right fails the station.
 Select+Start toggles target ECM; Select+Guide spawns the incoming fixture when
 the desktop exposes Guide. These suppress the corresponding base flight/menu
@@ -386,7 +384,7 @@ HUD edge when outside, including behind the aircraft. The display selection
 survives sensor loss, but radar lead and weapon support do not. **L** or
 **RELEASE LOCK** clears both selections. Destroying/removing the target or
 resetting the mission also removes its cue. The marker works with guns,
-missiles and master arm off. The [specification](spec/gunsight-targeting.md)
+missiles and NAV selected. The [specification](spec/gunsight-targeting.md)
 separates manual behavior from fitted projection and targeting rules.
 
 For a controlled capture, `--hud-target-preview bearing,elevation,feet` first
@@ -423,7 +421,7 @@ missiles keep their own targets. Select a target to return to CUED. Press **L**,
 selection. The manual's targeting list does not establish a retail release key.
 `weapon-seeker-mode` remains rebindable, and the upper-right mode label remains
 clickable. With radar power off, radar-missile bore, tones and target cues
-turn off; armed A2A IR missiles retain bore search and guidance; master arm still permits a DUMB release. That missile stays unguided
+turn off; armed A2A IR missiles retain bore search and guidance; weapon selection still permits an unguided release. That missile stays unguided
 after radar power returns. Selecting the passive IR channel alone does not turn
 off the power switch. Supported radar weapons need aircraft lock for guided shots.
 A detected bore target inside minimum range displays MIN RANGE and blocks release.
@@ -528,3 +526,9 @@ on. Unknown contacts use placeholders. Plus/minus zoom, arrows pan and Home foll
 continues; map pointer input cannot operate the covered instruments.
 `--flight-map --capture-flight PATH` captures this view. Map projection,
 identification and surface detection are fitted rules in the [map spec](spec/flight-map.md).
+
+NAV INFO and WEAPONS now use minus/plus selection and a third mode/page button.
+See [selection and instrument rules](spec/weapon-navigation-selection.md).
+
+Friendly selected contacts have a centered X inside their HUD target box.
+[Identification and presentation rules](spec/gunsight-targeting.md#target-square-and-edge-chevron).

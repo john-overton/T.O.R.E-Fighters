@@ -683,7 +683,7 @@ fn gamepad_text(device: &Device) -> String {
         ("button:310", "weapon-next", "press"),
         ("button:304", "designate", "press"),
         ("button:305", "clear-designation", "press"),
-        ("button:307", "master-arm", "press"),
+        ("button:307", "weapon-previous", "press"),
         ("button:308", "jammer", "press"),
         ("button:317", "radar", "press"),
         ("button:318", "jettison", "press"),

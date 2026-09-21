@@ -560,13 +560,14 @@ fn automatic_bore_release_and_radar_search_start_without_designation() {
     assert_eq!(s.mounted.status, Status::Search);
     assert_eq!(s.bore_observation.unwrap().id, 7);
     assert_eq!(s.designated(), None);
-    assert!(!s.seeker_tone(l).unwrap().locked);
+    assert!(s.seeker_tone(l).is_none());
     assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
     assert!(s.projectiles[0].guidance.as_ref().unwrap().enabled);
     assert_eq!(s.projectiles[0].target, None);
     s.command(Command::DesignateTarget(7), l);
     assert_eq!(s.designated(), Some(7));
     assert_eq!(s.launch_mode, LaunchMode::Cued);
+    assert!(s.seeker_tone(l).is_some());
     s.command(Command::ClearDesignation, l);
     assert_eq!(s.designated(), None);
     assert_eq!(s.mounted.target, None);
@@ -585,13 +586,13 @@ fn automatic_bore_release_and_radar_search_start_without_designation() {
         s.step(false, l, |_, _| 0.);
     }
     assert_eq!(s.mounted.target, Some(8));
-    assert!(s.seeker_tone(l).unwrap().locked);
+    assert!(s.seeker_tone(l).is_none());
     s.targets[1].position = [5000., 1000., 5000.];
     s.targets[0].position = [-5000., 1000., 5000.];
     s.step(false, l, |_, _| 0.);
     assert_eq!(s.mounted.status, Status::Search);
     assert_eq!(s.mounted.target, None);
-    assert!(!s.seeker_tone(l).unwrap().locked);
+    assert!(s.seeker_tone(l).is_none());
     // A supported weapon cannot gain an independent radar seeker.
     s.config.stations[0].weapon = weapon("R530.JT");
     s.config.stations[0].weapon.flags |= 0x200;
@@ -934,7 +935,7 @@ fn passive_channel_is_not_the_radar_power_switch() {
     l.controls.channel = sensors::Channel::Infrared;
     s.step(false, l, |_, _| 0.);
     assert_eq!(s.launch_mode, LaunchMode::Boresight);
-    assert!(s.seeker_tone(l).is_some());
+    assert!(s.seeker_tone(l).is_none());
 }
 
 #[test]
@@ -954,7 +955,7 @@ fn armed_ir_bore_ignores_radar_power_without_designation() {
     }
     assert_eq!(s.launch_mode, LaunchMode::Boresight);
     assert_eq!(s.mounted.target, Some(7));
-    assert!(s.seeker_tone(l).unwrap().locked);
+    assert!(s.seeker_tone(l).is_none());
     assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
     assert!(!s.projectiles[0].guidance.as_ref().unwrap().unguided);
     assert_eq!(s.projectiles[0].target, Some(7));

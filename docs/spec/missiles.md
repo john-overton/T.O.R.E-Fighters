@@ -635,7 +635,7 @@ selection tolerance do not change. Scaling uses the displayed instrument bounds.
 
 **Opinionated, requested by John on 2026-09-17.** In the spec weapon rules,
 radar power OFF disables radar-missile acquisition, boresight, seeker tones
-and target-derived weapon cues. IR guidance remains independent of radar power. Master arm is independent.
+and target-derived weapon cues. IR guidance remains independent of radar power. Arming follows weapon/NAV selection.
 An armed radar missile may release without designation while radar power is off, with
 normal safe, bay, ammunition and station gates. The HUD omits DUMB and IN RNG for that unguided release. Such a shot never acquires or steers, even if radar power returns later.
 It retains normal propulsion, inherited velocity, fuze timing, minimum-engagement
@@ -751,3 +751,6 @@ change. Draw two six-pixel horizontal bars just inside the range axis at the upp
 and lower bounds of that interval, with no connecting outline. Keep the target triangle visible, with bore blinking unchanged. No valid
 observation, SAFE, radar-off radar release or impossible prediction produces no
 band. The band does not change missile physics or firing permission.
+
+[Weapon/NAV selection and no-designation bore silence](weapon-navigation-selection.md)
+apply to the player controls and mounted seeker audio.

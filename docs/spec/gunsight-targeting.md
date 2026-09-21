@@ -67,7 +67,17 @@ pipper. The target designator itself is independent of arm and weapon selection.
 
 Project the selected target through the aircraft's complete yaw, pitch and roll
 into the same angular HUD space as the existing flight and missile symbology.
-A 14-pixel square follows an in-bounds target. Once its center leaves the inset
+A 14-pixel square follows an in-bounds target. John requested a centered X for
+friendly forces on 2026-09-21, using his supplied retail screenshot as the visual
+reference. Known friendly contacts use two diagonal strokes spanning six source
+pixels (center minus/plus three), an agent-selected fitted size. Use the same HUD
+color and transform as the square. Enemy, neutral and unknown contacts have no X.
+Use explicit mission-side metadata, or known airport allegiance for runway
+contacts; never infer allegiance from aircraft type or proximity. Off-HUD
+chevrons remain unchanged. This is presentation only and changes no targeting,
+guidance, firing permission or autonomous behavior.
+
+Once its center leaves the inset
 HUD rectangle x=184..456, y=106..380, replace the square with a chevron at that
 rectangle's edge. The arrow points along the three-dimensional bearing and
 elevation, including targets behind the aircraft. An exactly rearward target
