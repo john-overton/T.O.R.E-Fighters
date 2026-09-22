@@ -11,9 +11,12 @@ pub struct F22FlightModel {
 }
 impl F22FlightModel {
     pub fn from_aircraft(a: &tore_formats::aircraft::Aircraft) -> tore_formats::Result<Self> {
-        let supported = a.id.source() == tore_formats::aircraft::AircraftId::F22
-            && a.name == "F-22"
-            && a.shape == "F22.SH";
+        use tore_formats::aircraft::AircraftId;
+        let supported = a.name == "F-22"
+            && matches!(
+                (a.id.source(), a.shape.as_str()),
+                (AircraftId::F22, "F22.SH") | (AircraftId::F22n, "F22N.SH")
+            );
         if !supported {
             return Err(std::io::Error::other(
                 "aircraft identity does not match F22FlightModel",

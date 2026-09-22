@@ -47,6 +47,13 @@ side × 90 × (1 - gear fraction) degrees.
 | MiG-23 | (3, -1, -3) | (0, 27, -3) | Fitted aft side strips, below |
 | Su-35 | (23, 3, -1) | (0, 56, -1) | (0, 23, 8) / atan(10/21) about x |
 | F-22 | (13, 0, -5) | (0, 63, -9) | (0,-17,5) / 0.7 rad about normalized (1,±2/3,±1/3) |
+| F-22N | as F-22 | as F-22 | as F-22, on its own shape addresses |
+
+F-22N (2026-09-22) reuses the F-22 pivots, flap, aileron, elevator, rudder,
+bay and canopy rules on its own reviewed face addresses. Its bay belly uses
+face 39dc in place of the F-22A's 3d03, a fitted agent choice since the belly
+is remodelled. Its native hook stows about the fitted root hinge (0,-9,-9)
+through 0.9 radians, per the [F/A-XX contract](fa-xx.md#retractable-hook).
 
 Switched brake retraction angles multiply (1 - brake fraction). Their source
 pose is the deployed endpoint. MiG-21 has an independently fitted ventral brake

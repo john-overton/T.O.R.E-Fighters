@@ -87,7 +87,11 @@ impl Airframe {
                 use tore_formats::aircraft::AircraftId;
                 let absent_overlay = matches!(
                     id,
-                    AircraftId::X31 | AircraftId::Mig21 | AircraftId::F22 | AircraftId::Faxx
+                    AircraftId::X31
+                        | AircraftId::Mig21
+                        | AircraftId::F22
+                        | AircraftId::F22n
+                        | AircraftId::Faxx
                 ) && cockpit_art[1..].iter().any(|n| n == name)
                     || matches!(id, AircraftId::Mig29 | AircraftId::Mig23 | AircraftId::Su25)
                         && name == cockpit_art[2];
@@ -603,9 +607,12 @@ impl Airframe {
                     && crate::engine_material::nozzle(self.profile.id, f.address);
                 let engine_group =
                     crate::engine_material::outlet_group(self.profile.id, &f.positions);
-                let canopy = damaged.is_none()
-                    && self.profile.id.source() == tore_formats::aircraft::AircraftId::F22
-                    && crate::roster_animation::canopy(f.address);
+                let canopy = damaged.is_none() && {
+                    use tore_formats::aircraft::AircraftId;
+                    let source = self.profile.id.source();
+                    matches!(source, AircraftId::F22 | AircraftId::F22n)
+                        && crate::roster_animation::canopy(source, f.address)
+                };
                 for i in 1..f.positions.len() - 1 {
                     for j in [0, i, i + 1] {
                         let p = f.positions[j];

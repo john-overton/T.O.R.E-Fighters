@@ -1255,7 +1255,7 @@ mod tests {
         assert!((s.payload_lbs - s.systems.external_lbs() - 20.).abs() < 1e-9);
     }
     #[test]
-    fn faxx_hook_starts_stowed_deploys_and_reverses_without_enabling_f22() {
+    fn faxx_and_f22n_hook_starts_stowed_deploys_and_reverses_without_enabling_f22() {
         use tore_formats::aircraft::AircraftId;
         let mut a = profile();
         a.id = AircraftId::F22;
@@ -1265,6 +1265,13 @@ mod tests {
         donor.command(PilotCommand::Toggle(Switch::Hook));
         assert!(!donor.hook_available());
         assert!(!donor.hook_down);
+        a.id = AircraftId::F22n;
+        a.shape = "F22N.SH".into();
+        let mut carrier = State::new(&a, [0., 15000., 0.]).unwrap();
+        assert!(carrier.hook_available());
+        assert_eq!(carrier.hook, 0.);
+        carrier.command(PilotCommand::Toggle(Switch::Hook));
+        assert!(carrier.hook_down);
         a.id = AircraftId::Faxx;
         let mut s = State::new(&a, [0., 15000., 0.]).unwrap();
         assert!(s.hook_available());
@@ -1297,9 +1304,9 @@ mod tests {
     fn faxx_preserves_donor_response_and_bay_support() {
         use tore_formats::aircraft::AircraftId;
         let mut a = profile();
-        a.id = AircraftId::F22;
+        a.id = AircraftId::F22n;
         a.name = "F-22".into();
-        a.shape = "F22.SH".into();
+        a.shape = "F22N.SH".into();
         let mut donor = State::new(&a, [0., 15000., 0.]).unwrap();
         a.id = AircraftId::Faxx;
         let mut concept = State::new(&a, [0., 15000., 0.]).unwrap();

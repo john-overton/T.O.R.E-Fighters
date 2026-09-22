@@ -196,12 +196,13 @@ pub enum AircraftId {
     Mig23,
     Su35,
     F22,
+    F22n,
     Faxx,
 }
 impl AircraftId {
     /// Retail donor for an opinionated runtime variant.
     pub fn source(self) -> Self {
-        if self == Self::Faxx { Self::F22 } else { self }
+        if self == Self::Faxx { Self::F22n } else { self }
     }
     pub fn selection_key(self) -> &'static str {
         if self == Self::Faxx {
@@ -210,7 +211,7 @@ impl AircraftId {
             self.pt()
         }
     }
-    pub const SELECTABLE: [Self; 13] = [
+    pub const SELECTABLE: [Self; 14] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -223,10 +224,11 @@ impl AircraftId {
         Self::Mig23,
         Self::Su35,
         Self::F22,
+        Self::F22n,
         Self::Faxx,
     ];
     /// Retail import identities. Runtime variants reuse these dependencies.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -239,6 +241,7 @@ impl AircraftId {
         Self::Mig23,
         Self::Su35,
         Self::F22,
+        Self::F22n,
     ];
     pub fn parse(name: &str) -> Result<Self> {
         match name.to_ascii_lowercase().as_str() {
@@ -255,8 +258,9 @@ impl AircraftId {
             "su35" | "su35.pt" => Ok(Self::Su35),
             "faxx" | "fa-xx" | "f/a-xx" => Ok(Self::Faxx),
             "f22" | "f22.pt" => Ok(Self::F22),
+            "f22n" | "f22n.pt" => Ok(Self::F22n),
             _ => Err(invalid(
-                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, faxx",
+                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx",
             )),
         }
     }
@@ -273,7 +277,8 @@ impl AircraftId {
             Self::Su25 => "SU25.PT",
             Self::Mig23 => "MIG23.PT",
             Self::Su35 => "SU35.PT",
-            Self::F22 | Self::Faxx => "F22.PT",
+            Self::F22 => "F22.PT",
+            Self::F22n | Self::Faxx => "F22N.PT",
         }
     }
     pub fn hud(self) -> &'static str {
@@ -289,7 +294,8 @@ impl AircraftId {
             Self::Su25 => "SU33CC.HUD",
             Self::Mig23 => "SU33CC.HUD",
             Self::Su35 => "SU35.HUD",
-            Self::F22 | Self::Faxx => "F22.HUD",
+            Self::F22 => "F22.HUD",
+            Self::F22n | Self::Faxx => "F22N.HUD",
         }
     }
     pub fn stem(self) -> &'static str {
@@ -305,7 +311,8 @@ impl AircraftId {
             Self::Su25 => "SU25",
             Self::Mig23 => "MIG23",
             Self::Su35 => "SU35",
-            Self::F22 | Self::Faxx => "F22",
+            Self::F22 => "F22",
+            Self::F22n | Self::Faxx => "F22N",
         }
     }
     pub fn cockpit_stem(self) -> &'static str {
@@ -317,7 +324,7 @@ impl AircraftId {
             Self::Su25 => "SU33",
             Self::Mig23 => "SU33",
             Self::Su35 => "SU35",
-            Self::F22 | Self::Faxx => "F22",
+            Self::F22 | Self::F22n | Self::Faxx => "F22",
 
             _ => self.stem(),
         }
@@ -335,7 +342,7 @@ impl AircraftId {
             Self::Su25 => "~SU33H.PIC",
             Self::Mig23 => "~SU33H.PIC",
             Self::Su35 => "~SU35H.PIC",
-            Self::F22 | Self::Faxx => "~F22H.PIC",
+            Self::F22 | Self::F22n | Self::Faxx => "~F22H.PIC",
         }
     }
     pub fn label(self) -> &'static str {
@@ -352,6 +359,7 @@ impl AircraftId {
             Self::Mig23 => "MiG-23 Flogger-B",
             Self::Su35 => "Su-35",
             Self::F22 => "F-22A Raptor",
+            Self::F22n => "F-22N Raptor",
             Self::Faxx => "F/A-XX",
         }
     }
@@ -365,7 +373,7 @@ impl AircraftId {
             Self::Su25 => "SU24R.SEE",
             Self::Mig23 => "MIG27R.SEE",
             Self::Su35 => "SU27R.SEE",
-            Self::F22 | Self::Faxx => "F22R.SEE",
+            Self::F22 | Self::F22n | Self::Faxx => "F22R.SEE",
 
             _ => "F18R.SEE",
         }
@@ -383,7 +391,7 @@ impl AircraftId {
             Self::Su25 => "GSH301.JT",
             Self::Mig23 => "GSH6_30.JT",
             Self::Su35 => "GSH301.JT",
-            Self::F22 | Self::Faxx => "M61.JT",
+            Self::F22 | Self::F22n | Self::Faxx => "M61.JT",
         }
     }
 }
@@ -416,7 +424,7 @@ impl Aircraft {
         }
         let id = AircraftId::parse(&names[2])?;
         let size = match id {
-            AircraftId::F14 | AircraftId::F22 | AircraftId::Mig29 => 636,
+            AircraftId::F14 | AircraftId::F22 | AircraftId::F22n | AircraftId::Mig29 => 636,
             AircraftId::A4E | AircraftId::Mig21 => 612,
             _ => 660,
         };
@@ -439,6 +447,7 @@ impl Aircraft {
             AircraftId::Mig23 => Some(("MiG-23", "MiG-23 Flogger-B")),
             AircraftId::Su35 => Some(("Su-35", "Su-35")),
             AircraftId::F22 => Some(("F-22", "F- 22A Raptor")),
+            AircraftId::F22n => Some(("F-22", "F- 22N Raptor")),
 
             _ => None,
         };
@@ -847,9 +856,15 @@ mod tests {
         use super::AircraftId;
         let concept = AircraftId::parse("faxx").unwrap();
         assert_eq!(concept, AircraftId::Faxx);
-        assert_eq!(concept.source(), AircraftId::F22);
-        assert_ne!(concept.selection_key(), AircraftId::F22.selection_key());
-        assert_eq!(concept.pt(), AircraftId::F22.pt());
+        assert_eq!(concept.source(), AircraftId::F22n);
+        assert_ne!(concept.selection_key(), AircraftId::F22n.selection_key());
+        assert_ne!(
+            AircraftId::F22n.selection_key(),
+            AircraftId::F22.selection_key()
+        );
+        assert_eq!(concept.pt(), AircraftId::F22n.pt());
+        assert_ne!(concept.pt(), AircraftId::F22.pt());
+        assert_eq!(concept.cockpit(), AircraftId::F22.cockpit());
         assert!(AircraftId::SELECTABLE.contains(&concept));
         assert!(!AircraftId::ALL.contains(&concept));
         for id in AircraftId::SELECTABLE {
@@ -1006,6 +1021,7 @@ mod profile_tests {
             (AircraftId::Mig23, "MiG-23", "MiG-23 Flogger-B", 660),
             (AircraftId::Su35, "Su-35", "Su-35", 660),
             (AircraftId::F22, "F-22", "F- 22A Raptor", 636),
+            (AircraftId::F22n, "F-22", "F- 22N Raptor", 636),
         ] {
             let text = fixture()
                 .replace("F18.PT", id.pt())

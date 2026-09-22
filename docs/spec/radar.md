@@ -17,7 +17,9 @@ portions.
 
 ## Aircraft capabilities
 
-Use the radar installed in the aircraft PT hardpoints. The following twelve
+Use the radar installed in the aircraft PT hardpoints. The F-22N (F22N.PT,
+added 2026-09-22) carries the same sensors, ECM and stores as the F-22A rows
+below. The following twelve
 bindings were checked directly against FA records. Do not substitute avionics
 from a real-world aircraft of the same name, or impose a capability by year.
 One nautical mile is 6,076 feet in these records.

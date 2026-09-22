@@ -3,24 +3,46 @@ use crate::additional_animation::turn;
 use crate::{aircraft_animation::split_surface, flight::State};
 use tore_formats::{aircraft::AircraftId as Id, shape::Face};
 
-pub fn canopy(a: usize) -> bool {
-    matches!(
-        a,
-        0x2136
-            | 0x2153
-            | 0x2170
-            | 0x219c
-            | 0x2220
-            | 0x2255
-            | 0x228a
-            | 0x22a4
-            | 0x22bc
-            | 0x2462
-            | 0x247c
-            | 0x2494
-            | 0x2c36
-            | 0x2c6c
-    )
+/// Glazing panels, one list per source shape. F-22A and F-22N remodelled the
+/// canopy, so their addresses do not share.
+pub fn canopy(id: Id, a: usize) -> bool {
+    match id {
+        Id::F22 => matches!(
+            a,
+            0x2136
+                | 0x2153
+                | 0x2170
+                | 0x219c
+                | 0x2220
+                | 0x2255
+                | 0x228a
+                | 0x22a4
+                | 0x22bc
+                | 0x2462
+                | 0x247c
+                | 0x2494
+                | 0x2c36
+                | 0x2c6c
+        ),
+        Id::F22n => matches!(
+            a,
+            0x2215
+                | 0x2232
+                | 0x224f
+                | 0x227b
+                | 0x22ff
+                | 0x2334
+                | 0x2369
+                | 0x2383
+                | 0x239b
+                | 0x2541
+                | 0x255b
+                | 0x2573
+                | 0x2c8d
+                | 0x2e57
+        ),
+        _ => false,
+    }
 }
 pub fn sweep(s: &State) -> f64 {
     ((s.speed / 1.68781 - 400.) / 300.).clamp(0., 1.) * 40f64.to_radians() * (1. - s.flaps)
@@ -32,11 +54,19 @@ fn side(f: &Face) -> f32 {
         1.
     }
 }
-fn f22_flap(address: usize) -> bool {
-    matches!(
-        address,
-        0x437f | 0x439e | 0x43fb | 0x4416 | 0x4576 | 0x4599 | 0x45f6
-    )
+/// Inboard trailing-edge flaps, one list per source shape.
+fn f22_flap(id: Id, address: usize) -> bool {
+    match id {
+        Id::F22 => matches!(
+            address,
+            0x437f | 0x439e | 0x43fb | 0x4416 | 0x4576 | 0x4599 | 0x45f6
+        ),
+        Id::F22n => matches!(
+            address,
+            0x4477 | 0x4496 | 0x44f3 | 0x450e | 0x466e | 0x4691 | 0x46ee
+        ),
+        _ => false,
+    }
 }
 fn rudder(id: Id, a: usize) -> Option<(f32, f32)> {
     match id {
@@ -47,17 +77,18 @@ fn rudder(id: Id, a: usize) -> Option<(f32, f32)> {
         Id::Mig23 if matches!(a, 0x2a66 | 0x2a89 | 0x2b20) => Some((-21., 0.)),
         Id::Su35 if matches!(a, 0x2268 | 0x2301 | 0x26a8 | 0x4edf) => Some((-30., 20.)),
         Id::F22 if matches!(a, 0x34f7 | 0x354a | 0x381e | 0x3841) => Some((-35., 13.)),
+        Id::F22n if matches!(a, 0x361d | 0x3670 | 0x3903 | 0x3926) => Some((-35., 13.)),
         _ => None,
     }
 }
 /// Split across a reviewed/fitted hinge, keeping the fixed forward skin intact.
 pub fn faces(id: Id, f: &Face, s: &State) -> Vec<Face> {
     if id == Id::Faxx {
-        if matches!(f.address, 0x34f7 | 0x354a | 0x37ff | 0x381e | 0x3841) {
+        if matches!(f.address, 0x361d | 0x3670 | 0x38e4 | 0x3903 | 0x3926) {
             return Vec::new();
         }
         let opening = (f64::from(side(f)) * s.rudder).clamp(0., 1.) * 0.6;
-        if f22_flap(f.address) && opening > 1e-8 {
+        if f22_flap(Id::F22n, f.address) && opening > 1e-8 {
             return [-opening, opening]
                 .into_iter()
                 .map(|angle| {
@@ -94,8 +125,12 @@ pub fn faces(id: Id, f: &Face, s: &State) -> Vec<Face> {
         if s.rudder.abs() < 1e-8 {
             return vec![f.clone()];
         }
-        let slope = if id == Id::F22 { 0.25 } else { 0. };
-        let axis = if id == Id::F22 {
+        let slope = if matches!(id, Id::F22 | Id::F22n) {
+            0.25
+        } else {
+            0.
+        };
+        let axis = if matches!(id, Id::F22 | Id::F22n) {
             [f64::from(sign) * 0.45, -0.25, 1.]
         } else {
             [0., 0., 1.]
@@ -109,10 +144,16 @@ pub fn faces(id: Id, f: &Face, s: &State) -> Vec<Face> {
             |p| p[1] - y + slope * p[2],
         );
     }
-    if id == Id::F22
-        && matches!(f.address, 0x35d7 | 0x3601 | 0x362f | 0x3cc0 | 0x3d03)
-        && s.bay > 0.
-    {
+    // Belly skins the bay is cut from. The F-22N belly was remodelled, so its
+    // aft-right panel 0x39dc replaces the F-22A's 0x3d03 (fitted, agent choice
+    // 2026-09-22: it is the only F-22N skin at z=-9 covering the clip region's
+    // right half aft of y=22).
+    let bay_skin = match id {
+        Id::F22 => matches!(f.address, 0x35d7 | 0x3601 | 0x362f | 0x3cc0 | 0x3d03),
+        Id::F22n => matches!(f.address, 0x3755 | 0x36fd | 0x3716 | 0x39ae | 0x39dc),
+        _ => false,
+    };
+    if bay_skin && s.bay > 0. {
         return bay_doors(f, s.bay);
     }
     if id == Id::Su25 && matches!(f.address, 0x56a9 | 0x56d6 | 0x5810 | 0x58b7) {
@@ -259,13 +300,24 @@ pub fn animate(id: Id, f: &mut Face, s: &State) {
             }
         }
         Id::F22 => {
-            if f22_flap(a) {
+            if f22_flap(id, a) {
                 panel = Some(([sign * 17., -22., 0.], 0.4 * s.flaps));
             }
             if matches!(a, 0x43bd | 0x43dc | 0x45b8 | 0x45d7) {
                 panel = Some(([sign * 42., -22., 0.], roll));
             }
             if matches!(a, 0x32ba | 0x32cc | 0x35ad | 0x35c1 | 0x3987 | 0x3ba9) {
+                panel = Some(([sign * 18., -48., 1.], -0.3 * s.elevator + roll * 0.5));
+            }
+        }
+        Id::F22n => {
+            if f22_flap(id, a) {
+                panel = Some(([sign * 17., -22., 0.], 0.4 * s.flaps));
+            }
+            if matches!(a, 0x44b5 | 0x44d4 | 0x46b0 | 0x46cf) {
+                panel = Some(([sign * 42., -22., 0.], roll));
+            }
+            if matches!(a, 0x31eb | 0x31fd | 0x36d3 | 0x36e7 | 0x3ada | 0x3cff) {
                 panel = Some(([sign * 18., -48., 1.], -0.3 * s.elevator + roll * 0.5));
             }
         }
@@ -296,7 +348,7 @@ pub fn gear(id: Id, f: &mut Face, fraction: f64) {
         Id::Su25 => ([10., 0., -9.], [0., 40., -9.]),
         Id::Mig23 => ([3., -1., -3.], [0., 27., -3.]),
         Id::Su35 => ([23., 3., -1.], [0., 56., -1.]),
-        Id::F22 => ([13., 0., -5.], [0., 63., -9.]),
+        Id::F22 | Id::F22n => ([13., 0., -5.], [0., 63., -9.]),
         _ => return,
     };
     if nose {
@@ -354,7 +406,7 @@ pub fn brake(id: Id, f: &mut Face, fraction: f64) {
                 angle * (1. - fraction),
             );
         }
-        Id::F22 => turn(
+        Id::F22 | Id::F22n => turn(
             f,
             [0., -17., 5.],
             [1., sign * 2. / 3., sign / 3.],
@@ -460,17 +512,20 @@ mod tests {
     #[test]
     fn faxx_hides_fins_and_opens_only_commanded_flap_about_fixed_hinge() {
         let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
-        for address in [0x34f7, 0x354a, 0x37ff, 0x381e, 0x3841] {
-            let fin = face(
-                address,
-                vec![[13., -55., 1.], [29., -24., 36.], [14., -11., 4.]],
-            );
+        let fin_shape = vec![[13., -55., 1.], [29., -24., 36.], [14., -11., 4.]];
+        for address in [0x361d, 0x3670, 0x38e4, 0x3903, 0x3926] {
+            let fin = face(address, fin_shape.clone());
             assert!(faces(Id::Faxx, &fin, &state).is_empty());
+            assert_eq!(faces(Id::F22n, &fin, &state).len(), 1);
+        }
+        // The F-22A keeps every fin it always had.
+        for address in [0x34f7, 0x354a, 0x37ff, 0x381e, 0x3841] {
+            let fin = face(address, fin_shape.clone());
             assert_eq!(faces(Id::F22, &fin, &state).len(), 1);
         }
         for sign in [-1., 1.] {
             let flap = face(
-                0x437f,
+                0x4477,
                 vec![
                     [sign * 17., -22., 0.],
                     [sign * 20., -22., 0.],
@@ -492,7 +547,7 @@ mod tests {
                         (f64::from(leaf.positions[2][1]) + 22. + 10. * angle.cos()).abs() < 1e-5
                     );
                 }
-                assert_eq!(faces(Id::F22, &flap, &state).len(), 1);
+                assert_eq!(faces(Id::F22n, &flap, &state).len(), 1);
                 state.rudder = -state.rudder;
                 assert_eq!(faces(Id::Faxx, &flap, &state).len(), 1);
             }

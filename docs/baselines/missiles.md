@@ -193,7 +193,7 @@ audio or PDF bytes are committed. Human listening review remains unavailable.
 
 ## Earlier roster and range acceptance
 
-All twelve supported aircraft passed `--combat-smoke`, exercising their current
+All twelve aircraft supported at the time passed `--combat-smoke`, exercising their current
 stations and all five source damage classes. The pass includes AGM65G and AS7.
 Forty-six per-slot version-4 tapes were written and replayed with full state
 comparisons. A separate BORESIGHT tape includes heat and emitter fixture inputs,

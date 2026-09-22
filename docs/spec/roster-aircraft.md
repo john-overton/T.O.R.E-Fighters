@@ -27,6 +27,17 @@ These are game configuration values, not real-aircraft performance claims.
 | MiG-23 Flogger-B / MIG23.PT | 23589 | 11704 | 41556 | 17310 | 24728 | 225 / 286 / 571 |
 | Su-35 / SU35.PT | 40564 | 22000 | 74956 | 40755 | 58642 | 225 / 286 / 571 |
 | F-22A Raptor / F22.PT | 30000 | 25000 | 72000 | 64000 | 78000 | 360 / 526 / 1352 |
+| F-22N Raptor / F22N.PT | 30000 | 25000 | 72000 | 64000 | 78000 | 360 / 526 / 1352 |
+
+The F-22N was added on 2026-09-22 at John's request as the F/A-XX donor and as
+its own selectable aircraft. It is the stock carrier variant: same mass, thrust
+and envelopes as the F-22A, its own F22N.SH shape family and `_F22N` textures,
+the F22N.HUD reference to the shared F22 cockpit art, and PLANE_TYPE flags with
+the hook and carrier capability bits set. Its hook is the shape's own `_PLhook`
+branch, stowed by the fitted rule in the [F/A-XX contract](fa-xx.md#retractable-hook).
+Agent choice: it reuses the F-22A fitted handling, hinges and bay rig with its
+own shape addresses. The few PT words that differ from F22.PT are donor values,
+listed in the [packaging baseline](../baselines/fa-xx-packaging.md).
 
 Su-25 has no afterburner: burner commands must not produce thrust, flame, audio
 or rumble. F-22 spinEntry=2 disables spin entry; the others retain their own

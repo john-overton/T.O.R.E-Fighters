@@ -41,3 +41,43 @@ finless stability are not modeled. Damaged-body fin masks were checked against
 local decoded source polygons; an in-flight damage transition was not captured.
 Existing wing integration only receives the new identity and donor configuration;
 no autonomous behavior laws were added or tuned.
+
+## F-22N donor, 2026-09-22
+
+Implementation mode. John moved the concept donor to the retail F-22N and added
+the F-22N itself as a selectable aircraft. Donor identities and the parsed PT
+differences are in the [packaging baseline](fa-xx-packaging.md#f-22n-donor-export).
+
+Validated on Linux with the same NVIDIA Vulkan host:
+
+- The F22N.SH rig gate measured 20146 code bytes, 248 neutral faces and the
+  seven state words 5e70/5e7c/5e82/5e8e/5e9a/5ea0/5ea6; branches add 8 burner,
+  12 bay, 4 brake, 12 gear and 2 hook faces, all textured `_F22N.PIC`. The rig
+  error messages now print measured values so the next donor is easy to review.
+- All 1028 Rust tests passed (154 tore-formats, 626 tore-sim, 208 tore-app, the
+  rest in examples and integration tests), plus 69 Python tests, formatting,
+  Clippy with warnings denied, the locked workspace build, source and binary
+  asset checks and documentation headers. New synthetic tests cover the native
+  blade: exact source geometry at full extension, hidden at zero, rigid rotation
+  about (0,-9,-9), tip at z=-23 rising monotonically as it stows and above the
+  belly plane when nearly stowed. Fin and flap tests use the F-22N addresses
+  and separately check the F-22A's own fins still draw.
+- Captures under `.local/faxx-f22n/`, inspected: F/A-XX neutral is tailless
+  and the F-22N keeps both fins; from above, full right rudder opens only the
+  right inboard flap as two leaves and full left only the left; the F-22N's
+  rudder panels deflect at full rudder and are clean at neutral; from below the
+  striped native hook hangs to the wheel plane at extension 1, sits nearly
+  flush at 0.5 and is absent at 0, identically on F-22N and F/A-XX; the F-22N
+  bay opens with a solid belly behind the doors, matching the F-22A capture;
+  the F-22A neutral capture is unchanged.
+- Headless 120-tick runs for f22n, faxx and f22 in the default hybrid,
+  `--legacy-flight` and `--native-flight-tables` modes all completed without
+  crashing with identical end states within each mode. The GPU smoke test
+  presented successfully. Media were re-imported once into a separate
+  `TORE_DATA_DIR` because the cache now requires the F22N resources.
+- The F/A-XX now takes F22N.PT values: the flight suite departs earlier in the
+  stall scenario (tick 7215 against 7965 for the F-22A) and ends the spin
+  scenario at 262.17 kt against 264.19. Donor values, not tuning.
+
+Retail comparison was not run. An in-flight damage transition was not captured.
+Original FA flight of the new export is pending John's Windows check.

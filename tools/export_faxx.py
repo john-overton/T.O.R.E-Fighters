@@ -1,8 +1,10 @@
-"""Export reviewed F22 donors as a separate experimental FA F/A-XX aircraft. No retail code execution.
+"""Export reviewed F-22N donors as a separate experimental FA F/A-XX aircraft. No retail code execution.
 
 Requires the patched static OpenFA build. Outputs are local retail derivatives.
-The original drawing records stay at their addresses; authored endpoint routines
-are appended before the end marker. See docs/spec/fa-xx-export.md.
+The original drawing records stay at their addresses; authored split-flap
+routines are appended before the end marker. The tail hook is the donor's own
+native hook, so the exporter only verifies the PLANE_TYPE capability flags.
+See docs/spec/fa-xx-export.md.
 """
 import argparse
 import ast
@@ -19,12 +21,15 @@ from openfa_tools import require_static
 from fa_lib import pack_stored
 
 ROOT = Path(__file__).resolve().parents[1]
+MAIN = 'F22N.SH'
+DONOR_STEM = 'F22N'
 DONORS = {
-    'F22.SH': ('eba06b716e45431fa7401d99579eb0d4c8f1882eb80928c726186907c170f8b6', [0x34f7, 0x351e, 0x354a, 0x37ff, 0x381e, 0x3841, 0x386f]),
-    'F22_A.SH': ('4d06b11b332f68981fd5613ca048190a601c84974b4e3edf79ad238a60a24fdb', [0x3365, 0x3388]),
-    'F22_C.SH': ('c9a280ee6470fad95cd65fe497af2cb5c9543aeb6a7a3fd7d332c2c0922dfdf3', [0x2abf, 0x2ae2, 0x2c8a, 0x2cad]),
+    'F22N.SH': ('736649d76b7e4aea059586f00d7c7474df777ab9ddedde14baa075a34a90d380', [0x361d, 0x3644, 0x3670, 0x38e4, 0x3903, 0x3926, 0x3954]),
+    'F22N_A.SH': ('d38c1fa5463f54f35416de28baf29a4d434446487ba46eb5a7e77fb09cca8566', [0x3366, 0x3389]),
+    'F22N_C.SH': ('925bbb1b8a2d9e6476b89f0dead3778b025ccdac827ddda02146baedde25c13a', [0x2ac0, 0x2ae3, 0x2c8b, 0x2cae]),
 }
-FLAPS = [0x437f, 0x439e, 0x43fb, 0x4416, 0x4576, 0x4599, 0x45f6]
+FLAPS = [0x4477, 0x4496, 0x44f3, 0x450e, 0x466e, 0x4691, 0x46ee]
+HOOK_FLAGS = 0xd3
 
 
 def field(block, name):
@@ -109,36 +114,6 @@ class Extension:
         return out
 
 
-def hook_geometry():
-    length = (18 - 1.3*math.cos(.75))/math.sin(.75)-1
-    result = bytearray(b'\xe0\x00\x00\x00')
-    for lo, hi in [([-.45, -26-length, -5.45], [.45, -26, -4.55]),
-                   ([-.9, -27-length, -6.3], [.9, -23-length, -5])]:
-        for axis in range(3):
-            u, v = (axis+1)%3, (axis+2)%3
-            for upper in (False, True):
-                points = []
-                for a, b in [(0, 0), (1, 0), (1, 1), (0, 1)]:
-                    p = lo.copy()
-                    p[axis] = hi[axis] if upper else lo[axis]
-                    p[u] = hi[u] if a else lo[u]
-                    p[v] = hi[v] if b else lo[v]
-                    p = turn(p, .75, (0, -26, -5))
-                    # Keep the thin shank from collapsing at integer SH precision.
-                    p[0] = math.copysign(max(1, round(abs(p[0]))), p[0])
-                    points.append(p)
-                if not upper:
-                    points.reverse()
-                n = [0, 0, 0]
-                n[axis] = 32765 if upper else -32765
-                n = turn(n, .75, (0, 0, 0))
-                center = [round(sum(p[i] for p in points)/4) for i in (0, 2, 1)]
-                result += vb(range(4), points)
-                result += b'\xfc\x60\x02\x37\x00' + struct.pack('<hhhbbb',
-                    round(n[0]), round(n[2]), round(n[1]), *center) + b'\x04\x00\x01\x02\x03'
-    return bytes(result)
-
-
 def modify(text, original, faces, main):
     header, *blocks = re.split(r'(?=^- name: )', text, flags=re.M)
     offsets = [int(field(b, 'code_offset0'), 16) for b in blocks]
@@ -155,7 +130,7 @@ def modify(text, original, faces, main):
             while blocks[following].startswith('- name: Pad\n'):
                 following += 1
             replaced[i] = stub(offset, size, offsets[following], b)
-        if main == 'F22.SH' and offset + 0x1000 in FLAPS:
+        if main == MAIN and offset + 0x1000 in FLAPS:
             raw = code[offset:offset+size]
             following = i + 1
             while blocks[following].startswith('- name: Pad\n'):
@@ -183,19 +158,14 @@ def modify(text, original, faces, main):
                 extension.raw(split + jump(extension.at + len(split), resume))
                 extension.raw(closed + jump(extension.at + len(closed), resume))
             replaced[i] = stub(offset, size, routine, b)
-        if main == 'F22.SH' and b.startswith('- name: SourceName\n'):
-            routine = extension.at
-            geometry = hook_geometry()
-            extension.guard('_PLhook', 1, routine+36, offset+size)
-            extension.raw(geometry + jump(extension.at+len(geometry), offset+size))
-            replaced[i] = stub(offset, size, routine, b)
-    if main != 'F22.SH':
+    if main != MAIN:
         return header + ''.join(replaced.get(i, b) for i, b in enumerate(blocks)), {'fins': masks}
     # Preserve original instruction offsets. Only the end marker and import aliases move.
     shift = extension.size
     tramps = [(i, field(b, 'trampoline')) for i, b in enumerate(blocks) if b.startswith('- name: X86Trampoline\n')]
     aliases = {name: offsets[i]+shift for i, name in tramps}
-    extra = ['_PLhook', '_PLrudder']
+    # _PLhook is already a donor import; the split-flap guards need only _PLrudder.
+    extra = ['_PLrudder']
     last = offsets[-1]+shift+6
     aliases.update({name: last+i*6 for i, name in enumerate(extra)})
     import_count = len(tramps)+len(extra)
@@ -235,26 +205,25 @@ def modify(text, original, faces, main):
 
 
 IDENTITY_DONORS = {
-    'F22.PT': 'e6b0009e2cfd48b53f18a80abcf2ae41d2c77bb8c66a5d7401b5ad0a62f86a15',
-    'F22_B.SH': '69caaac4a05f41e52d85774fe9e95f4ad4368899aae5ea9305163a312ff19460',
-    'F22_D.SH': '68d7c820cf0bfea4da15d97493ede5fd5f2175181f0e3b22dea038a4845018a8',
-    'F22_S.SH': '4be45511cb9b2d7d2a72a9eb2ee516d584115b375328eb18b352d2f1368726ed',
+    'F22N.PT': '5ac12358639abba3119d6b94b631ff20e62c682052aa1f6804394a86ef9476bc',
+    'F22N_B.SH': '9f246eeb949bd3669275e192ac4dc92eabae34edd4805230a5cc9159152e2a4a',
+    'F22N_D.SH': '06b96b2b4d42b5555f80cc37b22eee46fb53a001ad7a26ac9acfdbfa18b091ab',
+    'F22N_S.SH': 'ff34efe77905f877863220582eac3168c6af037f6e04305087e2eafbc24640ef',
 }
 
 
-def hook_equipped_pt(data):
-    """Enable the reviewed PLANE_TYPE hook bit, preserving all other flags."""
+def verify_hook_capable_pt(data):
+    """Require the donor's own PLANE_TYPE hook bit; return the bytes unchanged."""
     text = data.decode('ascii')
     pattern = r'(?m)(^;[- ]*START OF PLANE_TYPE[- ]*\r?\n[ \t\r\n]*dword[ \t]+\$)([0-9A-Fa-f]+)(?=[ \t\r\n;]|$)'
     matches = list(re.finditer(pattern, text))
-    if len(matches) != 1 or int(matches[0][2], 16) not in (0x91, 0x93):
-        raise ValueError('unreviewed F22 plane capability flags')
-    flags = matches[0]
-    return (text[:flags.start(2)] + '93' + text[flags.end(2):]).encode('ascii')
+    if len(matches) != 1 or int(matches[0][2], 16) != HOOK_FLAGS:
+        raise ValueError('unreviewed F-22N plane capability flags')
+    return data
 
 
 def independent_pt(data):
-    """Give the concept its own identity/shape family and enable its hook."""
+    """Give the concept its own identity/shape family; the donor hook bit is verified only."""
     text = data.decode('ascii')
     replacements = {
         'ot_names': ['F/A-XX', 'F/A-XX Concept', 'FAXX.PT'],
@@ -269,7 +238,7 @@ def independent_pt(data):
         newline = '\r\n' if '\r\n' in match[0] else '\n'
         replacement = ':' + label + newline + ''.join('\tstring "'+v+'"'+newline for v in values)
         text = text[:match.start()] + replacement + text[match.end():]
-    return hook_equipped_pt(text.encode('ascii'))
+    return verify_hook_capable_pt(text.encode('ascii'))
 
 
 def main():
@@ -277,8 +246,6 @@ def main():
     parser.add_argument('--tool', type=Path, required=True)
     parser.add_argument('--donors', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--identity', choices=['faxx','f22'], default='faxx',
-                        help='Separate F/A-XX (default), or the earlier F-22 replacement')
     args = parser.parse_args()
     tool, out = args.tool.resolve(), args.out.resolve()
     require_static(tool)
@@ -288,19 +255,18 @@ def main():
             parser.error(f'unreviewed donor {name}')
     identity_inputs = {}
     for name, expected in IDENTITY_DONORS.items():
-        if args.identity == 'faxx' or name == 'F22.PT':
-            data = (args.donors/name).read_bytes()
-            if hashlib.sha256(data).hexdigest() != expected:
-                parser.error(f'unreviewed identity donor {name}')
-            identity_inputs[name] = data
+        data = (args.donors/name).read_bytes()
+        if hashlib.sha256(data).hexdigest() != expected:
+            parser.error(f'unreviewed identity donor {name}')
+        identity_inputs[name] = data
     out.mkdir(parents=True, exist_ok=False)
     faces = json.loads(subprocess.check_output(['cargo', 'run', '--locked', '-q', '-p', 'tore-extract',
-        '--example', 'shape_json', '--', str((args.donors/'F22.SH').resolve())], cwd=ROOT))
+        '--example', 'shape_json', '--', str((args.donors/MAIN).resolve())], cwd=ROOT))
     faces = {f['address']: f for f in faces}
     report = {'status': 'experimental, original-game operation unverified',
               'tool_sha256': hashlib.sha256(tool.read_bytes()).hexdigest(),
               'exporter_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-              'identity': args.identity, 'shapes': {}}
+              'identity': 'faxx', 'donor_stem': DONOR_STEM, 'shapes': {}}
     for name, original in inputs.items():
         shape = out/name
         shape.write_bytes(original)
@@ -313,36 +279,26 @@ def main():
         details['donor_sha256'] = hashlib.sha256(original).hexdigest()
         details['sha256'] = hashlib.sha256(shape.read_bytes()).hexdigest()
         report['shapes'][name] = details
-    resources = list(DONORS)
-    if args.identity == 'faxx':
-        resources = []
-        shapes = {}
-        for name, details in report['shapes'].items():
-            renamed = name.replace('F22', 'FAXX', 1)
-            (out/name).rename(out/renamed)
-            shapes[renamed] = details
-            resources.append(renamed)
-        report['shapes'] = shapes
-        report['identity_resources'] = {}
-        for name, original in identity_inputs.items():
-            renamed = name.replace('F22', 'FAXX', 1)
-            data = independent_pt(original) if name.endswith('.PT') else original
-            (out/renamed).write_bytes(data)
-            resources.append(renamed)
-            report['identity_resources'][renamed] = {
-                'donor_sha256': hashlib.sha256(original).hexdigest(),
-                'sha256': hashlib.sha256(data).hexdigest(),
-            }
-    else:
-        original = identity_inputs['F22.PT']
-        data = hook_equipped_pt(original)
-        (out/'F22.PT').write_bytes(data)
-        resources.append('F22.PT')
-        report['identity_resources'] = {'F22.PT': {
+    resources = []
+    shapes = {}
+    for name, details in report['shapes'].items():
+        renamed = name.replace(DONOR_STEM, 'FAXX', 1)
+        (out/name).rename(out/renamed)
+        shapes[renamed] = details
+        resources.append(renamed)
+    report['shapes'] = shapes
+    report['identity_resources'] = {}
+    for name, original in identity_inputs.items():
+        renamed = name.replace(DONOR_STEM, 'FAXX', 1)
+        data = independent_pt(original) if name.endswith('.PT') else original
+        (out/renamed).write_bytes(data)
+        resources.append(renamed)
+        report['identity_resources'][renamed] = {
             'donor_sha256': hashlib.sha256(original).hexdigest(),
             'sha256': hashlib.sha256(data).hexdigest(),
-        }}
-    report['hook_capability'] = {'donor_flags': '0x91', 'exported_flags': '0x93', 'enabled_bit': '0x02'}
+        }
+    report['hook_capability'] = {'donor_flags': '0xd3', 'exported_flags': '0xd3',
+                                 'change': 'none', 'source': 'native F-22N hook'}
     (out/'export-report.json').write_text(json.dumps(report, indent=2)+'\n')
     # Import here to avoid a cycle in the independent validator's CLI.
     from validate_faxx_export import validate
@@ -357,8 +313,7 @@ def main():
     for name in resources:
         if (unpacked/name).read_bytes() != (out/name).read_bytes():
             raise ValueError(f'archive round trip failed: {name}')
-    readme_name = 'faxx-independent-readme.txt' if args.identity == 'faxx' else 'faxx-package-readme.txt'
-    readme = (ROOT/'tools/openfa'/readme_name).read_text()
+    readme = (ROOT/'tools/openfa/faxx-independent-readme.txt').read_text()
     (out/'README.txt').write_text(readme)
     import zipfile
     payloads = ['README.txt', 'export-report.json', 'validation.json', 'FAXX.LIB', *resources]

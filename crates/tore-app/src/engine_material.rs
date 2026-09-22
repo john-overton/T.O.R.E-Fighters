@@ -103,14 +103,22 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
         AircraftId::Mig21 => address == 0x22e8,
         AircraftId::Mig23 => matches!(address, 0x34af | 0x34d6),
         AircraftId::Su35 => matches!(address, 0x2aee | 0x366c | 0x3690 | 0x3a9b | 0x3af0),
-        AircraftId::A4E | AircraftId::Su25 | AircraftId::F22 | AircraftId::Faxx => false,
+        AircraftId::A4E
+        | AircraftId::Su25
+        | AircraftId::F22
+        | AircraftId::F22n
+        | AircraftId::Faxx => false,
     }
 }
 /// Reviewed round, afterburning outlet families. F-22 deliberately excluded.
 pub fn outlet_count(id: AircraftId) -> usize {
     match id {
         AircraftId::X31 | AircraftId::Mig21 | AircraftId::Mig23 => 1,
-        AircraftId::A4E | AircraftId::Su25 | AircraftId::F22 | AircraftId::Faxx => 0,
+        AircraftId::A4E
+        | AircraftId::Su25
+        | AircraftId::F22
+        | AircraftId::F22n
+        | AircraftId::Faxx => 0,
         _ => 2,
     }
 }
@@ -142,7 +150,12 @@ mod tests {
             assert_eq!(outlet_group(id, &[[-1., 0., 0.]]), 0);
             assert_eq!(outlet_group(id, &[[1., 0., 0.]]), 1);
         }
-        for id in [AircraftId::F22, AircraftId::Su25, AircraftId::A4E] {
+        for id in [
+            AircraftId::F22,
+            AircraftId::F22n,
+            AircraftId::Su25,
+            AircraftId::A4E,
+        ] {
             assert_eq!(outlet_count(id), 0);
             assert!((0..65536).all(|address| !nozzle(id, address)));
         }

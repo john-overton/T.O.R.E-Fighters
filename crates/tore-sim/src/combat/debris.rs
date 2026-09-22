@@ -22,7 +22,7 @@ pub fn damage_variant(id: AircraftId, section: usize) -> Option<usize> {
         (AircraftId::F18, x) if x == DamageSection::LeftWing as usize => Some(1),
         (AircraftId::Rafale, x) if x == DamageSection::LeftWing as usize => Some(0),
         (AircraftId::Rafale, x) if x == DamageSection::Tail as usize => Some(1),
-        (AircraftId::F22, x) if x == DamageSection::LeftWing as usize => Some(0),
+        (AircraftId::F22 | AircraftId::F22n, x) if x == DamageSection::LeftWing as usize => Some(0),
         _ => None,
     }
 }

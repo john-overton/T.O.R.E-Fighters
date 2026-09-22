@@ -25,7 +25,7 @@ ADDITIONS = {
     "crates/tore-extract/examples/check_lib.rs", "docs/spec/fa-xx-export.md",
     "crates/tore-extract/examples/shape_json.rs", "crates/tore-extract/examples/check_faxx_pt.rs",
     "tools/openfa/README.md", "tools/openfa/static-export.patch",
-    "tools/openfa/faxx-package-readme.txt", "tools/openfa/faxx-independent-readme.txt", "tools/openfa/upstream/LICENSE",
+    "tools/openfa/faxx-independent-readme.txt", "tools/openfa/upstream/LICENSE",
     "tools/openfa/upstream/sh.rs", "tools/openfa/upstream/lib_ext.rs",
     "tools/openfa/upstream/provenance.json",
 }

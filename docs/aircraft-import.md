@@ -9,8 +9,10 @@
 > <!-- tore-header v2 -->
 
 The opinionated **F/A-XX** concept is also selectable as `--aircraft faxx` or
-from Quick Mission. It uses the validated F-22 import without extra media.
-See the [variant contract](spec/fa-xx.md) for split flaps, the concealed retractable hook and handling limits.
+from Quick Mission. Since 2026-09-22 it uses the validated F-22N import
+(`--aircraft f22n`, the stock carrier Raptor with its own hook) without extra
+media. See the [variant contract](spec/fa-xx.md) for split flaps, the stowed
+hook and handling limits.
 
 Updated 2026-09-16. Start here when adding an aircraft. This guide joins the
 existing extraction, format, simulation, presentation and systems contracts;
@@ -35,7 +37,8 @@ and ECM records. Existing player flight adapter defaults remain unchanged.
 
 The next requested batch adds **MiG-29 Fulcrum-C, Su-27 Flanker-B, MiG-21
 Fishbed, Su-25 Frogfoot-A, MiG-23 Flogger-B, Su-35 and F-22A Raptor** as initial
-player ports. All twelve identities are selectable through Quick Mission and
+player ports; the **F-22N Raptor** joined on 2026-09-22 as the F/A-XX donor.
+All thirteen identities are selectable through Quick Mission and
 `--aircraft`. [Roster spec](spec/roster-aircraft.md) and
 [acceptance](baselines/aircraft-roster-expansion.md) document shared source
 cockpits, missing PTS companions and fitted devices. The
@@ -203,7 +206,7 @@ cargo run --locked -p tore-app -- --free-flight --aircraft rafale --researched-f
 The LHX exclusion only skips unrelated bundled media; adapt source selection as
 specified in [EXTRACTION](EXTRACTION.md). Register and document new CLI identities
 only after source review. The reviewed additions are `f14`, `a4e`, `x31`, `mig29`, `su27`, `mig21`,
-`su25`, `mig23`, `su35` and `f22`.
+`su25`, `mig23`, `su35`, `f22` and `f22n`.
 For FA-only CLI extraction, exclude `swpatch.lib` and unrelated disc archives,
 as shown in the [acceptance record](baselines/aircraft-fa-expansion.md).
 

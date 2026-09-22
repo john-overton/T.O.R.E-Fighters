@@ -42,7 +42,7 @@ impl DamageArt {
         if id == AircraftId::Faxx {
             for (body, fins) in bodies
                 .iter_mut()
-                .zip([&[0x3365, 0x3388][..], &[0x2abf, 0x2ae2, 0x2c8a, 0x2cad][..]])
+                .zip([&[0x3366, 0x3389][..], &[0x2ac0, 0x2ae3, 0x2c8b, 0x2cae][..]])
             {
                 if body
                     .faces

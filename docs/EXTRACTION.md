@@ -400,8 +400,8 @@ boundaries and explicitly exclude toolkit `swpatch.lib` for base-FA research.
 The app itself imports only FA_1/FA_2 aircraft sources, with no SWPATCH overlay.
 [Commands, identities and limitations](baselines/aircraft-fa-expansion.md).
 
-The roster batch also accepts `mig29`, `su27`, `mig21`, `su25`, `mig23`, `su35`
-and `f22`. The same resolver imports each PT and its referenced resources;
+The roster batch also accepts `mig29`, `su27`, `mig21`, `su25`, `mig23`, `su35`,
+`f22` and `f22n`. The same resolver imports each PT and its referenced resources;
 known missing PTS companions do not block the four documented profiles.
 [Identity review, commands and validation](baselines/aircraft-roster-expansion.md).
 

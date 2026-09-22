@@ -97,7 +97,7 @@ impl Rig {
                         (0x79cc, Part::Gear, 18),
                     ],
                 ),
-                AircraftId::F22 | AircraftId::Faxx => (
+                AircraftId::F22 => (
                     20012,
                     245,
                     &[0x5df0, 0x5dfc, 0x5e02, 0x5e0e, 0x5e1a, 0x5e20],
@@ -108,14 +108,36 @@ impl Rig {
                         (0x5e0e, Part::Gear, 12),
                     ],
                 ),
+                AircraftId::F22n | AircraftId::Faxx => (
+                    20146,
+                    248,
+                    &[0x5e70, 0x5e7c, 0x5e82, 0x5e8e, 0x5e9a, 0x5ea0, 0x5ea6],
+                    &[
+                        (0x5e70, Part::Flame, 8),
+                        (0x5e7c, Part::Bay, 12),
+                        (0x5e82, Part::Brake, 4),
+                        (0x5e8e, Part::Gear, 12),
+                        (0x5e9a, Part::Hook, 2),
+                    ],
+                ),
                 _ => return Err("no additional aircraft rig for identity".into()),
             };
         let mut shape = Shape::parse(bytes)?;
-        if tore_formats::module::code(bytes)?.0.len() != size
+        let code = tore_formats::module::code(bytes)?.0.len();
+        if code != size
             || shape.faces.len() != neutral_count
             || shape.state_words != words.iter().copied().collect()
         {
-            return Err("unreviewed FA shape layout; review aircraft rig before flying".into());
+            // Report what the shape actually carries so a new rig row can be
+            // filled from the message instead of a separate inspection tool.
+            return Err(format!(
+                "unreviewed FA shape layout; review aircraft rig before flying \
+                 (measured code {code}, faces {}, state words {}; expected code {size}, faces {neutral_count}, state words {})",
+                shape.faces.len(),
+                hex_words(shape.state_words.iter().copied()),
+                hex_words(words.iter().copied()),
+            )
+            .into());
         }
         let neutral: BTreeSet<_> = shape.faces.iter().map(|f| f.address).collect();
         let mut parts = BTreeMap::new();
@@ -127,7 +149,11 @@ impl Rig {
                 .filter(|f| !neutral.contains(&f.address))
                 .collect();
             if added.len() != count {
-                return Err("unreviewed FA device branch".into());
+                return Err(format!(
+                    "unreviewed FA device branch (word 0x{word:04x} added {} faces, expected {count})",
+                    added.len()
+                )
+                .into());
             }
             for f in added {
                 parts.insert(f.address, part);
@@ -145,12 +171,6 @@ impl Rig {
             .any(|f| !f.texture.is_empty() && f.texture != format!("_{}.PIC", id.stem()))
         {
             return Err("unreviewed FA aircraft texture".into());
-        }
-        if id == AircraftId::Faxx {
-            for face in concept_hook() {
-                parts.insert(face.address, Part::Hook);
-                shape.faces.push(face);
-            }
         }
         Ok((Self { id, parts }, shape))
     }
@@ -412,6 +432,13 @@ impl Rig {
         Some(f)
     }
 }
+fn hex_words(words: impl IntoIterator<Item = usize>) -> String {
+    words
+        .into_iter()
+        .map(|w| format!("0x{w:04x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 fn a4_tail(address: usize) -> bool {
     matches!(
         address,
@@ -445,52 +472,11 @@ pub(crate) fn turn(f: &mut Face, pivot: [f32; 3], axis: [f32; 3], angle: f64) {
     }
 }
 
-/// Authored concept geometry, not a retail mesh. Source-unit dimensions are
-/// specified in docs/spec/fa-xx.md. Reserved addresses cannot collide with SH.
-const CONCEPT_HOOK_ANGLE: f64 = 0.75;
-fn concept_hook() -> Vec<Face> {
-    // Deployed wheel bottoms are z=-23. The shoe extends one unit aft and
-    // 1.3 units below the shank hinge, so include both in its rotated reach.
-    let length = ((18. - 1.3 * CONCEPT_HOOK_ANGLE.cos()) / CONCEPT_HOOK_ANGLE.sin() - 1.) as f32;
-    let end = -26. - length;
-    let mut faces = Vec::new();
-    for (lo, hi) in [
-        ([-0.45, end, -5.45], [0.45, -26., -4.55]),
-        ([-0.9, end - 1., -6.3], [0.9, end + 3., -5.]),
-    ] {
-        for axis in 0..3 {
-            let u = (axis + 1) % 3;
-            let v = (axis + 2) % 3;
-            for upper in [false, true] {
-                let mut positions = [(false, false), (true, false), (true, true), (false, true)]
-                    .map(|(a, b)| {
-                        let mut p = lo;
-                        p[axis] = if upper { hi[axis] } else { lo[axis] };
-                        p[u] = if a { hi[u] } else { lo[u] };
-                        p[v] = if b { hi[v] } else { lo[v] };
-                        p
-                    });
-                if !upper {
-                    positions.reverse();
-                }
-                let mut normal = [0.; 3];
-                normal[axis] = if upper { 32767. } else { -32767. };
-                faces.push(Face {
-                    positions: positions.to_vec(),
-                    colors: vec![55; 4],
-                    fog: Default::default(),
-                    uv: Vec::new(),
-                    texture: String::new(),
-                    subtype: 0x20,
-                    normal: Some([normal[0], normal[2], normal[1]]),
-                    address: usize::MAX - faces.len(),
-                });
-            }
-        }
-    }
-    faces
-}
-
+/// Fitted root hinge and stow travel for the native F-22N tail hook (agent
+/// choice, 2026-09-22). The deployed tip sits 16 units aft and 13 below the
+/// hinge, so 0.68 rad would level it; 0.9 rad tucks the blade above the belly.
+const HOOK_HINGE: [f32; 3] = [0., -9., -9.];
+const HOOK_STOW_ANGLE: f64 = 0.9;
 /// Agent-fitted travel between reviewed source device endpoints. No foreign rig offsets.
 fn roster_flame_root(id: AircraftId) -> Option<f32> {
     match id {
@@ -500,7 +486,7 @@ fn roster_flame_root(id: AircraftId) -> Option<f32> {
         AircraftId::Su25 => Some(0.),
         AircraftId::Mig23 => Some(-29.),
         AircraftId::Su35 => Some(-59.),
-        AircraftId::F22 | AircraftId::Faxx => Some(-48.),
+        AircraftId::F22 | AircraftId::F22n | AircraftId::Faxx => Some(-48.),
         _ => None,
     }
 }
@@ -521,12 +507,14 @@ fn roster_device(
             crate::roster_animation::brake(id, &mut f, s.brake);
             None
         }
-        Some(Part::Hook) if id == AircraftId::Faxx && s.hook > 1e-8 => {
+        Some(Part::Hook) if matches!(id, AircraftId::F22n | AircraftId::Faxx) && s.hook > 1e-8 => {
+            // The source blade is the deployed pose, tip already on the level
+            // wheel plane. Stowing swings it up about the fitted root hinge.
             turn(
                 &mut f,
-                [0., -26., -5.],
+                HOOK_HINGE,
                 [1., 0., 0.],
-                CONCEPT_HOOK_ANGLE * s.hook,
+                -HOOK_STOW_ANGLE * (1. - s.hook),
             );
             None
         }
@@ -560,47 +548,91 @@ fn roster_device(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn concept_hook_hides_stowed_and_rotates_rigidly_downward() {
-        let mut s = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
-        let faces = concept_hook();
-        assert_eq!(faces.len(), 12);
-        let rig = Rig {
-            id: AircraftId::Faxx,
-            parts: faces.iter().map(|f| (f.address, Part::Hook)).collect(),
-        };
-        s.hook = 1.;
-        let lowest = faces
-            .iter()
-            .flat_map(|f| rig.animate(f, &s).unwrap().positions)
-            .map(|p| p[2])
-            .fold(f32::INFINITY, f32::min);
-        assert!(
-            (lowest + 23.).abs() < 1e-4,
-            "hook tip must meet the level wheel plane"
-        );
-        s.hook = 0.;
-        for source in &faces {
-            assert!(rig.animate(source, &s).is_none());
-            for fraction in [0.5, 1.] {
-                s.hook = fraction;
-                let moved = rig.animate(source, &s).unwrap();
-                for (p, q) in source.positions.iter().zip(&moved.positions) {
-                    let radius = |p: &[f32; 3]| (p[1] + 26.).powi(2) + (p[2] + 5.).powi(2);
-                    assert!((radius(p) - radius(q)).abs() < 0.001);
-                    assert_eq!(p[0], q[0]);
-                    if p[1] < -41. {
-                        assert!(q[2] < -10.);
-                    }
-                }
-                assert_eq!(moved.colors, source.colors);
-            }
-            s.hook = 0.;
-            assert!(rig.animate(source, &s).is_none());
+    use super::*;
+    /// The two native F-22N hook faces, as the retail shape stores them.
+    fn native_hook(address: usize) -> Face {
+        Face {
+            positions: vec![
+                [0., -11., -9.],
+                [0., -7., -9.],
+                [0., -24., -23.],
+                [0., -26., -21.],
+            ],
+            colors: vec![0; 4],
+            uv: Vec::new(),
+            texture: String::new(),
+            subtype: 0x20,
+            normal: Some([32767., 0., 0.]),
+            address,
+            fog: Default::default(),
         }
     }
-
-    use super::*;
+    #[test]
+    fn native_hook_deploys_to_source_geometry_and_stows_out_of_sight() {
+        let mut s = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        for id in [AircraftId::F22n, AircraftId::Faxx] {
+            for address in [0x40a1, 0x40c0] {
+                let source = native_hook(address);
+                let rig = Rig {
+                    id,
+                    parts: [(address, Part::Hook)].into(),
+                };
+                s.hook = 1.;
+                assert_eq!(
+                    rig.animate(&source, &s).unwrap().positions,
+                    source.positions,
+                    "deployed pose is the untouched source blade"
+                );
+                s.hook = 0.;
+                assert!(rig.animate(&source, &s).is_none(), "stowed hook is hidden");
+                // Retracting lifts the tip clear of the deployed wheel plane
+                // about a fixed hinge, and the blade stays rigid.
+                let mut tip = |fraction: f64| {
+                    s.hook = fraction;
+                    let moved = rig.animate(&source, &s).unwrap();
+                    let midpoint = |f: &[[f32; 3]]| {
+                        std::array::from_fn::<f32, 3, _>(|i| {
+                            (f[0][i] + f[1][i] + f[2][i] + f[3][i]) * 0.25
+                        })
+                    };
+                    // The root edge straddles the hinge, so the blade centre
+                    // keeps its distance from it.
+                    let centre = midpoint(&moved.positions);
+                    assert!(
+                        ((centre[1] - HOOK_HINGE[1]).powi(2) + (centre[2] - HOOK_HINGE[2]).powi(2)
+                            - 106.25)
+                            .abs()
+                            < 0.01
+                    );
+                    for (p, q) in source.positions.iter().zip(&moved.positions) {
+                        let radius = |p: &[f32; 3]| {
+                            (p[1] - HOOK_HINGE[1]).powi(2) + (p[2] - HOOK_HINGE[2]).powi(2)
+                        };
+                        assert!((radius(p) - radius(q)).abs() < 0.001);
+                        assert_eq!(p[0], q[0]);
+                    }
+                    // Lowest point of the blade end, the part a deck wire meets.
+                    source
+                        .positions
+                        .iter()
+                        .zip(&moved.positions)
+                        .filter(|(p, _)| p[1] <= -24.)
+                        .map(|(_, q)| q[2])
+                        .fold(f32::INFINITY, f32::min)
+                };
+                let deployed = tip(1.);
+                assert!((deployed + 23.).abs() < 1e-4);
+                let mid = tip(0.5);
+                let nearly_stowed = tip(1e-6);
+                assert!(mid > deployed, "tip rises as the hook retracts");
+                assert!(nearly_stowed > mid);
+                assert!(
+                    nearly_stowed > -9.,
+                    "a nearly stowed blade tucks above the belly plane"
+                );
+            }
+        }
+    }
     fn face(address: usize) -> Face {
         Face {
             positions: vec![[0., 0., 0.], [3., 0., 0.], [0., 4., 0.]],

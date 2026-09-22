@@ -32,6 +32,7 @@ never executed. Local source-build hashes:
 | MiG-23 Flogger-B (`MIG23.PT`) | `8704a2c0ce241a2f3116dac50e0920d6412bbc6d77025c2770b02831b6b470ab` |
 | Su-35 (`SU35.PT`) | `92d5824b64e6584b0512d0f14257f3a362604e9a72e4ad331a1074530ab53452` |
 | F- 22A Raptor (`F22.PT`) | `e6b0009e2cfd48b53f18a80abcf2ae41d2c77bb8c66a5d7401b5ad0a62f86a15` |
+| F- 22N Raptor (`F22N.PT`, added 2026-09-22) | `5ac12358639abba3119d6b94b631ff20e62c682052aa1f6804394a86ef9476bc` |
 
 Exact displayed F22 long name is `F- 22A Raptor`; the UI normalizes spacing to
 F-22A Raptor. MiG-29 is Fulcrum-C, Su-27 is Flanker-B, MiG-23 is Flogger-B,

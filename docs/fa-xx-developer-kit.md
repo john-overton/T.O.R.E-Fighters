@@ -8,11 +8,13 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode. The local export now produces a separate original-format
-F/A-XX definition, shape family and LIB, with fin removal, split flap leaves and
-a hook. It contains no F22-named entries. It remains an **experimental original-game
-aircraft**. John confirmed that it works in original FA on Windows, including
-the decal cleanup, on 2026-09-18. Read the
+Implementation mode. The local export produces a separate original-format
+F/A-XX definition, shape family and LIB from the retail **F-22N** donors, with
+fin removal, split flap leaves and the F-22N's own hook. It contains no F22- or
+F22N-named entries. It remains an **experimental original-game aircraft**. John
+confirmed that the earlier F-22A-based package worked in original FA on
+Windows, including the decal cleanup, on 2026-09-18; the F-22N-based package
+(2026-09-22) has not been flown in original FA yet. Read the
 [export contract](spec/fa-xx-export.md) for endpoint animation and other fitted
 differences. [Validation and input identities](baselines/fa-xx-packaging.md).
 
@@ -94,13 +96,13 @@ it never installs them into a user's game automatically.
 
 ## Export the concept
 
-Extract your own stock F-22 and dependencies if needed:
+Extract your own stock F-22N and dependencies if needed:
 
 ```sh
-python3 tools/extract_assets.py --source /path/to/fighters-anthology --aircraft f22 --out .local/faxx-donor
+python3 tools/extract_assets.py --source /path/to/fighters-anthology --aircraft f22n --out .local/faxx-donor
 ```
 
-Locate the F22.SH/F22_A.SH/F22_C.SH directory in that extraction. Then run:
+Locate the F22N.SH/F22N_A.SH/F22N_C.SH directory in that extraction. Then run:
 
 ```sh
 python3 tools/export_faxx.py --tool .local/tools/openfa/target/debug/ofa-tools --donors /path/to/FA_2.LIB-directory --out .local/exports/faxx
@@ -110,29 +112,31 @@ On Windows use `python` and append `.exe` to the tool executable. Building/expor
 on Linux. Installing and flying the generated package was confirmed by John on
 Windows; the Windows tool-building workflow itself has not been exercised.
 
-The default `--identity faxx` creates FAXX.PT and six FAXX-named shapes. It needs
-F22.PT and F22_B/D/S.SH alongside the three reviewed edited donors. The exporter
-rejects unreviewed donor hashes. It writes editable YAML, compiled SH files,
-reports, FAXX.LIB and `F-A-XX-FA-experimental.zip`. Use `--identity f22` only when
-the recipient explicitly wants the F-22 replacement, including its hook-enabled
-PT. It automatically
-runs `tools/validate_faxx_export.py` and checks the LIB with an independent Rust reader and also compares OpenFA-unpacked
-payloads. The default ZIP contains the new PT, six SH files, equivalent LIB, reports and
-recipient notes. Stock donor textures, cockpit and equipment remain shared
-with the recipient's installation. No installation is modified automatically,
-and Kapset integration remains unverified. The README distinguishes loose-file and LIB alternatives.
+The exporter creates FAXX.PT and six FAXX-named shapes. It needs F22N.PT and
+F22N_B/D/S.SH alongside the three reviewed edited donors F22N.SH, F22N_A.SH and
+F22N_C.SH. The exporter rejects unreviewed donor hashes and a donor PT without
+the hook capability bit. It writes editable YAML, compiled SH files, reports,
+FAXX.LIB and `F-A-XX-FA-experimental.zip`. The earlier `--identity f22`
+replacement mode was removed on 2026-09-22. It automatically runs
+`tools/validate_faxx_export.py` and checks the LIB with an independent Rust
+reader and also compares OpenFA-unpacked payloads. The ZIP contains the new PT,
+six SH files, equivalent LIB, reports and recipient notes. Stock donor
+textures, cockpit and equipment remain shared with the recipient's
+installation. No installation is modified automatically, and Kapset
+integration remains unverified. The README distinguishes loose-file and LIB
+alternatives.
 
 Validation can be repeated independently:
 
 ```sh
 python3 tools/validate_faxx_export.py --donors /path/to/FA_2.LIB-directory --export .local/exports/faxx
-python3 tools/check_shape_roundtrip.py --tool .local/tools/openfa/target/debug/ofa-tools --out .local/roundtrip /path/to/F22.SH
+python3 tools/check_shape_roundtrip.py --tool .local/tools/openfa/target/debug/ofa-tools --out .local/roundtrip /path/to/F22N.SH
 ```
 
 `crates/tore-extract/examples/shape_json.rs` supplies the bounded geometry
 projection used by validation. `check_faxx_pt.rs` independently parses the new
-PT and checks that only the intended identity/reference fields and hook
-capability bit differ from the donor. Set `TORE_EXPORT_BRANCHES=1` for explicit SH jump
+PT and checks that only the intended identity/reference fields differ from the
+donor and that the donor already carries the hook capability bit. Set `TORE_EXPORT_BRANCHES=1` for explicit SH jump
 handling. The gameplay reader's existing projection is unchanged. This is not
 a general SH virtual machine and never executes x86. Generated JSON, YAML,
 meshes, SH and LIB files remain local retail derivatives.
@@ -146,13 +150,14 @@ exists, check the conflict before copying. Start FA normally; the shortcut's
 "Start in" directory should be the folder containing FA.EXE.
 
 Look for F/A-XX / F/A-XX Concept in Create Quick Mission. Selection inherits the
-F-22's availability/filter settings. First test menu selection and flight startup,
+F-22N's availability/filter settings. First test menu selection and flight startup,
 then external geometry, both rudder directions and the hook. Animation changes
 are discrete endpoints. To undo, close FA and remove the added FAXX.LIB.
 
 The [packaging baseline](baselines/fa-xx-packaging.md) records the verified
-startup scan and John's successful original FA flight/decal-fix reports. Kapset
-compatibility and detailed control/damage acceptance remain unverified.
+startup scan and John's successful original FA flight/decal-fix reports for the
+earlier F-22A-based package. The F-22N-based package, Kapset compatibility and
+detailed control/damage acceptance remain unverified in original FA.
 
 ## Included source and porting information
 
@@ -165,9 +170,9 @@ requires the recipient's own files. See [development setup](DEVELOPMENT.md),
 
 | Concern | Source |
 | --- | --- |
-| Concept identity and F-22 resource reuse | `crates/tore-formats/src/aircraft.rs` |
+| Concept identity and F-22N resource reuse | `crates/tore-formats/src/aircraft.rs` |
 | Fin masks and split flap geometry | `crates/tore-app/src/roster_animation.rs` |
-| Hook geometry and animation | `crates/tore-app/src/additional_animation.rs` |
+| Native hook rig and stow animation | `crates/tore-app/src/additional_animation.rs` |
 | Hook travel and donor flight response | `crates/tore-sim/src/flight.rs` |
 | Damaged-body fin masks | `crates/tore-app/src/damage_art.rs` |
 | Original-format export adapter | `tools/export_faxx.py` |

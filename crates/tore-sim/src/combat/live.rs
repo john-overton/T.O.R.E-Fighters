@@ -258,7 +258,7 @@ impl Configuration {
                 AircraftId::Su25 => ["AA8.JT", "AS7.JT", "B13.JT", "GSH301.JT"].contains(&name),
                 AircraftId::Mig23 => ["AS7.JT", "B8.JT", "GSH6_30.JT"].contains(&name),
                 AircraftId::Su35 => ["AA11B.JT", "AA12.JT", "AAML.JT", "GSH301.JT"].contains(&name),
-                AircraftId::F22 | AircraftId::Faxx => {
+                AircraftId::F22 | AircraftId::F22n | AircraftId::Faxx => {
                     ["AGM65G.JT", "AIM120.JT", "AIM9X.JT", "M61.JT"].contains(&name)
                 }
 
@@ -3335,7 +3335,7 @@ mod tests {
             .into_iter()
             .chain([AircraftId::Faxx])
             .collect::<Vec<_>>();
-        assert_eq!(aircraft.len(), 13);
+        assert_eq!(aircraft.len(), 14);
         let launcher = launcher();
         for (number, id) in aircraft.into_iter().enumerate() {
             let mut state = fixture(false);

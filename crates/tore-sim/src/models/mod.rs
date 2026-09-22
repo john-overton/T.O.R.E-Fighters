@@ -104,6 +104,7 @@ impl AircraftModel {
             ("MiG-23", "MIG23.SH") => Ok(Self::Mig23(mig23::Mig23FlightModel::from_aircraft(a)?)),
             ("Su-35", "SU35.SH") => Ok(Self::Su35(su35::Su35FlightModel::from_aircraft(a)?)),
             ("F-22", "F22.SH") => Ok(Self::F22(f22::F22FlightModel::from_aircraft(a)?)),
+            ("F-22", "F22N.SH") => Ok(Self::F22(f22::F22FlightModel::from_aircraft(a)?)),
             #[cfg(test)]
             ("Synthetic", "TEST.SH") => Ok(Self::F18(f18::F18FlightModel::from_aircraft(a)?)),
             _ => Err(std::io::Error::other(
@@ -323,6 +324,7 @@ mod additional_tests {
             (AircraftId::Mig23, "MiG-23", false, 500.),
             (AircraftId::Su35, "Su-35", false, 500.),
             (AircraftId::F22, "F-22", false, 500.),
+            (AircraftId::F22n, "F-22", true, 500.),
         ] {
             let mut a = crate::flight::integration_tests::profile();
             a.id = id;

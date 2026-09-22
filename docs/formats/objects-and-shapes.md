@@ -8,17 +8,23 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-The [F/A-XX concept](../spec/fa-xx.md) omits F22.SH fin faces
-34f7/354a/37ff/381e/3841 at runtime. The reviewed base layout is still validated
-by the F-22 rig before use. Its split leaves reuse the existing flap faces and
-texture coordinates; the imported source data is unchanged. Damaged-body fin
-faces are F22_A.SH 3365/3388 and F22_C.SH 2abf/2ae2/2c8a/2cad.
-The concept inherits F-22's C/D damage selection; D contains no vertical fin.
-The original-format exporter also removes the indexed decal faces 351e and 386f
-from the intact F22.SH. They use texture-index slots 1 and 0 respectively, with
+The [F/A-XX concept](../spec/fa-xx.md) is built on the F-22N since 2026-09-22
+and omits F22N.SH fin faces 361d/3670/38e4/3903/3926 at runtime. The reviewed
+base layout is still validated by the F-22N rig before use. Its split leaves
+reuse the existing inboard flap faces 4477/4496/44f3/450e/466e/4691/46ee and
+their texture coordinates; the imported source data is unchanged. Damaged-body
+fin faces are F22N_A.SH 3366/3389 and F22N_C.SH 2ac0/2ae3/2c8b/2cae.
+The concept inherits the F-22N's C/D damage selection; D contains no vertical fin.
+The original-format exporter also removes the indexed decal faces 3644 and 3954
+from the intact F22N.SH. They use texture-index slots 1 and 0 respectively, with
 source z=9..25 on the fin planes. The gameplay projection omits indexed materials;
-export validation now retains their geometry with unresolved material labels so
-that separate fin artwork cannot evade its removal checks.
+export validation retains their geometry with unresolved material labels so
+that separate fin artwork cannot evade its removal checks. The F-22N's own hook
+is the `_PLhook` word 5e9a branch, two coplanar faces 40a1/40c0 with root at
+source y=-11..-7, z=-9 and deployed tip at z=-23. The superseded F-22A
+addresses were fins 34f7/354a/37ff/381e/3841, decals 351e/386f, flaps
+437f/439e/43fb/4416/4576/4599/45f6, F22_A 3365/3388 and F22_C
+2abf/2ae2/2c8a/2cad; they were matched to the F-22N faces by identical geometry.
 
 > **Research notes, research mode.** Recovered facts about the original
 > game's data and code, kept as evidence. Requirements, gates and remaining
@@ -398,12 +404,16 @@ bounds establish device endpoints, not original continuous schedules.
 | MIG23 | 23312 | 219 | 6ae0 / 6 | none | 6ae6 / 18 |
 | SU35 | 27114 | 329 | 79c0 / 8 | 79c6 / 2 | 79cc / 18 |
 | F22 | 20012 | 245 | 5df0 / 8 | 5e02 / 4 | 5e0e / 12 |
+| F22N | 20146 | 248 | 5e70 / 8 | 5e82 / 4 | 5e8e / 12 |
 
 Words are hexadecimal. The loader checks CODE length, complete observed word
 set, neutral count, added face counts and texture identity before applying any
-rig. F22 word 5dfc adds 14 main-bay belly details, handled independently of gear. MiG23 header exponent is 9; the others are 8.
-Flame forward roots are respectively -41, -60, -56, absent, -29, -59 and -48
-source units. Gear upper bounds are 0, 0, -1, -9, -3, -1 and -1. These own-shape
+rig. F22 word 5dfc adds 14 main-bay belly details, handled independently of gear.
+F22N (added 2026-09-22) has the same F-22 devices at its own words: bay 5e7c
+adds 12 belly details and hook 5e9a adds the two native blade faces 40a1/40c0.
+MiG23 header exponent is 9; the others are 8.
+Flame forward roots are respectively -41, -60, -56, absent, -29, -59, -48 and
+-48 source units. Gear upper bounds are 0, 0, -1, -9, -3, -1, -1 and -1. These own-shape
 bounds establish source endpoints; the [animation spec](../spec/aircraft-animation.md)
 defines fitted rigid travel. Local projection logs: `.local/*-shape.txt` and
 `.local/<aircraft>-<word>.txt`. Unreviewed controls retain neutral geometry.
@@ -415,6 +425,12 @@ Addresses are hexadecimal CODE offsets, not transferable between aircraft.
 F22 outer glazing is 2136/2153/2170/219c/2220/2255/228a/22a4/22bc/
 2462/247c/2494/2c36/2c6c. Its main-bay belly spans base faces
 35d7/3601/362f/3cc0/3d03 and switched details under word 5dfc.
+F22N outer glazing is 2215/2232/224f/227b/22ff/2334/2369/2383/239b/
+2541/255b/2573/2c8d/2e57; ailerons 44b5/44d4/46b0/46cf; elevators
+31eb/31fd/36d3/36e7/3ada/3cff; rudder faces 361d/3670/3903/3926. Its
+main-bay belly spans 3755/36fd/3716/39ae plus 39dc, the remodelled right aft
+belly panel chosen (fitted, 2026-09-22) as the counterpart of F22 3d03, with
+switched details under word 5e7c.
 All new hinge and material choices follow the linked fitted/opinionated contracts.
 
 ## Combat damage and smoke resource review

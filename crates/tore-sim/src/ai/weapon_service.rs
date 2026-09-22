@@ -115,6 +115,7 @@ impl TimingProfile {
             | AircraftId::Mig23
             | AircraftId::Su35
             | AircraftId::F22
+            | AircraftId::F22n
             | AircraftId::Faxx => 5,
         };
         Self {

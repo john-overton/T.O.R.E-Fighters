@@ -138,7 +138,9 @@ packaging fault and a possible explanation for the missing entry, not a confirme
 original-game trace. The corrected file is accepted by both readers. The generic
 pack wrapper and exporter now use the corrected stored-entry writer. Earlier
 ZIPs under `.local/exports/` are superseded. The checked definition contains
-F/A-XX / F/A-XX Concept, not F-22N; the origin of John's F-22N list entry is unknown.
+F/A-XX / F/A-XX Concept, not F-22N. John's F-22N list entry was the stock
+FA_2.LIB aircraft F22N.PT, which the catalog enumerates like any other `*.PT`;
+it is now the concept's donor (see the 2026-09-22 section below).
 
 Reports include donor/output and exporter/tool hashes. The full ZIP contains the
 hook-enabled PT, six SH files, equivalent LIB, notes and reports. The corrected Windows test
@@ -287,3 +289,72 @@ and the [USNRaptor site](https://myplace.frontier.com/~usnraptor/) cites weapon
 content from Kapset 3. Neither page establishes the exact recipient archive,
 load order or F22 resource identity. That compatibility remains unknown, but
 it does not block the demonstrated stock-donor conversion work.
+
+## F-22N donor export
+
+Implementation mode, 2026-09-22. John moved the concept donor from the F-22A to
+the retail F-22N and chose the F-22N's own hook over the authored geometry.
+Contract: [F/A-XX export](../spec/fa-xx-export.md). The `--identity f22`
+replacement mode was removed at his request.
+
+Donor identities, same reviewed FA_2.LIB media as the roster baseline:
+
+| Donor | Bytes | SHA-256 |
+| --- | ---: | --- |
+| F22N.PT | 14641 | `5ac12358639abba3119d6b94b631ff20e62c682052aa1f6804394a86ef9476bc` |
+| F22N.SH | 25088 | `736649d76b7e4aea059586f00d7c7474df777ab9ddedde14baa075a34a90d380` |
+| F22N_A.SH | 16896 | `d38c1fa5463f54f35416de28baf29a4d434446487ba46eb5a7e77fb09cca8566` |
+| F22N_B.SH | 4608 | `9f246eeb949bd3669275e192ac4dc92eabae34edd4805230a5cc9159152e2a4a` |
+| F22N_C.SH | 12800 | `925bbb1b8a2d9e6476b89f0dead3778b025ccdac827ddda02146baedde25c13a` |
+| F22N_D.SH | 4608 | `06b96b2b4d42b5555f80cc37b22eee46fb53a001ad7a26ac9acfdbfa18b091ab` |
+| F22N_S.SH | 4608 | `ff34efe77905f877863220582eac3168c6af037f6e04305087e2eafbc24640ef` |
+| F22N.HUD | 4608 | `404e0ae65ec195fe49772b24df27c1a3653b4e221ca31ecc61655f8bc755c743` |
+
+F22N.SH has the same byte length as F22.SH but a different layout: 19,270 bytes
+differ, the belly and right fuselage are remodelled, and it imports `_PLhook`
+(alias 0x5e9a) in addition to the F-22A's nine state symbols. The reviewed
+F-22A face addresses were matched to F-22N faces by identical decoded geometry
+using the bounded `shape_json` projection; the resulting addresses have one
+home in [objects and shapes](../formats/objects-and-shapes.md). The neutral
+gameplay projection has 248 faces (F-22A 245) and the export projection with
+indexed decals 253 (F-22A 250). The `_PLhook` branch adds two coplanar faces
+0x40a1/0x40c0 forming one blade with root at source y=-11..-7, z=-9 and tip at
+z=-23. F22N.HUD differs from F22.HUD by five name bytes.
+
+Parsed F22N.PT differs from F22.PT only in: object flags `$806bf3` to
+`$8006bf3`, signature word 10 to 50, PLANE_TYPE flags `$91` to `$d3` (hook bit
+0x02 and carrier bit 0x40 set), lowAOAPitch 30 to 10, stallWarningDelay 1792 to
+512, stallDelay 512 to 256, bayDrag 25 to 0, the gun station x position 11 to
+10, and stations 5/6/7 location code 3 to 1 with one flag bit. Mass, thrust,
+envelopes, sounds, stores and counts are identical. In the headless flight
+suite the F-22N therefore departs earlier in the stall scenario (tick 7215
+against 7965) and ends the spin scenario at 262.17 against 264.19; every other
+scenario is identical. These are donor values, not tuning.
+
+Exported candidate under `.local/exports/fa-xx-f22n-2026-09-22/`:
+
+| Output | Bytes | SHA-256 |
+| --- | ---: | --- |
+| FAXX.PT | 14644 | `7d85e63f309c7e8727fc56b997282c604a28fc9cca37eeb54f46820f67c3083a` |
+| FAXX.SH | 29184 | `d95abe32511a19eac1e2bc857df142caecb40ebf4cf92df9b2d71e428e2f5e95` |
+| FAXX_A.SH | 16896 | `c6b13b031ceca165368fe0b030b0fac03f8a8ecd82af4ff7dad88ad1a00c577a` |
+| FAXX_C.SH | 12800 | `d79a2ae3e9bbb154f789a93322fd2e2859478fc7a3926cc82c0388c42952d99b` |
+| FAXX.LIB | 87499 | `11be97600763ea9419722a3f673f0de3dbf813b25cea565fad87e677aa707f23` |
+| F-A-XX-FA-experimental.zip | 77298 | `68f8259306dd5b22ef837ee34ccc944b98d0de410a98b5a20c10dcb379f733d8` |
+
+FAXX_B/_D/_S.SH are byte-identical donor copies. The exporter appends only the
+`_PLrudder` import; `_PLhook` resolves through the donor's own trampoline. The
+PT is the donor with names and shape references replaced and its `$d3` flags
+verified rather than edited; `check_faxx_pt` now requires every other field to
+be byte-equal. `validate_faxx_export.py` compared 24 gear/flap/rudder/hook
+poses with zero missing and zero extra faces (the donor is projected with the
+same hook state), confirmed that hook 1 minus hook 0 is exactly the native
+quad with minimum z=-23, that all seven masked fin and decal addresses are
+absent, and that the damaged bodies lose exactly two and four fin faces.
+`check_lib` and the OpenFA unpack verified seven FAXX-named entries with
+matching payloads. The payloads still reference the recipient's stock
+`f22n.HUD`, `F22R.SEE`, `F22.ECM` and `_f22n*.PIC` files, as intended.
+
+Not validated: original FA flight of this F-22N-based package, palette, draw
+order, distance behavior and Kapset compatibility. John's 2026-09-18 flight
+reports concern the superseded F-22A-based package.

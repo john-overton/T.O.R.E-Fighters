@@ -220,6 +220,7 @@ hashes are in [roster acceptance](../baselines/aircraft-roster-expansion.md).
 | MIG23.PT | 660 | SU33CC.HUD | SU33 | MIG27R.SEE | GSH6_30.JT |
 | SU35.PT | 660 | SU35.HUD | SU35 | SU27R.SEE | GSH301.JT |
 | F22.PT | 636 | F22.HUD | F22 | F22R.SEE | M61.JT |
+| F22N.PT | 636 | F22N.HUD | F22 | F22R.SEE | M61.JT |
 
 MiG-29, Su-27, Su-25 and MiG-23 lack PTS resources in the reviewed base media.
 PTS is inert and unused by flight or the PT-backed loadout editor. Its absence
@@ -235,10 +236,14 @@ controlled service and loadout allowlist, not a claim of all-JT support.
 ## Hook capability in original-game exports
 
 The reviewed F22.PT PLANE_TYPE flags at assembled offset 0xba are 0x91. Bit
-0x02 enables the original hook command. The concept exporter changes only that
-bit to produce 0x93, retaining the other donor flags, including the clear carrier
-capability bit 0x40. The original hook command updates deployed flag 0x400 in
-the aircraft instance; the shape-state producer maps it to `_PLhook` 0 or 1.
-The [packaging baseline](../baselines/fa-xx-packaging.md) records the inspected
-addresses and the exporter validation. This does not alter T.O.R.E's flight
-adapters or establish complete carrier-operation support for the export.
+0x02 enables the original hook command. The reviewed F22N.PT flags are 0xd3:
+the same base flags plus hook bit 0x02 and carrier capability bit 0x40. Since
+2026-09-22 the concept exporter uses the F-22N donor and copies its flags
+unchanged; it rejects a donor whose flags are not 0xd3. The earlier F-22A
+export set only bit 0x02 to produce 0x93. The original hook command updates
+deployed flag 0x400 in the aircraft instance; the shape-state producer maps it
+to `_PLhook` 0 or 1. The [packaging baseline](../baselines/fa-xx-packaging.md)
+records the inspected addresses and the exporter validation. This does not
+alter T.O.R.E's flight adapters or establish complete carrier-operation support
+for the export. F22N.PT otherwise differs from F22.PT in a handful of words
+recorded in the packaging baseline; T.O.R.E takes them as donor values.

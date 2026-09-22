@@ -30,15 +30,16 @@ of everything in the game or its code.
 
 ## Flight models
 
-These rows cover ordinary free flight across twelve retail aircraft and the F/A-XX concept. The
+These rows cover ordinary free flight across thirteen retail aircraft and the F/A-XX concept. The
 current flight model is the default; the previous model remains selectable.
 
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
-| F/A-XX concept variant | ☐ | ☑ | Implemented with hidden fins, split flap rudder animation and a concealed retractable hook. F-22 handling retained; independent drag physics remains. Experimental separate original-format aircraft exported; original FA flight and decal cleanup confirmed by John; export hook capability now enabled, awaiting a new live check; detailed control/damage checks and Kapset compatibility remain ([export](spec/fa-xx-export.md)). | [Contract](spec/fa-xx.md) |
+| F/A-XX concept variant | ☐ | ☑ | Implemented on the F-22N donor since 2026-09-22, with hidden fins, split flap rudder animation and the F-22N's own hook stowed in flight. F-22 handling retained; independent drag physics remains. Experimental separate original-format aircraft exported from the F-22N; the earlier F-22A package flew in original FA per John; the F-22N package awaits a live check; detailed control/damage checks and Kapset compatibility remain ([export](spec/fa-xx-export.md)). | [Contract](spec/fa-xx.md) |
+| F-22N Raptor | ☑ | ☐ | Implemented as the thirteenth retail aircraft: stock definition, shape, textures and hook, F-22A cockpit art and fitted handling shared with the F-22A. Remaining work matches the other roster aircraft. | [Roster spec](spec/roster-aircraft.md) |
 | Heading/altitude and waypoint autopilot | ☐ | ☑ | Partially implemented. Requested USNF-ATF modes, pilot override, HUD and input recording work. Waypoint target API is ready; route selection and sequencing remain. Steering is fitted, retail parity unverified. | [Autopilot](spec/autopilot.md) |
 | Expanded flight HUD and startup modes | ☐ | ☑ | Implemented across the selectable roster: expanded ladder window trimmed by 20%, weapon/ILS rows below the speed/altitude boxes, wider bank arc raised beneath the ladder, 25% tighter ladder spacing and motion calibrated to actual pitch, with readable +/-90-degree marks and a separate world-aligned zero bar, lower boxed TAS/MSL values without surrounding numbers or hash marks, no fixed aircraft datum, and AGL/VS only for active ILS. HUD symbols clip to aircraft-specific glass and render behind cockpit artwork. Ground starts use NAV; airborne starts select and arm the canonical gun. | [Layout and defaults](spec/hud-layout.md) |
-| Pitch, roll and rudder control | ☑ | ☐ | Completed. All twelve aircraft have working flight controls. | Manual pp. 60-61; [aircraft coverage](baselines/aircraft-roster-expansion.md) |
+| Pitch, roll and rudder control | ☑ | ☐ | Completed. All thirteen aircraft have working flight controls. | Manual pp. 60-61; [aircraft coverage](baselines/aircraft-roster-expansion.md) |
 | Speed- and altitude-dependent turning limits | ☑ | ☐ | Partially implemented. Aircraft limits are used; individual pitch/yaw response tuning remains. | Manual pp. 58-59; [flight model](FLIGHT-MODEL.md) |
 | Throttle, afterburner and fuel use | ☑ | ☐ | Completed. Available engines and afterburners follow the selected aircraft's configuration. | Manual p. 61; [flight model](FLIGHT-MODEL.md) |
 | Weapon weight affects handling | ☑ | ☐ | Partially implemented. Carried mass affects acceleration and loading; weapon-specific drag and external fuel transfer remain. | Manual p. 59; [flight model](FLIGHT-MODEL.md) |

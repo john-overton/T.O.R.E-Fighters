@@ -83,6 +83,7 @@ impl Configuration {
                 tore_formats::aircraft::AircraftId::F18
                     | tore_formats::aircraft::AircraftId::F14
                     | tore_formats::aircraft::AircraftId::A4E
+                    | tore_formats::aircraft::AircraftId::F22n
                     | tore_formats::aircraft::AircraftId::Faxx
             ),
             controls: if matches!(
@@ -97,6 +98,7 @@ impl Configuration {
                     | tore_formats::aircraft::AircraftId::Mig23
                     | tore_formats::aircraft::AircraftId::Su35
                     | tore_formats::aircraft::AircraftId::F22
+                    | tore_formats::aircraft::AircraftId::F22n
                     | tore_formats::aircraft::AircraftId::Faxx
             ) {
                 Some(super::handling::Profile::from_aircraft(a)?)
