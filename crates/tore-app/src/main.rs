@@ -2272,6 +2272,18 @@ impl ApplicationHandler for App {
                         {
                             target.with_activity(wings);
                         }
+                        if let (Some(readout), Some(wings)) =
+                            (self.instruments.combat.as_mut(), self.ai_wings.as_ref())
+                        {
+                            for emitter in &mut readout.rwr.emitters {
+                                if emitter.kind == scope::EmitterKind::EnemyAircraft
+                                    && let Some(slot) = wings.slot(emitter.id)
+                                    && slot.side == tore_sim::ai::launch::Side::Friendly
+                                {
+                                    emitter.kind = scope::EmitterKind::FriendlyAircraft;
+                                }
+                            }
+                        }
                         // Hover feedback uses the same projection as the click,
                         // so the selector marks the contact a click would take.
                         let window = renderer.window.inner_size();

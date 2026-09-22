@@ -20,6 +20,7 @@
 //!   seconds on a quarter-second clock ([`QUARTER_SECOND_TICKS`]).
 pub mod awareness;
 pub mod controller;
+pub mod defense;
 pub mod experience;
 pub mod fitted;
 pub mod formation;

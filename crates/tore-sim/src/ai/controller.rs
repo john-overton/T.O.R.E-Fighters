@@ -207,6 +207,14 @@ pub struct SearchContact {
     pub observed_tick: u64,
 }
 
+/// Perceived missile defense resolved by the shared defensive policy. It
+/// contains no hidden target or launcher information.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MissileDefense {
+    pub heading_deg: f64,
+    pub pitch_deg: f64,
+}
+
 /// A launch warning delivered to this actor and nobody else (B47).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ThreatReport {
@@ -541,9 +549,26 @@ pub struct Controller {
     search_started_tick: Option<u64>,
     search_orbit_altitude_ft: Option<f64>,
     completed_search: Option<SearchContact>,
+    missile_defense: Option<MissileDefense>,
+    defense_motion_id: Option<u64>,
 }
 
 impl Controller {
+    /// Survival maneuvers are driven by perceived missile records. Entering
+    /// or leaving defense invalidates a previous tactic, without losing the
+    /// independently observed offensive target or the aircraft's memory.
+    pub fn set_missile_defense(&mut self, defense: Option<MissileDefense>) {
+        if self.missile_defense.is_some() != defense.is_some() {
+            self.active = None;
+            self.pursuit = None;
+            self.search_started_tick = None;
+            self.search_orbit_altitude_ft = None;
+            self.defense_motion_id = None;
+            self.next_choice_quarters = 0;
+        }
+        self.missile_defense = defense;
+    }
+
     /// Supply the remembered contact to investigate. This record is frozen:
     /// it is never admitted to target selection or weapon employment.
     pub fn set_search_contact(&mut self, contact: Option<SearchContact>) {
@@ -642,6 +667,8 @@ impl Controller {
             search_started_tick: None,
             search_orbit_altitude_ft: None,
             completed_search: None,
+            missile_defense: None,
+            defense_motion_id: None,
         })
     }
 
@@ -755,15 +782,46 @@ impl Controller {
         // 6. Motion. An active maneuver runs to its completion rule before a
         //    new tactic is chosen (B13), except when a higher reason restarts
         //    the script.
-        self.motion(
-            frame,
-            clock,
-            reason,
-            recovering,
-            view,
-            geometry.as_ref(),
-            &mut batch,
-        )?;
+        if let Some(defense) = self.missile_defense {
+            let id = *self.defense_motion_id.get_or_insert_with(|| {
+                let id = self.next_motion_id;
+                self.next_motion_id += 1;
+                id
+            });
+            let request = MotionRequest::new(
+                defense.heading_deg.round() as i32,
+                PitchRequest::Explicit(defense.pitch_deg.round() as i32),
+                Bank::Unconstrained,
+                SpeedRequest::Corner,
+                Duration::Timed(1),
+            );
+            batch.motion = Some(MotionIntent {
+                id,
+                request,
+                heading_deg: defense.heading_deg,
+                flight_path_pitch_deg: defense.pitch_deg,
+                speed: frame.own.limits.corner,
+                bank: Bank::Unconstrained,
+                completion: Completion::Deadline(
+                    motion::deadline_for(Duration::Timed(1), clock).expect("timed defense"),
+                ),
+                steering_point: None,
+                mode: CommandMode::OtherState,
+                formation_flight: false,
+                afterburner: false,
+            });
+            batch.activity = Some(Activity::Defending);
+        } else {
+            self.motion(
+                frame,
+                clock,
+                reason,
+                recovering,
+                view,
+                geometry.as_ref(),
+                &mut batch,
+            )?;
+        }
 
         if batch.activity.is_none() {
             batch.activity = Some(self.activity(frame, recovering, view.is_some()));

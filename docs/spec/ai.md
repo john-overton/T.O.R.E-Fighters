@@ -875,8 +875,8 @@ No new movement override or skill reaction delay is introduced.
 The following is recovered behavior and the existing component contract. The
 [M1 missile-awareness specification](ai-awareness.md#missile-awareness-and-defense)
 supersede its warning eligibility, delay and selected reaction gates for the
-new M1 AI path. The replacement is not implemented yet; retain these research
-facts without treating them as requirements for the authored replacement.
+M1 AI path. The replacement is implemented for the default missile rules;
+B47 remains available for explicit compatibility behavior and component evidence.
 
 Executable-confirmed. A missile launch warning is delivered only to the
 aircraft the missile was fired at. Other aircraft, wingmen included, never

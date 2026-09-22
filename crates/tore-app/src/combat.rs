@@ -734,8 +734,79 @@ impl Combat {
             scope: crate::scope::scope(&self.state, s),
             rcs: crate::scope::rcs(&self.state, s, rcs_scale),
             rwr_failed: self.state.rwr_failed,
+            rwr: self.rwr_readout(s),
         }
     }
+    fn rwr_readout(&self, own: &flight::State) -> crate::scope::Rwr {
+        use crate::scope::{EmitterKind, EmitterState, Indicator, Rwr, RwrEmitter, RwrMissile};
+        use tore_sim::combat::threats::GuidanceClass;
+        let operating = !self.state.rwr_failed && own.systems.counts[32] <= 1;
+        let emitters = if operating {
+            self.state
+                .emitters
+                .iter()
+                .map(|emitter| RwrEmitter {
+                    id: emitter.id,
+                    bearing_rad: emitter.bearing_rad,
+                    distance_nmi: emitter.distance_nmi,
+                    // Allegiance is supplied by the mission bridge only for known
+                    // aircraft. Passive reception alone remains unidentified.
+                    kind: match emitter.symbol {
+                        tore_sim::sensors::passive::Symbol::Ground => EmitterKind::Ground,
+                        tore_sim::sensors::passive::Symbol::Aircraft => EmitterKind::EnemyAircraft,
+                        tore_sim::sensors::passive::Symbol::Unknown => EmitterKind::Unknown,
+                    },
+                    state: EmitterState::Detected,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut radar_indicator = if self.state.emitters.is_empty() || !operating {
+            Indicator::Off
+        } else {
+            Indicator::Detected
+        };
+        let mut infrared_indicator = Indicator::Off;
+        let missiles = self
+            .state
+            .missile_threats
+            .records()
+            .map(|record| {
+                if !record.stale && record.targeting_receiver {
+                    match record.guidance_class {
+                        Some(GuidanceClass::Radar) => radar_indicator = Indicator::Incoming,
+                        Some(GuidanceClass::Infrared) => infrared_indicator = Indicator::Incoming,
+                        _ => {}
+                    }
+                }
+                RwrMissile {
+                    id: record.missile_id,
+                    bearing_rad: record.bearing_deg.to_radians(),
+                    distance_nmi: record.position.map(|position| {
+                        position
+                            .iter()
+                            .zip(own.position)
+                            .map(|(a, b)| (a - b).powi(2))
+                            .sum::<f64>()
+                            .sqrt()
+                            / tore_sim::sensors::FEET_PER_NAUTICAL_MILE
+                    }),
+                    known_targeting_receiver: record.targeting_receiver,
+                    stale: record.stale,
+                }
+            })
+            .collect();
+        Rwr {
+            tick: self.state.sensors.tick(),
+            operating,
+            emitters,
+            missiles,
+            radar_indicator,
+            infrared_indicator,
+        }
+    }
+
     pub fn equipment_damage_report(&self) -> Vec<String> {
         let config = self.state.configuration();
         (36..45)

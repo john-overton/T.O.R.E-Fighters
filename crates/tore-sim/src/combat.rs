@@ -9,6 +9,7 @@ pub mod loadout;
 pub mod missiles;
 pub mod smoke;
 pub mod systems;
+pub mod threats;
 use tore_formats::{
     Result,
     weapons::{Movement, Zone},

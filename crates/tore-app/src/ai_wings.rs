@@ -18,9 +18,10 @@
 //! The creator uses this bridge by default. `--fixture-wings` keeps the old
 //! straight-flight launch and integration; ordinary free flight has no bridge.
 //!
-//! Projectiles carry their actor-owned weapon record. Compatibility missile
-//! steering remains fitted: full seeker activation and pitbull are not wired
-//! for AI launches. Live device events and decoy rolls are connected.
+//! Projectiles carry actor-owned weapon and fire-control observations into
+//! the shared seeker lifecycle. AI defense receives the same bounded missile
+//! information service as the player RWR. Compatibility steering remains an
+//! explicit weapon-rules option.
 
 mod orders;
 mod reports;
@@ -48,6 +49,7 @@ use tore_sim::{
     combat::{
         FallState, launch_speed,
         live::{self, MAX_PROJECTILES},
+        missiles::{self, Flight, LaunchMode, Motion, Rules, seeker},
     },
     models::FlightModel,
     sensors::{self, Observable, Sensors},
@@ -211,6 +213,7 @@ pub struct AiWings {
     last_hp: BTreeMap<u32, i32>,
     last_activity: BTreeMap<u32, Activity>,
     next_projectile_id: u32,
+    weapon_rules: Rules,
     last_message_tick: u64,
     /// Launch events that could not become a projectile, for honest reporting.
     pub dropped_launches: u32,
@@ -493,6 +496,7 @@ impl AiWings {
             last_activity: BTreeMap::new(),
             reports: reports::Reports::default(),
             next_projectile_id: AI_PROJECTILE_ID_BASE,
+            weapon_rules: Rules::Spec,
             last_message_tick: 0,
             dropped_launches: 0,
             realised_launches: 0,
@@ -547,6 +551,13 @@ impl AiWings {
         world: &World,
     ) -> AppResult<()> {
         let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
+        self.weapon_rules = state.weapon_rules;
+        self.mission
+            .set_missiles(if state.weapon_rules == Rules::Spec {
+                state.missile_snapshots(crate::combat::launcher(player))
+            } else {
+                Vec::new()
+            });
         let object = self.player_object(player, state.player_hp, state.configuration());
         let output = self.advance(object, &mut state.targets, &ground)?;
         for event in &output.launches {
@@ -647,14 +658,71 @@ impl AiWings {
         for event in &output.devices {
             self.realise_device(event, state)?;
         }
-        let stations = state.configuration().stations.clone();
-        self.report_threats(&state.projectiles, |index| {
-            match stations[index].weapon.seeker.signature {
-                2 => Some(SeekerClass::Infrared),
-                3 => Some(SeekerClass::Radar),
-                _ => None,
-            }
-        });
+        state.set_actor_supports(
+            self.mission
+                .actors()
+                .iter()
+                .filter(|a| a.alive())
+                .map(|actor| {
+                    let observation = actor
+                        .controller()
+                        .target()
+                        .and_then(|id| {
+                            actor
+                                .awareness()
+                                .current_observations()
+                                .find(|record| record.target.id == id)
+                        })
+                        .map(|record| {
+                            let delta =
+                                missiles::sub(record.target.position, actor.flight().position);
+                            seeker::Observation {
+                                id: record.target.id,
+                                position: record.target.position,
+                                velocity: record.velocity,
+                                quality: 1.0,
+                                off_axis: 0.0,
+                                range: missiles::length(delta),
+                            }
+                        });
+                    live::ActorSupport {
+                        owner: actor.id(),
+                        supported: observation
+                            .is_some_and(|o| actor.sensors().is_some_and(|s| s.supports(o.id))),
+                        observation,
+                        radar_position: actor.flight().position,
+                        radar_emitting: actor.flight().radar
+                            && actor.sensors().is_some_and(|s| {
+                                matches!(s.mode(), Some(sensors::Mode::Rws | sensors::Mode::Tws))
+                            }),
+                    }
+                }),
+        );
+        if state.weapon_rules == Rules::Compatibility {
+            let stations = state.configuration().stations.clone();
+            self.report_threats(&state.projectiles, |index| {
+                match stations[index].weapon.seeker.signature {
+                    2 => Some(SeekerClass::Infrared),
+                    3 => Some(SeekerClass::Radar),
+                    _ => None,
+                }
+            });
+        } else {
+            // Diagnostics list perceived incoming threats only. No launch
+            // event is broadcast to an aircraft that cannot detect the missile.
+            self.threat_reports = self
+                .mission
+                .actors()
+                .iter()
+                .flat_map(|actor| {
+                    actor
+                        .missile_threats()
+                        .filter(|record| record.targeting_receiver)
+                        .map(move |record| (actor.id(), record.missile_id))
+                })
+                .take(64)
+                .collect();
+        }
         Ok(())
     }
 
@@ -892,10 +960,24 @@ impl AiWings {
             return 0;
         };
         let origin = actor.flight().position;
-        let aim = if event.target == PLAYER_ID {
-            player_position
-        } else if let Some(other) = self.mission.actor(event.target) {
-            other.flight().position
+        let observed = actor
+            .awareness()
+            .current_observations()
+            .find(|record| record.target.id == event.target)
+            .copied();
+        let aim = if let Some(observation) = observed {
+            observation.target.position
+        } else if actor.sensors().is_none() {
+            // Sensorless synthetic fixtures explicitly supply permitted world
+            // targets. Live aircraft never use this fallback.
+            if event.target == PLAYER_ID {
+                player_position
+            } else if let Some(other) = self.mission.actor(event.target) {
+                other.flight().position
+            } else {
+                self.dropped_launches += event.projectiles;
+                return 0;
+            }
         } else {
             self.dropped_launches += event.projectiles;
             return 0;
@@ -909,16 +991,26 @@ impl AiWings {
             self.dropped_launches += event.projectiles;
             return 0;
         };
-        // `fitted`: an AI shot uses the unguided steering branch of
-        // `live::State::step`, never the spec guidance model. Rule: the
-        // guidance model searches `state.targets` only and consults the
-        // player's own sensors for support, so it can neither see the player
-        // nor track without the player's radar. The unguided branch steers with
-        // the store's own turn rates toward whatever the shot was aimed at, and
-        // it is the same branch the game's `Incoming` fixture already uses.
-        // `live::State` keeps its tick private, but the bridge steps exactly
-        // once per `Combat::step`, so the mission tick is the same number the
-        // combat step will use for this projectile's age.
+        let profile = (self.weapon_rules == Rules::Spec)
+            .then(|| missiles::Profile::for_weapon(weapon))
+            .flatten();
+        let guidance = profile.map(|profile| {
+            Flight::from_supported_launch(
+                profile,
+                LaunchMode::Cued,
+                seeker::Observation {
+                    id: event.target,
+                    position: aim,
+                    velocity: observed.map_or([0.; 3], |record| record.velocity),
+                    quality: 1.0,
+                    off_axis: 0.0,
+                    range: missiles::length(missiles::sub(aim, origin)),
+                },
+                origin,
+            )
+        });
+        // Compatibility keeps its existing steering; reviewed profiles use
+        // the same owner-aware seeker/propulsion lifecycle as player shots.
         let launched = (self.mission.tick() / 30) as u16;
         let incoming = event.target == PLAYER_ID;
         let mut emitted = 0;
@@ -935,9 +1027,10 @@ impl AiWings {
                 // AI kill never credits the player's score.
                 owner: event.actor,
                 weapon: Some(weapon.clone()),
-                guidance: None,
-                motion: None,
-                guidance_ticks: None,
+                guidance: guidance.clone(),
+                motion: profile
+                    .map(|_| Motion::new(&weapon.movement, actor.flight().velocity, origin[1])),
+                guidance_ticks: profile.map(|p| p.guidance_ticks),
                 age: 0,
                 incoming,
                 station,
@@ -997,7 +1090,12 @@ impl AiWings {
                 };
                 let missile = GuidingMissile {
                     seeker: class,
-                    guiding_on_releaser: projectile.target == Some(event.actor),
+                    guiding_on_releaser: projectile.target == Some(event.actor)
+                        && projectile.guidance.as_ref().is_none_or(|flight| {
+                            flight.enabled
+                                && flight.seeker.acquired
+                                && flight.seeker.observation.is_some()
+                        }),
                     decoy_susceptibility_percent: weapon.seeker.chaff_flare_chance,
                 };
                 if threat::decoy_missile(
@@ -2121,6 +2219,65 @@ mod tests {
         crate::combat::apply_startup_weapon_state(&mut state);
         assert_eq!(state.selected, 1);
         assert!(state.armed);
+    }
+
+    #[test]
+    fn active_ai_launch_uses_owned_guidance_and_cannot_be_decoyed_before_pitbull() {
+        use tore_sim::ai::{mission::DeviceEvent, weapon_service::StationId};
+        let (mut wings, _) = build(None);
+        let mut combat = combat_fixture(true);
+        let mut weapon = combat.configuration().stations[0].weapon.clone();
+        weapon.source = "AIM120.JT".into();
+        weapon.seeker.signature = 3;
+        weapon.seeker.chaff_flare_chance = 100;
+        wings.device_effectiveness.insert(3, (100, 100));
+        let event = LaunchEvent {
+            actor: 1,
+            station: StationId(0),
+            target: 3,
+            request_id: RequestId(1),
+            projectiles: 1,
+        };
+        assert_eq!(
+            wings.realise(&event, &mut combat.projectiles, &weapon, 0, [0.; 3], None),
+            1
+        );
+        assert!(combat.projectiles[0].guidance.is_some());
+        assert!(combat.projectiles[0].motion.is_some());
+        let release = DeviceEvent {
+            actor: 3,
+            class: SeekerClass::Radar,
+            released: 1,
+        };
+        wings.realise_device(&release, &mut combat).unwrap();
+        assert_eq!(combat.projectiles[0].target, Some(3));
+        let flight = combat.projectiles[0].guidance.as_mut().unwrap();
+        flight.enabled = true;
+        flight.seeker.acquired = true;
+        flight.seeker.observation = Some(seeker::Observation {
+            id: 3,
+            position: [0.; 3],
+            velocity: [0.; 3],
+            quality: 1.,
+            off_axis: 0.,
+            range: 1000.,
+        });
+        wings.realise_device(&release, &mut combat).unwrap();
+        assert_eq!(combat.projectiles[0].target, None);
+        assert!(combat.projectiles[0].guidance.is_none());
+        // The physical body remains visible after a successful decoy.
+        assert_eq!(
+            combat
+                .missile_snapshots(crate::combat::launcher(
+                    &flight::State::new(&aircraft(), [0., 20000., 0.]).unwrap()
+                ))
+                .len(),
+            1
+        );
+        wings.weapon_rules = Rules::Compatibility;
+        let mut compatibility = Vec::new();
+        wings.realise(&event, &mut compatibility, &weapon, 0, [0.; 3], None);
+        assert!(compatibility[0].guidance.is_none());
     }
 
     #[test]

@@ -24,6 +24,8 @@
 use tore_formats::aircraft::AircraftId;
 use tore_input::PilotInput;
 
+use super::defense;
+use crate::combat::threats::{MissileSnapshot, Receiver, ThreatRecord, ThreatService};
 use crate::flight;
 use crate::models::FlightModel;
 use crate::research::Surface;
@@ -173,6 +175,9 @@ pub struct AiActor {
     sensors: Option<Sensors>,
     awareness: Memory,
     search_target: Option<u32>,
+    missile_threats: ThreatService,
+    defense_state: defense::DefenseState,
+    last_defense: Option<defense::DefenseDecision>,
     stations: Vec<StationSpec>,
     dispensers: Vec<DispenserStore>,
     wing_slot: u8,
@@ -198,6 +203,9 @@ impl AiActor {
             sensors: setup.sensors,
             awareness: Memory::new(setup.experience, setup.identity.side),
             search_target: None,
+            missile_threats: ThreatService::new(setup.identity.actor.0),
+            defense_state: defense::DefenseState::default(),
+            last_defense: None,
             stations: setup.stations,
             dispensers: setup.dispensers,
             wing_slot: setup.wing_slot,
@@ -256,6 +264,14 @@ impl AiActor {
     /// Current observations and frozen records, exposed for diagnostics only.
     pub fn awareness(&self) -> &Memory {
         &self.awareness
+    }
+
+    pub fn missile_threats(&self) -> impl Iterator<Item = &ThreatRecord> {
+        self.missile_threats.records()
+    }
+
+    pub fn defense_decision(&self) -> Option<defense::DefenseDecision> {
+        self.last_defense
     }
 
     pub fn stations(&self) -> &[StationSpec] {
@@ -318,6 +334,10 @@ impl AiActor {
         self.alive = alive;
         if !alive {
             self.awareness.clear();
+            self.missile_threats.clear();
+            self.defense_state = defense::DefenseState::default();
+            self.last_defense = None;
+            self.controller.set_missile_defense(None);
             self.search_target = None;
             self.controller.set_search_contact(None);
         }
@@ -363,6 +383,7 @@ pub struct AiMission {
     horizontal_spacing_ft: i32,
     vertical_spacing_ft: i32,
     external_leaders: Vec<(super::targeting::Side, u8, u32)>,
+    missiles: Vec<MissileSnapshot>,
 }
 
 impl Default for AiMission {
@@ -381,7 +402,14 @@ impl AiMission {
             horizontal_spacing_ft: super::wing::PLAYER_SPACING_SPREAD_FT,
             vertical_spacing_ft: super::wing::PLAYER_STACKING_FT,
             external_leaders: Vec::new(),
+            missiles: Vec::new(),
         }
+    }
+
+    /// Complete current missile lifecycle snapshot, shared with the player
+    /// receiver. The observation service, not the controller, reads this data.
+    pub fn set_missiles(&mut self, missiles: Vec<MissileSnapshot>) {
+        self.missiles = missiles;
     }
 
     pub fn push(&mut self, actor: AiActor) {
@@ -531,6 +559,7 @@ impl AiMission {
 
         // 2. Own state from the actor's own flight model.
         let own = actor.own_state(ground);
+        actor.update_missile_defense(tick, &self.missiles, &own, ground);
 
         // 3. The frame.
         let events = actor.drain_events(tick);
@@ -621,6 +650,33 @@ impl AiMission {
             actor
                 .device_schedule
                 .push((tick, devices.class, devices.count));
+        }
+        if let Some(burst) = actor.last_defense.and_then(|d| d.burst) {
+            let mut classes = Vec::new();
+            for index in 0..burst.chaff.max(burst.flares) {
+                if index < burst.chaff {
+                    classes.push(SeekerClass::Radar);
+                }
+                if index < burst.flares {
+                    classes.push(SeekerClass::Infrared);
+                }
+            }
+            classes.retain(|class| {
+                actor
+                    .dispensers
+                    .iter()
+                    .any(|d| d.class == *class && d.count > 0)
+            });
+            // Keep one schedule across simultaneous missiles. Each release
+            // debits its actual dispenser when due; an empty class never
+            // prevents the other class or a defensive maneuver.
+            for (index, &class) in classes.iter().enumerate() {
+                actor.device_schedule.push((
+                    tick + index as u64 * super::QUARTER_SECOND_TICKS,
+                    class,
+                    1,
+                ));
+            }
         }
         let schedule = std::mem::take(&mut actor.device_schedule);
         for (due, class, remaining) in schedule {
@@ -909,6 +965,70 @@ impl AiActor {
                 id: s.target.id,
                 position: s.target.position,
                 observed_tick: s.last_observed_tick,
+            }));
+    }
+
+    fn update_missile_defense(
+        &mut self,
+        tick: u64,
+        missiles: &[MissileSnapshot],
+        own: &OwnState,
+        ground: &dyn Fn(f64, f64) -> f64,
+    ) {
+        self.missile_threats.observe(
+            tick,
+            Receiver {
+                id: self.id(),
+                position: own.position,
+                velocity: self.flight.velocity,
+                heading_deg: own.heading_deg,
+                pitch_deg: own.body_pitch_deg(),
+                skill: self.controller.experience().level,
+                rwr_operating: self.flight.systems.counts[32] <= 1,
+                visual_operating: true,
+                visibility_limit_ft: None,
+            },
+            missiles,
+            |from, to| crate::combat::live::terrain_hit(from, to, &ground).is_none(),
+        );
+        let speed = own.speed.0.max(125.0);
+        let g = own
+            .g_limit
+            .max(1.0)
+            .min(1.0 / own.maximum_bank_deg.to_radians().cos().max(0.01));
+        let bank = (1.0 / g).acos().to_degrees();
+        let coordinated_rate = (32.174 * (g * g - 1.0).sqrt() / speed).to_degrees();
+        let contacts: Vec<_> = self.missile_threats.records().copied().collect();
+        self.last_defense = defense::decide(
+            tick,
+            self.controller.experience().level,
+            defense::DefenseOwn {
+                position: own.position,
+                velocity: self.flight.velocity,
+                heading_deg: own.heading_deg,
+                flight_path_pitch_deg: own.flight_path_pitch_deg,
+                speed_ft_s: own.speed.0,
+                bank_deg: own.bank_deg,
+                usable_turn_rate_deg_s: coordinated_rate * 0.5,
+                usable_pitch_rate_deg_s: (32.174 * (g - 1.0) / speed).to_degrees() * 0.5,
+                roll_in_time_s: (bank + own.bank_deg.abs()) / own.roll_limit_deg_per_s.max(1.0)
+                    + 0.7,
+                dive_speed_safe: own.speed.0 + 32.174 * 20_f64.to_radians().sin() * 5.0
+                    <= own.limits.maximum.0,
+            },
+            &contacts,
+            &mut self.defense_state,
+            |position| ground(position[0], position[2]),
+        );
+        if self.last_defense.is_none() {
+            self.defense_state.clear_threat();
+        }
+        self.controller
+            .set_missile_defense(self.last_defense.and_then(|d| d.motion).map(|motion| {
+                super::controller::MissileDefense {
+                    heading_deg: motion.heading_deg,
+                    pitch_deg: motion.flight_path_pitch_deg,
+                }
             }));
     }
 
@@ -1846,6 +1966,149 @@ mod tests {
             None
         );
         assert!(mission.actor(1).unwrap().awareness.snapshot(2).is_some());
+    }
+
+    fn incoming_snapshot(
+        guidance: crate::combat::missiles::Guidance,
+        position: [f64; 3],
+    ) -> MissileSnapshot {
+        MissileSnapshot {
+            id: 99,
+            owner: 8,
+            position,
+            velocity: [0., 0., 2000.],
+            guidance,
+            target: Some(1),
+            radar_active: false,
+            radar_acquired: false,
+            supported: guidance == crate::combat::missiles::Guidance::Supported,
+            supporting_radar_position: Some([0., 20000., -60000.]),
+            alive: true,
+        }
+    }
+
+    #[test]
+    fn supported_warning_defends_immediately_and_debits_two_chaff_on_schedule() {
+        use crate::combat::missiles::Guidance;
+        let mut mission = AiMission::new();
+        let mut actor = perception_actor(Experience::Novice);
+        actor
+            .order(
+                super::super::wing::WingRequest::TargetAssignment(
+                    super::super::wing::TargetOrder::HoldFire,
+                ),
+                0,
+            )
+            .unwrap();
+        let initial = actor.dispensers()[1].count;
+        mission.push(actor);
+        mission.set_missiles(vec![incoming_snapshot(
+            Guidance::Supported,
+            [0., 20000., -1000.],
+        )]);
+        let mut releases = Vec::new();
+        for tick in 0..90 {
+            let output = mission.step(&[], &flat, TimeOfDay(tick)).unwrap();
+            assert!(output.launches.is_empty());
+            if tick == 0 {
+                let actor = mission.actor(1).unwrap();
+                assert_eq!(actor.activity(), Activity::Defending);
+                assert!(actor.missile_threats().any(|r| r.targeting_receiver));
+            }
+            for device in output.devices {
+                releases.push((tick, device.class, device.released));
+            }
+        }
+        assert_eq!(
+            releases,
+            [(0, SeekerClass::Radar, 1), (30, SeekerClass::Radar, 1)]
+        );
+        assert_eq!(mission.actor(1).unwrap().dispensers()[1].count, initial - 2);
+    }
+
+    #[test]
+    fn silent_and_unseen_missiles_cannot_trigger_ai_defense() {
+        use crate::combat::missiles::Guidance;
+        for guidance in [Guidance::Active, Guidance::Infrared, Guidance::Emitter] {
+            let mut mission = AiMission::new();
+            mission.push(perception_actor(Experience::Novice));
+            mission.set_missiles(vec![incoming_snapshot(guidance, [0., 20000., -1000.])]);
+            for tick in 0..60 {
+                let output = mission.step(&[], &flat, TimeOfDay(tick)).unwrap();
+                let actor = mission.actor(1).unwrap();
+                assert!(actor.defense_decision().is_none(), "{guidance:?}");
+                assert!(actor.missile_threats().next().is_none());
+                assert!(output.devices.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn pitbull_acquisition_and_receiver_failure_gate_the_same_ai_service() {
+        use crate::combat::missiles::Guidance;
+        let mut mission = AiMission::new();
+        mission.push(perception_actor(Experience::Novice));
+        let mut missile = incoming_snapshot(Guidance::Active, [0., 20000., -1000.]);
+        missile.radar_active = true;
+        mission.set_missiles(vec![missile]);
+        mission.step(&[], &flat, TimeOfDay(0)).unwrap();
+        assert!(mission.actor(1).unwrap().defense_decision().is_none());
+        missile.radar_acquired = true;
+        mission.set_missiles(vec![missile]);
+        mission.step(&[], &flat, TimeOfDay(1)).unwrap();
+        assert_eq!(mission.actor(1).unwrap().activity(), Activity::Defending);
+        let mut failed = AiMission::new();
+        let mut actor = perception_actor(Experience::Novice);
+        actor.flight_mut().systems.counts[32] = 2;
+        failed.push(actor);
+        failed.set_missiles(vec![missile]);
+        failed.step(&[], &flat, TimeOfDay(0)).unwrap();
+        assert!(failed.actor(1).unwrap().defense_decision().is_none());
+    }
+
+    #[test]
+    fn a_visually_observed_ir_threat_requests_a_mixed_burst_without_hidden_classification() {
+        use crate::combat::missiles::Guidance;
+        let mut mission = AiMission::new();
+        mission.push(perception_actor(Experience::Novice));
+        let mut missile = incoming_snapshot(Guidance::Infrared, [0., 20000., 5000.]);
+        missile.velocity = [0., 0., -3000.];
+        mission.set_missiles(vec![missile]);
+        let first = mission.step(&[], &flat, TimeOfDay(0)).unwrap();
+        assert!(first.devices.is_empty());
+        missile.position[2] -= 25.;
+        mission.set_missiles(vec![missile]);
+        let output = mission.step(&[], &flat, TimeOfDay(1)).unwrap();
+        let actor = mission.actor(1).unwrap();
+        assert_eq!(actor.activity(), Activity::Defending);
+        assert_eq!(
+            actor.defense_decision().unwrap().burst,
+            Some(defense::BurstRequest::MIXED)
+        );
+        assert!(actor.missile_threats().all(|r| r.guidance_class.is_none()));
+        assert_eq!(output.devices.len(), 1);
+    }
+
+    #[test]
+    fn a_distant_novice_maneuvers_without_devices_while_an_ace_preserves_its_flight() {
+        use crate::combat::missiles::Guidance;
+        for skill in [Experience::Novice, Experience::Ace] {
+            let mut mission = AiMission::new();
+            let mut actor = perception_actor(skill);
+            actor.dispensers.clear();
+            mission.push(actor);
+            mission.set_missiles(vec![incoming_snapshot(
+                Guidance::Supported,
+                [0., 20000., -60000.],
+            )]);
+            let output = mission.step(&[], &flat, TimeOfDay(0)).unwrap();
+            let actor = mission.actor(1).unwrap();
+            let decision = actor.defense_decision().unwrap();
+            assert_eq!(decision.motion.is_some(), skill == Experience::Novice);
+            assert!(decision.burst.is_none());
+            assert!(output.devices.is_empty());
+            assert!(decision.debug.estimated_threat_time_s.unwrap() > 30.);
+        }
     }
 
     #[test]

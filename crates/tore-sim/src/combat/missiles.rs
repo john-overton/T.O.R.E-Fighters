@@ -161,6 +161,36 @@ pub fn geometry(
         && heading <= limit(z.heading) + 1e-12
         && elevation <= limit(z.pitch) + 1e-12
 }
+
+/// Fitted active missile radar response using the shared Advanced notch preset:
+/// 60 ft/s half width and 0.45 centre range factor in full ground clutter.
+/// The continuous range penalty feeds normal seeker memory, so entering the
+/// notch does not immediately destroy or permanently defeat the missile.
+pub fn active_radar_visible(
+    w: &Weapon,
+    position: Vector,
+    basis: Basis,
+    target: &super::live::Target,
+    target_height_agl_ft: f64,
+) -> bool {
+    let nominal = f64::from(w.seeker.zones[0].maximum_range);
+    let sighting = crate::sensors::detection::Sighting::new(position, &basis, target.position);
+    let signature = target.signature.effective_radar(
+        &target.basis,
+        sub(position, target.position),
+        target.configuration,
+    );
+    let clutter =
+        crate::sensors::detection::clutter_exposure(&sighting, target_height_agl_ft.max(0.));
+    let notch = crate::sensors::detection::notch_factor(
+        &crate::sensors::Preset::Advanced.notch(),
+        clutter,
+        crate::sensors::detection::notch_speed_fps(&sighting, target.velocity),
+    );
+    let range =
+        crate::sensors::detection::effective_range_ft(nominal, signature / 100., 1., notch, 1.);
+    signature > 0. && sighting.distance_ft <= range
+}
 pub fn sub(a: Vector, b: Vector) -> Vector {
     std::array::from_fn(|i| a[i] - b[i])
 }
@@ -687,5 +717,21 @@ impl Flight {
             last_intercept: None,
             solution: None,
         }
+    }
+
+    /// Seed a cued release exclusively from the firing actor's observation.
+    /// Later support may refresh this intercept, but hidden target state never
+    /// enters the midcourse solution.
+    pub fn from_supported_launch(
+        profile: Profile,
+        mode: LaunchMode,
+        observation: seeker::Observation,
+        launch_origin: Vector,
+    ) -> Self {
+        let mut flight = Self::new(profile, mode, Some(observation.id), launch_origin);
+        flight.qualified_target = Some(observation.id);
+        flight.last_intercept = Some(observation.position);
+        flight.seeker.target = Some(observation.id);
+        flight
     }
 }

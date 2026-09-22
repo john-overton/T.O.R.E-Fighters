@@ -596,6 +596,18 @@ pub struct Projectile {
     /// Fitted presentation marker: every third physical gun round.
     pub tracer: bool,
 }
+
+/// One actor's current fire-control answer. The host replaces these snapshots
+/// every fixed tick. A projectile can consume only the entry matching its owner
+/// and the observation matching its retained target identity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ActorSupport {
+    pub owner: u32,
+    pub observation: Option<seeker::Observation>,
+    pub supported: bool,
+    pub radar_position: Vector,
+    pub radar_emitting: bool,
+}
 impl Projectile {
     pub fn weapon<'a>(&'a self, config: &'a Configuration) -> &'a Weapon {
         self.weapon
@@ -674,6 +686,8 @@ pub struct State {
     pub emitters: Vec<passive::Emitter>,
     pub projectiles: Vec<Projectile>,
     pub targets: Vec<Target>,
+    actor_support: BTreeMap<u32, ActorSupport>,
+    pub missile_threats: super::threats::ThreatService,
     /// Ground contact volumes keyed by stable target ID. Aircraft remain spheres.
     ground_bounds: BTreeMap<u32, crate::airport::OrientedBox>,
     pub effects: Vec<Effect>,
@@ -806,6 +820,8 @@ impl State {
             emitters: vec![],
             projectiles: vec![],
             targets: vec![],
+            actor_support: BTreeMap::new(),
+            missile_threats: super::threats::ThreatService::new(PLAYER_OWNER),
             ground_bounds: BTreeMap::new(),
             effects: vec![],
             smoke: super::smoke::Smoke::default(),
@@ -829,6 +845,95 @@ impl State {
         for cadence in &mut self.gun_cadence {
             cadence.pending = 0;
         }
+    }
+
+    /// Replace all non-player fire-control snapshots for the next missile step.
+    /// Player support remains sourced from this State's own sensor component.
+    pub fn set_actor_supports(&mut self, supports: impl IntoIterator<Item = ActorSupport>) {
+        self.actor_support.clear();
+        self.actor_support
+            .extend(supports.into_iter().map(|support| (support.owner, support)));
+    }
+
+    pub fn tick(&self) -> u64 {
+        self.tick
+    }
+
+    /// Current permitted missile measurements for RWR and AI awareness. This
+    /// exposes seeker state and actor-owned support, never hidden target poses.
+    pub fn missile_snapshots(&self, player: Launcher) -> Vec<super::threats::MissileSnapshot> {
+        self.projectiles
+            .iter()
+            .filter_map(|projectile| {
+                let weapon = projectile.weapon(&self.config);
+                let flight = projectile.guidance.as_ref();
+                let profile = flight
+                    .map(|flight| flight.profile)
+                    .or_else(|| missiles::Profile::for_weapon(weapon))?;
+                let target = flight
+                    .and_then(|flight| flight.seeker.target)
+                    .or(projectile.target);
+                let support = if projectile.owner == PLAYER_OWNER {
+                    target.map(|id| ActorSupport {
+                        owner: PLAYER_OWNER,
+                        observation: self.sensors.observation(id).map(|contact| {
+                            let delta = sub(contact.position, projectile.position);
+                            seeker::Observation {
+                                id,
+                                position: contact.position,
+                                velocity: contact.velocity,
+                                quality: 1.,
+                                off_axis: dot(unit(delta), projectile.direction)
+                                    .clamp(-1., 1.)
+                                    .acos(),
+                                range: missiles::length(delta),
+                            }
+                        }),
+                        supported: self.sensors.supports(id),
+                        radar_position: player.position,
+                        radar_emitting: player.radar && player.alive,
+                    })
+                } else {
+                    self.actor_support.get(&projectile.owner).copied()
+                };
+                let supported = profile.guidance == Guidance::Supported
+                    && support.is_some_and(|answer| {
+                        answer.supported
+                            && answer.radar_emitting
+                            && answer.observation.is_some_and(|o| Some(o.id) == target)
+                    });
+                let velocity = projectile.motion.map_or_else(
+                    || {
+                        projectile
+                            .direction
+                            .map(|axis| axis * f64::from(projectile.speed_f8) / 256.)
+                    },
+                    |motion| motion.velocity,
+                );
+                Some(super::threats::MissileSnapshot {
+                    id: projectile.id,
+                    owner: projectile.owner,
+                    position: projectile.position,
+                    velocity,
+                    guidance: profile.guidance,
+                    target,
+                    radar_active: flight.is_some_and(|flight| {
+                        profile.guidance == Guidance::Active
+                            && flight.enabled
+                            && flight.seeker.status != Status::Expired
+                    }),
+                    radar_acquired: flight.is_some_and(|flight| {
+                        flight.seeker.status == Status::Pitbull
+                            && flight.seeker.observation.is_some()
+                    }),
+                    supported,
+                    supporting_radar_position: supported
+                        .then(|| support.map(|answer| answer.radar_position))
+                        .flatten(),
+                    alive: true,
+                })
+            })
+            .collect()
     }
     /// Player selection ring: NAV, then each configured weapon station.
     /// Legacy range commands retain their old station-only behavior for tapes.
@@ -2062,7 +2167,7 @@ impl State {
             radar_emitting: launcher.radar,
             id: 0,
             position: launcher.position,
-            velocity: [0.; 3],
+            velocity: launcher.velocity,
             basis: launcher.basis,
             configuration: sensors::Configuration::CLEAN,
             signature: self.config.sensors.signature,
@@ -2114,7 +2219,39 @@ impl State {
             if p.guidance.is_some() {
                 let was_active = p.guidance.as_ref().unwrap().enabled;
                 let was_acquired = p.guidance.as_ref().unwrap().seeker.acquired;
-                guide(p, w, &self.targets, &self.sensors, &obscured);
+                let actor_support = if p.owner == PLAYER_OWNER {
+                    p.guidance
+                        .as_ref()
+                        .and_then(|flight| flight.seeker.target)
+                        .map(|id| ActorSupport {
+                            owner: PLAYER_OWNER,
+                            supported: self.sensors.supports(id),
+                            observation: self.sensors.observation(id).map(|contact| {
+                                let delta = sub(contact.position, p.position);
+                                seeker::Observation {
+                                    id,
+                                    position: contact.position,
+                                    velocity: contact.velocity,
+                                    quality: 1.,
+                                    off_axis: dot(unit(delta), p.direction).clamp(-1., 1.).acos(),
+                                    range: missiles::length(delta),
+                                }
+                            }),
+                            radar_position: launcher.position,
+                            radar_emitting: launcher.radar && launcher.alive,
+                        })
+                } else {
+                    self.actor_support.get(&p.owner).copied()
+                };
+                guide_owned(
+                    p,
+                    w,
+                    &self.targets,
+                    (p.owner != PLAYER_OWNER).then_some(&player),
+                    actor_support.as_ref(),
+                    &obscured,
+                    &ground,
+                );
                 let f = p.guidance.as_ref().unwrap();
                 if f.profile.guidance == Guidance::Active {
                     if !was_active && f.enabled {
@@ -2471,6 +2608,27 @@ impl State {
                 ));
             }
         }
+        let snapshots = self.missile_snapshots(launcher);
+        let heading_deg = launcher.basis.forward[0]
+            .atan2(launcher.basis.forward[2])
+            .to_degrees();
+        let pitch_deg = launcher.basis.forward[1].clamp(-1., 1.).asin().to_degrees();
+        self.missile_threats.observe(
+            self.tick,
+            super::threats::Receiver {
+                id: PLAYER_OWNER,
+                position: launcher.position,
+                velocity: launcher.velocity,
+                heading_deg,
+                pitch_deg,
+                skill: crate::ai::Experience::Ace,
+                rwr_operating: launcher.alive && !self.rwr_failed,
+                visual_operating: launcher.alive && !self.visual_failed,
+                visibility_limit_ft: Some(5. * missiles::NMI),
+            },
+            &snapshots,
+            |from, to| !obscured(from, to),
+        );
         events
     }
 }
@@ -4274,14 +4432,266 @@ mod tests {
         assert!(s.step(true, l, |_, _| 0.).contains(&Event::TrackLost(id)));
         assert_eq!(s.ammo, ammo);
     }
+
+    fn guided_weapon(state: &State, source: &str, signature: u8) -> Weapon {
+        let mut weapon = state.config.stations[0].weapon.clone();
+        weapon.source = source.into();
+        weapon.seeker.signature = signature;
+        for zone in &mut weapon.seeker.zones {
+            zone.minimum_range = 0;
+            zone.maximum_range = 100_000;
+            zone.minimum_altitude = -100_000;
+            zone.maximum_altitude = 100_000;
+            zone.heading = i16::MAX;
+            zone.pitch = i16::MAX;
+        }
+        weapon
+    }
+
+    fn owned_shot(
+        weapon: Weapon,
+        owner: u32,
+        target: u32,
+        position: Vector,
+        observation: seeker::Observation,
+    ) -> Projectile {
+        let profile = missiles::Profile::for_weapon(&weapon).unwrap();
+        Projectile {
+            id: 91,
+            owner,
+            weapon: Some(weapon.clone()),
+            guidance: Some(Flight::from_supported_launch(
+                profile,
+                LaunchMode::Cued,
+                observation,
+                position,
+            )),
+            motion: Some(Motion::new(&weapon.movement, [0., 0., 600.], position[1])),
+            guidance_ticks: Some(profile.guidance_ticks),
+            age: 0,
+            incoming: target == PLAYER_OWNER,
+            station: 0,
+            position,
+            previous: position,
+            direction: [0., 0., -1.],
+            speed_f8: 600 * 256,
+            launched_t: 0,
+            target: Some(target),
+            fall: FallState::default(),
+            gun_round: None,
+            tracer: false,
+        }
+    }
+
+    #[test]
+    fn ai_active_seeker_acquires_player_without_player_sensor_data() {
+        let mut state = fixture(true);
+        let weapon = guided_weapon(&state, "AIM120.JT", 3);
+        let player = launcher();
+        let observation = seeker::Observation {
+            id: PLAYER_OWNER,
+            position: player.position,
+            velocity: player.velocity,
+            quality: 1.,
+            off_axis: 0.,
+            range: 3_000.,
+        };
+        state.projectiles.push(owned_shot(
+            weapon,
+            7,
+            PLAYER_OWNER,
+            [0., player.position[1], 3_000.],
+            observation,
+        ));
+        state.set_actor_supports([ActorSupport {
+            owner: 7,
+            observation: Some(observation),
+            supported: true,
+            radar_position: [0., 1000., 5000.],
+            radar_emitting: true,
+        }]);
+        for _ in 0..missiles::DWELL {
+            state.step(false, player, |_, _| 0.);
+        }
+        let flight = state.projectiles[0].guidance.as_ref().unwrap();
+        assert_eq!(flight.seeker.target, Some(PLAYER_OWNER));
+        assert_eq!(flight.seeker.status, Status::Pitbull);
+        assert!(state.missile_snapshots(player)[0].radar_acquired);
+    }
+
+    #[test]
+    fn supported_ai_shot_uses_only_its_owner_support_and_reacquires() {
+        let state = fixture(true);
+        let weapon = guided_weapon(&state, "R530.JT", 3);
+        let target = target(44, [0., 1000., 4000.], 20, 0x80);
+        let observation = seeker::Observation {
+            id: target.id,
+            position: target.position,
+            velocity: target.velocity,
+            quality: 1.,
+            off_axis: 0.,
+            range: 4000.,
+        };
+        let mut shot = owned_shot(weapon.clone(), 7, target.id, [0., 1000., 0.], observation);
+        for _ in 0..missiles::DWELL {
+            guide_owned(
+                &mut shot,
+                &weapon,
+                std::slice::from_ref(&target),
+                None,
+                None,
+                &|_, _| false,
+                &|_, _| 0.,
+            );
+        }
+        assert!(!shot.guidance.as_ref().unwrap().seeker.acquired);
+        let support = ActorSupport {
+            owner: 7,
+            observation: Some(observation),
+            supported: true,
+            radar_position: [0., 1000., -1000.],
+            radar_emitting: true,
+        };
+        for _ in 0..missiles::DWELL {
+            guide_owned(
+                &mut shot,
+                &weapon,
+                std::slice::from_ref(&target),
+                None,
+                Some(&support),
+                &|_, _| false,
+                &|_, _| 0.,
+            );
+        }
+        assert_eq!(
+            shot.guidance.as_ref().unwrap().seeker.status,
+            Status::Locked
+        );
+        guide_owned(
+            &mut shot,
+            &weapon,
+            std::slice::from_ref(&target),
+            None,
+            None,
+            &|_, _| false,
+            &|_, _| 0.,
+        );
+        assert_eq!(
+            shot.guidance.as_ref().unwrap().seeker.status,
+            Status::Memory
+        );
+        for _ in 0..missiles::DWELL {
+            guide_owned(
+                &mut shot,
+                &weapon,
+                std::slice::from_ref(&target),
+                None,
+                Some(&support),
+                &|_, _| false,
+                &|_, _| 0.,
+            );
+        }
+        assert_eq!(
+            shot.guidance.as_ref().unwrap().seeker.status,
+            Status::Locked
+        );
+    }
+
+    #[test]
+    fn active_notch_enters_memory_instead_of_destroying_flight() {
+        let state = fixture(true);
+        let weapon = guided_weapon(&state, "AIM120.JT", 3);
+        let mut crossing = target(5, [0., 0., 60_000.], 20, 0x80);
+        crossing.signature.radar = 100.;
+        crossing.velocity = [800., 0., 0.];
+        let basis = Basis::new(0., 0., 0.);
+        assert!(!missiles::active_radar_visible(
+            &weapon,
+            [0., 5000., 0.],
+            basis,
+            &crossing,
+            crossing.position[1],
+        ));
+        crossing.velocity = [0., 0., 800.];
+        assert!(missiles::active_radar_visible(
+            &weapon,
+            [0., 5000., 0.],
+            basis,
+            &crossing,
+            crossing.position[1],
+        ));
+        let profile = missiles::Profile::for_weapon(&weapon).unwrap();
+        let mut seeker = seeker::Seeker::new(Some(crossing.id));
+        seeker.acquired = true;
+        seeker.status = Status::Pitbull;
+        seeker.step(profile, &[]);
+        assert_eq!(seeker.status, Status::Memory);
+        assert_eq!(seeker.target, Some(crossing.id));
+    }
+
+    #[test]
+    fn snapshots_keep_compatibility_missile_bodies_visible() {
+        let mut state = fixture(true);
+        let weapon = guided_weapon(&state, "AIM120.JT", 3);
+        let observation = seeker::Observation {
+            id: 8,
+            position: [0., 1000., 5000.],
+            velocity: [0.; 3],
+            quality: 1.,
+            off_axis: 0.,
+            range: 5000.,
+        };
+        let mut projectile = owned_shot(weapon, 8, 8, [0., 1000., 0.], observation);
+        projectile.guidance = None;
+        projectile.motion = None;
+        state.projectiles.push(projectile);
+        let snapshots = state.missile_snapshots(launcher());
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].guidance, missiles::Guidance::Active);
+        assert!(!snapshots[0].radar_active);
+        assert!(!snapshots[0].radar_acquired);
+    }
+
+    #[test]
+    fn player_supported_snapshot_carries_actual_support() {
+        let mut state = fixture(true);
+        state.config.stations[0].weapon = guided_weapon(&state, "R530.JT", 3);
+        let player = launcher();
+        state.range_target(player);
+        observe(&mut state, player, 1);
+        state.designate_next();
+        observe(&mut state, player, ACQUISITION);
+        let id = state.designated().unwrap();
+        let contact = state.sensors.observation(id).unwrap();
+        let observation = seeker::Observation {
+            id,
+            position: contact.position,
+            velocity: contact.velocity,
+            quality: 1.,
+            off_axis: 0.,
+            range: missiles::length(sub(contact.position, player.position)),
+        };
+        state.projectiles.push(owned_shot(
+            state.config.stations[0].weapon.clone(),
+            PLAYER_OWNER,
+            id,
+            player.position,
+            observation,
+        ));
+        let snapshot = state.missile_snapshots(player)[0];
+        assert!(snapshot.supported);
+        assert_eq!(snapshot.supporting_radar_position, Some(player.position));
+    }
 }
 
-fn guide(
+fn guide_owned(
     p: &mut Projectile,
     w: &Weapon,
     targets: &[Target],
-    sensors: &Sensors,
+    player: Option<&Target>,
+    support: Option<&ActorSupport>,
     obscured: &dyn Fn(Vector, Vector) -> bool,
+    ground: &dyn Fn(f64, f64) -> f64,
 ) {
     let flight = p.guidance.as_mut().unwrap();
     let profile = flight.profile;
@@ -4296,14 +4706,25 @@ fn guide(
     let supported = flight
         .seeker
         .target
-        .filter(|id| sensors.supports(*id))
+        .filter(|id| {
+            support.is_some_and(|answer| {
+                answer.supported
+                    && answer.radar_emitting
+                    && answer.observation.is_some_and(|o| o.id == *id)
+            })
+        })
         .filter(|id| {
             targets
                 .iter()
+                .chain(player)
                 .find(|t| t.id == *id)
                 .is_some_and(|t| flight.eligible(w, t))
         })
-        .and_then(|id| sensors.observation(id));
+        .and_then(|id| {
+            support
+                .and_then(|answer| answer.observation)
+                .filter(|o| o.id == id)
+        });
     // Only shared supported observations may update an initially silent shot.
     if !flight.seeker.acquired
         && let Some(contact) = supported
@@ -4339,9 +4760,29 @@ fn guide(
         };
         let observations: Vec<_> = targets
             .iter()
+            .chain(player)
             .filter(|t| flight.eligible(w, t))
-            .filter(|t| profile.guidance != Guidance::Supported || sensors.supports(t.id))
-            .filter_map(|t| seeker::observe(w, profile, &view, t))
+            .filter(|t| {
+                profile.guidance != Guidance::Supported || supported.is_some_and(|o| o.id == t.id)
+            })
+            .filter_map(|t| {
+                let observed = seeker::observe(w, profile, &view, t)?;
+                if profile.guidance == Guidance::Supported {
+                    supported
+                } else if profile.guidance == Guidance::Active
+                    && !missiles::active_radar_visible(
+                        w,
+                        p.position,
+                        basis,
+                        t,
+                        t.position[1] - ground(t.position[0], t.position[2]),
+                    )
+                {
+                    None
+                } else {
+                    Some(observed)
+                }
+            })
             .collect();
         if profile.guidance == Guidance::Supported && !observations.is_empty() {
             flight.seeker.candidate = flight.seeker.target;
@@ -4377,6 +4818,35 @@ fn guide(
         let heading = missiles::commanded_heading(p.direction, p.motion.unwrap().velocity, desired);
         p.direction = missiles::steer(&w.movement, p.age, p.direction, heading);
     }
+}
+
+#[cfg(test)]
+fn guide(
+    p: &mut Projectile,
+    w: &Weapon,
+    targets: &[Target],
+    sensors: &Sensors,
+    obscured: &dyn Fn(Vector, Vector) -> bool,
+) {
+    let support = p
+        .guidance
+        .as_ref()
+        .and_then(|flight| flight.seeker.target)
+        .map(|id| ActorSupport {
+            owner: p.owner,
+            supported: sensors.supports(id),
+            observation: sensors.observation(id).map(|contact| seeker::Observation {
+                id,
+                position: contact.position,
+                velocity: contact.velocity,
+                quality: 1.,
+                off_axis: 0.,
+                range: missiles::length(sub(contact.position, p.position)),
+            }),
+            radar_position: [0.; 3],
+            radar_emitting: true,
+        });
+    guide_owned(p, w, targets, None, support.as_ref(), obscured, &|_, _| 0.);
 }
 
 #[cfg(test)]

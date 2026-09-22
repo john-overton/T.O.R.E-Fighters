@@ -81,6 +81,113 @@ const SCOPE_ORIGIN: (f64, f64) = (80., 130.);
 const SCOPE_HALF_WIDTH: f64 = 55.;
 const SCOPE_DEPTH: f64 = 90.;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum RwrPlot {
+    Ranged(i32, i32),
+    BearingOnly { rim: (i32, i32), inner: (i32, i32) },
+    Clipped { rim: (i32, i32), inner: (i32, i32) },
+}
+
+fn rwr_blink_on(tick: u64) -> bool {
+    tick % 120 < 60
+}
+
+fn rwr_plot(bearing: f64, distance_nmi: Option<f64>, scale_nmi: f64, radius: f64) -> RwrPlot {
+    let direction = (bearing.sin(), -bearing.cos());
+    let at = |r: f64| {
+        (
+            (80. + direction.0 * r).round() as i32,
+            (76. + direction.1 * r).round() as i32,
+        )
+    };
+    match distance_nmi {
+        Some(distance) if distance.is_finite() && distance <= scale_nmi => {
+            let ratio = (distance.max(0.) / scale_nmi).clamp(0., 1.);
+            let (x, y) = at(radius * ratio);
+            RwrPlot::Ranged(x, y)
+        }
+        Some(_) => RwrPlot::Clipped {
+            rim: at(radius),
+            inner: at(radius - 5.),
+        },
+        None => RwrPlot::BearingOnly {
+            rim: at(radius),
+            inner: at(radius - 4.),
+        },
+    }
+}
+
+fn draw_rwr_rim(r: &mut Raster, plot: RwrPlot, colour: [u8; 4]) -> Option<(i32, i32)> {
+    match plot {
+        RwrPlot::Ranged(x, y) => Some((x, y)),
+        RwrPlot::BearingOnly { rim, inner } => {
+            r.line(rim, inner, colour);
+            None
+        }
+        RwrPlot::Clipped { rim, inner } => {
+            // A fork distinguishes a ranged contact clipped by the selected
+            // scale from a simple bearing-only tick.
+            r.line(rim, inner, colour);
+            let tangent = ((rim.1 - inner.1).signum(), -(rim.0 - inner.0).signum());
+            r.line(
+                (rim.0 - tangent.0 * 2, rim.1 - tangent.1 * 2),
+                (rim.0 + tangent.0 * 2, rim.1 + tangent.1 * 2),
+                colour,
+            );
+            None
+        }
+    }
+}
+
+fn draw_rwr_emitter(r: &mut Raster, plot: RwrPlot, kind: scope::EmitterKind, colour: [u8; 4]) {
+    let Some((x, y)) = draw_rwr_rim(r, plot, colour) else {
+        return;
+    };
+    match kind {
+        scope::EmitterKind::Ground => r.rect(x - 2, y - 2, 5, 5, colour),
+        scope::EmitterKind::FriendlyAircraft => {
+            r.line((x, y - 3), (x + 3, y), colour);
+            r.line((x + 3, y), (x, y + 3), colour);
+            r.line((x, y + 3), (x - 3, y), colour);
+            r.line((x - 3, y), (x, y - 3), colour);
+        }
+        scope::EmitterKind::EnemyAircraft => {
+            for row in -3i32..=3 {
+                let half = 3 - row.abs();
+                r.rect(x - half, y + row, half * 2 + 1, 1, colour);
+            }
+        }
+        scope::EmitterKind::Unknown => {
+            r.line((x - 2, y), (x + 2, y), colour);
+            r.line((x, y - 2), (x, y + 2), colour);
+        }
+    }
+}
+
+fn draw_rwr_missile(r: &mut Raster, plot: RwrPlot, colour: [u8; 4]) {
+    if let Some((x, y)) = draw_rwr_rim(r, plot, colour) {
+        r.rect(x - 1, y - 1, 3, 3, colour);
+    }
+}
+
+fn draw_rwr_indicator(
+    r: &mut Raster,
+    font: &Font,
+    label: &str,
+    x: i32,
+    indicator: scope::Indicator,
+    blink_on: bool,
+) {
+    let colour = match indicator {
+        scope::Indicator::Off => return,
+        scope::Indicator::Detected => GREEN,
+        scope::Indicator::Tracking => BRIGHT,
+        scope::Indicator::Incoming if blink_on => BRIGHT,
+        scope::Indicator::Incoming => return,
+    };
+    r.text(font, label, x, 124, colour);
+}
+
 /// One projection for drawing and picking: bearing across, distance up.
 /// A contact outside the plotted range returns None and is not drawn, which
 /// does not mean the sensor lost it.
@@ -164,6 +271,7 @@ pub struct CombatReadout {
     pub target: Option<crate::target_window::Readout>,
     pub scope: scope::Scope,
     pub rcs: scope::Rcs,
+    pub rwr: scope::Rwr,
     pub rwr_failed: bool,
     pub envelope_target: Option<Vec<tore_formats::aircraft::Envelope>>,
 }
@@ -530,7 +638,11 @@ impl Instruments {
         let text = |r: &mut Raster, t: &str, x, y| r.text(f, t, x, y, GREEN);
         if (id == 9 && s.systems.has(32))
             || (id == 5
-                && (s.systems.counts[32] > 1 || self.combat.as_ref().is_some_and(|c| c.rwr_failed)))
+                && (s.systems.counts[32] > 1
+                    || self
+                        .combat
+                        .as_ref()
+                        .is_some_and(|c| c.rwr_failed || !c.rwr.operating)))
         {
             return r;
         }
@@ -668,10 +780,11 @@ impl Instruments {
                 r.text(f, &fuel, 138 - width(&fuel), 115, green);
             }
             5 => {
+                let (cx, cy, radius) = (80i32, 76i32, 48.);
                 r.line((13, 76), (147, 76), DIM);
                 r.line((80, 22), (80, 133), DIM);
-                r.circle(80, 76, 48., DIM);
-                r.circle(80, 76, 24., DIM);
+                r.circle(cx, cy, radius, DIM);
+                r.circle(cx, cy, radius / 2., DIM);
                 text(
                     &mut r,
                     ["5", "10", "20", "30", "50"][self.rwr_range],
@@ -682,6 +795,34 @@ impl Instruments {
                 r.rect(78, 74, 1, 5, GREEN);
                 r.rect(82, 74, 1, 5, GREEN);
                 r.rect(78, 78, 5, 1, GREEN);
+                if let Some(combat) = &self.combat {
+                    let rwr = &combat.rwr;
+                    let blink_on = rwr_blink_on(rwr.tick);
+                    let scale = [5., 10., 20., 30., 50.][self.rwr_range];
+                    for emitter in &rwr.emitters {
+                        if emitter.state == scope::EmitterState::Tracking && !blink_on {
+                            continue;
+                        }
+                        let colour = if emitter.state == scope::EmitterState::Detected {
+                            GREEN
+                        } else {
+                            BRIGHT
+                        };
+                        let plot =
+                            rwr_plot(emitter.bearing_rad, emitter.distance_nmi, scale, radius);
+                        draw_rwr_emitter(&mut r, plot, emitter.kind, colour);
+                    }
+                    for missile in &rwr.missiles {
+                        if missile.known_targeting_receiver && !missile.stale && !blink_on {
+                            continue;
+                        }
+                        let plot =
+                            rwr_plot(missile.bearing_rad, missile.distance_nmi, scale, radius);
+                        draw_rwr_missile(&mut r, plot, if missile.stale { DIM } else { BRIGHT });
+                    }
+                    draw_rwr_indicator(&mut r, f, "R", 132, rwr.radar_indicator, blink_on);
+                    draw_rwr_indicator(&mut r, f, "I", 141, rwr.infrared_indicator, blink_on);
+                }
                 if s.jammer && s.engine {
                     text(&mut r, "JAM", 17, 124);
                 }
@@ -1036,6 +1177,64 @@ impl Instruments {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rwr_blink_uses_fixed_simulation_ticks() {
+        assert!(rwr_blink_on(0));
+        assert!(rwr_blink_on(59));
+        assert!(!rwr_blink_on(60));
+        assert!(!rwr_blink_on(119));
+        assert!(rwr_blink_on(120));
+    }
+
+    #[test]
+    fn rwr_projection_distinguishes_range_quality() {
+        assert_eq!(rwr_plot(0., Some(5.), 10., 48.), RwrPlot::Ranged(80, 52));
+        assert_eq!(
+            rwr_plot(std::f64::consts::FRAC_PI_2, None, 10., 48.),
+            RwrPlot::BearingOnly {
+                rim: (128, 76),
+                inner: (124, 76)
+            }
+        );
+        assert_eq!(
+            rwr_plot(std::f64::consts::PI, Some(11.), 10., 48.),
+            RwrPlot::Clipped {
+                rim: (80, 124),
+                inner: (80, 119)
+            }
+        );
+        for scale in [5., 10., 20., 30., 50.] {
+            for (bearing, expected) in [
+                (0., (80, 28)),
+                (std::f64::consts::FRAC_PI_2, (128, 76)),
+                (std::f64::consts::PI, (80, 124)),
+                (-std::f64::consts::FRAC_PI_2, (32, 76)),
+            ] {
+                assert_eq!(
+                    rwr_plot(bearing, Some(scale), scale, 48.),
+                    RwrPlot::Ranged(expected.0, expected.1)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn manual_rwr_symbols_have_distinct_synthetic_rasters() {
+        fn pixels(kind: scope::EmitterKind) -> Vec<u8> {
+            let mut raster = Raster::new();
+            draw_rwr_emitter(&mut raster, RwrPlot::Ranged(80, 76), kind, GREEN);
+            raster.pixels
+        }
+        let ground = pixels(scope::EmitterKind::Ground);
+        let friendly = pixels(scope::EmitterKind::FriendlyAircraft);
+        let enemy = pixels(scope::EmitterKind::EnemyAircraft);
+        let unknown = pixels(scope::EmitterKind::Unknown);
+        assert_ne!(ground, friendly);
+        assert_ne!(friendly, enemy);
+        assert_ne!(enemy, unknown);
+        assert_ne!(ground, unknown);
+    }
+
     fn button(i: &Instruments, slot: usize, b: usize) -> (f64, f64) {
         let (x, y, w, h) = i.layout.rect(slot);
         (

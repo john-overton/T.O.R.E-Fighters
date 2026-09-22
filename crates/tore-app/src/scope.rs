@@ -74,6 +74,67 @@ pub struct Rcs {
     pub signature: f64,
 }
 
+/// Player-facing warning-receiver snapshot. The simulation owns detection and
+/// threat classification; this value only carries permitted presentation data.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Rwr {
+    /// Fixed simulation tick, used for the one-second warning blink cycle.
+    pub tick: u64,
+    pub operating: bool,
+    pub emitters: Vec<RwrEmitter>,
+    pub missiles: Vec<RwrMissile>,
+    pub radar_indicator: Indicator,
+    pub infrared_indicator: Indicator,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Indicator {
+    #[default]
+    Off,
+    Detected,
+    /// Manual-defined seeker tracking state, awaiting its simulation producer.
+    #[allow(dead_code)]
+    Tracking,
+    Incoming,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EmitterKind {
+    Unknown,
+    FriendlyAircraft,
+    EnemyAircraft,
+    Ground,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EmitterState {
+    Detected,
+    /// Manual-defined illumination state, awaiting explicit lock evidence.
+    #[allow(dead_code)]
+    Painting,
+    Tracking,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RwrEmitter {
+    pub id: u32,
+    pub bearing_rad: f64,
+    pub distance_nmi: Option<f64>,
+    pub kind: EmitterKind,
+    pub state: EmitterState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RwrMissile {
+    pub id: u32,
+    pub bearing_rad: f64,
+    pub distance_nmi: Option<f64>,
+    /// True only when this receiver's evidence identifies an incoming threat.
+    pub known_targeting_receiver: bool,
+    /// Lost-observation grace keeps the last plot steady and visibly dim.
+    pub stale: bool,
+}
+
 /// Agent-proposed noise density, clamped for readability.
 fn density(received: f64) -> f64 {
     let value = 0.35 * received / (1. + received);

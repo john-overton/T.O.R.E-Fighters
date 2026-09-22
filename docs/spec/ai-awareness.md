@@ -13,8 +13,8 @@
 Development specification for M1 air-to-air awareness, memory, search, missile
 defense, RWR missile presentation and mission engagement. Visual awareness,
 aircraft memory and contact-loss search are implemented in the existing aircraft
-runtime. Missile defense, RWR missile presentation and mission roles remain
-pending. Delivery sequencing is defined in
+runtime. Missile defense and shared AI/RWR missile information are implemented
+for reviewed missile profiles. Mission roles remain pending. Delivery sequencing is defined in
 [M1e](../ROADMAP.md#m1-air-to-air-awareness-delivery).
 
 The requirements are **opinionated** gameplay behavior. Existing equipment,
@@ -325,6 +325,16 @@ Initial defensive timing parameters:
 | Experienced | 3 seconds | Same threshold rule, with less conservative commitment and continuous reassessment |
 | Ace | 1.5 seconds | Preserve the attack while comfortably outside the threshold; use the available margin, defend, then reassess attack opportunity |
 
+The fitted response estimate uses half the load-limited coordinated-turn rate
+at current speed, bounded by the aircraft's maximum bank. Pitch authority uses
+half the available normal acceleration above 1 G divided by current speed.
+Roll-in allowance is the requested bank plus the magnitude of current bank,
+divided by the loaded roll-rate limit, plus 0.7 seconds of control settling.
+Gravity is 32.174 feet per second squared. These agent-authored conservative
+estimates use loaded aircraft limits; they are not exact trajectory predictions.
+A dive is speed-safe only when current speed plus five seconds of gravitational
+acceleration at 20 degrees remains within the current maximum-speed envelope.
+
 Maneuver-time estimation must be bounded against measured flight-model turns
 before acceptance. If estimated available time is already too short at any
 skill, act immediately with the fastest feasible safe break and available
@@ -362,23 +372,21 @@ to protecting their charge instead of automatically chasing revenge. Novice must
 still obey its single-target memory and fresh-reacquisition rule when its former
 target is gone.
 
-Notching needs a real sensor/seeker effect to matter. The shared aircraft radar
-already has an authored notch model; the missile spec explicitly leaves
-weapon-specific notch rejection unspecified. Before implementation acceptance,
-specify and test the A-seeker notch response and S-support-loss response, with
-named fitted constants where original evidence is missing. Do not invent an
-automatic kill or universal evade chance. Passive E countermeasure
+Active missile seekers use the shared Advanced notch preset: a 60 ft/s radial
+speed half-width and a 0.45 center range factor at full ground clutter. Clutter
+uses the target's actual height above terrain and the downward sight angle.
+This is a fitted shared default, not weapon-specific recovered rejection.
+Supported missiles lose measured steering when their launcher's own radar loses
+support; they may reacquire before guidance expiry. A notch can shorten detection
+range or break support; it never guarantees missile defeat. Passive E countermeasure
 susceptibility also remains weapon-specific and unknown where not specified.
 Ground/emitter homing can be tested with fixtures. A2G AI is out of scope.
 
 ### Shared RWR missile information and display
 
 RWR supplies missile information to AI and displays missile contacts for the
-player. Known incoming threats blink for the receiving aircraft. The existing
-`tore-app::instruments` page 5 currently draws the RWR grid, range and JAM label
-but no missile contacts. `scope::Rcs` has passive emitter presentation inputs;
-it does not supply RWR missile contacts. Live missile plots are required for
-display acceptance.
+player. Known incoming threats blink for the receiving aircraft. The
+[manual-based RWR specification](rwr.md) defines symbols, indicators and layout.
 
 Create one actor-owned threat-information service in `tore-sim`, consumed by
 both AI and the player's RWR presentation. No AI-only omniscient missile list,
@@ -400,6 +408,15 @@ use the same snapshot and its age. Do not look up the missile's live world pose
 between updates. Bearing-only observations remain valid when a ranged report is
 absent; they use the conservative defense rule above. Validate this initial
 exact-sample approximation in play before considering fitted estimation error.
+
+Own launched missiles also appear as steady dots, as described by the manual.
+The shared service supplies own-ordnance snapshots at the same 30-tick cadence,
+an opinionated telemetry allowance that does not reveal another aircraft's
+silent weapons. Unrelated active missile emitters provide bearing-only records
+within 50 NM unless independently seen. Only a directed S warning or acquired
+A threat supplies the authored radar threat range/motion snapshot. The player's
+visual receiver uses the 5 NM cone as an agent-authored host default; AI uses
+its resolved skill. RWR failure suppresses electronic reception but not vision.
 
 Visual I/E observations feed the same threat service as visual evidence, never
 as electronic detections. Show a visually acquired incoming missile on the
@@ -542,7 +559,7 @@ objectives/import and general contact-sharing doctrine are outside M1 scope.
 Before implementing the affected behavior, resolve and document:
 
 - Environmental visibility where cloud/night occlusion is incomplete.
-- Active-missile seeker notch rejection and supported-missile support loss.
+- Weapon-specific tuning beyond the shared active-seeker notch preset.
 - Passive-guidance countermeasure susceptibility where no weapon rule exists.
 - Defensive maneuver-time estimates validated against the selected flight model.
 

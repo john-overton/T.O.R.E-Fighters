@@ -617,7 +617,9 @@ transmissions only; jammer homing requires an explicit profile opt-in. This is a
 fitted conservative receiver policy, not recovered band evidence. Wide 0x7fff
 angles impose no limit on that axis; other axes use independent spherical angles.
 Seeker radar range uses the shared RCS/aspect square-root law with reference 100;
-weapon-specific notch and jammer rejection remain unspecified. The bounded intercept estimate simulates the shared propulsion, limited turns
+active-seeker notch rejection uses the shared Advanced preset with a 60 ft/s
+radial half-width and a 0.45 center range factor at full terrain-relative clutter.
+Weapon-specific notch tuning and jammer rejection remain unspecified. The bounded intercept estimate simulates the shared propulsion, limited turns
 and fitted maneuver losses at 120 Hz. Lead updates every 0.1 seconds. See
 [engagement-dependent range](#engagement-dependent-maximum-range).
 
@@ -754,3 +756,19 @@ band. The band does not change missile physics or firing permission.
 
 [Weapon/NAV selection and no-designation bore silence](weapon-navigation-selection.md)
 apply to the player controls and mounted seeker audio.
+
+## Actor-owned launch integration
+
+Reviewed AI missiles use the same seeker activation, acquisition, propulsion,
+last-intercept memory and expiry rules as player missiles. Each supported shot
+reads only its firing actor's current fire-control observation. Player support
+cannot support an AI shot. AI seekers can acquire the player as target ID 0;
+player seekers cannot acquire their own launcher. The explicit compatibility
+weapon path retains its prior steering.
+
+The [shared threat service](ai-awareness.md#missile-awareness-and-defense) reads
+actual missile state for warning onset. Countermeasures can decoy a spec-guided
+missile only while its own enabled seeker has an acquired observation of the
+releasing aircraft. An inactive active-radar seeker is not decoyed by a chaff
+burst. Successful decoy preserves the physical coasting body and retires its
+lock; the body can remain visible.

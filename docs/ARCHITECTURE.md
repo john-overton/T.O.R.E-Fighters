@@ -266,6 +266,13 @@ profiles, and the mission terrain query masks visual and radar/infrared sensing.
 Production sensor loading fails explicitly rather than enabling the sensorless
 synthetic-fixture path. SEARCHING/ACQUIRING/REJOINING are simulation activities
 read by Target view. [Behavior and limitations](spec/ai-awareness.md).
+`combat::threats` owns bounded missile observations for every receiver, including
+the player RWR. Controllers consume copied threat records through `ai::defense`;
+they cannot inspect live missiles or private launcher targets. `ActorSupport`
+snapshots bind each guided projectile to its own launcher, and the shared
+seeker lifecycle supplies actual pitbull and support-loss state. Countermeasure
+bursts are scheduled/debited by the mission before the bridge applies decoy
+rolls. RWR drawing reads the same records and never drives the decision clock.
 `ai::formation` owns routine repositioning, trailing, breakout, intercept, stabilization and
 capture guidance. Traffic and arrival states are snapshotted before any actor
 advances, so iteration order cannot grant approach priority. Its trace hook is
