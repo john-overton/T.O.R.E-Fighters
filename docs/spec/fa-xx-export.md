@@ -22,7 +22,11 @@ FAXX_A/B/C/D/S.SH, all derived from the F-22N donors F22N.PT and
 F22N.SH/_A/_B/_C/_D/_S.SH. The PT names it F/A-XX / F/A-XX Concept and
 identifies itself as FAXX.PT. Shape and shadow references point into the new
 family. The donor's hook capability bit is already set, so the PT flags are
-copied unchanged. All other definition fields, including aerodynamic settings,
+copied unchanged. The exported shapes apply the concept's [panel recolour](fa-xx.md): F-22N
+greys 156, 146 and 147 become the F/A-18 grey 150 on Face and VertexInfo
+records and on authored flap leaves. FAXX_B and FAXX_D are therefore
+recompiled through the same static toolchain rather than copied; FAXX_S
+remains a byte-identical donor alias. All other definition fields, including aerodynamic settings,
 cockpit/HUD, equipment and availability, remain donor values. The package has
 no F22- or F22N-named resource entries.
 
@@ -33,7 +37,7 @@ Evidence and the shadow-derived damage-name contract are recorded in the
 original FA flight of the earlier F-22A-based package on 2026-09-18; the F-22N
 based package has not yet been flown in original FA.
 
-The B/D fragments and S shadow are unchanged donor aliases. Copying the shadow
+The S shadow is an unchanged donor alias. Copying the shadow
 under FAXX_S.SH is necessary because original setup derives related damage names
 from that shadow filename. Keep textures and equipment shared with the recipient's
 stock files: the shapes reference the stock `_F22N` textures. Automatic campaign
@@ -110,8 +114,9 @@ Acceptance for this **experimental candidate** includes a parsed PT check that
 only names and geometry references differ and that the donor already carries
 the hook capability bit, matching B/D/S alias bytes, no F22/F22N resource
 collisions, decoded geometry agreement for 24 gear/flap/rudder/hook
-combinations including the donor's own hook faces, finless damage-body
-agreement, and exact LIB payload recovery. Synthetic tests cover jump bounds,
+combinations including the donor's own hook faces with the recolour applied,
+finless damage-body and fragment agreement, no remaining panel-grey indices,
+and exact LIB payload recovery. Synthetic tests cover jump bounds,
 geometry constants and failure detection. These checks do not establish
 original-game loading, draw order, palette appearance, key availability, timing
 or Kapset compatibility. The recipient must check those before treating the

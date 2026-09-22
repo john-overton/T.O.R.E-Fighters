@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 
-from export_faxx import DONORS, FLAPS, MAIN, ROOT
+from export_faxx import DONORS, FLAPS, MAIN, RECOLOR, ROOT
 
 HOOK_FACES = [0x40a1, 0x40c0]
 from inspect_shape_effects import inspect
@@ -16,6 +16,10 @@ from inspect_shape_effects import inspect
 
 def key(face):
     return json.dumps([face['positions'], face['uv'], face['colors']])
+
+
+def recolored(face):
+    return dict(face, colors=[RECOLOR.get(c, c) for c in face['colors']])
 
 
 def project(executable, path, states=None):
@@ -31,13 +35,12 @@ def validate(donors, exported):
     stem = 'FAXX'
     subprocess.run(['cargo', 'run', '--locked', '-q', '-p', 'tore-extract', '--example',
                     'check_faxx_pt', '--', str(donors/'F22N.PT'), str(exported/(stem+'.PT'))], cwd=ROOT, check=True)
-    for suffix in ['_B.SH','_D.SH','_S.SH']:
-        assert (donors/('F22N'+suffix)).read_bytes() == (exported/(stem+suffix)).read_bytes()
+    assert (donors/'F22N_S.SH').read_bytes() == (exported/(stem+'_S.SH')).read_bytes()
     assert not any((exported/name).exists() for name in DONORS)
     comparisons = 0
     for gear, flap, rudder, hook in itertools.product([0,1], [0,-1], [-1,0,1], [0,1]):
         states = {'_PLgearDown': gear, '_PLgearPos': 0, '_PLhook': hook}
-        original = project(executable, donors/MAIN, states)
+        original = [recolored(f) for f in project(executable, donors/MAIN, states)]
         actual = project(executable, exported/(stem+'.SH'), dict(states, _PLleftFlap=flap,
                          _PLrightFlap=flap, _PLrudder=rudder))
         expected = []
@@ -74,11 +77,17 @@ def validate(donors, exported):
     assert Counter(added) == Counter(map(key, hook_faces)), 'hook poses differ by more than the native quad'
     assert len({json.dumps(sorted(f['positions'])) for f in hook_faces}) == 1, 'native hook faces are not one quad'
     assert min(p[2] for f in hook_faces for p in f['positions']) == -23, 'hook tip off the wheel plane'
-    for name in ['F22N_A.SH','F22N_C.SH']:
-        original = project(executable, donors/name)
+    recolored_faces = 0
+    for name in ['F22N_A.SH', 'F22N_B.SH', 'F22N_C.SH', 'F22N_D.SH']:
+        original = [recolored(f) for f in project(executable, donors/name)]
         actual = project(executable, exported/name.replace('F22N',stem,1))
         assert Counter(map(key,actual)) == Counter(key(f) for f in original if f['address'] not in DONORS[name][1])
-    result = {'pose_comparisons': comparisons, 'damage_bodies': 2, 'identity': stem,
+    for name in DONORS:
+        actual = project(executable, exported/name.replace('F22N', stem, 1))
+        assert not [c for f in actual for c in f['colors'] if c in RECOLOR], f'unmapped airframe grey in {name}'
+        recolored_faces += sum(1 for f in actual if 150 in f['colors'])
+    result = {'pose_comparisons': comparisons, 'damage_bodies': 2, 'fragments': 2, 'identity': stem,
+              'recolor': {str(k): v for k, v in RECOLOR.items()}, 'neutral_faces_at_base_grey': recolored_faces,
               'hook': 'native donor faces', 'hook_capability_enabled': True,
               'method': 'bounded static SH data projection, no original module execution',
               'original_game_tested': False, 'kapset_tested': False}

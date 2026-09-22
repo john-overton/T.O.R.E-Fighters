@@ -35,6 +35,16 @@ added deceleration, roll coupling and loss of fin stability are not simulated.
 This deliberately preserves the requested F-22-like handling. Those aerodynamic
 changes would need a separate opinionated handling specification.
 
+John requested on 2026-09-22 that the concept take the F/A-18's base colour on
+all panels. **Opinionated:** every airframe face or vertex colour using the
+F-22N's panel greys, palette indices 156 (RGB 105/105/105), 146 (210/210/210)
+and 147 (198/198/198), uses the F/A-18's dominant airframe grey, index 150
+(RGB 174/174/174), instead. This applies to the intact aircraft, both damaged
+bodies and both break-off fragments. Dark trim indices 153, 157 and 159,
+afterburner flames and texture-only faces keep their donor colours. Texture
+detail is unchanged and still draws over the new base colour. The F-22A and
+F-22N keep their stock greys.
+
 Damage reuses F-22N bodies with their remaining fin faces omitted. The selected
 F22N_C damaged body and F22N_D fragment keep the existing damage behavior. Split
 flap animation applies to the intact aircraft only.

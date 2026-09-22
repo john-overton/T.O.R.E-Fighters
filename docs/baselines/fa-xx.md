@@ -81,3 +81,12 @@ Validated on Linux with the same NVIDIA Vulkan host:
 
 Retail comparison was not run. An in-flight damage transition was not captured.
 Original FA flight of the new export is pending John's Windows check.
+
+## F/A-18 panel grey, 2026-09-22
+
+The runtime F/A-XX applies the same 156/146/147 to 150 remap to its intact rig
+faces, both damaged bodies and both fragments; the F-22A and F-22N are
+unchanged. A synthetic test checks the map and that trim, flame and
+texture-only colours are kept. Local captures `.local/faxx-color/f18.png`,
+`faxx.png` and `f22n.png`, taken from the same external view, show the F/A-XX
+airframe in the F/A-18's light grey while the F-22N keeps its darker stock grey.

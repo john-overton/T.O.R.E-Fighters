@@ -172,6 +172,9 @@ impl Rig {
         {
             return Err("unreviewed FA aircraft texture".into());
         }
+        if id == AircraftId::Faxx {
+            concept_colors(&mut shape.faces);
+        }
         Ok((Self { id, parts }, shape))
     }
     pub fn scale(&self) -> f32 {
@@ -478,6 +481,16 @@ pub(crate) fn turn(f: &mut Face, pivot: [f32; 3], axis: [f32; 3], angle: f64) {
 const HOOK_HINGE: [f32; 3] = [0., -9., -9.];
 const HOOK_STOW_ANGLE: f64 = 0.9;
 /// Agent-fitted travel between reviewed source device endpoints. No foreign rig offsets.
+/// F/A-XX airframe greys take the F/A-18 base grey, palette index 150
+/// (John, 2026-09-22). Dark trim, flames and texture-only faces keep donor colours.
+pub const CONCEPT_RECOLOR: [(u8, u8); 3] = [(156, 150), (146, 150), (147, 150)];
+pub fn concept_colors(faces: &mut [Face]) {
+    for c in faces.iter_mut().flat_map(|f| f.colors.iter_mut()) {
+        if let Some(&(_, to)) = CONCEPT_RECOLOR.iter().find(|(from, _)| from == c) {
+            *c = to;
+        }
+    }
+}
 fn roster_flame_root(id: AircraftId) -> Option<f32> {
     match id {
         AircraftId::Mig29 => Some(-41.),
@@ -566,6 +579,25 @@ mod tests {
             address,
             fog: Default::default(),
         }
+    }
+    #[test]
+    fn concept_airframe_greys_take_the_hornet_base_grey() {
+        let mut faces: Vec<_> = [156u8, 146, 147, 159, 157, 153, 0, 188]
+            .into_iter()
+            .map(|c| {
+                let mut f = native_hook(0x100);
+                f.colors = vec![c; 3];
+                f
+            })
+            .collect();
+        concept_colors(&mut faces);
+        let after: Vec<_> = faces.iter().map(|f| f.colors[0]).collect();
+        assert_eq!(after, [150, 150, 150, 159, 157, 153, 0, 188]);
+        assert!(
+            faces
+                .iter()
+                .all(|f| f.colors.iter().all(|c| *c == f.colors[0]))
+        );
     }
     #[test]
     fn native_hook_deploys_to_source_geometry_and_stows_out_of_sight() {

@@ -56,6 +56,12 @@ impl DamageArt {
                 body.faces.retain(|f| !fins.contains(&f.address));
             }
         }
+        let mut fragments = fragments;
+        if id == AircraftId::Faxx {
+            for body in bodies.iter_mut().chain(fragments.iter_mut()) {
+                crate::additional_animation::concept_colors(&mut body.faces);
+            }
+        }
         let mut regions = BTreeMap::from([(
             format!("_{}.PIC", id.stem()),
             [atlas.width, atlas.height, 0],

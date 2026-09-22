@@ -358,3 +358,34 @@ matching payloads. The payloads still reference the recipient's stock
 Not validated: original FA flight of this F-22N-based package, palette, draw
 order, distance behavior and Kapset compatibility. John's 2026-09-18 flight
 reports concern the superseded F-22A-based package.
+
+## F/A-18 panel grey
+
+Implementation mode, 2026-09-22. John asked for the F/A-18's base colour on all
+panels. Local F18.SH inspection: palette index 150 (RGB 174/174/174) covers 82%
+of its surface area, including textured faces' base colour. The F-22N donor's
+panel greys are 156 (75% of area), 146 (14%) and 147 (3%). The exporter now maps
+those three to 150 on every Face and VertexInfo record, on the raw bytes of the
+authored flap leaves, and in the break-off fragments, which are therefore
+recompiled rather than copied. Dark trim 153/157/159, flame colours 186/188/68
+and texture-only faces keep donor colours. The PT is unchanged.
+
+Candidate under `.local/exports/fa-xx-f22n-hornet-grey-2026-09-22/`:
+
+| Output | Bytes | SHA-256 |
+| --- | ---: | --- |
+| FAXX.SH | 29184 | `d8fc2d70b54b658a9cd3fea13cc6a89f28b78705a47f319848b9b21fb3d8ff28` |
+| FAXX_A.SH | 16896 | `0b5f791564f5b783bc92234cd1ff19468c35c3c3b52a69b5590f4df1f91e390d` |
+| FAXX_B.SH | 4608 | `070f33179f4e9d488ce3984fe0f7b361f96df5ad8783c332cd1819f968cb93e2` |
+| FAXX_C.SH | 12800 | `38122ea8a91b6995662682beb10d94be758ef6179a7d3c1c5c0bbce914b8de39` |
+| FAXX_D.SH | 4608 | `c7beb415be6e34bf25094ddb23686c79ddc361b9169386289e9f2d6d072ca02f` |
+| FAXX.PT | 14644 | `7d85e63f309c7e8727fc56b997282c604a28fc9cca37eeb54f46820f67c3083a` |
+| FAXX.LIB | 87499 | `621d33844f228b31e965b2e0d1aa76d1b9076cf1a86fa7c2cb95cc45809f85a4` |
+| F-A-XX-FA-experimental.zip | 77208 | `c67ca0c4a42e42b95414d26368ba2b9659dd9ba16eed6f83056f3ba46739e6a9` |
+
+The validator applies the same map to the donor projection before comparing.
+All 24 poses, both damaged bodies and both fragments match with zero missing or
+extra faces; no exported face carries 156, 146 or 147; 482 faces across the six
+recoloured shapes now use 150. The native hook check, `check_faxx_pt`,
+`check_lib` and the OpenFA unpack round trip all pass. Original FA appearance,
+including how FA shades index 150 on this airframe, is not yet checked.

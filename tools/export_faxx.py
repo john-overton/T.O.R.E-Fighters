@@ -4,6 +4,7 @@ Requires the patched static OpenFA build. Outputs are local retail derivatives.
 The original drawing records stay at their addresses; authored split-flap
 routines are appended before the end marker. The tail hook is the donor's own
 native hook, so the exporter only verifies the PLANE_TYPE capability flags.
+Airframe greys are recoloured to the F/A-18's base grey (RECOLOR).
 See docs/spec/fa-xx-export.md.
 """
 import argparse
@@ -27,7 +28,14 @@ DONORS = {
     'F22N.SH': ('736649d76b7e4aea059586f00d7c7474df777ab9ddedde14baa075a34a90d380', [0x361d, 0x3644, 0x3670, 0x38e4, 0x3903, 0x3926, 0x3954]),
     'F22N_A.SH': ('d38c1fa5463f54f35416de28baf29a4d434446487ba46eb5a7e77fb09cca8566', [0x3366, 0x3389]),
     'F22N_C.SH': ('925bbb1b8a2d9e6476b89f0dead3778b025ccdac827ddda02146baedde25c13a', [0x2ac0, 0x2ae3, 0x2c8b, 0x2cae]),
+    # Break-off fragments: no masks, recoloured only.
+    'F22N_B.SH': ('9f246eeb949bd3669275e192ac4dc92eabae34edd4805230a5cc9159152e2a4a', []),
+    'F22N_D.SH': ('06b96b2b4d42b5555f80cc37b22eee46fb53a001ad7a26ac9acfdbfa18b091ab', []),
 }
+# John, 2026-09-22: match the F/A-18's airframe grey (F18.SH base index 150,
+# RGB 174/174/174) on all F-22N panel greys. Dark trim and texture-only faces keep
+# their donor colours.
+RECOLOR = {156: 150, 146: 150, 147: 150}
 FLAPS = [0x4477, 0x4496, 0x44f3, 0x450e, 0x466e, 0x4691, 0x46ee]
 HOOK_FLAGS = 0xd3
 
@@ -65,8 +73,17 @@ def turn(p, angle, pivot=(0, -22, 0)):
     return [x + pivot[0], c*y - s*z + pivot[1], s*y + c*z + pivot[2]]
 
 
+def recolor(text):
+    """Remap palette colours on Face and VertexInfo records of an OpenFA YAML block."""
+    if not text.startswith(('- name: Face\n', '- name: VertexInfo\n')):
+        return text
+    return re.sub(r'(?m)^(  color: )(\d+)$', lambda m: m[1] + str(RECOLOR.get(int(m[2]), int(m[2]))), text)
+
+
 def moved_face(raw, positions, angle):
     result = bytearray(raw)
+    if raw[4] == 0:
+        result[3] = RECOLOR.get(raw[3], raw[3])
     if raw[1] & 0x60:
         n = struct.unpack_from('<hhh', raw, 5)
         n = turn([n[0], n[2], n[1]], angle, (0, 0, 0))
@@ -116,6 +133,7 @@ class Extension:
 
 def modify(text, original, faces, main):
     header, *blocks = re.split(r'(?=^- name: )', text, flags=re.M)
+    blocks = [recolor(b) for b in blocks]
     offsets = [int(field(b, 'code_offset0'), 16) for b in blocks]
     sizes = [b-a for a, b in zip(offsets, offsets[1:])] + [6]
     _, code = inspect(original)
@@ -206,8 +224,6 @@ def modify(text, original, faces, main):
 
 IDENTITY_DONORS = {
     'F22N.PT': '5ac12358639abba3119d6b94b631ff20e62c682052aa1f6804394a86ef9476bc',
-    'F22N_B.SH': '9f246eeb949bd3669275e192ac4dc92eabae34edd4805230a5cc9159152e2a4a',
-    'F22N_D.SH': '06b96b2b4d42b5555f80cc37b22eee46fb53a001ad7a26ac9acfdbfa18b091ab',
     'F22N_S.SH': 'ff34efe77905f877863220582eac3168c6af037f6e04305087e2eafbc24640ef',
 }
 
@@ -297,6 +313,8 @@ def main():
             'donor_sha256': hashlib.sha256(original).hexdigest(),
             'sha256': hashlib.sha256(data).hexdigest(),
         }
+    report['recolor'] = {'rule': 'F-22N airframe greys to the F/A-18 base grey',
+                         'map': {str(k): v for k, v in RECOLOR.items()}}
     report['hook_capability'] = {'donor_flags': '0xd3', 'exported_flags': '0xd3',
                                  'change': 'none', 'source': 'native F-22N hook'}
     (out/'export-report.json').write_text(json.dumps(report, indent=2)+'\n')

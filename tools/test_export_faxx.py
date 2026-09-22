@@ -4,7 +4,7 @@ import struct
 import unittest
 from unittest.mock import patch
 
-from export_faxx import independent_pt, jump, moved_face, stub, turn, vb, verify_hook_capable_pt
+from export_faxx import RECOLOR, independent_pt, jump, moved_face, recolor, stub, turn, vb, verify_hook_capable_pt
 from openfa_tools import require_static
 
 
@@ -35,6 +35,21 @@ class ExportTests(unittest.TestCase):
         result = moved_face(raw,[[0,-22,0],[1,-22,0],[0,-23,-1]], .6)
         self.assertEqual(raw[14:],result[14:])
         self.assertNotEqual(raw[5:11],result[5:11])
+
+    def test_airframe_greys_take_the_hornet_base_grey(self):
+        self.assertEqual(RECOLOR, {156: 150, 146: 150, 147: 150})
+        face = '- name: Face\n  code_offset0: 0x10\n  color: 156\n  indices: [1, 2, 3]\n'
+        self.assertIn('  color: 150\n', recolor(face))
+        info = '- name: VertexInfo\n  vertex_buffer_index: 7\n  color: 147\n'
+        self.assertIn('  color: 150\n', recolor(info))
+        for kept in ('159', '0', '188'):
+            self.assertEqual(recolor(face.replace('156', kept)), face.replace('156', kept))
+        other = '- name: Unk38\n  color: 156\n'
+        self.assertEqual(recolor(other), other)
+        raw = b'\xfc\x64\x02\x9c\x00'+struct.pack('<hhhbbb',0,32765,0,0,0,0)+b'\x03\x00\x01\x02'+bytes(range(12))
+        self.assertEqual(moved_face(raw,[[0,-22,0],[1,-22,0],[0,-23,-1]], 0.)[3], 150)
+        dark = raw[:3] + b'\x9f' + raw[4:]
+        self.assertEqual(moved_face(dark,[[0,-22,0],[1,-22,0],[0,-23,-1]], 0.)[3], 0x9f)
 
     def test_separate_identity_preserves_donor_names_flags_and_sections(self):
         fixture = (b"[brent's_relocatable_format]\r\nword 636\r\n"
