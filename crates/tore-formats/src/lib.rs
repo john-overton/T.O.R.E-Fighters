@@ -2,6 +2,8 @@
 //! No executable resource is ever executed. See docs/formats/menu.md and theater.md.
 pub mod aircraft;
 mod dcl;
+pub mod esa;
+pub mod executable;
 pub mod font;
 pub mod hud;
 pub mod mission;

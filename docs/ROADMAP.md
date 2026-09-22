@@ -703,6 +703,78 @@ Decisions recorded 2026-09-21 (John): mounted disc or copied folder, no raw
 ISO reader; proper installers rather than portable archives; unsigned first
 builds.
 
+#### Implementation plan (2026-09-22)
+
+Execution plan for the three slices, written after a code survey. Behaviour
+stays in the [spec](spec/first-run-import.md); this section owns sequencing,
+ownership and the agent decisions that the survey forced. Every type and file
+name below is an agent design choice, not an existing API.
+
+What the survey established:
+
+- The importer's only file lookups are one case-insensitive `archive()` helper
+  and two inline `FA.EXE` scans in `tore-app/src/assets.rs`. One `MediaSource`
+  replaces all three.
+- `Archive` opens a whole file from offset zero. The four LIB archives are
+  stored uncompressed inside `SETUP.ESA`, so a base-offset constructor lets the
+  existing EALIB reader serve a disc without copying 108 MB.
+- Three table readers gate on the 1.02F hash; `radio::phrases` has no gate and
+  would read wrong addresses from the 1.0 build. All four move to one build
+  table with two address sets.
+- Every game object in `tore-app/src/main.rs` is built from imported assets
+  before the window opens, and the renderer needs a terrain world. A first-run
+  screen therefore cannot live inside the game `App`.
+- There is no text field, no file-drop handler, no clipboard and no release or
+  packaging job anywhere in the repository.
+
+Agent decisions, recorded as agent decisions:
+
+- **Pre-game shell.** The locate screen is a separate winit application
+  handler run with `run_app_on_demand` before the game app on the same event
+  loop, presenting a 640 × 480 CPU canvas through a minimal blit-only wgpu
+  path. Re-import from Pref ends the game app with a re-import outcome and the
+  shell runs again. `EventLoop::new` is never called twice.
+- **Art before import.** Before any import exists there is no retail art on
+  disk, so the locate screen uses the bundled menu font and flat panels from
+  `menu.rs`. When a pack already exists (re-import, or a stale cache) the same
+  screen draws over the retail Choose Activity background. The spec's "original
+  menu art" is amended to say this.
+- **Text entry without a clipboard.** The path field accepts typed characters,
+  Backspace, Delete, Home, End and Enter. There is no paste; drag-and-drop and
+  automatic detection cover the common cases. A clipboard dependency is not
+  added.
+- **Import progress.** `Assets::import` gains a progress callback and runs on a
+  worker thread; the shell polls a channel and redraws. The import result and
+  report text are unchanged apart from the build line.
+- **Build identity.** `tore-formats::executable::identify` maps a hash to a
+  `Build` with per-build addresses. Unknown hashes are refused before any
+  archive is read. The report line becomes `FA.EXE: 1.02F` or `FA.EXE: 1.0
+  (disc)` followed by the hash.
+- **Packages.** A tag-triggered release workflow builds `--release` on the four
+  CI images, stages a bundle directory per platform, runs
+  `tools/check_assets.py` on the staged directory and on the finished package,
+  then uploads unsigned MSI (WiX from the runner image), DMG (`hdiutil`),
+  AppImage (`appimagetool` pinned by hash) and tar.gz. No Rust dependency and no
+  signing.
+
+Work packages and file ownership:
+
+| Package | Owns | Depends on |
+| --- | --- | --- |
+| A: ESA reader and CLI | `tore-formats/src/esa.rs`, `Archive` base-offset constructor in `tore-formats/src/lib.rs`, `tore-extract/src/main.rs`, `docs/EXTRACTION.md`, `docs/formats/coverage.md` | none |
+| B: executable builds | `tore-formats/src/executable.rs`, `ui/creator.rs`, `ui/fingerprint.rs`, `weather/clouds.rs`, `weather/flare.rs`, `radio.rs`, `docs/formats/esa-installer.md` implementation notes | none |
+| C: media source and importer | `tore-app/src/media_source.rs`, `tore-app/src/assets.rs`, `--import` handling in `main.rs` startup only | A, B |
+| D: packaging | `.github/workflows/release.yml`, `tools/package/*`, `docs/DEVELOPMENT.md` packaging section | none |
+| E: locate screen state and drawing | `tore-app/src/locate.rs` (state, key handling, layout, headless snapshot test), Pref entry in `tore-app/src/menu.rs` | none, integrates in F |
+| F: shell integration | `main.rs` (pre-game shell, file drop, re-import outcome, remembered source), `tore-app/src/canvas_present.rs`, `docs/spec/first-run-import.md`, `docs/features.md`, `docs/ARCHITECTURE.md` | C, E |
+
+A, B and D run together; C and E follow; F closes. Each package runs the
+repository checks on its own files before handing back; F runs the full set
+plus the display smoke test and a real first run against the local disc 1
+folder and the installed folder, with `TORE_DATA_DIR` pointed at an empty
+directory. Windows and macOS runtime validation is recorded as pending until a
+package is installed on each.
+
 Deliverable: on each platform, install, choose a mounted disc 1 or an
 installed folder, and fly the README free-flight check without using a
 terminal.
