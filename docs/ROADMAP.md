@@ -775,6 +775,12 @@ folder and the installed folder, with `TORE_DATA_DIR` pointed at an empty
 directory. Windows and macOS runtime validation is recorded as pending until a
 package is installed on each.
 
+Current (2026-09-22): slices 1 to 3 are implemented. The media source, the
+ESA container reader, both executable builds, the locate screen, the pre-game
+shell with drag-and-drop and Pref re-import, and the four release packages are
+in the tree and validated on Linux. Windows and macOS runtime validation is
+pending until a package is installed on each.
+
 Deliverable: on each platform, install, choose a mounted disc 1 or an
 installed folder, and fly the README free-flight check without using a
 terminal.

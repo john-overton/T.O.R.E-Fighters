@@ -97,7 +97,7 @@ source "$HOME/.cargo/env"
 cargo run --locked -p tore-app
 ```
 
-On first run, local `gameassets/fighters-anthology/` media is imported into platform application data. Later launches use that cache. To import another location or refresh the menu, theater and aircraft assets:
+On first run the app imports local `gameassets/fighters-anthology/` media, or the source it remembers, into platform application data without asking. If it cannot find media on its own it opens a **Locate Fighters Anthology** screen: drop a folder on the window, pick a detected source, or type a path, then Import and Continue. An installed game folder and a mounted disc 1 both work. Later launches use that cache, and **Pref > Re-import media** returns to the same screen. To import another location from a terminal instead:
 
 ```sh
 cargo run --locked -p tore-app -- --import /path/to/fighters-anthology

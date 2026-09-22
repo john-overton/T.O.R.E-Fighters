@@ -19,25 +19,48 @@ format is in [SETUP.ESA notes](../formats/esa-installer.md).
 
 1. The installed T.O.R.E application starts. If a valid import already exists
    in application data, the main menu appears as today.
-2. Otherwise the app shows a **Locate Fighters Anthology** screen drawn with
-   the original menu art. It explains, in one paragraph, that the player's own
-   copy is needed and that nothing is copied out of the repository. It offers:
+2. Otherwise the app shows a **Locate Fighters Anthology** screen. It
+   explains, in one paragraph, that the player's own copy is needed and that
+   nothing is copied out of the repository. It offers:
    - a text field for a path, prefilled with the first automatically detected
      source if any;
    - drag-and-drop of a folder or a file onto the window;
    - a list of detected sources, each labelled by kind (see below);
    - **Import** and **Quit**.
+
+   The screen is drawn on a flat panel with the bundled menu font, because on
+   a first run there is no retail art on disk to draw with. When a pack does
+   exist, which is the re-import case and the stale-cache case, the same
+   screen is drawn over the Choose Activity frame the player was looking at.
+   The path field takes typed characters, Backspace, Delete, Home, End, the
+   arrow keys and Enter. There is no paste: drag-and-drop and automatic
+   detection cover the cases a clipboard would, and no clipboard dependency is
+   added. Tab moves between the field, the list and the buttons; Escape quits.
+
+   When the app already knows a source, the remembered one or a developer
+   checkout, it starts that import immediately instead of waiting for a click,
+   so a stale cache and a fresh clone both reach the menu on their own. Only a
+   re-import asked for from Pref always waits, because the player opened that
+   screen to change something.
 3. Import shows progress by archive and resource count, then the summary
    already written to the import report: build read (`1.0 (disc)` or `1.02F`),
    archives read, optional parts that were missing (recorded music, radio).
-   **Continue** opens the main menu.
+   The import runs on a worker thread, so the screen keeps drawing and the
+   window keeps responding. **Continue** opens the main menu.
 4. A failed import stays on the locate screen with the reason in plain words:
    the folder is not a Fighters Anthology source, an archive is truncated, the
    executable is an unreviewed build, or the disk is full. Nothing partial is
    kept.
 
 The same screen is reachable later from **Pref** as **Re-import media**, with
-the remembered source prefilled.
+the remembered source prefilled and the menu behind it. Continuing from there
+rebuilds the game from the new pack without restarting the application.
+
+`--smoke-test` drives the screen without a player: it imports the prefilled
+source, continues as soon as the import finishes, presents one menu frame and
+exits, so a first run can be checked end to end in one command.
+`--snapshot PATH --snapshot-state locate` writes the screen's layout headlessly
+with a fixed candidate list, without needing any media.
 
 ## Accepted sources
 
@@ -102,6 +125,9 @@ published; a package that fails is not released.
 
 - Synthetic tests for the ESA reader: stored and compressed entries, terminator,
   overlapping or out-of-range offsets, unsupported DCL header.
+- Unit tests for the startup decision: a readable pack plays, a known source
+  imports without asking, an unknown source asks when there is a window, and a
+  headless run with no source fails with the terminal message.
 - Synthetic tests for source detection: each kind, mixed case, nested one level.
 - The two executable fingerprints each decode the same creator, cloud, flare
   and radio content in a fixture-driven test that uses no retail bytes.
