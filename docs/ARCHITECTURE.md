@@ -406,3 +406,27 @@ background darkening, then restore opaque panel pixels. Camera-specific near
 clipping improves magnified subject depth precision. Target preview requests use
 an independent 24 Hz phase clock; the other camera panels retain their existing
 refresh interval.
+
+## Ownship systems state
+
+`tore-sim::aircraft_systems` coordinates separate engine, fluids, fuel, controls,
+structure and pilot components. Each owns its fault state and fixed-tick
+progression. The coordinator couples oil pressure to engine temperature and
+combines fatal outcomes; it does not own the components' timer arithmetic.
+Regional structural effects supply one shared set of flight penalties for both
+flight adapters, using the same regional fractions as the damage renderer.
+The renderer currently hides all airframe marks and tears below 100% damage;
+this gate never changes component state or aerodynamic penalties. The app transfers newly selected combat faults exactly once, resolves
+hardpoint identities and forwards notifications to the existing sim log. Flight
+applies power, controls and actuator limits, and consumes source tank fuel. The
+Systems raster only reads this state. D is a report action and never applies a
+hit. See [the behavior contract](spec/systems-damage.md).
+
+## Wreck lifecycle
+
+`tore-sim::wreck` owns fixed-tick aerodynamic wreck motion, captured per-engine
+thrust and an independent explosion RNG. Ownship flight and combat targets both
+use it after destruction; living AI decisions are untouched. The AI bridge only
+copies live propulsion metadata for later use by the wreck. Airburst events
+trigger existing audio/effects and hide the whole airframe and detached pieces.
+[Behavior contract](spec/destroyed-aircraft.md).

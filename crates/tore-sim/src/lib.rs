@@ -1,5 +1,6 @@
 //! Renderer-independent aircraft simulation and deterministic validation.
 pub mod ai;
+pub mod aircraft_systems;
 pub mod airport;
 pub mod attitude;
 pub mod autopilot;
@@ -13,6 +14,7 @@ pub mod sensors;
 pub mod telemetry;
 pub mod turbulence;
 pub mod vapor;
+pub mod wreck;
 
 pub mod clouds;
 

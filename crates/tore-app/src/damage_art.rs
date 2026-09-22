@@ -123,6 +123,11 @@ impl DamageArt {
         tore_sim::combat::debris::damage_variant(id, section?)
     }
 
+    /// Reviewed whole-part loss is reserved for a destroyed airframe.
+    /// Surviving aircraft currently retain intact geometry and textures.
+    pub fn body_variant(id: AircraftId, section: Option<usize>, damage: f64) -> Option<usize> {
+        (damage >= 1.).then(|| Self::variant(id, section)).flatten()
+    }
     /// Persistent fitted surface marks and progressive loss of wing/fin area.
     /// Work in source coordinates; animation has already placed this face.
     pub fn surfaces(&self, face: &Face, amounts: &[f64; 6], scale: f32) -> Vec<Face> {
@@ -279,6 +284,19 @@ mod tests {
             normal: Some([0., 1., 0.]),
             address: 5,
         }
+    }
+    #[test]
+    fn missing_nose_body_requires_actual_destruction() {
+        for damage in [0., 0.75, 0.92, 0.99, 0.99999] {
+            assert_eq!(
+                DamageArt::body_variant(AircraftId::F18, Some(0), damage),
+                None
+            );
+        }
+        assert_eq!(
+            DamageArt::body_variant(AircraftId::F18, Some(0), 1.),
+            Some(0)
+        );
     }
     #[test]
     fn regional_surface_damage_keeps_opposite_wing_and_grows() {

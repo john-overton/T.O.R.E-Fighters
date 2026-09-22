@@ -26,6 +26,7 @@ pub struct State {
     lift_g: f64,
     pub throttle: f64,
     pub fuel: f64,
+    pub systems: crate::aircraft_systems::Systems,
     pub payload_lbs: f64,
     pub engine: bool,
     pub burner: bool,
@@ -56,6 +57,7 @@ pub struct State {
     pub damage_regions: [f64; crate::combat::live::DAMAGE_SECTIONS],
     pub autopilot: crate::autopilot::Autopilot,
     pub crashed: bool,
+    pub wreck: Option<crate::wreck::Wreck>,
     pub ticks: u64,
 }
 impl State {
@@ -140,6 +142,7 @@ impl State {
             maneuver: crate::telemetry::Maneuver::default(),
             throttle: 0.7,
             fuel,
+            systems: Default::default(),
             payload_lbs: 0.,
             engine: true,
             burner: false,
@@ -166,6 +169,7 @@ impl State {
             damage_regions: [0.; crate::combat::live::DAMAGE_SECTIONS],
             autopilot: Default::default(),
             crashed: false,
+            wreck: None,
             ticks: 0,
         }
     }
@@ -216,7 +220,12 @@ impl State {
     }
     /// Interpolate presentation only, leaving fixed-tick state and discrete controls untouched.
     pub fn presented(&self, previous: &Self, alpha: f64) -> Self {
-        if self.crashed {
+        if self.crashed
+            && self
+                .wreck
+                .as_ref()
+                .is_none_or(|w| w.phase != crate::wreck::Phase::Falling)
+        {
             return self.clone();
         }
         let alpha = alpha.clamp(0., 1.);
@@ -244,10 +253,88 @@ impl State {
         result.aileron = lerp(previous.aileron, self.aileron);
         result
     }
+    pub fn wreck_power(&self, engine_count: u8) -> crate::wreck::Power {
+        if !self.engine || self.fuel + self.systems.external_lbs() <= 0. {
+            return crate::wreck::Power {
+                engine_count,
+                ..Default::default()
+            };
+        }
+        let c = self.model.configuration();
+        let ab = self.burner
+            && !self.systems.has(8)
+            && self.throttle > c.equipment.afterburner_throttle
+            && c.propulsion.afterburner_thrust_lbf > 0.;
+        let thrust = if ab {
+            c.propulsion.afterburner_thrust_lbf
+        } else {
+            c.propulsion.military_thrust_lbf * self.throttle
+        };
+        let flow = if ab {
+            c.propulsion.afterburner_fuel_lbs_per_second
+        } else {
+            c.propulsion.military_fuel_lbs_per_second * self.throttle
+        } * self.systems.power_available();
+        let mass = c.mass.empty_lbs + self.fuel + self.payload_lbs;
+        let lapse = self
+            .model
+            .response(Conditions {
+                altitude_msl_ft: self.position[1],
+                tas_fps: self.speed,
+                load_factor: self.g,
+            })
+            .thrust_lapse;
+        crate::wreck::Power {
+            acceleration: self
+                .systems
+                .engine
+                .thrust_shares(engine_count)
+                .map(|share| share * thrust * lapse / mass * 32.174),
+            engine_count,
+            fuel_seconds: if flow > 0. {
+                (self.fuel + self.systems.external_lbs()) / flow
+            } else {
+                0.
+            },
+        }
+    }
+    pub fn airburst(&self) -> bool {
+        self.wreck
+            .as_ref()
+            .is_some_and(|w| w.phase == crate::wreck::Phase::Exploded)
+    }
+    pub fn ground_impact(&self) -> bool {
+        self.wreck
+            .as_ref()
+            .is_some_and(|w| w.phase == crate::wreck::Phase::Grounded)
+    }
+    pub fn wreck_gone(&self) -> bool {
+        self.airburst() || self.ground_impact()
+    }
+    fn finish_ground_crash(&mut self, height: f64) {
+        if self.crashed
+            && self.wreck.is_none()
+            && self.position[1] <= height + self.model.configuration().equipment.ground_clearance_ft
+        {
+            let mut wreck = crate::wreck::Wreck::new(0, self.ticks, [0.; 3]);
+            wreck.phase = crate::wreck::Phase::Grounded;
+            self.wreck = Some(wreck);
+            self.engine = false;
+            self.burner = false;
+            self.exhaust = 0.;
+            self.velocity = [0.; 3];
+            self.speed = 0.;
+            self.vertical_speed = 0.;
+            self.damage_fraction = 1.;
+            self.systems.kill_pilot("Pilot killed in ground impact");
+        }
+    }
     pub fn afterburner_active(&self) -> bool {
         self.engine
+            && !self.systems.has(8)
+            && self.systems.power_available() > 0.
             && self.model.configuration().propulsion.afterburner_thrust_lbf > 0.
-            && self.fuel > 0.
+            && self.fuel + self.systems.external_lbs() > 0.
             && self.burner
             && self.throttle > self.model.configuration().equipment.afterburner_throttle
             && !self.crashed
@@ -261,15 +348,18 @@ impl State {
         self.model.configuration().hook_available
     }
     pub fn command(&mut self, command: PilotCommand) {
+        if self.crashed {
+            return;
+        }
         let (switch, setting) = match command {
             PilotCommand::Throttle(value) => {
-                if value.is_finite() {
+                if value.is_finite() && self.systems.controls.throttle_lock.is_none() {
                     self.throttle = value.clamp(0., 1.);
                 }
                 return;
             }
             PilotCommand::AdjustThrottle(value) => {
-                if value.is_finite() {
+                if value.is_finite() && self.systems.controls.throttle_lock.is_none() {
                     self.throttle = (self.throttle + value).clamp(0., 1.);
                 }
                 return;
@@ -277,6 +367,14 @@ impl State {
             PilotCommand::Toggle(switch) => (switch, None),
             PilotCommand::Set(switch, value) => (switch, Some(value)),
         };
+        if switch == Switch::Engine
+            && setting.unwrap_or(!self.engine)
+            && self.systems.power_available() <= 0.
+        {
+            self.systems
+                .notify("Engine restart unavailable due to damage");
+            return;
+        }
         if (switch == Switch::Hook && !self.hook_available())
             || (switch == Switch::Bay && !self.bay_available())
             || (switch == Switch::Burner
@@ -285,6 +383,14 @@ impl State {
             return;
         }
         if matches!(switch, Switch::Autopilot | Switch::WaypointAutopilot) {
+            if !self.systems.autopilot_available()
+                || self.damage_regions[3..].iter().any(|v| *v > 0.)
+                || (switch == Switch::WaypointAutopilot && self.systems.has(33))
+            {
+                self.systems.notify("Autopilot unavailable due to damage");
+                self.autopilot.disengage();
+                return;
+            }
             self.autopilot
                 .select(switch, setting, self.yaw, self.position[1]);
             return;
@@ -302,6 +408,38 @@ impl State {
             Switch::Autopilot | Switch::WaypointAutopilot => unreachable!(),
         };
         *target = setting.unwrap_or(!*target);
+    }
+    /// Runtime fuel debit, with external fuel mass removed from payload as consumed.
+    pub(crate) fn consume_fuel(&mut self, pounds: f64) {
+        let before = self.systems.external_lbs();
+        self.systems.consume(&mut self.fuel, pounds);
+        self.payload_lbs = (self.payload_lbs - before + self.systems.external_lbs()).max(0.);
+    }
+    fn advance_systems(&mut self, ground: f64) {
+        if self.crashed {
+            return;
+        }
+        let restarting = self.systems.engine.flameout > 0.;
+        let landed =
+            self.research.as_ref().is_some_and(|r| r.on_ground) && self.supported_at(ground);
+        self.systems.advance(
+            self.engine,
+            self.throttle,
+            self.g,
+            self.damage_fraction,
+            landed,
+            &mut self.fuel,
+        );
+        if restarting && self.systems.engine.flameout == 0. && self.systems.power_available() > 0. {
+            self.engine = true;
+        }
+        if self.systems.power_available() <= 0. {
+            self.engine = false;
+            self.burner = false;
+        }
+        if self.systems.fatal() {
+            self.crashed = true;
+        }
     }
     pub fn step(&mut self, input: &PilotInput, ground: impl Fn(f64, f64) -> f64) {
         self.step_surface(input, |x, z| {
@@ -368,6 +506,55 @@ impl State {
         input: &PilotInput,
         ground: impl Fn(f64, f64) -> crate::research::Surface,
     ) {
+        if self.crashed {
+            self.autopilot.disengage();
+            self.finish_ground_crash(ground(self.position[0], self.position[2]).height);
+            if self.wreck_gone() {
+                return;
+            }
+            if self.wreck.is_none() {
+                let mut wreck = crate::wreck::Wreck::new(
+                    0,
+                    self.ticks,
+                    [-self.pitch_rate, 0., -self.roll_rate],
+                );
+                wreck.power = self.wreck_power(self.systems.engine.count());
+                self.wreck = Some(wreck);
+            }
+            self.ticks += 1;
+            let mut basis = Basis::new(self.yaw, self.pitch, self.bank);
+            let wreck = self.wreck.as_mut().unwrap();
+            let before = wreck.power.fuel_seconds;
+            wreck.step(
+                &mut self.position,
+                &mut self.velocity,
+                &mut basis,
+                |x, z| ground(x, z).height,
+            );
+            let remaining = wreck.power.fuel_seconds;
+            let falling = wreck.phase == crate::wreck::Phase::Falling;
+            let phase = wreck.phase;
+            if phase == crate::wreck::Phase::Grounded {
+                self.systems.kill_pilot("Pilot killed in ground impact");
+            } else if phase == crate::wreck::Phase::Exploded {
+                self.systems
+                    .kill_pilot("Pilot killed in aircraft explosion");
+            }
+            if before > 0. && remaining < before {
+                self.consume_fuel(
+                    (self.fuel + self.systems.external_lbs()) * (before - remaining) / before,
+                );
+            }
+            if !falling || remaining <= 0. {
+                self.engine = false;
+                self.burner = false;
+                self.exhaust = 0.;
+            }
+            [self.yaw, self.pitch, self.bank] = basis.angles();
+            self.speed = dot(self.velocity, self.velocity).sqrt();
+            self.vertical_speed = self.velocity[1];
+            return;
+        }
         let mut input = input.bounded();
         input.commands.retain(|command| {
             if matches!(
@@ -381,6 +568,12 @@ impl State {
                 true
             }
         });
+        if !self.systems.autopilot_available()
+            || self.damage_regions[3..].iter().any(|v| *v > 0.)
+            || (self.systems.has(33) && self.autopilot.mode() == crate::autopilot::Mode::Waypoint)
+        {
+            self.autopilot.disengage();
+        }
         let mut autopilot = std::mem::take(&mut self.autopilot);
         autopilot.apply(
             self,
@@ -389,6 +582,7 @@ impl State {
         );
         self.autopilot = autopilot;
         self.step_controlled(&input, &ground);
+        self.finish_ground_crash(ground(self.position[0], self.position[2]).height);
         if self.crashed
             || self.position[1]
                 <= ground(self.position[0], self.position[2]).height
@@ -403,6 +597,22 @@ impl State {
         input: &PilotInput,
         ground: impl Fn(f64, f64) -> crate::research::Surface,
     ) {
+        if self.crashed || self.native_fault().is_some() {
+            return;
+        }
+        let mut input = input.bounded();
+        self.advance_systems(ground(self.position[0], self.position[2]).height);
+        [input.pitch, input.roll, input.yaw] = self.systems.controls(
+            [input.pitch, input.roll, input.yaw],
+            [self.elevator, self.aileron, self.rudder],
+            self.ticks,
+        );
+        let regional = crate::aircraft_systems::regional_effects(self.damage_regions);
+        let aero = regional.commands([input.pitch, input.roll, input.yaw]);
+        if self.systems.controls.throttle_lock.is_some() {
+            input.throttle_rate = 0.;
+        }
+        let input = &input;
         if self.native.is_some() {
             if self.crashed || self.native_fault().is_some() {
                 return;
@@ -462,18 +672,33 @@ impl State {
         self.throttle = (self.throttle
             + input.throttle_rate * DT * c.equipment.throttle_rate_per_second)
             .clamp(0., 1.);
-        for (v, on) in [
-            (&mut self.gear, self.gear_down),
-            (&mut self.flaps, self.flaps_down),
-            (&mut self.brake, self.brake_out),
-            (&mut self.hook, self.hook_down),
+        for (v, on, movable) in [
+            (&mut self.gear, self.gear_down, self.systems.device_free(16)),
+            (
+                &mut self.flaps,
+                self.flaps_down,
+                self.systems.device_free(17),
+            ),
+            (
+                &mut self.brake,
+                self.brake_out,
+                self.systems.device_free(18),
+            ),
+            (
+                &mut self.hook,
+                self.hook_down,
+                self.systems.fluids.hydraulic > 0.,
+            ),
         ] {
+            if !movable {
+                continue;
+            }
             *v = (*v + (if on { 1. } else { -1. }) * DT / c.equipment.deployment_seconds)
                 .clamp(0., 1.);
         }
         let bay_target = f64::from(self.bay_available() && (self.bay_open || self.bay_auto_open));
         self.bay += (bay_target - self.bay).clamp(-DT, DT);
-        if self.fuel <= 0. {
+        if self.fuel + self.systems.external_lbs() <= 0. {
             self.engine = false;
             self.burner = false;
         }
@@ -485,16 +710,18 @@ impl State {
                 DT / c.equipment.exhaust_seconds,
             ))
         .clamp(0., 1.);
-        self.rudder += (input.yaw - self.rudder) * (DT / c.equipment.control_seconds);
-        self.elevator += (input.pitch - self.elevator) * (DT / c.equipment.control_seconds);
-        self.aileron += (input.roll - self.aileron) * (DT / c.equipment.control_seconds);
+        if self.systems.fluids.hydraulic > 0. {
+            self.rudder += (input.yaw - self.rudder) * (DT / c.equipment.control_seconds);
+            self.elevator += (input.pitch - self.elevator) * (DT / c.equipment.control_seconds);
+            self.aileron += (input.roll - self.aileron) * (DT / c.equipment.control_seconds);
+        }
         let rate = if ab {
             c.propulsion.afterburner_fuel_lbs_per_second
         } else {
             c.propulsion.military_fuel_lbs_per_second * self.throttle
         };
         if self.engine {
-            self.fuel = (self.fuel - rate * DT).max(0.);
+            self.consume_fuel(rate * DT);
         }
         let env = c.aerodynamics.envelopes.iter().find(|e| e.g == 1).unwrap();
         let (clean_stall, vmax) = env.speeds(self.position[1]).unwrap_or((900., 1000.));
@@ -523,9 +750,8 @@ impl State {
         {
             hi = continuous / (1. + loading * c.aerodynamics.loaded_elevator_percent / 100.);
         }
-        let mut command = (1. + input.pitch * if input.pitch > 0. { hi - 1. } else { 1. - lo })
-            .clamp(lo, hi)
-            * authority;
+        let mut command =
+            (1. + aero[0] * if aero[0] > 0. { hi - 1. } else { 1. - lo }).clamp(lo, hi) * authority;
         let drag_percent = tore_formats::flight_model::drag_percent(
             (self.speed * 256.) as i32,
             (self.position[1] * 256.) as i32,
@@ -542,14 +768,18 @@ impl State {
             };
             command *= 1. + self.flaps * flap_lift_f8 / 256.;
         }
+        if self.systems.has(25) {
+            command *= 0.5;
+        }
+        command *= regional.lift;
         let requested_g = command;
         if let Some(r) = &mut self.research {
             r.advance(
                 c,
                 self.speed,
                 stall,
-                input.pitch,
-                input.yaw,
+                aero[0],
+                aero[2],
                 self.throttle,
                 self.bank,
                 self.roll_rate,
@@ -589,13 +819,13 @@ impl State {
             c.tuning.legacy_roll_limit_rad_per_second
         };
         let tuning = model.tuning();
-        let roll_command = input.roll * roll_limit * authority * control_scale[0];
+        let roll_command = aero[1] * roll_limit * authority * control_scale[0];
         // Aircraft-owned source controls for the new ports. Existing adapters remain selected as before.
         if let Some(profile) = c.controls {
             use crate::models::handling::{approach, auxiliary_authority};
             self.roll_rate = approach(
                 self.roll_rate,
-                input.roll,
+                aero[1],
                 if self.research.is_some() {
                     profile.hybrid_roll.unwrap_or(profile.roll)
                 } else {
@@ -609,7 +839,7 @@ impl State {
                     + c.equipment.ground_clearance_ft;
             let powered = self.engine && self.fuel > 0.;
             let scale = auxiliary_authority(self.speed, self.throttle, powered, on_ground);
-            for (i, command) in [input.roll, input.pitch, input.yaw].into_iter().enumerate() {
+            for (i, command) in [aero[1], aero[0], aero[2]].into_iter().enumerate() {
                 self.auxiliary_rates[i] = if !powered || on_ground {
                     0.
                 } else {
@@ -627,7 +857,7 @@ impl State {
         }
         let normal_pitch =
             (requested_g - basis.up[1]) * control_scale[1] * 32.174 / self.speed.max(60.);
-        let spin_pitch = 40_f64.to_radians() * input.pitch * spin_controls * authority;
+        let spin_pitch = 40_f64.to_radians() * aero[0] * spin_controls * authority;
         let pitch_command = normal_pitch * (1. - spin_fraction) + spin_pitch * spin_fraction;
         self.pitch_rate += (pitch_command - self.pitch_rate) * (DT / tuning.pitch_response_seconds);
         // Authored trim target, not decoded gpullAOA units. Preserve a positive
@@ -661,7 +891,10 @@ impl State {
                 - basis.forward[i] * (self.roll_rate + self.auxiliary_rates[0])
                 + basis.up[i]
                     * (turn_yaw
-                        + self.rudder * control_scale[2] * tuning.rudder_rate * authority
+                        + (self.rudder * regional.authority[2] + regional.yaw_bias)
+                            * control_scale[2]
+                            * tuning.rudder_rate
+                            * authority
                         + self.auxiliary_rates[2])
                 + alignment[i] * tuning.alignment_rate * authority)
         });
@@ -687,9 +920,10 @@ impl State {
                 -dot(rotation, basis.right) / DT,
                 dot(rotation, basis.up) / DT,
             ],
-            rudder_command: input.yaw,
+            rudder_command: aero[2],
             rudder_deflection: self.rudder,
-            effective_rudder: self.rudder * control_scale[2],
+            effective_rudder: (self.rudder * regional.authority[2] + regional.yaw_bias)
+                * control_scale[2],
             departure: self.research.as_ref().map(|r| r.departure.mode),
             stall_severity_f8: severity,
             ..Default::default()
@@ -709,7 +943,8 @@ impl State {
             }
         } else {
             0.
-        } * lapse;
+        } * lapse
+            * self.systems.power_available();
         let weight = c.mass.empty_lbs + self.fuel + self.payload_lbs;
         // Drag normalized against the source 1G upper envelope. This is not the native force law.
         // Fitted symmetric slip loss, based on air-relative motion rather than
@@ -734,6 +969,7 @@ impl State {
                     + c.native.drag.flaps as f64 * self.flaps * device_drag_fraction
                     + c.native.drag.airbrake as f64 * self.brake * device_drag_fraction)
                 / 256.;
+        let drag = drag * (1. + regional.drag_percent / 100.);
         let drag = if self.research.is_some() {
             drag.min(weight * self.speed / 32.174 / DT)
         } else {
@@ -869,6 +1105,155 @@ impl Clock {
 mod tests {
     use super::integration_tests::profile;
     use super::*;
+    #[test]
+    fn airborne_player_ground_impact_is_terminal_and_kills_pilot_without_a_poll() {
+        let mut s = State::new(&profile(), [0., 8.1, 0.]).unwrap();
+        s.crashed = true;
+        s.velocity = [0., -100., 0.];
+        for _ in 0..120 {
+            s.step(&PilotInput::default(), |_, _| 0.);
+            if s.ground_impact() {
+                break;
+            }
+        }
+        assert!(s.ground_impact() && s.wreck_gone());
+        assert!(s.systems.pilot.dead);
+        assert!(!s.engine && !s.burner);
+        assert_eq!(s.wreck.as_ref().unwrap().polls, 0);
+        let impact = s.clone();
+        s.step(&PilotInput::default(), |_, _| 0.);
+        assert_eq!(s, impact);
+    }
+    #[test]
+    fn direct_ground_crash_finishes_in_the_same_tick() {
+        let mut s = State::new(&profile(), [0., 1., 0.]).unwrap();
+        s.velocity = [0., -100., 0.];
+        s.step(&PilotInput::default(), |_, _| 0.);
+        assert!(s.crashed && s.ground_impact() && s.systems.pilot.dead);
+        assert_eq!(s.damage_fraction, 1.);
+    }
+    #[test]
+    fn destroyed_ownship_tumbles_with_surviving_engine_thrust_and_ignores_controls() {
+        let mut s = State::new(&profile(), [0., 10000., 0.]).unwrap();
+        s.systems = crate::aircraft_systems::Systems::new(2, [0.; 9]);
+        s.systems.hit(9, s.throttle);
+        let before = s.clone();
+        s.crashed = true;
+        let mut replica = s.clone();
+        s.command(PilotCommand::Throttle(0.));
+        s.command(PilotCommand::Set(Switch::Engine, false));
+        assert_eq!(s, replica, "direct UI commands cannot control a wreck");
+        for _ in 0..119 {
+            s.step(
+                &PilotInput {
+                    pitch: 1.,
+                    roll: 1.,
+                    throttle: Some(0.),
+                    ..Default::default()
+                },
+                |_, _| 0.,
+            );
+            replica.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert_eq!(s, replica);
+        assert_ne!(s.position, before.position);
+        assert_ne!(
+            [s.yaw, s.pitch, s.bank],
+            [before.yaw, before.pitch, before.bank]
+        );
+        let wreck = s.wreck.as_ref().unwrap();
+        assert_eq!(wreck.polls, 0);
+        assert_eq!(wreck.power.acceleration[0], 0.);
+        assert!(wreck.power.acceleration[1] > 0.);
+        assert!(s.engine);
+        assert!(s.fuel < before.fuel);
+        let mut dead_engines = before;
+        dead_engines.systems.hit(10, dead_engines.throttle);
+        dead_engines.crashed = true;
+        dead_engines.step(&PilotInput::default(), |_, _| 0.);
+        assert_eq!(dead_engines.wreck.as_ref().unwrap().power.total(), 0.);
+    }
+    #[test]
+    fn torn_wing_changes_motion_without_fabricating_aileron_movement() {
+        let mut healthy = State::new(&profile(), [0., 15000., 0.]).unwrap();
+        let mut torn = healthy.clone();
+        torn.damage_regions[3] = 0.75;
+        for _ in 0..120 {
+            healthy.step(&PilotInput::default(), |_, _| 0.);
+            torn.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert!(torn.bank < healthy.bank - 0.01);
+        assert!(torn.g < healthy.g);
+        assert_eq!(torn.aileron, healthy.aileron);
+        assert!(torn.speed < healthy.speed);
+        assert!(!torn.crashed);
+    }
+    #[test]
+    fn damage_controls_devices_thrust_and_autopilot_affect_flight() {
+        let aircraft = profile();
+        let mut healthy = State::new(&aircraft, [0., 15000., 0.]).unwrap();
+        let mut damaged = healthy.clone();
+        damaged.systems.hit(5, 0.7);
+        damaged.systems.hit(19, 0.7);
+        damaged.systems.hit(16, 0.7);
+        damaged.command(PilotCommand::Toggle(Switch::Autopilot));
+        assert_eq!(damaged.autopilot.mode(), crate::autopilot::Mode::Off);
+        let input = PilotInput {
+            pitch: 0.5,
+            commands: vec![PilotCommand::Set(Switch::Gear, true)],
+            ..Default::default()
+        };
+        for _ in 0..120 {
+            healthy.step(&input, |_, _| 0.);
+            damaged.step(&input, |_, _| 0.);
+        }
+        assert_eq!(damaged.gear, 0.);
+        assert!(healthy.gear > 0.);
+        assert!(damaged.elevator < healthy.elevator * 0.6);
+        assert!(damaged.g < healthy.g);
+        let mut engine_only = State::new(&aircraft, [0., 15000., 0.]).unwrap();
+        let mut intact = engine_only.clone();
+        engine_only.systems.hit(9, 0.7);
+        for _ in 0..120 {
+            engine_only.step(&PilotInput::default(), |_, _| 0.);
+            intact.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert!(engine_only.speed < intact.speed);
+        assert!(!engine_only.engine);
+        engine_only.command(PilotCommand::Set(Switch::Engine, true));
+        assert!(!engine_only.engine);
+    }
+    #[test]
+    fn stuck_throttle_frozen_hydraulics_and_external_fuel_cannot_be_bypassed() {
+        let mut s = State::new(&profile(), [0., 15000., 0.]).unwrap();
+        s.systems.hit(29, s.throttle);
+        s.systems.fluids.hydraulic = 0.;
+        s.elevator = 0.2;
+        s.aileron = -0.1;
+        s.rudder = 0.3;
+        s.step(
+            &PilotInput {
+                throttle: Some(1.),
+                throttle_rate: 1.,
+                pitch: -1.,
+                roll: 1.,
+                yaw: -1.,
+                ..Default::default()
+            },
+            |_, _| 0.,
+        );
+        assert_eq!(s.throttle, 0.7);
+        assert_eq!([s.elevator, s.aileron, s.rudder], [0.2, -0.1, 0.3]);
+        s.systems =
+            crate::aircraft_systems::Systems::new(2, [100., 0., 0., 0., 0., 0., 0., 0., 0.]);
+        s.payload_lbs = 120.;
+        s.fuel = 0.;
+        s.engine = true;
+        s.step(&PilotInput::default(), |_, _| 0.);
+        assert!(s.engine);
+        assert!(s.systems.external_lbs() < 100.);
+        assert!((s.payload_lbs - s.systems.external_lbs() - 20.).abs() < 1e-9);
+    }
     #[test]
     fn faxx_hook_starts_stowed_deploys_and_reverses_without_enabling_f22() {
         use tore_formats::aircraft::AircraftId;

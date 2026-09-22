@@ -154,12 +154,15 @@ pub(crate) fn step(
     // Existing host equipment/fuel laws, not recovered actuator/engine lifecycle.
     s.throttle = (s.throttle + input.throttle_rate * DT * c.equipment.throttle_rate_per_second)
         .clamp(0., 1.);
-    for (v, on) in [
-        (&mut s.gear, s.gear_down),
-        (&mut s.flaps, s.flaps_down),
-        (&mut s.brake, s.brake_out),
-        (&mut s.hook, s.hook_down),
+    for (v, on, movable) in [
+        (&mut s.gear, s.gear_down, s.systems.device_free(16)),
+        (&mut s.flaps, s.flaps_down, s.systems.device_free(17)),
+        (&mut s.brake, s.brake_out, s.systems.device_free(18)),
+        (&mut s.hook, s.hook_down, s.systems.fluids.hydraulic > 0.),
     ] {
+        if !movable {
+            continue;
+        }
         *v = (*v
             + if on {
                 DT / c.equipment.deployment_seconds
@@ -168,7 +171,7 @@ pub(crate) fn step(
             })
         .clamp(0., 1.);
     }
-    if s.fuel <= 0. {
+    if s.fuel + s.systems.external_lbs() <= 0. {
         s.engine = false;
         s.burner = false;
     }
@@ -177,17 +180,21 @@ pub(crate) fn step(
         -DT / c.equipment.exhaust_seconds,
         DT / c.equipment.exhaust_seconds,
     );
-    s.rudder += (input.yaw - s.rudder) * DT / c.equipment.control_seconds;
-    s.elevator += (input.pitch - s.elevator) * DT / c.equipment.control_seconds;
-    s.aileron += (input.roll - s.aileron) * DT / c.equipment.control_seconds;
+    if s.systems.fluids.hydraulic > 0. {
+        s.rudder += (input.yaw - s.rudder) * DT / c.equipment.control_seconds;
+        s.elevator += (input.pitch - s.elevator) * DT / c.equipment.control_seconds;
+        s.aileron += (input.roll - s.aileron) * DT / c.equipment.control_seconds;
+    }
     if s.engine {
         let rate = if ab {
             c.propulsion.afterburner_fuel_lbs_per_second
         } else {
             c.propulsion.military_fuel_lbs_per_second * s.throttle
         };
-        s.fuel = (s.fuel - rate * DT).max(0.);
+        s.consume_fuel(rate * DT);
     }
+    let regional = crate::aircraft_systems::regional_effects(s.damage_regions);
+    let aero = regional.commands([input.pitch, input.roll, input.yaw]);
     let n = s.native.as_mut().unwrap();
     if n.state.is_none() {
         n.state = Some(diagnostic::State {
@@ -231,7 +238,7 @@ pub(crate) fn step(
         diagnostic::Input {
             now: n.elapsed,
             ticks,
-            commands: [f8(input.roll)?, f8(input.pitch)?, f8(input.yaw)?],
+            commands: [f8(aero[1])?, f8(aero[0])?, f8(aero[2])?],
             global_flags: 0x0100_0000,
             devices: DragDevices {
                 gear: s.gear >= 0.5,
@@ -253,12 +260,22 @@ pub(crate) fn step(
                 roll_locked: false,
             },
             rudder_damage: Some(0),
-            drag_damage: 0,
+            drag_damage: crate::aircraft_systems::regional_effects(s.damage_regions)
+                .drag_percent
+                .round() as i16,
             pull_drag_damage: 0,
             afterburner: ab,
             halve_thrust: false,
-            thrust_scale_f8: if s.engine { 256 } else { 0 },
-            lift_damage: 0,
+            thrust_scale_f8: if s.engine {
+                (256. * s.systems.power_available()).round() as i32
+            } else {
+                0
+            },
+            lift_damage: (100.
+                * (1.
+                    - crate::aircraft_systems::regional_effects(s.damage_regions).lift
+                        * if s.systems.has(25) { 0.5 } else { 1. }))
+            .round() as u8,
             disturbance_request: None,
             rate_shift: 0,
             wind_fps: speed as i32,

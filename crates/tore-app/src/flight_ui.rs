@@ -14,6 +14,7 @@ pub enum Command {
     PreviousWeapon,
     Target,
     RangeReset,
+    DamageReport,
     Combat(tore_sim::combat::live::Command),
     Click,
     End,
@@ -55,6 +56,7 @@ pub struct FlightUi {
     pub time_scale: f64,
     pub effects: bool,
     pub notice: Option<(String, Instant)>,
+    pending_notices: std::collections::VecDeque<String>,
     pub help: bool,
     pub controls_editor: Option<crate::controls_editor::Editor>,
     root: usize,
@@ -80,6 +82,7 @@ impl Default for FlightUi {
             time_scale: 1.,
             effects: true,
             notice: None,
+            pending_notices: Default::default(),
             help: false,
             controls_editor: None,
             root: 0,
@@ -113,6 +116,17 @@ impl FlightUi {
             clock.steps_scaled(elapsed, self.time_scale)
         }
     }
+    /// Match F10 once on the pilot-death transition, without pausing the wreck.
+    pub fn pilot_death_view(&mut self, was_dead: bool, dead: bool) -> Option<u8> {
+        if !was_dead && dead {
+            self.map.open = false;
+            self.look = [0.; 2];
+            self.zoom = 1.;
+            Some(1)
+        } else {
+            None
+        }
+    }
     pub fn cancel_press(&mut self) {
         self.map.cancel_press();
         self.pressed = None;
@@ -121,7 +135,26 @@ impl FlightUi {
         }
     }
     pub fn message(&mut self, text: impl Into<String>) {
-        self.notice = Some((text.into(), Instant::now()));
+        let text = text.into();
+        if self.pending_notices.contains(&text)
+            || self
+                .notice
+                .as_ref()
+                .is_some_and(|(shown, at)| *shown == text && at.elapsed() < Duration::from_secs(4))
+        {
+            return;
+        }
+        if self
+            .notice
+            .as_ref()
+            .is_some_and(|(_, at)| at.elapsed() < Duration::from_secs(4))
+        {
+            if self.pending_notices.len() < 64 {
+                self.pending_notices.push_back(text);
+            }
+        } else {
+            self.notice = Some((text, Instant::now()));
+        }
     }
     fn unavailable(&mut self, label: &str) -> Command {
         self.message(format!("{label}: not implemented yet"));
@@ -516,7 +549,7 @@ impl FlightUi {
                 self.help = true;
                 Command::None
             }
-            "d" => Command::Combat(tore_sim::combat::live::Command::DamagePlayer),
+            "d" => Command::DamageReport,
             "y" => Command::SensorHistory,
             "k" => Command::Combat(tore_sim::combat::live::Command::Jettison),
             "l" => Command::Combat(tore_sim::combat::live::Command::ClearDesignation),
@@ -649,7 +682,15 @@ impl FlightUi {
             None => Command::None,
         }
     }
-    pub fn draw(&self, pixels: &mut [u8], font: &Font, tree: &[MenuNode]) {
+    pub fn draw(&mut self, pixels: &mut [u8], font: &Font, tree: &[MenuNode]) {
+        if self
+            .notice
+            .as_ref()
+            .is_none_or(|(_, at)| at.elapsed() >= Duration::from_secs(4))
+            && let Some(text) = self.pending_notices.pop_front()
+        {
+            self.notice = Some((text, Instant::now()));
+        }
         if self.menu
             && let Some(editor) = &self.controls_editor
         {
@@ -673,7 +714,7 @@ impl FlightUi {
                     "A: heading/altitude | Ctrl-A: waypoint autopilot".into(),
                     "I: infrared | R: radar | Y: contact history | J: own ECM".into(),
                     "Click a contact to designate it; L clears the designation".into(),
-                    "Range: Shift-I incoming | D player hit | Shift-Y target ECM".into(),
+                    "D damage report | Range: Shift-I incoming | Shift-Y target ECM".into(),
                     "[ / ] NAV/weapons | K jettison | L clear".into(),
                     "Pad: hold Select, RB fire / LB weapon / A target / B clear".into(),
                     "Select+X previous weapon / Y ECM / L3 radar / R3 jettison".into(),
@@ -755,19 +796,84 @@ impl FlightUi {
         if let Some((text, at)) = &self.notice
             && at.elapsed() < Duration::from_secs(4)
         {
-            Canvas(pixels).rect((8, 416, 624, 22), [20, 30, 40, 245]);
-            Paint {
-                pixels,
-                clip: (12, 418, 616, 18),
-                color: [240, 233, 194, 255],
+            let mut lines = vec![String::new()];
+            for word in text.split_whitespace() {
+                let last = lines.last_mut().unwrap();
+                let candidate = if last.is_empty() {
+                    word.to_owned()
+                } else {
+                    format!("{last} {word}")
+                };
+                let width: usize = candidate
+                    .bytes()
+                    .map(|ch| font.glyphs[ch as usize].advance)
+                    .sum();
+                if width > 600 && !last.is_empty() {
+                    lines.push(word.to_owned());
+                } else {
+                    *last = candidate;
+                }
             }
-            .text(font, text, 16, 423);
+            let lines = &lines[..lines.len().min(3)];
+            let height = 10 + lines.len() as i32 * 12;
+            let top = 438 - height;
+            Canvas(pixels).rect((8, top, 624, height), [20, 30, 40, 245]);
+            let mut paint = Paint {
+                pixels,
+                clip: (12, top + 2, 616, height - 4),
+                color: [240, 233, 194, 255],
+            };
+            for (i, line) in lines.iter().enumerate() {
+                paint.text(font, line, 16, top + 7 + i as i32 * 12);
+            }
         }
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pilot_death_switches_to_f10_once_without_pausing() {
+        let mut ui = FlightUi {
+            look: [0.8, -0.3],
+            zoom: 2.,
+            ..Default::default()
+        };
+        ui.map.open = true;
+        assert_eq!(ui.pilot_death_view(false, false), None);
+        assert_eq!(ui.pilot_death_view(false, true), Some(1));
+        assert_eq!(ui.look, [0.; 2]);
+        assert_eq!(ui.zoom, 1.);
+        assert!(!ui.paused && !ui.menu && !ui.map.open);
+        assert_eq!(ui.pilot_death_view(true, true), None);
+    }
+    #[test]
+    fn d_reports_damage_without_injecting_it_and_messages_do_not_overwrite() {
+        let mut ui = FlightUi::default();
+        assert_eq!(
+            ui.key("d", false, false, false, &tree()),
+            Command::DamageReport
+        );
+        for (shift, ctrl, alt) in [
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+        ] {
+            assert_ne!(
+                ui.key("d", shift, ctrl, alt, &tree()),
+                Command::DamageReport
+            );
+        }
+        ui.message("Wing order");
+        ui.message("Oil leak");
+        assert_eq!(ui.notice.as_ref().unwrap().0, "Wing order");
+        assert_eq!(ui.pending_notices.front().unwrap(), "Oil leak");
+        ui.menu = true;
+        assert_ne!(
+            ui.key("d", false, false, false, &tree()),
+            Command::DamageReport
+        );
+    }
     #[test]
     fn map_shortcut_pan_and_escape_do_not_pause_or_switch_sensors() {
         let mut ui = FlightUi::default();

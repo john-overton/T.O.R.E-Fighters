@@ -13,14 +13,19 @@ aircraft shapes/textures and smoke artwork. Local source inspection establishes
 resource availability and visible geometry, not original damage thresholds or
 smoke scheduling. [Resource evidence](../formats/objects-and-shapes.md#combat-damage-and-smoke-resource-review).
 
-John requested incremental localized damage on 2026-09-20. The six-region
-model below is an agent-selected fit. Each direct aircraft hit is projected into the aircraft basis and
-assigned to one of six regions: nose, cockpit, central fuselage, left wing,
-right wing or tail. Region damage accumulates independently. A structural body
-and its paired fragment appear only when one region has received at least 75%
-of the aircraft's starting hit points. Damage elsewhere cannot make the F/A-18D
-nose disappear. The first region to cross the threshold owns the retained
-breakup choice through destruction.
+John requested hiding visual airframe damage below 100% on 2026-09-21, pending
+a later visual pass. All surviving aircraft retain intact geometry and textures:
+no local damage marks, wing/fin tears or missing body sections, including at 92%
+and 99%. Damage smoke and ordinary device/control animations remain in use.
+This is a presentation gate only. Six-region damage, component failures, flight
+penalties, damage reports and destruction continue to work independently.
+
+The six-region model remains an agent-selected fit. Direct hits are assigned to
+nose, cockpit, central fuselage, left wing, right wing or tail in aircraft space.
+At 100% total damage (zero hit points), regional damage selects the appropriate
+reviewed breakup body and paired fragment. Damage elsewhere cannot select the
+F/A-18D nose. Internally, the first region to accumulate 75% of starting hit points
+reserves that choice, without displaying it or releasing debris while alive.
 
 The reviewed F/A-18D A/B pair represents nose and cockpit loss and its C/D pair
 represents inner or trailing wing loss. The reviewed Rafale A/B pair represents
@@ -30,12 +35,12 @@ for F/A-18D nose/cockpit or left-wing damage, Rafale left-wing or tail damage,
 and F-22 left-wing damage. All other aircraft and regions retain the intact body
 with fitted surface marks or mesh tears. These are
 alternate appearances, not alphabetical severity levels. Render destroyed
-target bodies while airborne, using their existing ballistic motion. The paired
+target bodies while airborne, using [aerodynamic wreck motion and airbursts](destroyed-aircraft.md). The paired
 B/D piece detaches once at the structural transition. Use each shape's own
 texture and never apply intact animation address ranges to a damaged shape. The
 original model scale is retained; variant scale parity remains unverified.
 
-Before breakup, persistent local marks use the reviewed dark patch from
+At destruction, persistent local marks use the reviewed dark patch from
 `_F18_A.PIC` on every supported aircraft. This cross-aircraft reuse and placement
 are agent-selected fitted presentation rules, not evidence that the original
 shared this texture. Both textured and flat-colored aircraft surfaces receive
@@ -44,18 +49,17 @@ density is one fifth at 4%, two fifths at 15%, and four fifths at 35%.
 Panels of at least eight square feet always receive a mark, an agent-selected
 fit so low-polygon aircraft such as the Su-27 cannot omit all light wing damage.
 Patch size
-is respectively 22%, 40%, and 58% of the marked face. At 35% regional damage,
-wing and vertical-fin surfaces begin fitted face clipping. Source-mesh
-face centers classify wings beyond 30% of maximum absolute lateral extent and
-tail faces behind 25% of maximum absolute longitudinal extent. Elevated aft
-faces above 35% of maximum height also count as fins, covering aircraft such as
-the Su-35 whose fin centers sit ahead of that longitudinal boundary. They retain
-82% of span or height at 35% and 52% at the 75% structural threshold. The
-renderer mirrors side-specific clipping, so a right-wing hit does not remove a
-reviewed left-wing chunk. Reviewed whole-body pairs are used only for the exact
-region mappings above. Other wing and tail regions use the fitted tear and do
-not spawn an unrelated B/D fragment. Nose, cockpit and core damage without a
-matching reviewed body retain marks without removing unrelated geometry.
+is respectively 22%, 40%, and 58% of the marked face. Partial wing/fin tears
+retain 82% of span/height at 35% regional damage and 52% at or above 75% regional
+damage. This retained tear renderer runs only at 100% total damage for now.
+Reviewed whole-body breakup pairs and detached
+B/D pieces still require 100% total damage. Source face centers classify wings
+beyond 30% of maximum lateral extent and tails behind 25% of maximum longitudinal
+extent; elevated aft faces above 35% of maximum height also count as fins.
+Side-specific clipping and reviewed body mappings remain unchanged. Nose,
+cockpit and core damage without a matching body retain marks without removing
+unrelated geometry. [Ownship flight penalties](systems-damage.md#regional-structural-damage)
+use the same regional fractions, even while visual tears are suppressed.
 
 Cockpit contact from a gun round is a fitted pilot kill. Direct-hit tests use
 bounded volumes inside the broad aircraft collision sphere: cockpit right/up/
@@ -81,7 +85,10 @@ thresholds remain unknown.
 Emit white missile smoke only during the movement model's powered interval,
 including supported compatibility weapons. Guns emit none. Emit dark aircraft
 smoke at or below 50% remaining health, while the target remains airborne.
-Ownship emits while damaged and alive; residual puffs persist after destruction.
+Ownship emits while damaged and alive, and continues emitting while its destroyed
+wreck remains airborne, as requested by John on 2026-09-21. Pilot death does not
+stop this trail. Ground impact or an airburst stops new emission; existing puffs
+persist and fade through their remaining lifetime.
 No dark damage smoke is emitted by an undamaged aircraft. Missile motors emit
 no smoke before ignition or after burnout. Existing smoke continues to disperse after its source stops or disappears.
 

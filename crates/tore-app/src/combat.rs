@@ -41,7 +41,7 @@ impl FireInput {
 /// the target carries a real attitude written by the AI bridge, so the stored
 /// basis is used instead.
 pub fn target_pose(target: &live::Target, ai_poses: bool) -> [f64; 3] {
-    if ai_poses {
+    if ai_poses || target.hp <= 0 {
         target.basis.angles()
     } else {
         [target.velocity[0].atan2(target.velocity[2]), 0., 0.]
@@ -423,6 +423,10 @@ impl Combat {
         self.input = FireInput::default();
         self.controller.cancel();
         s.set_payload(self.state.payload_lbs())?;
+        s.systems = tore_sim::aircraft_systems::Systems::new(
+            self.state.configuration().engines,
+            self.state.external_fuel_lbs(),
+        );
         s.damage_fraction = 0.;
         s.damage_variant = None;
         s.damage_regions = [0.; live::DAMAGE_SECTIONS];
@@ -466,11 +470,72 @@ impl Combat {
                 l,
             );
         }
-        let events = self
-            .state
-            .step(self.input.held || self.controller.held, l, |x, z| {
-                f64::from(world.height(x as f32, z as f32))
-            });
+        let mut events = Vec::new();
+        if s.airburst()
+            && let Some(event) = self.state.player_airburst(s.position)
+        {
+            events.push(event);
+        }
+        if s.ground_impact()
+            && let Some(event) = self.state.player_ground_impact(s.position)
+        {
+            events.push(event);
+        }
+        // Stop wreck emissions before advancing smoke on the impact/airburst tick.
+        events.extend(
+            self.state
+                .step(self.input.held || self.controller.held, l, |x, z| {
+                    f64::from(world.height(x as f32, z as f32))
+                }),
+        );
+        for index in 0..45 {
+            while s.systems.counts[index] < self.state.subsystem_counts[index] {
+                s.systems.hit(index, s.throttle);
+                if let Some(hardpoint) = index.checked_sub(36) {
+                    let config = self.state.configuration();
+                    if config.external_fuel_lbs[hardpoint] > 0. {
+                        s.systems.fuel.external[hardpoint] = 0.;
+                        s.systems.notify(format!(
+                            "External fuel tank {} damaged: fuel lost",
+                            hardpoint + 1
+                        ));
+                    } else if let Some(Some(slot)) = config.hardpoint_slots.get(hardpoint) {
+                        s.systems.notify(format!(
+                            "{} station damaged",
+                            config.stations[*slot].weapon.hud_name
+                        ));
+                    } else {
+                        s.systems.notify(
+                            if self.state.radar_failed && hardpoint == config.radar_hardpoint {
+                                "Radar failed"
+                            } else if self.state.visual_failed
+                                && hardpoint == config.visual_hardpoint
+                            {
+                                "Visual sensor failed"
+                            } else if self.state.infrared_failed
+                                && Some(hardpoint) == config.infrared_hardpoint
+                            {
+                                "Infrared sensor failed"
+                            } else if Some(hardpoint) == config.rwr_hardpoint {
+                                "RWR failed"
+                            } else if hardpoint == config.ecm_hardpoint {
+                                "Countermeasure equipment damaged"
+                            } else {
+                                "Hardpoint equipment damaged"
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        if s.systems.fatal() {
+            s.crashed = true;
+        }
+        if s.crashed
+            && let Some(event) = self.state.systems_destroyed()
+        {
+            events.push(event);
+        }
         use tore_sim::combat::smoke::contrail_altitude_ft;
         let mut outlets = Vec::new();
         let mut add = |id: u32, position: Vector, basis: Basis, offsets: &[Vector]| {
@@ -519,7 +584,7 @@ impl Combat {
         }
         self.contrails.step([]);
         self.contrails.contrails(outlets);
-        s.set_payload(self.state.payload_lbs())?;
+        s.set_payload((self.state.payload_lbs() - s.systems.used_external_lbs()).max(0.))?;
         s.bay_auto_open = s.bay_available()
             && self.state.armed
             && (self.state.designated().is_some()
@@ -540,6 +605,9 @@ impl Combat {
             - f64::from(self.state.player_hp)
                 / f64::from(self.state.configuration().damage_capacity))
         .clamp(0., 1.);
+        if events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))) {
+            s.systems.report_impact(s.ticks, s.damage_fraction);
+        }
         s.damage_variant = self
             .state
             .player_damage_section()
@@ -547,6 +615,15 @@ impl Combat {
         s.damage_regions = self.state.player_damage_regions();
         if self.state.player_hp == 0 {
             s.crashed = true;
+            if matches!(
+                self.state.player_damage_section(),
+                Some(live::DamageSection::Nose | live::DamageSection::Cockpit)
+            ) {
+                s.systems.kill_pilot("Pilot killed: nose or cockpit lost");
+            }
+        }
+        if events.contains(&Event::PilotKilled) {
+            s.systems.kill_pilot("Pilot killed by cockpit hit");
         }
         Ok(events)
     }
@@ -586,6 +663,8 @@ impl Combat {
                 .find(|h| Some(h.profile.id) == target.aircraft)
                 .unwrap_or(aircraft);
             let mut pose = player.clone();
+            pose.wreck = target.wreck.clone();
+            pose.crashed = target.hp <= 0;
             let (position, angles) = self.presentation.pose(target, self.ai_poses);
             pose.position = position;
             [pose.yaw, pose.pitch, pose.bank] = angles;
@@ -654,7 +733,43 @@ impl Combat {
             }),
             scope: crate::scope::scope(&self.state, s),
             rcs: crate::scope::rcs(&self.state, s, rcs_scale),
+            rwr_failed: self.state.rwr_failed,
         }
+    }
+    pub fn equipment_damage_report(&self) -> Vec<String> {
+        let config = self.state.configuration();
+        (36..45)
+            .filter(|i| self.state.subsystem_counts[*i] > 0)
+            .map(|i| {
+                let hardpoint = i - 36;
+                if config.external_fuel_lbs[hardpoint] > 0. {
+                    format!("External tank {} damaged", hardpoint + 1)
+                } else if let Some(Some(slot)) = config.hardpoint_slots.get(hardpoint) {
+                    format!("{} station failed", config.stations[*slot].weapon.hud_name)
+                } else if hardpoint == config.radar_hardpoint {
+                    "Radar failed".into()
+                } else if hardpoint == config.visual_hardpoint {
+                    "Visual sensor failed".into()
+                } else if Some(hardpoint) == config.infrared_hardpoint {
+                    "Infrared sensor failed".into()
+                } else if Some(hardpoint) == config.rwr_hardpoint {
+                    "RWR failed".into()
+                } else if hardpoint == config.ecm_hardpoint {
+                    format!(
+                        "Countermeasures: jammer {}, chaff {}, flares {}",
+                        if self.state.ecm_failed {
+                            "failed"
+                        } else {
+                            "available"
+                        },
+                        self.state.chaff,
+                        self.state.flares
+                    )
+                } else {
+                    format!("Hardpoint {} equipment damaged", hardpoint + 1)
+                }
+            })
+            .collect()
     }
     pub fn status(&self, s: &flight::State) -> String {
         let i = self.state.selected;
@@ -735,6 +850,8 @@ impl Combat {
         let mut v = Vec::new();
         for t in self.state.targets.iter().filter(|t| t.airborne) {
             let mut pose = s.clone();
+            pose.wreck = t.wreck.clone();
+            pose.crashed = t.hp <= 0;
             let (position, angles) = self.presentation.pose(t, self.ai_poses);
             pose.position = position;
             pose.damage_fraction = t.damage_fraction();
@@ -763,6 +880,8 @@ impl Combat {
             .filter(|p| p.owner == 0 || self.dummies.is_empty())
         {
             let mut pose = s.clone();
+            // Detached pieces have their own lifecycle, not the observer's wreck state.
+            pose.wreck = None;
             pose.position = piece.position;
             if piece.owner != 0 {
                 pose.damage_variant = self
@@ -1743,6 +1862,8 @@ mod ai_pose_tests {
             hp: 100,
             initial_hp: 100,
             fragment_offsets: [[0.; 3]; 2],
+            wreck: None,
+            wreck_power: tore_sim::wreck::Power::default(),
             fragment_released: false,
             localized_damage: live::LocalizedDamage::default(),
             category: 0,

@@ -147,12 +147,16 @@ pub struct Configuration {
     pub radar_hardpoint: usize,
     pub visual_hardpoint: usize,
     pub infrared_hardpoint: Option<usize>,
+    pub rwr_hardpoint: Option<usize>,
     pub ecm_hardpoint: usize,
     pub aircraft: AircraftId,
     pub stations: Vec<Station>,
     pub hit_points: i32,
     pub target_category: u16,
     pub external_equipment_lbs: i32,
+    pub external_fuel_lbs: [f64; 9],
+    pub engines: u8,
+    pub wreck_power: crate::wreck::Power,
     /// Imported sensor capability, resolved by parsed record channel.
     pub sensors: sensors::SensorProfiles,
 }
@@ -168,6 +172,12 @@ impl Configuration {
                 .all(|v| v.is_finite())
             || self.hit_points <= 0
             || self.external_equipment_lbs < 0
+            || !(1..=4).contains(&self.engines)
+            || self
+                .external_fuel_lbs
+                .iter()
+                .any(|fuel| !fuel.is_finite() || *fuel < 0.)
+            || self.external_fuel_lbs.iter().sum::<f64>() > f64::from(self.external_equipment_lbs)
         {
             return Err(super::invalid("invalid live configuration bounds"));
         }
@@ -196,10 +206,19 @@ impl Configuration {
     ) -> Result<Self> {
         let mut stations = Vec::new();
         let mut external_equipment_lbs = 0i32;
-        for h in a.hardpoints.iter().filter(|h| h.flags & 8 == 0) {
+        let mut external_fuel_lbs = [0.; 9];
+        for (index, h) in a
+            .hardpoints
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| h.flags & 8 == 0)
+        {
             if let Some(name) = h.store.as_deref() {
                 let weight = if name.ends_with(".GAS") {
                     let tank = tore_formats::weapons::Tank::parse(&read(name)?)?;
+                    if let Some(fuel) = external_fuel_lbs.get_mut(index) {
+                        *fuel = f64::from(tank.fuel_weight) * f64::from(h.count);
+                    }
                     i32::from(tank.empty_weight).checked_add(tank.fuel_weight)
                 } else if name.ends_with(".SEE") {
                     let e = tore_formats::aircraft::Equipment::parse(name, &read(name)?)?;
@@ -304,6 +323,21 @@ impl Configuration {
             a.hardpoints[ecm_hardpoint].store.as_deref().unwrap(),
             &read(a.hardpoints[ecm_hardpoint].store.as_deref().unwrap())?,
         )?;
+        let mut rwr_hardpoint = None;
+        for (index, h) in a.hardpoints.iter().enumerate() {
+            if let Some(name) = h.store.as_deref().filter(|name| name.ends_with(".SEE")) {
+                let equipment = tore_formats::aircraft::Equipment::parse(name, &read(name)?)?;
+                if equipment
+                    .fields
+                    .get("sig")
+                    .map(|v| v.number())
+                    .transpose()?
+                    == Some(4)
+                {
+                    rwr_hardpoint = Some(index);
+                }
+            }
+        }
         let mut system_damage = [0; 45];
         for (i, out) in system_damage.iter_mut().enumerate() {
             *out = a
@@ -330,6 +364,32 @@ impl Configuration {
             .checked_mul(2)
             .filter(|v| *v <= i32::from(i16::MAX))
             .ok_or_else(|| super::invalid("native player damage capacity"))?;
+        let engines = a
+            .fields
+            .get("engines")
+            .map(|v| v.number())
+            .transpose()?
+            .unwrap_or(1)
+            .clamp(1, 4) as u8;
+        let fuel = a.number("internalFuel") + external_fuel_lbs.iter().sum::<f64>();
+        let mass = a
+            .object
+            .get("weight")
+            .map(|v| v.number())
+            .transpose()?
+            .unwrap_or(1) as f64
+            + a.number("internalFuel")
+            + f64::from(external_equipment_lbs)
+            + stations
+                .iter()
+                .filter(|s| !s.internal)
+                .map(|s| f64::from(s.weapon.weight) * f64::from(s.count))
+                .sum::<f64>();
+        let wreck_power = crate::wreck::Power::symmetric(
+            engines,
+            a.number("thrust") * 0.7 / mass.max(1.) * 32.174,
+            fuel / (a.number("fuelConsumption") * 0.7).max(0.001),
+        );
         Ok(Self {
             fragment_offsets: [
                 super::debris::attachment(a.id, 0, &mut read)?,
@@ -348,9 +408,13 @@ impl Configuration {
             visual_hardpoint,
             radar_hardpoint,
             infrared_hardpoint,
+            rwr_hardpoint,
             ecm_hardpoint,
             sensors: profiles,
             external_equipment_lbs,
+            external_fuel_lbs,
+            wreck_power,
+            engines,
             aircraft: a.id,
             stations,
             hit_points,
@@ -379,6 +443,8 @@ pub struct Target {
     pub jammer_active: bool,
     /// Physical airborne presence. Hit points reaching zero does not clear it.
     pub airborne: bool,
+    pub wreck: Option<crate::wreck::Wreck>,
+    pub wreck_power: crate::wreck::Power,
     pub radius: f64,
     pub hp: i32,
     pub initial_hp: i32,
@@ -560,11 +626,14 @@ pub enum Event {
     Pitbull(u32),
     Hit(u32),
     Destroyed(u32),
+    Airburst(u32),
     Ground,
     TrackLost(u32),
     PlayerDamaged(i32),
     SubsystemDamaged(usize),
     PlayerDestroyed,
+    PilotKilled,
+    PlayerGroundImpact,
     Defeated(u32),
 }
 /// Mounted weapon audio state, independent of playback and rendering.
@@ -611,6 +680,7 @@ pub struct State {
     pub smoke: super::smoke::Smoke,
     pub debris: Vec<super::debris::Piece>,
     player_fragment_released: bool,
+    player_explosion_reported: bool,
     player_localized_damage: LocalizedDamage,
     pub shots: u32,
     pub hits: u32,
@@ -623,6 +693,7 @@ pub struct State {
     pub radar_failed: bool,
     pub visual_failed: bool,
     pub infrared_failed: bool,
+    pub rwr_failed: bool,
     pub ecm_failed: bool,
     pub chaff: u8,
     pub flares: u8,
@@ -716,6 +787,7 @@ impl State {
             radar_failed: false,
             visual_failed: false,
             infrared_failed: false,
+            rwr_failed: false,
             ecm_failed: false,
             target_jammer: false,
             rng: 0x46414a54,
@@ -739,6 +811,7 @@ impl State {
             smoke: super::smoke::Smoke::default(),
             debris: Vec::new(),
             player_fragment_released: false,
+            player_explosion_reported: false,
             player_localized_damage: LocalizedDamage::default(),
             shots: 0,
             hits: 0,
@@ -1036,6 +1109,8 @@ impl State {
                     self.visual_failed = true;
                 } else if Some(h) == self.config.infrared_hardpoint {
                     self.infrared_failed = true;
+                } else if Some(h) == self.config.rwr_hardpoint {
+                    self.rwr_failed = true;
                 } else if h == self.config.ecm_hardpoint {
                     for _ in 0..10 {
                         let roll = draw(&mut self.rng, 100);
@@ -1055,10 +1130,45 @@ impl State {
                 }
             }
         }
+        for index in super::systems::accumulated_faults(
+            &self.config.system_damage,
+            &self.subsystem_counts,
+            self.player_damage,
+            self.config.damage_capacity,
+        ) {
+            self.subsystem_counts[index] += 1;
+            self.last_subsystem = Some(index);
+            events.push(Event::SubsystemDamaged(index));
+        }
         if self.player_hp == 0 {
             self.release();
             events.push(Event::PlayerDestroyed);
         }
+    }
+    /// Ownship subsystem lifecycle reached a fatal outcome outside a projectile hit.
+    pub fn systems_destroyed(&mut self) -> Option<Event> {
+        if self.player_hp <= 0 {
+            return None;
+        }
+        self.player_hp = 0;
+        self.player_damage = self.player_damage.max(self.config.damage_capacity);
+        self.release();
+        Some(Event::PlayerDestroyed)
+    }
+    pub fn player_airburst(&mut self, position: Vector) -> Option<Event> {
+        self.player_explosion(position, Event::Airburst(0))
+    }
+    pub fn player_ground_impact(&mut self, position: Vector) -> Option<Event> {
+        self.player_explosion(position, Event::PlayerGroundImpact)
+    }
+    fn player_explosion(&mut self, position: Vector, event: Event) -> Option<Event> {
+        if self.player_explosion_reported {
+            return None;
+        }
+        self.player_explosion_reported = true;
+        self.debris.retain(|piece| piece.owner != 0);
+        self.effect(position, EffectKind::Destroyed);
+        Some(event)
     }
     pub fn rounds(&self, station: usize) -> u16 {
         self.ammo[station] & 0x7fff
@@ -1177,6 +1287,13 @@ impl State {
             t.position,
         )
     }
+    pub fn external_fuel_lbs(&self) -> [f64; 9] {
+        if self.external {
+            self.config.external_fuel_lbs
+        } else {
+            [0.; 9]
+        }
+    }
     pub fn payload_lbs(&self) -> f64 {
         f64::from(if self.external {
             self.config.external_equipment_lbs
@@ -1219,6 +1336,8 @@ impl State {
             hp: config.hit_points,
             initial_hp: config.hit_points,
             fragment_offsets: config.fragment_offsets,
+            wreck: None,
+            wreck_power: config.wreck_power,
             fragment_released: false,
             localized_damage: LocalizedDamage::default(),
             category: config.target_category,
@@ -1275,6 +1394,8 @@ impl State {
             hp: hit_points,
             initial_hp: hit_points,
             fragment_offsets: [[0.; 3]; 2],
+            wreck: None,
+            wreck_power: crate::wreck::Power::default(),
             fragment_released: false,
             localized_damage: LocalizedDamage::default(),
             category,
@@ -1327,6 +1448,8 @@ impl State {
             hp: self.config.hit_points,
             initial_hp: self.config.hit_points,
             fragment_offsets: self.config.fragment_offsets,
+            wreck: None,
+            wreck_power: self.config.wreck_power,
             fragment_released: false,
             localized_damage: LocalizedDamage::default(),
         });
@@ -1897,27 +2020,36 @@ impl State {
             self.mounted = Seeker::default();
             self.mounted_key = None;
         }
-        // Targets use a deliberately explicit scripted flight profile, not AI.
+        // Living target poses remain owned by their existing flight service.
         let old_targets: Vec<_> = self.targets.iter().map(|t| t.position).collect();
+        let mut airbursts = Vec::new();
         for t in &mut self.targets {
             if t.hp > 0 {
                 for i in 0..3 {
                     t.position[i] += t.velocity[i] / 120.;
                 }
             } else if t.airborne {
-                // Minimal fitted ballistic fall for a destroyed airframe, so a
-                // wreck stays an observable object until it reaches the ground.
-                t.velocity[1] -= 32.174 / 120.;
-                for i in 0..3 {
-                    t.position[i] += t.velocity[i] / 120.;
-                }
-                let surface = ground(t.position[0], t.position[2]);
-                if t.position[1] <= surface {
-                    t.position[1] = surface;
-                    t.velocity = [0.; 3];
+                let wreck = t.wreck.get_or_insert_with(|| {
+                    let mut wreck = crate::wreck::Wreck::new(t.id, self.tick, [0.; 3]);
+                    if !matches!(t.heat, Heat::Engine { on: false, .. }) {
+                        wreck.power = t.wreck_power;
+                    }
+                    wreck
+                });
+                if let Some(phase) =
+                    wreck.step(&mut t.position, &mut t.velocity, &mut t.basis, &ground)
+                {
                     t.airborne = false;
+                    if phase == crate::wreck::Phase::Exploded {
+                        airbursts.push((t.id, t.position));
+                    }
                 }
             }
+        }
+        for (id, position) in airbursts {
+            self.debris.retain(|piece| piece.owner != id);
+            self.effect(position, EffectKind::Destroyed);
+            events.push(Event::Airburst(id));
         }
         let previous_player = self
             .previous_player_position
@@ -1941,6 +2073,8 @@ impl State {
             hp: if launcher.alive { self.player_hp } else { 0 },
             initial_hp: self.config.damage_capacity,
             fragment_offsets: self.config.fragment_offsets,
+            wreck: None,
+            wreck_power: crate::wreck::Power::default(),
             fragment_released: self.player_fragment_released,
             localized_damage: self.player_localized_damage.clone(),
             category: self.config.target_category,
@@ -2234,6 +2368,9 @@ impl State {
         for (amount, section, direct_gun) in player_hits {
             self.player_localized_damage
                 .record(section, amount, self.config.damage_capacity);
+            if direct_gun && section == DamageSection::Cockpit && self.player_hp > 0 {
+                events.push(Event::PilotKilled);
+            }
             let amount = if direct_gun
                 && (section == DamageSection::Cockpit
                     || (section == DamageSection::Core
@@ -2259,7 +2396,11 @@ impl State {
                 Kind::Aircraft,
             ));
         }
-        if launcher.alive && self.player_hp > 0 && self.player_hp <= self.config.damage_capacity / 2
+        let falling_player = self.player_hp == 0
+            && launcher.position[1] > ground(launcher.position[0], launcher.position[2]);
+        if !self.player_explosion_reported
+            && self.player_hp <= self.config.damage_capacity / 2
+            && ((launcher.alive && self.player_hp > 0) || falling_player)
         {
             sources.push((
                 std::array::from_fn(|i| launcher.position[i] - launcher.basis.forward[i] * 15.),
@@ -2281,7 +2422,10 @@ impl State {
             self.effect(p, EffectKind::DebrisImpact);
         }
         for t in &mut self.targets {
-            if t.airborne && t.localized_damage.structural_section.is_some() && !t.fragment_released
+            if t.airborne
+                && t.hp == 0
+                && t.localized_damage.structural_section.is_some()
+                && !t.fragment_released
             {
                 t.fragment_released = true;
                 let variant = t.aircraft.and_then(|aircraft| {
@@ -2304,7 +2448,9 @@ impl State {
                 }
             }
         }
-        if self.player_localized_damage.structural_section.is_some()
+        if self.player_hp == 0
+            && !self.player_explosion_reported
+            && self.player_localized_damage.structural_section.is_some()
             && !self.player_fragment_released
         {
             self.player_fragment_released = true;
@@ -2641,7 +2787,11 @@ mod tests {
                 hit_points: 20,
                 target_category: 0x80,
                 external_equipment_lbs: 0,
+                external_fuel_lbs: [0.; 9],
+                engines: 1,
+                wreck_power: crate::wreck::Power::default(),
                 infrared_hardpoint: None,
+                rwr_hardpoint: None,
                 sensors: sensor_profiles(),
             },
             true,
@@ -2649,6 +2799,213 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn player_wreck_keeps_smoking_until_impact_or_airburst_then_puffs_fade() {
+        use super::super::smoke::Kind;
+        let mut s = fixture(false);
+        s.player_hp = 0;
+        let mut l = launcher();
+        l.alive = false;
+        for tick in 0..120 {
+            l.position[1] = 5000. - f64::from(tick);
+            s.step(false, l, |_, _| 0.);
+        }
+        assert_eq!(s.smoke.puffs.len(), 10);
+        assert!(s.smoke.puffs.iter().all(|p| p.kind == Kind::Aircraft));
+        let mut airburst = s.clone();
+        airburst.player_airburst(l.position);
+        s.player_ground_impact([l.position[0], 0., l.position[2]]);
+        for _ in 0..120 {
+            s.step(false, l, |_, _| 0.);
+            airburst.step(false, l, |_, _| 0.);
+        }
+        for state in [&s, &airburst] {
+            assert_eq!(state.smoke.puffs.len(), 10);
+            assert!(state.smoke.puffs.iter().all(|p| p.age >= 120));
+        }
+        for _ in 0..960 {
+            s.step(false, l, |_, _| 0.);
+        }
+        assert!(s.smoke.puffs.is_empty());
+        let mut grounded = fixture(false);
+        grounded.player_hp = 0;
+        l.position[1] = 0.;
+        for _ in 0..24 {
+            grounded.step(false, l, |_, _| 0.);
+        }
+        assert!(grounded.smoke.puffs.is_empty());
+    }
+    #[test]
+    fn incoming_cockpit_hit_reports_pilot_death_without_needing_nose_breakup() {
+        let mut s = fixture(false);
+        // Synthetic gun data uses the exact reviewed gun identity for contact classification.
+        s.config.stations[0].weapon.source = AircraftId::F18.gun().into();
+        let l = launcher();
+        s.command(Command::Incoming, l);
+        let p = s.projectiles.last_mut().unwrap();
+        p.position = std::array::from_fn(|i| {
+            l.position[i] + l.basis.forward[i] * 100. + l.basis.up[i] * 11.
+        });
+        p.previous = p.position;
+        p.age = 1;
+        let mut events = Vec::new();
+        for _ in 0..120 {
+            events.extend(s.step(false, l, |_, _| 0.));
+            if s.player_hp == 0 {
+                break;
+            }
+        }
+        assert!(events.contains(&Event::PilotKilled));
+        assert!(events.contains(&Event::PlayerDestroyed));
+        assert_eq!(s.player_damage_section(), None);
+    }
+    #[test]
+    fn player_impact_explosion_cleans_up_once_and_excludes_later_airbursts() {
+        let mut s = fixture(false);
+        s.debris.push(super::super::debris::Piece::new(
+            0,
+            0,
+            [0., 1., 0.],
+            [0.; 3],
+            Basis::new(0., 0., 0.),
+            [0.; 3],
+        ));
+        assert_eq!(
+            s.player_ground_impact([0., 0., 0.]),
+            Some(Event::PlayerGroundImpact)
+        );
+        assert!(s.debris.is_empty());
+        assert_eq!(
+            s.effects
+                .iter()
+                .filter(|e| e.kind == EffectKind::Destroyed)
+                .count(),
+            1
+        );
+        assert_eq!(s.player_ground_impact([0., 0., 0.]), None);
+        assert_eq!(s.player_airburst([0., 0., 0.]), None);
+    }
+    #[test]
+    fn wreck_airburst_removes_target_and_fragments_without_awarding_another_kill() {
+        let mut s = fixture(false);
+        let mut aircraft = target(77, [0., 100000., 2000.], 100, 0x80);
+        aircraft.hp = 0;
+        aircraft.wreck_power = crate::wreck::Power::symmetric(2, 20., 10.);
+        s.targets.push(aircraft);
+        // Search deterministic destruction ticks rather than depending on global combat RNG.
+        let born = (0..1000)
+            .find(|born| {
+                let mut w = crate::wreck::Wreck::new(77, *born, [0.; 3]);
+                let (mut p, mut v, mut b) = ([0., 100000., 0.], [0.; 3], Basis::new(0., 0., 0.));
+                for _ in 0..120 {
+                    w.step(&mut p, &mut v, &mut b, |_, _| 0.);
+                }
+                w.phase == crate::wreck::Phase::Exploded
+            })
+            .unwrap();
+        s.tick = born.saturating_sub(1);
+        s.targets[0].wreck = Some(crate::wreck::Wreck::new(77, born, [0.; 3]));
+        s.debris.push(super::super::debris::Piece::new(
+            77,
+            0,
+            s.targets[0].position,
+            [0.; 3],
+            s.targets[0].basis,
+            [0.; 3],
+        ));
+        let mut bursts = 0;
+        for _ in 0..240 {
+            bursts += s
+                .step(false, launcher(), |_, _| 0.)
+                .iter()
+                .filter(|e| **e == Event::Airburst(77))
+                .count();
+        }
+        assert_eq!(bursts, 1);
+        assert!(!s.targets[0].airborne);
+        assert_eq!(s.kills, 0);
+        assert!(s.debris.iter().all(|p| p.owner != 77));
+        assert!(s.effects.iter().any(|e| e.kind == EffectKind::Destroyed));
+        assert_eq!(s.player_airburst([0., 5000., 0.]), Some(Event::Airburst(0)));
+        assert_eq!(s.player_airburst([0., 5000., 0.]), None);
+    }
+    #[test]
+    fn heavy_enemy_hit_degrades_components_without_detaching_a_live_nose() {
+        let mut s = fixture(false);
+        s.config.damage_capacity = 100;
+        s.player_hp = 100;
+        s.config.system_damage = [0; 45];
+        for index in [19, 5, 14, 12] {
+            s.config.system_damage[index] = 0x11;
+        }
+        let mut events = Vec::new();
+        // A real incoming projectile sweeps the ownship nose. The zero seed
+        // fixes the damage draw at its lower boundary for this synthetic test.
+        let raw = if is_gun(&s.config.stations[0].weapon) {
+            345
+        } else {
+            115
+        };
+        s.config.stations[0].weapon.damage.by_class = [raw; 5];
+        s.rng = 0;
+        s.command(Command::Incoming, launcher());
+        for _ in 0..720 {
+            events.extend(s.step(false, launcher(), |_, _| 0.));
+            if s.player_hp < 100 {
+                break;
+            }
+        }
+        assert_eq!(s.player_hp, 8);
+        let mut components = crate::aircraft_systems::Systems::default();
+        for event in events {
+            if let Event::SubsystemDamaged(index) = event {
+                components.hit(index, 1.);
+            }
+        }
+        for index in [19, 5, 14, 12] {
+            assert_eq!(s.subsystem_counts[index], 1);
+        }
+        assert_eq!(components.power_available(), 0.75);
+        assert_eq!(components.oil_pressure(), 0.5);
+        assert_eq!(components.controls([1., 0., 0.], [0.; 3], 0)[0], 0.5);
+        for _ in 0..120 {
+            components.advance(true, 1., 1., 0.92, false, &mut 100.);
+        }
+        assert!(components.fluids.hydraulic < 1.);
+        assert!(components.engine.temperature > 0.);
+        s.step(false, launcher(), |_, _| 0.);
+        assert!(s.debris.is_empty());
+        s.apply_player_damage(7, &mut Vec::new());
+        s.step(false, launcher(), |_, _| 0.);
+        assert_eq!(s.player_hp, 1);
+        assert!(s.debris.is_empty());
+        s.apply_player_damage(1, &mut Vec::new());
+        s.step(false, launcher(), |_, _| 0.);
+        assert_eq!(s.player_hp, 0);
+        assert_eq!(s.debris.len(), 1);
+        s.step(false, launcher(), |_, _| 0.);
+        assert_eq!(s.debris.len(), 1);
+    }
+    #[test]
+    fn rwr_damage_is_a_receiver_fault_and_systems_destruction_is_once_only() {
+        let mut s = fixture(false);
+        s.config.rwr_hardpoint = Some(4);
+        s.config.system_damage = [0; 45];
+        s.config.system_damage[40] = 0x1f;
+        s.player_hp = 10000;
+        let mut events = Vec::new();
+        for _ in 0..30 {
+            s.apply_player_damage(4, &mut events);
+        }
+        assert_eq!(s.subsystem_counts[40], 1);
+        assert!(s.rwr_failed);
+        assert!(!s.radar_failed);
+        let reset = State::new(s.config.clone(), true).unwrap();
+        assert!(!reset.rwr_failed);
+        assert_eq!(s.systems_destroyed(), Some(Event::PlayerDestroyed));
+        assert_eq!(s.systems_destroyed(), None);
+        assert_eq!(s.player_hp, 0);
+    }
     #[test]
     fn player_selection_wraps_through_nav_and_arms_only_weapons() {
         let initial = fixture(false);
@@ -3260,6 +3617,8 @@ mod tests {
             hp,
             initial_hp: hp,
             fragment_offsets: [[0.; 3]; 2],
+            wreck: None,
+            wreck_power: crate::wreck::Power::default(),
             fragment_released: false,
             localized_damage: LocalizedDamage::default(),
             category,
@@ -3525,7 +3884,7 @@ mod tests {
         let mut s = fixture(false);
         let l = launcher();
         s.targets.push(target(7, [0., 5., 100000.], 100, 0x8000));
-        s.targets[0].hp = 50;
+        s.targets[0].hp = 0;
         s.targets[0]
             .localized_damage
             .record(DamageSection::LeftWing, 75, 100);
@@ -3533,7 +3892,7 @@ mod tests {
         s.step(false, l, |_, _| 0.);
         assert_eq!(s.debris.len(), 1);
         assert_eq!(s.debris[0].owner, 7);
-        assert_eq!(s.debris[0].velocity, [30., 0., 10.]);
+        assert_eq!(s.debris[0].velocity, s.targets[0].velocity);
         let mut impacts = 0;
         for _ in 0..300 {
             let had_piece = !s.debris.is_empty();
@@ -3564,6 +3923,12 @@ mod tests {
             s.config.damage_capacity,
             s.config.damage_capacity,
         );
+        s.step(false, l, |_, _| 0.);
+        assert!(
+            s.debris.is_empty(),
+            "a live aircraft keeps catastrophic parts"
+        );
+        s.player_hp = 0;
         s.step(false, l, |_, _| 0.);
         assert_eq!(s.debris.len(), 1);
         assert_eq!(s.debris[0].owner, 0);

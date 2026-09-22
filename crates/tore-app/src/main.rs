@@ -493,6 +493,7 @@ impl App {
             "range-target" => Command::RangeReset,
             "damage-class" => Command::Combat(tore_sim::combat::live::Command::CycleClass),
             "fail-station" => Command::Combat(tore_sim::combat::live::Command::FailStation),
+            "damage-report" => Command::DamageReport,
             "damage-player" => Command::Combat(tore_sim::combat::live::Command::DamagePlayer),
             "incoming" => Command::Combat(tore_sim::combat::live::Command::Incoming),
             "target-jammer" => Command::Combat(tore_sim::combat::live::Command::ToggleTargetJammer),
@@ -619,6 +620,20 @@ impl App {
                 }
                 Action::None
             }
+            Command::DamageReport => {
+                self.flight_ui
+                    .message(self.flight.systems.summary(self.flight.damage_fraction));
+                for index in 1..36 {
+                    if self.flight.systems.has(index) {
+                        self.flight_ui
+                            .message(tore_sim::aircraft_systems::label(index));
+                    }
+                }
+                for message in self.combat.equipment_damage_report() {
+                    self.flight_ui.message(message);
+                }
+                Action::None
+            }
             Command::None => Action::None,
             Command::Click => Action::Click,
             Command::End => Action::Back,
@@ -635,7 +650,10 @@ impl App {
                 {
                     self.combat.cancel();
                     self.combat.command(command, combat::launcher(&self.flight));
-                    if let Err(error) = self.flight.set_payload(self.combat.state.payload_lbs()) {
+                    if let Err(error) = self.flight.set_payload(
+                        (self.combat.state.payload_lbs() - self.flight.systems.used_external_lbs())
+                            .max(0.),
+                    ) {
                         self.flight_ui.message(error.to_string());
                     }
                 } else {
@@ -1943,6 +1961,12 @@ impl ApplicationHandler for App {
                                     return;
                                 }
                             };
+                            if let Some(view) = self.flight_ui.pilot_death_view(
+                                self.previous_flight.systems.pilot.dead,
+                                self.flight.systems.pilot.dead,
+                            ) {
+                                self.flight_view = view;
+                            }
                             for airport_event in self.airport_service.synchronize_health(
                                 self.combat
                                     .state
@@ -1979,6 +2003,9 @@ impl ApplicationHandler for App {
                                     }
                                 }
                             }
+                            for message in self.flight.systems.messages.drain(..) {
+                                self.flight_ui.message(message);
+                            }
                             let mut sounds = std::collections::BTreeSet::new();
                             for event in &events {
                                 use tore_sim::combat::live::Event;
@@ -1991,7 +2018,8 @@ impl ApplicationHandler for App {
                                     Event::PlayerDamaged(_) => {
                                         sounds.insert("&EXPL3.5K");
                                     }
-                                    Event::SubsystemDamaged(_)
+                                    Event::PilotKilled
+                                    | Event::SubsystemDamaged(_)
                                     | Event::Defeated(_)
                                     | Event::TrackLost(_)
                                     | Event::SeekerActivated(_)
@@ -2012,6 +2040,18 @@ impl ApplicationHandler for App {
                                     }
                                     Event::Hit(_) | Event::Ground => {
                                         sounds.insert("&EXPL3.5K");
+                                    }
+                                    Event::PlayerGroundImpact => {
+                                        sounds.insert("&EXPL12.5K");
+                                        self.flight_ui.message("Your aircraft exploded on impact");
+                                    }
+                                    Event::Airburst(id) => {
+                                        sounds.insert("&EXPL12.5K");
+                                        self.flight_ui.message(if *id == 0 {
+                                            "Your aircraft exploded"
+                                        } else {
+                                            "Destroyed aircraft exploded"
+                                        });
                                     }
                                     Event::Destroyed(_) => {
                                         sounds.insert("&EXPL12.5K");
@@ -2316,8 +2356,12 @@ impl ApplicationHandler for App {
                         renderer.cockpit(
                             &presented,
                             &self.camera,
-                            self.flight_ui.cockpit && matches!(self.flight_view, 0 | 3 | 4),
-                            self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4),
+                            self.flight_ui.cockpit
+                                && !presented.wreck_gone()
+                                && matches!(self.flight_view, 0 | 3 | 4),
+                            self.flight_ui.hud
+                                && !presented.wreck_gone()
+                                && matches!(self.flight_view, 0 | 3 | 4),
                             &self.menu.pixels,
                             &cockpit_palette,
                         );
@@ -2709,6 +2753,7 @@ fn main() -> AppResult<()> {
     let mut damage_preview_ticks = 240usize;
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
+    let mut systems_preview: Vec<usize> = Vec::new();
     let mut validate_creator = false;
     let mut sensor_summary = false;
     let mut validate_weather = false;
@@ -3090,6 +3135,11 @@ fn main() -> AppResult<()> {
                         .parse::<usize>()?,
                 )
             }
+            "--systems-preview" => {
+                systems_preview = args.next().ok_or("--systems-preview needs comma-separated damage indices 1..35")?
+                    .split(',').map(str::parse).collect::<Result<Vec<usize>, _>>()?;
+                if systems_preview.iter().any(|i| !(1..=35).contains(i)) { return Err("--systems-preview indices must be 1..35".into()); }
+            }
             "--panel-snapshot" => {
                 panel_snapshot = Some(args.next().ok_or("--panel-snapshot needs output path")?)
             }
@@ -3155,14 +3205,14 @@ fn main() -> AppResult<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. K jettison selected external group; L clears designation; Use --combat-command class/fail for damage-class and station-fault fixtures. D injects a gun-strength player hit; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..72000 runs a headless AI mission and prints a deterministic per-actor summary.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. K jettison selected external group; L clears designation; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..72000 runs a headless AI mission and prints a deterministic per-actor summary.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35 and F-22A assets into platform application data.\nA local gameassets/fighters-anthology directory is imported automatically on first run.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(());
             }
@@ -3208,6 +3258,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             || headless_ticks.is_some())
     {
         return Err("dummy aircraft require normal desktop flight; range/research/replay/headless-flight modes have separate fixtures".into());
+    }
+    if !systems_preview.is_empty() && panel_snapshot.is_none() {
+        return Err("--systems-preview requires --panel-snapshot".into());
     }
     if damage_preview.is_some()
         && (capture_terrain.is_none()
@@ -3505,6 +3558,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             if replay_frames.is_none() {
                 let load = combat::Combat::new(&hornet, &assets.theater_resources, false)?;
                 state.set_payload(load.state.payload_lbs())?;
+                state.systems = tore_sim::aircraft_systems::Systems::new(
+                    load.state.configuration().engines,
+                    load.state.external_fuel_lbs(),
+                );
             }
             quick_mission::apply_ground_start(world, &mut state, object)?;
             println!(
@@ -3584,7 +3641,24 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     if let Some(path) = panel_snapshot {
         use std::io::Write;
-        let state = flight::State::new(&hornet.profile, [0., 5000., 0.])?;
+        let mut state = flight::State::new(&hornet.profile, [0., 5000., 0.])?;
+        let mut combat = combat::Combat::new(&hornet, &assets.theater_resources, false)?;
+        combat.reset(&mut state)?;
+        if let Some(throttle) = flight_throttle {
+            state.throttle = throttle;
+        }
+        for index in &systems_preview {
+            state.systems.hit(*index, state.throttle);
+        }
+        if !systems_preview.is_empty() {
+            for _ in 0..flight_probe_ticks.unwrap_or(1200) {
+                state
+                    .systems
+                    .advance(true, state.throttle, 1., 0., false, &mut state.fuel);
+                state.ticks += 1;
+            }
+            println!("{}", state.systems.summary(0.));
+        }
         let r =
             instruments::Instruments::default().page(instrument_page.unwrap_or(7), &hornet, &state);
         let mut f = std::fs::File::create(path)?;
@@ -4210,6 +4284,25 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 .count(),
             combat.state.smoke.puffs.len()
         );
+    }
+    if damage_preview.is_some()
+        && let Some(wreck) = &flight.wreck
+    {
+        println!(
+            "Wreck preview: phase={:?} ticks={} polls={} engine_acceleration={:?} position={:?} attitude={:?}",
+            wreck.phase,
+            wreck.ticks,
+            wreck.polls,
+            wreck.power.acceleration,
+            flight.position,
+            [flight.yaw, flight.pitch, flight.bank]
+        );
+    }
+    if flight.systems.pilot.dead {
+        flight_view = 1;
+        if damage_preview.is_some() {
+            println!("Pilot death preview: exterior view {flight_view}");
+        }
     }
     if input_profile.is_none() {
         let default = assets::data_directory()?.join("input-v1.conf");

@@ -443,7 +443,7 @@ new bindings or regenerate a profile deliberately. No saved file is overwritten.
 | Left-stick click | R: radar toggle |
 | Right-stick click | K: selected external group jettison |
 | D-pad up | Backslash: replace range target |
-| D-pad down | D: explicit player-hit fixture |
+| D-pad down | Explicit `damage-player` developer fixture; keyboard D reports damage |
 | D-pad left | Next damage class fixture |
 | D-pad right | Selected station failure fixture |
 | Start | Shift-Y: target jammer fixture |
@@ -685,3 +685,11 @@ NAV INFO minus/plus select destinations; button 3 switches mission/airport mode.
 WEAPONS minus/plus select NAV/weapons; button 3 pages the store list.
 Boresight has no seeker tone without a designated contact.
 [Behavior and current route limitations](spec/weapon-navigation-selection.md).
+
+## Ownship damage report
+
+D reports current aircraft damage and system readings through the bottom-center
+sim log. The rebindable `damage-report` action does the same. Damage notifications
+share that log; the Systems instrument retains its four gauges and two fuel rows.
+The separate `damage-player` fixture remains a development action, including
+existing controller profiles. See [systems behavior](spec/systems-damage.md).

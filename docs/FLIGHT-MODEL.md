@@ -379,3 +379,35 @@ height gains no longer require six feet/second of upward velocity. The existing
 binary flap control is retained. Low-speed nose alignment now blends a modest,
 stick-dependent trim target into the airborne response without a wheel-release
 angle jump. [Rules and fitted constants](spec/takeoff-ground-contact.md).
+
+## Ownship systems damage
+
+The shared 120 Hz ownship state now carries oil, hydraulic fluid, engine health,
+thermal progression, control/device faults and fuel-tank contents. Flight uses
+the resulting power and control limits. External fuel burns before internal fuel
+and reduces loaded mass as consumed. Autopilot refuses damaged controls. The
+legacy, hybrid and restricted research adapters remain separately selectable.
+The original event identities are reviewed; progression constants are fitted
+and documented in [systems damage](spec/systems-damage.md). No autonomous
+aircraft decisions were changed.
+
+Partial wing/tail damage now reduces lift and control authority, adds drag and
+creates asymmetric roll/yaw bias using the same regional fractions as the
+mesh tear model. All airframe damage visuals are temporarily hidden below 100%,
+while the physical penalties remain active. Source-eligible cumulative faults prevent heavy combat damage
+from leaving all flight systems healthy. Coefficients and thresholds are in the
+[systems contract](spec/systems-damage.md#regional-structural-damage).
+
+## Destroyed aircraft
+
+Airborne destruction hands motion to a shared fixed-tick wreck component. It
+retains momentum, tumbles under aerodynamic torque and drag, and carries captured
+surviving-engine thrust until fuel depletion, ground contact or an airburst.
+Individual shutdowns make multi-engine thrust asymmetric. The player cannot
+control the wreck. [Requested timing and fitted physics](spec/destroyed-aircraft.md)
+apply independently of the selected living flight adapter.
+
+Player ground crashes and falling-wreck impacts now end in a guaranteed explosion.
+Nose/cockpit loss kills the pilot, but surviving engine thrust remains active
+until impact or an airburst. Pilot death switches presentation to the exterior
+view without affecting the fixed-tick wreck physics.

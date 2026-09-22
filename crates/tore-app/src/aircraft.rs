@@ -472,6 +472,9 @@ impl Airframe {
         world: &World,
         fragment: bool,
     ) -> Vec<f32> {
+        if s.wreck_gone() {
+            return Vec::new();
+        }
         let mut result = Vec::new();
         let (sy, cy) = (s.yaw as f32).sin_cos();
         let (sp, cp) = (s.pitch as f32).sin_cos();
@@ -494,7 +497,15 @@ impl Airframe {
             });
         let model_scale = self.rig.as_ref().map_or(1. / 3., |r| r.scale());
         let hornet_rig = self.profile.id == tore_formats::aircraft::AircraftId::F18;
-        let damaged = crate::damage_art::DamageArt::variant(self.profile.id, s.damage_variant);
+        let damaged = if fragment {
+            crate::damage_art::DamageArt::variant(self.profile.id, s.damage_variant)
+        } else {
+            crate::damage_art::DamageArt::body_variant(
+                self.profile.id,
+                s.damage_variant,
+                s.damage_fraction,
+            )
+        };
         if fragment && damaged.is_none() {
             return result;
         }
@@ -535,7 +546,9 @@ impl Airframe {
             }) else {
                 continue;
             };
-            let surfaces = if fragment {
+            // Temporarily keep surviving aircraft visually intact. Regional
+            // damage still drives flight penalties and component failures.
+            let surfaces = if fragment || s.damage_fraction < 1. {
                 vec![f]
             } else {
                 self.damage_art.surfaces(&f, &s.damage_regions, model_scale)

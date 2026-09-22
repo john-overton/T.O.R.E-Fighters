@@ -96,9 +96,66 @@ pub fn select(
     None
 }
 
+/// Fitted cumulative ownship damage milestones, see docs/spec/systems-damage.md.
+/// Returns additional source-eligible faults without changing the chance selector.
+pub fn accumulated_faults(
+    table: &[u8; 45],
+    counts: &[u8; 45],
+    total: i32,
+    capacity: i32,
+) -> Vec<usize> {
+    let mut faults = Vec::new();
+    if capacity <= 0 {
+        return faults;
+    }
+    let groups: [(i32, &[usize]); 4] = [
+        (25, &[19, 21, 23, 27, 28]),
+        (50, &[5, 6, 7, 9, 10]),
+        (75, &[14]),
+        (90, &[12, 13]),
+    ];
+    for (percent, group) in groups {
+        if i64::from(total) * 100 >= i64::from(capacity) * i64::from(percent)
+            && !group.iter().any(|i| counts[*i] > 0)
+            && let Some(index) = group
+                .iter()
+                .copied()
+                .find(|i| eligible(table[*i], counts[*i], total, capacity, 0, true, *i))
+        {
+            faults.push(index);
+        }
+    }
+    faults
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cumulative_milestones_are_inclusive_and_respect_source_eligibility() {
+        let mut table = [0; 45];
+        for index in [19, 5, 14, 12] {
+            table[index] = 0x11;
+        }
+        let counts = [0; 45];
+        assert!(accumulated_faults(&table, &counts, 24, 100).is_empty());
+        assert_eq!(accumulated_faults(&table, &counts, 25, 100), [19]);
+        assert_eq!(accumulated_faults(&table, &counts, 50, 100), [19, 5]);
+        assert_eq!(accumulated_faults(&table, &counts, 75, 100), [19, 5, 14]);
+        assert_eq!(
+            accumulated_faults(&table, &counts, 90, 100),
+            [19, 5, 14, 12]
+        );
+        let mut counts = counts;
+        for index in accumulated_faults(&table, &counts, 92, 100) {
+            counts[index] += 1;
+        }
+        assert!(accumulated_faults(&table, &counts, 99, 100).is_empty());
+        table[19] = 0;
+        table[21] = 0x11;
+        assert_eq!(accumulated_faults(&table, &[0; 45], 25, 100), [21]);
+        assert!(accumulated_faults(&[0; 45], &[0; 45], 99, 100).is_empty());
+    }
     #[test]
     fn native_integer_damage_and_selection_boundaries() {
         assert_eq!(damage_amount(25, 100, 0), 20);

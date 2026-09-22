@@ -78,15 +78,15 @@ IR deception 40, radar/IR signature additions 100, noise distances 0/0.
   always-on fixture; no AI or autonomous launch decision exists.
 - Swept player/projectile contacts use relative previous/current positions.
   Applied damage is clamped to remaining HP; cumulative damage retains the
-  pre-clamp amount for selection. D requests one gun-strength player hit on
-  the next tick, using the aircraft's own gun damage and reviewed amount roll.
+  pre-clamp amount for selection. The explicit `damage` fixture requests one gun-strength player hit on
+  the next tick (keyboard D now reports damage), using the aircraft's own gun damage and reviewed amount roll.
 - Ordinary player hits automatically run the weighted selection and repeat
   gates. JT failures preserve mass/ammo but inhibit release; visual failure
   removes visual acquisition; radar failure removes radar contacts, inhibits
   radar launch and breaks illumination-dependent tracking. ECM failure follows
-  the separate jammer/chaff/flare branch. Unmapped selected indices retain
-  their bounded occurrence counts and report their source index; they do not
-  silently alter engine thrust or hydraulic pressure.
+  the separate jammer/chaff/flare branch. This pass retained unmapped selected indices as counts only. The later
+  [ownship systems implementation](../spec/systems-damage.md) connects their
+  reviewed identities to documented fitted engine, fluid and control effects.
 - Weapon instruments display player HP and V/R/E state: V is visual availability,
   R radar power, E jammer power; `+` available/powered, `-` off, `!` failed.
   Source fault index, readiness, ammo and existing target hit data remain visible.

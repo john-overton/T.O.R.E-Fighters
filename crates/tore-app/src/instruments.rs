@@ -164,6 +164,7 @@ pub struct CombatReadout {
     pub target: Option<crate::target_window::Readout>,
     pub scope: scope::Scope,
     pub rcs: scope::Rcs,
+    pub rwr_failed: bool,
     pub envelope_target: Option<Vec<tore_formats::aircraft::Envelope>>,
 }
 pub struct Instruments {
@@ -527,6 +528,16 @@ impl Instruments {
             r.text(f, label, x + 6, 141, [20, 35, 46, 255]);
         }
         let text = |r: &mut Raster, t: &str, x, y| r.text(f, t, x, y, GREEN);
+        if (id == 9 && s.systems.has(32))
+            || (id == 5
+                && (s.systems.counts[32] > 1 || self.combat.as_ref().is_some_and(|c| c.rwr_failed)))
+        {
+            return r;
+        }
+        if id == 6 && s.systems.has(33) {
+            text(&mut r, "NAV FAILED", 46, 73);
+            return r;
+        }
         match id {
             0 => {
                 let (cx, cy, radius) = (80i32, 76i32, 48.);
@@ -595,23 +606,66 @@ impl Instruments {
                 }
             }
             7 => {
-                for (i, (label, value)) in [
-                    ("THR", format!("{:.0}%", s.throttle * 100.)),
-                    ("TEMP", "---".into()),
-                    ("OIL", "---".into()),
-                    ("HYD", "---".into()),
+                let green = [72, 172, 55, 255];
+                let amber = [235, 187, 60, 255];
+                let red = [235, 70, 50, 255];
+                let width = |value: &str| {
+                    value
+                        .bytes()
+                        .map(|ch| f.glyphs[ch as usize].advance as i32)
+                        .sum::<i32>()
+                };
+                for (i, (label, value, color)) in [
+                    ("THR", s.throttle * 100., green),
+                    (
+                        "TEMP",
+                        s.systems.engine.temperature,
+                        if s.systems.engine.temperature >= 75. {
+                            red
+                        } else if s.systems.engine.temperature > 25. {
+                            amber
+                        } else {
+                            green
+                        },
+                    ),
+                    (
+                        "OIL",
+                        s.systems.oil_pressure() * 100.,
+                        if s.systems.oil_pressure() <= 0.25 {
+                            red
+                        } else if s.systems.oil_pressure() < 0.75 {
+                            amber
+                        } else {
+                            green
+                        },
+                    ),
+                    (
+                        "HYD",
+                        s.systems.fluids.hydraulic * 100.,
+                        if s.systems.fluids.hydraulic <= 0.25 {
+                            red
+                        } else if s.systems.fluids.hydraulic < 0.75 {
+                            amber
+                        } else {
+                            green
+                        },
+                    ),
                 ]
-                .iter()
+                .into_iter()
                 .enumerate()
                 {
-                    text(&mut r, label, 20, 33 + i as i32 * 14);
-                    text(&mut r, value, 107, 33 + i as i32 * 14);
+                    let y = 33 + i as i32 * 14;
+                    r.text(f, label, 20, y, color);
+                    let value = format!("{value:.0}%");
+                    r.text(f, &value, 138 - width(&value), y, color);
                 }
-                r.line((20, 91), (138, 91), GREEN);
-                text(&mut r, "FUEL", 20, 101);
-                text(&mut r, &format!("{:.0} LBS", s.fuel), 76, 101);
-                text(&mut r, "STORES", 20, 115);
-                text(&mut r, &format!("{:.0} LBS", s.payload_lbs), 76, 115);
+                r.line((20, 91), (138, 91), green);
+                r.text(f, "FUEL", 20, 101, green);
+                let fuel = format!("{:.0} LBS", s.fuel);
+                r.text(f, &fuel, 138 - width(&fuel), 101, green);
+                r.text(f, "(+ EXT", 20, 115, green);
+                let fuel = format!("{:.0} LBS)", s.systems.external_lbs());
+                r.text(f, &fuel, 138 - width(&fuel), 115, green);
             }
             5 => {
                 r.line((13, 76), (147, 76), DIM);

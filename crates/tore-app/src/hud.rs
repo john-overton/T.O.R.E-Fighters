@@ -191,6 +191,10 @@ pub fn draw(
         clip: HUD_CLIP,
         color: [color[0], color[1], color[2], 255],
     };
+    if s.systems.has(31) {
+        p.text(font, "FLIGHT DATA FAILED", 264, 225);
+        return;
+    }
     let hdg = heading(s.yaw);
     // Heading strip and pointer, wrapped across north.
     for i in -4..=4 {

@@ -875,6 +875,7 @@ impl AiWings {
             target.velocity = f.velocity;
             target.basis = Basis::new(f.yaw, f.pitch, f.bank);
             target.radar_emitting = f.radar;
+            target.wreck_power = f.wreck_power(target.wreck_power.engine_count.max(1));
         }
     }
 
@@ -1500,7 +1501,11 @@ mod tests {
                 hit_points: 20,
                 target_category: 0x80,
                 external_equipment_lbs: 0,
+                external_fuel_lbs: [0.; 9],
+                engines: 1,
+                wreck_power: tore_sim::wreck::Power::default(),
                 infrared_hardpoint: None,
+                rwr_hardpoint: None,
                 sensors: sensors::SensorProfiles {
                     aircraft: AircraftId::F18,
                     radar: None,
@@ -1546,6 +1551,8 @@ mod tests {
             hp: 100,
             initial_hp: 100,
             fragment_offsets: [[0.; 3]; 2],
+            wreck: None,
+            wreck_power: tore_sim::wreck::Power::default(),
             fragment_released: false,
             localized_damage: live::LocalizedDamage::default(),
             category: 0,

@@ -99,6 +99,7 @@ impl Action {
                 | "range-target"
                 | "damage-class"
                 | "fail-station"
+                | "damage-report"
                 | "damage-player"
                 | "target-jammer"
                 | "incoming"

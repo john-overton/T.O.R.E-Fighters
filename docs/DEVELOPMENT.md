@@ -725,3 +725,13 @@ shadows versus distant casters, and a five-second low-sun stability sequence
 with small camera movements and sunglare disabled. The glare test checks
 every channel of a synthetic gradient under two flare circles against continuous
 optical composition. Both tests use no retail media.
+
+## Systems instrument fixtures
+
+`--panel-snapshot PATH --instrument-page 7` renders the aircraft's actual default
+loadout, including external tanks. `--systems-preview 12,13,14` applies explicit
+panel-only oil pump, oil leak and hydraulic leak faults. Advance with
+`--flight-probe-ticks N` (default 1,200 in this fixture), and use
+`--flight-throttle 0..1` for thermal comparisons. The preview requires a panel
+snapshot and cannot inject damage into an interactive sortie. Indices 1..35
+are listed in the [damage event map](formats/systems-damage.md). Keep captures ignored.

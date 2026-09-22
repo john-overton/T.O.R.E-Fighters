@@ -190,6 +190,7 @@ pub fn rcs(state: &live::State, s: &flight::State, scale_nmi: f64) -> Rcs {
         emitters: state
             .emitters
             .iter()
+            .filter(|_| !state.rwr_failed)
             .map(|e| Emitter {
                 bearing_rad: e.bearing_rad,
                 distance_nmi: e.distance_nmi,

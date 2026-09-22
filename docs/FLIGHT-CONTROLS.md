@@ -42,6 +42,7 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | Backspace | Toggle cockpit art, retain HUD/windows | FA menu (`BS`) |
 | Shift-U | Toggle HUD | Development shortcut |
 | Shift-[ / Shift-] | Dim / brighten HUD | FA menu |
+| D | Report ownship and systems damage in the sim log | Manual p. 161; requested summary |
 | Shift-0…9 | Toggle instrument windows (four large or six small) | FA menu; oldest open window is replaced |
 | Comma / period | Decrease/increase scope range | USNF manual; applies to the RWR or the RCS page if either is the last opened window, and to the radar scope otherwise |
 | C / Shift-C | Cycle 1×/2×/4×/8× time / select 0.5× | FA menu; fixed 120 Hz ticks, authored adapter time scaling |
@@ -70,7 +71,7 @@ The Envelope window (Shift-1) uses U for the current G curve, A for all positive
 The instrument contents retain their original 160×156 raster and are resampled directly to the flight overlay resolution. There is no intermediate 96×94 reduction, so small-window text retains source strokes on larger displays. These are fitted layouts, not recovered native placement rules. Sizes and margins scale by the smaller of width/640 and height/480. Use `--instrument-layout large` or `--instrument-layout small` for startup or repeatable GPU captures.
 
 
-Shift-1 Envelope; Shift-2 Forward View; Shift-3 Other View; Shift-4 Radar/Visual; Shift-5 RWR; Shift-6 Navigation; Shift-7 Systems; Shift-8 Weapons; Shift-9 Radar; Shift-0 Radar Cross Section. Page 0 now draws the exposure contour, received emitter symbols and its view scale; its buttons are `-` and `+`. Page 9 buttons are `-`, `+`, `M` for the channel cycle and `Y` for history. Hovering a contact on page 9 marks it with the selector corners, a click on it designates it, and an empty click leaves the current designation alone. Empty scopes and NO TARGET are intentional in target-free flight. Temperature, oil and hydraulics remain unavailable instead of displaying fabricated healthy values.
+Shift-1 Envelope; Shift-2 Forward View; Shift-3 Other View; Shift-4 Radar/Visual; Shift-5 RWR; Shift-6 Navigation; Shift-7 Systems; Shift-8 Weapons; Shift-9 Radar; Shift-0 Radar Cross Section. Page 0 now draws the exposure contour, received emitter symbols and its view scale; its buttons are `-` and `+`. Page 9 buttons are `-`, `+`, `M` for the channel cycle and `Y` for history. Hovering a contact on page 9 marks it with the selector corners, a click on it designates it, and an empty click leaves the current designation alone. Empty scopes and NO TARGET are intentional in target-free flight. Systems now shows live damage-driven TEMP/OIL/HYD, internal FUEL and external tank fuel. D reports damage in the bottom-center sim log. [System failures and fitted rates](spec/systems-damage.md).
 
 The scope, the exposure page and the weapons all read one shared sensor
 component. [What it models, what is authored tuning and what is deferred](radar.md).
@@ -251,10 +252,12 @@ This is separate from pilot-input recording and does not re-simulate flight.
 
 ## Weapons and systems continuation
 
-In the explicit `--live-fire` range, **D** requests a gun-strength player hit,
-**Shift-I** spawns one incoming selected source weapon, and **Shift-Y** toggles
+**D** reports your aircraft damage percentage, temperature/oil/hydraulic readings,
+remaining engine power and failed systems through the bottom-center sim log.
+It never damages the aircraft. The `damage-player` developer command and controller
+fixture remain available explicitly. In the `--live-fire` range, **Shift-I** spawns one incoming selected source weapon, and **Shift-Y** toggles
 target ECM. Those two fixtures moved off I and Y when those keys took over
-infrared selection and contact history; D is also a development binding.
+infrared selection and contact history.
 **J** controls own ECM and **R** radar. The incoming fixture does
 not command AI or spend player ammunition. K selected-group jettison, L clear designation, bracket NAV/weapon cycling,
 T/Enter designate, Space hold fire and backslash target replacement remain available.
@@ -272,7 +275,9 @@ in [INPUT.md](INPUT.md#manual-combat-layer-2026-09-14).
 Weapons page V/R/E reports visual availability, radar and ECM: `+` available/on,
 `-` off, `!` failed. A failed visual sensor now also removes visual contacts, so
 the V indicator and the scope agree. Automatic source-index faults are separate from the manual
-bracket injection. Unknown engine/hydraulic effects remain unimplemented.
+developer injection. Engine, fluid, control, structural and pilot failures now
+affect ownship and use the sim log. The panel retains only its retail gauges
+and fuel rows. See [systems damage](spec/systems-damage.md) for exact fitted rates.
 [Recovered contracts, runtime evidence and remaining gates](baselines/weapons-systems.md).
 
 
@@ -534,3 +539,23 @@ See [selection and instrument rules](spec/weapon-navigation-selection.md).
 
 Friendly selected contacts have a centered X inside their HUD target box.
 [Identification and presentation rules](spec/gunsight-targeting.md#target-square-and-edge-chevron).
+
+Partial wing or tail damage reduces control effectiveness and can cause an
+uncommanded roll or yaw. Autopilot is unavailable after such structural damage.
+The D report never rounds a surviving aircraft up to 100%; catastrophic whole-part
+loss requires actual destruction. All damage marks and partial tears are also
+currently hidden until 100%, while flight and system failures remain active.
+See [damage behavior](spec/systems-damage.md).
+
+Destroyed airborne aircraft now tumble and fall without accepting pilot commands.
+Surviving engines may continue to push the wreck, including asymmetric thrust.
+A 5% airburst check runs each second for five seconds, then every five seconds
+until impact. A successful roll explodes and removes the aircraft. Restart clears
+the wreck. See [destroyed-aircraft behavior](spec/destroyed-aircraft.md).
+
+Pilot death immediately selects the F10 exterior view, recenters look/zoom and
+closes the navigation map without pausing. Player nose loss is fatal to the pilot.
+The player wreck explodes on ground impact; a safe landing does not.
+
+A destroyed player aircraft continues trailing damage smoke while airborne,
+even after pilot death. Impact or explosion stops emission; existing smoke fades.
