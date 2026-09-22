@@ -9,7 +9,7 @@ use tore_input::{
     Action, Event, FeedbackEvent, FeedbackMixer, FeedbackUpdate, PilotCommand, PilotInput, Profile,
     Resolver,
 };
-use tore_input_native::{Backend, Device, Kind, Notification};
+use tore_input_native::{Backend, Device, HeadTracker, Kind, Notification};
 const DEFAULTS: &str = "tore-input 1\n\
 bind keyboard flight-pitch pitch axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-roll roll axis -1 0 1 0 1 1 100\n\
@@ -21,7 +21,46 @@ bind keyboard Shift-n airport-nav press\n\
 bind keyboard Shift-a airport-next press\n\
 bind keyboard Shift-l airport-request-landing press\n\
 bind keyboard Shift-r airport-repeat press\n\
-bind keyboard Shift-c airport-cancel press\n";
+bind keyboard Shift-c airport-cancel press\n\
+bind mouse wheel:up zoom-in press\n\
+bind mouse wheel:down zoom-out press\n";
+const FLIGHT_KEYS: [&str; 6] = [
+    "flight-pitch",
+    "flight-roll",
+    "flight-yaw",
+    "flight-throttle",
+    "flight-look-x",
+    "flight-look-y",
+];
+/// Stock bindings plus the player's profile. Stock keyboard/mouse bindings
+/// the player removed are left out.
+fn complete(custom: &Profile) -> Result<Profile, String> {
+    let mut profile = Profile::parse(DEFAULTS)?;
+    profile.bindings.retain(|b| {
+        !custom
+            .disabled
+            .contains(&(b.device.clone(), b.control.clone()))
+    });
+    let stock = std::mem::take(&mut profile.bindings);
+    profile = Profile {
+        bindings: stock,
+        ..custom.clone()
+    };
+    profile.bindings.extend(custom.bindings.iter().cloned());
+    Ok(profile)
+}
+fn is_stock(binding: &tore_input::Binding) -> bool {
+    Profile::parse(DEFAULTS)
+        .expect("static defaults")
+        .bindings
+        .iter()
+        .any(|d| {
+            d.device == binding.device
+                && d.control == binding.control
+                && d.action == binding.action
+                && d.mode == binding.mode
+        })
+}
 pub struct Input {
     pub resolver: Resolver,
     automatic: bool,
@@ -37,11 +76,17 @@ pub struct Input {
     key_values: BTreeMap<String, f64>,
     context: (bool, bool),
     pub next_poll: Instant,
+    native: bool,
+    head: HeadTracker,
+    head_raw: Option<[f64; 2]>,
+    head_center: [f64; 2],
 }
 impl Input {
     pub fn new(path: Option<&Path>, native: bool) -> Result<Self, String> {
-        let mut profile = Profile::parse(DEFAULTS)?;
-        profile.gamepad_defaults = path.is_none();
+        let mut custom = Profile {
+            gamepad_defaults: path.is_none(),
+            ..Profile::default()
+        };
         if let Some(path) = path {
             let mut text = String::new();
             std::fs::File::open(path)
@@ -49,21 +94,18 @@ impl Input {
                 .take(256 * 1024 + 1)
                 .read_to_string(&mut text)
                 .map_err(|e| e.to_string())?;
-            let custom = Profile::parse(&text)?;
-            profile.aliases = custom.aliases;
-            profile.rumble = custom.rumble;
-            profile.gamepad_defaults = custom.gamepad_defaults;
-            profile.bindings.extend(custom.bindings);
+            custom = Profile::parse(&text)?;
+        }
+        let profile = complete(&custom)?;
+        let head = match profile.head_port {
+            Some(port) if native => HeadTracker::start(port),
+            _ => HeadTracker::disabled(),
+        };
+        if let Some(error) = &head.error {
+            eprintln!("Head tracker not listening: {error}");
         }
         let mut resolver = Resolver::new(profile);
-        for control in [
-            "flight-pitch",
-            "flight-roll",
-            "flight-yaw",
-            "flight-throttle",
-            "flight-look-x",
-            "flight-look-y",
-        ] {
+        for control in FLIGHT_KEYS {
             resolver.event(Event {
                 device: "keyboard".into(),
                 control: control.into(),
@@ -91,16 +133,15 @@ impl Input {
             key_values: BTreeMap::new(),
             context: (false, true),
             next_poll: Instant::now(),
+            native,
+            head,
+            head_raw: None,
+            head_center: [0.; 2],
         })
     }
     pub fn settings_profile(&self) -> Profile {
         let mut profile = self.resolver.profile.clone();
-        profile.bindings.retain(|b| {
-            !(b.device == "keyboard"
-                && (b.control.starts_with("flight-")
-                    || ["Shift-n", "Shift-a", "Shift-l", "Shift-r", "Shift-c"]
-                        .contains(&b.control.as_str())))
-        });
+        profile.bindings.retain(|b| !is_stock(b));
         profile
     }
     pub fn save_settings(&mut self, profile: &Profile) -> Result<(), String> {
@@ -116,22 +157,23 @@ impl Input {
         };
         crate::preferences::write(&path, &text)
             .map_err(|e| format!("Could not save controls: {e}"))?;
+        self.save_settings_to(profile, Some(path));
+        Ok(())
+    }
+    /// Replaces the live bindings with a validated profile.
+    fn save_settings_to(&mut self, profile: &Profile, path: Option<std::path::PathBuf>) {
         self.stop();
-        let mut complete = Profile::parse(DEFAULTS)?;
-        complete.aliases = profile.aliases.clone();
-        complete.rumble = profile.rumble;
-        complete.gamepad_defaults = profile.gamepad_defaults;
-        complete.bindings.extend(profile.bindings.clone());
-        self.resolver = Resolver::new(complete);
+        let port = self.resolver.profile.head_port;
+        self.resolver = Resolver::new(complete(profile).expect("validated profile"));
         self.resolver.context(self.context.0, self.context.1);
-        for control in [
-            "flight-pitch",
-            "flight-roll",
-            "flight-yaw",
-            "flight-throttle",
-            "flight-look-x",
-            "flight-look-y",
-        ] {
+        if port != profile.head_port {
+            self.head = HeadTracker::disabled();
+            if let Some(port) = profile.head_port.filter(|_| self.native) {
+                self.head = HeadTracker::start(port);
+            }
+            self.head_raw = None;
+        }
+        for control in FLIGHT_KEYS {
             self.resolver.event(Event {
                 device: "keyboard".into(),
                 control: control.into(),
@@ -155,8 +197,9 @@ impl Input {
         self.key_claims.clear();
         self.key_values.clear();
         self.automatic = profile.gamepad_defaults;
-        self.profile_path = Some(path);
-        Ok(())
+        if path.is_some() {
+            self.profile_path = path;
+        }
     }
     pub fn context(&mut self, paused: bool, focused: bool) {
         if self.context != (paused, focused) {
@@ -201,7 +244,9 @@ impl Input {
     ) -> bool {
         if !pressed {
             if let Some(control) = self.key_claims.remove(key) {
-                self.key_value(&control, 0.);
+                if !control.is_empty() {
+                    self.key_value(&control, 0.);
+                }
                 return true;
             }
             return false;
@@ -222,7 +267,91 @@ impl Input {
             self.key_value(&control, 1.);
             return true;
         }
+        // A stock key the player removed does nothing until released.
+        if self
+            .resolver
+            .profile
+            .disabled
+            .contains(&("keyboard".into(), control.clone()))
+            && !crate::input_catalog::PROTECTED_KEYS.contains(&control.as_str())
+        {
+            self.key_claims.insert(key.into(), String::new());
+            return true;
+        }
         false
+    }
+    /// Mouse buttons other than the left button, which always drives the
+    /// screen. The right button is mouse look while that is enabled.
+    pub fn mouse_button(&mut self, control: &str, pressed: bool) {
+        self.mouse_value(control, f64::from(u8::from(pressed)));
+    }
+    /// One press and release per wheel notch.
+    pub fn mouse_wheel(&mut self, notches: i32) {
+        let control = if notches > 0 {
+            "wheel:up"
+        } else {
+            "wheel:down"
+        };
+        for _ in 0..notches.unsigned_abs().min(8) {
+            self.mouse_value(control, 1.);
+            self.mouse_value(control, 0.);
+        }
+    }
+    fn mouse_value(&mut self, control: &str, value: f64) {
+        let key = format!("mouse:{control}");
+        if !self.key_values.contains_key(&key) {
+            self.resolver.event(Event {
+                device: "mouse".into(),
+                control: control.into(),
+                value: 0.,
+                baseline: true,
+            });
+        }
+        if self.key_values.insert(key, value) != Some(value) {
+            self.resolver.event(Event {
+                device: "mouse".into(),
+                control: control.into(),
+                value,
+                baseline: false,
+            });
+        }
+    }
+    /// Head-tracker view angles in radians, relative to the last recenter:
+    /// an opentrack UDP pose when one is arriving, otherwise bound head axes.
+    pub fn head_look(&mut self) -> Option<[f32; 2]> {
+        // opentrack yaw is positive to the left; T.O.R.E look is positive to
+        // the right. Fitted sign; `head-scale` negative values flip either axis.
+        self.head_raw = self
+            .head
+            .poll()
+            .map(|pose| [-pose.yaw.to_radians(), pose.pitch.to_radians()])
+            .or_else(|| self.resolver.head().map(|v| v.map(f64::from)));
+        let raw = self.head_raw?;
+        let scale = self.resolver.profile.head_scale;
+        Some(std::array::from_fn(|i| {
+            ((raw[i] - self.head_center[i]) * scale[i]) as f32
+        }))
+    }
+    /// Makes the current head pose the forward view.
+    pub fn center_head(&mut self) {
+        if let Some(raw) = self.head_raw {
+            self.head_center = raw;
+        }
+    }
+    pub fn head_status(&mut self) -> String {
+        let pose = self.head.poll();
+        match (self.head.port(), pose, &self.head.error) {
+            (_, Some(p), _) => format!(
+                "Receiving on UDP {}: yaw {:.0}, pitch {:.0} degrees",
+                self.head.port().unwrap_or(0),
+                p.yaw,
+                p.pitch
+            ),
+            (Some(port), None, _) => format!("Waiting for opentrack on UDP {port}"),
+            (None, _, Some(error)) => format!("Not listening: {error}"),
+            (None, _, None) if !self.native => "Device input is off for this session".into(),
+            (None, _, None) => "Off".into(),
+        }
     }
     fn key_value(&mut self, control: &str, value: f64) {
         if !self.key_values.contains_key(control) {
@@ -259,13 +388,18 @@ impl Input {
                             .any(|b| b.device == d.id)
                     {
                         let defaults = gamepad_defaults(&d);
-                        if self.resolver.profile.bindings.len() + defaults.len() <= 1024 {
-                            if !defaults.is_empty() {
+                        if self.resolver.profile.bindings.len() + defaults.bindings.len() <= 1024 {
+                            if !defaults.bindings.is_empty() {
                                 eprintln!(
                                     "Input: standard Linux gamepad bindings enabled; see docs/INPUT.md"
                                 );
                             }
-                            self.resolver.profile.bindings.extend(defaults);
+                            self.resolver.profile.bindings.extend(defaults.bindings);
+                            for modifier in defaults.modifiers {
+                                if !self.resolver.profile.modifiers.contains(&modifier) {
+                                    self.resolver.profile.modifiers.push(modifier);
+                                }
+                            }
                         }
                     }
                     if self.devices.contains_key(&d.id) {
@@ -619,12 +753,11 @@ fn rumble_target<'a>(
     }
 }
 
-fn gamepad_defaults(device: &Device) -> Vec<tore_input::Binding> {
-    Profile::parse(&gamepad_text(device))
-        .expect("static gamepad profile")
-        .bindings
+/// Default bindings and the Select modifier for a standard Linux gamepad.
+pub fn gamepad_defaults(device: &Device) -> Profile {
+    Profile::parse(&gamepad_text(device)).expect("static gamepad profile")
 }
-fn gamepad_text(device: &Device) -> String {
+pub fn gamepad_text(device: &Device) -> String {
     if !device.id.starts_with("linux-")
         || ![
             "axis:0",
@@ -677,6 +810,9 @@ fn gamepad_text(device: &Device) -> String {
                 device.id
             ));
         }
+    }
+    if device.controls.iter().any(|c| c.id == "button:314") {
+        text.push_str(&format!("modifier {} button:314\n", device.id));
     }
     for (control, action, mode) in [
         ("button:311", "fire", "hold"),
@@ -835,6 +971,55 @@ mod tests {
             i.resolver.drain()[0].1,
             Action::Pilot(PilotCommand::Toggle(tore_input::Switch::Flaps))
         );
+    }
+    #[test]
+    fn removed_stock_keys_are_swallowed_and_moved_keys_act() {
+        let mut i = Input::new(None, false).unwrap();
+        let p = Profile::parse(
+            "tore-input 1\ndisable keyboard g\ndisable keyboard Shift-n\nbind keyboard Ctrl-g gear press\nbind keyboard w pitch negative -1 0 1 0 1 1 100",
+        )
+        .unwrap();
+        i.save_settings_to(&p, None);
+        // G no longer reaches the stock gear handler, and does nothing itself.
+        assert!(i.key("g", true, M::empty()));
+        assert!(i.resolver.drain().is_empty());
+        assert!(i.key("g", false, M::empty()));
+        // Protected keys are never swallowed.
+        i.resolver
+            .profile
+            .disabled
+            .insert(("keyboard".into(), "Escape".into()));
+        assert!(!i.key("Escape", true, M::empty()));
+        i.resolver
+            .profile
+            .disabled
+            .remove(&("keyboard".into(), "Escape".into()));
+        // The stock airport binding on Shift-N is gone.
+        assert!(!i.resolver.bound("keyboard", "Shift-n"));
+        assert!(i.key("g", true, M::CONTROL));
+        assert_eq!(
+            i.resolver.drain()[0].1,
+            Action::Pilot(PilotCommand::Toggle(tore_input::Switch::Gear))
+        );
+        assert!(i.key("w", true, M::empty()));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.pitch, -1.);
+        assert_eq!(
+            i.settings_profile().to_text().unwrap(),
+            p.to_text().unwrap()
+        );
+    }
+    #[test]
+    fn wheel_notches_zoom_unless_removed() {
+        let mut i = input("");
+        i.mouse_wheel(2);
+        let zooms = i.resolver.drain();
+        assert_eq!(zooms.len(), 2);
+        assert_eq!(zooms[0].1, Action::Ui("zoom-in".into()));
+        let p = Profile::parse("tore-input 1\ndisable mouse wheel:up").unwrap();
+        i.save_settings_to(&p, None);
+        i.mouse_wheel(1);
+        i.mouse_wheel(-1);
+        assert_eq!(i.resolver.drain()[0].1, Action::Ui("zoom-out".into()));
     }
     #[test]
     fn pending_commands_are_consumed_once_and_dropped_on_pause() {

@@ -333,8 +333,110 @@ fn fire_profiles_cannot_silently_select_edge_or_axis_modes() {
     for mode in ["press", "release", "switch", "axis", "delta"] {
         assert!(Profile::parse(&format!("tore-input 1\nbind pad b fire {mode}")).is_err());
     }
-    for control in ["+a", "a+", "a+a", "a+b+c"] {
+    for control in ["+a", "a+", "a+a", "a+b+a", "a+b+c+d", "hat=x+b", "t>+b"] {
         assert!(Profile::parse(&format!("tore-input 1\nbind pad {control} fire hold")).is_err());
     }
     assert!(Profile::parse("tore-input 1\nbind pad modifier+b fire hold").is_ok());
+    assert!(Profile::parse("tore-input 1\nbind pad lb+rb+b fire hold").is_ok());
+    assert!(Profile::parse("tore-input 1\nbind keyboard a+b gear press").is_err());
+}
+
+#[test]
+fn stacked_modifiers_pick_the_most_specific_layer() {
+    let mut r = resolver(
+        "bind pad a gear press\nbind pad lb+a flaps press\nbind pad lb+rb+a hook press\nbind pad rb+a airbrake press",
+    );
+    for c in ["a", "lb", "rb"] {
+        event(&mut r, "pad", c, 0., true);
+    }
+    let press = |r: &mut Resolver| {
+        event(r, "pad", "a", 1., false);
+        event(r, "pad", "a", 0., false);
+        r.drain()
+            .into_iter()
+            .map(|(_, a)| crate::profile_text::action_name(&a))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(press(&mut r), ["gear"]);
+    event(&mut r, "pad", "lb", 1., false);
+    assert_eq!(press(&mut r), ["flaps"]);
+    event(&mut r, "pad", "rb", 1., false);
+    assert_eq!(press(&mut r), ["hook"]);
+    event(&mut r, "pad", "lb", 0., false);
+    assert_eq!(press(&mut r), ["airbrake"]);
+    event(&mut r, "pad", "rb", 0., false);
+    assert_eq!(press(&mut r), ["gear"]);
+}
+#[test]
+fn dpad_directions_are_independent_dedicated_modifiers() {
+    let mut r = resolver(
+        "modifier pad hat=-1\nmodifier pad hat=1\nbind pad hat instrument-previous position=-1\nbind pad hat instrument-next position=1\nbind pad hat=-1+a flaps press\nbind pad hat=1+a hook press\nbind pad a gear press",
+    );
+    for c in ["a", "hat"] {
+        event(&mut r, "pad", c, 0., true);
+    }
+    event(&mut r, "pad", "hat", -1., false);
+    // A dedicated modifier no longer performs its own hat action.
+    assert!(r.drain().is_empty());
+    event(&mut r, "pad", "a", 1., false);
+    event(&mut r, "pad", "a", 0., false);
+    assert_eq!(
+        r.drain(),
+        vec![(
+            "pad".into(),
+            Action::Pilot(PilotCommand::Toggle(Switch::Flaps))
+        )]
+    );
+    event(&mut r, "pad", "hat", 1., false);
+    event(&mut r, "pad", "a", 1., false);
+    assert_eq!(
+        r.drain(),
+        vec![(
+            "pad".into(),
+            Action::Pilot(PilotCommand::Toggle(Switch::Hook))
+        )]
+    );
+    event(&mut r, "pad", "a", 0., false);
+    event(&mut r, "pad", "hat", 0., false);
+    event(&mut r, "pad", "a", 1., false);
+    assert_eq!(
+        r.drain(),
+        vec![(
+            "pad".into(),
+            Action::Pilot(PilotCommand::Toggle(Switch::Gear))
+        )]
+    );
+}
+#[test]
+fn analog_threshold_acts_as_a_button_and_trigger_scale_is_sensitivity() {
+    let mut r =
+        resolver("bind pad rt>0 fire hold\nbind pad lt yaw trigger-negative -1 0 1 0 1 0.5 10");
+    event(&mut r, "pad", "rt", -1., true);
+    event(&mut r, "pad", "lt", -1., true);
+    event(&mut r, "pad", "rt", -0.5, false);
+    assert!(!r.held("fire"));
+    event(&mut r, "pad", "rt", 0.4, false);
+    assert!(r.held("fire"));
+    event(&mut r, "pad", "rt", -1., false);
+    assert!(!r.held("fire"));
+    event(&mut r, "pad", "lt", 1., false);
+    assert_eq!(frame(&mut r).yaw, -0.5);
+}
+#[test]
+fn head_axes_report_absolute_angles_only_when_bound() {
+    let mut r = resolver("bind stick x roll axis");
+    assert_eq!(r.head(), None);
+    let mut r = resolver("bind track yaw head-yaw axis -1 0 1 0 1 1 10");
+    event(&mut r, "track", "yaw", 0., true);
+    event(&mut r, "track", "yaw", 0.5, false);
+    let head = r.head().unwrap();
+    assert!((head[0] - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+    assert_eq!(head[1], 0.);
+}
+#[test]
+fn star_bindings_never_match_keyboard_or_mouse() {
+    let mut r = resolver("bind * wheel:up zoom-in press");
+    event(&mut r, "mouse", "wheel:up", 0., true);
+    event(&mut r, "mouse", "wheel:up", 1., false);
+    assert!(r.drain().is_empty());
 }

@@ -10,6 +10,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tore_input::Event;
+mod head;
+pub use head::{HeadPose, HeadTracker};
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]

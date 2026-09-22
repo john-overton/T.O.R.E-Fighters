@@ -10,6 +10,8 @@ pub fn action_name(action: &Action) -> String {
             Axis::ThrottleRate => "throttle-rate",
             Axis::LookX => "look-x",
             Axis::LookY => "look-y",
+            Axis::HeadYaw => "head-yaw",
+            Axis::HeadPitch => "head-pitch",
         }
         .into(),
         Action::Pilot(PilotCommand::Toggle(s)) => match s {
@@ -61,8 +63,29 @@ impl Profile {
             "gamepad-defaults {}\n",
             if self.gamepad_defaults { "on" } else { "off" }
         ));
+        let on = |v: bool| if v { "on" } else { "off" };
+        text.push_str(&format!(
+            "mouse-look {}\nmouse-sensitivity {}\nmouse-invert {}\n",
+            on(self.mouse_look),
+            self.mouse_sensitivity,
+            on(self.mouse_invert)
+        ));
+        match self.head_port {
+            Some(port) => text.push_str(&format!("head-tracker udp:{port}\n")),
+            None => text.push_str("head-tracker off\n"),
+        }
+        text.push_str(&format!(
+            "head-scale {} {}\n",
+            self.head_scale[0], self.head_scale[1]
+        ));
         for (alias, id) in &self.aliases {
             text.push_str(&format!("alias {alias} {id}\n"));
+        }
+        for (device, control) in &self.modifiers {
+            text.push_str(&format!("modifier {device} {control}\n"));
+        }
+        for (device, control) in &self.disabled {
+            text.push_str(&format!("disable {device} {control}\n"));
         }
         for b in &self.bindings {
             let c = b.calibration;
@@ -90,9 +113,13 @@ mod tests {
     use super::*;
     #[test]
     fn roundtrip_preserves_aliases_calibration_and_behaviors() {
-        let p=Profile::parse("tore-input 1\nrumble on\nalias pad device\nbind pad x roll axis -0.9 0.1 0.8 0.12 1.7 -1 30\nbind pad t throttle unit\nbind pad b gear follow\nbind pad hat instrument-next position=-1\nbind keyboard Ctrl-g gear press\nbind keyboard Shift-o bay press\n").unwrap();
+        let p=Profile::parse("tore-input 1\nrumble on\nmouse-sensitivity 2.5\nmouse-invert on\nhead-tracker udp:5555\nhead-scale -1.5 0.5\nmodifier pad axis:16=-1\nmodifier pad button:314\ndisable keyboard g\ndisable mouse wheel:up\nbind pad button:314+axis:16=-1+b jammer press\nbind pad axis:5>0.5 fire hold\nbind pad hy head-yaw axis\nalias pad device\nbind pad x roll axis -0.9 0.1 0.8 0.12 1.7 -1 30\nbind pad t throttle unit\nbind pad b gear follow\nbind pad hat instrument-next position=-1\nbind keyboard Ctrl-g gear press\nbind keyboard Shift-o bay press\n").unwrap();
         let text = p.to_text().unwrap();
         assert_eq!(Profile::parse(&text).unwrap().to_text().unwrap(), text);
         assert!(text.contains("0.12 1.7 -1 30"));
+        assert_eq!(p.head_port, Some(5555));
+        assert_eq!(p.head_scale, [-1.5, 0.5]);
+        assert_eq!(p.modifiers.len(), 2);
+        assert!(text.contains("disable keyboard g\n"));
     }
 }

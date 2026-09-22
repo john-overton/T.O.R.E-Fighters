@@ -30,6 +30,7 @@ mod flight_ui;
 mod hud;
 mod hud_aperture;
 mod input;
+mod input_catalog;
 mod instruments;
 mod lens_flare;
 mod locate;
@@ -70,7 +71,7 @@ use tore_sim::models::FlightModel;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{ElementState, MouseButton, WindowEvent},
+    event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, ModifiersState},
     platform::run_on_demand::EventLoopExtRunOnDemand,
@@ -199,6 +200,15 @@ struct App {
     /// Set by Pref > Re-import media: the menu frame the player was looking
     /// at, which the locate screen then draws over.
     reimport: Option<Vec<u8>>,
+    /// The input configuration screen, open over the main menu or the
+    /// paused flight menu. One component serves both.
+    controls: Option<controls_editor::Editor>,
+    /// Cursor position while the right button drags mouse look.
+    mouse_look: Option<(f64, f64)>,
+    /// Unused fraction of a smooth-scrolling wheel notch.
+    wheel: f64,
+    /// Head-tracker view offset added to the player's look angles.
+    head_look: [f32; 2],
     finished: bool,
     next_frame: Option<Instant>,
     error: Option<Box<dyn Error>>,
@@ -804,19 +814,7 @@ impl App {
                 self.camera.keys.clear();
                 self.combat.cancel();
                 self.flight_clock.remainder = 0.;
-                self.flight_ui.controls_editor = Some(controls_editor::Editor::new(
-                    self.input.settings_profile(),
-                    self.input.devices.values().cloned().collect(),
-                ));
-                Action::Click
-            }
-            Command::ControlsSave => {
-                if let Some(editor) = &mut self.flight_ui.controls_editor {
-                    editor.message = match self.input.save_settings(&editor.profile) {
-                        Ok(()) => "Controls saved and applied".into(),
-                        Err(e) => e,
-                    };
-                }
+                self.open_controls("Flight paused");
                 Action::Click
             }
             Command::Toggle(switch) => {
@@ -861,11 +859,13 @@ impl App {
             }
             Command::CenterLook => {
                 self.flight_ui.look = [0.; 2];
+                self.input.center_head();
                 Action::None
             }
             Command::View(view) => {
                 self.flight_view = view;
                 self.flight_ui.look = [0.; 2];
+                self.input.center_head();
                 self.flight_ui.zoom = 1.;
                 Action::Click
             }
@@ -941,6 +941,43 @@ impl App {
             }
         }
     }
+    fn open_controls(&mut self, context: &'static str) {
+        let mut editor = controls_editor::Editor::new(
+            self.input.settings_profile(),
+            self.input.devices.values().cloned().collect(),
+            context,
+        );
+        editor.head_status = self.input.head_status();
+        self.controls = Some(editor);
+        self.mouse_look = None;
+    }
+    fn controls_result(&mut self, result: controls_editor::ResultAction) -> Action {
+        use controls_editor::ResultAction;
+        match result {
+            ResultAction::None => Action::None,
+            ResultAction::Changed => Action::Click,
+            ResultAction::Save => {
+                if let Some(editor) = &mut self.controls {
+                    match self.input.save_settings(&editor.profile) {
+                        Ok(()) => {
+                            editor.message = "Controls saved and applied".into();
+                            editor.saved();
+                        }
+                        Err(e) => editor.message = e,
+                    }
+                }
+                Action::Click
+            }
+            ResultAction::Close => {
+                self.controls = None;
+                if self.screen == Screen::Flight {
+                    self.flight_ui.controls_closed();
+                }
+                self.menu.state.cancel();
+                Action::Click
+            }
+        }
+    }
     fn action(&mut self, event_loop: &ActiveEventLoop, action: Action) {
         if action == Action::Exit {
             self.finished = true;
@@ -948,6 +985,7 @@ impl App {
             return;
         }
         match action {
+            Action::Controls => self.open_controls("Main menu"),
             Action::ReimportMedia => {
                 // The pack on disk is still valid here, so the menu the player
                 // is looking at becomes the locate screen's background.
@@ -1571,6 +1609,10 @@ impl ApplicationHandler for App {
                 self.quick.cancel();
                 self.instruments.cancel_press();
                 self.flight_ui.cancel_press();
+                if let Some(editor) = &mut self.controls {
+                    editor.cancel_capture();
+                }
+                self.mouse_look = None;
                 self.pointer = None;
                 self.camera.keys.clear();
                 self.combat.cancel();
@@ -1580,13 +1622,58 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let point = renderer.viewport().point(position.x, position.y);
                 self.pointer = Some((position.x, position.y));
+                if self.controls.is_some() {
+                    return;
+                }
                 match self.screen {
                     Screen::Main => self.menu.state.pointer(point),
                     Screen::Quick => {
                         self.quick.pointer(point);
                         Action::None
                     }
-                    Screen::Viewer | Screen::Flight => Action::None,
+                    Screen::Flight => {
+                        if self.flight_ui.frozen() {
+                            self.mouse_look = None;
+                        }
+                        if let Some(last) = self.mouse_look {
+                            let profile = &self.input.resolver.profile;
+                            // 1.0 sensitivity turns 2 radians per 1,000 pixels.
+                            let k = 0.002 * profile.mouse_sensitivity;
+                            let up = if profile.mouse_invert { 1. } else { -1. };
+                            look::nudge(
+                                &mut self.flight_ui.look,
+                                [
+                                    ((position.x - last.0) * k) as f32,
+                                    ((position.y - last.1) * k * up) as f32,
+                                ],
+                                matches!(self.flight_view, 1 | 2),
+                            );
+                            self.mouse_look = Some((position.x, position.y));
+                            renderer.window.request_redraw();
+                        }
+                        Action::None
+                    }
+                    Screen::Viewer => Action::None,
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.wheel += match delta {
+                    MouseScrollDelta::LineDelta(_, y) => f64::from(y),
+                    MouseScrollDelta::PixelDelta(p) => p.y / 40.,
+                };
+                let notches = self.wheel.trunc() as i32;
+                self.wheel -= f64::from(notches);
+                if notches == 0 {
+                    return;
+                }
+                if let Some(editor) = &mut self.controls {
+                    let result = editor.wheel(notches);
+                    self.controls_result(result)
+                } else if self.screen == Screen::Flight && !self.flight_ui.frozen() {
+                    self.input.mouse_wheel(notches);
+                    Action::None
+                } else {
+                    return;
                 }
             }
             WindowEvent::CursorLeft { .. } => {
@@ -1608,17 +1695,45 @@ impl ApplicationHandler for App {
                 self.quick.cancel();
                 self.instruments.cancel_press();
                 self.flight_ui.cancel_press();
+                if let Some(editor) = &mut self.controls {
+                    editor.cancel_capture();
+                }
+                self.mouse_look = None;
                 self.pointer = None;
                 self.camera.keys.clear();
                 self.combat.cancel();
                 self.modifiers = ModifiersState::empty();
                 Action::None
             }
+            WindowEvent::MouseInput { state, button, .. } if self.controls.is_some() => {
+                let point = self
+                    .pointer
+                    .and_then(|(x, y)| renderer.viewport().point(x, y));
+                let pressed = state == ElementState::Pressed;
+                let editor = self.controls.as_mut().expect("guarded");
+                let result = match (button, mouse_control(button)) {
+                    (MouseButton::Left, _) => editor.pointer(point, pressed),
+                    (_, Some(control)) if pressed => editor.mouse(control),
+                    _ => controls_editor::ResultAction::None,
+                };
+                self.controls_result(result)
+            }
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Right,
                 ..
             } if self.screen == Screen::Quick => self.quick.right(state == ElementState::Pressed),
+            WindowEvent::MouseInput { state, button, .. }
+                if self.screen == Screen::Flight && button != MouseButton::Left =>
+            {
+                let pressed = state == ElementState::Pressed;
+                if button == MouseButton::Right && self.input.resolver.profile.mouse_look {
+                    self.mouse_look = self.pointer.filter(|_| pressed && !self.flight_ui.frozen());
+                } else if let Some(control) = mouse_control(button) {
+                    self.input.mouse_button(control, pressed);
+                }
+                Action::None
+            }
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
@@ -1740,6 +1855,25 @@ impl ApplicationHandler for App {
                     }
                     return;
                 }
+                // The controls screen takes every key press while it is open,
+                // with the same physical key names flight uses for capture.
+                if event.state == ElementState::Pressed
+                    && let Some(editor) = &mut self.controls
+                {
+                    if event.repeat && editor.capturing() {
+                        return;
+                    }
+                    let name = flight_key(event.physical_key, &name);
+                    let result = editor.key(
+                        &name,
+                        self.modifiers.shift_key(),
+                        self.modifiers.control_key(),
+                        self.modifiers.alt_key(),
+                    );
+                    let action = self.controls_result(result);
+                    self.action(event_loop, action);
+                    return;
+                }
                 if self.screen == Screen::Flight
                     && !(event.state == ElementState::Pressed
                         && self.flight_ui.map.open
@@ -1757,19 +1891,18 @@ impl ApplicationHandler for App {
                                 | "Home"
                         ))
                     && (event.state == ElementState::Released
-                        || (self.flight_ui.controls_editor.is_none()
-                            && !(self.flight_ui.menu
-                                && matches!(
-                                    name.as_str(),
-                                    "Escape"
-                                        | "Tab"
-                                        | "ArrowUp"
-                                        | "ArrowDown"
-                                        | "ArrowLeft"
-                                        | "ArrowRight"
-                                        | "Enter"
-                                        | "Space"
-                                ))))
+                        || (!(self.flight_ui.menu
+                            && matches!(
+                                name.as_str(),
+                                "Escape"
+                                    | "Tab"
+                                    | "ArrowUp"
+                                    | "ArrowDown"
+                                    | "ArrowLeft"
+                                    | "ArrowRight"
+                                    | "Enter"
+                                    | "Space"
+                            ))))
                     && (if event.repeat {
                         self.input.claimed(&name)
                     } else {
@@ -1870,7 +2003,13 @@ impl ApplicationHandler for App {
                     self.flight_ui.paused = false;
                 }
                 let mut animating = match self.screen {
-                    Screen::Main => self.menu.render(),
+                    Screen::Main => {
+                        let animating = self.menu.render();
+                        if let Some(editor) = &self.controls {
+                            editor.draw(&mut self.menu.pixels, &self.hornet.font);
+                        }
+                        animating
+                    }
                     Screen::Quick => {
                         self.quick.render(
                             &mut self.menu.pixels,
@@ -2032,7 +2171,11 @@ impl ApplicationHandler for App {
                             look::apply(
                                 &mut weather_view,
                                 self.flight.position.map(|v| v as f32),
-                                self.flight_ui.look,
+                                look::combine(
+                                    self.flight_ui.look,
+                                    self.head_look,
+                                    matches!(self.flight_view, 1 | 2),
+                                ),
                                 matches!(self.flight_view, 1 | 2),
                             );
                             self.world.step_weather(self.flight.speed, &weather_view);
@@ -2234,6 +2377,7 @@ impl ApplicationHandler for App {
                                 elapsed,
                                 matches!(self.flight_view, 1 | 2),
                             );
+                            self.head_look = self.input.head_look().unwrap_or([0.; 2]);
                         }
                         self.combat.present_targets(if self.flight_ui.frozen() {
                             1.0
@@ -2256,7 +2400,11 @@ impl ApplicationHandler for App {
                         look::apply(
                             &mut self.camera,
                             presented.position.map(|v| v as f32),
-                            self.flight_ui.look,
+                            look::combine(
+                                self.flight_ui.look,
+                                self.head_look,
+                                matches!(self.flight_view, 1 | 2),
+                            ),
                             matches!(self.flight_view, 1 | 2),
                         );
                         self.camera.zoom = self.flight_ui.zoom;
@@ -2544,6 +2692,9 @@ impl ApplicationHandler for App {
                             &self.hornet.font,
                             &self.hornet.flight_menu,
                         );
+                        if let Some(editor) = &self.controls {
+                            editor.draw(&mut self.menu.pixels, &self.hornet.font);
+                        }
                         self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
                         if let Some(audio) = &self.audio {
                             audio.seeker(
@@ -2689,8 +2840,12 @@ impl ApplicationHandler for App {
         if Instant::now() >= self.input.next_poll {
             let (actions, lost, warnings) = self.input.poll();
             let mut changed = lost || !actions.is_empty();
-            if let Some(editor) = &mut self.flight_ui.controls_editor {
-                if !editor.capture {
+            let mut captured = false;
+            if let Some(editor) = &mut self.controls {
+                let status = self.input.head_status();
+                changed |= status != editor.head_status;
+                editor.head_status = status;
+                if !editor.capturing() {
                     editor.devices = self.input.devices.values().cloned().collect();
                 } else {
                     editor
@@ -2703,8 +2858,9 @@ impl ApplicationHandler for App {
                     }
                 }
                 for event in &self.input.observed {
-                    changed |= editor.observe(event);
+                    captured |= editor.observe(event);
                 }
+                changed |= captured;
                 if changed && let Some(renderer) = &self.renderer {
                     renderer.window.request_redraw();
                 }
@@ -2723,7 +2879,26 @@ impl ApplicationHandler for App {
                 self.frame_time = Instant::now();
             } else {
                 for action in actions {
-                    if self.flight_ui.controls_editor.is_some() {
+                    // Controller menu buttons navigate the controls screen,
+                    // except in the poll that completed a capture with them.
+                    if let Some(editor) = &mut self.controls {
+                        let key = match &action {
+                            tore_input::Action::Ui(name) => match name.as_str() {
+                                "menu-up" => Some("ArrowUp"),
+                                "menu-down" => Some("ArrowDown"),
+                                "menu-left" => Some("ArrowLeft"),
+                                "menu-right" => Some("ArrowRight"),
+                                "menu-accept" => Some("Enter"),
+                                "menu-back" => Some("Escape"),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        if let Some(key) = key.filter(|_| !captured && !editor.capturing()) {
+                            let result = editor.key(key, false, false, false);
+                            let action = self.controls_result(result);
+                            self.action(event_loop, action);
+                        }
                         continue;
                     }
                     let was_frozen = self.flight_ui.frozen();
@@ -3922,7 +4097,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -4626,6 +4801,29 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             for p in menu.pixels.chunks_exact(4) {
                 f.write_all(&p[..3])?;
             }
+        } else if let Some(tab) = snapshot_state.strip_prefix("controls") {
+            // A synthetic Xbox-layout pad with its defaults, so the screen
+            // can be inspected without hardware.
+            let pad = controls_editor::preview_device();
+            let defaults = input::gamepad_defaults(&pad);
+            let profile = tore_input::Profile {
+                bindings: defaults.bindings,
+                modifiers: defaults.modifiers,
+                gamepad_defaults: true,
+                ..Default::default()
+            };
+            let mut editor = controls_editor::Editor::new(profile, vec![pad], "Main menu");
+            editor.head_status = "Waiting for opentrack on UDP 4242".into();
+            editor.preview(tab.trim_start_matches('-'))?;
+            menu.preview_state("normal")?;
+            menu.render();
+            editor.draw(&mut menu.pixels, &hornet.font);
+            use std::io::Write;
+            let mut f = std::fs::File::create(&path)?;
+            write!(f, "P6\n640 480\n255\n")?;
+            for p in menu.pixels.chunks_exact(4) {
+                f.write_all(&p[..3])?;
+            }
         } else {
             menu.preview_state(&snapshot_state)?;
             menu.save_ppm(&path)?;
@@ -5264,6 +5462,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         smoke_test,
         capture_terrain,
         reimport: None,
+        controls: None,
+        mouse_look: None,
+        wheel: 0.,
+        head_look: [0.; 2],
         finished: false,
         next_frame: None,
         error: None,
@@ -5375,6 +5577,16 @@ fn apply_sensor_controls(
     if history {
         instruments.history = true;
     }
+}
+/// Profile names of the mouse buttons other than the left one.
+fn mouse_control(button: MouseButton) -> Option<&'static str> {
+    Some(match button {
+        MouseButton::Right => "button:right",
+        MouseButton::Middle => "button:middle",
+        MouseButton::Back => "button:back",
+        MouseButton::Forward => "button:forward",
+        _ => return None,
+    })
 }
 fn flight_key(physical: winit::keyboard::PhysicalKey, fallback: &str) -> String {
     use winit::keyboard::{KeyCode, PhysicalKey};

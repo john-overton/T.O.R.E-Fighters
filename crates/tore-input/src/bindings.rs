@@ -10,6 +10,10 @@ pub enum Axis {
     ThrottleRate,
     LookX,
     LookY,
+    /// Absolute head-tracker yaw: -1..1 maps to -180..180 degrees before scaling.
+    HeadYaw,
+    /// Absolute head-tracker pitch: -1..1 maps to -90..90 degrees before scaling.
+    HeadPitch,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
@@ -57,6 +61,8 @@ impl Action {
             "throttle-rate" => Some(Axis::ThrottleRate),
             "look-x" => Some(Axis::LookX),
             "look-y" => Some(Axis::LookY),
+            "head-yaw" => Some(Axis::HeadYaw),
+            "head-pitch" => Some(Axis::HeadPitch),
             _ => None,
         };
         if let Some(axis) = axis {
@@ -241,12 +247,90 @@ pub struct Binding {
     pub calibration: Calibration,
     pub priority: i32,
 }
-#[derive(Clone, Debug, Default)]
+/// Mouse and head-tracker settings are part of the input profile so the
+/// controls screen saves every device in one file.
+#[derive(Clone, Debug)]
 pub struct Profile {
     pub aliases: BTreeMap<String, String>,
     pub bindings: Vec<Binding>,
     pub rumble: bool,
     pub gamepad_defaults: bool,
+    /// Held controls that select another binding layer on their device, such
+    /// as Select or a D-pad direction (`axis:16=-1`). A declared modifier's own
+    /// unmodified bindings are ignored, so the control is dedicated to it.
+    pub modifiers: Vec<(String, String)>,
+    /// Stock keyboard/mouse assignments the player removed, as `(device, control)`.
+    pub disabled: BTreeSet<(String, String)>,
+    /// Hold the right mouse button and drag to look around.
+    pub mouse_look: bool,
+    /// Radians of look per 1,000 mouse pixels.
+    pub mouse_sensitivity: f64,
+    pub mouse_invert: bool,
+    /// Loopback UDP port for opentrack-style head poses; `None` disables it.
+    pub head_port: Option<u16>,
+    /// Yaw and pitch multipliers for head-tracker angles; negative inverts.
+    pub head_scale: [f64; 2],
+}
+impl Default for Profile {
+    fn default() -> Self {
+        Self {
+            aliases: BTreeMap::new(),
+            bindings: Vec::new(),
+            rumble: false,
+            gamepad_defaults: false,
+            modifiers: Vec::new(),
+            disabled: BTreeSet::new(),
+            mouse_look: true,
+            mouse_sensitivity: 1.,
+            mouse_invert: false,
+            head_port: Some(4242),
+            head_scale: [1., 1.],
+        }
+    }
+}
+/// Physical control read by a token. `axis:16=-1` (a hat direction) and
+/// `axis:5>0.5` (an analog threshold) are virtual buttons over `axis:16` and `axis:5`.
+pub fn token_base(token: &str) -> &str {
+    token.split(['=', '>', '<']).next().unwrap_or(token)
+}
+/// Button value, 1 or 0, of a virtual token for a normalized physical value.
+pub fn token_value(token: &str, value: f64) -> Option<f64> {
+    let base = token_base(token);
+    let rest = &token[base.len()..];
+    let threshold = |s: &str| s.parse::<f64>().ok().filter(|v| v.is_finite());
+    let on = match rest.chars().next()? {
+        '=' => value == rest[1..].parse::<i32>().ok()? as f64,
+        '>' => value > threshold(&rest[1..])?,
+        '<' => value < threshold(&rest[1..])?,
+        _ => return None,
+    };
+    Some(f64::from(u8::from(on)))
+}
+fn valid_token(token: &str) -> bool {
+    let base = token_base(token);
+    !base.is_empty() && (base.len() == token.len() || token_value(token, 0.).is_some())
+}
+/// Modifier tokens and the base control of `MOD+MOD+CONTROL`.
+pub fn chord_parts(control: &str) -> (Vec<&str>, &str) {
+    let mut parts: Vec<_> = control.split('+').collect();
+    let base = parts.pop().unwrap_or(control);
+    (parts, base)
+}
+fn valid_chord(device: &str, control: &str) -> bool {
+    let parts: Vec<_> = control.split('+').collect();
+    if device == "keyboard" || device == "mouse" {
+        return parts.len() == 1 && !control.is_empty();
+    }
+    parts.len() <= 3
+        && parts.iter().all(|p| valid_token(p))
+        && parts.iter().collect::<BTreeSet<_>>().len() == parts.len()
+}
+fn on_off(value: &str) -> Result<bool, String> {
+    match value {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        _ => Err("expected on or off".into()),
+    }
 }
 impl Profile {
     /// Bounded versioned text; aliases and control names are whitespace-free identifiers.
@@ -285,6 +369,48 @@ impl Profile {
                     }
                     ["rumble", value] if matches!(*value, "on" | "off") => {
                         p.rumble = *value == "on"
+                    }
+                    ["modifier", device, control] if p.modifiers.len() < 64 => {
+                        if !valid_chord(device, control) || control.contains('+') {
+                            return Err("invalid modifier control".into());
+                        }
+                        let entry = ((*device).to_owned(), (*control).to_owned());
+                        if !p.modifiers.contains(&entry) {
+                            p.modifiers.push(entry);
+                        }
+                    }
+                    ["disable", device @ ("keyboard" | "mouse"), control]
+                        if p.disabled.len() < 512 =>
+                    {
+                        p.disabled.insert(((*device).into(), (*control).into()));
+                    }
+                    ["mouse-look", value] => p.mouse_look = on_off(value)?,
+                    ["mouse-invert", value] => p.mouse_invert = on_off(value)?,
+                    ["mouse-sensitivity", value] => {
+                        p.mouse_sensitivity = value
+                            .parse::<f64>()
+                            .ok()
+                            .filter(|v| (0.1..=5.).contains(v))
+                            .ok_or("mouse sensitivity must be 0.1..5")?;
+                    }
+                    ["head-tracker", "off"] => p.head_port = None,
+                    ["head-tracker", source] => {
+                        p.head_port = Some(
+                            source
+                                .strip_prefix("udp:")
+                                .and_then(|port| port.parse::<u16>().ok())
+                                .filter(|port| *port >= 1024)
+                                .ok_or("head tracker must be off or udp:PORT (1024..65535)")?,
+                        );
+                    }
+                    ["head-scale", yaw, pitch] => {
+                        for (i, v) in [yaw, pitch].into_iter().enumerate() {
+                            p.head_scale[i] = v
+                                .parse::<f64>()
+                                .ok()
+                                .filter(|v| v.abs() >= 0.1 && v.abs() <= 3.)
+                                .ok_or("head scale must be 0.1..3, negative to invert")?;
+                        }
                     }
                     ["bind", device, control, action, mode, rest @ ..]
                         if p.bindings.len() < 1024 =>
@@ -350,13 +476,8 @@ impl Profile {
                         if action == Action::Ui("fire".into()) && mode != Mode::HoldState {
                             return Err("fire requires hold behavior".into());
                         }
-                        if control.contains('+')
-                            && (device == &"keyboard"
-                                || control.split('+').count() != 2
-                                || control.split('+').any(str::is_empty)
-                                || control.split_once('+').is_some_and(|(m, c)| m == c))
-                        {
-                            return Err("invalid two-control chord".into());
+                        if !valid_chord(device, control) {
+                            return Err("invalid control or modifier chord".into());
                         }
                         if !compatible {
                             return Err("mode incompatible with action".into());
@@ -410,7 +531,11 @@ pub struct Resolver {
     overflow: bool,
     held_switches: BTreeSet<Switch>,
     physical: BTreeMap<(String, String), f64>,
+    /// The chord (or plain control) each base control currently feeds.
+    layers: BTreeMap<(String, String), String>,
 }
+/// A chord binding split into its modifiers, base control and full token.
+type Chord = (Vec<String>, String, String);
 impl Resolver {
     pub fn new(profile: Profile) -> Self {
         Self {
@@ -426,19 +551,37 @@ impl Resolver {
             .any(|b| self.matches(b, device) && b.control == control)
     }
     fn matches(&self, binding: &Binding, device: &str) -> bool {
-        binding.device == device
-            || (binding.device == "*" && device != "keyboard")
+        self.matches_device(&binding.device, device)
+    }
+    /// Whether a profile device reference (identity, alias or `*`) names `device`.
+    pub fn matches_device(&self, reference: &str, device: &str) -> bool {
+        reference == device
+            || (reference == "*" && device != "keyboard" && device != "mouse")
             || self
                 .profile
                 .aliases
-                .get(&binding.device)
+                .get(reference)
                 .is_some_and(|id| id == device)
+    }
+    /// A declared modifier is dedicated: its own unmodified bindings, including
+    /// a hat position it names, do not act.
+    fn shadowed(&self, binding: &Binding, device: &str) -> bool {
+        !binding.control.contains('+')
+            && self.profile.modifiers.iter().any(|(d, m)| {
+                self.matches_device(d, device)
+                    && (m == &binding.control
+                        || (token_base(m) == binding.control
+                            && matches!(
+                                (binding.mode, m.split_once('=')),
+                                (Mode::Position(n), Some((_, v))) if v.parse::<i32>() == Ok(n)
+                            )))
+            })
     }
     /// Feedback eligibility includes assigned controls at rest, excluding UI-only boxes.
     pub fn flight_bound(&self, device: &str, control: &str) -> bool {
         self.profile.bindings.iter().any(|b| {
             self.matches(b, device)
-                && b.control.rsplit('+').next() == Some(control)
+                && b.control.rsplit('+').next().map(token_base) == Some(control)
                 && (matches!(
                     b.action,
                     Action::Pilot(_)
@@ -481,74 +624,127 @@ impl Resolver {
             s.pickup = false;
         }
     }
-    /// Modifier-first chords use `button-id+control-id`. Entering/leaving a
-    /// layer baselines its controls, requiring neutral before a new action.
+    /// Modifier-first chords use `MODIFIER+CONTROL`, with up to two modifiers.
+    /// The chord whose modifiers are all held and which names the most of them
+    /// wins. Entering/leaving a layer baselines its controls, requiring neutral
+    /// before a new action. Virtual tokens such as `axis:16=-1` behave as
+    /// buttons derived from their physical control.
     pub fn event(&mut self, event: Event) {
-        if event.device == "keyboard" || !event.value.is_finite() {
+        if event.device == "keyboard" || event.device == "mouse" || !event.value.is_finite() {
             self.resolve_event(event);
             return;
         }
-        self.physical
-            .insert((event.device.clone(), event.control.clone()), event.value);
-        let chords: BTreeSet<_> = self
+        let virtuals: BTreeSet<String> = self
             .profile
             .bindings
             .iter()
             .filter(|b| self.matches(b, &event.device))
-            .filter_map(|b| {
-                b.control
-                    .split_once('+')
-                    .map(|(m, c)| (m.to_owned(), c.to_owned()))
+            .flat_map(|b| b.control.split('+'))
+            .chain(
+                self.profile
+                    .modifiers
+                    .iter()
+                    .filter(|(d, _)| self.matches_device(d, &event.device))
+                    .map(|(_, c)| c.as_str()),
+            )
+            .filter(|t| *t != event.control && token_base(t) == event.control)
+            .map(str::to_owned)
+            .collect();
+        self.control_event(event.clone());
+        for token in virtuals {
+            let value = token_value(&token, event.value).unwrap_or(0.);
+            if event.baseline
+                || self.physical.get(&(event.device.clone(), token.clone())) != Some(&value)
+            {
+                self.control_event(Event {
+                    device: event.device.clone(),
+                    control: token,
+                    value,
+                    baseline: event.baseline,
+                });
+            }
+        }
+    }
+    fn chords(&self, device: &str) -> Vec<Chord> {
+        let set: BTreeSet<_> = self
+            .profile
+            .bindings
+            .iter()
+            .filter(|b| b.control.contains('+') && self.matches(b, device))
+            .map(|b| {
+                let (mods, base) = chord_parts(&b.control);
+                (
+                    mods.into_iter().map(str::to_owned).collect(),
+                    base.to_owned(),
+                    b.control.clone(),
+                )
             })
             .collect();
-        let modifier_changed = chords.iter().any(|(m, _)| m == &event.control);
-        if modifier_changed {
-            let mut controls = BTreeSet::new();
-            for (m, c) in &chords {
-                if m != &event.control {
-                    continue;
-                }
-                let raw = *self
-                    .physical
-                    .get(&(event.device.clone(), c.clone()))
-                    .unwrap_or(&0.);
+        set.into_iter().collect()
+    }
+    fn layer(&self, device: &str, base: &str, chords: &[Chord]) -> String {
+        chords
+            .iter()
+            .filter(|(mods, b, _)| {
+                b == base
+                    && mods.iter().all(|m| {
+                        self.physical
+                            .get(&(device.to_owned(), m.clone()))
+                            .is_some_and(|v| *v != 0.)
+                    })
+            })
+            .max_by(|a, b| a.0.len().cmp(&b.0.len()).then(b.2.cmp(&a.2)))
+            .map_or_else(|| base.to_owned(), |c| c.2.clone())
+    }
+    fn control_event(&mut self, event: Event) {
+        self.physical
+            .insert((event.device.clone(), event.control.clone()), event.value);
+        let chords = self.chords(&event.device);
+        let affected: BTreeSet<String> = chords
+            .iter()
+            .filter(|(mods, _, _)| mods.contains(&event.control))
+            .map(|(_, base, _)| base.clone())
+            .collect();
+        for base in affected {
+            let key = (event.device.clone(), base.clone());
+            let old = self
+                .layers
+                .get(&key)
+                .cloned()
+                .unwrap_or_else(|| base.clone());
+            let new = self.layer(&event.device, &base, &chords);
+            if new == old {
+                continue;
+            }
+            let raw = *self.physical.get(&key).unwrap_or(&0.);
+            let ids: Vec<String> = std::iter::once(base.clone())
+                .chain(
+                    chords
+                        .iter()
+                        .filter(|(_, b, _)| *b == base)
+                        .map(|(_, _, full)| full.clone()),
+                )
+                .collect();
+            for id in ids {
+                let value = if id == new { raw } else { 0. };
                 self.resolve_event(Event {
                     device: event.device.clone(),
-                    control: format!("{m}+{c}"),
-                    value: if event.value != 0. { raw } else { 0. },
-                    baseline: true,
-                });
-                controls.insert(c.clone());
-            }
-            for c in controls {
-                let raw = *self
-                    .physical
-                    .get(&(event.device.clone(), c.clone()))
-                    .unwrap_or(&0.);
-                self.resolve_event(Event {
-                    device: event.device.clone(),
-                    control: c,
-                    value: if event.value != 0. { 0. } else { raw },
+                    control: id,
+                    value,
                     baseline: true,
                 });
             }
+            self.layers.insert(key, new);
         }
-        let mut consumed = false;
-        for (m, c) in chords {
-            if c == event.control
-                && self
-                    .physical
-                    .get(&(event.device.clone(), m.clone()))
-                    .is_some_and(|v| *v != 0.)
-            {
-                consumed = true;
-                self.resolve_event(Event {
-                    control: format!("{m}+{c}"),
-                    ..event.clone()
-                });
-            }
-        }
-        if !consumed {
+        if chords.iter().any(|(_, base, _)| *base == event.control) {
+            let new = self.layer(&event.device, &event.control, &chords);
+            self.layers
+                .insert((event.device.clone(), event.control.clone()), new.clone());
+            self.resolve_event(Event {
+                control: new,
+                ..event
+            });
+        } else {
             self.resolve_event(event);
         }
     }
@@ -570,7 +766,10 @@ impl Resolver {
         }
         for index in 0..self.profile.bindings.len() {
             let b = &self.profile.bindings[index];
-            if !self.matches(b, &event.device) || b.control != event.control {
+            if !self.matches(b, &event.device)
+                || b.control != event.control
+                || self.shadowed(b, &event.device)
+            {
                 continue;
             }
             let s = self
@@ -585,10 +784,12 @@ impl Resolver {
             let mut output = None;
             match b.mode {
                 Mode::Trigger(sign) => {
+                    // Scale magnitude is the trigger's sensitivity; its sign is inversion.
                     let unit = b.calibration.apply(event.value, true);
                     let v = ((unit - b.calibration.deadzone).max(0.)
                         / (1. - b.calibration.deadzone))
                         .powf(b.calibration.curve)
+                        * b.calibration.scale.abs()
                         * sign;
                     if initial || !allowed {
                         s.armed = v == 0.;
@@ -712,6 +913,7 @@ impl Resolver {
             d == device && matches!(axis, Axis::Pitch | Axis::Roll | Axis::Yaw | Axis::Throttle)
         });
         self.physical.retain(|(d, _), _| d != device);
+        self.layers.retain(|(d, _), _| d != device);
         self.states.retain(|(_, d), _| d != device);
         self.owners.retain(|_, (_, d)| d != device);
         self.events.retain(|(d, _)| d != device);
@@ -838,6 +1040,26 @@ impl Resolver {
             self.axis(Axis::LookX, 0.) as f32,
             self.axis(Axis::LookY, 0.) as f32,
         ]
+    }
+    /// Absolute head-tracker view angles in radians from `head-yaw` and
+    /// `head-pitch` axes, or `None` when no such axis is bound.
+    pub fn head(&mut self) -> Option<[f32; 2]> {
+        let bound = |axis| {
+            self.profile
+                .bindings
+                .iter()
+                .any(|b| b.action == Action::Axis(axis))
+        };
+        if !bound(Axis::HeadYaw) && !bound(Axis::HeadPitch) {
+            return None;
+        }
+        if self.paused || !self.focused {
+            return Some([0.; 2]);
+        }
+        Some([
+            (self.axis(Axis::HeadYaw, 0.) * std::f64::consts::PI) as f32,
+            (self.axis(Axis::HeadPitch, 0.) * std::f64::consts::FRAC_PI_2) as f32,
+        ])
     }
     pub fn active_devices(&self) -> BTreeSet<String> {
         self.owners.values().map(|(_, d)| d.clone()).collect()

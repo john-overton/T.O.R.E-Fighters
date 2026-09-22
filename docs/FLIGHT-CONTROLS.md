@@ -37,7 +37,9 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | F2 / F3 | Look back / up | FA menu; authored angles, forward artwork projects out of view naturally |
 | F10 | External chase view | FA menu; authored camera placement |
 | Shift + arrows / Ctrl + arrows | Cockpit look-around; exterior orbit | Shift is a convenience alias; Ctrl has USNF manual evidence; FA-specific dispatch unverified |
-| Shift + / | Recenter look/orbit without changing view or zoom | Development shortcut |
+| Shift + / | Recenter look/orbit without changing view or zoom; also recenters a head tracker | Development shortcut |
+| Hold right mouse button and drag | Mouse look, with the same limits as keyboard look | Opinionated agent choice, 2026-09-22; see [input](INPUT.md#mouse-look) |
+| Head tracker (opentrack UDP 4242) | Turns the view on top of keyboard, stick and mouse look, with the same limits | See [head tracking](INPUT.md#head-tracking-and-trackir) |
 | + / - | Zoom view | USNF manual; authored 0.5–4× projection |
 | Backspace | Toggle cockpit art, retain HUD/windows | FA menu (`BS`) |
 | Shift-U | Toggle HUD | Development shortcut |
@@ -220,14 +222,16 @@ FA dispatch evidence. Optional rumble and input-only tick tapes are documented
 in [INPUT.md](INPUT.md); [acceptance](baselines/input.md) distinguishes physical
 hardware checks from synthetic and cross-compilation evidence.
 
-Enable rumble through **Escape → Control → Rumble: On → Save & apply**. Actual
+Enable rumble through **Escape → Control**, the controller tab's **Rumble** setting, then **Apply**. Actual
 afterburner engagement produces a subtle impulse followed by a quiet continuous
 low-frequency rumble while it remains active. The switch alone below the model's activation
 threshold does not. Event feedback designs and future weapon/turbulence hooks
 are listed in [INPUT.md](INPUT.md); successful gun/missile events now drive the corresponding rumble cues in the live-fire adapter.
 
-The flight **Control** tab now opens the authored binding editor rather than the
-retail device-selection stub. Instrument page sets/layout, scope controls, zoom,
+The flight **Control** tab opens the same input configuration screen as
+**Pref → Controls...** on the main menu, rather than the retail device-selection
+stub. Every key, mouse input and gamepad button is listed in the
+[controls master list](CONTROLS.md), and every stock key can be remapped. Instrument page sets/layout, scope controls, zoom,
 cockpit/HUD options and sound preferences save automatically between normal
 sessions and survive aircraft changes/restarts. [Full settings contract](INPUT.md).
 

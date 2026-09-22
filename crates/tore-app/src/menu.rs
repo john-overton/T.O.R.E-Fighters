@@ -33,6 +33,7 @@ pub enum Action {
     Music(bool),
     Effects(bool),
     ReimportMedia,
+    Controls,
 }
 pub struct State {
     pub buttons: Vec<Button>,
@@ -188,6 +189,10 @@ impl State {
                 if let Some(bar) = self.open {
                     if bar == 0 && row == 2 {
                         return Action::Exit;
+                    }
+                    if bar == 1 && row == 2 {
+                        self.cancel();
+                        return Action::Controls;
                     }
                     if bar == 1 && row == 3 {
                         self.cancel();

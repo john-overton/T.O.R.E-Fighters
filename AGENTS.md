@@ -154,6 +154,13 @@ not have to be replaced by a `native` one before acceptance. See
   [weather formats](docs/formats/weather.md),
   [objects and shapes](docs/formats/objects-and-shapes.md),
   [theater](docs/formats/theater.md), [architecture](docs/ARCHITECTURE.md).
+- **Controls master list:** [docs/CONTROLS.md](docs/CONTROLS.md) lists every
+  default keyboard key, mouse input and gamepad button. Any change that adds an
+  action or changes a default binding updates it in the same change: add the
+  action to `crates/tore-app/src/input_catalog.rs` (or change the gamepad
+  defaults in `crates/tore-app/src/input.rs`), then run
+  `TORE_UPDATE_CONTROLS_DOC=1 cargo test --locked -p tore-app controls_doc`.
+  The test fails while the document is stale.
 - Correct stale status claims in place. Do not append a success note beneath a
   contradictory summary.
 

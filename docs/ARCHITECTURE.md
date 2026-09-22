@@ -135,10 +135,17 @@ retained controller; public HID support queries suppress duplicate raw endpoints
 permits unsafe platform FFI; `libc` and `windows` are thin platform bindings,
 not a third-party input policy engine. Main-loop discovery never blocks a flight
 frame. Presentation-only look resolution cannot change pilot-axis ownership.
+It also runs the head-tracker receiver: a safe `std::net` loopback UDP socket on
+its own thread that reads opentrack poses. Head and mouse look add to the
+presented look angle only; they never touch pilot axes or the simulation.
 See [contracts, platform limits and profile syntax](INPUT.md).
 
-The paused flight controls editor owns a draft `tore-input::Profile`; native
-capture is isolated from menu/gameplay dispatch. Canonical serialization validates
+The app's input configuration screen (`controls_editor`) is one component opened
+from the main menu and the paused flight menu. It owns a draft
+`tore-input::Profile`; native capture is isolated from menu/gameplay dispatch.
+`input_catalog` is the single table of listed actions and stock keyboard/mouse
+assignments; it drives the screen's rows, stock-key remapping (`disable`
+directives) and the generated [controls master list](CONTROLS.md). Canonical serialization validates
 before file replacement and live rebaselining. General display/instrument/sound
 preferences use a separate bounded versioned file and persist independently of
 flight/aircraft state. Smoke/capture/performance diagnostics bypass those preferences.

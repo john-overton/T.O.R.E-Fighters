@@ -2,7 +2,10 @@
 pub mod pilot;
 pub use pilot::{PilotCommand, PilotInput, Switch};
 pub mod bindings;
-pub use bindings::{Action, Axis, Binding, Calibration, Event, Mode, Profile, Resolver};
+pub use bindings::{
+    Action, Axis, Binding, Calibration, Event, Mode, Profile, Resolver, chord_parts, token_base,
+    token_value,
+};
 pub mod feedback;
 pub mod recording;
 #[cfg(test)]

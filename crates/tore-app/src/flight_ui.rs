@@ -35,7 +35,6 @@ pub enum Command {
     SensorInfrared,
     Effects(bool),
     ControlsOpen,
-    ControlsSave,
     InstrumentSelect(usize),
     InstrumentCycle(i32),
     InstrumentControl(usize),
@@ -58,7 +57,6 @@ pub struct FlightUi {
     pub notice: Option<(String, Instant)>,
     pending_notices: std::collections::VecDeque<String>,
     pub help: bool,
-    pub controls_editor: Option<crate::controls_editor::Editor>,
     root: usize,
     path: Vec<usize>,
     focus: usize,
@@ -84,7 +82,6 @@ impl Default for FlightUi {
             notice: None,
             pending_notices: Default::default(),
             help: false,
-            controls_editor: None,
             root: 0,
             path: vec![],
             focus: 0,
@@ -130,9 +127,6 @@ impl FlightUi {
     pub fn cancel_press(&mut self) {
         self.map.cancel_press();
         self.pressed = None;
-        if let Some(editor) = &mut self.controls_editor {
-            editor.cancel_capture();
-        }
     }
     pub fn message(&mut self, text: impl Into<String>) {
         let text = text.into();
@@ -288,10 +282,6 @@ impl FlightUi {
         alt: bool,
         tree: &[MenuNode],
     ) -> Command {
-        if let Some(editor) = &mut self.controls_editor {
-            let result = editor.key(key, shift, ctrl, alt);
-            return self.editor_result(result);
-        }
         if !self.menu && !ctrl && !alt && shift && key == "m" {
             self.map.open = !self.map.open;
             return Command::Click;
@@ -569,20 +559,11 @@ impl FlightUi {
             _ => Command::None,
         }
     }
-    fn editor_result(&mut self, result: crate::controls_editor::ResultAction) -> Command {
-        use crate::controls_editor::ResultAction;
-        match result {
-            ResultAction::None => Command::None,
-            ResultAction::Changed => Command::Click,
-            ResultAction::Save => Command::ControlsSave,
-            ResultAction::Close => {
-                self.controls_editor = None;
-                self.root = 0;
-                self.path.clear();
-                self.focus = 0;
-                Command::Click
-            }
-        }
+    /// The controls screen closed; the flight menu reopens at its first tab.
+    pub fn controls_closed(&mut self) {
+        self.root = 0;
+        self.path.clear();
+        self.focus = 0;
     }
     // Top buttons, source rows and development session actions share hit/render geometry.
     fn controls(&self, tree: &[MenuNode]) -> Vec<Control> {
@@ -635,10 +616,6 @@ impl FlightUi {
         out
     }
     pub fn pointer(&mut self, tree: &[MenuNode], point: Option<(f64, f64)>, down: bool) -> Command {
-        if let Some(editor) = &mut self.controls_editor {
-            let result = editor.pointer(point, down);
-            return self.editor_result(result);
-        }
         let hit = point.and_then(|(x, y)| {
             self.controls(tree)
                 .into_iter()
@@ -691,12 +668,6 @@ impl FlightUi {
         {
             self.notice = Some((text, Instant::now()));
         }
-        if self.menu
-            && let Some(editor) = &self.controls_editor
-        {
-            editor.draw(pixels, font);
-            return;
-        }
         if self.menu {
             Canvas(pixels).rect((0, 0, 640, 26), [200, 207, 219, 255]);
             if self.help {
@@ -720,6 +691,8 @@ impl FlightUi {
                     "Select+X previous weapon / Y ECM / L3 radar / R3 jettison".into(),
                     "Select+Dpad: up target / down hit / left class / right fault".into(),
                     "Select+Start target ECM / Guide incoming; F10 external".into(),
+                    "Right-drag: mouse look | Esc > Control: remap any key".into(),
+                    "Stock keys shown here; docs/CONTROLS.md lists them all".into(),
                     "SOURCE MENU SHORTCUTS:".into(),
                 ];
                 fn add(tree: &[MenuNode], lines: &mut Vec<String>) {
@@ -982,12 +955,8 @@ mod tests {
             u.key("ArrowRight", false, false, false, &t),
             Command::ControlsOpen
         );
-        u.controls_editor = Some(crate::controls_editor::Editor::new(
-            tore_input::Profile::default(),
-            vec![],
-        ));
-        assert_eq!(u.key("Escape", false, false, false, &t), Command::Click);
-        assert!(u.menu && u.controls_editor.is_none());
+        u.controls_closed();
+        assert!(u.menu);
         assert_eq!(u.root, 0);
         assert_eq!(t[1].children[0].label, "Keyboard");
     }

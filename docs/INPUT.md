@@ -17,8 +17,9 @@ shared [sensor component](radar.md) decides what the scopes show.
 
 ## Quick start
 
-On Linux a controller exposing the standard two-stick gamepad controls receives
-the following default mapping. The 8BitDo Ultimate 2 wireless controller's input
+Every default key, mouse input and gamepad button is in the
+[controls master list](CONTROLS.md). On Linux a controller exposing the standard
+two-stick gamepad controls receives the following default mapping. The 8BitDo Ultimate 2 wireless controller's input
 capabilities have been inspected on the development host, and the user confirmed
 the Linux rumble test pulse works. Flight handling and disconnect checks remain open.
 
@@ -36,10 +37,10 @@ cargo run --locked -p tore-app -- --monitor-inputs 30
 | Left / right shoulder | Decrease / increase throttle while held |
 | South / east face button (A/B on Xbox layout) | Gear / airbrake toggle |
 | West / north face button (X/Y on Xbox layout) | Flaps / afterburner toggle |
-| Select / left-stick click | Combat modifier / forward cockpit view |
+| View (Select) / left-stick click | Combat modifier / forward cockpit view |
 | Start | Pause/resume |
 | Guide | Escape flight menu, if not intercepted by the desktop |
-| Right-stick click | Recenter look |
+| Right-stick click | Recenter look, including a head tracker |
 | D-pad left/right | Previous/next instrument selection |
 | D-pad up/down | Selected instrument's first/second stock button |
 | D-pad and south/east buttons in menus | Navigate and accept/back |
@@ -68,24 +69,47 @@ game starts in borderless fullscreen; the choice is saved as `fullscreen` in
 `preferences-v1.conf` and `--windowed` starts one run in a window without
 changing it.
 
-Open **Escape → Control** during flight. This authored replacement for the old
-input-device submenu uses the existing raster font and paused menu canvas.
+### The controls screen
 
-- Set **Rumble: On**, then select **Save & apply**. No text editor is required.
-- Choose a binding with Left/Right on **Binding**, or use **Add binding**. Select
-  its action, then **Capture key / button / axis** and operate the desired control.
-  Escape cancels capture; it does not become a binding. Keyboard modifiers are
-  retained. Controller menu actions are suppressed while the editor is open.
-- Device/Input rows also let you select an exposed control without capture.
-  Behavior, dead zone, curve, inversion, priority and normalized min/center/max
-  are editable. Behavior choices are filtered to those the selected action supports.
-- Use Up/Down to select a row, Left/Right to change values, Enter to activate;
-  mouse clicks on the left arrow decrement and elsewhere increment/activate.
-- **Save & apply** validates and saves before replacing live bindings. Escape or
-  **Back** discards changes since the last save. Removing a custom keyboard binding
-  restores the stock shortcut; it does not disable the stock keyboard table.
-  Shared assignments remain explicit; assigning an input does not delete another
-  action assigned to it. Actions remain subject to current aircraft capabilities.
+Open **Pref → Controls...** on the main menu or **Escape → Control** in flight.
+Both open the same input configuration screen; in flight the game stays paused.
+The layout follows John's 2026-09-22 mockup; its details are an opinionated agent
+design drawn with the imported raster font. Every default is listed in the
+[controls master list](CONTROLS.md).
+
+- **Devices on the left.** Keyboard, Mouse, each detected controller, stick,
+  throttle, pedal set or button box, any disconnected device the profile still
+  names, and Head tracker. The device type is guessed from its name and controls
+  (a fitted rule): it only picks the tab title and which settings appear.
+- **Settings at the top right**, per device. Controllers: rumble, modifier
+  buttons, deadzone, stick sensitivity, trigger sensitivity and defaults for new
+  gamepads. Sticks, throttles and pedals: modifiers, deadzone and sensitivity.
+  Mouse: mouse look, sensitivity and invert. Head tracker: see
+  [head tracking](#head-tracking-and-trackir). Deadzone and sensitivity apply to
+  every axis binding on that device; sensitivity scales the axis output from 0.10
+  to 1.00. Trigger sensitivity scales trigger (`trigger-*`) bindings the same way.
+- **Mappings below**, grouped as Flight controls, Systems, Weapons, Sensors and
+  instruments, View, Communication and Game and menus. Click a group header to
+  fold it. Each action has a primary and secondary input; click one to capture
+  a replacement and operate the control. Axis rows also have an invert box and a
+  response curve button (1.0, 1.5, 2.0, 3.0). **Clear** removes the action's
+  inputs on this device; Delete or Backspace clears only the focused input.
+  Profile bindings for actions the screen does not list appear under
+  **Other bindings**, where they can be cleared.
+- **Keyboard remapping is complete.** Stock keys show as the primary input and can
+  be changed or cleared. A key given to one action is taken from its previous
+  action, and the message names it. Giving an action back its own stock key simply
+  re-enables it. Esc, Alt+Enter and Alt+F4 cannot be taken.
+- **Capture** picks the behaviour from the row: a stick or axis on an axis row,
+  a button or D-pad direction on a direction row (for example Rudder left), a
+  trigger moved on a direction row becomes a trigger contribution, and a trigger
+  pushed on a button action (such as Fire) acts as a button once past halfway. A
+  stick moved on a direction row is assigned to the whole axis row instead. Esc
+  cancels capture.
+- **Apply** validates and saves before replacing live bindings. **Reset device**
+  restores the selected device's defaults in the draft. **Back** or Esc discards
+  anything not applied. Arrow keys, Tab, Page Up/Down and Enter navigate; a
+  controller's D-pad, A and B do too, except while capturing.
 
 The editor saves the explicitly loaded `--input-profile` file, or `input-v1.conf`
 in the [application data directory](DEVELOPMENT.md). It writes a canonical profile
@@ -101,10 +125,81 @@ retained instead of appending another default set. With defaults on, removing al
 bindings for a device lets it receive defaults again when reconnected.
 
 macOS GameController capture explicitly uses shared `*` bindings because its
-public identity is session-only. The editor reports this sharing. Native generic
-HID identities and Windows/Linux identities keep their normal matching rules.
-The editor covers the current binding model, not a calibration wizard, persistent
-Apple player assignment, device firmware remapping or unsupported aircraft systems.
+public identity is session-only. Native generic HID identities and Windows/Linux
+identities keep their normal matching rules. The screen covers the current
+binding model, not a calibration wizard, persistent Apple player assignment,
+device firmware remapping or unsupported aircraft systems. Per-binding priority
+and min/center/max calibration remain profile-file settings; the screen keeps
+whatever the file holds.
+
+### Modifiers
+
+A modifier is a held control that switches its device to another layer of
+bindings, like Ctrl or Shift on a keyboard. A device can have up to four. Add
+one on the device's settings row (right, or click the value's right side, then
+press the button or D-pad direction); remove the last one with left. Any button
+or a single D-pad direction can be a modifier, so D-pad left and D-pad right can
+be two separate modifiers. While capturing, hold one or two modifiers and press
+the control: `View + D-pad left + A` is a valid binding. When several held
+modifiers match, the binding naming the most of them wins.
+
+A declared modifier is dedicated: its own unmodified bindings stop acting, so
+declaring D-pad left removes its Previous instrument and menu-left actions.
+Standard gamepad defaults declare View (Select) as the combat modifier. Keyboard
+modifiers are simply Ctrl, Alt and Shift in any combination, such as Ctrl+G,
+Ctrl+Shift+G or Ctrl+Alt+G.
+
+### Mouse look
+
+Hold the right mouse button and drag to look around in flight. Sensitivity 1.0
+turns the view 2 radians per 1,000 pixels of mouse travel (an opinionated agent
+value); the range is 0.1 to 5.0. Mouse look obeys the same limits as the
+keyboard and stick: in the cockpit you cannot look below the forward eye line.
+Turn mouse look off to bind the right button to an action instead. The middle,
+back and forward buttons and the wheel are bindable. The wheel zooms by default.
+The left button always operates instruments and the HUD.
+
+### Head tracking and TrackIR
+
+The game listens for head poses on loopback UDP port 4242 in opentrack's "UDP
+over network" format: 48-byte datagrams of six little-endian doubles, x/y/z in
+centimetres then yaw/pitch/roll in degrees. The listener binds `127.0.0.1` only,
+so it needs no firewall permission and accepts no remote sender. The head angle
+is added to the player's look angle, the way the right stick and mouse look turn
+the view, and the result obeys the same cockpit limit: you cannot look below the
+forward eye line. **Center view** (Shift+/, or right-stick press) makes the
+current head position straight ahead. Head position and roll are not used; zoom
+stays on its own controls.
+
+TrackIR's own software only sends data to games registered with NaturalPoint,
+so T.O.R.E does not talk to it directly. Run [opentrack](https://github.com/opentrack/opentrack)
+with its TrackIR input (or a webcam or phone tracker) and the "UDP over network"
+output set to `127.0.0.1` port 4242. Trackers that appear as a joystick instead can
+bind the **Head tracker yaw** and **Head tracker pitch** axis rows on that
+device's tab; full axis travel maps to plus or minus 180 degrees of yaw and 90
+degrees of pitch before the head sensitivity setting.
+
+Head tracker settings: receiver on or off, yaw and pitch sensitivity (0.1 to
+3.0) and inversion for each. The sign convention is fitted: opentrack's positive
+yaw is taken as a turn to the left. It has not been checked against real
+TrackIR hardware; use the invert settings if a direction is reversed. A port
+already in use is reported in the Head tracker status line and on the console.
+
+### Profile directives for these settings
+
+```text
+modifier DEVICE CONTROL         # up to 64 in total; CONTROL may be a D-pad direction
+disable keyboard KEY            # a stock key the player removed
+disable mouse wheel:up          # a stock mouse binding the player removed
+mouse-look on|off               # default on
+mouse-sensitivity 0.1..5        # default 1
+mouse-invert on|off             # default off
+head-tracker off|udp:PORT       # default udp:4242, ports 1024..65535
+head-scale YAW PITCH            # default 1 1; 0.1..3, negative inverts
+```
+
+Existing profiles without these lines keep the defaults. Older builds cannot read
+a profile saved with them.
 
 Normal sessions also save `preferences-v1.conf`: large/small instrument page sets,
 active layout/selection, scope settings, cockpit/HUD/ladder visibility, HUD
@@ -147,7 +242,7 @@ automatic loading; see [platform paths](DEVELOPMENT.md). `--input-profile` choos
 an explicit file. A custom profile replaces automatic controller defaults unless it enables
 `gamepad-defaults on`;
 existing keyboard flight/navigation shortcuts remain unless explicitly rebound.
-Settings load at startup and can be edited through Escape → Control.
+Settings load at startup and can be edited in the [controls screen](#the-controls-screen).
 
 Profiles use UTF-8 text, `#` comments and whitespace-separated tokens. The first
 non-comment line must be `tore-input 1`. Limits: 256 KiB, 1,024 bindings and 64
@@ -172,8 +267,8 @@ A binding is:
 bind DEVICE CONTROL ACTION MODE [MIN CENTER MAX DEADZONE CURVE SCALE PRIORITY]
 ```
 
-`DEVICE` is an exact device identity, an alias, `keyboard`, or `*` for every
-native device. Prefer aliases/exact identities when different equipment shares
+`DEVICE` is an exact device identity, an alias, `keyboard`, `mouse`, or `*` for
+every native device (never the keyboard or mouse). Prefer aliases/exact identities when different equipment shares
 axis numbers. Never use enumeration order for persistent assignments. USB serials
 are preferred; serial-less devices fall back to physical connection identity and
 may require rebinding when moved. Devices with no serial or physical identity use
@@ -225,7 +320,9 @@ use the same simulation commands. `press` toggles; `switch`/`follow` request a s
 existing system behavior and never force animation fractions or bypass aircraft
 capabilities. Rafale's unavailable hook stays unavailable. `throttle=0.75`
 requests a preset. Axes are `pitch`, `roll`, `yaw`, `throttle`, `throttle-rate`,
-`look-x`, `look-y`.
+`look-x`, `look-y`, and the absolute `head-yaw` and `head-pitch`. Mouse controls
+are `button:right`, `button:middle`, `button:back`, `button:forward`, `wheel:up`
+and `wheel:down`; each wheel notch is one press.
 
 UI actions: `pause`, `menu`, `end-flight`, `restart`, `view-front`, `view-back`,
 `view-up`, `view-external`, `center-look`, `cockpit`, `hud`, `zoom-in`, `zoom-out`,
@@ -469,19 +566,26 @@ rudder triggers and instrument navigation retain their functions. External view
 uses F10 or a custom `view-external` binding; Select is no longer its default.
 No AI makes the incoming launch decision. Fixtures/jettison require `--live-fire`.
 
-Profile chord syntax is `MODIFIER+CONTROL`, for example:
+Profile chord syntax is `MODIFIER+CONTROL` or `MODIFIER+MODIFIER+CONTROL`, for
+example:
 
 ```text
+modifier pad button:314
+modifier pad axis:16=-1
 bind pad button:314+button:311 fire hold
 bind pad button:314+button:304 designate press
 bind pad button:314+axis:17 range-target position=-1
+bind pad button:314+axis:16=-1+button:304 flaps press
 ```
 
-Two distinct nonempty controls are required. Keyboard shortcuts retain their
-existing `Ctrl-`/`Shift-` syntax. `fire` requires **hold** behavior; press/release
-or axis modes are rejected instead of silently doing nothing. The editor lists
-combat actions and standard Select combinations in its Input row. Capture remains
-single-control capture; choose the combo through Input or edit the profile. Exact
+Two or three distinct nonempty tokens are required. A token may be a virtual
+button over a physical control: `axis:16=-1` is pressed while that hat or D-pad
+axis reads exactly -1, and `axis:5>0` or `axis:1<-0.5` is pressed while the
+normalized axis is past that threshold. Virtual buttons work as modifiers and as
+bound controls. Keyboard and mouse bindings take no chords; keyboard shortcuts
+keep their `Ctrl-`/`Alt-`/`Shift-` syntax. `fire` requires **hold** behavior;
+press/release or axis modes are rejected instead of silently doing nothing.
+Capture in the controls screen records held modifiers automatically. Exact
 Windows/macOS device IDs/control names still need an explicit platform profile.
 
 Combo actions suppress the base control, including throttle and menu actions.
@@ -491,7 +595,7 @@ are independent, so releasing one cannot cancel a trigger held by the other.
 
 ## Weapon haptic envelopes
 
-Rumble remains opt-in in Control → Rumble → Save & apply. Cues are authored,
+Rumble remains opt-in: the controller tab's Rumble setting, then Apply. Cues are authored,
 not native force-feedback recovery. Strong/weak motor amplitudes are normalized:
 
 | Confirmed event | Duration | Strong / weak |

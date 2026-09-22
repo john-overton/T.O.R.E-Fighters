@@ -61,19 +61,31 @@ pub fn step(look: &mut [f32; 2], keys: &BTreeSet<String>, elapsed: f64, external
     step_axes(look, [yaw, pitch], elapsed, external);
 }
 pub fn step_axes(look: &mut [f32; 2], axes: [f32; 2], elapsed: f64, external: bool) {
-    let [yaw, pitch] = axes;
     let delta = elapsed.clamp(0., 0.25) as f32; // One radian per second, independent of repeats.
+    nudge(look, axes.map(|a| a * delta), external);
+}
+/// Turns the view by radians, as mouse look does. The cockpit cannot look
+/// below its forward eye line; the exterior orbit wraps freely.
+pub fn nudge(look: &mut [f32; 2], delta: [f32; 2], external: bool) {
+    let [yaw, pitch] = delta;
     if yaw != 0. {
-        look[0] = wrap(look[0] + yaw * delta);
+        look[0] = wrap(look[0] + yaw);
     }
     if pitch != 0. {
-        let next = look[1] + pitch * delta;
-        look[1] = if external {
-            wrap(next)
-        } else {
-            next.clamp(0., PI / 2.)
-        };
+        look[1] = limit(look[1] + pitch, external);
     }
+}
+fn limit(pitch: f32, external: bool) -> f32 {
+    if external {
+        wrap(pitch)
+    } else {
+        pitch.clamp(0., PI / 2.)
+    }
+}
+/// The presented look: the player's look plus a head tracker's offset, under
+/// the same cockpit limits, so tracking never looks below the eye line.
+pub fn combine(look: [f32; 2], head: [f32; 2], external: bool) -> [f32; 2] {
+    [wrap(look[0] + head[0]), limit(look[1] + head[1], external)]
 }
 
 pub fn apply(camera: &mut Camera, target: [f32; 3], look: [f32; 2], external: bool) {
@@ -109,6 +121,19 @@ pub fn apply(camera: &mut Camera, target: [f32; 3], look: [f32; 2], external: bo
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn head_and_mouse_look_keep_the_cockpit_eye_line_limit() {
+        let near =
+            |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
+        assert!(near(combine([0.2, 0.3], [0.1, -1.], false), [0.3, 0.]));
+        assert_eq!(combine([0., 1.2], [0., 1.], false)[1], PI / 2.);
+        assert!(combine([0., 0.], [0., -0.5], true)[1] < 0.);
+        let mut look = [0.; 2];
+        nudge(&mut look, [0.5, -0.4], false);
+        assert_eq!(look, [0.5, 0.]);
+        nudge(&mut look, [4., 0.4], false);
+        assert!((look[0] - wrap(4.5)).abs() < 1e-6 && look[1] == 0.4);
+    }
     #[test]
     fn look_arrows_never_become_flight_controls_until_released() {
         for modifier in [ModifiersState::SHIFT, ModifiersState::CONTROL] {
