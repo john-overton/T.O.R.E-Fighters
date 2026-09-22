@@ -1,2 +1,241 @@
-//! Minimal blit-only presenter for a 640 x 480 CPU canvas, used by the pre-game shell.
-//! Work package F owns this file.
+//! Minimal presenter for a 640x480 CPU canvas, used before any media exists.
+//! Work package F owns this file; behaviour: docs/spec/first-run-import.md.
+//!
+//! The game renderer needs a terrain world, which a first run does not have
+//! yet, so the locate screen gets its own blit-only path: one texture, one
+//! sampler, one full-screen triangle, no world and no depth buffer. The
+//! adapter and present-mode choices mirror `renderer.rs` so that a first run
+//! exercises the same GPU selection a game run does, and the 4:3 canvas is
+//! letterboxed through the same [`Viewport`] the menu uses.
+use crate::{
+    AppResult,
+    menu::{HEIGHT, WIDTH},
+    renderer::Viewport,
+};
+use std::sync::Arc;
+use winit::window::Window;
+
+/// Full-screen triangle with the canvas sampled over it. Inline, because this
+/// path has no other shader and nothing shares it.
+const SHADER: &str = r"
+@group(0) @binding(0) var canvas: texture_2d<f32>;
+@group(0) @binding(1) var canvas_sampler: sampler;
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+@vertex fn vertex(@builtin(vertex_index) index: u32) -> VertexOutput {
+    let points = array<vec2<f32>, 3>(vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0));
+    let p = points[index];
+    var result: VertexOutput;
+    result.position = vec4(p, 0.0, 1.0);
+    result.uv = vec2((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5);
+    return result;
+}
+@fragment fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
+    return textureSample(canvas, canvas_sampler, input.uv);
+}
+";
+
+pub(crate) struct CanvasPresenter {
+    surface: wgpu::Surface<'static>,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    config: wgpu::SurfaceConfiguration,
+    texture: wgpu::Texture,
+    pipeline: wgpu::RenderPipeline,
+    bind_group: wgpu::BindGroup,
+    pub(crate) window: Arc<Window>,
+}
+
+impl CanvasPresenter {
+    pub(crate) async fn new(window: Arc<Window>) -> AppResult<Self> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let surface = instance.create_surface(window.clone())?;
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await?;
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor::default())
+            .await?;
+        let size = window.inner_size();
+        let mut config = surface
+            .get_default_config(&adapter, size.width.max(1), size.height.max(1))
+            .ok_or("surface has no configuration")?;
+        let modes = surface.get_capabilities(&adapter).present_modes;
+        config.present_mode = if modes.contains(&wgpu::PresentMode::Immediate) {
+            wgpu::PresentMode::Immediate
+        } else if modes.contains(&wgpu::PresentMode::Mailbox) {
+            wgpu::PresentMode::Mailbox
+        } else {
+            wgpu::PresentMode::Fifo
+        };
+        config.desired_maximum_frame_latency = 1;
+        surface.configure(&device, &config);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Locate canvas"),
+            size: wgpu::Extent3d {
+                width: WIDTH as u32,
+                height: HEIGHT as u32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Locate compositor"),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Locate"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vertex"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fragment"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
+        let view = texture.create_view(&Default::default());
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Locate canvas image"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        Ok(Self {
+            surface,
+            device,
+            queue,
+            config,
+            texture,
+            pipeline,
+            bind_group,
+            window,
+        })
+    }
+
+    /// Where the 640x480 canvas sits inside the window, for pointer mapping.
+    pub(crate) fn viewport(&self) -> Viewport {
+        let size = self.window.inner_size();
+        Viewport::new(size.width, size.height)
+    }
+
+    pub(crate) fn resize(&mut self) {
+        let size = self.window.inner_size();
+        if size.width > 0 && size.height > 0 {
+            self.config.width = size.width;
+            self.config.height = size.height;
+            self.surface.configure(&self.device, &self.config);
+            self.window.request_redraw();
+        }
+    }
+
+    /// Upload one 640x480 RGBA frame and show it, letterboxed.
+    pub(crate) fn present(&mut self, pixels: &[u8]) -> AppResult<bool> {
+        if pixels.len() != WIDTH * HEIGHT * 4 {
+            return Err("the locate canvas must be 640x480 RGBA".into());
+        }
+        let size = self.window.inner_size();
+        if size.width == 0 || size.height == 0 {
+            return Ok(false);
+        }
+        let frame = match self.surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                self.resize();
+                return Ok(false);
+            }
+            Err(wgpu::SurfaceError::Timeout | wgpu::SurfaceError::Other) => {
+                self.window.request_redraw();
+                return Ok(false);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(WIDTH as u32 * 4),
+                rows_per_image: Some(HEIGHT as u32),
+            },
+            wgpu::Extent3d {
+                width: WIDTH as u32,
+                height: HEIGHT as u32,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = frame.texture.create_view(&Default::default());
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Locate screen"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            let v = self.viewport();
+            pass.set_viewport(v.x, v.y, v.width, v.height, 0., 1.);
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        self.queue.submit([encoder.finish()]);
+        // Same Wayland pacing rule as the game renderer: only ask for frame
+        // callbacks when the surface has fallen back to FIFO.
+        if self.config.present_mode == wgpu::PresentMode::Fifo {
+            self.window.pre_present_notify();
+        }
+        frame.present();
+        Ok(true)
+    }
+}

@@ -92,8 +92,7 @@ pub(crate) struct Progress {
 /// locate screen shows. The same facts are in `import-report.txt` in full.
 pub(crate) struct ImportOutcome {
     pub assets: Assets,
-    /// Shown by the pre-game shell in package F.
-    #[allow(dead_code)]
+    /// Shown by the pre-game shell as the import summary.
     pub summary: Vec<String>,
 }
 

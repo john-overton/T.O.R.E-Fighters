@@ -52,7 +52,7 @@ use menu::{Action, Menu};
 use renderer::Renderer;
 use std::{
     error::Error,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -63,6 +63,7 @@ use winit::{
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, ModifiersState},
+    platform::run_on_demand::EventLoopExtRunOnDemand,
     window::{CursorIcon, Window, WindowId},
 };
 type AppResult<T> = Result<T, Box<dyn Error>>;
@@ -125,6 +126,9 @@ struct App {
     modifiers: ModifiersState,
     smoke_test: bool,
     capture_terrain: Option<PathBuf>,
+    /// Set by Pref > Re-import media: the menu frame the player was looking
+    /// at, which the locate screen then draws over.
+    reimport: Option<Vec<u8>>,
     finished: bool,
     next_frame: Option<Instant>,
     error: Option<Box<dyn Error>>,
@@ -846,6 +850,14 @@ impl App {
             return;
         }
         match action {
+            Action::ReimportMedia => {
+                // The pack on disk is still valid here, so the menu the player
+                // is looking at becomes the locate screen's background.
+                self.reimport = Some(self.menu.pixels.clone());
+                self.finished = true;
+                event_loop.exit();
+                return;
+            }
             Action::Music(on) => {
                 self.menu.state.music = on;
             }
@@ -2706,7 +2718,467 @@ fn ai_probe_run(
     Ok(())
 }
 
+/// What the app should do when there is no usable pack in application data.
+/// Kept free of the file system so the decision itself can be tested.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Step {
+    /// The pack loaded; start the game.
+    Play,
+    /// A source the app already knows: import it without asking.
+    ImportNow(PathBuf),
+    /// Show the locate screen, with this path in the field if there is one.
+    Ask(Option<PathBuf>),
+    /// No window and nothing to import from: report it in the terminal.
+    Fail,
+}
+
+/// `known` is the remembered source or the developer checkout, whichever
+/// detects first; `prefill` is the first automatically detected source.
+fn next_step(
+    loaded: bool,
+    interactive: bool,
+    known: Option<PathBuf>,
+    prefill: Option<PathBuf>,
+) -> Step {
+    match (loaded, known, interactive) {
+        (true, ..) => Step::Play,
+        (false, Some(path), _) => Step::ImportNow(path),
+        (false, None, true) => Step::Ask(prefill),
+        (false, None, false) => Step::Fail,
+    }
+}
+
+/// The path the shell imports without waiting for the player: a source the app
+/// already knows, or, under `--smoke-test`, whatever the field was prefilled
+/// with, so a first run can be checked end to end without clicks.
+fn auto_import_path(step: &Step, prefill: Option<&Path>, smoke_test: bool) -> Option<PathBuf> {
+    match step {
+        Step::ImportNow(path) => Some(path.clone()),
+        _ if smoke_test => prefill.map(Path::to_path_buf),
+        _ => None,
+    }
+}
+
+/// How a session of the game application ended.
+enum Outcome {
+    Done,
+    /// Pref asked for another import. The frame is the menu the player was
+    /// looking at, which the locate screen draws over.
+    Reimport(Vec<u8>),
+}
+
+/// What a session starts from.
+enum Session {
+    First,
+    Reimport(Vec<u8>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShellOutcome {
+    Quit,
+    Continue,
+}
+
+/// Progress and results from the importing worker thread. The error is already
+/// a plain string, because `Box<dyn Error>` cannot cross a thread boundary.
+enum ImportMessage {
+    Progress(assets::Progress),
+    Done(Vec<String>),
+    Failed(String),
+}
+
+/// The pre-game shell: the locate screen, its own blit-only presenter, and the
+/// import running on a worker thread. It is a second winit application handler
+/// because every game object is built from imported assets, so the game `App`
+/// cannot exist before an import does.
+struct LocateShell {
+    locate: locate::Locate,
+    data: PathBuf,
+    presenter: Option<canvas_present::CanvasPresenter>,
+    font: menu::Sprite,
+    small: menu::Sprite,
+    background: Option<Vec<u8>>,
+    pixels: Vec<u8>,
+    worker: Option<std::sync::mpsc::Receiver<ImportMessage>>,
+    /// Last pointer position in canvas coordinates: winit reports a button
+    /// press without one, so the latest motion is what a click uses.
+    last_pointer: Option<(f64, f64)>,
+    /// Imported as soon as the window is up, without waiting for the player.
+    auto_import: Option<PathBuf>,
+    /// `--smoke-test` continues as soon as the import finishes.
+    auto_continue: bool,
+    outcome: ShellOutcome,
+    error: Option<Box<dyn Error>>,
+}
+
+/// winit key names the locate screen understands. Printable characters go
+/// through `text_input` instead, so their case survives.
+fn locate_key_name(key: &Key) -> Option<&'static str> {
+    use winit::keyboard::NamedKey;
+    let Key::Named(named) = key else {
+        return None;
+    };
+    Some(match named {
+        NamedKey::Enter => "Enter",
+        NamedKey::Escape => "Escape",
+        NamedKey::Tab => "Tab",
+        NamedKey::Backspace => "Backspace",
+        NamedKey::Delete => "Delete",
+        NamedKey::Home => "Home",
+        NamedKey::End => "End",
+        NamedKey::ArrowUp => "ArrowUp",
+        NamedKey::ArrowDown => "ArrowDown",
+        NamedKey::ArrowLeft => "ArrowLeft",
+        NamedKey::ArrowRight => "ArrowRight",
+        _ => return None,
+    })
+}
+
+impl LocateShell {
+    fn redraw(&mut self) {
+        if let Some(presenter) = &self.presenter {
+            presenter.window.request_redraw();
+        }
+    }
+    fn settle(&mut self, event_loop: &ActiveEventLoop, event: locate::Event) {
+        match event {
+            locate::Event::None => {}
+            locate::Event::Import(path) => self.start_import(path),
+            locate::Event::Quit => {
+                self.outcome = ShellOutcome::Quit;
+                event_loop.exit();
+            }
+            locate::Event::Continue => {
+                self.outcome = ShellOutcome::Continue;
+                event_loop.exit();
+            }
+        }
+        self.redraw();
+    }
+    /// Classify the chosen path, then read it on a worker thread so the screen
+    /// keeps drawing. Nothing partial is kept: a failure leaves the old pack.
+    fn start_import(&mut self, path: PathBuf) {
+        if self.worker.is_some() {
+            return;
+        }
+        let source = match media_source::MediaSource::detect(&path) {
+            Ok(source) => source,
+            Err(error) => {
+                self.locate.set_phase(locate::Phase::Failed {
+                    reason: error.to_string(),
+                });
+                return;
+            }
+        };
+        self.locate.clear_hint();
+        self.locate.set_phase(locate::Phase::Importing {
+            archive: String::from("FA.EXE"),
+            resources_done: 0,
+            resources_total: None,
+        });
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let data = self.data.clone();
+        std::thread::spawn(move || {
+            let reports = sender.clone();
+            let result = Assets::import_with_progress(&source, &data, &mut |progress| {
+                let _ = reports.send(ImportMessage::Progress(progress));
+            });
+            let _ = sender.send(match result {
+                // The decoded assets are dropped here; the caller reloads the
+                // pack that was just written, which proves it reads back.
+                Ok(outcome) => ImportMessage::Done(outcome.summary),
+                Err(error) => ImportMessage::Failed(error.to_string()),
+            });
+        });
+        self.worker = Some(receiver);
+    }
+    /// Drain the worker channel. Returns true when the screen changed.
+    fn poll_import(&mut self, event_loop: &ActiveEventLoop) -> bool {
+        let Some(receiver) = self.worker.take() else {
+            return false;
+        };
+        let mut changed = false;
+        let mut running = true;
+        loop {
+            match receiver.try_recv() {
+                Ok(ImportMessage::Progress(progress)) => {
+                    self.locate.set_phase(locate::Phase::Importing {
+                        archive: progress.archive,
+                        resources_done: progress.done,
+                        resources_total: progress.total,
+                    });
+                    changed = true;
+                }
+                Ok(ImportMessage::Done(summary)) => {
+                    self.locate.set_phase(locate::Phase::Done { summary });
+                    changed = true;
+                    running = false;
+                }
+                Ok(ImportMessage::Failed(reason)) => {
+                    self.locate.set_phase(locate::Phase::Failed { reason });
+                    changed = true;
+                    running = false;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    running = false;
+                    break;
+                }
+            }
+        }
+        if running {
+            self.worker = Some(receiver);
+        } else if self.auto_continue && matches!(self.locate.phase(), locate::Phase::Done { .. }) {
+            self.outcome = ShellOutcome::Continue;
+            event_loop.exit();
+        }
+        changed
+    }
+}
+
+impl ApplicationHandler for LocateShell {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.presenter.is_some() {
+            return;
+        }
+        let result = (|| {
+            let window = Arc::new(
+                event_loop.create_window(
+                    Window::default_attributes()
+                        .with_title("T.O.R.E-Fighters - Locate Fighters Anthology")
+                        .with_inner_size(LogicalSize::new(960.0, 720.0))
+                        .with_min_inner_size(LogicalSize::new(640.0, 480.0)),
+                )?,
+            );
+            pollster::block_on(canvas_present::CanvasPresenter::new(window))
+        })();
+        match result {
+            Ok(presenter) => {
+                presenter.window.request_redraw();
+                self.presenter = Some(presenter);
+                if let Some(path) = self.auto_import.take() {
+                    self.start_import(path);
+                }
+            }
+            Err(error) => {
+                self.error = Some(error);
+                event_loop.exit();
+            }
+        }
+    }
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        let Some(presenter) = self.presenter.as_mut() else {
+            return;
+        };
+        if presenter.window.id() != id {
+            return;
+        }
+        match event {
+            WindowEvent::CloseRequested => {
+                self.outcome = ShellOutcome::Quit;
+                event_loop.exit();
+            }
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => presenter.resize(),
+            WindowEvent::DroppedFile(path) => {
+                // A dropped file or folder is classified before it reaches the
+                // field, so the field always holds a folder the importer can read.
+                match media_source::MediaSource::detect(&path) {
+                    Ok(source) => self.locate.dropped_path(source.path),
+                    Err(error) => {
+                        self.locate.dropped_path(path);
+                        self.locate.set_hint(error.to_string());
+                    }
+                }
+                self.redraw();
+            }
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                if let Some(name) = locate_key_name(&event.logical_key) {
+                    let result = self.locate.key(name);
+                    self.settle(event_loop, result);
+                    return;
+                }
+                // Space continues a finished import and otherwise types a space.
+                if event.logical_key == Key::Named(winit::keyboard::NamedKey::Space) {
+                    let result = self.locate.key(" ");
+                    self.locate.text_input(' ');
+                    self.settle(event_loop, result);
+                    return;
+                }
+                if let Some(text) = &event.text {
+                    for ch in text.chars().filter(|ch| !ch.is_control()) {
+                        self.locate.text_input(ch);
+                    }
+                    self.redraw();
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.last_pointer = presenter.viewport().point(position.x, position.y);
+                if let Some((x, y)) = self.last_pointer {
+                    self.locate.hover(x, y);
+                    self.redraw();
+                }
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                if let Some((x, y)) = self.last_pointer {
+                    let result = self.locate.click(x, y);
+                    self.settle(event_loop, result);
+                }
+            }
+            WindowEvent::RedrawRequested => {
+                self.poll_import(event_loop);
+                self.locate.draw(
+                    &mut self.pixels,
+                    &self.font,
+                    &self.small,
+                    self.background.as_deref(),
+                );
+                let pixels = std::mem::take(&mut self.pixels);
+                if let Some(presenter) = &mut self.presenter
+                    && let Err(error) = presenter.present(&pixels)
+                {
+                    self.error = Some(error);
+                    event_loop.exit();
+                }
+                self.pixels = pixels;
+            }
+            _ => {}
+        }
+    }
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.poll_import(event_loop) {
+            self.redraw();
+        }
+        event_loop.set_control_flow(if self.worker.is_some() {
+            // Poll the import often enough for a smooth progress bar.
+            ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(33))
+        } else {
+            ControlFlow::Wait
+        });
+    }
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // Release the GPU backend while the display connection is still alive,
+        // for the same reason the game renderer does; see docs/DEVELOPMENT.md.
+        self.presenter = None;
+    }
+}
+
+/// Show the locate screen until the player quits or continues.
+fn locate_shell(
+    event_loop: &mut EventLoop<()>,
+    data: &Path,
+    prefill: Option<PathBuf>,
+    candidates: Vec<media_source::MediaSource>,
+    background: Option<Vec<u8>>,
+    auto_import: Option<PathBuf>,
+    auto_continue: bool,
+) -> AppResult<ShellOutcome> {
+    let candidates: Vec<locate::Candidate> = candidates
+        .into_iter()
+        .map(|source| locate::Candidate {
+            path: source.path,
+            kind: match source.kind {
+                media_source::Kind::Installed => locate::SourceKind::Installed,
+                media_source::Kind::Disc => locate::SourceKind::Disc,
+            },
+        })
+        .collect();
+    match &auto_import {
+        Some(path) => println!(
+            "Locate Fighters Anthology: {} detected source(s), importing {}",
+            candidates.len(),
+            path.display()
+        ),
+        None => println!(
+            "Locate Fighters Anthology: {} detected source(s), waiting for a choice",
+            candidates.len()
+        ),
+    }
+    let mut shell = LocateShell {
+        locate: locate::Locate::new(prefill.map(|path| path.display().to_string()), candidates),
+        data: data.to_path_buf(),
+        presenter: None,
+        font: menu::flat_font([235, 239, 243]),
+        small: menu::flat_font([210, 219, 230]),
+        background: background.filter(|art| art.len() == menu::WIDTH * menu::HEIGHT * 4),
+        pixels: vec![0; menu::WIDTH * menu::HEIGHT * 4],
+        worker: None,
+        auto_import,
+        auto_continue,
+        outcome: ShellOutcome::Quit,
+        error: None,
+        last_pointer: None,
+    };
+    event_loop.run_app_on_demand(&mut shell)?;
+    match shell.error {
+        Some(error) => Err(error),
+        None => Ok(shell.outcome),
+    }
+}
+
+/// Headless locate-screen preview (`--snapshot PATH --snapshot-state locate`).
+/// The candidate list is fixed so the layout is reviewable on any machine,
+/// with or without media.
+fn locate_snapshot(path: &Path) -> AppResult<()> {
+    use std::io::Write;
+    let mut screen = locate::Locate::new(
+        None,
+        vec![
+            locate::Candidate {
+                path: PathBuf::from("gameassets/fighters-anthology"),
+                kind: locate::SourceKind::Installed,
+            },
+            locate::Candidate {
+                path: PathBuf::from("/run/media/pilot/FA_DISC1"),
+                kind: locate::SourceKind::Disc,
+            },
+        ],
+    );
+    screen.set_hint(
+        "Drop the mounted disc 1 folder on this window, or type the folder above.".into(),
+    );
+    let mut pixels = vec![0u8; menu::WIDTH * menu::HEIGHT * 4];
+    screen.draw(
+        &mut pixels,
+        &menu::flat_font([235, 239, 243]),
+        &menu::flat_font([210, 219, 230]),
+        None,
+    );
+    let mut file = std::fs::File::create(path)?;
+    write!(file, "P6\n{} {}\n255\n", menu::WIDTH, menu::HEIGHT)?;
+    for pixel in pixels.chunks_exact(4) {
+        file.write_all(&pixel[..3])?;
+    }
+    println!("Locate preview: {}", path.display());
+    Ok(())
+}
+
+/// The event loop is created at most once per process and only when a window
+/// is actually wanted, so headless runs still work without a display.
+fn shared_event_loop(slot: &mut Option<EventLoop<()>>) -> AppResult<&mut EventLoop<()>> {
+    if slot.is_none() {
+        slot.replace(EventLoop::new()?);
+    }
+    Ok(slot.as_mut().expect("the event loop was just created"))
+}
+
 fn main() -> AppResult<()> {
+    let mut event_loop = None;
+    let mut session = Session::First;
+    loop {
+        match run(&mut event_loop, session)? {
+            Outcome::Done => return Ok(()),
+            // Pref asked for another import: the shell runs again, and on
+            // Continue the game is rebuilt from the new pack.
+            Outcome::Reimport(frame) => session = Session::Reimport(frame),
+        }
+    }
+}
+
+fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Outcome> {
     let mut args = std::env::args().skip(1);
     let mut live_fire = false;
     let mut dummy_aircraft = Vec::new();
@@ -3230,7 +3702,7 @@ fn main() -> AppResult<()> {
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
 Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
-                return Ok(());
+                return Ok(Outcome::Done);
             }
             _ => return Err(format!("Unknown argument: {arg}").into()),
         }
@@ -3334,12 +3806,21 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     if snapshot.is_none() && !smoke_test && snapshot_state != "normal" {
         return Err("--snapshot-state requires --snapshot or --smoke-test".into());
     }
+    // The locate screen owns no imported media, so its preview is written
+    // before any pack is looked for.
+    if let Some(path) = &snapshot
+        && snapshot_state == "locate"
+    {
+        locate_snapshot(path)?;
+        return Ok(Outcome::Done);
+    }
     if let Some(seconds) = input_seconds {
-        return input::diagnostics(
+        input::diagnostics(
             seconds,
             write_input_profile.as_deref(),
             test_rumble.as_deref(),
-        );
+        )?;
+        return Ok(Outcome::Done);
     }
     if record_input.is_some()
         && (headless_ticks.is_some()
@@ -3395,36 +3876,96 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             initial_screen = Screen::Flight;
         }
     }
-    let mut assets = if let Some(chosen) = import {
+    // A window is opened only when no headless mode was selected. The locate
+    // screen belongs to those runs alone; everything else keeps the terminal
+    // behaviour, which package C settled.
+    let windowed = !import_only
+        && snapshot.is_none()
+        && replay_combat.is_none()
+        && panel_snapshot.is_none()
+        && headless_ticks.is_none()
+        && ai_probe.is_none()
+        && !sensor_summary
+        && !missile_acceptance
+        && !combat_smoke
+        && !native_flight_report
+        && !validate_creator
+        && !validate_weather
+        && !(airport_probe.is_some() && !(smoke_test && initial_screen == Screen::Flight))
+        && std::env::var_os("TORE_ENVIRONMENT_PROBE").is_none();
+    let reimport_background = match session {
+        Session::Reimport(frame) => Some(frame),
+        Session::First => None,
+    };
+    let reimporting = reimport_background.is_some();
+    let mut assets = if let Some(chosen) = import.filter(|_| !reimporting) {
         // --import accepts an installed folder, a mounted disc folder or the
         // installer container inside one; the kind is decided by content.
         Assets::import_path(&chosen, &data)?
     } else {
-        match Assets::load(&data) {
+        // Pref asked for this screen, so the pack on disk is deliberately ignored.
+        let loaded = match reimporting {
+            true => Err("Re-import media".into()),
+            false => Assets::load(&data),
+        };
+        match loaded {
             Ok(assets) => assets,
             Err(error) => {
                 // A remembered source is tried first, then a developer checkout.
-                let remembered = media_source::remembered(&data).map(|(path, _)| path);
-                let fallback = remembered
+                let known = media_source::remembered(&data)
+                    .map(|(path, _)| path)
                     .into_iter()
                     .chain(std::iter::once(PathBuf::from(
                         "gameassets/fighters-anthology",
                     )))
-                    .find_map(|path| media_source::MediaSource::detect(&path).ok());
-                match fallback {
-                    Some(source) => Assets::import(&source, &data)?,
-                    None => {
+                    .find_map(|path| media_source::MediaSource::detect(&path).ok())
+                    .map(|source| source.path);
+                let candidates = if windowed {
+                    media_source::candidates(Duration::from_secs(2))
+                } else {
+                    Vec::new()
+                };
+                let first = candidates.first().map(|source| source.path.clone());
+                let prefill = known.clone().or_else(|| first.clone());
+                let step = next_step(false, windowed, known, first);
+                match step {
+                    Step::Fail => {
                         return Err(format!(
                             "{error}\nImport your own Fighters Anthology media with --import <directory>: an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA."
                         )
                         .into());
+                    }
+                    // No window: the terminal path package C left in place.
+                    Step::ImportNow(path) if !windowed => Assets::import_path(&path, &data)?,
+                    Step::Play => Assets::load(&data)?,
+                    step => {
+                        // Re-import is a deliberate choice, so that screen waits
+                        // for the player even when a source is already known.
+                        let auto = if reimporting && !smoke_test {
+                            None
+                        } else {
+                            auto_import_path(&step, prefill.as_deref(), smoke_test)
+                        };
+                        let outcome = locate_shell(
+                            shared_event_loop(event_loop)?,
+                            &data,
+                            prefill,
+                            candidates,
+                            reimport_background,
+                            auto,
+                            smoke_test,
+                        )?;
+                        if outcome == ShellOutcome::Quit {
+                            return Ok(Outcome::Done);
+                        }
+                        Assets::load(&data)?
                     }
                 }
             }
         }
     };
     if import_only {
-        return Ok(());
+        return Ok(Outcome::Done);
     }
     let hornet = aircraft::Airframe::load(&assets.theater_resources, aircraft_id)?;
     if let Some(path) = replay_combat {
@@ -3440,7 +3981,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             &theater_code,
             &w,
         )?;
-        return Ok(());
+        return Ok(Outcome::Done);
     }
     if sensor_summary {
         // The reviewable per-aircraft capability report. Porting an aircraft
@@ -3451,7 +3992,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 Err(error) => println!("{id:?}: unavailable, {error}"),
             }
         }
-        return Ok(());
+        return Ok(Outcome::Done);
     }
     if missile_acceptance {
         let config = tore_sim::combat::live::Configuration::from_source(&hornet.profile, |name| {
@@ -3461,10 +4002,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 .cloned()
                 .ok_or_else(|| std::io::Error::other("missing probe resource"))
         })?;
-        return missile_acceptance::run(config);
+        missile_acceptance::run(config)?;
+        return Ok(Outcome::Done);
     }
     if combat_smoke {
-        return combat::smoke(&hornet, &assets.theater_resources);
+        combat::smoke(&hornet, &assets.theater_resources)?;
+        return Ok(Outcome::Done);
     }
     if live_fire && record_input.is_some() {
         return Err("combat recording is not in the flight-only tape format".into());
@@ -3480,7 +4023,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             let table = tore_formats::flight_model::rotation::TrigTable::parse(&bytes)?;
             flight::native_rotation_report(&hornet.profile, &table)?;
         }
-        return Ok(());
+        return Ok(Outcome::Done);
     }
     let ground_object = |world: &terrain::World| -> AppResult<Option<u32>> {
         ground_start_airport
@@ -3666,7 +4209,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.fuel,
             state.crashed
         );
-        return Ok(());
+        return Ok(Outcome::Done);
     }
     if let Some(path) = panel_snapshot {
         use std::io::Write;
@@ -3695,7 +4238,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         for p in r.pixels.chunks_exact(4) {
             f.write_all(&p[..3])?;
         }
-        return Ok(());
+        return Ok(Outcome::Done);
     }
     let audio = if no_audio
         || smoke_test
@@ -3736,10 +4279,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         );
     }
     if validate_creator {
-        return ordnance::validate_sources(&assets.theater_resources, &world);
+        ordnance::validate_sources(&assets.theater_resources, &world)?;
+        return Ok(Outcome::Done);
     }
     if validate_weather {
-        return weather::validate_sources(&assets.theater_resources, &world.environment);
+        weather::validate_sources(&assets.theater_resources, &world.environment)?;
+        return Ok(Outcome::Done);
     }
     let theater_resources = assets.theater_resources.clone();
     let creator_options = assets.creator_options.clone();
@@ -3788,7 +4333,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             service.selected(),
             service.clearance(),
         );
-        return Ok(());
+        return Ok(Outcome::Done);
     }
     let mut menu = Menu::new(assets, background.as_deref())?;
     if let Some(path) = snapshot {
@@ -3839,7 +4384,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
 
         println!("Menu preview: {}", path.display());
-        return Ok(());
+        return Ok(Outcome::Done);
     }
     let turbulence_enabled = match std::env::var("TORE_TURBULENCE").as_deref() {
         Err(std::env::VarError::NotPresent) | Ok("1") => true,
@@ -3879,16 +4424,18 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     if let Some(ticks) = ai_probe {
         if ai_roster_probe {
-            return ai_wings::roster_probe(ticks, &theater_resources, &world);
+            ai_wings::roster_probe(ticks, &theater_resources, &world)?;
+            return Ok(Outcome::Done);
         }
-        return ai_probe_run(
+        ai_probe_run(
             ticks,
             &mut quick,
             &hornet,
             &theater_resources,
             &world,
             enemy_skill,
-        );
+        )?;
+        return Ok(Outcome::Done);
     }
     if initial_screen == Screen::Quick && snapshot_state == "ordnance" {
         quick.ordnance = Some(ordnance::Ordnance::new(
@@ -4035,7 +4582,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             flight.position,
             [flight.yaw, flight.pitch, flight.bank]
         );
-        return Ok(());
+        return Ok(Outcome::Done);
     }
     if let Some(v) = flight_devices {
         if v[4] > 0.
@@ -4463,6 +5010,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         modifiers: ModifiersState::empty(),
         smoke_test,
         capture_terrain,
+        reimport: None,
         finished: false,
         next_frame: None,
         error: None,
@@ -4527,10 +5075,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         app.screen != Screen::Flight || app.flight_ui.frozen(),
         app.focused,
     );
-    EventLoop::new()?.run_app(&mut app)?;
-    match app.error {
-        Some(error) => Err(error),
-        None => Ok(()),
+    shared_event_loop(event_loop)?.run_app_on_demand(&mut app)?;
+    if let Some(error) = app.error {
+        return Err(error);
+    }
+    match app.reimport {
+        Some(frame) => Ok(Outcome::Reimport(frame)),
+        None => Ok(Outcome::Done),
     }
 }
 
@@ -4615,6 +5166,84 @@ fn cycle_player_weapon(
     let readout = combat.readout(flight, instruments.rcs_scale_nmi());
     if let Some(index) = readout.weapons.iter().position(|row| row.2) {
         instruments.weapon_page = index / 6;
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+
+    fn path(text: &str) -> Option<PathBuf> {
+        Some(PathBuf::from(text))
+    }
+
+    #[test]
+    fn a_readable_pack_starts_the_game() {
+        assert_eq!(
+            next_step(true, true, path("/games/fa"), path("/mnt/disc1")),
+            Step::Play
+        );
+        assert_eq!(next_step(true, false, None, None), Step::Play);
+    }
+
+    #[test]
+    fn a_known_source_is_imported_without_asking() {
+        // The remembered source, or a developer checkout, needs no click.
+        assert_eq!(
+            next_step(false, true, path("/games/fa"), path("/mnt/disc1")),
+            Step::ImportNow(PathBuf::from("/games/fa"))
+        );
+        assert_eq!(
+            next_step(false, false, path("/games/fa"), None),
+            Step::ImportNow(PathBuf::from("/games/fa"))
+        );
+    }
+
+    #[test]
+    fn an_unknown_source_asks_the_player_when_there_is_a_window() {
+        assert_eq!(
+            next_step(false, true, None, path("/mnt/disc1")),
+            Step::Ask(path("/mnt/disc1"))
+        );
+        assert_eq!(next_step(false, true, None, None), Step::Ask(None));
+        // Headless runs keep the terminal message package C wrote.
+        assert_eq!(
+            next_step(false, false, None, path("/mnt/disc1")),
+            Step::Fail
+        );
+    }
+
+    #[test]
+    fn the_smoke_test_imports_the_prefilled_source() {
+        let ask = Step::Ask(path("/mnt/disc1"));
+        assert_eq!(auto_import_path(&ask, None, false), None);
+        // Under --smoke-test the field's own path is imported, so a first run
+        // can be checked end to end without clicks.
+        assert_eq!(
+            auto_import_path(&ask, Some(Path::new("/mnt/disc1")), true),
+            path("/mnt/disc1")
+        );
+        assert_eq!(auto_import_path(&Step::Ask(None), None, true), None);
+        // A known source starts on its own either way.
+        let known = Step::ImportNow(PathBuf::from("/games/fa"));
+        assert_eq!(auto_import_path(&known, None, false), path("/games/fa"));
+        assert_eq!(
+            auto_import_path(&known, Some(Path::new("/mnt/disc1")), true),
+            path("/games/fa")
+        );
+    }
+
+    #[test]
+    fn named_keys_reach_the_locate_screen_and_letters_do_not() {
+        use winit::keyboard::NamedKey;
+        assert_eq!(locate_key_name(&Key::Named(NamedKey::Enter)), Some("Enter"));
+        assert_eq!(
+            locate_key_name(&Key::Named(NamedKey::Backspace)),
+            Some("Backspace")
+        );
+        // Printable characters go through text_input, with their case intact.
+        assert_eq!(locate_key_name(&Key::Character("D".into())), None);
+        assert_eq!(locate_key_name(&Key::Named(NamedKey::Space)), None);
     }
 }
 

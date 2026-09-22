@@ -7,7 +7,6 @@
 //! retail media: the panel is flat colour and the text uses the bundled menu
 //! font, because on a first run there is no imported art yet. When a pack does
 //! exist the caller passes the Choose Activity frame as `background`.
-#![allow(dead_code)] // integrated by the pre-game shell
 use crate::menu::{Canvas, HEIGHT, Sprite, WIDTH, text_width};
 use std::path::PathBuf;
 
@@ -223,20 +222,8 @@ impl Locate {
     pub(crate) fn clear_hint(&mut self) {
         self.hint = None;
     }
-    pub(crate) fn path(&self) -> &str {
-        &self.path
-    }
     pub(crate) fn phase(&self) -> &Phase {
         &self.phase
-    }
-    pub(crate) fn focus(&self) -> Focus {
-        self.focus
-    }
-    pub(crate) fn candidates(&self) -> &[Candidate] {
-        &self.candidates
-    }
-    pub(crate) fn selected(&self) -> Option<usize> {
-        self.selected
     }
     fn importing(&self) -> bool {
         matches!(self.phase, Phase::Importing { .. })
@@ -749,36 +736,36 @@ mod tests {
     fn typing_preserves_case_and_edits_at_the_caret() {
         let mut l = Locate::new(None, Vec::new());
         type_text(&mut l, "D:/Janes/FA");
-        assert_eq!(l.path(), "D:/Janes/FA");
+        assert_eq!(l.path, "D:/Janes/FA");
         assert_eq!(l.key("Backspace"), Event::None);
-        assert_eq!(l.path(), "D:/Janes/F");
+        assert_eq!(l.path, "D:/Janes/F");
         l.key("Home");
         assert_eq!(l.cursor, 0);
         // Backspace at the start of the field does nothing.
         l.key("Backspace");
-        assert_eq!(l.path(), "D:/Janes/F");
+        assert_eq!(l.path, "D:/Janes/F");
         l.key("Delete");
-        assert_eq!(l.path(), ":/Janes/F");
+        assert_eq!(l.path, ":/Janes/F");
         l.key("ArrowRight");
         type_text(&mut l, "C");
-        assert_eq!(l.path(), ":C/Janes/F");
+        assert_eq!(l.path, ":C/Janes/F");
         l.key("End");
         type_text(&mut l, "A");
-        assert_eq!(l.path(), ":C/Janes/FA");
+        assert_eq!(l.path, ":C/Janes/FA");
         l.key("ArrowLeft");
         l.key("ArrowLeft");
-        assert_eq!(l.cursor, l.path().len() - 2);
+        assert_eq!(l.cursor, l.path.len() - 2);
     }
     #[test]
     fn the_field_length_is_capped() {
         let mut l = Locate::new(None, Vec::new());
         type_text(&mut l, &"a".repeat(MAX_PATH_BYTES + 40));
-        assert_eq!(l.path().len(), MAX_PATH_BYTES);
+        assert_eq!(l.path.len(), MAX_PATH_BYTES);
     }
     #[test]
     fn tab_cycles_focus_and_skips_an_empty_candidate_list() {
         let mut l = Locate::new(Some("/tmp/fa".into()), candidates());
-        assert_eq!(l.focus(), Focus::PathField);
+        assert_eq!(l.focus, Focus::PathField);
         for expected in [
             Focus::Candidates,
             Focus::ImportButton,
@@ -786,43 +773,43 @@ mod tests {
             Focus::PathField,
         ] {
             l.key("Tab");
-            assert_eq!(l.focus(), expected);
+            assert_eq!(l.focus, expected);
         }
         let mut empty = Locate::new(Some("/tmp/fa".into()), Vec::new());
         for expected in [Focus::ImportButton, Focus::QuitButton, Focus::PathField] {
             empty.key("Tab");
-            assert_eq!(empty.focus(), expected);
+            assert_eq!(empty.focus, expected);
         }
     }
     #[test]
     fn selecting_a_candidate_copies_its_path_into_the_field() {
         let mut l = Locate::new(Some("/typed".into()), candidates());
-        assert_eq!(l.path(), "/typed");
-        assert_eq!(l.selected(), None);
+        assert_eq!(l.path, "/typed");
+        assert_eq!(l.selected, None);
         l.key("ArrowDown");
-        assert_eq!(l.focus(), Focus::Candidates);
-        assert_eq!(l.path(), "/home/pilot/games/Fighters Anthology");
+        assert_eq!(l.focus, Focus::Candidates);
+        assert_eq!(l.path, "/home/pilot/games/Fighters Anthology");
         l.key("ArrowDown");
-        assert_eq!(l.selected(), Some(1));
-        assert_eq!(l.path(), "/run/media/pilot/FA_DISC1");
+        assert_eq!(l.selected, Some(1));
+        assert_eq!(l.path, "/run/media/pilot/FA_DISC1");
         // Past the last row the focus moves on to the buttons.
         l.key("ArrowDown");
-        assert_eq!(l.focus(), Focus::ImportButton);
+        assert_eq!(l.focus, Focus::ImportButton);
         // Clicking a row selects it too.
         assert_eq!(
             l.click(INNER_X as f64 + 4.0, LIST_Y as f64 + 2.0),
             Event::None
         );
-        assert_eq!(l.selected(), Some(0));
-        assert_eq!(l.path(), "/home/pilot/games/Fighters Anthology");
+        assert_eq!(l.selected, Some(0));
+        assert_eq!(l.path, "/home/pilot/games/Fighters Anthology");
     }
     #[test]
     fn an_empty_field_takes_the_first_detected_source() {
         let l = Locate::new(None, candidates());
-        assert_eq!(l.path(), "/home/pilot/games/Fighters Anthology");
-        assert_eq!(l.selected(), Some(0));
+        assert_eq!(l.path, "/home/pilot/games/Fighters Anthology");
+        assert_eq!(l.selected, Some(0));
         let kept = Locate::new(Some("/kept".into()), candidates());
-        assert_eq!(kept.path(), "/kept");
+        assert_eq!(kept.path, "/kept");
     }
     #[test]
     fn enter_imports_the_field_path_and_continues_when_done() {
@@ -833,12 +820,12 @@ mod tests {
         l.set_phase(Phase::Done {
             summary: vec!["FA.EXE: 1.02F".into()],
         });
-        assert_eq!(l.focus(), Focus::ContinueButton);
+        assert_eq!(l.focus, Focus::ContinueButton);
         assert_eq!(l.key("Enter"), Event::Continue);
         assert_eq!(l.key("Escape"), Event::Continue);
         // Typing cannot change the field once the import has finished.
         type_text(&mut l, "x");
-        assert_eq!(l.path(), "  /mnt/disc1  ");
+        assert_eq!(l.path, "  /mnt/disc1  ");
     }
     #[test]
     fn escape_quits_when_idle_or_failed_and_is_ignored_while_importing() {
@@ -863,7 +850,7 @@ mod tests {
             reason: "FA_2.LIB is truncated".into(),
         });
         assert_eq!(l.key("Escape"), Event::Quit);
-        assert_eq!(l.focus(), Focus::PathField);
+        assert_eq!(l.focus, Focus::PathField);
     }
     #[test]
     fn clicking_each_button_reports_its_event() {
@@ -877,10 +864,10 @@ mod tests {
         // The caret follows a click in the field.
         let (x, y) = centre(FIELD);
         assert_eq!(l.click((FIELD.0 + FIELD_PAD) as f64, y), Event::None);
-        assert_eq!(l.focus(), Focus::PathField);
+        assert_eq!(l.focus, Focus::PathField);
         assert_eq!(l.cursor, 0);
         l.click(x, y);
-        assert_eq!(l.cursor, l.path().len());
+        assert_eq!(l.cursor, l.path.len());
         l.set_phase(Phase::Done {
             summary: vec!["archives read: 2".into()],
         });
@@ -903,8 +890,8 @@ mod tests {
         let mut l = Locate::new(None, candidates());
         l.set_hint("Mount the image and choose the mounted folder".into());
         l.dropped_path(PathBuf::from("/run/media/pilot/FA_DISC1/SETUP.ESA"));
-        assert_eq!(l.path(), "/run/media/pilot/FA_DISC1/SETUP.ESA");
-        assert_eq!(l.selected(), None);
+        assert_eq!(l.path, "/run/media/pilot/FA_DISC1/SETUP.ESA");
+        assert_eq!(l.selected, None);
         assert!(l.hint.is_none());
     }
     #[test]
@@ -944,7 +931,7 @@ mod tests {
         let (visible, start) = l.field_view(&f);
         assert!(start > 0);
         assert!(text_width(&f, &visible) <= FIELD.2 - FIELD_PAD * 2 - 2);
-        assert!(l.path().ends_with(&visible));
+        assert!(l.path.ends_with(&visible));
         l.key("Home");
         let (_, start) = l.field_view(&f);
         assert_eq!(start, 0);

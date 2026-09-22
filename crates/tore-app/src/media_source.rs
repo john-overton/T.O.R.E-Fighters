@@ -8,7 +8,6 @@
 //! three files and the disc folder by the container signature. Reading a disc
 //! never copies an archive into memory, the container serves stored archives in
 //! place by offset.
-#![allow(dead_code)] // candidates() and the detection errors are shown by the pre-game shell
 
 use crate::{AppResult, preferences};
 use std::{
@@ -301,19 +300,6 @@ impl MediaSource {
             Kind::Disc => Ok(self.container()?.read("FA.EXE", EXECUTABLE_LIMIT)?),
         }
     }
-
-    /// Whether an optional archive is present, without opening it.
-    pub(crate) fn has(&self, name: &str) -> bool {
-        match self.kind {
-            Kind::Installed => files(&self.path)
-                .map(|files| named(&files, name).is_some())
-                .unwrap_or(false),
-            Kind::Disc => self
-                .container()
-                .map(|container| container.entry(name).is_some())
-                .unwrap_or(false),
-        }
-    }
 }
 
 /// Check one root and its immediate subdirectories, appending every hit.
@@ -552,7 +538,6 @@ mod tests {
         assert_eq!(source.archive("FA_1.LIB").unwrap().entries.len(), 1);
         assert_eq!(source.executable().unwrap(), b"synthetic executable");
         assert!(source.optional_archive("FA_4B.LIB").unwrap().is_none());
-        assert!(!source.has("FA_4B.LIB"));
     }
 
     #[test]
