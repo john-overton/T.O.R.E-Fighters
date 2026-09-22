@@ -80,7 +80,7 @@
         <Directory Id="ApplicationProgramsFolder" Name="T.O.R.E-Fighters">
           <Component Id="ProgramMenuDir" Guid="82B6C67B-DD7F-4AF2-959E-2885EB80939D">
             <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
-            <RegistryValue Root="HKLM"
+            <RegistryValue Root="HKCU"
                            Key="Software\T.O.R.E-Fighters"
                            Name="InstallFolder"
                            Type="string"
