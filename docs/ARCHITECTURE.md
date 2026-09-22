@@ -273,6 +273,22 @@ snapshots bind each guided projectile to its own launcher, and the shared
 seeker lifecycle supplies actual pitbull and support-loss state. Countermeasure
 bursts are scheduled/debited by the mission before the bridge applies decoy
 rolls. RWR drawing reads the same records and never drives the decision clock.
+`ai::engagement` gates current target selection by role and stance before B41
+ranking. Quick Mission initializes a separate neutral engagement gate for every
+actor. Accepted combat orders release it; formation and disengage commands
+recall it without rewriting mission objectives. Recall suppresses repeated
+offensive reactions to known projectile IDs while retaining missile evasion.
+AI leaders release their own wings only after a perceived attack, with command
+delivery after all same-tick decisions. `AiMission` delivers perception-only attack reports to assigned escorts and wing leaders
+on the next tick, with a fixed expiry; bearings never become synthetic targets.
+Escorts also assess detected aircraft against each assigned friendly's protection
+zone using observed relative motion. Confirmed attackers outrank prospective
+threats. Frozen contacts can guide investigation but still cannot authorize fire.
+Quick Mission group objectives resolve through stable side/wing/member metadata
+into per-actor assignments. Whole-group survival requirements are stored separately from combat orders.
+The Target window combines player assignments, these requirements and allegiance
+to select a typed Survive/Destroy label, with no label for other contacts. Source missions and
+campaign outcomes remain outside the M1 assignment adapter.
 `ai::formation` owns routine repositioning, trailing, breakout, intercept, stabilization and
 capture guidance. Traffic and arrival states are snapshotted before any actor
 advances, so iteration order cannot grant approach priority. Its trace hook is

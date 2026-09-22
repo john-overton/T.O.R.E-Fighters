@@ -29,6 +29,10 @@ diamond and an enemy aircraft as a filled diamond. Draw a missile with a dot.
 An emitter painting this aircraft is bright. An emitter known to be tracking or
 firing at this aircraft flashes. These states require supplied evidence. A
 passively received emitter with no lock evidence remains in its ordinary state.
+A current supported-radar incoming warning marks its source as firing only when
+exactly one independently identified emitter lies within 2 degrees of the
+supporting-radar bearing. Ambiguous and unidentified sources remain steady.
+Prelaunch painting/tracking states have no fabricated producer.
 
 Show `R` in the lower-right corner for radar warning state and `I` beside it for
 infrared warning state. An ordinary detection is dim, a seeker tracking this

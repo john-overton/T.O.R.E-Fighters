@@ -69,6 +69,12 @@ pub fn fit(camera: &mut crate::terrain::Camera, points: impl IntoIterator<Item =
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetObjective {
+    Survive,
+    Destroy,
+}
+
 /// Target camera readback alpha separates scenery (0) from aircraft and static
 /// objects (255). Restore opaque alpha after darkening scenery by ten percent.
 pub fn monochrome(pixels: &mut [u8]) {
@@ -88,7 +94,7 @@ pub struct Readout {
     pub damage: f64,
     pub bearing: String,
     pub metric: String,
-    pub objective: Option<bool>,
+    pub objective: Option<TargetObjective>,
     pub activity: String,
     pub goal: &'static str,
     pub player_goal: bool,
@@ -114,6 +120,7 @@ impl Readout {
         }
     }
     pub fn with_activity(&mut self, wings: &AiWings) {
+        self.objective = wings.target_objective(self.id);
         let Some(actor) = wings.mission().actor(self.id) else {
             return;
         };

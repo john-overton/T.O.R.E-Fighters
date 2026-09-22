@@ -45,10 +45,12 @@ on 2026-09-21, an opinionated timing choice.
   threshold is opinionated; the manual does not give the original number.
 - Bottom right alternates slant distance in NM and ground speed in KTS every
   360 simulation ticks at 120 Hz, starting with distance. Pausing freezes it.
-- `MISSION OBJECTIVE` identifies an assigned objective. Allegiance alone never
-  establishes an objective. The requested meaning is destroy enemies or protect
-  friendlies. Current launch data has no objective assignments: display
-  `OBJECTIVE ?` until that contract exists. Known non-objectives have no label.
+- The objective row shows only `Obj: Survive` or `Obj: Destroy`, relative to the
+  player's assignment. Survive identifies an escorted friendly or a friendly
+  marked must-survive in mission requirements. Destroy identifies an enemy
+  explicitly required by the player's destroy assignment. Other contacts have
+  no objective label. Allegiance alone does not establish a requirement.
+- Activity, tactical goal and skill keep their existing independent meanings.
 - Goal A means attack, E evade, N neutral, T takeoff, C crash, L land.
   Underline A/E only when directed at the player. Skill has 0..3 dots.
 
@@ -66,6 +68,7 @@ remain finite and use that same position. Displayed range, bearing and Hi/Lo
 still measure from the player, never from this presentation camera.
 Agent-chosen framing keeps image roll level and fits aircraft mesh vertices into
 90% of image width and 52% of image height, reserving the top/bottom text rows.
+The single objective row is at y=111 and uses the original instrument font.
 One dimension fills that area without cropping the other. Zoom follows projected
 geometry each camera refresh, so range, target size, and aspect cannot leave a
 small target surrounded by empty space. Ground objects use their oriented bounds.
@@ -91,6 +94,6 @@ There is no invented firing prediction: activity describes current state, not
 whether a launch will occur. Return-to-base is not labeled L before landing.
 
 Unknown: original Hi/Lo threshold, exact camera pose, speed definition, bar
-fill direction, complete activity wording, objective assignment/loading, and
+fill direction, complete activity wording, campaign objective loading, and
 player-specific evade provenance. Next research should inspect mission objective
 records and activity display contracts. No AI decisions or flight adapters change.

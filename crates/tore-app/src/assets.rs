@@ -145,6 +145,12 @@ impl Assets {
         if resources.get("TORE_AIRPORTS_V1").map(Vec::as_slice) != Some(b"SCENE1") {
             return Err("cache predates airport scene dependencies; re-import media".into());
         }
+        for &name in tore_formats::ui::creator::ORDNANCE_SOUNDS {
+            let bytes = resources
+                .get(name)
+                .ok_or_else(|| format!("cache missing ordnance sound {name}; re-import media"))?;
+            tore_formats::pcm::Pcm::parse(name, bytes)?;
+        }
         for &name in tore_formats::aircraft::COMBAT_RESOURCES {
             if !resources.contains_key(name) {
                 return Err(

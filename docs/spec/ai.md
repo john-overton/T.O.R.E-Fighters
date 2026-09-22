@@ -837,14 +837,17 @@ See [radio data contract](../formats/radio.md).
 
 Player commands include all five B46 breaks, target engagement, disengage,
 formation selection, horizontal spacing, stacking and loose/medium control.
+Quick Mission initializes neutral formation permission on both sides. Formation
+selection and disengage recall the addressed aircraft, canceling pursuit until
+a new engagement order or newly perceived attack. The current authored rules
+are in [formation and leader authorization](ai-awareness.md#formation-and-leader-authorization).
 Attack on contact restores free selection. Engage from formation permits an
-explicit target with medium control. Protect me assigns the nearest observed
-hostile currently targeting the player, measured from the first addressed
-wingman; absent such a threat it reports no assignment. Attacker identity uses
-the mission AI target assignment, an explicit direct-awareness fallback rather
-than sensor inference of hostile intent. Each recipient must independently see
-the chosen target before accepting. These last target-resolution choices are **fitted, agent-authored**;
-class/policy pursuit and original protect-me persistence are not established.
+explicit target with medium control. Protect me establishes a persistent duty
+to protect the player, including when no attacker is currently observed. Each
+escort independently acquires aircraft and assesses their threat to the player;
+perceived attack reports can raise priority without revealing hidden launchers.
+The authored policy, pursuit limits and search rules are specified in
+[mission roles and engagement](ai-awareness.md#mission-roles-and-rules-of-engagement).
 Approaches use the designated target and each recipient's own bearing/elevation.
 The moving target position is the **fitted** approach point because the original
 point displacement is unknown. Player approaches assign that target for attack.

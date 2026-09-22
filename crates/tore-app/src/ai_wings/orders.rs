@@ -1,8 +1,11 @@
 //! Player delivery uses the same B46 receiver as AI team requests.
 use super::*;
-use tore_sim::ai::wing::{
-    self, PlayerOrder, ReceiverOutcome, SpacingAxis, TargetId, TargetOrder, WingControl,
-    WingRequest,
+use tore_sim::ai::{
+    engagement::{Assignment, Role, Stance},
+    wing::{
+        self, PlayerOrder, ReceiverOutcome, SpacingAxis, TargetId, TargetOrder, WingControl,
+        WingRequest,
+    },
 };
 
 pub struct OrderReport {
@@ -37,38 +40,9 @@ impl AiWings {
             order,
             PlayerOrder::EngageMyTarget
                 | PlayerOrder::EngageFromFormation
-                | PlayerOrder::ProtectMe
                 | PlayerOrder::Approach(_)
         );
-        let target = if order == PlayerOrder::ProtectMe {
-            self.mission
-                .actors()
-                .iter()
-                .filter(|a| {
-                    a.alive()
-                        && a.identity().side != FRIENDLY_SIDE
-                        && a.controller().target() == Some(PLAYER_ID)
-                })
-                .filter(|a| {
-                    self.mission
-                        .actor(members[0].1)
-                        .unwrap()
-                        .sensors()
-                        .is_none_or(|s| {
-                            s.contacts().iter().any(|c| c.id == a.id())
-                                || s.visual().iter().any(|c| c.id == a.id())
-                        })
-                })
-                .min_by(|a, b| {
-                    let own = self.mission.actor(members[0].1).unwrap().flight().position;
-                    distance_squared(a.flight().position, own)
-                        .total_cmp(&distance_squared(b.flight().position, own))
-                })
-                .map(|a| a.id())
-        } else {
-            selected
-        };
-        let target = target.filter(|id| {
+        let target = selected.filter(|id| {
             self.mission
                 .actor(*id)
                 .is_some_and(|a| a.alive() && a.identity().side != FRIENDLY_SIDE)
@@ -113,14 +87,14 @@ impl AiWings {
                 },
                 PlayerOrder::ControlToggle => WingRequest::WingControl(control),
                 PlayerOrder::Disengage => WingRequest::TargetAssignment(TargetOrder::HoldFire),
-                PlayerOrder::AttackOnContact => {
+                PlayerOrder::AttackOnContact | PlayerOrder::ProtectMe => {
                     WingRequest::TargetAssignment(TargetOrder::FreeSelection)
                 }
-                PlayerOrder::EngageMyTarget
-                | PlayerOrder::EngageFromFormation
-                | PlayerOrder::ProtectMe => WingRequest::TargetAssignment(
-                    TargetOrder::ConcreteTarget(TargetId(target.unwrap())),
-                ),
+                PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation => {
+                    WingRequest::TargetAssignment(TargetOrder::ConcreteTarget(TargetId(
+                        target.unwrap(),
+                    )))
+                }
                 PlayerOrder::Approach(a) => {
                     let target_actor = self.mission.actor(target.unwrap()).unwrap();
                     let own = actor.flight().position;
@@ -171,8 +145,23 @@ impl AiWings {
                 .order(*id, request)
                 .unwrap()
                 .map_err(|e| e.to_string())?;
+            if matches!(order, PlayerOrder::Formation(_) | PlayerOrder::Disengage)
+                && !matches!(outcome, ReceiverOutcome::Rejected(_))
+            {
+                // The sim has already debited a launched burst. Stop its
+                // remaining physical gun shots when recall is accepted.
+                // Intentional cancellation is not a failed projectile launch.
+                self.pending_guns
+                    .retain(|(queued_actor, _), _| *queued_actor != *id);
+            }
             match outcome {
                 ReceiverOutcome::Applied(_) | ReceiverOutcome::MotionInstalled(_) => {
+                    if let Some(assignment) = mission_assignment(order, target) {
+                        self.mission
+                            .actor_mut(*id)
+                            .unwrap()
+                            .set_assignment(assignment);
+                    }
                     applied += 1;
                     if let PlayerOrder::Approach(a) = order {
                         self.mission.track_ordered_approach(
@@ -191,7 +180,15 @@ impl AiWings {
                     }
                 }
                 ReceiverOutcome::Rejected(_) => rejected += 1,
-                ReceiverOutcome::AppliedNoMotion => no_motion += 1,
+                ReceiverOutcome::AppliedNoMotion => {
+                    if let Some(assignment) = mission_assignment(order, target) {
+                        self.mission
+                            .actor_mut(*id)
+                            .unwrap()
+                            .set_assignment(assignment);
+                    }
+                    no_motion += 1;
+                }
             }
         }
         let mut radio = Vec::new();
@@ -211,8 +208,30 @@ impl AiWings {
     }
 }
 
-fn distance_squared(a: [f64; 3], b: [f64; 3]) -> f64 {
-    a.iter().zip(b).map(|(a, b)| (a - b) * (a - b)).sum()
+fn mission_assignment(order: PlayerOrder, target: Option<u32>) -> Option<Assignment> {
+    match order {
+        PlayerOrder::ProtectMe => Some(Assignment {
+            role: Role::Escort,
+            stance: Stance::ProtectAssigned,
+            protected_ids: vec![PLAYER_ID],
+            ..Assignment::default()
+        }),
+        PlayerOrder::EngageMyTarget => Some(Assignment {
+            role: Role::Intercept,
+            stance: Stance::EngageAssigned,
+            destroy_ids: target.into_iter().collect(),
+            ..Assignment::default()
+        }),
+        PlayerOrder::AttackOnContact => Some(Assignment::default()),
+        PlayerOrder::Disengage
+        | PlayerOrder::EngageFromFormation
+        | PlayerOrder::Break(_)
+        | PlayerOrder::Approach(_)
+        | PlayerOrder::Formation(_)
+        | PlayerOrder::Spacing
+        | PlayerOrder::Stacking
+        | PlayerOrder::ControlToggle => None,
+    }
 }
 
 fn sender_stem(
@@ -301,5 +320,43 @@ fn order_label(order: PlayerOrder) -> &'static str {
         PlayerOrder::EngageMyTarget => "Engage my target",
         PlayerOrder::AttackOnContact => "Attack on contact",
         PlayerOrder::EngageFromFormation => "Engage from formation",
+    }
+}
+
+#[cfg(test)]
+mod engagement_tests {
+    use super::*;
+
+    #[test]
+    fn accepted_policy_orders_map_to_persistent_assignments() {
+        let protect = mission_assignment(PlayerOrder::ProtectMe, Some(9)).unwrap();
+        assert_eq!(protect.role, Role::Escort);
+        assert_eq!(protect.stance, Stance::ProtectAssigned);
+        assert_eq!(protect.protected_ids, [PLAYER_ID]);
+        assert!(protect.destroy_ids.is_empty());
+
+        let engage = mission_assignment(PlayerOrder::EngageMyTarget, Some(9)).unwrap();
+        assert_eq!(engage.role, Role::Intercept);
+        assert_eq!(engage.destroy_ids, [9]);
+
+        assert_eq!(
+            mission_assignment(PlayerOrder::AttackOnContact, None),
+            Some(Assignment::default())
+        );
+        assert_eq!(mission_assignment(PlayerOrder::Disengage, None), None);
+    }
+
+    #[test]
+    fn routine_motion_and_formation_orders_do_not_rewrite_mission_policy() {
+        use wing::{Formation, PlayerBreak};
+        for order in [
+            PlayerOrder::Break(PlayerBreak::Left),
+            PlayerOrder::Formation(Formation::Echelon),
+            PlayerOrder::Spacing,
+            PlayerOrder::Stacking,
+            PlayerOrder::ControlToggle,
+        ] {
+            assert_eq!(mission_assignment(order, Some(9)), None);
+        }
     }
 }

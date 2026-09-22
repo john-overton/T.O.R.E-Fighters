@@ -166,11 +166,15 @@ impl<'a> Image<'a> {
         Err(invalid("unterminated list"))
     }
 }
+/// Original ordnance editing samples required by the creator import profile.
+pub const ORDNANCE_SOUNDS: &[&str] = &["&ARMWPN.5K", "&ARMBLLT.5K", "&ARMDRIP.11K"];
+
 /// Shared archive profile for creator metadata and original ordnance UI resources.
 /// Does not imply all catalog objects are flyable or all stores are executable.
 pub fn resource(name: &str) -> bool {
     name.ends_with(".PT")
         || name.ends_with(".JT")
+        || ORDNANCE_SOUNDS.contains(&name)
         || name.starts_with('$') && name.ends_with(".PIC")
         || [
             "QUIKMIS3.PIC",
@@ -195,6 +199,14 @@ pub fn resource(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ordnance_audio_is_part_of_the_shared_creator_import() {
+        for name in ["&ARMWPN.5K", "&ARMBLLT.5K", "&ARMDRIP.11K"] {
+            assert!(ORDNANCE_SOUNDS.contains(&name));
+            assert!(resource(name));
+        }
+        assert!(!resource("UNREVIEWED.5K"));
+    }
     #[test]
     fn cache_rejects_truncation_trailing_and_missing_lists() {
         let mut o = Options {

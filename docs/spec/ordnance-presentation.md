@@ -11,17 +11,26 @@
 Implementation specification, 2026-09-16. The supplied retail screenshot guides
 presentation; its executable identity is unknown. Recovered card positions and
 loadout interactions remain documented in the [ordnance contract](../formats/ordnance-menu.md).
-This pass changes presentation, not store compatibility, quantities, fuel steps,
-launch validation, flight adapters or combat behaviour.
+Store compatibility, fuel steps, launch validation, flight adapters and combat
+behaviour retain their existing contracts.
 
 The original ORD_AIR3 background, thumbnail images, dial, rocker and button
-pieces remain runtime imports. Catalog cards retain two columns at x=68/188,
+pieces remain runtime imports. Catalog cards use two columns at x=68/187,
 four rows from y=108 at 68-pixel spacing. Station headings retain x=350/469,
 three rows from y=121 at 71-pixel spacing. Card names, quantities, location
 labels and numeric fields use the approved 10 px Noto Sans Bold atlas from
 [Quick Mission](quick-mission-menu.md). This is an agent-selected extension of
 the approved font, not evidence of the original font face. Selected weapon names
 are yellow and catalog mass/guidance are blue. Names must fit 111 pixels.
+
+John requested centered thumbnail boxes on 2026-09-22. Both catalog and station
+black wells are 113 pixels wide. Their left edges are x=66/185 for the catalog
+and x=351/470 for stations. The 109-pixel outlines start two pixels inside each
+well, at x=68/187 and x=353/472 respectively. This leaves equal two-pixel side
+margins on selected, unselected and empty cards. Thumbnails are centered within
+the 109 by 23 pixel outline in both directions; original 105 by 19 pixel images
+have two pixels of inset on each edge, including the outline. These measured
+background bounds guide fitted placement, not a retail interaction claim.
 
 The category dial uses DIAL13 for air-to-air and DIAL11 for air-to-surface,
 at (148,393), pointing toward the corresponding category lamp. LIGHTON and LIGHTOFF overlay both background lamps at (115,394) and (115,422),
@@ -47,3 +56,62 @@ vertically inside y=38..58, using visible glyph bounds. Ordnance Weapons and
 Airbase begin at x=103 and x=178; matching hit regions do not overlap. Main-menu
 bar labels are centered within their existing interactive rectangles. The exact
 original font alignment and dial placement remain unknown; these are fitted rules.
+
+## Dragging and empty stations
+
+John requested visible weapon dragging, unloading into the catalog, station
+transfers and persistent empty-card outlines on 2026-09-22. These requested
+interactions are opinionated requirements; thumbnail art and quantity steps
+come from the linked recovered contract.
+
+While dragging, only the imported weapon thumbnail follows the pointer, with
+its transparent pixels preserved. The system cursor is hidden during the drag.
+No card border, name or quantity follows it.
+Catalog drops fill a compatible station to its capacity. Station-to-station
+drops move one quantity step: 1 for capacity up to 100, 10 for 101 through 300,
+and 100 above 300. Transfers stop at the available source quantity and free
+destination capacity. A different destination weapon is replaced. Incompatible
+drops preserve both stations and display the existing compatibility notice.
+Dropping onto the source station leaves its quantity unchanged.
+
+Dropping a station weapon anywhere in the eight-card catalog area, including
+unused card spaces, empties that station completely. Other releases leave the
+load unchanged. Escape, focus loss or leaving the menu canvas cancels dragging.
+John also requested adding one weapon by left-click on 2026-09-22. A matching
+left press/release on a loaded station adds exactly one round or store when
+capacity remains, regardless of a prior catalog selection. A full station is
+unchanged. Clicking an empty station loads the selected catalog weapon as before;
+dragging from the catalog can replace a loaded station's weapon. Right-click
+decrement and keyboard quantity steps retain their recovered scaling.
+Agent-selected input details: movement of 3 canvas pixels starts a drag; the
+thumbnail is centered on the pointer; only catalog drops unload, so releasing
+over unrelated controls cannot discard stores. These details are fitted.
+
+Every empty station, including an empty internal gun station, keeps its red
+109 by 23 pixel thumbnail outline. The weapon image, name, quantity and Empty
+label are absent. The station's location heading remains above the outline.
+
+## Sound effects
+
+Successful loading, quantity changes, unloading and station transfers use the
+retail ordnance cue once per completed edit, without the standard menu click
+layered over it. Ordinary stores use `&ARMWPN.5K` (about 0.633 seconds);
+ammunition-marked weapons use `&ARMBLLT.5K` (about 0.419 seconds). Classification
+comes from the imported weapon's ammunition flag, not its filename or station
+location. This is spec-derived behavior from the
+[retail sound selection](../formats/ordnance-menu.md#sound-selection).
+
+Use the weapon being loaded or transferred to choose the cue; for an unload,
+use the weapon being removed. A full station, empty decrement, rejected drop,
+same-station drop, canceled drag or pointer movement plays no ordnance cue.
+The requested one-at-a-time left-click addition uses the same successful-edit
+cue as other quantity changes. Catalog selection and unrelated menu actions
+retain their existing button feedback. The Unload All menu item also retains
+its existing button feedback; its original dedicated sound remains untraced.
+
+Fuel edits use `&ARMDRIP.11K` (about 0.257 seconds) when the fuel amount changes.
+Do not stack or restart that sample while it is already playing. At either fuel
+limit, no fuel cue plays. Sound-effects Off and `--no-audio` silence these cues.
+Playback uses the imported unsigned PCM8 mono samples at the existing reader's
+5,512 Hz / 11,025 Hz rates. Original device volume and shell repeat cadence are
+unverified; the host retains its current effects mix and discrete edit events.

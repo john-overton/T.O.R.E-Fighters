@@ -61,6 +61,9 @@ fn cue(action: Action) -> Option<&'static str> {
         | Action::FreeFlight
         | Action::Back => Some("&BUTTON.11K"),
         Action::Music(_) | Action::Effects(_) => Some("&TOGGLE1.5K"),
+        Action::OrdnanceWeapon => Some("&ARMWPN.5K"),
+        Action::OrdnanceAmmunition => Some("&ARMBLLT.5K"),
+        Action::OrdnanceFuel => Some("&ARMDRIP.11K"),
         // Mouse hover and keyboard focus changes never play a sound.
         _ => None,
     }
@@ -430,13 +433,24 @@ impl Audio {
             _ => {}
         }
         let name = cue(action);
-        if mixer.effects_on
-            && mixer.ui_voices.len() < 8
-            && let Some(clip) = name.and_then(|n| self.clips.get(n))
+        if let Some(clip) = name.and_then(|n| self.clips.get(n)) {
+            mixer.play_ui(clip, action == Action::OrdnanceFuel);
+        }
+    }
+}
+impl Mixer {
+    fn play_ui(&mut self, clip: &Arc<Clip>, reuse_active: bool) {
+        if self.effects_on
+            && self.ui_voices.len() < 8
+            && !(reuse_active
+                && self
+                    .ui_voices
+                    .iter()
+                    .any(|voice| Arc::ptr_eq(&voice.clip, clip) && !voice.finished()))
         {
-            mixer.ui_voices.push(Voice {
+            self.ui_voices.push(Voice {
                 clip: clip.clone(),
-                position: 0.0,
+                position: 0.,
             });
         }
     }
@@ -732,6 +746,29 @@ mod tests {
         assert_eq!(cue(Action::None), None);
         assert_eq!(cue(Action::Click), Some("&BUTTON.11K"));
         assert_eq!(cue(Action::Aircraft(1)), Some("&BUTTON.11K"));
+    }
+    #[test]
+    fn ordnance_cues_use_imported_samples_and_fuel_does_not_stack() {
+        assert_eq!(cue(Action::OrdnanceWeapon), Some("&ARMWPN.5K"));
+        assert_eq!(cue(Action::OrdnanceAmmunition), Some("&ARMBLLT.5K"));
+        assert_eq!(cue(Action::OrdnanceFuel), Some("&ARMDRIP.11K"));
+        let clip = Arc::new(Clip {
+            samples: vec![160; 4],
+            rate: 5512.,
+        });
+        let mut mixer = test_mixer();
+        mixer.play_ui(&clip, true);
+        mixer.ui_voices[0].position = 2.;
+        mixer.play_ui(&clip, true);
+        assert_eq!(mixer.ui_voices.len(), 1);
+        assert_eq!(mixer.ui_voices[0].position, 2.);
+        mixer.ui_voices[0].position = 4.;
+        mixer.play_ui(&clip, true);
+        assert_eq!(mixer.ui_voices.len(), 2);
+        mixer.effects_on = false;
+        mixer.ui_voices.clear();
+        mixer.play_ui(&clip, false);
+        assert!(mixer.ui_voices.is_empty());
     }
     #[test]
     fn pcm_resampling_and_loop_boundaries() {

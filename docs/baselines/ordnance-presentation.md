@@ -8,34 +8,55 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation-mode validation on Linux, 2026-09-16, against the
-[presentation specification](../spec/ordnance-presentation.md).
+Implementation-mode validation on Linux, 2026-09-22, against the
+[presentation and drag specification](../spec/ordnance-presentation.md) and
+[mission-wide guns-only rule](../spec/quick-mission-menu.md#mission-wings).
 
-The original ORD_AIR3 background and all 16 small dial orientations were decoded
-and visually inspected locally. DIAL00 visibly contains the unwanted white corner;
-DIAL13 and DIAL11 point toward the air/surface indicators and fit the white frame.
-LIGHTON and LIGHTOFF supply both lamps with blue outer rims, replacing the
-white inactive rim baked into the background. A close-up capture confirmed the
-inactive surface lamp rim; available weight and page count were lowered two pixels. New required assets successfully triggered the
-existing automatic re-import from local user-owned media.
+The screen retains the original ORD_AIR3 background, thumbnails, category dial,
+lamps and button pieces. CPU captures of the loaded, empty and dragging states were
+visually inspected. Empty stations retain red thumbnail outlines, with location
+headings above them and no weapon image, name or quantity. The carried thumbnail
+preserves its transparency and has no surrounding card or text. Local captures
+remain ignored in `.local/ordnance-refinements/loaded.png`, `empty.png` and
+`.local/ordnance-fixes/drag.png`. Pixel checks against the imported black wells
+confirmed equal two-pixel horizontal margins around all eight catalog boxes and
+five F/A-18D station boxes, in both loaded and empty captures. Thumbnail pixels
+are centered within their outlines in both directions.
 
-CPU captures of both categories, Quick Mission and the main menu were inspected.
-The surface capture initialized the existing category state to one for inspection;
-normal startup was restored to zero before final validation. Captures remain
-ignored: `.local/ordnance-pass.png`, `.local/ordnance-surface.png`,
-`.local/quick-bars.png` and `.local/menu-bars.png`.
+Six synthetic UI tests cover thumbnail-only rendering, catalog loading, station
+transfers, unloading over occupied and unused catalog space, rejected drops,
+same-station drops, unrelated controls, Escape/focus/canvas cancellation, empty
+internal and external cards, click loading and right-click decrement. Loaded
+station clicks add exactly one, preserve the installed weapon despite a prior
+catalog selection, and stop at capacity. The same one-round rule is checked on
+a gun station whose keyboard/right-click quantity step is 100. Simulation
+tests cover the quantity boundaries 100/101 and 300/301, source and destination
+limits, replacement and compatibility rejection. A guns-only test checks that
+internal-bay missiles are cleared while the aircraft's own gun retains its
+accepted ammunition.
 
-Formatting, warnings-denied Clippy, locked workspace tests/build, 40 Python tests,
+The loadout pass in `--validate-creator` passed for all 14 selectable aircraft,
+including exact F/A-18D and Rafale C identities. For each aircraft it checked
+29 members across all six wings, rebuilding guns-only inventories on restart,
+restoring standard inventories, player accepted-ammunition restart, catalog
+unload/reload and compatible station transfers. This pass completes before the
+probe's unrelated flight appearance checks. Log: `.local/ordnance-fixes/creator.log`.
+
+The full creator probe does **not** pass: it stops at the unchanged assertion
+`F18: damage region 3 at 0.1 has no distinct finite geometry`. That assertion
+expects visible partial damage, conflicting with the current
+[requested intact appearance below destruction](../spec/damage-smoke.md).
+This pass does not change that damage behavior or its old assertion.
+
+Formatting, warnings-denied Clippy, locked workspace tests/build, 70 Python tests,
 source and both debug binary asset guards, documentation headers and diff checks
-passed. The 394 Rust tests include a synthetic glyph-padding test proving visible
-text is centered independently of transparent rows in the font image.
-
-`--validate-creator` passed for all five exact imported identities: 9 supported
-store/placement cases for F/A-18D, 9 for Rafale C, 10 for F-14D, 3 for A-4E and
-9 for X-31 EFM, including edited fuel, empty stations and accepted-load restart.
-These checks cover loadout state, not a manual pointer-to-flight playthrough.
+passed. Rust results: 1,148 passed and three explicitly ignored GPU tests.
 Main-menu and ordnance GPU smoke tests passed on NVIDIA RTX 4070 / Vulkan.
+Current command logs remain ignored in `.local/ordnance-refinements/`.
+The earlier all-aircraft loadout probe remains in `.local/ordnance-fixes/`; the
+centering and single-click follow-up did not rerun that broader probe.
 
-Font choice, text offsets, blue/yellow text colours and dial placement are fitted
-presentation. No retail executable comparison, Windows/macOS execution or manual
-full loadout editing playthrough was performed. No retail assets were committed.
+Drag threshold and thumbnail positioning are fitted input details; the requested
+interaction scope and empty-card treatment are opinionated requirements. No
+retail executable comparison, Windows/macOS execution or manual full
+pointer-to-flight playthrough was performed. No retail assets were committed.

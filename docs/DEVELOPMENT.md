@@ -417,6 +417,60 @@ The full-height cockpit and live HUD can be captured with `--capture-flight .loc
 
 Flight UI now adapts to drawable aspect ratio independently of menu letterboxing. Use `--window-size 1280x720` (or resize normally) to inspect widescreen behavior. `--capture-flight` preserves the current aspect and writes at the flight overlay resolution, capped proportionally at 1920×1080. The original `--capture-terrain` remains 960×720. Small instruments resample directly from their native rasters; HUD readouts have transparent backgrounds. See [responsive-flight checks](baselines/responsive-flight-ui.md).
 
+## Headless development
+
+Run from the repository root with the pinned Rust toolchain and `--locked`.
+`cargo run` uses the dev profile by default, retaining debug symbols and
+assertions; no `--dev` flag is needed. Keep runtime data separate from normal
+play by setting `TORE_DATA_DIR` to an ignored directory under `.local/`.
+
+On Linux/macOS shells, prepare an isolated profile and output directory:
+
+```sh
+mkdir -p .local/headless
+export TORE_DATA_DIR="$PWD/.local/dev-profile"
+cargo run --locked -p tore-app -- --import gameassets/fighters-anthology --import-only --no-audio
+```
+
+The import command reads local user-owned media, creates the cache and exits
+without opening a window or audio device. Run it once for a new profile; later
+commands reuse that cache. See [cache locations and refresh](#macos-setup).
+
+For a deterministic flight-model probe, run 1,200 fixed simulation ticks
+(10 simulated seconds):
+
+```sh
+cargo run --locked -p tore-app -- --headless-flight 1200 --aircraft f18 --maneuver level --no-audio
+```
+
+This prints flight state and exits before window/audio initialization. It is
+the isolated flight-model probe, not a complete rendered mission. Keep the
+default researched flight adapter unless the task explicitly concerns another
+adapter. Use `--aircraft rafale` for the exact Rafale C identity.
+
+For a CPU-rendered Ordnance screen capture:
+
+```sh
+cargo run --locked -p tore-app -- --quick-mission --snapshot-state ordnance --snapshot .local/headless/ordnance.ppm --no-audio
+```
+
+The snapshot command also exits without a display or audio device. Other menu
+states, including `ordnance-empty` and `ordnance-drag`, use the same command.
+Keep captures, logs and imported media under ignored directories. When using
+`target/debug/tore-app` directly, first rebuild with
+`cargo build --locked -p tore-app` so the binary matches the source.
+
+`--no-audio` only disables sound. A plain app launch, `--free-flight`,
+`--flight-probe-ticks` by itself, GPU `--capture-flight`/`--capture-terrain`, and
+`--smoke-test` still need a display. Do not use those as generic headless
+commands. The environment and other feature probes have their own exit paths;
+follow their documented commands elsewhere in this guide.
+
+In PowerShell, create `.local/headless` with `New-Item -ItemType Directory -Force .local/headless`,
+set `$env:TORE_DATA_DIR` to the absolute `.local/dev-profile` path, and run the
+same Cargo commands. Remove the environment override after the session with
+`Remove-Item Env:TORE_DATA_DIR`; on Linux/macOS use `unset TORE_DATA_DIR`.
+
 ## Flight performance
 
 Normal `cargo run --locked -p tore-app -- --free-flight` now optimizes the app crate at level 2, retaining debug symbols/assertions. Dependencies keep their existing debug settings; Cargo may still label the overall dev profile “unoptimized.” No release build is required to benefit. Simulation remains fixed at 120 Hz; presentation interpolates its last two poses and requests uncapped Immediate presentation, then Mailbox, with FIFO only as a supported-mode fallback and one requested queued frame. There is no additional 16 ms sleep in flight/viewer mode. The display/compositor can still limit presentation frequency.
@@ -495,7 +549,9 @@ cargo run --locked -p tore-app -- --quick-mission --snapshot-state theaters --sn
 ```
 
 `--aircraft f18` remains the default. Quick-mission snapshot states are `normal`,
-`aircraft`, `theaters`, `ordnance`, and `help`; they use the original 640×480 menu canvas.
+`aircraft`, `theaters`, `ordnance`, `ordnance-empty`, `ordnance-drag`, and `help`;
+they use the original 640×480 menu canvas. The empty/drag ordnance fixtures
+support CPU snapshots for inspecting card outlines and the carried thumbnail.
 Old caches re-import when local media is present. Aircraft switching refreshes
 GPU atlas/cockpit resources, camera previews and instruments before launch.
 See [validation and remaining parity](baselines/rafale-quick-mission.md).
@@ -652,11 +708,21 @@ porting an aircraft's sensors. For repeatable headless captures,
 `--scope-history` set the scope before the capture. See
 [the component guide](radar.md) and [its validation](baselines/radar.md).
 
-`--validate-creator` needs imported media but no display/audio, and checks both
-aircraft's supported placements, fuel, empty stations and accepted-ammo restart.
+`--validate-creator` needs imported media but no display/audio, and checks all
+imported aircraft's supported placements, fuel, empty stations and accepted-ammo restart.
+It first checks guns-only launch/restart across all six wings and the ordnance drag
+paths for the full selectable roster. See the [current results and unrelated damage
+assertion](baselines/ordnance-presentation.md).
 In Load Ordnance click a catalog weapon then a compatible station, or drag between
-them. Tab changes selected station; +/- changes ammunition; right-click decrements.
-Fuel rocker edits 500 lb at a time. Select Plane preserves the custom draft.
+them. The weapon thumbnail follows the pointer. Drag from station to station
+to transfer ammunition, or from a station into the catalog to empty it.
+Left-click a loaded station to add one, or an empty station to load the selected
+catalog weapon. Tab changes selected station; +/- changes ammunition;
+right-click decrements.
+Fuel rocker edits 500 lb at a time. Successful edits play the original weapon,
+ammunition or fuel sound; canceled and unchanged edits are silent. Older caches
+refresh these samples from local media through the existing import path.
+Select Plane preserves the custom draft.
 [Evidence, hands-on steps and material limits](baselines/creator-ordnance.md).
 
 ### Weather implementation audit
@@ -927,3 +993,19 @@ panel-only oil pump, oil leak and hydraulic leak faults. Advance with
 `--flight-throttle 0..1` for thermal comparisons. The preview requires a panel
 snapshot and cannot inject damage into an interactive sortie. Indices 1..35
 are listed in the [damage event map](formats/systems-damage.md). Keep captures ignored.
+
+## AI mission and objective checks
+
+`--ai-mission free|cap|intercept|escort|self-defense|hold` sets the inherited
+Quick Mission policy. Normal default remains free engagement. Group stamps in
+the creator override the preset and remain on mission restart. For example:
+
+```sh
+cargo run --locked -p tore-app -- --ai-probe-ticks 1200 --ai-mission escort --no-audio
+cargo run --locked -p tore-app -- --launch-quick-mission --ai-mission intercept
+cargo run --locked -p tore-app -- --quick-mission --snapshot-state objective-1 --snapshot .local/objective-popup.ppm
+```
+
+Objective popup snapshots accept `objective-1` through `objective-6`, friendly
+then enemy groups. `--snapshot-state objectives` shows a primary-group/free-fire
+example with a required-survival friendly group. These diagnostics do not replace campaign mission loading.

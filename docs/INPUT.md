@@ -580,16 +580,21 @@ Alt-7 select wingmen 1 through 4. Restart restores whole-flight addressing.
 Unavailable recipients or targets produce explicit messages. Paused flight does
 not issue orders. The imported flight menu has no wing-order submenu.
 
+Both sides start in neutral formation, even with free-fire objectives. Your
+wingmen wait for your engagement commands while continuing radar scans and
+missile defense. AI flight leaders issue engagement orders in response to
+perceived attacks on their flight or protected aircraft.
+
 | Shortcut | Order |
 | --- | --- |
 | Alt-B / Alt-R | Break left / right |
 | Alt-H / Alt-V / Alt-T | Break high / low / fly straight |
 | Alt-E | Engage the designated target |
-| Alt-P | Protect me, assign a currently observed attacker |
+| Alt-P | Protect me, maintain an escort duty |
 | Alt-W | Attack on contact |
 | Alt-F | Engage designated target from formation, medium control |
-| Alt-D | Disengage and stop selecting targets |
-| Alt-1 / Alt-2 / Alt-3 | Echelon / line abreast / line astern |
+| Alt-D | Disengage and return to neutral formation |
+| Alt-1 / Alt-2 / Alt-3 | Return to formation: echelon / line abreast / line astern |
 | Alt-8 | Toggle 512 / 2048 ft horizontal spacing |
 | Alt-K | Cycle level / 512 ft high / 512 ft low stacking |
 | Alt-C | Toggle loose / medium control |
@@ -600,9 +605,10 @@ Input profiles can use these as `key:Alt-b`, `key:Alt-8`,
 `key:Alt-Shift-b` and the corresponding keys above. Alt-S remains the unimplemented
 original radio-silence shortcut; it is not repurposed for spacing.
 
-The message gives applied, rejected and no-motion counts. A target must be alive,
+The message gives applied, rejected and no-motion counts. An explicit attack target must be alive,
 hostile and present in each recipient's own radar or visual contacts. Synthetic
 headless actors without sensors retain their explicit direct-awareness fallback.
+Protect me needs no selected or currently detected attacker.
 The first living wingman alone replies to an accepted engage/protect assignment.
 Commands take effect immediately, independently of their radio recordings.
 A new command interrupts queued old command audio. Sound off mutes radio along
@@ -618,11 +624,16 @@ moving inward. A new order replaces the pending path; real collision danger
 still permits breakout. Harder turns can therefore interrupt a transition.
 Normal vertical wandering now requests at most five feet, with smooth changes.
 
-Formation selection changes the slot setting; disengage stops the engagement
-and lets the safe rejoin procedure return the aircraft. Approaches assign the
+Formation selection and disengage cancel the engagement and let the safe rejoin
+procedure return the aircraft. They remain neutral until a new engagement order
+or a newly perceived attack; an already-known missile warning cannot restart
+the pursuit. Evasion continues when needed. Spacing and stacking alone do not
+cancel or authorize combat. Approaches assign the
 selected target and continue that engagement after reaching the fitted approach
-point. Protect me currently assigns a detected attacker once, rather than
-maintaining a persistent escort policy. [Behavior and limits](spec/ai.md#live-wing-command-and-radio-integration).
+point. Protect me assigns a persistent escort duty: wingmen assess detected
+hostiles near or approaching your aircraft and respond to shared attack reports.
+They return when the escort pursuit limit is reached.
+[Behavior and limits](spec/ai-awareness.md#mission-roles-and-rules-of-engagement).
 
 For live testing, use a Quick Mission with at least three friendly aircraft:
 
@@ -678,6 +689,16 @@ list pickers. The player's wing never cycles below one. Right-click requires a
 matching press/release and cannot launch, cancel or select through a modal list.
 The ordnance view retains right-click quantity decrement.
 
+In Load Ordnance, drag a catalog weapon onto a compatible station to load it.
+Its picture follows the pointer. Drag a loaded station to another station to
+transfer ammunition, or back into the catalog area to empty it. Escape cancels
+a drag. Left-click a loaded station to add one, up to its capacity. Click an
+empty station to load the selected catalog weapon. Empty stations retain a red
+outline. See the
+[drag and quantity rules](spec/ordnance-presentation.md#dragging-and-empty-stations).
+Quick Mission's Guns only restriction applies to every friendly and enemy wing
+and remains active after restart.
+
 View 4 target-camera fields and status meanings are described in the
 [flight controls guide](FLIGHT-CONTROLS.md#target-camera-view-4).
 
@@ -701,3 +722,13 @@ sim log. The rebindable `damage-report` action does the same. Damage notificatio
 share that log; the Systems instrument retains its four gauges and two fuel rows.
 The separate `damage-player` fixture remains a development action, including
 existing controller profiles. See [systems behavior](spec/systems-damage.md).
+
+## Quick Mission group objectives
+
+Click the highlighted objective in a friendly or enemy group's briefing sentence
+to choose its primary group, free fire or other duty. Right-click cycles
+backward. Click its survival field to toggle required/optional. Tab/Shift-Tab
+and arrow keys reach all objective and survival fields; Enter activates them.
+Shift-4 shows only `Obj: Survive` for a protected/required friendly or `Obj:
+Destroy` for a designated enemy objective. Other contacts have no objective
+label. [Assignment rules](spec/ai-awareness.md#quick-mission-objective-stamps).

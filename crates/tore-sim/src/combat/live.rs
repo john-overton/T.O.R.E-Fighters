@@ -3583,6 +3583,97 @@ mod tests {
         assert_eq!(s.targets[0].localized_damage.structural_section, None);
     }
     #[test]
+    fn preflight_transfers_conserve_counts_and_respect_capacity_steps() {
+        use crate::combat::loadout::Loadout;
+        use tore_formats::aircraft::Hardpoint;
+        for (capacity, expected_step) in [(4, 1), (100, 1), (101, 10), (300, 10), (301, 100)] {
+            let mut configuration = fixture(true).configuration().clone();
+            configuration
+                .stations
+                .push(configuration.stations[0].clone());
+            let hardpoint = Hardpoint {
+                location: 4,
+                flags: 8,
+                position: [0; 3],
+                store: Some(configuration.stations[0].weapon.source.clone()),
+                count: capacity,
+                weight_class: 0,
+            };
+            let mut load = Loadout {
+                aircraft: AircraftId::F18,
+                configuration,
+                quantities: vec![capacity as u16, 0],
+                fuel_lbs: 0.,
+                internal_capacity_lbs: 1000.,
+                empty_lbs: 10000.,
+                maximum_lbs: 20000.,
+                hardpoints: vec![hardpoint.clone(), hardpoint],
+            };
+            load.transfer(0, 1).unwrap();
+            assert_eq!(
+                load.quantities,
+                [capacity as u16 - expected_step, expected_step]
+            );
+            load.quantities = vec![2, capacity as u16 - 1];
+            load.transfer(0, 1).unwrap();
+            assert_eq!(load.quantities, [1, capacity as u16]);
+            load.transfer(0, 1).unwrap();
+            load.transfer(0, 0).unwrap();
+            assert_eq!(load.quantities, [1, capacity as u16]);
+            load.quantities[1] = 0;
+            load.transfer(0, 1).unwrap();
+            assert_eq!(load.quantities, [0, 1]);
+            load.transfer(0, 1).unwrap();
+            assert_eq!(load.quantities, [0, 1]);
+            load.quantities[0] = 2;
+            load.hardpoints[1].store = Some("OTHER.JT".into());
+            assert!(load.transfer(0, 1).is_err());
+            assert_eq!(load.quantities, [2, 1]);
+            load.hardpoints[1].store = load.hardpoints[0].store.clone();
+            load.configuration.stations[1].weapon.source = "REPLACED.JT".into();
+            load.transfer(0, 1).unwrap();
+            assert_eq!(
+                load.quantities,
+                [2 - expected_step.min(2), expected_step.min(2)]
+            );
+            assert_eq!(
+                load.configuration.stations[1].weapon.source,
+                load.configuration.stations[0].weapon.source
+            );
+        }
+    }
+    #[test]
+    fn guns_only_removes_internal_bay_and_external_weapons_without_refilling_guns() {
+        use crate::combat::loadout::Loadout;
+        for aircraft in AircraftId::SELECTABLE {
+            let mut configuration = fixture(true).configuration().clone();
+            configuration.aircraft = aircraft;
+            configuration.stations[0].weapon.source = "AIM120.JT".into();
+            let mut bay = configuration.stations[0].clone();
+            bay.internal = true;
+            let mut gun = bay.clone();
+            gun.weapon.source = aircraft.gun().into();
+            configuration.stations.extend([bay, gun]);
+            let mut load = Loadout {
+                aircraft,
+                configuration,
+                quantities: vec![2, 4, 7],
+                fuel_lbs: 1000.,
+                internal_capacity_lbs: 1000.,
+                empty_lbs: 10000.,
+                maximum_lbs: 20000.,
+                hardpoints: vec![],
+            };
+            load.restrict_to_guns();
+            assert_eq!(load.quantities, [0, 0, 7]);
+            // Configuration retains valid station capacities; accepted ammo
+            // is stored separately and restored by the host on restart.
+            assert!(load.configuration.stations.iter().all(|s| s.count == 11));
+            load.restrict_to_guns();
+            assert_eq!(load.quantities, [0, 0, 7]);
+        }
+    }
+    #[test]
     fn preflight_draft_capacity_fuel_mass_and_clone_isolation() {
         use crate::combat::loadout::Loadout;
         use tore_formats::aircraft::Hardpoint;

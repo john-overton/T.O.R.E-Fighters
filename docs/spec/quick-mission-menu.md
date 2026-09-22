@@ -78,6 +78,14 @@ y=38..58, matching the [ordnance menu bar](ordnance-presentation.md).
 
 ## Mission wings
 
+Guns only applies to the player and every member of all six wings, on both
+launch and restart. Each aircraft retains ammunition for its own gun; every
+other weapon has zero ammunition, including missiles in internal bays. Choosing
+Guns and missiles with Standard load restores normal default weapons. Custom
+player loads still reject non-gun weapons at launch while Guns only is selected. This scope is an
+opinionated requirement requested by John on 2026-09-22. It changes loadout
+initialization only. It does not change flight or combat decision rules.
+
 Implementation mode. Normal creator launches use AI for every selected non-player
 aircraft, requested by John on 2026-09-17. Friendly Wing 1 includes the player,
 so a count of 5 creates four wingmen. The other five wings each launch their
@@ -107,7 +115,8 @@ Restart restores all six groups.
 
 The existing combat AI remains partial. Scoped [player wing commands and radio](ai.md#live-wing-command-and-radio-integration)
 are connected, including recipient outcomes and cancellation. Broader mission
-orders, persistent protection policy and full missile acquisition remain. Separate wing placement and formation following do not
+campaign routes and scoring remain. Persistent protection and reviewed missile
+acquisition are connected through the current AI services. Separate wing placement and formation following do not
 establish combat or retail parity.
 
 ## Straight-flight mission fixtures
@@ -170,3 +179,24 @@ not grant landing clearance or announce that a landing has completed.
 restart, real runway support, takeoff probes and rendering checks.
 
 [Reverse-cycling validation](../baselines/horizon-creator.md).
+
+## Group objectives
+
+All six groups carry objective selectors in ordinary briefing sentences, using
+the same `line` layout, font and beveled inline fields as the other mission
+parameters. Wing counts use 14-pixel row spacing; objective sentences occupy
+rows 201, 215 and 229 in each column. Separate survival-required/optional
+sentences occupy rows 249, 263 and 277. Other mission parameters begin at row
+301, with the optional airport row at 399, clear of the bottom buttons.
+
+For example, `Your primary target is enemy group 1.` identifies that group as
+the player's mission objective. `Your flight will use free fire.` permits any
+observed eligible hostile without assigning every enemy as a primary objective.
+This objective does not authorize firing at launch. Both sides begin in neutral
+formation and follow [leader authorization](ai-awareness.md#formation-and-leader-authorization).
+CAP, protection, self-defense, hold and mission inheritance remain available.
+Click an objective field to choose, right-click to cycle backward, or use
+Tab/arrows and Enter. Survival fields toggle between required and optional.
+Inactive groups preserve both settings. [Assignment and target-label rules](ai-awareness.md#quick-mission-objective-stamps)
+define the semantics; [validation](../baselines/mission-objectives.md) covers
+styling and two opposing-group discrimination.

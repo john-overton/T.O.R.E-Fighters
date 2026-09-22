@@ -342,7 +342,8 @@ static local parameters; native runtime placement/hit testing remains separate.
 ## Creator metadata and ordnance UI
 
 `--creator` adds all PT/JT metadata, weapon thumbnails and original creator/ordnance
-UI resources through the same profile used by the app. Combine it with
+UI resources, including the three [ordnance editing sounds](spec/ordnance-presentation.md#sound-effects),
+through the same profile used by the app. Combine it with
 `--aircraft f18 --aircraft rafale` for supported flight dependencies. Archive boundaries,
 conflict checks and provenance are retained; other aircraft metadata does not enable flight.
 

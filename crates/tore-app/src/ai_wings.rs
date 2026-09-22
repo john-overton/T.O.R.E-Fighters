@@ -23,6 +23,8 @@
 //! information service as the player RWR. Compatibility steering remains an
 //! explicit weapon-rules option.
 
+mod engagement;
+pub use engagement::Preset;
 mod orders;
 mod reports;
 
@@ -56,6 +58,14 @@ use tore_sim::{
 };
 
 use crate::{AppResult, flight, terrain::World};
+
+fn terrain_visible(from: Vector, to: Vector, ground: &dyn Fn(f64, f64) -> f64) -> bool {
+    (1..=8).all(|step| {
+        let t = step as f64 / 8.;
+        let point = std::array::from_fn::<_, 3, _>(|i| from[i] + (to[i] - from[i]) * t);
+        point[1] > ground(point[0], point[2])
+    })
+}
 
 /// `fitted`: the AI side numbers. `tore_sim::ai::targeting::Side` is an opaque
 /// identity with no recovered numbering, so the host picks one. The player and
@@ -198,6 +208,7 @@ impl Slot {
 /// The live AI bridge for one mission.
 pub struct AiWings {
     mission: AiMission,
+    mission_preset: Preset,
     reports: reports::Reports,
     formation_log: Option<std::io::BufWriter<std::fs::File>>,
     slots: Vec<Slot>,
@@ -284,7 +295,7 @@ impl AiWings {
     pub fn build(
         wings: &[WingLaunch],
         targets: &[live::Target],
-        _config: &live::Configuration,
+        guns_only: bool,
         resources: &BTreeMap<String, Vec<u8>>,
     ) -> AppResult<Self> {
         let mut bridge = Self::build_with(wings, targets, 0, |id| {
@@ -318,6 +329,9 @@ impl AiWings {
                 } else {
                     simple_stations(u32::from(station.count), 0, AI_STORE_SPEED).remove(0)
                 };
+                if guns_only && !gun {
+                    spec.store.rounds = tore_sim::ai::weapon_service::Rounds::Finite(0);
+                }
                 spec.station = tore_sim::ai::weapon_service::StationId(index as u8);
                 spec.guided = w.flags & 1 != 0;
                 spec.capability = tore_sim::ai::weapon_service::StoreCapability {
@@ -476,6 +490,7 @@ impl AiWings {
                 index += 1;
             }
         }
+        mission.start_in_formation();
         let formation_log = std::env::var_os("TORE_FORMATION_TRACE").map(|path| {
             use std::io::Write;
             let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
@@ -485,6 +500,7 @@ impl AiWings {
         }).transpose()?;
         Ok(Self {
             mission,
+            mission_preset: Preset::Free,
             formation_log,
             slots,
             weapons: BTreeMap::new(),
@@ -723,7 +739,187 @@ impl AiWings {
                 .take(64)
                 .collect();
         }
+        self.report_perceived_attacks(state, player, &ground);
         Ok(())
+    }
+
+    /// Report observable attacks, never an opponent's private target choice.
+    fn report_perceived_attacks(
+        &mut self,
+        state: &live::State,
+        player: &flight::State,
+        ground: &dyn Fn(f64, f64) -> f64,
+    ) {
+        use tore_sim::ai::{awareness, engagement::ThreatReport};
+        use tore_sim::combat::threats::EvidenceSource;
+        let mut reports = Vec::new();
+        // The player's RWR may identify a supporting source only by a unique
+        // independently observed hostile emitter at the received bearing.
+        for record in state
+            .missile_threats
+            .records()
+            .filter(|r| r.targeting_receiver && !r.stale)
+        {
+            let attacker_id = if record.source == EvidenceSource::ElectronicSupported {
+                record.radar_bearing_deg.and_then(|bearing| {
+                    let mut matches = state.emitters.iter().filter(|emitter| {
+                        self.slot(emitter.id)
+                            .is_some_and(|slot| slot.side == launch::Side::Enemy)
+                            && state.sensors.observation(emitter.id).is_some()
+                            && ((emitter.bearing_rad.to_degrees() - bearing + 180.)
+                                .rem_euclid(360.)
+                                - 180.)
+                                .abs()
+                                <= 2.
+                    });
+                    let first = matches.next()?;
+                    matches.next().is_none().then_some(first.id)
+                })
+            } else {
+                None
+            };
+            reports.push((
+                PLAYER_ID,
+                ThreatReport {
+                    attacker_id,
+                    defended_id: PLAYER_ID,
+                },
+                Some(
+                    (player.yaw.to_degrees()
+                        + record.radar_bearing_deg.unwrap_or(record.bearing_deg))
+                    .rem_euclid(360.),
+                ),
+                Some(record.missile_id),
+            ));
+        }
+        // A fresh, visibly departing missile or tracer can reveal its shooter
+        // only when that aircraft is independently observed. Hidden projectile
+        // target IDs do not participate in this association.
+        for projectile in state.projectiles.iter().filter(|p| p.age <= 30) {
+            let weapon = projectile.weapon(state.configuration());
+            let gun = live::is_gun(weapon);
+            if gun && !projectile.tracer {
+                continue;
+            }
+            for receiver in std::iter::once(PLAYER_ID).chain(
+                self.mission
+                    .actors()
+                    .iter()
+                    .filter(|a| a.alive() && !a.is_dummy())
+                    .map(AiActor::id),
+            ) {
+                if receiver == projectile.owner {
+                    continue;
+                }
+                let (position, velocity, heading, pitch, skill, possible_shooters, incoming) =
+                    if receiver == PLAYER_ID {
+                        (
+                            player.position,
+                            player.velocity,
+                            player.yaw.to_degrees(),
+                            player.pitch.to_degrees(),
+                            tore_sim::ai::Experience::Ace,
+                            state
+                                .targets
+                                .iter()
+                                .filter(|target| {
+                                    self.slot(target.id)
+                                        .is_some_and(|slot| slot.side == launch::Side::Enemy)
+                                })
+                                .filter_map(|target| {
+                                    state
+                                        .sensors
+                                        .observation(target.id)
+                                        .map(|o| (target.id, o.position))
+                                })
+                                .collect::<Vec<_>>(),
+                            state.missile_threats.records().any(|r| {
+                                r.missile_id == projectile.id && r.targeting_receiver && !r.stale
+                            }),
+                        )
+                    } else {
+                        let actor = self.mission.actor(receiver).unwrap();
+                        (
+                            actor.flight().position,
+                            actor.flight().velocity,
+                            actor.flight().yaw.to_degrees(),
+                            actor.flight().pitch.to_degrees(),
+                            actor.controller().experience().level,
+                            actor
+                                .awareness()
+                                .current_observations()
+                                .filter(|o| o.target.side != actor.identity().side)
+                                .map(|o| (o.target.id, o.target.position))
+                                .collect::<Vec<_>>(),
+                            actor.missile_threats().any(|r| {
+                                r.missile_id == projectile.id && r.targeting_receiver && !r.stale
+                            }),
+                        )
+                    };
+                if !awareness::visual_eligible(
+                    skill,
+                    position,
+                    heading,
+                    pitch,
+                    projectile.position,
+                    None,
+                    terrain_visible(position, projectile.position, ground),
+                ) {
+                    continue;
+                }
+                let mut launch_sources = possible_shooters.into_iter().filter(|(_, shooter)| {
+                    missiles::length(missiles::sub(*shooter, projectile.previous)) <= 1000.
+                        && awareness::visual_eligible(
+                            skill,
+                            position,
+                            heading,
+                            pitch,
+                            *shooter,
+                            None,
+                            terrain_visible(position, *shooter, ground),
+                        )
+                });
+                let Some((shooter, _)) = launch_sources.next() else {
+                    continue;
+                };
+                if launch_sources.next().is_some() {
+                    continue;
+                }
+                let gun_incoming = if gun {
+                    let delta = missiles::sub(projectile.position, position);
+                    let movement = std::array::from_fn::<_, 3, _>(|i| {
+                        (projectile.position[i] - projectile.previous[i]) * 120. - velocity[i]
+                    });
+                    let vv = tore_sim::attitude::dot(movement, movement);
+                    let time = if vv > 0. {
+                        -tore_sim::attitude::dot(delta, movement) / vv
+                    } else {
+                        -1.
+                    };
+                    let closest = std::array::from_fn::<_, 3, _>(|i| delta[i] + movement[i] * time);
+                    (0. ..=15.).contains(&time) && missiles::length(closest) <= 1000.
+                } else {
+                    false
+                };
+                if !(incoming || gun_incoming) {
+                    continue;
+                }
+                let delta = missiles::sub(projectile.position, position);
+                reports.push((
+                    receiver,
+                    ThreatReport {
+                        attacker_id: Some(shooter),
+                        defended_id: receiver,
+                    },
+                    Some(delta[0].atan2(delta[2]).to_degrees().rem_euclid(360.)),
+                    Some(projectile.id),
+                ));
+            }
+        }
+        for (receiver, report, bearing, event_id) in reports {
+            self.mission
+                .report_attack_evidence(receiver, report, bearing, event_id);
+        }
     }
 
     /// The AI half of one tick, with the combat world reduced to its target
@@ -1305,7 +1501,7 @@ pub fn roster_probe(
                 [0.0, 30000.0, 30000.0],
                 Basis::new(std::f64::consts::PI, 0.0, 0.0),
             );
-            let mut bridge = AiWings::build(&wings, &combat.targets, &config, resources)?;
+            let mut bridge = AiWings::build(&wings, &combat.targets, false, resources)?;
             for actor in bridge.mission.actors() {
                 if actor.stations().len() != config.stations.len()
                     || actor
@@ -1382,12 +1578,14 @@ pub fn roster_probe(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::terrain::tests::world;
     use tore_sim::{
         ai::{
             Experience,
+            controller::TargetView,
+            engagement::{GroupObjective, Policy, Priority},
             experience::{EnemySkillOverride, ExperienceOrigin},
             launch::{WingId, WingSelection, resolve_wings},
         },
@@ -1469,7 +1667,7 @@ mod tests {
     /// `velocity / 120` to every live target once per tick.
     const FIXTURE_TICK_RATE: f64 = 120.0;
 
-    fn combat_fixture(guided: bool) -> live::State {
+    pub(crate) fn combat_fixture(guided: bool) -> live::State {
         use live::{Configuration, State, Station};
         use tore_formats::weapons::*;
         let zone = Zone {
@@ -1681,6 +1879,115 @@ mod tests {
     }
 
     #[test]
+    fn player_group_objective_distinguishes_two_populated_enemy_groups_from_free_fire() {
+        let selections = [
+            (launch::Side::Friendly, 1u8),
+            (launch::Side::Enemy, 0),
+            (launch::Side::Enemy, 1),
+        ]
+        .map(|(side, index)| WingSelection {
+            wing: WingId::new(side, index).unwrap(),
+            aircraft: AircraftId::F18,
+            count: 2,
+            skill_level: 1,
+        });
+        let payload = resolve_wings(&selections, None).unwrap();
+        let targets = vec![
+            target(1, [0., 20000., 0.], 0.),
+            target(2, [1500., 20000., 0.], 0.),
+            target(3, [0., 20000., 40000.], std::f64::consts::PI),
+            target(4, [1500., 20000., 40000.], std::f64::consts::PI),
+            target(5, [8000., 20000., 40000.], std::f64::consts::PI),
+            target(6, [9500., 20000., 40000.], std::f64::consts::PI),
+        ];
+        let mut wings =
+            AiWings::build_with(&payload, &targets, 0, |_| Ok((aircraft(), None))).unwrap();
+        let enemy_one = WingId::new(launch::Side::Enemy, 0).unwrap();
+        let mut objectives = [GroupObjective::Inherit; 6];
+        objectives[0] = GroupObjective::Intercept(enemy_one);
+        objectives[1] = GroupObjective::Intercept(enemy_one);
+        wings.apply_group_objectives(&objectives, [0., 20000., 0.]);
+
+        assert_eq!(wings.mission.player_assignment().destroy_ids, [3, 4]);
+        for id in [1, 2] {
+            assert_eq!(
+                wings.mission.actor(id).unwrap().assignment().destroy_ids,
+                [3, 4]
+            );
+        }
+        for id in [3, 4] {
+            assert!(wings.objective_for_player(id));
+        }
+        for id in [5, 6] {
+            assert!(!wings.objective_for_player(id));
+        }
+        let mut group_one = crate::target_window::Readout::new(
+            &targets[2],
+            wings.mission.actor(3).unwrap().flight(),
+            "TEST".into(),
+        );
+        group_one.with_activity(&wings);
+        let mut group_two = crate::target_window::Readout::new(
+            &targets[4],
+            wings.mission.actor(5).unwrap().flight(),
+            "TEST".into(),
+        );
+        group_two.with_activity(&wings);
+        assert_eq!(
+            group_one.objective,
+            Some(crate::target_window::TargetObjective::Destroy)
+        );
+        assert_eq!(group_two.objective, None);
+
+        objectives[0] = GroupObjective::Free;
+        wings.apply_group_objectives(&objectives, [0., 20000., 0.]);
+        assert!(wings.mission.player_assignment().destroy_ids.is_empty());
+        assert!(
+            [3, 4, 5, 6]
+                .into_iter()
+                .all(|id| !wings.objective_for_player(id))
+        );
+        let contact = |id, position| TargetView {
+            id,
+            side: ENEMY_SIDE,
+            position,
+            heading_deg: 0.,
+            pitch_deg: 0.,
+            speed: ScalarSpeed(400.),
+            maximum_speed: ScalarSpeed(800.),
+            is_aircraft: true,
+            is_fighter: true,
+            human_controlled: false,
+            valid: true,
+            type_allowed: true,
+            seeker_eligible: true,
+            wing_attackers: 0,
+            terrain_blocked: false,
+            sensor_supported: true,
+        };
+        for candidate in [
+            contact(3, [1000., 20000., 0.]),
+            contact(5, [1000., 20000., 0.]),
+        ] {
+            let selected = Policy::default()
+                .select(
+                    PLAYER_ID,
+                    FRIENDLY_SIDE,
+                    [0., 20000., 0.],
+                    wings.mission.player_assignment(),
+                    &[candidate],
+                    &[],
+                    &[],
+                    None,
+                    1,
+                )
+                .unwrap();
+            assert_eq!(selected.id, candidate.id);
+            assert_eq!(selected.priority, Priority::Free);
+        }
+    }
+
+    #[test]
     fn dummy_mode_reaches_live_targets_without_changing_other_wings() {
         let mut payload = payload(None);
         payload[1].dummy = true;
@@ -1722,13 +2029,34 @@ mod tests {
         assert!(!wings.mission.actor(3).unwrap().alive());
     }
 
-    fn build(enemy_override: Option<EnemySkillOverride>) -> (AiWings, Vec<live::Target>) {
+    pub(super) fn build(
+        enemy_override: Option<EnemySkillOverride>,
+    ) -> (AiWings, Vec<live::Target>) {
         let targets = spawned();
         let wings = AiWings::build_with(&payload(enemy_override), &targets, 0, |_| {
             Ok((aircraft(), None))
         })
         .unwrap();
         (wings, targets)
+    }
+
+    #[test]
+    fn both_sides_start_neutral_with_free_fire_objectives() {
+        let (mut wings, mut targets) = build(None);
+        wings.apply_mission_preset(Preset::Free, [0., 20000., 0.]);
+        wings.apply_group_objectives(&[GroupObjective::Inherit; 6], [0., 20000., 0.]);
+        assert!(wings.mission.actors().iter().all(AiActor::is_neutral));
+        for _ in 0..240 {
+            let output = wings
+                .advance(
+                    player_object([0., 20000., -20000.]),
+                    &mut targets,
+                    &|_, _| 0.,
+                )
+                .unwrap();
+            assert!(output.launches.is_empty());
+        }
+        assert!(wings.mission.actors().iter().all(AiActor::is_neutral));
     }
 
     fn player_object(position: Vector) -> WorldObject {
@@ -2206,6 +2534,50 @@ mod tests {
     }
 
     #[test]
+    fn accepted_recall_cancels_remaining_physical_gun_burst() {
+        use tore_sim::ai::wing::{Formation, PlayerOrder};
+        for order in [
+            PlayerOrder::Formation(Formation::Echelon),
+            PlayerOrder::Disengage,
+        ] {
+            let mut selections = payload(None);
+            selections[0].wing.index = 0;
+            let mut wings =
+                AiWings::build_with(&selections, &spawned(), 0, |_| Ok((aircraft(), None)))
+                    .unwrap();
+            for actor in wings.mission.actors_mut() {
+                actor.set_stations(Vec::new());
+            }
+            let mut combat = combat_fixture(false);
+            combat.targets = spawned();
+            let gun = combat.configuration().stations[0].weapon.clone();
+            wings.weapons.insert((1, 0), gun);
+            wings.pending_guns.insert(
+                (1, 0),
+                PendingGun {
+                    groups: VecDeque::from([(3, 3)]),
+                    next_scaled: 0,
+                    ordinal: 0,
+                },
+            );
+            let player = flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
+            wings.step(&mut combat, &player, &world()).unwrap();
+            assert_eq!(combat.projectiles.len(), 1, "{order:?}");
+            let rounds = wings.mission.actor(1).unwrap().rounds_remaining();
+            let dropped = wings.dropped_launches;
+            let report = wings.command(order, None, Some(1)).unwrap();
+            assert!(report.message.contains("1 applied"), "{order:?}");
+            assert!(!wings.pending_guns.contains_key(&(1, 0)));
+            for _ in 0..20 {
+                wings.step(&mut combat, &player, &world()).unwrap();
+            }
+            assert_eq!(combat.projectiles.len(), 1, "{order:?}");
+            assert_eq!(wings.mission.actor(1).unwrap().rounds_remaining(), rounds);
+            assert_eq!(wings.dropped_launches, dropped);
+        }
+    }
+
+    #[test]
     fn normal_startup_selects_and_arms_canonical_gun() {
         let fixture = combat_fixture(false);
         let mut config = fixture.configuration().clone();
@@ -2328,7 +2700,13 @@ mod tests {
     }
     #[test]
     fn finite_missile_depletion_is_followed_by_actor_owned_gun_fire() {
+        use tore_sim::ai::wing::{TargetOrder, WingRequest};
         let (mut wings, mut targets) = build(None);
+        wings
+            .mission
+            .order(3, WingRequest::TargetAssignment(TargetOrder::FreeSelection))
+            .unwrap()
+            .unwrap();
         for actor in wings.mission.actors_mut() {
             actor.set_stations(Vec::new());
         }
@@ -2390,6 +2768,62 @@ mod tests {
         );
         assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 0);
     }
+    #[test]
+    fn targetless_protect_me_releases_only_the_addressed_wingman() {
+        use tore_sim::ai::{
+            engagement::{Role, Stance},
+            wing::PlayerOrder,
+        };
+        let mut selections = payload(None);
+        selections[0].wing.index = 0;
+        let mut wings =
+            AiWings::build_with(&selections, &spawned(), 0, |_| Ok((aircraft(), None))).unwrap();
+        let report = wings
+            .command(PlayerOrder::ProtectMe, None, Some(1))
+            .unwrap();
+        assert!(report.message.contains("1 applied"));
+        assert!(!wings.mission.actor(1).unwrap().is_neutral());
+        assert!(wings.mission.actor(2).unwrap().is_neutral());
+        assert!(wings.mission.actor(3).unwrap().is_neutral());
+        let assignment = wings.mission.actor(1).unwrap().assignment();
+        assert_eq!(assignment.role, Role::Escort);
+        assert_eq!(assignment.stance, Stance::ProtectAssigned);
+        assert_eq!(assignment.protected_ids, [PLAYER_ID]);
+    }
+
+    #[test]
+    fn attack_on_contact_releases_after_recall_but_rejected_engage_does_not() {
+        use tore_sim::ai::engagement::Assignment;
+        use tore_sim::ai::wing::{Formation, PlayerOrder};
+        let mut selections = payload(None);
+        selections[0].wing.index = 0;
+        let mut wings =
+            AiWings::build_with(&selections, &spawned(), 0, |_| Ok((aircraft(), None))).unwrap();
+        let rejected = wings
+            .command(PlayerOrder::EngageMyTarget, Some(999), Some(1))
+            .unwrap();
+        assert!(rejected.message.contains("no valid hostile target"));
+        assert!(wings.mission.actor(1).unwrap().is_neutral());
+        wings
+            .command(PlayerOrder::AttackOnContact, None, Some(1))
+            .unwrap();
+        assert!(!wings.mission.actor(1).unwrap().is_neutral());
+        assert_eq!(
+            wings.mission.actor(1).unwrap().assignment(),
+            &Assignment::default()
+        );
+        wings
+            .command(PlayerOrder::Formation(Formation::Echelon), None, Some(1))
+            .unwrap();
+        assert!(wings.mission.actor(1).unwrap().is_neutral());
+        wings
+            .command(PlayerOrder::AttackOnContact, None, Some(1))
+            .unwrap();
+        assert!(!wings.mission.actor(1).unwrap().is_neutral());
+        assert!(wings.mission.actor(2).unwrap().is_neutral());
+        assert!(wings.mission.actor(3).unwrap().is_neutral());
+    }
+
     #[test]
     fn player_commands_report_acceptance_cancel_and_stay_in_the_addressed_wing() {
         use tore_sim::ai::wing::{PlayerApproach, PlayerBreak, PlayerOrder as O};
@@ -2492,8 +2926,8 @@ mod tests {
         let protected = bridge.command(O::ProtectMe, None, None).unwrap();
         assert_eq!(protected.radio, ["^CLRMY6", "^SHWTIME"]);
         assert_eq!(
-            bridge.mission.actor(1).unwrap().controller().target(),
-            Some(3)
+            bridge.mission.actor(1).unwrap().assignment().protected_ids,
+            [PLAYER_ID]
         );
         bridge.mission.actor_mut(1).unwrap().set_alive(false);
         assert_eq!(

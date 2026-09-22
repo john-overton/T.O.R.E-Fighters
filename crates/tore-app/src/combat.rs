@@ -797,14 +797,27 @@ impl Combat {
                 }
             })
             .collect();
-        Rwr {
+        let mut readout = Rwr {
             tick: self.state.sensors.tick(),
             operating,
             emitters,
             missiles,
             radar_indicator,
             infrared_indicator,
-        }
+        };
+        readout.mark_supported_sources(
+            self.state
+                .missile_threats
+                .records()
+                .filter(|r| {
+                    !r.stale
+                        && r.targeting_receiver
+                        && r.source
+                            == tore_sim::combat::threats::EvidenceSource::ElectronicSupported
+                })
+                .filter_map(|r| r.radar_bearing_deg),
+        );
+        readout
     }
 
     pub fn equipment_damage_report(&self) -> Vec<String> {

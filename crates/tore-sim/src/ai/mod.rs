@@ -21,6 +21,7 @@
 pub mod awareness;
 pub mod controller;
 pub mod defense;
+pub mod engagement;
 pub mod experience;
 pub mod fitted;
 pub mod formation;
