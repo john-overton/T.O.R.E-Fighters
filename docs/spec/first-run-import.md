@@ -28,8 +28,14 @@ format is in [SETUP.ESA notes](../formats/esa-installer.md).
    - a list of detected sources, each labelled by kind (see below);
    - **Import** and **Quit**.
 
-   The screen is drawn on a flat panel with the bundled menu font, because on
-   a first run there is no retail art on disk to draw with. When a pack does
+   The screen is drawn on a flat panel with the larger of the two bundled
+   menu fonts, because on a first run there is no retail art on disk to draw
+   with. The panel fills all but a twelve-pixel margin of the 640 by 480
+   canvas, one text line is seventeen pixels tall and lines are eighteen
+   pixels apart, so the screen is still readable when the window is scaled to
+   a 1080p or fullscreen display. Headings, the typed path and the button
+   labels are white; the explanation, the field label and the source kinds are
+   a light grey. When a pack does
    exist, which is the re-import case and the stale-cache case, the same
    screen is drawn over the Choose Activity frame the player was looking at.
    The path field takes typed characters, Backspace, Delete, Home, End, the

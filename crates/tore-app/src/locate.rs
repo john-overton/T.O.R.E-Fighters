@@ -4,10 +4,12 @@
 //! The screen is renderer independent. It keeps the typed path, the detected
 //! candidates and the import phase, turns key, pointer and drop input into
 //! [`Event`]s, and paints itself into a 640x480 RGBA buffer. Nothing here reads
-//! retail media: the panel is flat colour and the text uses the bundled menu
-//! font, because on a first run there is no imported art yet. When a pack does
-//! exist the caller passes the Choose Activity frame as `background`.
-use crate::menu::{Canvas, HEIGHT, Sprite, WIDTH, text_width};
+//! retail media: the panel is flat colour and the text uses the bundled
+//! large menu font, because on a first run there is no imported art yet. When
+//! a pack does exist the caller passes the Choose Activity frame as
+//! `background`. The screen owns its own atlas so that every string on it is
+//! drawn at the same readable size.
+use crate::menu::{Canvas, HEIGHT, LARGE_CELL, Sprite, WIDTH, flat_font_large, text_width};
 use std::path::PathBuf;
 
 /// How a candidate folder is offered to the player. Detection itself lives in
@@ -63,33 +65,61 @@ pub(crate) enum Event {
 }
 
 // Layout. Every hit rectangle below is derived from these, so `click` and
-// `draw` cannot drift apart.
-const PANEL: (i32, i32, i32, i32) = (40, 40, 560, 400);
-const INNER_X: i32 = PANEL.0 + 18;
-const INNER_W: i32 = PANEL.2 - 36;
-const LINE: i32 = 14;
-const TITLE_Y: i32 = PANEL.1 + 14;
-const PARA_Y: i32 = PANEL.1 + 40;
+// `draw` cannot drift apart. The numbers are sized for the 24 by 17 cells of
+// the large bundled atlas: one text line is `CELL` tall and successive lines
+// are `LINE` apart. The panel is nearly the whole canvas because the larger
+// type needs the room.
+const CELL: i32 = LARGE_CELL.1 as i32;
+const PANEL: (i32, i32, i32, i32) = (20, 12, 600, 456);
+const INNER_X: i32 = PANEL.0 + 20;
+const INNER_W: i32 = PANEL.2 - 40;
+const LINE: i32 = 18;
+const TITLE_Y: i32 = PANEL.1 + 10;
+const PARA_Y: i32 = PANEL.1 + 42;
 const PARA_LINES: usize = 5;
 const FIELD_LABEL_Y: i32 = PARA_Y + PARA_LINES as i32 * LINE + 6;
-const FIELD: (i32, i32, i32, i32) = (INNER_X, FIELD_LABEL_Y + LINE, INNER_W, 22);
-const FIELD_PAD: i32 = 6;
-const LIST_LABEL_Y: i32 = FIELD.1 + FIELD.3 + 10;
-const LIST_Y: i32 = LIST_LABEL_Y + LINE;
-const ROW_H: i32 = 17;
+const FIELD: (i32, i32, i32, i32) = (INNER_X, FIELD_LABEL_Y + LINE + 1, INNER_W, 26);
+const FIELD_PAD: i32 = 8;
+const LIST_LABEL_Y: i32 = FIELD.1 + FIELD.3 + 8;
+const LIST_Y: i32 = LIST_LABEL_Y + LINE + 1;
+const ROW_H: i32 = 20;
 const MAX_ROWS: usize = 4;
 const STATUS_Y: i32 = LIST_Y + MAX_ROWS as i32 * ROW_H + 8;
-const STATUS_LINES: usize = 5;
-const HINT_Y: i32 = STATUS_Y + STATUS_LINES as i32 * LINE;
+const STATUS_LINES: usize = 4;
+const HINT_Y: i32 = STATUS_Y + STATUS_LINES as i32 * LINE + 4;
 const HINT_LINES: usize = 2;
-const BUTTON_W: i32 = 130;
-const BUTTON_H: i32 = 26;
-const BUTTON_Y: i32 = PANEL.1 + PANEL.3 - 18 - BUTTON_H;
+const BUTTON_W: i32 = 150;
+const BUTTON_H: i32 = 28;
+const BUTTON_Y: i32 = PANEL.1 + PANEL.3 - 10 - BUTTON_H;
 const IMPORT_RECT: (i32, i32, i32, i32) = (INNER_X, BUTTON_Y, BUTTON_W, BUTTON_H);
 const QUIT_RECT: (i32, i32, i32, i32) =
     (INNER_X + INNER_W - BUTTON_W, BUTTON_Y, BUTTON_W, BUTTON_H);
 const CONTINUE_RECT: (i32, i32, i32, i32) = IMPORT_RECT;
 const MAX_PATH_BYTES: usize = 512;
+/// Compile-time layout guard. A block of `n` text lines starting at `start`
+/// ends at `start + (n - 1) * LINE + CELL`. Nothing may reach into the block
+/// below it, the buttons must sit inside the panel, and the panel with its
+/// drop shadow must sit inside the 640x480 canvas.
+const _: () = {
+    const fn ends(start: i32, lines: i32) -> i32 {
+        start + (lines - 1) * LINE + CELL
+    }
+    assert!(ends(TITLE_Y, 1) < PARA_Y);
+    assert!(ends(PARA_Y, PARA_LINES as i32) <= FIELD_LABEL_Y);
+    assert!(ends(FIELD_LABEL_Y, 1) <= FIELD.1);
+    assert!(FIELD.1 + FIELD.3 <= LIST_LABEL_Y);
+    assert!(ends(LIST_LABEL_Y, 1) <= LIST_Y);
+    assert!(CELL + 2 <= ROW_H, "a candidate row cannot hold its text");
+    assert!(LIST_Y + MAX_ROWS as i32 * ROW_H <= STATUS_Y);
+    assert!(ends(STATUS_Y, STATUS_LINES as i32) < HINT_Y);
+    assert!(ends(HINT_Y, HINT_LINES as i32) < BUTTON_Y);
+    assert!(CELL < BUTTON_H);
+    assert!(BUTTON_Y + BUTTON_H <= PANEL.1 + PANEL.3);
+    assert!(PANEL.0 + PANEL.2 + 4 <= WIDTH as i32);
+    assert!(PANEL.1 + PANEL.3 + 4 <= HEIGHT as i32);
+    assert!(IMPORT_RECT.0 + IMPORT_RECT.2 < QUIT_RECT.0);
+    assert!(QUIT_RECT.0 + QUIT_RECT.2 <= PANEL.0 + PANEL.2);
+};
 
 const TITLE: &str = "Locate Fighters Anthology";
 const EXPLANATION: &str = "T.O.R.E ships with no game media. Point it at your own copy of Jane's Fighters Anthology, either the installed game folder or a mounted disc 1, and it reads what it needs once into its own data folder. Your copy is never changed, and nothing is taken from this program. You can also drop a folder onto this window.";
@@ -107,9 +137,9 @@ const BUTTON_FILL: [u8; 4] = [44, 60, 80, 255];
 const BUTTON_ACTIVE: [u8; 4] = [68, 94, 126, 255];
 const BUTTON_DISABLED: [u8; 4] = [32, 40, 51, 255];
 const BAR_FILL: [u8; 4] = [96, 152, 210, 255];
-const DIM: [u8; 3] = [168, 180, 196];
-const FAIL: [u8; 3] = [255, 118, 108];
-const GOOD: [u8; 3] = [150, 222, 160];
+const DIM: [u8; 3] = [206, 216, 232];
+const FAIL: [u8; 3] = [255, 140, 130];
+const GOOD: [u8; 3] = [160, 232, 172];
 
 fn in_rect(x: f64, y: f64, (rx, ry, rw, rh): (i32, i32, i32, i32)) -> bool {
     x >= rx as f64 && y >= ry as f64 && x < (rx + rw) as f64 && y < (ry + rh) as f64
@@ -159,6 +189,9 @@ fn fit_right(font: &Sprite, text: &str, width: i32) -> String {
 }
 
 pub(crate) struct Locate {
+    /// Full-white large atlas. Primary text is drawn straight from it and
+    /// secondary text is tinted down, so both come from one allocation.
+    font: Sprite,
     path: String,
     cursor: usize,
     candidates: Vec<Candidate>,
@@ -173,6 +206,7 @@ pub(crate) struct Locate {
 impl Locate {
     pub(crate) fn new(prefill: Option<String>, candidates: Vec<Candidate>) -> Self {
         let mut locate = Self {
+            font: flat_font_large([255, 255, 255]),
             path: String::new(),
             cursor: 0,
             candidates: Vec::new(),
@@ -382,13 +416,13 @@ impl Locate {
         }
     }
     fn caret_from_click(&mut self, x: f64) {
-        let font = crate::menu::flat_font([255, 255, 255]);
-        let (visible, start) = self.field_view(&font);
+        let font = &self.font;
+        let (visible, start) = self.field_view(font);
         let target = x - (FIELD.0 + FIELD_PAD) as f64;
         let mut at = start;
         for (offset, ch) in visible.char_indices() {
-            let advance = text_width(&font, &visible[offset..offset + ch.len_utf8()]) as f64;
-            let left = text_width(&font, &visible[..offset]) as f64;
+            let advance = text_width(font, &visible[offset..offset + ch.len_utf8()]) as f64;
+            let left = text_width(font, &visible[..offset]) as f64;
             if target < left + advance / 2.0 {
                 self.cursor = start + offset;
                 return;
@@ -504,13 +538,17 @@ impl Locate {
             }
         }
     }
+    /// Paint the screen. The two font arguments are vestigial: the screen owns
+    /// its atlas so that everything on it is one readable size, and they are
+    /// kept only so the callers in `main.rs` need not change in this step.
     pub(crate) fn draw(
         &self,
         pixels: &mut [u8],
-        font: &Sprite,
-        small: &Sprite,
+        _font: &Sprite,
+        _small: &Sprite,
         background: Option<&[u8]>,
     ) {
+        let (font, small) = (&self.font, &self.font);
         assert_eq!(
             pixels.len(),
             WIDTH * HEIGHT * 4,
@@ -526,7 +564,7 @@ impl Locate {
         canvas.rect(PANEL, PANEL_FILL);
         canvas.outline(PANEL, PANEL_EDGE);
         canvas.text(font, TITLE, INNER_X, TITLE_Y, None);
-        canvas.rect((INNER_X, TITLE_Y + LINE + 2, INNER_W, 1), PANEL_EDGE);
+        canvas.rect((INNER_X, TITLE_Y + CELL + 4, INNER_W, 1), PANEL_EDGE);
         for (row, line) in wrap(small, EXPLANATION, INNER_W)
             .iter()
             .take(PARA_LINES)
@@ -582,13 +620,13 @@ impl Locate {
             let candidate = &self.candidates[index];
             let kind = candidate.kind.label();
             let kind_w = text_width(small, kind) + 12;
-            canvas.text(small, kind, rect.0 + 6, rect.1 + 3, Some(DIM));
+            canvas.text(small, kind, rect.0 + 6, rect.1 + 2, Some(DIM));
             let path = candidate.path.display().to_string();
             canvas.text(
                 small,
                 &truncate_left(small, &path, rect.2 - kind_w - 12),
                 rect.0 + 6 + kind_w,
-                rect.1 + 3,
+                rect.1 + 2,
                 None,
             );
         }
@@ -597,7 +635,7 @@ impl Locate {
                 small,
                 &format!("{} more", self.candidates.len() - self.scroll - shown),
                 INNER_X,
-                LIST_Y + MAX_ROWS as i32 * ROW_H - LINE,
+                LIST_Y + MAX_ROWS as i32 * ROW_H - CELL,
                 Some(DIM),
             );
         }
@@ -616,7 +654,7 @@ impl Locate {
             ..
         } = &self.phase
         {
-            let bar = (INNER_X, STATUS_Y + 2 * LINE + 4, INNER_W, 8);
+            let bar = (INNER_X, STATUS_Y + 2 * LINE + 4, INNER_W, 10);
             canvas.rect(bar, FIELD_FILL);
             canvas.outline(bar, EDGE_IDLE);
             let filled = if *total == 0 {
@@ -709,10 +747,8 @@ impl Locate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::menu::flat_font;
-
     fn font() -> Sprite {
-        flat_font([235, 239, 243])
+        flat_font_large([255, 255, 255])
     }
     fn candidates() -> Vec<Candidate> {
         vec![
@@ -924,6 +960,28 @@ mod tests {
         assert_eq!(lines.join(" "), EXPLANATION);
     }
     #[test]
+    fn the_screen_and_its_layout_agree_on_the_cell_height() {
+        // `LAYOUT` checks the block chain at compile time; the atlas is the
+        // one thing it cannot see.
+        assert_eq!(CELL, font().height as i32);
+        assert_eq!(font().glyphs[b'M' as usize][2] as i32, CELL);
+    }
+    #[test]
+    fn button_labels_fit_their_buttons() {
+        let f = font();
+        for label in ["Import", "Quit", "Continue"] {
+            assert!(
+                text_width(&f, label) + 16 <= BUTTON_W,
+                "{label} does not fit a {BUTTON_W} pixel button"
+            );
+        }
+        assert!(text_width(&f, TITLE) <= INNER_W);
+        assert!(text_width(&f, "No sources detected. Type or drop a folder above.") <= INNER_W);
+        // A row label plus its truncated path has to leave room for both.
+        let kind = text_width(&f, SourceKind::Disc.label()) + 12;
+        assert!(INNER_W - kind - 12 > 200, "no room left for the path");
+    }
+    #[test]
     fn the_field_scrolls_so_the_caret_stays_visible() {
         let f = font();
         let mut l = Locate::new(None, Vec::new());
@@ -938,7 +996,7 @@ mod tests {
     }
     #[test]
     fn every_phase_draws_a_panel_without_panicking() {
-        let (font, small) = (font(), flat_font([210, 219, 230]));
+        let (font, small) = (font(), font());
         let phases = [
             ("idle", Phase::Idle),
             (
