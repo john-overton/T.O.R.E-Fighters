@@ -97,8 +97,8 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then
             vs=$(/c/Program\ Files\ \(x86\)/Microsoft\ Visual\ Studio/Installer/vswhere.exe -latest -property installationPath | tr -d '\r')
             dumpbin=$(find "$vs/VC/Tools/MSVC" -name dumpbin.exe -path '*Hostx64/x64*' | head -1)
-            "$dumpbin" /dependents target/release/tore-app.exe
-            "$dumpbin" /dependents target/release/tore-extract.exe
+            "$dumpbin" -dependents target/release/tore-app.exe
+            "$dumpbin" -dependents target/release/tore-extract.exe
           elif [ "$RUNNER_OS" = "macOS" ]; then
             otool -L target/release/tore-app target/release/tore-extract
           else
