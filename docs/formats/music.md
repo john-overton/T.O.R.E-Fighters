@@ -143,6 +143,8 @@ music context; diagnostics are emitted outside the callback.
 
 Main-menu M / Pref still controls saved music preference. In-flight Sound still
 controls effects only; a full flight volume/settings mixer remains deferred.
+The [startup preference rule](../spec/menu-music.md) keeps the initial Music
+setting independent of which subsystem owns the imported sample buffers.
 
 ## Speed brakes
 

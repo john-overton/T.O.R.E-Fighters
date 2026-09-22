@@ -389,7 +389,9 @@ impl Menu {
             .clone()
             .try_into()
             .map_err(|_| "invalid background palette")?;
-        let mut state = State::new(assets.buttons, assets.sounds.contains_key("AIR003.11K"));
+        // Audio already owns the sample buffers. Music defaults on regardless
+        // of that ownership; saved preferences override it later in startup.
+        let mut state = State::new(assets.buttons, true);
         // Native bar origins are 70, 185 and 76, respectively (FA.EXE 0x4a091a..64).
         state.bar_offset = match background.as_str() {
             "CHOOSEAC.PIC" => -6,
@@ -869,6 +871,57 @@ mod tests {
                 .collect(),
             true,
         )
+    }
+    #[test]
+    fn startup_music_survives_audio_ownership_and_saved_off_still_wins() {
+        let mut assets = Assets {
+            creator_options: tore_formats::ui::creator::Options {
+                fields: vec![],
+                targets: vec![],
+            },
+            theater_resources: BTreeMap::new(),
+            pics: ["CHOOSEV.PIC", "QUIKMIS3.PIC"]
+                .into_iter()
+                .map(|name| {
+                    (
+                        name.into(),
+                        tore_formats::Pic {
+                            width: 1,
+                            height: 1,
+                            pixels: vec![0],
+                            mask: vec![true],
+                            palette: vec![[0; 3]; 256],
+                            glyphs: vec![],
+                        },
+                    )
+                })
+                .collect(),
+            buttons: vec![],
+            sounds: [(tore_formats::music::MAIN[0].into(), vec![192, 192])].into(),
+            music_scores: BTreeMap::new(),
+            palette: [[0; 3]; 256],
+        };
+        // Production startup gives audio the PCM buffers before building the menu.
+        let audio_clips = std::mem::take(&mut assets.sounds);
+        assert!(!audio_clips.is_empty());
+        let mut menu = Menu::new(assets, Some("CHOOSEV")).unwrap();
+        assert!(
+            menu.state.music,
+            "a fresh profile must not mute imported menu music"
+        );
+
+        let mut ui = crate::flight_ui::FlightUi::default();
+        let mut instruments = crate::instruments::Instruments::default();
+        let mut saved =
+            crate::preferences::Preferences::capture(&ui, &instruments, &menu.state, true);
+        saved.music = false;
+        let saved = crate::preferences::Preferences::parse(&saved.text()).unwrap();
+        saved.apply(&mut ui, &mut instruments, &mut menu.state);
+        assert!(
+            !menu.state.music,
+            "an explicit saved mute must be preserved"
+        );
+        assert_eq!(menu.state.key("m", false), Action::Music(true));
     }
     #[test]
     fn click_requires_release_on_same_enabled_control() {

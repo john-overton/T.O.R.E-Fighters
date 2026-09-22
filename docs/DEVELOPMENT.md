@@ -149,6 +149,11 @@ This uses the imported menu, a real 960 × 720 window (never fullscreen, so the 
 
 `--no-audio` silences a session. Normal playback uses the system's default output device, original PCM effects, recorded main/briefing playlists and the NORMAL score during free flight when available. Device initialization failure is reported and the menu continues silently. Main-menu M toggles music; `Pref` exposes music/effect toggles. Music follows the saved preference into flight and freezes on flight pause. In-flight Sound still toggles effects only. No MIDI or synth is used. See [audio behavior and limits](formats/music.md). Music/effects and flight display preferences are restored from `preferences-v1.conf` in the application data directory.
 
+Profiles without saved preferences start with Music On. Saved Music On/Off still
+overrides that default; imported sample ownership or a silent diagnostic run does
+not choose the setting. If an older profile saved Music Off, use M or Pref to
+enable it. See the [startup regression](baselines/menu-music-startup.md).
+
 ## Explore media and capture previews
 
 ```sh
