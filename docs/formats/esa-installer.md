@@ -129,10 +129,16 @@ should carry a per-build address set rather than a single delta.
 
 ## Implementation notes for the readers
 
-- Gate on either fingerprint. Each reader keeps its bounded reads, size caps and
-  content validation exactly as now; only the address set is selected by hash.
+- The build table lives in `tore-formats/src/executable.rs`: a `Build` enum, a
+  `Layout` of per-build table addresses, the `LAYOUTS` array of the two reviewed
+  builds, and `identify`, which maps an executable's SHA-256 to its layout.
+- All four readers gate on `identify` and take their addresses from the returned
+  layout, keeping their bounded reads, size caps and content validation
+  unchanged. Each also exposes a `parse_with`/`phrases_with` entry point that
+  takes a layout directly, so synthetic fixtures can exercise both address sets.
 - The import report should name the build it read, `1.0 (disc)` or `1.02F`.
-- Do not accept unknown builds. A third hash is a new research pass.
+- Do not accept unknown builds. `identify` refuses one by name, quoting the
+  computed hash; a third hash is a new research pass.
 
 ## Not covered
 

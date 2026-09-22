@@ -11,17 +11,17 @@ pub struct Layout {
     pub circles: Vec<Circle>,
 }
 impl Layout {
+    /// Read the descriptors from a reviewed build, selected by fingerprint.
     pub fn parse(exe: &[u8]) -> Result<Self> {
-        if exe.len() > 16 * 1024 * 1024
-            || crate::ui::fingerprint::sha256(exe)
-                != "e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c"
-        {
-            return Err(invalid("lens flare requires reviewed FA.EXE"));
-        }
+        Self::parse_with(crate::executable::identify(exe)?, exe)
+    }
+
+    /// Read the descriptors using an already chosen build address set.
+    pub fn parse_with(build: &crate::executable::Layout, exe: &[u8]) -> Result<Self> {
         let image = crate::ui::creator::Image::parse(exe)?;
         let mut circles = Vec::new();
         for i in 0..17 {
-            let r = image.read(0x50c8d8 + i * 12, 12, false)?;
+            let r = image.read(build.flare_records + i * 12, 12, false)?;
             let radius = u32_at(r, 4)?;
             if radius == 0 {
                 let out = Self { circles };
@@ -106,5 +106,28 @@ mod tests {
         let mut bad = bytes;
         bad[13] = 0;
         assert!(Layout::decode(&bad).is_err());
+    }
+
+    /// The same nine synthetic descriptors at each reviewed build's addresses.
+    fn image(build: &crate::executable::Layout) -> Vec<u8> {
+        let mut data = vec![0u8; 12 * 10];
+        for i in 0..9usize {
+            let r = i * 12;
+            let offset = (i as i32 * 100 - 400) as u32;
+            for (at, value) in [(0, offset), (4, i as u32 + 1), (8, 265 + (i as u32 & 1))] {
+                data[r + at..r + at + 4].copy_from_slice(&value.to_le_bytes());
+            }
+        }
+        crate::executable::fixture(&[(".data", build.flare_records, data, false)])
+    }
+
+    #[test]
+    fn both_reviewed_builds_decode_the_same_circles() {
+        let [disc, patch] = crate::executable::LAYOUTS;
+        let a = Layout::parse_with(&disc, &image(&disc)).unwrap();
+        assert_eq!(a, Layout::parse_with(&patch, &image(&patch)).unwrap());
+        assert_eq!(a.circles.len(), 9);
+        assert_eq!(a.circles[0].offset_percent, -400);
+        assert!(Layout::parse(&image(&patch)).is_err());
     }
 }

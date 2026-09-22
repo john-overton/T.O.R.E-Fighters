@@ -68,24 +68,24 @@ impl Options {
         })
     }
 
+    /// Read the tables from a reviewed build, selected by fingerprint.
     pub fn parse(data: &[u8]) -> Result<Self> {
-        if data.len() > 16 * 1024 * 1024
-            || crate::ui::fingerprint::sha256(data)
-                != "e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c"
-        {
-            return Err(invalid("creator tables require the reviewed FA.EXE build"));
-        }
+        Self::parse_with(crate::executable::identify(data)?, data)
+    }
+
+    /// Read the tables using an already chosen build address set.
+    pub fn parse_with(build: &crate::executable::Layout, data: &[u8]) -> Result<Self> {
         let image = Image::parse(data)?;
-        let dispatch = image.read(0x42e86c, 240, true)?;
+        let dispatch = image.read(build.creator_fields, 240, true)?;
         let mut fields = vec![Vec::new(); 33];
         for (id, field) in fields.iter_mut().enumerate().skip(3) {
             let branch = u32_at(dispatch, (id - 3) * 4)?;
-            if matches!(branch, 0x42e747 | 0x42e799) {
+            if build.creator_sentinels.contains(&branch) {
                 continue;
             }
             *field = image.list(branch)?;
         }
-        let dispatch = image.read(0x42e95c, 64, true)?;
+        let dispatch = image.read(build.creator_targets, 64, true)?;
         let targets = (0..16)
             .map(|i| image.list(u32_at(dispatch, i * 4)?))
             .collect::<Result<_>>()?;
@@ -221,6 +221,63 @@ mod tests {
         o.targets[0].clear();
         assert!(Options::decode(&o.encode()).is_err());
     }
+    /// Same synthetic lists placed at each reviewed build's addresses.
+    fn image(build: &crate::executable::Layout) -> Vec<u8> {
+        let thunks = 44;
+        let code_va = build.creator_sentinels[0] - 0x200;
+        let data_va = match build.build {
+            crate::executable::Build::Patch102F => 0x500000,
+            crate::executable::Build::Disc10 => 0x500000 - 0x4710,
+        };
+        let mut code = vec![0u8; build.creator_targets + 64 - code_va];
+        let mut data = vec![0u8; thunks * 16];
+        let mut next = 0;
+        let mut thunk = |code: &mut Vec<u8>, data: &mut Vec<u8>| {
+            let (at, text) = (next * 6, format!("L{next:02}1\0L{next:02}2\0\0"));
+            code[at] = 0xb8;
+            code[at + 1..at + 5].copy_from_slice(&((data_va + next * 16) as u32).to_le_bytes());
+            code[at + 5] = 0xc3;
+            data[next * 16..next * 16 + text.len()].copy_from_slice(text.as_bytes());
+            next += 1;
+            (code_va + at) as u32
+        };
+        for slot in 0..46 {
+            let branch = match slot {
+                3 => build.creator_sentinels[0] as u32,
+                10 => build.creator_sentinels[1] as u32,
+                _ => thunk(&mut code, &mut data),
+            };
+            let table = if slot < 30 {
+                build.creator_fields - code_va + slot * 4
+            } else {
+                build.creator_targets - code_va + (slot - 30) * 4
+            };
+            code[table..table + 4].copy_from_slice(&branch.to_le_bytes());
+        }
+        crate::executable::fixture(&[
+            ("CODE", code_va, code, true),
+            (".data", data_va, data, false),
+        ])
+    }
+
+    #[test]
+    fn both_reviewed_builds_decode_the_same_lists() {
+        let [disc, patch] = crate::executable::LAYOUTS;
+        let (a, b) = (
+            Options::parse_with(&disc, &image(&disc)).unwrap(),
+            Options::parse_with(&patch, &image(&patch)).unwrap(),
+        );
+        assert_eq!(a.fields, b.fields);
+        assert_eq!(a.targets, b.targets);
+        assert_eq!(a.targets.len(), 16);
+        assert_eq!(a.fields[6], Vec::<String>::new());
+        assert_eq!(a.fields[13], Vec::<String>::new());
+        assert_eq!(a.fields[3], vec!["L001", "L002"]);
+        assert_eq!(a.fields[4], vec!["L011", "L012"]);
+        // The gated entry point still refuses a build it has not reviewed.
+        assert!(Options::parse(&image(&patch)).is_err());
+    }
+
     #[test]
     fn bounded_pointer_lists_and_fingerprint() {
         let mut data = vec![0xb8, 0, 2, 0, 0, 0xc3];

@@ -14,15 +14,15 @@ pub struct Layout {
     pub subdivisions: u8,
 }
 impl Layout {
+    /// Read the table from a reviewed build, selected by fingerprint.
     pub fn parse(exe: &[u8]) -> Result<Self> {
-        if exe.len() > 16 * 1024 * 1024
-            || crate::ui::fingerprint::sha256(exe)
-                != "e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c"
-        {
-            return Err(invalid("cloud layout requires reviewed FA.EXE"));
-        }
+        Self::parse_with(crate::executable::identify(exe)?, exe)
+    }
+
+    /// Read the table using an already chosen build address set.
+    pub fn parse_with(build: &crate::executable::Layout, exe: &[u8]) -> Result<Self> {
         let image = crate::ui::creator::Image::parse(exe)?;
-        let code = image.read(0x4a8bda, 7, true)?;
+        let code = image.read(build.cloud_call, 7, true)?;
         if code[0] != 0x6a || code[2] != 0x68 {
             return Err(invalid("cloud repeat call changed"));
         }
@@ -32,7 +32,7 @@ impl Layout {
             subdivisions: code[1],
         };
         for i in 0..64 {
-            let r = image.read(0x50c298 + 26 * i, 26, false)?;
+            let r = image.read(build.cloud_records + 26 * i, 26, false)?;
             let flags = u32_at(r, 0)?;
             if flags == 0 {
                 out.validate()?;
@@ -136,5 +136,41 @@ mod tests {
         bad[14] = 4;
         assert!(Layout::decode(&bad).is_err());
         assert!(Layout::parse(&bad).is_err());
+    }
+
+    /// The same nine synthetic patches at each reviewed build's addresses.
+    fn image(build: &crate::executable::Layout) -> Vec<u8> {
+        let mut code = vec![0x6a, 0x02, 0x68, 0, 0, 0, 0x02];
+        code.resize(16, 0);
+        let mut data = vec![0u8; 26 * 10 + 10];
+        let name = build.cloud_records + 26 * 10;
+        data[26 * 10..].copy_from_slice(b"cloud1.SH\0");
+        for i in 0..9usize {
+            let r = i * 26;
+            for (at, value) in [
+                (0, i % 3 + 1),
+                (4, name),
+                (12, 100 + i * 10),
+                (20, 200 + i * 10),
+            ] {
+                data[r + at..r + at + 4].copy_from_slice(&(value as u32).to_le_bytes());
+            }
+            data[r + 24..r + 26].copy_from_slice(&(i as u16 * 7).to_le_bytes());
+        }
+        crate::executable::fixture(&[
+            ("CODE", build.cloud_call, code, true),
+            (".data", build.cloud_records, data, false),
+        ])
+    }
+
+    #[test]
+    fn both_reviewed_builds_decode_the_same_patches() {
+        let [disc, patch] = crate::executable::LAYOUTS;
+        let a = Layout::parse_with(&disc, &image(&disc)).unwrap();
+        assert_eq!(a, Layout::parse_with(&patch, &image(&patch)).unwrap());
+        assert_eq!(a.patches.len(), 9);
+        assert_eq!(a.period_f8, 1 << 25);
+        assert_eq!(a.subdivisions, 2);
+        assert!(Layout::parse(&image(&patch)).is_err());
     }
 }

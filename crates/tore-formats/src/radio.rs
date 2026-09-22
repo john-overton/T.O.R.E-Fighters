@@ -2,6 +2,8 @@
 use crate::{Result, invalid, slice, u16_at, u32_at};
 use std::collections::BTreeMap;
 
+/// Pointer-pair addresses in the 1.02F build. For the 1.0 disc build subtract
+/// [`crate::executable::Layout::radio_shift`], which [`phrases_with`] applies.
 pub const STEMS: &[(&str, usize)] = &[
     ("^BREAKRT", 0x4ff170),
     ("^BREAKLF", 0x4ff178),
@@ -43,6 +45,14 @@ pub fn resource(name: &str) -> bool {
 /// Select bounded inert records from the reviewed executable layout.
 /// Expected stems are layout guards, not substitute metadata.
 pub fn phrases(data: &[u8]) -> Result<BTreeMap<String, Vec<u8>>> {
+    phrases_with(crate::executable::identify(data)?, data)
+}
+
+/// Read the pointer pairs using an already chosen build address set.
+pub fn phrases_with(
+    build: &crate::executable::Layout,
+    data: &[u8],
+) -> Result<BTreeMap<String, Vec<u8>>> {
     if data.len() > 16 * 1024 * 1024 || slice(data, 0, 2)? != b"MZ" {
         return Err(invalid("invalid radio image"));
     }
@@ -91,7 +101,10 @@ pub fn phrases(data: &[u8]) -> Result<BTreeMap<String, Vec<u8>>> {
     };
     let mut result = BTreeMap::new();
     for (stem, va) in STEMS {
-        let at = offset(*va)?;
+        let at = offset(
+            va.checked_sub(build.radio_shift)
+                .ok_or_else(|| invalid("radio pointer outside section"))?,
+        )?;
         let text = string(u32_at(bytes, at)?)?;
         if string(u32_at(bytes, at + 4)?)? != stem.as_bytes() {
             return Err(invalid("unreviewed radio mapping"));
@@ -104,37 +117,47 @@ pub fn phrases(data: &[u8]) -> Result<BTreeMap<String, Vec<u8>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> Vec<u8> {
-        let mut b = crate::module::fixture(&vec![0; 8192]);
-        b[64..68].copy_from_slice(b"PE\0\0");
-        b[116..120].copy_from_slice(&0x400000u32.to_le_bytes());
-        b[120..128].copy_from_slice(b".data\0\0\0");
-        b[132..136].copy_from_slice(&0xff000u32.to_le_bytes());
-        let mut pos = 5000;
+    /// The same synthetic pointer pairs at each reviewed build's addresses.
+    fn fixture(build: &crate::executable::Layout) -> Vec<u8> {
+        let base = 0x4ff000 - build.radio_shift;
+        let mut data = vec![0u8; 0x1400];
+        let mut pos = 0x1000;
         for (stem, va) in STEMS {
-            let at = 256 + va - 0x4ff000;
+            let at = va - 0x4ff000;
             for (slot, text) in [(0, "Synthetic phrase"), (4, *stem)] {
-                b[at + slot..at + slot + 4]
-                    .copy_from_slice(&(0x4ff000u32 + pos as u32).to_le_bytes());
-                b[256 + pos..256 + pos + text.len()].copy_from_slice(text.as_bytes());
+                data[at + slot..at + slot + 4]
+                    .copy_from_slice(&((base + pos) as u32).to_le_bytes());
+                data[pos..pos + text.len()].copy_from_slice(text.as_bytes());
                 pos += text.len() + 1;
             }
         }
-        b
+        crate::executable::fixture(&[(".data", base, data, false)])
+    }
+    #[test]
+    fn both_reviewed_builds_decode_the_same_phrases() {
+        let [disc, patch] = crate::executable::LAYOUTS;
+        let a = phrases_with(&disc, &fixture(&disc)).unwrap();
+        assert_eq!(a, phrases_with(&patch, &fixture(&patch)).unwrap());
+        assert_eq!(a.len(), STEMS.len());
+        assert!(a.contains_key("TORE_RADIO_^ENGAGE"));
+        // Unknown builds are refused rather than read at guessed addresses.
+        assert!(phrases(&fixture(&patch)).is_err());
     }
     #[test]
     fn bounded_metadata_and_layout_guards() {
-        let b = fixture();
-        assert_eq!(phrases(&b).unwrap().len(), STEMS.len());
+        let patch = &crate::executable::LAYOUTS[1];
+        let b = fixture(patch);
+        assert_eq!(phrases_with(patch, &b).unwrap().len(), STEMS.len());
         for n in 0..b.len() {
-            assert!(phrases(&b[..n]).is_err());
+            assert!(phrases_with(patch, &b[..n]).is_err());
         }
+        let start = b.len() - 0x1400;
         let mut bad = b.clone();
-        bad[256 + 0x170..256 + 0x174].fill(255);
-        assert!(phrases(&bad).is_err());
+        bad[start + 0x170..start + 0x174].fill(255);
+        assert!(phrases_with(patch, &bad).is_err());
         let mut bad = b;
-        bad[256 + 5000] = 0;
-        assert!(phrases(&bad).is_err());
+        bad[start + 0x1000] = 0;
+        assert!(phrases_with(patch, &bad).is_err());
         assert!(!resource("^UNKNOWN.5K"));
         assert!(resource("^ENGAGE.5K"));
     }
