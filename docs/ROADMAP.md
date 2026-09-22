@@ -80,7 +80,7 @@ twelve-aircraft scope; their individual acceptance limits remain documented.
 
 ## Principles
 
-1. **Faithful first, opinionated second.**  Milestone 1 and 2 reproduce the retail game.  Every expansion, remaster, and quality-of-life change lands as a layer on top that can be switched off, so a "classic" mode always exists and always matches retail.
+1. **Faithful first, opinionated second.**  Milestone 1 and 2 reproduce the retail game with tasteful opinions.  No feature will be left behind, and some opinionated features will have retail settings you can turn on to return back to that original experience.
 2. **Bring your own copy.**  The repo ships no retail bytes.  The importer reads the user's own Fighters Anthology media at runtime and writes to app data.  A signature scan for EALIB, PIC, and other retail markers stays a release gate.
 3. **Hand-rolled where it counts.**  External dependencies are kept to a minimum.  Formats, synth, terrain, and sim are ours.
 4. **Importer grows with the game.**  There is no "import everything" phase.  Each step decodes exactly the formats the next playable piece needs.  Breadth is tracked in a coverage table, not a milestone.
