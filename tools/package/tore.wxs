@@ -170,7 +170,7 @@
                   BinaryKey="WixCA"
                   DllEntry="WixShellExec"
                   Impersonate="yes"
-                  Return="asyncNoWait" />
+                  />
     <UI>
       <!-- Welcome, licence, feature choice with a Browse button, confirm, finish. -->
       <UIRef Id="WixUI_FeatureTree" />
