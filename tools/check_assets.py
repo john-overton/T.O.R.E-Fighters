@@ -1,4 +1,21 @@
-"""Baseline retail-data guard. Uses only the Python standard library."""
+"""Baseline retail-data guard. Uses only the Python standard library.
+
+With no arguments it scans every Git-visible file in the repository. With
+explicit paths it scans those files and directories, which is how release
+packaging checks what it is about to publish.
+
+How release packages are scanned:
+
+- A `.tar.gz` (or `.tgz`, or a plain `.tar`) is opened with `tarfile` and each
+  member is scanned as if it were a loose file, so a retail extension or an
+  embedded EALIB or PIC signature inside the archive is caught.
+- MSI, DMG and AppImage packages are scanned as raw bytes only. That catches an
+  uncompressed EALIB or PIC signature sitting in the container, but it does not
+  see inside a compressed payload, and all three formats compress. The real
+  gate is therefore the scan of the staged directory the package is built from,
+  which the packaging scripts run first; the scan of the finished package is a
+  second, weaker net.
+"""
 
 import argparse
 import re
@@ -6,6 +23,7 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+import tarfile
 
 
 RETAIL_SUFFIXES = {".lib", ".esa", ".pic", ".pal", ".fnt", ".dlg", ".mnu", ".lay", ".11k", ".5k", ".xmi", ".mus", ".pack"}
@@ -63,6 +81,34 @@ def violation(path, data):
     return None
 
 
+def is_tarball(path):
+    """True for the archive form we can open and scan member by member."""
+    return path.name.lower().endswith((".tar.gz", ".tgz", ".tar"))
+
+
+def tarball_violations(path):
+    """Scan every regular member of a tarball. Returns (member, reason) pairs.
+
+    Unlike MSI, DMG and AppImage, a tarball can be decompressed with the
+    standard library, so its contents get the same scan a loose file gets.
+    """
+    found = []
+    with tarfile.open(path, "r:*") as archive:
+        for member in archive:
+            if member.issym() or member.islnk():
+                found.append((member.name, "expected a regular file"))
+                continue
+            if not member.isfile():
+                continue
+            handle = archive.extractfile(member)
+            if handle is None:
+                continue
+            reason = violation(Path(member.name), handle.read())
+            if reason:
+                found.append((member.name, reason))
+    return found
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=Path,
@@ -99,6 +145,14 @@ def main():
             failures.append(f"{relative}: expected a regular file")
             continue
         checked += 1
+        if is_tarball(path):
+            try:
+                members = tarball_violations(path)
+            except tarfile.TarError as error:
+                failures.append(f"{relative}: unreadable archive ({error})")
+                continue
+            failures.extend(f"{relative}:{member}: {reason}" for member, reason in members)
+            continue
         reason = violation(path, path.read_bytes())
         if reason:
             failures.append(f"{relative}: {reason}")

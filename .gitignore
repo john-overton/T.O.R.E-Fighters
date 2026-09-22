@@ -1,6 +1,7 @@
 /gameassets
 /USNF-ATF
 /target/
+/dist/
 /.local/
 .DS_Store
 __pycache__/

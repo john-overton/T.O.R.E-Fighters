@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX v3 source for the unsigned per-machine MSI. package-windows.ps1 passes
+  -dVersion and -dStageDir; every file installed comes from the staged
+  directory the asset guard has already scanned.
+
+  The UpgradeCode is permanent: it is what tells Windows that a new MSI
+  replaces an older T.O.R.E-Fighters rather than installing beside it. Never
+  change it. Component GUIDs are generated per file by WiX from the install
+  path, which is stable across builds for the same layout.
+
+  The installer uses the default Windows Installer icon. Producing a
+  multi-resolution .ico without an image library is more machinery than the
+  result is worth; see tools/package/make_icon.py.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="T.O.R.E-Fighters"
+           Language="1033"
+           Version="$(var.Version)"
+           Manufacturer="T.O.R.E-Fighters project"
+           UpgradeCode="0469B01A-8410-4B23-A091-59407DAF6FBB">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="T.O.R.E-Fighters"
+             Comments="Unsigned build. Brings no retail media; import your own copy on first run." />
+
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of T.O.R.E-Fighters is already installed. Uninstall it first." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Shown in Settings, Installed apps, next to the uninstall entry. -->
+    <Property Id="ARPCONTACT" Value="https://github.com/jroverton/T.O.R.E-Fighters" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="T.O.R.E-Fighters">
+
+          <Component Id="MainExecutable" Guid="*">
+            <File Id="ToreApp" Name="tore-app.exe" KeyPath="yes"
+                  Source="$(var.StageDir)\tore-app.exe">
+              <Shortcut Id="StartMenuShortcut"
+                        Directory="ApplicationProgramsFolder"
+                        Name="T.O.R.E-Fighters"
+                        Description="Ground-up rebuild of Jane's Fighters Anthology"
+                        WorkingDirectory="INSTALLFOLDER"
+                        Advertise="yes" />
+            </File>
+          </Component>
+
+          <!-- Optional developer tool, installed but not shortcut. -->
+          <Component Id="ExtractTool" Guid="*">
+            <File Id="ToreExtract" Name="tore-extract.exe" KeyPath="yes"
+                  Source="$(var.StageDir)\tore-extract.exe" />
+          </Component>
+
+          <Component Id="LicenseFile" Guid="*">
+            <File Id="LicenseTxt" Name="LICENSE" KeyPath="yes"
+                  Source="$(var.StageDir)\LICENSE" />
+          </Component>
+
+          <Component Id="ThirdPartyNotices" Guid="*">
+            <File Id="ThirdPartyMd" Name="THIRD_PARTY_NOTICES.md" KeyPath="yes"
+                  Source="$(var.StageDir)\THIRD_PARTY_NOTICES.md" />
+          </Component>
+
+          <Component Id="ReadmeFile" Guid="*">
+            <File Id="ReadmeMd" Name="README.md" KeyPath="yes"
+                  Source="$(var.StageDir)\README.md" />
+          </Component>
+
+        </Directory>
+      </Directory>
+
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="T.O.R.E-Fighters">
+          <Component Id="ProgramMenuDir" Guid="82B6C67B-DD7F-4AF2-959E-2885EB80939D">
+            <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
+            <RegistryValue Root="HKLM"
+                           Key="Software\T.O.R.E-Fighters"
+                           Name="InstallFolder"
+                           Type="string"
+                           Value="[INSTALLFOLDER]"
+                           KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <Feature Id="Complete" Title="T.O.R.E-Fighters" Level="1">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="ExtractTool" />
+      <ComponentRef Id="LicenseFile" />
+      <ComponentRef Id="ThirdPartyNotices" />
+      <ComponentRef Id="ReadmeFile" />
+      <ComponentRef Id="ProgramMenuDir" />
+    </Feature>
+
+    <UIRef Id="WixUI_InstallDir" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.StageDir)\LICENSE.rtf" />
+  </Product>
+</Wix>

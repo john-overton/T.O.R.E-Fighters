@@ -162,7 +162,98 @@ For the general extractor, use `python3 tools/extract_assets.py --dry-run` follo
 
 `tools/check_assets.py` scans tracked and non-ignored untracked files. It rejects Git-visible local media/reference directories, retail asset/cache extensions, plausible embedded EALIB archives, and recognizable standalone or embedded PIC headers. A format-name constant in the decoder is allowed; a plausible archive directory/sentinel is rejected. Pass explicit files/directories to inspect artifacts, including ignored outputs.
 
-This is an initial guard, not proof that an artifact contains no retail derivatives. PIC has a structured header rather than ASCII magic. The guard does not decode compressed packages or identify converted art/audio. Extend it as packaging arrives. Run it against exact release contents before shipping; a debug executable check alone is not a release audit.
+This is an initial guard, not proof that an artifact contains no retail derivatives. PIC has a structured header rather than ASCII magic. A `.tar.gz`, `.tgz` or `.tar` argument is opened and scanned member by member; MSI, DMG and AppImage are scanned as raw bytes only, which sees an uncompressed signature in the container but not a compressed payload. The guard does not identify converted art/audio. Run it against exact release contents before shipping; a debug executable check alone is not a release audit. The staged directory scan described under [Packaging](#packaging) is the real gate.
+
+## Packaging
+
+The release packages are built by `.github/workflows/release.yml` when a `v*`
+tag is pushed, and by the same three scripts when a developer runs them by
+hand. `workflow_dispatch` runs the build half only, so the packaging path can
+be exercised on a branch without publishing anything.
+
+Every script takes the version from `--version`, then from the tag the workflow
+is running for, then from `git describe`, then falls back to `0.0.0-dev`. A
+leading `v` is stripped. Packages are written to ignored `dist/`, and the
+staged bundle each package is built from stays in `dist/stage/`.
+
+Build the release binaries first:
+
+```sh
+cargo build --release --locked -p tore-app -p tore-extract
+```
+
+| Platform | Command | Produces |
+| --- | --- | --- |
+| Linux | `tools/package/package-linux.sh` | `dist/*.tar.gz` and `dist/*.AppImage` |
+| macOS | `tools/package/package-macos.sh` | `dist/*.dmg` holding `T.O.R.E-Fighters.app` |
+| Windows | `pwsh tools/package/package-windows.ps1` | `dist/*.msi` |
+
+What each package contains:
+
+- **tar.gz**: `tore-app`, `tore-extract`, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
+  `README.md`, the desktop entry and the icon. Unpack anywhere and run.
+- **AppImage**: `tore-app` only, with the desktop entry and icon at the AppDir
+  root so a desktop integrates it. `tore-extract` is a developer tool and stays
+  in the tar.gz.
+- **DMG**: `T.O.R.E-Fighters.app` plus a link to `/Applications`. The bundle
+  carries `tore-app`, `tore-extract`, the generated `tore.icns` and the three
+  text files under `Contents/Resources`. `CFBundleIdentifier` is
+  `org.tore-fighters.app` and `LSMinimumSystemVersion` is 11.0, which is what
+  the pinned toolchain targets on both architectures.
+- **MSI**: a per-machine install into `%ProgramFiles%\T.O.R.E-Fighters` with a
+  Start menu shortcut and an uninstall entry, built with WiX v3 from
+  `tools/package/tore.wxs`. Its `UpgradeCode` is permanent and `MajorUpgrade`
+  replaces an older install rather than installing beside it.
+
+None of these contain retail media. The app imports the player's own Fighters
+Anthology copy at runtime; see [first-run import](spec/first-run-import.md).
+
+### Icon and desktop entry
+
+`tools/package/make_icon.py` draws `tools/package/tore.png`, a plain geometric
+delta, with the standard library only. The geometry is scale free, so the macOS
+script asks for each `.iconset` size directly and hands the folder to
+`iconutil`; nothing is resampled. The MSI uses the default Windows Installer
+icon: producing a multi-resolution `.ico` without an image library is more
+machinery than the result is worth. `tools/package/tore-fighters.desktop` is
+the Linux desktop entry, used by both the tar.gz and the AppImage.
+
+### appimagetool
+
+`appimagetool` is published only under a moving `continuous` tag, so the script
+downloads it and checks it against a SHA-256 pinned in `package-linux.sh`. When
+upstream rebuilds the asset the hash stops matching and the script refuses to
+run it; review the new build and update the pin deliberately. If the tool is
+already on `PATH` that copy is used instead. Locally, no AppImage is a warning
+and the tar.gz still succeeds; in CI it is a failure.
+
+### Unsigned builds and first launch
+
+Nothing is signed or notarized. Signing is a later change that does not alter
+the package layout.
+
+- **macOS**: double-clicking an unsigned app is refused. The first launch is
+  right-click (or Control-click) on `T.O.R.E-Fighters.app`, choose **Open**,
+  then **Open** again in the dialog. After that it launches normally.
+- **Windows**: SmartScreen warns about an unrecognized publisher. Choose
+  **More info**, then **Run anyway**. This applies to the MSI itself.
+- **Linux**: mark the AppImage executable (`chmod +x`) if the browser cleared
+  the bit.
+
+### What CI validates, and what it does not
+
+The release workflow runs `cargo fmt`, Clippy, the workspace tests, the Python
+tool tests and the documentation header check on all four images, builds the
+release binaries, scans them, then runs the platform script. Each script scans
+its staged directory before building and scans the finished package after. The
+release job scans every downloaded package once more before uploading it to the
+GitHub release, which is created as a pre-release if it does not exist.
+
+That proves the packages build and carry no detectable retail data. It does not
+prove they install. Installing the MSI on Windows, opening the DMG and running
+the app from `/Applications` on both macOS architectures, and running the
+AppImage on a machine that is not the build host are manual checks, and they
+stay recorded as pending until someone performs them on a tag.
 
 ## Troubleshooting
 

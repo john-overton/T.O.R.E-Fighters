@@ -1,0 +1,134 @@
+name: Release packages
+
+# Tag-triggered. workflow_dispatch is here so the packaging path can be
+# exercised on a branch without publishing anything: the release job only runs
+# for a tag. Nothing built here is signed.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        # The same four images as ci.yml. macos-14 is Apple Silicon;
+        # macos-15-intel is the last x86_64 macOS image GitHub will offer.
+        os: [macos-14, macos-15-intel, ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # The packaging scripts fall back to `git describe`.
+      - name: Install Linux windowing libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxrandr-dev libasound2-dev pkg-config
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: rustup show
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      # The same gates ci.yml runs, so a tag cannot ship something the baseline
+      # would have rejected.
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Test asset guard
+        run: python -m unittest discover -s tools -p "test_*.py"
+      - name: Check source assets
+        run: python tools/check_assets.py
+      - name: Check documentation headers
+        run: python tools/check_docs.py
+
+      - name: Build release binaries
+        run: cargo build --release --locked -p tore-app -p tore-extract
+      - name: Check release binaries
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            python tools/check_assets.py target/release/tore-app.exe
+            python tools/check_assets.py target/release/tore-extract.exe
+          else
+            python tools/check_assets.py target/release/tore-app
+            python tools/check_assets.py target/release/tore-extract
+          fi
+
+      # Each script stages a bundle directory, scans it with check_assets.py,
+      # builds the package, and scans the finished package too.
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: tools/package/package-linux.sh
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: tools/package/package-macos.sh
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: tools/package/package-windows.ps1
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            dist/*.tar.gz
+            dist/*.AppImage
+            dist/*.dmg
+            dist/*.msi
+
+  release:
+    needs: package
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: dist
+      - name: List packages
+        run: ls -l dist
+      - name: Check every package again before publishing
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(dist/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No packages were downloaded." >&2
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            python tools/check_assets.py "$file"
+          done
+      - name: Publish to the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --prerelease \
+              --notes "Unsigned pre-release builds. On macOS the first launch is right-click, Open. On Windows SmartScreen, choose More info, then Run anyway. No retail media is included: point the app at your own Fighters Anthology copy on first run."
+          fi
+          gh release upload "$TAG" dist/* --clobber

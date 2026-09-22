@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=T.O.R.E-Fighters
+GenericName=Combat Flight Simulator
+Comment=Ground-up rebuild of Jane's Fighters Anthology. Bring your own retail copy.
+Exec=tore-app
+Icon=tore-fighters
+Terminal=false
+Categories=Game;Simulation;
+Keywords=flight;simulator;combat;
+StartupNotify=true

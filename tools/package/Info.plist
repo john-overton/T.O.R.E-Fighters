@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for T.O.R.E-Fighters.app. package-macos.sh substitutes @VERSION@ and
+  copies the result to Contents/Info.plist. Nothing here is signed.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>T.O.R.E-Fighters</string>
+    <key>CFBundleDisplayName</key>
+    <string>T.O.R.E-Fighters</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.tore-fighters.app</string>
+    <key>CFBundleVersion</key>
+    <string>@VERSION@</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@VERSION@</string>
+    <key>CFBundleExecutable</key>
+    <string>tore-app</string>
+    <key>CFBundleIconFile</key>
+    <string>tore</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>MacOSX</string>
+    </array>
+    <!-- The pinned toolchain targets macOS 11 for both architectures. -->
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.simulation-games</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>See LICENSE and THIRD_PARTY_NOTICES.md inside the bundle.</string>
+</dict>
+</plist>
