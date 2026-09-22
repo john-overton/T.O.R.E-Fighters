@@ -108,25 +108,20 @@ research path. Do not change the default without being asked.
 
 ## Next
 
-Current requested work: **aircraft and surface AI research and implementation**.
-The [main AI spec](spec/ai.md), [experience spec](spec/ai-experience.md) and
-[FA source map](formats/ai.md) are written. Skill loading, speed units,
-performance and terrain rules, formation geometry, wing orders, threat
-warnings, countermeasures, routes and fuel closed on 2026-09-17. The same day
-the components were joined into a per-actor controller, given actor-owned
-sensors, stores and flight models, and hooked into Quick Mission. Creator
-launches now enable AI by default with separate wing formations; the explicit
-`--fixture-wings` option retains straight-flight practice. The reviewed runtime defects have regression coverage, including falling wrecks,
-pursuit, warnings, owned weapons, device timing and wing commands. Full AI seeker
-activation and pitbull remain open. Next research is the
-remaining tactics that currently run on named fitted rules, and surface
-classes; next implementation is surface actors and the other aircraft
-families, which the controller rejects today rather than serving fighter
-behavior. The [M1e stages](ROADMAP.md#1e-ai) include all
-aircraft families and a separate surface workstream. Initial implementation and
-acceptance cover [all twelve ported aircraft](spec/ai-experience.md#currently-ported-aircraft)
-at all four experience levels. Earlier no-AI restrictions
-on the weapon/radar slices below do not prohibit this newly requested work.
+Current scope: **M1 air-to-air awareness and engagement**. The
+[development specification](spec/ai-awareness.md) defines visual cones,
+four-tier memory, searching in Target view, shared AI/RWR missile information,
+blinking incoming-missile plots, skill-based defensive timing, jink/notch/dive,
+chaff/flare responses and mission roles. Implementation is pending; the rules
+are authored behavior, not a claim of retail parity. The
+[delivery sequence](ROADMAP.md#m1-air-to-air-awareness-delivery) builds
+observations/memory first, then search, missile defense and RWR, mission
+priorities and integrated combat acceptance. Existing actor-owned sensors,
+stores, flight and controllers provide the foundation; seeker activation/pitbull
+and broader mission integration remain partial. Acceptance covers the twelve
+ported aircraft at all four resolved skills. Surface AI and other behavior
+families remain outside this scope. `--fixture-wings` and all three flight paths
+remain available.
 
 1. **Missile tuning and remaining evidence.** Stages 1 through 5 shipped for
    current stores, with controlled emitter fixtures. Four guidance types, silent

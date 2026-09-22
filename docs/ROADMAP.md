@@ -52,7 +52,8 @@ twelve and their AI family bindings. A development
 weapons range supports manual weapon testing. Ground contact and landing are
 authored behaviour ([opinionated](behavior-provenance.md)); combat AI has
 spec-derived components and a partial Quick Mission hookup. John requested aircraft and surface AI research
-and planning on 2026-09-17; the current scope and stages are in M1e below.
+and planning on 2026-09-17; the 2026-09-22 M1 air-to-air plan now prioritizes
+awareness, search and mission engagement. Current stages are in M1e below.
 
 John scheduled the shoreline correction and ocean-motion trial on 2026-09-16.
 See [ocean behavior and visual scope](spec/ocean.md). This bounded visual
@@ -68,8 +69,9 @@ No default adapter change or AI scope is included.
 
 The preceding execution order (2026-09-14) required manual weapons, sensors and
 damage acceptance for F/A-18D and Rafale C before AI work. John's 2026-09-17
-request now schedules the M1e research and plan below. It leaves live AI hookup
-for later; existing straight-flight weapon fixtures remain available. See
+request scheduled M1e research, followed by partial live aircraft hookup. The
+2026-09-22 request prioritizes its air-to-air gaps; existing straight-flight
+weapon fixtures remain available. See
 [current systems evidence and remaining gates](baselines/weapons-systems.md).
 The manual range covers both aircraft's ten PT-default weapon slots, partial
 ECM/player-damage integration and controller feedback. This does not close the
@@ -436,13 +438,11 @@ Exit: the loop can be run a hundred times headless with a fixed seed and produce
 
 ### 1e. AI
 
-**Current task: research and planning, requested by John on 2026-09-17.** Recover
-FA aircraft behavior and its experience channels, include surface objects where
-evidence permits, then prepare isolated components before later game hookup.
-"Whole AI" means coverage of the behavior families and their engine-side
-services. It does not change the M0 decision against running retail modules or
-porting the USNF-ATF engine. This ordering and the proposed component boundaries
-are agent recommendations, not implementation choices attributed to John.
+**M1 scope: air-to-air awareness and engagement.** The
+[development specification](spec/ai-awareness.md) covers visual cones,
+skill-scaled memory, search, missile defense, shared AI/RWR threat information
+and mission rules. Implementation is pending. Surface AI and additional
+behavior families remain in the broader backlog, outside this scope.
 
 The [main AI behavior specification](spec/ai.md) now covers established fighter
 choices, other family differences, surface boundaries and proposed API inputs.
@@ -466,7 +466,34 @@ wing groups and idle delta-formation following. `--fixture-wings` keeps the
 straight-flight setup. Reviewed runtime defects are covered by the
 [repair baseline](baselines/ai-research.md); AI seeker lifecycle and broader
 mission integration remain partial. AI-4, surface behavior, remains pending.
-The backlog below is the single list of open items.
+The delivery sequence below prioritizes this scope; the older backlog retains
+remaining research and integration work.
+
+#### M1 air-to-air awareness delivery
+
+Behavior, provenance, initial tuning constants and acceptance cases have one home in
+[air-to-air awareness](spec/ai-awareness.md). Deliver these slices in order:
+
+| Slice | Concrete work | Exit evidence |
+| --- | --- | --- |
+| A: Observations and memory | Add actor-owned timestamped observation records between sensors and decisions; separate live observations, memories and bearing-only warnings; skill-filter visual acquisition | Cone/range boundaries, expiry, hidden-turn and Novice kill/reacquisition tests pass; no hidden world pose refresh |
+| B: Search and Target view | Connect remembered-position investigation, acquiring and return/rejoin to steering; expose real activity through the existing Target window | Lost-contact scenario visibly searches and reacquires or returns; deterministic headless transitions and display smoke |
+| C: Missile awareness and defense | Connect actual A pitbull, S supported launch and I/E visual sightings through shared actor-owned RWR threat records; show known missiles in player RWR with incoming threats blinking; add skill-based time-to-defend assessment, jink/notch/dive selection, timed inventory-backed bursts and re-engagement; specify missing missile notch response | Silent midcourse and unseen passive shots provoke no response; immediate supported-launch warning; matching AI/RWR knowledge, receiver-specific blinking, safe maneuvers, effective sensor/support coupling, bounded device use and no hidden launcher knowledge |
+| D: Mission roles and stances | Explicit protect/destroy/escort assignments and stance inputs, narrow protected-aircraft threat reports, priority selection and leash; connect minimal Quick Mission assignments | Escort protects its charge instead of chasing unrelated enemies; hostile escorts follow symmetric rules; objective label uses assignments |
+| E: Integrated combat acceptance | Finish required AI seeker acquisition/activation/pitbull hookup; run role, sensor, weapon and survival scenarios together | Twelve aircraft by four skills, mixed roles, Novice multi-kill limits, repeated-seed replay and measured 30-aircraft fixture; full repository checks and display smoke |
+
+Implementation should extend `tore-sim::ai::mission`, `controller`, `targeting`
+and threat services, with the shared sensor component supplying observations.
+Keep simulation state independent of `tore-app`; the app passes assignments and
+renders activity. Existing tactics and weapon services remain reusable. Each
+slice needs its own specified behavior and tests before being described as
+complete. No new runtime dependency or flight-adapter default change is planned.
+The remaining fitted search-orbit constants must be documented before slice B.
+Slice C depends on real missile lifecycle events, so bring the required seeker
+activation/support adapters forward from slice E. Specify missing missile notch
+rejection before accepting defensive effectiveness; attempted maneuvers alone
+do not close that gap.
+Report slice milestones in the session for Jeeves until the PM file is restored.
 
 #### AI backlog (2026-09-17)
 

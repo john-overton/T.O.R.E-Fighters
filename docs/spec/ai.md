@@ -872,6 +872,12 @@ No new movement override or skill reaction delay is introduced.
 
 ## B47: Threat warnings, countermeasures and reason priority
 
+The following is recovered behavior and the existing component contract. The
+[M1 missile-awareness specification](ai-awareness.md#missile-awareness-and-defense)
+supersede its warning eligibility, delay and selected reaction gates for the
+new M1 AI path. The replacement is not implemented yet; retain these research
+facts without treating them as requirements for the authored replacement.
+
 Executable-confirmed. A missile launch warning is delivered only to the
 aircraft the missile was fired at. Other aircraft, wingmen included, never
 receive it, whatever their equipment. The warning identifies the missile, so
