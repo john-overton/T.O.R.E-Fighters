@@ -1,0 +1,8 @@
+# Windows builds link the Microsoft C runtime statically so the installed
+# executable runs on a machine without the Visual C++ Redistributable
+# (VCRUNTIME140.dll). Nothing else is configured here.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

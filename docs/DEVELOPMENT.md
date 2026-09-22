@@ -245,7 +245,9 @@ the package layout.
 - **macOS**: double-clicking an unsigned app is refused. The first launch is
   right-click (or Control-click) on `T.O.R.E-Fighters.app`, choose **Open**,
   then **Open** again in the dialog. After that it launches normally.
-- **Windows**: SmartScreen warns about an unrecognized publisher. Choose
+- **Windows**: the executable links the C runtime statically
+  (`.cargo/config.toml`), so no Visual C++ Redistributable is needed.
+  SmartScreen warns about an unrecognized publisher. Choose
   **More info**, then **Run anyway**. This applies to the MSI itself.
 - **Linux**: mark the AppImage executable (`chmod +x`) if the browser cleared
   the bit.
