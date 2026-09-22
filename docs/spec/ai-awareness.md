@@ -464,6 +464,51 @@ an integration limitation.
 
 ## Mission roles and rules of engagement
 
+### Formation and leader authorization
+
+Quick Mission starts every wing on both sides in formation with neutral
+engagement permission, including wings assigned free fire, intercept or escort.
+Mission objectives describe duties and remain separate from permission to begin
+combat. Neutral aircraft run their sensors and retain observations, but neither
+a detected hostile nor a remembered target starts a pursuit. This startup and
+recall policy is opinionated behavior requested on 2026-09-22.
+
+Accepted engage-target, attack-on-contact, engage-from-formation and protect-me
+orders authorize only the addressed recipients. Protect me establishes its duty
+without requiring a current attacker. Rejected commands, break maneuvers, spacing,
+stacking and control changes do not authorize engagement. Formation selection
+also acts as a return-to-formation order: cancel pursuit, target designation,
+ordered approach and investigation, then stay neutral. Disengage uses the same
+neutral recall. Mission objectives and aircraft memory survive the recall.
+
+An accepted player recall also cancels the addressed aircraft's queued gun
+shots. Already emitted projectiles retain their normal lifecycle. The current
+host debits a gun burst when it accepts the launch event; canceled queued rounds
+are not refunded and are not counted as failed launches. This ammunition
+accounting is a fitted limitation of the burst scheduler.
+
+AI-led wings remain neutral until their leader issues an engagement order.
+The M1 automatic leader responds to a newly perceived attack on itself, a wing
+member or an assigned protected aircraft by releasing its wing to perform their
+assigned duties. Merely detecting a hostile does not trigger that order. This
+attack-triggered leader decision is an agent-authored interpretation of neutral
+AI leadership. Reports reach leaders on the next tick; the leader's order is
+delivered after that tick's decisions and takes effect on the following tick.
+The human-led wing never receives an automatic AI-leader release. A recalled
+individual remains neutral when the rest of its wing is already engaged.
+
+Missile evasion and countermeasures remain available during neutral flight.
+A newly perceived identified attacker can also authorize immediate individual
+self-defense. After recall, already known missiles and pre-order attack reports
+cannot restart offensive combat; a new perceived attack or a new accepted lead
+engagement order is required. An old incoming missile can still require evasion.
+Track attack identity separately from repeated warning updates so an ongoing
+RWR warning is not mistaken for a second launch. Weapons-hold mission assignments
+still prohibit offensive fire, including automatic leader release. Restart
+restores neutral formation permission regardless of prior combat orders.
+
+### Roles and contact priority
+
 Separate role (what to accomplish), stance (when allowed to engage), and current
 activity (what the aircraft is doing). Skill controls awareness and execution;
 it does not rewrite the mission. Supported stances are weapons hold,
@@ -541,9 +586,10 @@ assignment; an absent region does not authorize unlimited patrol.
 ### Assignment delivery and observed attack reports
 
 Explicit accepted target orders replace the aircraft's current assignment with
-an intercept of that target. Hold orders set weapons hold. Protect Me creates a
-persistent escort assignment for the player; Disengage changes to self-defense.
-Routine break, formation and spacing commands do not rewrite the mission.
+an intercept of that target. Protect Me creates a persistent escort assignment
+for the player. Return-to-formation and disengage recall the addressed aircraft
+without rewriting its mission. Routine break and spacing commands do not
+rewrite the mission or change engagement permission.
 Target selection may retain a currently detected assigned aircraft outside its
 weapon range so it can approach. Actual firing still requires a valid weapon
 solution, including range, direction, support and terrain checks.

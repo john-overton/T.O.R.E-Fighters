@@ -274,7 +274,12 @@ seeker lifecycle supplies actual pitbull and support-loss state. Countermeasure
 bursts are scheduled/debited by the mission before the bridge applies decoy
 rolls. RWR drawing reads the same records and never drives the decision clock.
 `ai::engagement` gates current target selection by role and stance before B41
-ranking. `AiMission` delivers perception-only attack reports to assigned escorts
+ranking. Quick Mission initializes a separate neutral engagement gate for every
+actor. Accepted combat orders release it; formation and disengage commands
+recall it without rewriting mission objectives. Recall suppresses repeated
+offensive reactions to known projectile IDs while retaining missile evasion.
+AI leaders release their own wings only after a perceived attack, with command
+delivery after all same-tick decisions. `AiMission` delivers perception-only attack reports to assigned escorts and wing leaders
 on the next tick, with a fixed expiry; bearings never become synthetic targets.
 Escorts also assess detected aircraft against each assigned friendly's protection
 zone using observed relative motion. Confirmed attackers outrank prospective

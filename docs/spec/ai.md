@@ -837,6 +837,10 @@ See [radio data contract](../formats/radio.md).
 
 Player commands include all five B46 breaks, target engagement, disengage,
 formation selection, horizontal spacing, stacking and loose/medium control.
+Quick Mission initializes neutral formation permission on both sides. Formation
+selection and disengage recall the addressed aircraft, canceling pursuit until
+a new engagement order or newly perceived attack. The current authored rules
+are in [formation and leader authorization](ai-awareness.md#formation-and-leader-authorization).
 Attack on contact restores free selection. Engage from formation permits an
 explicit target with medium control. Protect me establishes a persistent duty
 to protect the player, including when no attacker is currently observed. Each

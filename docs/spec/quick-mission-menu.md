@@ -184,6 +184,8 @@ sentences occupy rows 249, 263 and 277. Other mission parameters begin at row
 For example, `Your primary target is enemy group 1.` identifies that group as
 the player's mission objective. `Your flight will use free fire.` permits any
 observed eligible hostile without assigning every enemy as a primary objective.
+This objective does not authorize firing at launch. Both sides begin in neutral
+formation and follow [leader authorization](ai-awareness.md#formation-and-leader-authorization).
 CAP, protection, self-defense, hold and mission inheritance remain available.
 Click an objective field to choose, right-click to cycle backward, or use
 Tab/arrows and Enter. Survival fields toggle between required and optional.

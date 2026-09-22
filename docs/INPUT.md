@@ -572,6 +572,11 @@ Alt-7 select wingmen 1 through 4. Restart restores whole-flight addressing.
 Unavailable recipients or targets produce explicit messages. Paused flight does
 not issue orders. The imported flight menu has no wing-order submenu.
 
+Both sides start in neutral formation, even with free-fire objectives. Your
+wingmen wait for your engagement commands while continuing radar scans and
+missile defense. AI flight leaders issue engagement orders in response to
+perceived attacks on their flight or protected aircraft.
+
 | Shortcut | Order |
 | --- | --- |
 | Alt-B / Alt-R | Break left / right |
@@ -580,8 +585,8 @@ not issue orders. The imported flight menu has no wing-order submenu.
 | Alt-P | Protect me, maintain an escort duty |
 | Alt-W | Attack on contact |
 | Alt-F | Engage designated target from formation, medium control |
-| Alt-D | Disengage and stop selecting targets |
-| Alt-1 / Alt-2 / Alt-3 | Echelon / line abreast / line astern |
+| Alt-D | Disengage and return to neutral formation |
+| Alt-1 / Alt-2 / Alt-3 | Return to formation: echelon / line abreast / line astern |
 | Alt-8 | Toggle 512 / 2048 ft horizontal spacing |
 | Alt-K | Cycle level / 512 ft high / 512 ft low stacking |
 | Alt-C | Toggle loose / medium control |
@@ -592,9 +597,10 @@ Input profiles can use these as `key:Alt-b`, `key:Alt-8`,
 `key:Alt-Shift-b` and the corresponding keys above. Alt-S remains the unimplemented
 original radio-silence shortcut; it is not repurposed for spacing.
 
-The message gives applied, rejected and no-motion counts. A target must be alive,
+The message gives applied, rejected and no-motion counts. An explicit attack target must be alive,
 hostile and present in each recipient's own radar or visual contacts. Synthetic
 headless actors without sensors retain their explicit direct-awareness fallback.
+Protect me needs no selected or currently detected attacker.
 The first living wingman alone replies to an accepted engage/protect assignment.
 Commands take effect immediately, independently of their radio recordings.
 A new command interrupts queued old command audio. Sound off mutes radio along
@@ -610,8 +616,11 @@ moving inward. A new order replaces the pending path; real collision danger
 still permits breakout. Harder turns can therefore interrupt a transition.
 Normal vertical wandering now requests at most five feet, with smooth changes.
 
-Formation selection changes the slot setting; disengage stops the engagement
-and lets the safe rejoin procedure return the aircraft. Approaches assign the
+Formation selection and disengage cancel the engagement and let the safe rejoin
+procedure return the aircraft. They remain neutral until a new engagement order
+or a newly perceived attack; an already-known missile warning cannot restart
+the pursuit. Evasion continues when needed. Spacing and stacking alone do not
+cancel or authorize combat. Approaches assign the
 selected target and continue that engagement after reaching the fitted approach
 point. Protect me assigns a persistent escort duty: wingmen assess detected
 hostiles near or approaching your aircraft and respond to shared attack reports.

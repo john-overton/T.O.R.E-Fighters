@@ -557,6 +557,27 @@ pub struct Controller {
 }
 
 impl Controller {
+    /// Cancel offensive motion immediately while leaving missile survival
+    /// decisions available. Mission permission determines subsequent targeting.
+    pub fn return_to_formation(&mut self) {
+        self.target = None;
+        self.recipient.target = None;
+        self.recipient.target_order = None;
+        self.recipient.target_deadline = None;
+        self.recipient.active_command = false;
+        self.reason = None;
+        self.active = None;
+        self.pursuit = None;
+        self.ordered_approach = None;
+        self.search_contact = None;
+        self.search_started_tick = None;
+        self.search_orbit_altitude_ft = None;
+        self.mission_target = Some(None);
+        self.mission_rejoin = None;
+        self.mission_search_bearing = None;
+        self.next_choice_quarters = 0;
+    }
+
     pub fn set_mission_hold_fire(&mut self, hold: bool) {
         if hold {
             self.recipient.target_order = Some(wing::TargetOrder::HoldFire);

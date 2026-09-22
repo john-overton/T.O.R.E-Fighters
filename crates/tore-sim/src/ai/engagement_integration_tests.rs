@@ -3,7 +3,7 @@ use super::*;
 use crate::ai::{
     Experience,
     targeting::Side,
-    wing::{TargetId, TargetOrder, WingRequest},
+    wing::{Formation, TargetId, TargetOrder, WingRequest},
 };
 
 fn assignment(role: engagement::Role, stance: engagement::Stance) -> engagement::Assignment {
@@ -46,6 +46,303 @@ fn radar_escort() -> AiActor {
     duty.protected_ids.push(10);
     actor.set_assignment(duty);
     actor
+}
+
+fn neutral_wing_mission() -> AiMission {
+    let mut mission = AiMission::new();
+    for (id, side, member, z) in [
+        (1, 1, 0, 0.),
+        (2, 1, 1, -500.),
+        (3, 2, 0, 2_000.),
+        (4, 2, 1, 2_500.),
+    ] {
+        mission.push(AiActor::new(setup(id, side, member, [0., 20_000., z], 0.)).unwrap());
+    }
+    mission.start_in_formation();
+    mission
+}
+
+#[test]
+fn both_wings_start_neutral_despite_visible_opponents_and_keep_their_objectives() {
+    let mut mission = neutral_wing_mission();
+    let mut intercept = assignment(
+        engagement::Role::Intercept,
+        engagement::Stance::EngageAssigned,
+    );
+    intercept.destroy_ids.push(3);
+    mission
+        .actor_mut(1)
+        .unwrap()
+        .set_assignment(intercept.clone());
+    mission.start_in_formation();
+
+    for tick in 0..4 {
+        let world = world_with(&mission, []);
+        let output = mission.step(&world, &flat, TimeOfDay(tick)).unwrap();
+        assert!(
+            output.launches.is_empty(),
+            "launched on neutral tick {tick}"
+        );
+        for id in 1..=4 {
+            let actor = mission.actor(id).unwrap();
+            assert!(actor.is_neutral(), "actor {id} left formation on contact");
+            assert_eq!(actor.controller().target(), None);
+            assert_eq!(actor.search_target, None);
+        }
+    }
+    assert_eq!(mission.actor(1).unwrap().assignment(), &intercept);
+    assert!(mission.actor(1).unwrap().awareness().snapshot(3).is_some());
+}
+
+#[test]
+fn directed_attack_order_releases_only_the_recipient() {
+    let mut mission = neutral_wing_mission();
+    let outcomes = mission
+        .order_wing_report(
+            Side(1),
+            0,
+            None,
+            Some(2),
+            WingRequest::TargetAssignment(TargetOrder::ConcreteTarget(TargetId(3))),
+        )
+        .unwrap();
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].0, 2);
+    assert!(!mission.actor(2).unwrap().is_neutral());
+    assert!(mission.actor(1).unwrap().is_neutral());
+    assert!(mission.actor(3).unwrap().is_neutral());
+    assert!(mission.actor(4).unwrap().is_neutral());
+
+    let world = world_with(&mission, []);
+    mission.step(&world, &flat, TimeOfDay(0)).unwrap();
+    assert_eq!(mission.actor(2).unwrap().controller().target(), Some(3));
+    assert_eq!(mission.actor(1).unwrap().controller().target(), None);
+}
+
+#[test]
+fn formation_recall_cancels_combat_without_erasing_objective_or_memory() {
+    let mut mission = AiMission::new();
+    let mut actor = perception_actor(Experience::Ace);
+    enable_test_radar(&mut actor);
+    let mut intercept = assignment(
+        engagement::Role::Intercept,
+        engagement::Stance::EngageAssigned,
+    );
+    intercept.destroy_ids.push(2);
+    actor.set_assignment(intercept.clone());
+    mission.push(actor);
+    let seen = visible_object(mission.actor(1).unwrap(), 2, [0., 20_000., 1_000.]);
+    mission
+        .step(&world_with(&mission, [seen]), &flat, TimeOfDay(0))
+        .unwrap();
+    assert_eq!(mission.actor(1).unwrap().controller().target(), Some(2));
+
+    let hidden = visible_object(mission.actor(1).unwrap(), 2, [0., 20_000., -40_000.]);
+    mission
+        .step(&world_with(&mission, [hidden.clone()]), &flat, TimeOfDay(1))
+        .unwrap();
+    assert_eq!(mission.actor(1).unwrap().search_target, Some(2));
+    mission
+        .order(1, WingRequest::FormationSelection(Formation::LineAstern))
+        .unwrap()
+        .unwrap();
+    let actor = mission.actor(1).unwrap();
+    assert!(actor.is_neutral());
+    assert_eq!(actor.assignment(), &intercept);
+    assert_eq!(actor.controller().target(), None);
+    assert_eq!(actor.search_target, None);
+    assert_eq!(actor.sensors().unwrap().selected(), None);
+    assert!(actor.awareness().snapshot(2).is_some());
+
+    let output = mission
+        .step(&world_with(&mission, [hidden]), &flat, TimeOfDay(2))
+        .unwrap();
+    assert!(output.launches.is_empty());
+    assert_eq!(mission.actor(1).unwrap().controller().target(), None);
+    assert_eq!(mission.actor(1).unwrap().search_target, None);
+}
+
+#[test]
+fn ai_leader_releases_its_wing_on_a_fresh_attack_but_not_another_wing() {
+    let mut mission = neutral_wing_mission();
+    let mut other_wing = setup(5, 1, 0, [2_000., 20_000., 0.], 0.);
+    other_wing.identity.wing = 1;
+    mission.push(AiActor::new(other_wing).unwrap());
+    mission.start_in_formation();
+    mission.report_attack_evidence(
+        2,
+        engagement::ThreatReport {
+            attacker_id: Some(3),
+            defended_id: 2,
+        },
+        None,
+        Some(90),
+    );
+
+    let output = mission
+        .step(&world_with(&mission, []), &flat, TimeOfDay(0))
+        .unwrap();
+    assert!(output.wing.iter().any(|(sender, request)| {
+        *sender == 1 && *request == WingRequest::TargetAssignment(TargetOrder::FreeSelection)
+    }));
+    assert!(!mission.actor(1).unwrap().is_neutral());
+    assert!(!mission.actor(2).unwrap().is_neutral());
+    for id in [3, 4, 5] {
+        assert!(
+            mission.actor(id).unwrap().is_neutral(),
+            "other wing actor {id} released"
+        );
+    }
+    // AI leader commands are delivered after all aircraft decide this tick.
+    assert_eq!(mission.actor(2).unwrap().controller().target(), None);
+    mission
+        .step(&world_with(&mission, []), &flat, TimeOfDay(1))
+        .unwrap();
+    assert_eq!(mission.actor(2).unwrap().controller().target(), Some(3));
+}
+
+#[test]
+fn old_attack_id_cannot_undo_recall_but_new_attack_can_release_ai_wing() {
+    let mut mission = neutral_wing_mission();
+    let report = engagement::ThreatReport {
+        attacker_id: Some(3),
+        defended_id: 2,
+    };
+    mission.report_attack_evidence(2, report, None, Some(90));
+    mission
+        .step(&world_with(&mission, []), &flat, TimeOfDay(0))
+        .unwrap();
+    assert!(!mission.actor(1).unwrap().is_neutral());
+
+    mission
+        .order_wing(
+            Side(1),
+            0,
+            None,
+            WingRequest::FormationSelection(Formation::LineAstern),
+        )
+        .unwrap();
+    assert!(mission.actor(1).unwrap().is_neutral());
+    assert!(mission.actor(2).unwrap().is_neutral());
+    mission.report_attack_evidence(2, report, None, Some(90));
+    let output = mission
+        .step(&world_with(&mission, []), &flat, TimeOfDay(1))
+        .unwrap();
+    assert!(!output.wing.iter().any(|(sender, request)| {
+        *sender == 1 && *request == WingRequest::TargetAssignment(TargetOrder::FreeSelection)
+    }));
+    assert!(mission.actor(1).unwrap().is_neutral());
+    assert!(mission.actor(2).unwrap().is_neutral());
+    assert_eq!(mission.actor(2).unwrap().controller().target(), None);
+
+    mission.report_attack_evidence(2, report, None, Some(91));
+    let output = mission
+        .step(&world_with(&mission, []), &flat, TimeOfDay(2))
+        .unwrap();
+    assert!(output.wing.iter().any(|(sender, request)| {
+        *sender == 1 && *request == WingRequest::TargetAssignment(TargetOrder::FreeSelection)
+    }));
+    assert!(!mission.actor(1).unwrap().is_neutral());
+    assert!(!mission.actor(2).unwrap().is_neutral());
+}
+
+#[test]
+fn recall_ignores_a_missile_report_waiting_for_the_leader() {
+    use crate::combat::missiles::Guidance;
+
+    let missile = |id| MissileSnapshot {
+        id,
+        owner: 3,
+        position: [0., 20_000., -1_500.],
+        velocity: [0., 0., 2_000.],
+        guidance: Guidance::Supported,
+        target: Some(2),
+        radar_active: false,
+        radar_acquired: false,
+        supported: true,
+        supporting_radar_position: Some([5_000., 20_000., 0.]),
+        alive: true,
+    };
+    let mut mission = neutral_wing_mission();
+    mission.set_missiles(vec![missile(90)]);
+    let first = mission
+        .step(&world_with(&mission, []), &flat, TimeOfDay(0))
+        .unwrap();
+    assert!(first.wing.is_empty());
+    assert!(mission.actor(1).unwrap().perceived_attacks().is_empty());
+    assert!(mission.actor(2).unwrap().defense_decision().is_some());
+
+    // The wingman's warning has been queued for the leader's next tick.
+    mission
+        .order_wing(
+            Side(1),
+            0,
+            None,
+            WingRequest::FormationSelection(Formation::LineAstern),
+        )
+        .unwrap();
+    for tick in 1..=2 {
+        let output = mission
+            .step(&world_with(&mission, []), &flat, TimeOfDay(tick))
+            .unwrap();
+        assert!(
+            !output.wing.iter().any(|(sender, request)| {
+                *sender == 1
+                    && *request == WingRequest::TargetAssignment(TargetOrder::FreeSelection)
+            }),
+            "old missile released the wing at tick {tick}"
+        );
+        assert!(mission.actor(1).unwrap().is_neutral());
+        assert!(mission.actor(2).unwrap().is_neutral());
+        assert_eq!(mission.actor(1).unwrap().controller().target(), None);
+    }
+
+    mission.set_missiles(vec![missile(91)]);
+    mission
+        .step(&world_with(&mission, []), &flat, TimeOfDay(3))
+        .unwrap();
+    let output = mission
+        .step(&world_with(&mission, []), &flat, TimeOfDay(4))
+        .unwrap();
+    assert!(output.wing.iter().any(|(sender, request)| {
+        *sender == 1 && *request == WingRequest::TargetAssignment(TargetOrder::FreeSelection)
+    }));
+    assert!(!mission.actor(1).unwrap().is_neutral());
+    assert!(!mission.actor(2).unwrap().is_neutral());
+}
+
+#[test]
+fn human_led_wing_stays_neutral_after_an_attack_until_ordered() {
+    let mut mission = AiMission::new();
+    mission.push(AiActor::new(setup(2, 1, 1, [0., 20_000., -500.], 0.)).unwrap());
+    mission.set_external_leader(Side(1), 0, 10);
+    mission.start_in_formation();
+    mission.report_attack_evidence(
+        10,
+        engagement::ThreatReport {
+            attacker_id: Some(3),
+            defended_id: 10,
+        },
+        None,
+        Some(90),
+    );
+    let hostile = visible_object(mission.actor(2).unwrap(), 3, [0., 20_000., 1_000.]);
+    let world = world_with(&mission, [charge(10, [0., 20_000., 0.]), hostile]);
+    let output = mission.step(&world, &flat, TimeOfDay(0)).unwrap();
+    assert!(output.wing.is_empty());
+    assert!(output.launches.is_empty());
+    assert!(mission.actor(2).unwrap().is_neutral());
+    assert_eq!(mission.actor(2).unwrap().controller().target(), None);
+
+    mission
+        .order_wing(
+            Side(1),
+            0,
+            None,
+            WingRequest::TargetAssignment(TargetOrder::FreeSelection),
+        )
+        .unwrap();
+    assert!(!mission.actor(2).unwrap().is_neutral());
 }
 
 #[test]

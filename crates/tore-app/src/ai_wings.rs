@@ -487,6 +487,7 @@ impl AiWings {
                 index += 1;
             }
         }
+        mission.start_in_formation();
         let formation_log = std::env::var_os("TORE_FORMATION_TRACE").map(|path| {
             use std::io::Write;
             let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
@@ -785,6 +786,7 @@ impl AiWings {
                         + record.radar_bearing_deg.unwrap_or(record.bearing_deg))
                     .rem_euclid(360.),
                 ),
+                Some(record.missile_id),
             ));
         }
         // A fresh, visibly departing missile or tracer can reveal its shooter
@@ -907,12 +909,13 @@ impl AiWings {
                         defended_id: receiver,
                     },
                     Some(delta[0].atan2(delta[2]).to_degrees().rem_euclid(360.)),
+                    Some(projectile.id),
                 ));
             }
         }
-        for (receiver, report, bearing) in reports {
+        for (receiver, report, bearing, event_id) in reports {
             self.mission
-                .report_attack_bearing(receiver, report, bearing);
+                .report_attack_evidence(receiver, report, bearing, event_id);
         }
     }
 
@@ -2034,6 +2037,25 @@ mod tests {
         (wings, targets)
     }
 
+    #[test]
+    fn both_sides_start_neutral_with_free_fire_objectives() {
+        let (mut wings, mut targets) = build(None);
+        wings.apply_mission_preset(Preset::Free, [0., 20000., 0.]);
+        wings.apply_group_objectives(&[GroupObjective::Inherit; 6], [0., 20000., 0.]);
+        assert!(wings.mission.actors().iter().all(AiActor::is_neutral));
+        for _ in 0..240 {
+            let output = wings
+                .advance(
+                    player_object([0., 20000., -20000.]),
+                    &mut targets,
+                    &|_, _| 0.,
+                )
+                .unwrap();
+            assert!(output.launches.is_empty());
+        }
+        assert!(wings.mission.actors().iter().all(AiActor::is_neutral));
+    }
+
     fn player_object(position: Vector) -> WorldObject {
         WorldObject {
             id: PLAYER_ID,
@@ -2509,6 +2531,50 @@ mod tests {
     }
 
     #[test]
+    fn accepted_recall_cancels_remaining_physical_gun_burst() {
+        use tore_sim::ai::wing::{Formation, PlayerOrder};
+        for order in [
+            PlayerOrder::Formation(Formation::Echelon),
+            PlayerOrder::Disengage,
+        ] {
+            let mut selections = payload(None);
+            selections[0].wing.index = 0;
+            let mut wings =
+                AiWings::build_with(&selections, &spawned(), 0, |_| Ok((aircraft(), None)))
+                    .unwrap();
+            for actor in wings.mission.actors_mut() {
+                actor.set_stations(Vec::new());
+            }
+            let mut combat = combat_fixture(false);
+            combat.targets = spawned();
+            let gun = combat.configuration().stations[0].weapon.clone();
+            wings.weapons.insert((1, 0), gun);
+            wings.pending_guns.insert(
+                (1, 0),
+                PendingGun {
+                    groups: VecDeque::from([(3, 3)]),
+                    next_scaled: 0,
+                    ordinal: 0,
+                },
+            );
+            let player = flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
+            wings.step(&mut combat, &player, &world()).unwrap();
+            assert_eq!(combat.projectiles.len(), 1, "{order:?}");
+            let rounds = wings.mission.actor(1).unwrap().rounds_remaining();
+            let dropped = wings.dropped_launches;
+            let report = wings.command(order, None, Some(1)).unwrap();
+            assert!(report.message.contains("1 applied"), "{order:?}");
+            assert!(!wings.pending_guns.contains_key(&(1, 0)));
+            for _ in 0..20 {
+                wings.step(&mut combat, &player, &world()).unwrap();
+            }
+            assert_eq!(combat.projectiles.len(), 1, "{order:?}");
+            assert_eq!(wings.mission.actor(1).unwrap().rounds_remaining(), rounds);
+            assert_eq!(wings.dropped_launches, dropped);
+        }
+    }
+
+    #[test]
     fn normal_startup_selects_and_arms_canonical_gun() {
         let fixture = combat_fixture(false);
         let mut config = fixture.configuration().clone();
@@ -2631,7 +2697,13 @@ mod tests {
     }
     #[test]
     fn finite_missile_depletion_is_followed_by_actor_owned_gun_fire() {
+        use tore_sim::ai::wing::{TargetOrder, WingRequest};
         let (mut wings, mut targets) = build(None);
+        wings
+            .mission
+            .order(3, WingRequest::TargetAssignment(TargetOrder::FreeSelection))
+            .unwrap()
+            .unwrap();
         for actor in wings.mission.actors_mut() {
             actor.set_stations(Vec::new());
         }
@@ -2693,6 +2765,62 @@ mod tests {
         );
         assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 0);
     }
+    #[test]
+    fn targetless_protect_me_releases_only_the_addressed_wingman() {
+        use tore_sim::ai::{
+            engagement::{Role, Stance},
+            wing::PlayerOrder,
+        };
+        let mut selections = payload(None);
+        selections[0].wing.index = 0;
+        let mut wings =
+            AiWings::build_with(&selections, &spawned(), 0, |_| Ok((aircraft(), None))).unwrap();
+        let report = wings
+            .command(PlayerOrder::ProtectMe, None, Some(1))
+            .unwrap();
+        assert!(report.message.contains("1 applied"));
+        assert!(!wings.mission.actor(1).unwrap().is_neutral());
+        assert!(wings.mission.actor(2).unwrap().is_neutral());
+        assert!(wings.mission.actor(3).unwrap().is_neutral());
+        let assignment = wings.mission.actor(1).unwrap().assignment();
+        assert_eq!(assignment.role, Role::Escort);
+        assert_eq!(assignment.stance, Stance::ProtectAssigned);
+        assert_eq!(assignment.protected_ids, [PLAYER_ID]);
+    }
+
+    #[test]
+    fn attack_on_contact_releases_after_recall_but_rejected_engage_does_not() {
+        use tore_sim::ai::engagement::Assignment;
+        use tore_sim::ai::wing::{Formation, PlayerOrder};
+        let mut selections = payload(None);
+        selections[0].wing.index = 0;
+        let mut wings =
+            AiWings::build_with(&selections, &spawned(), 0, |_| Ok((aircraft(), None))).unwrap();
+        let rejected = wings
+            .command(PlayerOrder::EngageMyTarget, Some(999), Some(1))
+            .unwrap();
+        assert!(rejected.message.contains("no valid hostile target"));
+        assert!(wings.mission.actor(1).unwrap().is_neutral());
+        wings
+            .command(PlayerOrder::AttackOnContact, None, Some(1))
+            .unwrap();
+        assert!(!wings.mission.actor(1).unwrap().is_neutral());
+        assert_eq!(
+            wings.mission.actor(1).unwrap().assignment(),
+            &Assignment::default()
+        );
+        wings
+            .command(PlayerOrder::Formation(Formation::Echelon), None, Some(1))
+            .unwrap();
+        assert!(wings.mission.actor(1).unwrap().is_neutral());
+        wings
+            .command(PlayerOrder::AttackOnContact, None, Some(1))
+            .unwrap();
+        assert!(!wings.mission.actor(1).unwrap().is_neutral());
+        assert!(wings.mission.actor(2).unwrap().is_neutral());
+        assert!(wings.mission.actor(3).unwrap().is_neutral());
+    }
+
     #[test]
     fn player_commands_report_acceptance_cancel_and_stay_in_the_addressed_wing() {
         use tore_sim::ai::wing::{PlayerApproach, PlayerBreak, PlayerOrder as O};
@@ -2795,8 +2923,8 @@ mod tests {
         let protected = bridge.command(O::ProtectMe, None, None).unwrap();
         assert_eq!(protected.radio, ["^CLRMY6", "^SHWTIME"]);
         assert_eq!(
-            bridge.mission.actor(1).unwrap().controller().target(),
-            Some(3)
+            bridge.mission.actor(1).unwrap().assignment().protected_ids,
+            [PLAYER_ID]
         );
         bridge.mission.actor_mut(1).unwrap().set_alive(false);
         assert_eq!(

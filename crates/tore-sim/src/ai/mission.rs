@@ -173,6 +173,8 @@ pub struct ObservedAttack {
     pub report: engagement::ThreatReport,
     pub bearing_world_deg: Option<f64>,
     pub observed_tick: u64,
+    /// Observed projectile identity, never a hidden launcher identity.
+    pub event_id: Option<u32>,
 }
 
 /// One AI-flown aircraft and everything it owns.
@@ -190,6 +192,9 @@ pub struct AiActor {
     assignment: engagement::Assignment,
     mission_policy: engagement::Policy,
     observed_attacks: Vec<ObservedAttack>,
+    neutral: bool,
+    formation_order_tick: Option<u64>,
+    ignored_attack_ids: Vec<u32>,
     received_emitters: Vec<sensors::passive::Emitter>,
     stations: Vec<StationSpec>,
     dispensers: Vec<DispenserStore>,
@@ -222,6 +227,11 @@ impl AiActor {
             assignment: engagement::Assignment::default(),
             mission_policy: engagement::Policy::default(),
             observed_attacks: Vec::new(),
+            // Standalone simulation fixtures supply authorized assignments.
+            // Quick Mission explicitly initializes every wing as neutral.
+            neutral: false,
+            formation_order_tick: None,
+            ignored_attack_ids: Vec::new(),
             received_emitters: Vec::new(),
             stations: setup.stations,
             dispensers: setup.dispensers,
@@ -302,12 +312,44 @@ impl AiActor {
         &self.observed_attacks
     }
 
-    fn remember_attack(&mut self, attack: ObservedAttack) {
-        if let Some(previous) = self
+    pub fn is_neutral(&self) -> bool {
+        self.neutral
+    }
+
+    pub fn return_to_formation(&mut self, tick: u64) {
+        self.neutral = true;
+        self.formation_order_tick = Some(tick);
+        self.ignored_attack_ids = self
             .observed_attacks
-            .iter_mut()
-            .find(|previous| previous.report == attack.report)
-        {
+            .iter()
+            .filter_map(|a| a.event_id)
+            .chain(self.missile_threats.records().map(|r| r.missile_id))
+            .collect();
+        self.ignored_attack_ids.sort_unstable();
+        self.ignored_attack_ids.dedup();
+        self.controller.return_to_formation();
+        self.activity = Activity::Formation;
+        self.search_target = None;
+        self.mission_policy.reset();
+        if let Some(sensors) = self.sensors.as_mut() {
+            sensors.clear_selection();
+        }
+    }
+
+    fn permits_attack_response(&self, attack: &ObservedAttack) -> bool {
+        !self.neutral
+            || (self
+                .formation_order_tick
+                .is_none_or(|tick| attack.observed_tick > tick)
+                && attack
+                    .event_id
+                    .is_none_or(|id| !self.ignored_attack_ids.contains(&id)))
+    }
+
+    fn remember_attack(&mut self, attack: ObservedAttack) {
+        if let Some(previous) = self.observed_attacks.iter_mut().find(|previous| {
+            previous.report == attack.report && previous.event_id == attack.event_id
+        }) {
             *previous = attack;
         } else {
             self.observed_attacks.push(attack);
@@ -417,6 +459,7 @@ impl AiActor {
                 super::wing::WingRequest::TargetAssignment(
                     super::wing::TargetOrder::ConcreteTarget(id),
                 ) => {
+                    self.neutral = false;
                     self.set_assignment(engagement::Assignment {
                         role: engagement::Role::Intercept,
                         stance: engagement::Stance::EngageAssigned,
@@ -425,9 +468,13 @@ impl AiActor {
                     });
                 }
                 super::wing::WingRequest::TargetAssignment(super::wing::TargetOrder::HoldFire) => {
-                    let mut assignment = self.assignment.clone();
-                    assignment.stance = engagement::Stance::WeaponsHold;
-                    self.set_assignment(assignment);
+                    self.return_to_formation(tick);
+                }
+                super::wing::WingRequest::FormationSelection(_) => self.return_to_formation(tick),
+                super::wing::WingRequest::TargetAssignment(
+                    super::wing::TargetOrder::FreeSelection,
+                ) => {
+                    self.neutral = false;
                 }
                 _ => {}
             }
@@ -504,6 +551,14 @@ impl AiMission {
         self.player_assignment = assignment;
     }
 
+    /// Quick Mission startup permission is independent of its group objectives.
+    pub fn start_in_formation(&mut self) {
+        for actor in &mut self.actors {
+            actor.return_to_formation(self.tick);
+            actor.formation_order_tick = None;
+        }
+    }
+
     /// Queue a legitimately perceived attack for the observer and its assigned
     /// friendly escorts on the next simulation step. Unknown attackers remain
     /// unknown; these reports never populate aircraft observation or memory.
@@ -517,27 +572,43 @@ impl AiMission {
         report: engagement::ThreatReport,
         bearing_world_deg: Option<f64>,
     ) {
+        self.report_attack_evidence(receiver, report, bearing_world_deg, None);
+    }
+
+    pub fn report_attack_evidence(
+        &mut self,
+        receiver: u32,
+        report: engagement::ThreatReport,
+        bearing_world_deg: Option<f64>,
+        event_id: Option<u32>,
+    ) {
         if report.defended_id != receiver {
             return;
         }
-        let side = self.actor(receiver).map(|a| a.identity.side).or_else(|| {
-            self.external_leaders
-                .iter()
-                .find(|(_, _, id)| *id == receiver)
-                .map(|(side, _, _)| *side)
-        });
-        let Some(side) = side else {
+        let identity = self
+            .actor(receiver)
+            .map(|a| (a.identity.side, a.identity.wing))
+            .or_else(|| {
+                self.external_leaders
+                    .iter()
+                    .find(|(_, _, id)| *id == receiver)
+                    .map(|(side, wing, _)| (*side, *wing))
+            });
+        let Some((side, wing)) = identity else {
             return;
         };
         let attack = ObservedAttack {
             report,
             bearing_world_deg,
             observed_tick: self.tick,
+            event_id,
         };
         for actor in &self.actors {
             if actor.alive()
                 && actor.identity.side == side
-                && (actor.id() == receiver || actor.assignment.protected_ids.contains(&receiver))
+                && (actor.id() == receiver
+                    || actor.assignment.protected_ids.contains(&receiver)
+                    || (actor.identity.is_leader() && actor.identity.wing == wing))
             {
                 let key = (actor.id(), attack);
                 if !self.pending_attack_reports.contains(&key) {
@@ -654,7 +725,47 @@ impl AiMission {
             })
             .collect();
         for (receiver, attack) in fresh_reports {
-            self.report_attack_bearing(receiver, attack.report, attack.bearing_world_deg);
+            self.report_attack_evidence(
+                receiver,
+                attack.report,
+                attack.bearing_world_deg,
+                attack.event_id,
+            );
+        }
+
+        // Neutral AI leaders respond to an actual perceived attack, never to
+        // mere contact acquisition. Orders take effect after all decisions.
+        let releases: Vec<_> = self
+            .actors
+            .iter()
+            .filter(|leader| {
+                leader.alive()
+                    && leader.identity.is_leader()
+                    && leader.neutral
+                    && leader.assignment.stance != engagement::Stance::WeaponsHold
+                    && !self.external_leaders.iter().any(|(side, wing, _)| {
+                        *side == leader.identity.side && *wing == leader.identity.wing
+                    })
+                    && leader.observed_attacks.iter().any(|attack| {
+                        leader.permits_attack_response(attack)
+                            && (leader
+                                .assignment
+                                .protected_ids
+                                .contains(&attack.report.defended_id)
+                                || self.actors.iter().any(|member| {
+                                    member.id() == attack.report.defended_id
+                                        && member.identity.side == leader.identity.side
+                                        && member.identity.wing == leader.identity.wing
+                                }))
+                    })
+            })
+            .map(AiActor::id)
+            .collect();
+        for leader in releases {
+            let request =
+                super::wing::WingRequest::TargetAssignment(super::wing::TargetOrder::FreeSelection);
+            self.order(leader, request).expect("live leader")?;
+            output.wing.push((leader, request));
         }
 
         // Deliver after all actors have decided, so iteration order cannot
@@ -780,9 +891,15 @@ impl AiMission {
                         .rem_euclid(360.),
                 ),
                 observed_tick: tick,
+                event_id: Some(record.missile_id),
             });
         }
-        let reports: Vec<_> = actor.observed_attacks.iter().map(|a| a.report).collect();
+        let reports: Vec<_> = actor
+            .observed_attacks
+            .iter()
+            .filter(|attack| actor.permits_attack_response(attack))
+            .map(|a| a.report)
+            .collect();
         let protected: Vec<_> = world
             .iter()
             .filter(|object| {
@@ -795,11 +912,25 @@ impl AiMission {
                 alive: object.alive && !object.destroyed,
             })
             .collect();
+        let neutral_assignment = engagement::Assignment {
+            role: engagement::Role::Disengage,
+            stance: if actor.assignment.stance == engagement::Stance::WeaponsHold {
+                engagement::Stance::WeaponsHold
+            } else {
+                engagement::Stance::SelfDefense
+            },
+            ..engagement::Assignment::default()
+        };
+        let permission = if actor.neutral {
+            &neutral_assignment
+        } else {
+            &actor.assignment
+        };
         let selection = actor.mission_policy.select(
             actor_id,
             identity.side,
             own.position,
-            &actor.assignment,
+            permission,
             &targets,
             &protected,
             &reports,
@@ -819,7 +950,7 @@ impl AiMission {
                         .total_cmp(&distance(own.position, b.position))
                 })
                 .map(|p| p.position)
-        } else if actor.assignment.role == engagement::Role::CombatAirPatrol {
+        } else if !actor.neutral && actor.assignment.role == engagement::Role::CombatAirPatrol {
             actor
                 .assignment
                 .patrol
@@ -831,6 +962,7 @@ impl AiMission {
         actor.controller.set_mission_rejoin(rejoin);
         let cue = (rejoin.is_none()
             && selection.is_none()
+            && !actor.neutral
             && actor.assignment.stance == engagement::Stance::ProtectAssigned)
             .then(|| {
                 actor
@@ -855,7 +987,9 @@ impl AiMission {
             formation: self.formation,
             horizontal_spacing_ft: self.horizontal_spacing_ft,
             vertical_spacing_ft: self.vertical_spacing_ft,
-            slot: if actor.identity.is_leader() && actor.assignment.role == engagement::Role::Escort
+            slot: if !actor.neutral
+                && actor.identity.is_leader()
+                && actor.assignment.role == engagement::Role::Escort
             {
                 1 + actor.identity.wing * 3
             } else {
@@ -915,7 +1049,10 @@ impl AiMission {
         for fallback in &batch.fallbacks {
             output.fallbacks.push((actor_id, *fallback));
         }
-        if let Some(activity) = batch.activity {
+        if let Some(mut activity) = batch.activity {
+            if actor.neutral && matches!(activity, Activity::Idle | Activity::Searching) {
+                activity = Activity::Formation;
+            }
             actor.activity = activity;
             output.activities.push((actor_id, activity));
         }
@@ -984,7 +1121,7 @@ impl AiMission {
     /// The leader's pose for a wingman, taken from the leader actor itself.
     fn leader_view(&self, index: usize, world: &[WorldObject]) -> Option<LeaderView> {
         let actor = &self.actors[index];
-        if actor.assignment.role == engagement::Role::Escort {
+        if !actor.neutral && actor.assignment.role == engagement::Role::Escort {
             let same_assignment_leader = self.actors.iter().any(|leader| {
                 leader.id() != actor.id()
                     && leader.alive()
@@ -1061,7 +1198,28 @@ impl AiMission {
         request: super::wing::WingRequest,
     ) -> Option<Result<super::wing::ReceiverOutcome>> {
         let tick = self.tick;
-        self.actor_mut(actor).map(|a| a.order(request, tick))
+        let recalling = matches!(
+            request,
+            super::wing::WingRequest::FormationSelection(_)
+                | super::wing::WingRequest::TargetAssignment(super::wing::TargetOrder::HoldFire)
+        );
+        // A report perceived before recall may still be in next-tick delivery.
+        // Remember its identity too, so its subsequent refresh is not a new shot.
+        let pending_ids: Vec<_> = self
+            .pending_attack_reports
+            .iter()
+            .filter(|(receiver, _)| recalling && *receiver == actor)
+            .filter_map(|(_, attack)| attack.event_id)
+            .collect();
+        self.actor_mut(actor).map(|a| {
+            let outcome = a.order(request, tick);
+            if recalling && matches!(outcome, Ok(super::wing::ReceiverOutcome::Applied(_))) {
+                a.ignored_attack_ids.extend(pending_ids);
+                a.ignored_attack_ids.sort_unstable();
+                a.ignored_attack_ids.dedup();
+            }
+            outcome
+        })
     }
 
     pub fn track_ordered_approach(&mut self, actor: u32, target: u32, heading: f64, pitch: f64) {
@@ -1265,6 +1423,11 @@ impl AiActor {
     /// Choose a stable, lost hostile observation for investigation. Current
     /// observations stay in the ordinary selector; a frozen record never does.
     fn update_search_contact(&mut self, protected: &[engagement::ProtectedView]) {
+        if self.neutral {
+            self.search_target = None;
+            self.controller.set_search_contact(None);
+            return;
+        }
         let lost = |snapshot: &&awareness::Snapshot| {
             snapshot.target.side != self.identity.side
                 && self.mission_policy.allows_investigation(
