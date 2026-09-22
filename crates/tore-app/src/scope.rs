@@ -135,6 +135,27 @@ pub struct RwrMissile {
     pub stale: bool,
 }
 
+impl Rwr {
+    /// Flash an aircraft source only after an incoming supported-radar report
+    /// has one independently identified emitter at the same bearing.
+    pub fn mark_supported_sources(&mut self, bearings: impl IntoIterator<Item = f64>) {
+        for bearing in bearings {
+            let mut matches = self.emitters.iter().enumerate().filter(|(_, emitter)| {
+                emitter.kind != EmitterKind::Unknown
+                    && ((emitter.bearing_rad.to_degrees() - bearing + 180.).rem_euclid(360.) - 180.)
+                        .abs()
+                        <= 2.
+            });
+            let selected = matches.next().map(|(index, _)| index);
+            if matches.next().is_none()
+                && let Some(index) = selected
+            {
+                self.emitters[index].state = EmitterState::Tracking;
+            }
+        }
+    }
+}
+
 /// Agent-proposed noise density, clamped for readability.
 fn density(received: f64) -> f64 {
     let value = 0.35 * received / (1. + received);
@@ -310,6 +331,36 @@ mod tests {
             trail: vec![],
         }
     }
+    #[test]
+    fn supported_radar_firing_marks_only_a_unique_identified_emitter() {
+        let emitter = RwrEmitter {
+            id: 1,
+            bearing_rad: 0.,
+            distance_nmi: Some(3.),
+            kind: EmitterKind::EnemyAircraft,
+            state: EmitterState::Detected,
+        };
+        let mut rwr = Rwr {
+            emitters: vec![emitter],
+            ..Rwr::default()
+        };
+        rwr.mark_supported_sources([0.]);
+        assert_eq!(rwr.emitters[0].state, EmitterState::Tracking);
+        rwr.emitters = vec![emitter, RwrEmitter { id: 2, ..emitter }];
+        rwr.mark_supported_sources([0.]);
+        assert!(
+            rwr.emitters
+                .iter()
+                .all(|e| e.state == EmitterState::Detected)
+        );
+        rwr.emitters = vec![RwrEmitter {
+            kind: EmitterKind::Unknown,
+            ..emitter
+        }];
+        rwr.mark_supported_sources([0.]);
+        assert_eq!(rwr.emitters[0].state, EmitterState::Detected);
+    }
+
     #[test]
     fn picking_uses_the_drawn_projection_and_stable_tie_breaking() {
         let contacts = [

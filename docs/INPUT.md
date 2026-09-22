@@ -693,3 +693,11 @@ sim log. The rebindable `damage-report` action does the same. Damage notificatio
 share that log; the Systems instrument retains its four gauges and two fuel rows.
 The separate `damage-player` fixture remains a development action, including
 existing controller profiles. See [systems behavior](spec/systems-damage.md).
+
+## Quick Mission group objectives
+
+Click the objective stamp below any friendly or enemy group to choose its duty.
+Right-click cycles backward. Tab/Shift-Tab and the arrow keys reach all six
+stamps; Enter opens the selection. Shift-4 shows the selected aircraft's group
+objective separately from its current activity and the player's objective
+marker. [Available objectives and rules](spec/ai-awareness.md#quick-mission-objective-stamps).

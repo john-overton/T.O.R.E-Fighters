@@ -551,9 +551,52 @@ pub struct Controller {
     completed_search: Option<SearchContact>,
     missile_defense: Option<MissileDefense>,
     defense_motion_id: Option<u64>,
+    mission_target: Option<Option<u32>>,
+    mission_rejoin: Option<[f64; 3]>,
+    mission_search_bearing: Option<f64>,
 }
 
 impl Controller {
+    pub fn set_mission_hold_fire(&mut self, hold: bool) {
+        if hold {
+            self.recipient.target_order = Some(wing::TargetOrder::HoldFire);
+        } else if self.recipient.target_order == Some(wing::TargetOrder::HoldFire) {
+            self.recipient.target_order = None;
+        }
+    }
+
+    /// A shared bearing can orient a search but never supplies a target ID,
+    /// range, remembered aircraft or weapon solution.
+    pub fn set_mission_search_bearing(&mut self, bearing: Option<f64>) {
+        if self.mission_search_bearing.is_some() != bearing.is_some() {
+            self.active = None;
+        }
+        self.mission_search_bearing = bearing;
+    }
+
+    /// Apply an already-permissioned mission choice. Isolated component
+    /// callers retain B41 selection until the mission supplies this override.
+    pub fn set_mission_target(&mut self, target: Option<u32>) {
+        if self.mission_target != Some(target) {
+            if self.pursuit.is_some() {
+                self.active = None;
+                self.pursuit = None;
+            }
+            self.next_choice_quarters = 0;
+        }
+        self.mission_target = Some(target);
+    }
+
+    pub fn set_mission_rejoin(&mut self, point: Option<[f64; 3]>) {
+        if self.mission_rejoin.is_some() != point.is_some() {
+            self.active = None;
+            self.pursuit = None;
+            self.search_started_tick = None;
+            self.search_orbit_altitude_ft = None;
+        }
+        self.mission_rejoin = point;
+    }
+
     /// Survival maneuvers are driven by perceived missile records. Entering
     /// or leaving defense invalidates a previous tactic, without losing the
     /// independently observed offensive target or the aircraft's memory.
@@ -669,6 +712,9 @@ impl Controller {
             completed_search: None,
             missile_defense: None,
             defense_motion_id: None,
+            mission_target: None,
+            mission_rejoin: None,
+            mission_search_bearing: None,
         })
     }
 
@@ -811,6 +857,45 @@ impl Controller {
                 afterburner: false,
             });
             batch.activity = Some(Activity::Defending);
+        } else if let Some(point) = self.mission_rejoin.filter(|_| !recovering) {
+            let delta = std::array::from_fn::<_, 3, _>(|i| point[i] - frame.own.position[i]);
+            let heading = delta[0].atan2(delta[2]).to_degrees();
+            let pitch = delta[1]
+                .atan2(delta[0].hypot(delta[2]))
+                .to_degrees()
+                .clamp(-20., 20.);
+            let request = MotionRequest::new(
+                heading.round() as i32,
+                PitchRequest::Explicit(pitch.round() as i32),
+                Bank::Unconstrained,
+                SpeedRequest::Corner,
+                Duration::Timed(3),
+            );
+            self.pursuit = None;
+            batch.motion = Some(self.resolve(
+                frame,
+                clock,
+                request,
+                None,
+                None,
+                &mut IntentBatch::default(),
+            )?);
+            batch.activity = Some(Activity::Rejoining);
+        } else if let Some(bearing) = self
+            .mission_search_bearing
+            .filter(|_| view.is_none() && !recovering)
+        {
+            let request = MotionRequest::new(
+                bearing.round() as i32,
+                PitchRequest::Explicit(0),
+                Bank::Unconstrained,
+                SpeedRequest::Corner,
+                Duration::Timed(1),
+            );
+            self.pursuit = None;
+            let motion = self.resolve(frame, clock, request, None, None, &mut batch)?;
+            batch.motion = Some(motion);
+            batch.activity = Some(Activity::Searching);
         } else {
             self.motion(
                 frame,
@@ -1123,6 +1208,18 @@ impl Controller {
         if self.recipient.target_order == Some(wing::TargetOrder::HoldFire) {
             return Ok(None);
         }
+        if let Some(selected) = self.mission_target {
+            return Ok(selected.filter(|id| {
+                frame.targets.iter().any(|t| {
+                    t.id == *id
+                        && t.id != self.identity.actor.0
+                        && t.side != self.identity.side
+                        && t.valid
+                        && t.type_allowed
+                        && t.seeker_eligible
+                })
+            }));
+        }
         let candidates: Vec<CandidateTarget> = frame
             .targets
             .iter()
@@ -1375,7 +1472,11 @@ impl Controller {
                     (dy.atan2(dx.hypot(dz)).to_degrees() + pitch_offset * scale).clamp(-90., 90.);
                 self.active = Some(active);
                 batch.motion = Some(active.intent);
-                batch.activity = Some(Activity::Pursuing);
+                batch.activity = Some(if t.side == self.identity.side {
+                    Activity::Rejoining
+                } else {
+                    Activity::Pursuing
+                });
                 return Ok(());
             }
             self.ordered_approach = None;

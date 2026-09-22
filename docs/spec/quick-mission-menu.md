@@ -170,3 +170,13 @@ not grant landing clearance or announce that a landing has completed.
 restart, real runway support, takeoff probes and rendering checks.
 
 [Reverse-cycling validation](../baselines/horizon-creator.md).
+
+## Group objectives
+
+All six groups carry editable objective stamps in addition to aircraft, count
+and skill. The stamps use the existing creator font, field styling and popup
+controls. Click to choose, right-click to cycle backward, or use Tab/arrows and
+Enter. Mission inheritance, free engagement, CAP, opposing-group intercept,
+same-side-group escort, self-defense and weapons hold are available. Inactive
+groups preserve their selection. [Assignment semantics and Shift-4 display](ai-awareness.md#quick-mission-objective-stamps)
+are defined once in the AI specification.

@@ -735,3 +735,18 @@ panel-only oil pump, oil leak and hydraulic leak faults. Advance with
 `--flight-throttle 0..1` for thermal comparisons. The preview requires a panel
 snapshot and cannot inject damage into an interactive sortie. Indices 1..35
 are listed in the [damage event map](formats/systems-damage.md). Keep captures ignored.
+
+## AI mission and objective checks
+
+`--ai-mission free|cap|intercept|escort|self-defense|hold` sets the inherited
+Quick Mission policy. Normal default remains free engagement. Group stamps in
+the creator override the preset and remain on mission restart. For example:
+
+```sh
+cargo run --locked -p tore-app -- --ai-probe-ticks 1200 --ai-mission escort --no-audio
+cargo run --locked -p tore-app -- --launch-quick-mission --ai-mission intercept
+cargo run --locked -p tore-app -- --quick-mission --snapshot-state objective-1 --snapshot .local/objective-popup.ppm
+```
+
+Objective popup snapshots accept `objective-1` through `objective-6`, friendly
+then enemy groups. These diagnostics do not replace campaign mission loading.

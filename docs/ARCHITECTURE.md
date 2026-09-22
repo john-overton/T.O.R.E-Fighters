@@ -273,6 +273,13 @@ snapshots bind each guided projectile to its own launcher, and the shared
 seeker lifecycle supplies actual pitbull and support-loss state. Countermeasure
 bursts are scheduled/debited by the mission before the bridge applies decoy
 rolls. RWR drawing reads the same records and never drives the decision clock.
+`ai::engagement` gates current target selection by role and stance before B41
+ranking. `AiMission` delivers perception-only attack reports to assigned escorts
+on the next tick, with a fixed expiry; bearings never become synthetic targets.
+Quick Mission group objectives resolve through stable side/wing/member metadata
+into per-actor assignments. The Target window reads the same assignments for
+its group stamp and independent player-objective marker. Source missions and
+campaign outcomes remain outside the M1 assignment adapter.
 `ai::formation` owns routine repositioning, trailing, breakout, intercept, stabilization and
 capture guidance. Traffic and arrival states are snapshotted before any actor
 advances, so iteration order cannot grant approach priority. Its trace hook is

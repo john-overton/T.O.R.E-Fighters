@@ -684,11 +684,12 @@ impl Combat {
             pose.brake = 0.;
             pose.hook = 0.;
             let vertices = model.vertices(&pose, &camera, world);
-            crate::target_window::fit(
+            crate::target_window::fit_with_objective(
                 &mut camera,
                 vertices
                     .chunks_exact(10)
                     .map(|v| [f64::from(v[0]), f64::from(v[1]), f64::from(v[2])]),
+                self.ai_poses,
             );
         }
         Some(camera)
@@ -797,14 +798,27 @@ impl Combat {
                 }
             })
             .collect();
-        Rwr {
+        let mut readout = Rwr {
             tick: self.state.sensors.tick(),
             operating,
             emitters,
             missiles,
             radar_indicator,
             infrared_indicator,
-        }
+        };
+        readout.mark_supported_sources(
+            self.state
+                .missile_threats
+                .records()
+                .filter(|r| {
+                    !r.stale
+                        && r.targeting_receiver
+                        && r.source
+                            == tore_sim::combat::threats::EvidenceSource::ElectronicSupported
+                })
+                .filter_map(|r| r.radar_bearing_deg),
+        );
+        readout
     }
 
     pub fn equipment_damage_report(&self) -> Vec<String> {

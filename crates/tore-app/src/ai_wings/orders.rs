@@ -1,8 +1,11 @@
 //! Player delivery uses the same B46 receiver as AI team requests.
 use super::*;
-use tore_sim::ai::wing::{
-    self, PlayerOrder, ReceiverOutcome, SpacingAxis, TargetId, TargetOrder, WingControl,
-    WingRequest,
+use tore_sim::ai::{
+    engagement::{Assignment, Role, Stance},
+    wing::{
+        self, PlayerOrder, ReceiverOutcome, SpacingAxis, TargetId, TargetOrder, WingControl,
+        WingRequest,
+    },
 };
 
 pub struct OrderReport {
@@ -173,6 +176,12 @@ impl AiWings {
                 .map_err(|e| e.to_string())?;
             match outcome {
                 ReceiverOutcome::Applied(_) | ReceiverOutcome::MotionInstalled(_) => {
+                    if let Some(assignment) = mission_assignment(order, target) {
+                        self.mission
+                            .actor_mut(*id)
+                            .unwrap()
+                            .set_assignment(assignment);
+                    }
                     applied += 1;
                     if let PlayerOrder::Approach(a) = order {
                         self.mission.track_ordered_approach(
@@ -191,7 +200,15 @@ impl AiWings {
                     }
                 }
                 ReceiverOutcome::Rejected(_) => rejected += 1,
-                ReceiverOutcome::AppliedNoMotion => no_motion += 1,
+                ReceiverOutcome::AppliedNoMotion => {
+                    if let Some(assignment) = mission_assignment(order, target) {
+                        self.mission
+                            .actor_mut(*id)
+                            .unwrap()
+                            .set_assignment(assignment);
+                    }
+                    no_motion += 1;
+                }
             }
         }
         let mut radio = Vec::new();
@@ -208,6 +225,36 @@ impl AiWings {
             ),
             radio,
         })
+    }
+}
+
+fn mission_assignment(order: PlayerOrder, target: Option<u32>) -> Option<Assignment> {
+    match order {
+        PlayerOrder::ProtectMe => Some(Assignment {
+            role: Role::Escort,
+            stance: Stance::ProtectAssigned,
+            protected_ids: vec![PLAYER_ID],
+            ..Assignment::default()
+        }),
+        PlayerOrder::EngageMyTarget => Some(Assignment {
+            role: Role::Intercept,
+            stance: Stance::EngageAssigned,
+            destroy_ids: target.into_iter().collect(),
+            ..Assignment::default()
+        }),
+        PlayerOrder::Disengage => Some(Assignment {
+            role: Role::Disengage,
+            stance: Stance::SelfDefense,
+            ..Assignment::default()
+        }),
+        PlayerOrder::AttackOnContact
+        | PlayerOrder::EngageFromFormation
+        | PlayerOrder::Break(_)
+        | PlayerOrder::Approach(_)
+        | PlayerOrder::Formation(_)
+        | PlayerOrder::Spacing
+        | PlayerOrder::Stacking
+        | PlayerOrder::ControlToggle => None,
     }
 }
 
@@ -301,5 +348,41 @@ fn order_label(order: PlayerOrder) -> &'static str {
         PlayerOrder::EngageMyTarget => "Engage my target",
         PlayerOrder::AttackOnContact => "Attack on contact",
         PlayerOrder::EngageFromFormation => "Engage from formation",
+    }
+}
+
+#[cfg(test)]
+mod engagement_tests {
+    use super::*;
+
+    #[test]
+    fn accepted_policy_orders_map_to_persistent_assignments() {
+        let protect = mission_assignment(PlayerOrder::ProtectMe, Some(9)).unwrap();
+        assert_eq!(protect.role, Role::Escort);
+        assert_eq!(protect.stance, Stance::ProtectAssigned);
+        assert_eq!(protect.protected_ids, [PLAYER_ID]);
+        assert!(protect.destroy_ids.is_empty());
+
+        let engage = mission_assignment(PlayerOrder::EngageMyTarget, Some(9)).unwrap();
+        assert_eq!(engage.role, Role::Intercept);
+        assert_eq!(engage.destroy_ids, [9]);
+
+        let disengage = mission_assignment(PlayerOrder::Disengage, None).unwrap();
+        assert_eq!(disengage.role, Role::Disengage);
+        assert_eq!(disengage.stance, Stance::SelfDefense);
+    }
+
+    #[test]
+    fn routine_motion_and_formation_orders_do_not_rewrite_mission_policy() {
+        use wing::{Formation, PlayerBreak};
+        for order in [
+            PlayerOrder::Break(PlayerBreak::Left),
+            PlayerOrder::Formation(Formation::Echelon),
+            PlayerOrder::Spacing,
+            PlayerOrder::Stacking,
+            PlayerOrder::ControlToggle,
+        ] {
+            assert_eq!(mission_assignment(order, Some(9)), None);
+        }
     }
 }

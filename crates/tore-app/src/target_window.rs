@@ -47,6 +47,14 @@ pub fn camera(eye: [f64; 3], target: [f64; 3]) -> crate::terrain::Camera {
 /// Fit the actual projected silhouette between the text rows. These limits
 /// leave five percent side margins and the top/bottom information bands.
 pub fn fit(camera: &mut crate::terrain::Camera, points: impl IntoIterator<Item = [f64; 3]>) {
+    fit_with_objective(camera, points, false);
+}
+
+pub fn fit_with_objective(
+    camera: &mut crate::terrain::Camera,
+    points: impl IntoIterator<Item = [f64; 3]>,
+    objective: bool,
+) {
     use tore_sim::attitude::{Basis, dot};
     let basis = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.);
     let eye = camera.position.map(f64::from);
@@ -61,7 +69,9 @@ pub fn fit(camera: &mut crate::terrain::Camera, points: impl IntoIterator<Item =
         nearest = nearest.min(depth);
         let x = dot(delta, basis.right).abs() * 3_f64.sqrt() / (138. / 114.) / depth;
         let y = dot(delta, basis.up).abs() * 3_f64.sqrt() / depth;
-        zoom = zoom.min(0.90 / x).min(0.52 / y);
+        zoom = zoom
+            .min(0.90 / x)
+            .min(if objective { 0.36 } else { 0.52 } / y);
     }
     if zoom.is_finite() {
         camera.zoom = zoom.clamp(0.0001, 1_000_000.) as f32;
@@ -89,6 +99,7 @@ pub struct Readout {
     pub bearing: String,
     pub metric: String,
     pub objective: Option<bool>,
+    pub objective_stamp: Option<String>,
     pub activity: String,
     pub goal: &'static str,
     pub player_goal: bool,
@@ -107,6 +118,7 @@ impl Readout {
             bearing: format!("{bearing}:00{altitude}"),
             metric: metric(player.ticks, norm(offset), norm(target.velocity)),
             objective: None,
+            objective_stamp: None,
             activity: String::new(),
             goal: "?",
             player_goal: false,
@@ -114,6 +126,8 @@ impl Readout {
         }
     }
     pub fn with_activity(&mut self, wings: &AiWings) {
+        self.objective = Some(wings.objective_for_player(self.id));
+        self.objective_stamp = wings.objective_stamp(self.id);
         let Some(actor) = wings.mission().actor(self.id) else {
             return;
         };
@@ -185,6 +199,16 @@ fn metric(ticks: u64, distance_ft: f64, speed_fps: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_objective_stamp_reserves_a_separate_text_band() {
+        let points = [[-1., -20., 1000.], [1., 20., 1000.]];
+        let mut plain = camera([0.; 3], [0., 0., 1000.]);
+        let mut stamped = camera([0.; 3], [0., 0., 1000.]);
+        fit(&mut plain, points);
+        fit_with_objective(&mut stamped, points, true);
+        assert!((f64::from(stamped.zoom / plain.zoom) - 0.36 / 0.52).abs() < 1e-5);
+    }
+
     #[test]
     fn preview_requests_average_24_fps_without_catch_up_bursts() {
         use std::time::{Duration, Instant};

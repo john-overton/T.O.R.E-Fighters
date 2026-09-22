@@ -14,7 +14,8 @@ Development specification for M1 air-to-air awareness, memory, search, missile
 defense, RWR missile presentation and mission engagement. Visual awareness,
 aircraft memory and contact-loss search are implemented in the existing aircraft
 runtime. Missile defense and shared AI/RWR missile information are implemented
-for reviewed missile profiles. Mission roles remain pending. Delivery sequencing is defined in
+for reviewed missile profiles. Mission roles, engagement rules and per-group
+Quick Mission objective stamps are connected to both sides' aircraft. Delivery sequencing is defined in
 [M1e](../ROADMAP.md#m1-air-to-air-awareness-delivery).
 
 The requirements are **opinionated** gameplay behavior. Existing equipment,
@@ -54,9 +55,10 @@ failures are reported instead of using the sensorless fixture path.
 `controller::Activity` exposes searching, acquiring and rejoining through the
 existing Target window. SEARCHING also describes an airborne leader following
 its current heading before first acquisition; wingmen retain formation activity.
-Mission route import and protect/destroy assignments are not connected.
-`MissionDefensePriority` remains unspecified. Search therefore returns to the
-existing formation/heading behavior when its investigation ends.
+Mission route import remains unavailable. Explicit protect/destroy assignments
+feed `ai::engagement`; the original `MissionDefensePriority` branch remains a
+research gap rather than a runtime requirement. Search returns to the assigned
+protection, patrol center or existing formation/heading behavior.
 
 The current host supplies terrain but no weather visibility limit to AI
 perception. Cloud/night visibility remains a fitted clear-air assumption, not
@@ -507,6 +509,87 @@ priority keep the current eligible target to limit switching; a new
 higher-priority threat may preempt it. Use B41 ranking within a newly selected
 priority and stable actor ID for exact ties. Patrol extent comes from the
 assignment; an absent region does not authorize unlimited patrol.
+
+### Assignment delivery and observed attack reports
+
+Explicit accepted target orders replace the aircraft's current assignment with
+an intercept of that target. Hold orders set weapons hold. Protect Me creates a
+persistent escort assignment for the player; Disengage changes to self-defense.
+Routine break, formation and spacing commands do not rewrite the mission.
+Target selection may retain a currently detected assigned aircraft outside its
+weapon range so it can approach. Actual firing still requires a valid weapon
+solution, including range, direction, support and terrain checks.
+
+Attack reports expire exactly 240 ticks after their last observation. An actor
+receives its own observations immediately; assigned same-side escorts receive
+copies on the next simulation tick. Reports preserve their original observation
+time and do not refresh themselves by forwarding. Unknown attackers remain
+unknown. A world-relative bearing may direct a level search at corner speed,
+using one-second bounded motion requests, but supplies no range, aircraft memory
+or weapon target. This cue ends on expiry, a real target, recovery, own missile
+defense or the escort leash.
+
+A supporting radar can be associated with an attacker only when exactly one
+independently observed hostile RF emitter lies within 2 degrees of the received
+supporting-radar bearing. Active-missile radar bearings never identify the
+launcher. A visible departing missile or tracer can identify a shooter only
+during its first 30 ticks, with exactly one independently observed, visually
+eligible hostile aircraft within 1,000 feet of the observed departure point.
+Incoming trajectory evidence is required; hidden projectile target/owner IDs
+cannot establish that association. These are fitted identification rules.
+
+Escort distance is horizontal. Escort leaders follow the assigned live friendly
+charge using the existing delta guidance; members retain their own wing leader
+only when that leader has the same protection assignment. Leaders use existing
+delta slots 1, 4 and 7 by wing index. Outside the 10 NM leash, rejoin the charge;
+resume engagement at or inside 8 NM. Rejoin guidance uses corner speed with
+pitch limited to plus or minus 20 degrees in three-second bounded requests.
+Immediate missile defense and fuel recovery take precedence. CAP returns toward
+its assigned center outside the patrol radius. Full route navigation and
+mission success/failure scoring remain outside this slice.
+
+### Quick Mission objective stamps
+
+Each of the three friendly and three enemy groups has its own objective stamp.
+Click the stamp to choose an objective. Right-click cycles backward. Tab and
+arrow navigation include all six stamps; popup navigation uses existing keys.
+Use the original creator art and font.
+
+| Objective | Assignment |
+| --- | --- |
+| Use mission setting | Inherit the selected mission preset; normal default is free engagement |
+| Free engagement | Engage observed eligible hostiles |
+| Combat air patrol | Patrol a 10 NM horizontal circle centered on the player launch position |
+| Intercept opposing group 1, 2 or 3 | Assign every aircraft in that group as a destroy objective |
+| Escort another same-side group | Protect every aircraft in the chosen group |
+| Self-defense | Engage only independently identified immediate attackers |
+| Weapons hold | No offensive fire; defense and countermeasures remain available |
+
+Group references are resolved to actual launch identities. Friendly group 1
+includes the player. Same-side intercept and opposing-side/self-group escort
+assignments are invalid and cannot manufacture targets. An inactive referenced
+group resolves to an empty assignment. Its aircraft must never be substituted
+from a different group. Inactive groups retain their selected stamps for later
+editing. Mission restart rebuilds the same group assignments with fresh memory.
+The settings are session-local; campaign/save persistence remains separate.
+
+`--ai-mission free|cap|intercept|escort|self-defense|hold` selects the inherited
+Quick Mission preset. Explicit group stamps override it. Intercept targets the
+first enemy aircraft; its other aircraft protect it. Escort assigns friendly
+AI to protect the player, the enemy principal to intercept the player, and
+enemy escorts to protect that principal. These are authored M1 presets using
+current fighter aircraft, not additional bomber or transport behavior families.
+Hostile escort relationships are explicit metadata derived from assignments;
+they affect priority only after observation and a perceived threat report.
+
+Every AI aircraft inherits its group's resolved duty, on both sides. Shift-4
+shows that duty in a separate objective line, such as `INTERCEPT ENEMY 1`,
+`PROTECT FRIENDLY 2`, `AIR PATROL` or `HOLD FIRE`. Activity remains a separate
+live field. The `MISSION OBJECTIVE` marker still means the selected aircraft
+is a protect/destroy objective for the player's assignment. The player's group
+stamp supplies objectives and AI-wingman orders; it does not automate human
+controls or enforce player trigger discipline. Dummy aircraft retain straight
+flight regardless of their stored objective.
 
 ## Acceptance criteria
 

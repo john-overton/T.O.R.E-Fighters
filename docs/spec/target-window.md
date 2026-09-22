@@ -47,8 +47,12 @@ on 2026-09-21, an opinionated timing choice.
   360 simulation ticks at 120 Hz, starting with distance. Pausing freezes it.
 - `MISSION OBJECTIVE` identifies an assigned objective. Allegiance alone never
   establishes an objective. The requested meaning is destroy enemies or protect
-  friendlies. Current launch data has no objective assignments: display
-  `OBJECTIVE ?` until that contract exists. Known non-objectives have no label.
+  friendlies. Quick Mission launch data supplies explicit objective assignments. Other
+  contexts display `OBJECTIVE ?` until assignments exist. Known non-objectives
+  have no label.
+- AI targets show their group's resolved objective on a separate row above the
+  player's objective marker. It does not replace the live activity, tactical
+  goal or skill. Both friendly and enemy groups use their own assignments.
 - Goal A means attack, E evade, N neutral, T takeoff, C crash, L land.
   Underline A/E only when directed at the player. Skill has 0..3 dots.
 
@@ -66,6 +70,8 @@ remain finite and use that same position. Displayed range, bearing and Hi/Lo
 still measure from the player, never from this presentation camera.
 Agent-chosen framing keeps image roll level and fits aircraft mesh vertices into
 90% of image width and 52% of image height, reserving the top/bottom text rows.
+AI views with a group objective line reserve an additional text band at row 100
+and use 36% of image height. This is an authored layout margin.
 One dimension fills that area without cropping the other. Zoom follows projected
 geometry each camera refresh, so range, target size, and aspect cannot leave a
 small target surrounded by empty space. Ground objects use their oriented bounds.
@@ -91,6 +97,6 @@ There is no invented firing prediction: activity describes current state, not
 whether a launch will occur. Return-to-base is not labeled L before landing.
 
 Unknown: original Hi/Lo threshold, exact camera pose, speed definition, bar
-fill direction, complete activity wording, objective assignment/loading, and
+fill direction, complete activity wording, campaign objective loading, and
 player-specific evade provenance. Next research should inspect mission objective
 records and activity display contracts. No AI decisions or flight adapters change.

@@ -23,6 +23,8 @@
 //! information service as the player RWR. Compatibility steering remains an
 //! explicit weapon-rules option.
 
+mod engagement;
+pub use engagement::Preset;
 mod orders;
 mod reports;
 
@@ -56,6 +58,14 @@ use tore_sim::{
 };
 
 use crate::{AppResult, flight, terrain::World};
+
+fn terrain_visible(from: Vector, to: Vector, ground: &dyn Fn(f64, f64) -> f64) -> bool {
+    (1..=8).all(|step| {
+        let t = step as f64 / 8.;
+        let point = std::array::from_fn::<_, 3, _>(|i| from[i] + (to[i] - from[i]) * t);
+        point[1] > ground(point[0], point[2])
+    })
+}
 
 /// `fitted`: the AI side numbers. `tore_sim::ai::targeting::Side` is an opaque
 /// identity with no recovered numbering, so the host picks one. The player and
@@ -198,6 +208,7 @@ impl Slot {
 /// The live AI bridge for one mission.
 pub struct AiWings {
     mission: AiMission,
+    mission_preset: Preset,
     reports: reports::Reports,
     formation_log: Option<std::io::BufWriter<std::fs::File>>,
     slots: Vec<Slot>,
@@ -485,6 +496,7 @@ impl AiWings {
         }).transpose()?;
         Ok(Self {
             mission,
+            mission_preset: Preset::Free,
             formation_log,
             slots,
             weapons: BTreeMap::new(),
@@ -723,7 +735,185 @@ impl AiWings {
                 .take(64)
                 .collect();
         }
+        self.report_perceived_attacks(state, player, &ground);
         Ok(())
+    }
+
+    /// Report observable attacks, never an opponent's private target choice.
+    fn report_perceived_attacks(
+        &mut self,
+        state: &live::State,
+        player: &flight::State,
+        ground: &dyn Fn(f64, f64) -> f64,
+    ) {
+        use tore_sim::ai::{awareness, engagement::ThreatReport};
+        use tore_sim::combat::threats::EvidenceSource;
+        let mut reports = Vec::new();
+        // The player's RWR may identify a supporting source only by a unique
+        // independently observed hostile emitter at the received bearing.
+        for record in state
+            .missile_threats
+            .records()
+            .filter(|r| r.targeting_receiver && !r.stale)
+        {
+            let attacker_id = if record.source == EvidenceSource::ElectronicSupported {
+                record.radar_bearing_deg.and_then(|bearing| {
+                    let mut matches = state.emitters.iter().filter(|emitter| {
+                        self.slot(emitter.id)
+                            .is_some_and(|slot| slot.side == launch::Side::Enemy)
+                            && state.sensors.observation(emitter.id).is_some()
+                            && ((emitter.bearing_rad.to_degrees() - bearing + 180.)
+                                .rem_euclid(360.)
+                                - 180.)
+                                .abs()
+                                <= 2.
+                    });
+                    let first = matches.next()?;
+                    matches.next().is_none().then_some(first.id)
+                })
+            } else {
+                None
+            };
+            reports.push((
+                PLAYER_ID,
+                ThreatReport {
+                    attacker_id,
+                    defended_id: PLAYER_ID,
+                },
+                Some(
+                    (player.yaw.to_degrees()
+                        + record.radar_bearing_deg.unwrap_or(record.bearing_deg))
+                    .rem_euclid(360.),
+                ),
+            ));
+        }
+        // A fresh, visibly departing missile or tracer can reveal its shooter
+        // only when that aircraft is independently observed. Hidden projectile
+        // target IDs do not participate in this association.
+        for projectile in state.projectiles.iter().filter(|p| p.age <= 30) {
+            let weapon = projectile.weapon(state.configuration());
+            let gun = live::is_gun(weapon);
+            if gun && !projectile.tracer {
+                continue;
+            }
+            for receiver in std::iter::once(PLAYER_ID).chain(
+                self.mission
+                    .actors()
+                    .iter()
+                    .filter(|a| a.alive() && !a.is_dummy())
+                    .map(AiActor::id),
+            ) {
+                if receiver == projectile.owner {
+                    continue;
+                }
+                let (position, velocity, heading, pitch, skill, possible_shooters, incoming) =
+                    if receiver == PLAYER_ID {
+                        (
+                            player.position,
+                            player.velocity,
+                            player.yaw.to_degrees(),
+                            player.pitch.to_degrees(),
+                            tore_sim::ai::Experience::Ace,
+                            state
+                                .targets
+                                .iter()
+                                .filter(|target| {
+                                    self.slot(target.id)
+                                        .is_some_and(|slot| slot.side == launch::Side::Enemy)
+                                })
+                                .filter_map(|target| {
+                                    state
+                                        .sensors
+                                        .observation(target.id)
+                                        .map(|o| (target.id, o.position))
+                                })
+                                .collect::<Vec<_>>(),
+                            state.missile_threats.records().any(|r| {
+                                r.missile_id == projectile.id && r.targeting_receiver && !r.stale
+                            }),
+                        )
+                    } else {
+                        let actor = self.mission.actor(receiver).unwrap();
+                        (
+                            actor.flight().position,
+                            actor.flight().velocity,
+                            actor.flight().yaw.to_degrees(),
+                            actor.flight().pitch.to_degrees(),
+                            actor.controller().experience().level,
+                            actor
+                                .awareness()
+                                .current_observations()
+                                .filter(|o| o.target.side != actor.identity().side)
+                                .map(|o| (o.target.id, o.target.position))
+                                .collect::<Vec<_>>(),
+                            actor.missile_threats().any(|r| {
+                                r.missile_id == projectile.id && r.targeting_receiver && !r.stale
+                            }),
+                        )
+                    };
+                if !awareness::visual_eligible(
+                    skill,
+                    position,
+                    heading,
+                    pitch,
+                    projectile.position,
+                    None,
+                    terrain_visible(position, projectile.position, ground),
+                ) {
+                    continue;
+                }
+                let mut launch_sources = possible_shooters.into_iter().filter(|(_, shooter)| {
+                    missiles::length(missiles::sub(*shooter, projectile.previous)) <= 1000.
+                        && awareness::visual_eligible(
+                            skill,
+                            position,
+                            heading,
+                            pitch,
+                            *shooter,
+                            None,
+                            terrain_visible(position, *shooter, ground),
+                        )
+                });
+                let Some((shooter, _)) = launch_sources.next() else {
+                    continue;
+                };
+                if launch_sources.next().is_some() {
+                    continue;
+                }
+                let gun_incoming = if gun {
+                    let delta = missiles::sub(projectile.position, position);
+                    let movement = std::array::from_fn::<_, 3, _>(|i| {
+                        (projectile.position[i] - projectile.previous[i]) * 120. - velocity[i]
+                    });
+                    let vv = tore_sim::attitude::dot(movement, movement);
+                    let time = if vv > 0. {
+                        -tore_sim::attitude::dot(delta, movement) / vv
+                    } else {
+                        -1.
+                    };
+                    let closest = std::array::from_fn::<_, 3, _>(|i| delta[i] + movement[i] * time);
+                    (0. ..=15.).contains(&time) && missiles::length(closest) <= 1000.
+                } else {
+                    false
+                };
+                if !(incoming || gun_incoming) {
+                    continue;
+                }
+                let delta = missiles::sub(projectile.position, position);
+                reports.push((
+                    receiver,
+                    ThreatReport {
+                        attacker_id: Some(shooter),
+                        defended_id: receiver,
+                    },
+                    Some(delta[0].atan2(delta[2]).to_degrees().rem_euclid(360.)),
+                ));
+            }
+        }
+        for (receiver, report, bearing) in reports {
+            self.mission
+                .report_attack_bearing(receiver, report, bearing);
+        }
     }
 
     /// The AI half of one tick, with the combat world reduced to its target
@@ -1722,7 +1912,9 @@ mod tests {
         assert!(!wings.mission.actor(3).unwrap().alive());
     }
 
-    fn build(enemy_override: Option<EnemySkillOverride>) -> (AiWings, Vec<live::Target>) {
+    pub(super) fn build(
+        enemy_override: Option<EnemySkillOverride>,
+    ) -> (AiWings, Vec<live::Target>) {
         let targets = spawned();
         let wings = AiWings::build_with(&payload(enemy_override), &targets, 0, |_| {
             Ok((aircraft(), None))

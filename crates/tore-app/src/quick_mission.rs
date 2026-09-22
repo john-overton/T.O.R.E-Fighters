@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use tore_formats::{aircraft::AircraftId, ui::creator::Options};
 use tore_sim::ai::{
     AiError,
+    engagement::GroupObjective,
     experience::EnemySkillOverride,
     launch::{Side, WingId, WingLaunch, WingSelection, legacy_pairs, resolve_wings},
 };
@@ -21,6 +22,8 @@ const POP_OK: usize = 70;
 const POP_CANCEL: usize = 71;
 const UP: usize = 72;
 const DOWN: usize = 73;
+const OBJECTIVE_BASE: usize = 80;
+const OBJECTIVE_COUNT: usize = 6;
 #[derive(Clone, Debug)]
 pub struct Draft {
     pub values: [usize; 35],
@@ -54,6 +57,10 @@ pub struct QuickMission {
     pub aircraft_names: Vec<String>,
     pub aircraft_files: Vec<String>,
     pub draft: Draft,
+    /// Friendly groups 1 through 3, then enemy groups 1 through 3.
+    pub group_objectives: [GroupObjective; OBJECTIVE_COUNT],
+    /// Mission-wide setting used when a group inherits its objective.
+    pub ai_mission: crate::ai_wings::Preset,
     options: Options,
     start_modes: Vec<String>,
     airport_names: Vec<Vec<String>>,
@@ -155,6 +162,8 @@ impl QuickMission {
             aircraft_names,
             aircraft_files,
             draft,
+            group_objectives: [GroupObjective::Inherit; OBJECTIVE_COUNT],
+            ai_mission: crate::ai_wings::Preset::Free,
             options,
             selector: None,
             cursor: 0,
@@ -214,6 +223,75 @@ impl QuickMission {
             .get(self.draft.values[id])
             .cloned()
             .unwrap_or_else(|| "Unavailable".into())
+    }
+    fn objective_choices(group: usize) -> Vec<(String, GroupObjective)> {
+        let side = if group < 3 {
+            Side::Friendly
+        } else {
+            Side::Enemy
+        };
+        let wing = group % 3;
+        let opposing = if side == Side::Friendly {
+            Side::Enemy
+        } else {
+            Side::Friendly
+        };
+        let mut choices = vec![
+            ("Use mission setting".into(), GroupObjective::Inherit),
+            ("Free engagement".into(), GroupObjective::Free),
+            ("Combat air patrol".into(), GroupObjective::Cap),
+        ];
+        for index in 0..3 {
+            let target = WingId::new(opposing, index).expect("fixed Quick Mission wing");
+            choices.push((
+                format!("Intercept opposing group {}", index + 1),
+                GroupObjective::Intercept(target),
+            ));
+        }
+        for index in 0..3 {
+            if index != wing {
+                let target = WingId::new(side, index as u8).expect("fixed Quick Mission wing");
+                choices.push((
+                    format!("Escort own group {}", index + 1),
+                    GroupObjective::Escort(target),
+                ));
+            }
+        }
+        choices.extend([
+            ("Self-defense".into(), GroupObjective::SelfDefense),
+            ("Weapons hold".into(), GroupObjective::Hold),
+        ]);
+        choices
+    }
+    fn objective_label(&self, group: usize) -> String {
+        match self.group_objectives[group] {
+            GroupObjective::Inherit => {
+                let inherited = match self.ai_mission {
+                    crate::ai_wings::Preset::SelfDefense => "SELF DEF",
+                    preset => preset.name(),
+                };
+                format!("MISSION: {}", inherited.to_ascii_uppercase())
+            }
+            GroupObjective::Free => "FREE".into(),
+            GroupObjective::Cap => "CAP".into(),
+            GroupObjective::Intercept(wing) => format!("INTERCEPT {}", wing.display_number()),
+            GroupObjective::Escort(wing) => format!("ESCORT {}", wing.display_number()),
+            GroupObjective::SelfDefense => "SELF-DEFENSE".into(),
+            GroupObjective::Hold => "HOLD".into(),
+        }
+    }
+    fn selector_values(&self, id: usize) -> Vec<String> {
+        if let Some(group) = id
+            .checked_sub(OBJECTIVE_BASE)
+            .filter(|g| *g < OBJECTIVE_COUNT)
+        {
+            Self::objective_choices(group)
+                .into_iter()
+                .map(|(label, _)| label)
+                .collect()
+        } else {
+            self.values(id).to_vec()
+        }
     }
     /// The six wing rows as the AI launch payload: side, aircraft, wing skill
     /// and one entry per member (`docs/spec/ai-experience.md`, "Experience
@@ -344,7 +422,17 @@ impl QuickMission {
     }
     fn open(&mut self, id: usize) {
         self.selector = Some(id);
-        self.cursor = self.draft.values[id];
+        self.cursor = if let Some(group) = id
+            .checked_sub(OBJECTIVE_BASE)
+            .filter(|group| *group < OBJECTIVE_COUNT)
+        {
+            Self::objective_choices(group)
+                .iter()
+                .position(|(_, objective)| *objective == self.group_objectives[group])
+                .unwrap_or(0)
+        } else {
+            self.draft.values[id]
+        };
         self.scroll = self.cursor / ROWS * ROWS;
         self.hover = None;
         self.pressed = None;
@@ -361,6 +449,14 @@ impl QuickMission {
             "airports" => {
                 self.apply(33, 1);
                 self.open(34);
+            }
+            name if name.starts_with("objective-") => {
+                let group = name[10..]
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|group| (1..=OBJECTIVE_COUNT).contains(group))
+                    .ok_or("objective snapshots use objective-1 through objective-6")?;
+                self.open(OBJECTIVE_BASE + group - 1);
             }
             _ => {
                 let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..35).contains(v)).ok_or("snapshot states: normal, aircraft, theaters, help, field-3 through field-34")?;
@@ -412,7 +508,10 @@ impl QuickMission {
         }
         if down {
             self.pressed = None;
-            self.right_pressed = self.hover.filter(|id| (3..=34).contains(id));
+            self.right_pressed = self.hover.filter(|id| {
+                (3..=34).contains(id)
+                    || (OBJECTIVE_BASE..OBJECTIVE_BASE + OBJECTIVE_COUNT).contains(id)
+            });
             return Action::None;
         }
         let Some(id) = self
@@ -424,6 +523,20 @@ impl QuickMission {
         };
         if id == 34 && !self.ground_start() {
             return Action::None;
+        }
+        if let Some(group) = id
+            .checked_sub(OBJECTIVE_BASE)
+            .filter(|group| *group < OBJECTIVE_COUNT)
+        {
+            let choices = Self::objective_choices(group);
+            let current = choices
+                .iter()
+                .position(|(_, objective)| *objective == self.group_objectives[group])
+                .unwrap_or(0);
+            let previous = (current + choices.len() - 1) % choices.len();
+            self.group_objectives[group] = choices[previous].1;
+            self.focus = id;
+            return Action::Click;
         }
         let n = self.values(id).len();
         let minimum = usize::from(id == 4);
@@ -454,10 +567,20 @@ impl QuickMission {
         if let Some(field) = self.selector {
             match id {
                 POP_OK => {
-                    if self.values(field).is_empty() {
+                    let values = self.selector_values(field);
+                    if values.is_empty() {
                         return Action::None;
                     }
-                    self.apply(field, self.cursor);
+                    if let Some(group) = field
+                        .checked_sub(OBJECTIVE_BASE)
+                        .filter(|group| *group < OBJECTIVE_COUNT)
+                    {
+                        self.group_objectives[group] =
+                            Self::objective_choices(group)[self.cursor].1;
+                        self.notice = None;
+                    } else {
+                        self.apply(field, self.cursor);
+                    }
                     self.selector = None;
                     self.focus = field;
                 }
@@ -468,11 +591,11 @@ impl QuickMission {
                 UP => self.scroll = self.scroll.saturating_sub(ROWS),
                 DOWN => {
                     self.scroll = (self.scroll + ROWS)
-                        .min(self.values(field).len().saturating_sub(1) / ROWS * ROWS)
+                        .min(self.selector_values(field).len().saturating_sub(1) / ROWS * ROWS)
                 }
                 ROW_BASE.. => {
                     let index = self.scroll + id - ROW_BASE;
-                    if index < self.values(field).len() {
+                    if index < self.selector_values(field).len() {
                         self.cursor = index;
                     }
                 }
@@ -511,6 +634,10 @@ impl QuickMission {
                     }
                 }
             }
+            OBJECTIVE_BASE..=85 => {
+                self.focus = id;
+                self.open(id);
+            }
             _ => return Action::None,
         }
         Action::Click
@@ -529,7 +656,7 @@ impl QuickMission {
             return Action::Back;
         }
         if let Some(field) = self.selector {
-            let n = self.values(field).len();
+            let n = self.selector_values(field).len();
             if n == 0 {
                 return Action::None;
             }
@@ -549,15 +676,22 @@ impl QuickMission {
         match key {
             "Tab" | "ArrowDown" | "ArrowUp" => {
                 let backwards = shift || key == "ArrowUp";
-                let last = if self.ground_start() { 34 } else { 33 };
-                self.focus = if backwards {
-                    if self.focus <= 1 {
-                        last
+                let focus_order: Vec<_> = (1..=if self.ground_start() { 34 } else { 33 })
+                    .chain(OBJECTIVE_BASE..OBJECTIVE_BASE + OBJECTIVE_COUNT)
+                    .collect();
+                self.focus = if let Some(position) =
+                    focus_order.iter().position(|field| *field == self.focus)
+                {
+                    let next = if backwards {
+                        (position + focus_order.len() - 1) % focus_order.len()
                     } else {
-                        self.focus - 1
-                    }
+                        (position + 1) % focus_order.len()
+                    };
+                    focus_order[next]
+                } else if backwards {
+                    *focus_order.last().unwrap()
                 } else {
-                    self.focus % last + 1
+                    focus_order[0]
                 };
                 self.hover = Some(self.focus);
             }
@@ -611,11 +745,13 @@ impl QuickMission {
         for (x, start) in [(35, 4), (340, 21)] {
             for wing in 0..3 {
                 let id = start + wing * 3;
+                let group = wing + usize::from(start == 21) * 3;
+                let y = 153 + wing as i32 * 21;
                 self.line(
                     &mut c,
                     font,
                     x,
-                    165 + wing as i32 * 14,
+                    y,
                     &[
                         (&format!("Wing {}: ", wing + 1), None),
                         ("", Some(id)),
@@ -625,6 +761,21 @@ impl QuickMission {
                         ("", Some(id + 2)),
                     ],
                 );
+                let objective_id = OBJECTIVE_BASE + group;
+                let label = self.objective_label(group);
+                let stamp_x = if start == 4 { 176 } else { 481 };
+                let rect = (stamp_x, y + 10, 123, 11);
+                self.controls.push((objective_id, rect));
+                c.rect(
+                    rect,
+                    if self.hover == Some(objective_id) {
+                        [127, 139, 144, 255]
+                    } else {
+                        [72, 82, 86, 255]
+                    },
+                );
+                bevel(&mut c, rect, false);
+                c.text(font, &fit(font, &label, 117), stamp_x + 3, y + 11, None);
             }
         }
         for (y, parts) in [
@@ -718,6 +869,7 @@ impl QuickMission {
             self.controls = vec![(0, (84, 35, 18, 24)), (61, (84, 60, 180, 25))];
         }
         if let Some(field) = self.selector {
+            let selector_values = self.selector_values(field);
             self.controls.clear();
             // Reuse the original metal panel texture, inset list wells and rocker.
             let background = &sprites["QUIKMIS3.PIC"];
@@ -735,7 +887,7 @@ impl QuickMission {
                 let y = 116 + row as i32 * 18;
                 c.rect((207, y, 226, 14), [12, 16, 16, 255]);
                 bevel(&mut c, (207, y, 226, 14), true);
-                let Some(text) = self.values(field).get(self.scroll + row) else {
+                let Some(text) = selector_values.get(self.scroll + row) else {
                     continue;
                 };
                 stripe(
@@ -745,7 +897,7 @@ impl QuickMission {
                 );
                 c.text(font, &fit(font, text, 208), 223, y + 2, None);
             }
-            for row in 0..ROWS.min(self.values(field).len().saturating_sub(self.scroll)) {
+            for row in 0..ROWS.min(selector_values.len().saturating_sub(self.scroll)) {
                 self.controls
                     .push((ROW_BASE + row, (207, 116 + row as i32 * 18, 226, 14)));
             }
@@ -757,7 +909,7 @@ impl QuickMission {
                 &format!(
                     "{} of {}",
                     self.scroll / ROWS + 1,
-                    self.values(field).len().div_ceil(ROWS).max(1)
+                    selector_values.len().div_ceil(ROWS).max(1)
                 ),
                 314,
                 394,
@@ -769,7 +921,7 @@ impl QuickMission {
             c.blit(rocker, (410, 393), 0, rocker.width, 1.);
             self.controls
                 .extend([(UP, (410, 393, 18, 17)), (DOWN, (410, 410, 18, 17))]);
-            if self.values(field).is_empty() {
+            if selector_values.is_empty() {
                 c.text(font, "No available choices.", 209, 118, None);
             }
             self.button(&mut c, sprites, POP_OK, "OK", (217, 437, 85, 24));
@@ -996,6 +1148,87 @@ mod tests {
         q.right(false)
     }
     #[test]
+    fn group_objectives_are_independent_and_inactive_groups_keep_their_choice() {
+        let mut q = setup();
+        q.draft.values[7] = 0;
+        q.open(OBJECTIVE_BASE + 1);
+        q.cursor = QuickMission::objective_choices(1)
+            .iter()
+            .position(|(_, objective)| *objective == GroupObjective::Hold)
+            .unwrap();
+        q.activate(POP_OK);
+        assert_eq!(q.group_objectives[1], GroupObjective::Hold);
+        assert!(
+            q.group_objectives
+                .iter()
+                .enumerate()
+                .all(|(index, objective)| index == 1 || *objective == GroupObjective::Inherit)
+        );
+        q.draft.values[7] = 3;
+        assert_eq!(q.group_objectives[1], GroupObjective::Hold);
+    }
+
+    #[test]
+    fn objective_choices_restrict_targets_by_side_and_exclude_self_escort() {
+        for group in 0..OBJECTIVE_COUNT {
+            let side = if group < 3 {
+                Side::Friendly
+            } else {
+                Side::Enemy
+            };
+            let own_index = (group % 3) as u8;
+            let choices = QuickMission::objective_choices(group);
+            let intercepts: Vec<_> = choices
+                .iter()
+                .filter_map(|(_, objective)| match objective {
+                    GroupObjective::Intercept(wing) => Some(*wing),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(intercepts.len(), 3);
+            assert!(intercepts.iter().all(|wing| wing.side != side));
+            let escorts: Vec<_> = choices
+                .iter()
+                .filter_map(|(_, objective)| match objective {
+                    GroupObjective::Escort(wing) => Some(*wing),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(escorts.len(), 2);
+            assert!(
+                escorts
+                    .iter()
+                    .all(|wing| wing.side == side && wing.index != own_index)
+            );
+        }
+    }
+
+    #[test]
+    fn objective_popup_and_right_click_cycle_only_the_addressed_group() {
+        let mut q = setup();
+        q.open(OBJECTIVE_BASE);
+        q.cursor = 2;
+        q.activate(POP_OK);
+        assert_eq!(q.group_objectives[0], GroupObjective::Cap);
+        assert!(matches!(right_click(&mut q, OBJECTIVE_BASE), Action::Click));
+        assert_eq!(q.group_objectives[0], GroupObjective::Free);
+        assert_eq!(q.group_objectives[1], GroupObjective::Inherit);
+    }
+
+    #[test]
+    fn inherited_stamp_names_the_actual_mission_setting() {
+        let mut q = setup();
+        assert_eq!(q.objective_label(0), "MISSION: FREE");
+        q.ai_mission = crate::ai_wings::Preset::Escort;
+        assert_eq!(q.objective_label(5), "MISSION: ESCORT");
+        q.ai_mission = crate::ai_wings::Preset::SelfDefense;
+        assert_eq!(q.objective_label(2), "MISSION: SELF DEF");
+        q.group_objectives[2] = GroupObjective::Intercept(
+            WingId::new(Side::Enemy, 2).expect("fixed Quick Mission wing"),
+        );
+        assert_eq!(q.objective_label(2), "INTERCEPT 3");
+    }
+    #[test]
     fn all_six_skill_selectors_launch_dummy_members() {
         let mut q = setup();
         for field in [4, 7, 10, 21, 24, 27] {
@@ -1093,12 +1326,25 @@ mod tests {
         q.key("Tab", false);
         assert_eq!(q.focus, 33);
         q.key("Tab", false);
+        assert_eq!(q.focus, OBJECTIVE_BASE);
+        for expected in OBJECTIVE_BASE + 1..OBJECTIVE_BASE + OBJECTIVE_COUNT {
+            q.key("Tab", false);
+            assert_eq!(q.focus, expected);
+        }
+        q.key("Tab", false);
         assert_eq!(q.focus, 1);
         q.apply(33, 1);
         q.focus = 33;
         q.key("Tab", false);
         assert_eq!(q.focus, 34);
         q.key("Tab", false);
+        assert_eq!(q.focus, OBJECTIVE_BASE);
+        q.key("ArrowUp", false);
+        assert_eq!(q.focus, 34);
+        q.focus = 1;
+        q.key("Tab", true);
+        assert_eq!(q.focus, OBJECTIVE_BASE + OBJECTIVE_COUNT - 1);
+        q.key("ArrowDown", false);
         assert_eq!(q.focus, 1);
     }
     #[test]
