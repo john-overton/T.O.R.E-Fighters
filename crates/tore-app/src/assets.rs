@@ -1,11 +1,14 @@
-use crate::AppResult;
+use crate::{
+    AppResult,
+    media_source::{self, MediaSource},
+};
 use std::{
     collections::BTreeMap,
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
 };
-use tore_formats::{Archive, Button, Pic};
+use tore_formats::{Button, Pic};
 
 const ART: &[&str] = &[
     "QUIKMIS3.PIC",
@@ -76,17 +79,24 @@ pub fn data_directory() -> AppResult<PathBuf> {
     };
     Ok(root.join("T.O.R.E-Fighters"))
 }
-fn archive(root: &Path, name: &str) -> AppResult<Archive> {
-    let path = fs::read_dir(root)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .find(|p| {
-            p.file_name()
-                .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(name))
-        })
-        .ok_or_else(|| format!("{}: missing {name}", root.display()))?;
-    Ok(Archive::open(path)?)
+/// How far an import has got, for the first-run screen. `total` is the number
+/// of resources selected from the archive being read, when it is known.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Progress {
+    pub archive: String,
+    pub done: usize,
+    pub total: Option<usize>,
 }
+
+/// A finished import: the decoded assets and the plain-words summary the
+/// locate screen shows. The same facts are in `import-report.txt` in full.
+pub(crate) struct ImportOutcome {
+    pub assets: Assets,
+    /// Shown by the pre-game shell in package F.
+    #[allow(dead_code)]
+    pub summary: Vec<String>,
+}
+
 fn pack_generation(path: &Path) -> Option<u128> {
     let name = path.file_name()?.to_str()?;
     let generation = name.strip_prefix("menu-")?.strip_suffix(".pack")?;
@@ -299,23 +309,36 @@ impl Assets {
             palette,
         })
     }
-    pub fn import(source: &Path, destination: &Path) -> AppResult<Self> {
+    /// Import from a path the caller has not classified yet, for the CLI.
+    pub(crate) fn import_path(source: &Path, destination: &Path) -> AppResult<Self> {
+        // The plain-words reason is what a terminal user needs, not the variant.
+        let source = MediaSource::detect(source).map_err(|error| error.to_string())?;
+        Self::import(&source, destination)
+    }
+    pub(crate) fn import(source: &MediaSource, destination: &Path) -> AppResult<Self> {
+        Ok(Self::import_with_progress(source, destination, &mut |_| {})?.assets)
+    }
+    /// Import with progress reports, at least once per archive and every 64
+    /// resources. The callback runs on the importing thread.
+    pub(crate) fn import_with_progress(
+        source: &MediaSource,
+        destination: &Path,
+        progress: &mut dyn FnMut(Progress),
+    ) -> AppResult<ImportOutcome> {
         let mut resources = BTreeMap::new();
+        let mut summary = Vec::new();
         let mut report = String::from(
             "T.O.R.E-Fighters menu import v1\nOnly selected resources decompressed. No executable resources executed.\n",
         );
-        let exe_path = fs::read_dir(source)?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .find(|p| {
-                p.file_name()
-                    .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("FA.EXE"))
-            })
-            .ok_or("creator import needs reviewed FA.EXE alongside archives")?;
-        if fs::metadata(&exe_path)?.len() > 16 * 1024 * 1024 {
-            return Err("FA.EXE exceeds input bound".into());
-        }
-        let executable = fs::read(&exe_path)?;
+        report.push_str(&format!(
+            "Source: {} {}\n",
+            source.kind.label(),
+            source.path.display()
+        ));
+        // The build is identified before any archive is opened, so an unreviewed
+        // executable never leaves a half-known data set in the cache.
+        let executable = source.executable()?;
+        let layout = tore_formats::executable::identify(&executable)?;
         let tables = tore_formats::ui::creator::Options::parse(&executable)?;
         let clouds = tore_formats::weather::clouds::Layout::parse(&executable)?;
         resources.insert("TORE_CLOUDS_V1".into(), clouds.encode());
@@ -324,8 +347,13 @@ impl Assets {
             tore_formats::weather::flare::Layout::parse(&executable)?.encode(),
         );
         resources.insert("TORE_CREATOR_V1".into(), tables.encode());
-        report.push_str("FA.EXE: reviewed SHA-256 e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c; inert creator lists and cloud layout\n");
-        let aircraft_libs = [archive(source, "FA_1.LIB")?, archive(source, "FA_2.LIB")?];
+        report.push_str(&format!(
+            "FA.EXE: {} SHA-256 {}; inert creator lists and cloud layout\n",
+            layout.name,
+            tore_formats::executable::sha256(&executable)
+        ));
+        summary.push(format!("Build read: FA.EXE {}", layout.name));
+        let aircraft_libs = [source.archive("FA_1.LIB")?, source.archive("FA_2.LIB")?];
         let aircraft_names = tore_formats::aircraft::dependencies(
             &aircraft_libs.iter().collect::<Vec<_>>(),
             &tore_formats::aircraft::AircraftId::ALL,
@@ -340,11 +368,12 @@ impl Assets {
             &scene_layouts,
         )?;
         for (filename, names) in [("FA_1.LIB", ART), ("FA_2.LIB", DATA)] {
-            let lib = archive(source, filename)?;
+            let lib = source.archive(filename)?;
             report.push_str(&format!(
                 "{filename}: {} unique entries\n",
                 lib.entries.len()
             ));
+            summary.push(format!("{filename}: {} entries read", lib.entries.len()));
             let selected: Vec<_> = lib
                 .entries
                 .keys()
@@ -360,7 +389,19 @@ impl Assets {
                 })
                 .cloned()
                 .collect();
-            for name in &selected {
+            progress(Progress {
+                archive: filename.to_string(),
+                done: 0,
+                total: Some(selected.len()),
+            });
+            for (index, name) in selected.iter().enumerate() {
+                if index > 0 && index.is_multiple_of(64) {
+                    progress(Progress {
+                        archive: filename.to_string(),
+                        done: index,
+                        total: Some(selected.len()),
+                    });
+                }
                 let bytes = lib.read(name)?;
                 let entry = &lib.entries[name];
                 report.push_str(&format!(
@@ -374,48 +415,63 @@ impl Assets {
                 }
                 resources.insert(name.to_string(), bytes);
             }
-        }
-        let radio = fs::read_dir(source)?
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .find(|path| {
-                path.file_name()
-                    .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("FA.EXE"))
-            })
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "FA.EXE missing"))
-            .and_then(|path| {
-                let mut bytes = Vec::new();
-                fs::File::open(path)?
-                    .take(16 * 1024 * 1024 + 1)
-                    .read_to_end(&mut bytes)?;
-                tore_formats::radio::phrases(&bytes)
+            progress(Progress {
+                archive: filename.to_string(),
+                done: selected.len(),
+                total: Some(selected.len()),
             });
-        match radio {
+        }
+        match tore_formats::radio::phrases(&executable) {
             Ok(phrases) => {
                 report.push_str(&format!(
                     "Radio: {} verified phrase mappings\n",
                     phrases.len()
                 ));
+                summary.push(format!("Radio: {} phrase mappings read", phrases.len()));
                 resources.extend(phrases);
             }
             Err(error) => {
-                report.push_str(&format!("Optional radio metadata unavailable: {error}\n"))
+                report.push_str(&format!("Optional radio metadata unavailable: {error}\n"));
+                summary.push(format!("Radio phrases unavailable: {error}"));
             }
         }
         for filename in ["FA_4B.LIB", "FA_4D.LIB"] {
-            let lib = match archive(source, filename) {
-                Ok(lib) => lib,
+            let lib = match source.optional_archive(filename) {
+                Ok(Some(lib)) => lib,
+                Ok(None) => {
+                    report.push_str(&format!(
+                        "Optional recorded music unavailable: {filename} is not in this source\n"
+                    ));
+                    summary.push(format!("Recorded music {filename} missing"));
+                    continue;
+                }
                 Err(error) => {
                     eprintln!("Optional recorded music unavailable: {error}");
                     report.push_str(&format!("Optional recorded music unavailable: {error}\n"));
+                    summary.push(format!("Recorded music {filename} unreadable: {error}"));
                     continue;
                 }
             };
-            for name in lib
+            let scores: Vec<String> = lib
                 .entries
                 .keys()
                 .filter(|n| tore_formats::music::resource(n))
-            {
+                .cloned()
+                .collect();
+            progress(Progress {
+                archive: filename.to_string(),
+                done: 0,
+                total: Some(scores.len()),
+            });
+            summary.push(format!("{filename}: {} music resources read", scores.len()));
+            for (index, name) in scores.iter().enumerate() {
+                if index > 0 && index.is_multiple_of(64) {
+                    progress(Progress {
+                        archive: filename.to_string(),
+                        done: index,
+                        total: Some(scores.len()),
+                    });
+                }
                 let bytes = lib.read(name)?;
                 if resources.get(name).is_some_and(|old| *old != bytes) {
                     return Err(format!("conflicting music resource {filename}/{name}").into());
@@ -429,7 +485,13 @@ impl Assets {
                 ));
                 resources.insert(name.clone(), bytes);
             }
+            progress(Progress {
+                archive: filename.to_string(),
+                done: scores.len(),
+                total: Some(scores.len()),
+            });
         }
+        let mut missing_scores = 0;
         for name in tore_formats::music::SCORES {
             if let Some(bytes) = resources.get(*name) {
                 let score = tore_formats::music::Score::parse(bytes)?;
@@ -440,8 +502,15 @@ impl Assets {
                     }
                 }
             } else {
+                missing_scores += 1;
                 report.push_str(&format!("Unavailable score {name}\n"));
             }
+        }
+        if missing_scores > 0 {
+            summary.push(format!(
+                "Recorded music: {missing_scores} of {} scores unavailable",
+                tore_formats::music::SCORES.len()
+            ));
         }
         resources.insert("TORE_MUSIC_V1".into(), b"PCM1".to_vec());
         resources.insert("TORE_COMBAT_V1".into(), b"RAW1".to_vec());
@@ -485,11 +554,17 @@ impl Assets {
         drop(assets);
         let assets = Self::load_pack(&path)?;
         cleanup_previous_imports(destination, &path);
+        // The remembered source only saves the player a second choice; failing to
+        // write it does not spoil a finished import.
+        if let Err(error) = media_source::remember(destination, source) {
+            eprintln!("Could not remember the media source: {error}");
+            summary.push(format!("Media source not remembered: {error}"));
+        }
         println!(
             "Imported menu and all theater resources to {}",
             path.display()
         );
-        Ok(assets)
+        Ok(ImportOutcome { assets, summary })
     }
     pub fn load(directory: &Path) -> AppResult<Self> {
         let mut paths = fs::read_dir(directory)?
