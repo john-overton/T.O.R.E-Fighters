@@ -12,6 +12,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 here="$root/tools/package"
+icons="$root/crates/tore-app/assets/icon"
 # shellcheck source=tools/package/version.sh
 . "$here/version.sh"
 
@@ -71,14 +72,38 @@ install -m 644 "$root/README.md" "$app/Contents/Resources/README.md"
 printf 'APPL????' > "$app/Contents/PkgInfo"
 sed "s/@VERSION@/$version/g" "$here/Info.plist" > "$app/Contents/Info.plist"
 
-# The icon geometry is scale free, so each iconset size is drawn rather than
-# resampled. iconutil then packs them into tore.icns.
+# iconutil packs a .iconset folder into tore.icns. The sizes come straight
+# from the committed PNG set, so nothing is resampled here and the macOS icon
+# is the same artwork Windows and Linux get. See tools/package/build_icons.py.
+#
+# An @2x entry is just the PNG of twice the nominal size. icon_512x512@2x
+# would need a 1024 px PNG, which is not committed: the source render is
+# photographic and a lossless 1024 px PNG costs about 2 MB. macOS scales the
+# 512 px entry for that one case, which is what an upscaled file would have
+# given it anyway.
 iconset="$stage/tore.iconset"
 mkdir -p "$iconset"
-for size in 16 32 128 256 512; do
-    python3 "$here/make_icon.py" --size "$size" "$iconset/icon_${size}x${size}.png"
-    python3 "$here/make_icon.py" --size "$((size * 2))" "$iconset/icon_${size}x${size}@2x.png"
-done
+
+# Copy one committed PNG into the .iconset under the name iconutil expects.
+# $1 is the nominal point size, $2 is the pixel size, $3 is "" or "@2x".
+stage_iconset_entry() {
+    local source_png="$icons/tore-$2.png"
+    if [ ! -f "$source_png" ]; then
+        echo "Missing $source_png. Run: python3 tools/package/build_icons.py" >&2
+        exit 1
+    fi
+    install -m 644 "$source_png" "$iconset/icon_$1x$1$3.png"
+}
+
+stage_iconset_entry 16 16 ""
+stage_iconset_entry 16 32 "@2x"
+stage_iconset_entry 32 32 ""
+stage_iconset_entry 32 64 "@2x"
+stage_iconset_entry 128 128 ""
+stage_iconset_entry 128 256 "@2x"
+stage_iconset_entry 256 256 ""
+stage_iconset_entry 256 512 "@2x"
+stage_iconset_entry 512 512 ""
 iconutil --convert icns "$iconset" --output "$app/Contents/Resources/tore.icns"
 rm -rf "$iconset"
 

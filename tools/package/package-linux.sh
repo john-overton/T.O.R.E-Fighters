@@ -17,6 +17,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 here="$root/tools/package"
+icons="$root/crates/tore-app/assets/icon"
 # shellcheck source=tools/package/version.sh
 . "$here/version.sh"
 
@@ -72,7 +73,8 @@ install -m 644 "$root/LICENSE" "$stage/LICENSE"
 install -m 644 "$root/THIRD_PARTY_NOTICES.md" "$stage/THIRD_PARTY_NOTICES.md"
 install -m 644 "$root/README.md" "$stage/README.md"
 install -m 644 "$here/tore-fighters.desktop" "$stage/tore-fighters.desktop"
-install -m 644 "$here/tore.png" "$stage/tore-fighters.png"
+# The desktop entry says Icon=tore-fighters, so the file is named to match.
+install -m 644 "$icons/tore-256.png" "$stage/tore-fighters.png"
 
 echo "Checking the staged directory for retail data"
 python3 "$root/tools/check_assets.py" "$stage"
@@ -92,8 +94,10 @@ install -m 644 "$root/LICENSE" "$appdir/usr/share/LICENSE"
 install -m 644 "$root/THIRD_PARTY_NOTICES.md" "$appdir/usr/share/THIRD_PARTY_NOTICES.md"
 install -m 644 "$here/tore-fighters.desktop" "$appdir/tore-fighters.desktop"
 install -m 644 "$here/tore-fighters.desktop" "$appdir/usr/share/applications/tore-fighters.desktop"
-install -m 644 "$here/tore.png" "$appdir/tore-fighters.png"
-install -m 644 "$here/tore.png" "$appdir/usr/share/icons/hicolor/256x256/apps/tore-fighters.png"
+# appimagetool wants the icon at the AppDir root under the desktop entry's
+# Icon= name, and desktops that unpack the AppImage read the hicolor copy.
+install -m 644 "$icons/tore-256.png" "$appdir/tore-fighters.png"
+install -m 644 "$icons/tore-256.png" "$appdir/usr/share/icons/hicolor/256x256/apps/tore-fighters.png"
 cat > "$appdir/AppRun" <<'APPRUN'
 #!/bin/sh
 here=$(dirname "$(readlink -f "$0")")

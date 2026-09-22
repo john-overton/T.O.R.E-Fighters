@@ -106,7 +106,12 @@ jobs:
           fi
 
       # Each script stages a bundle directory, scans it with check_assets.py,
-      # builds the package, and scans the finished package too.
+      # builds the package, and scans the finished package too. The
+      # application icon is not generated here: the PNG set and tore.ico are
+      # committed under crates/tore-app/assets/icon/, so no runner needs
+      # ImageMagick. The Windows script passes -ext WixUtilExtension to candle
+      # and light for the exit dialog's launch checkbox; it ships with the
+      # WiX 3.14 install on the windows-2022 image alongside WixUIExtension.
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: tools/package/package-linux.sh

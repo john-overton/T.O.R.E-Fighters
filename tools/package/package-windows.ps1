@@ -14,7 +14,9 @@
     where the player picks More info, then Run anyway.
 
     WiX v3 (candle.exe and light.exe) ships on the windows-2022 runner image.
-    Locally, install the WiX Toolset v3.11 or later, or pass -WixBin.
+    Locally, install the WiX Toolset v3.14 or later, or pass -WixBin. Both
+    WixUIExtension and WixUtilExtension are part of that install; the exit
+    dialog's launch checkbox needs the second one.
 
 .PARAMETER Version
     Package version. Defaults to the tag the release workflow is running for,
@@ -78,7 +80,7 @@ function Find-WixTool {
     throw "Could not find $Name. Install WiX Toolset v3 or pass -WixBin."
 }
 
-# The WixUI_InstallDir license pane needs RTF, so wrap the plain-text LICENSE.
+# The license pane needs RTF, so wrap the plain-text LICENSE.
 function Write-LicenseRtf {
     param([string]$Source, [string]$Destination)
     $text = (Get-Content -Raw -Path $Source) -replace '\\', '\\\\' -replace '\{', '\{' -replace '\}', '\}'
@@ -110,6 +112,9 @@ Copy-Item (Join-Path $target "tore-extract.exe") (Join-Path $stage "tore-extract
 Copy-Item (Join-Path $root "LICENSE") (Join-Path $stage "LICENSE")
 Copy-Item (Join-Path $root "THIRD_PARTY_NOTICES.md") (Join-Path $stage "THIRD_PARTY_NOTICES.md")
 Copy-Item (Join-Path $root "README.md") (Join-Path $stage "README.md")
+# The committed icon. It is installed beside the executable, used for both
+# shortcuts, and shown in Settings, Installed apps.
+Copy-Item (Join-Path $root "crates\tore-app\assets\icon\tore.ico") (Join-Path $stage "tore.ico")
 Write-LicenseRtf -Source (Join-Path $root "LICENSE") -Destination (Join-Path $stage "LICENSE.rtf")
 
 Write-Host "Checking the staged directory for retail data"
@@ -126,12 +131,15 @@ New-Item -ItemType Directory -Force -Path $objDir | Out-Null
 
 $wixobj = Join-Path $objDir "tore.wixobj"
 & $candle -nologo -arch x64 "-dVersion=$msiVersion" "-dStageDir=$stage" `
-    -ext WixUIExtension -out $wixobj (Join-Path $here "tore.wxs")
+    -ext WixUIExtension -ext WixUtilExtension -out $wixobj (Join-Path $here "tore.wxs")
 if ($LASTEXITCODE -ne 0) { throw "candle failed." }
 
 $msi = Join-Path $dist "T.O.R.E-Fighters-$version-windows-x86_64.msi"
 if (Test-Path $msi) { Remove-Item -Force $msi }
-& $light -nologo -ext WixUIExtension -sice:ICE61 -out $msi $wixobj
+# ICE61 is the only suppression: it rejects AllowSameVersionUpgrades, which
+# we want so that rebuilding the same version replaces the install instead of
+# stacking a second copy. Every other validation check stays on.
+& $light -nologo -ext WixUIExtension -ext WixUtilExtension -sice:ICE61 -out $msi $wixobj
 if ($LASTEXITCODE -ne 0) { throw "light failed." }
 
 Write-Host "Wrote $msi"

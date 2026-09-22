@@ -7,11 +7,14 @@
   The UpgradeCode is permanent: it is what tells Windows that a new MSI
   replaces an older T.O.R.E-Fighters rather than installing beside it. Never
   change it. Component GUIDs are generated per file by WiX from the install
-  path, which is stable across builds for the same layout.
+  path, which is stable across builds for the same layout. The two components
+  whose key path is a registry value carry a fixed GUID instead, because WiX
+  can only generate one from a file key path.
 
-  The installer uses the default Windows Installer icon. Producing a
-  multi-resolution .ico without an image library is more machinery than the
-  result is worth; see tools/package/make_icon.py.
+  The icon is crates/tore-app/assets/icon/tore.ico, our own artwork; see
+  tools/package/build_icons.py. The same file is embedded in tore-app.exe by
+  crates/tore-app/build.rs, installed next to it, used for both shortcuts and
+  shown in Settings, Installed apps.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
@@ -32,8 +35,9 @@
 
     <MediaTemplate EmbedCab="yes" />
 
-    <!-- Shown in Settings, Installed apps, next to the uninstall entry.
-         WixUI_InstallDir already sets ARPNOMODIFY; declaring it again fails the link. -->
+    <!-- Shown in Settings, Installed apps, next to the uninstall entry. -->
+    <Icon Id="tore.ico" SourceFile="$(var.StageDir)\tore.ico" />
+    <Property Id="ARPPRODUCTICON" Value="tore.ico" />
     <Property Id="ARPCONTACT" Value="https://github.com/john-overton/T.O.R.E-Fighters" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
@@ -42,20 +46,20 @@
 
           <Component Id="MainExecutable" Guid="*">
             <File Id="ToreApp" Name="tore-app.exe" KeyPath="yes"
-                  Source="$(var.StageDir)\tore-app.exe">
-              <Shortcut Id="StartMenuShortcut"
-                        Directory="ApplicationProgramsFolder"
-                        Name="T.O.R.E-Fighters"
-                        Description="Ground-up rebuild of Jane's Fighters Anthology"
-                        WorkingDirectory="INSTALLFOLDER"
-                        Advertise="yes" />
-            </File>
+                  Source="$(var.StageDir)\tore-app.exe" />
           </Component>
 
           <!-- Optional developer tool, installed but not shortcut. -->
           <Component Id="ExtractTool" Guid="*">
             <File Id="ToreExtract" Name="tore-extract.exe" KeyPath="yes"
                   Source="$(var.StageDir)\tore-extract.exe" />
+          </Component>
+
+          <!-- Installed beside the executable so a player can point their own
+               shortcuts at it. -->
+          <Component Id="IconFile" Guid="*">
+            <File Id="ToreIco" Name="tore.ico" KeyPath="yes"
+                  Source="$(var.StageDir)\tore.ico" />
           </Component>
 
           <Component Id="LicenseFile" Guid="*">
@@ -76,9 +80,21 @@
         </Directory>
       </Directory>
 
+      <!-- Both shortcut components below follow the same rule: a component
+           holding a non-advertised shortcut must have a registry value under
+           HKCU as its key path, which is what ICE38 and ICE43 check. The
+           shortcuts are not advertised because an advertised one cannot carry
+           its own icon and reinstalls on every launch. -->
       <Directory Id="ProgramMenuFolder">
         <Directory Id="ApplicationProgramsFolder" Name="T.O.R.E-Fighters">
-          <Component Id="ProgramMenuDir" Guid="82B6C67B-DD7F-4AF2-959E-2885EB80939D">
+          <Component Id="StartMenuShortcut" Guid="82B6C67B-DD7F-4AF2-959E-2885EB80939D">
+            <Shortcut Id="StartMenuLink"
+                      Name="T.O.R.E-Fighters"
+                      Description="Ground-up rebuild of Jane's Fighters Anthology"
+                      Target="[INSTALLFOLDER]tore-app.exe"
+                      WorkingDirectory="INSTALLFOLDER"
+                      Icon="tore.ico"
+                      IconIndex="0" />
             <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
             <RegistryValue Root="HKCU"
                            Key="Software\T.O.R.E-Fighters"
@@ -89,19 +105,78 @@
           </Component>
         </Directory>
       </Directory>
+
+      <Directory Id="DesktopFolder" Name="Desktop">
+        <Component Id="DesktopShortcut" Guid="21BF53C1-7FFE-479E-A5A6-CBE98132F2D2">
+          <Shortcut Id="DesktopLink"
+                    Name="T.O.R.E-Fighters"
+                    Description="Ground-up rebuild of Jane's Fighters Anthology"
+                    Target="[INSTALLFOLDER]tore-app.exe"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Icon="tore.ico"
+                    IconIndex="0" />
+          <RegistryValue Root="HKCU"
+                         Key="Software\T.O.R.E-Fighters"
+                         Name="DesktopShortcut"
+                         Type="integer"
+                         Value="1"
+                         KeyPath="yes" />
+        </Component>
+      </Directory>
     </Directory>
 
-    <Feature Id="Complete" Title="T.O.R.E-Fighters" Level="1">
+    <!-- The customize page shows these three. The program itself cannot be
+         deselected; both shortcuts start ticked and can be turned off. -->
+    <Feature Id="MainProgram"
+             Title="T.O.R.E-Fighters"
+             Description="The game, the extraction tool, and the licence and notice files."
+             Level="1"
+             Absent="disallow"
+             AllowAdvertise="no">
       <ComponentRef Id="MainExecutable" />
       <ComponentRef Id="ExtractTool" />
+      <ComponentRef Id="IconFile" />
       <ComponentRef Id="LicenseFile" />
       <ComponentRef Id="ThirdPartyNotices" />
       <ComponentRef Id="ReadmeFile" />
-      <ComponentRef Id="ProgramMenuDir" />
+
+      <Feature Id="StartMenuFeature"
+               Title="Start menu shortcut"
+               Description="Add T.O.R.E-Fighters to the Start menu."
+               Level="1"
+               AllowAdvertise="no">
+        <ComponentRef Id="StartMenuShortcut" />
+      </Feature>
+
+      <Feature Id="DesktopFeature"
+               Title="Desktop shortcut"
+               Description="Put a T.O.R.E-Fighters shortcut on the desktop."
+               Level="1"
+               AllowAdvertise="no">
+        <ComponentRef Id="DesktopShortcut" />
+      </Feature>
     </Feature>
 
-    <UIRef Id="WixUI_InstallDir" />
+    <!-- WixUI_FeatureTree's Browse button reads this. -->
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.StageDir)\LICENSE.rtf" />
+
+    <!-- "Launch T.O.R.E-Fighters" on the last page. WixShellExec comes from
+         WixUtilExtension, which candle and light are both given. Impersonate
+         runs it as the installing user, not as the elevated installer. -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch T.O.R.E-Fighters" />
+    <Property Id="WixShellExecTarget" Value="[#ToreApp]" />
+    <CustomAction Id="LaunchApplication"
+                  BinaryKey="WixCA"
+                  DllEntry="WixShellExec"
+                  Impersonate="yes"
+                  Return="asyncNoWait" />
+    <UI>
+      <!-- Welcome, licence, feature choice with a Browse button, confirm, finish. -->
+      <UIRef Id="WixUI_FeatureTree" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication" Order="1">
+        WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed
+      </Publish>
+    </UI>
   </Product>
 </Wix>

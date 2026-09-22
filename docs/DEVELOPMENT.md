@@ -201,32 +201,114 @@ TORE_BUILD_VERSION=0.1.0 cargo build --release --locked -p tore-app -p tore-extr
 What each package contains:
 
 - **tar.gz**: `tore-app`, `tore-extract`, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
-  `README.md`, the desktop entry and the icon. Unpack anywhere and run.
-- **AppImage**: `tore-app` only, with the desktop entry and icon at the AppDir
-  root so a desktop integrates it. `tore-extract` is a developer tool and stays
-  in the tar.gz.
+  `README.md`, the desktop entry and `tore-fighters.png`, which is the 256 px
+  icon. Unpack anywhere and run.
+- **AppImage**: `tore-app` only, with the desktop entry and the 256 px icon at
+  the AppDir root under the name the entry's `Icon=` line asks for, plus a
+  hicolor copy, so a desktop integrates it. `tore-extract` is a developer tool
+  and stays in the tar.gz.
 - **DMG**: `T.O.R.E-Fighters.app` plus a link to `/Applications`. The bundle
-  carries `tore-app`, `tore-extract`, the generated `tore.icns` and the three
-  text files under `Contents/Resources`. `CFBundleIdentifier` is
-  `org.tore-fighters.app` and `LSMinimumSystemVersion` is 11.0, which is what
-  the pinned toolchain targets on both architectures.
-- **MSI**: a per-machine install into `%ProgramFiles%\T.O.R.E-Fighters` with a
-  Start menu shortcut and an uninstall entry, built with WiX v3 from
-  `tools/package/tore.wxs`. Its `UpgradeCode` is permanent and `MajorUpgrade`
-  replaces an older install rather than installing beside it.
+  carries `tore-app`, `tore-extract`, `tore.icns` and the three text files
+  under `Contents/Resources`. `CFBundleIconFile` is `tore`.
+  `CFBundleIdentifier` is `org.tore-fighters.app` and `LSMinimumSystemVersion`
+  is 11.0, which is what the pinned toolchain targets on both architectures.
+- **MSI**: a per-machine install into `%ProgramFiles%\T.O.R.E-Fighters`
+  carrying both executables, `tore.ico` and the three text files, built with
+  WiX v3 from `tools/package/tore.wxs`. Its `UpgradeCode` is permanent and
+  `MajorUpgrade` replaces an older install rather than installing beside it.
+  The installer's pages and its shortcut choices are described below.
 
 None of these contain retail media. The app imports the player's own Fighters
 Anthology copy at runtime; see [first-run import](spec/first-run-import.md).
 
-### Icon and desktop entry
+### Application icon
 
-`tools/package/make_icon.py` draws `tools/package/tore.png`, a plain geometric
-delta, with the standard library only. The geometry is scale free, so the macOS
-script asks for each `.iconset` size directly and hands the folder to
-`iconutil`; nothing is resampled. The MSI uses the default Windows Installer
-icon: producing a multi-resolution `.ico` without an image library is more
-machinery than the result is worth. `tools/package/tore-fighters.desktop` is
-the Linux desktop entry, used by both the tar.gz and the AppImage.
+The icon is the project logo, `docs/images/tore-fighters-logo.png`: a 1254 px
+render of a round embroidered patch on a transparent ground. It is our own
+artwork and carries no retail content.
+
+`tools/package/build_icons.py` downscales it into the committed set under
+`crates/tore-app/assets/icon/`. Regenerate it only when the logo changes:
+
+```sh
+python3 tools/package/build_icons.py
+```
+
+That needs ImageMagick 7 (`magick`) on `PATH`. Nothing else does: every build
+and every packaging script reads the committed files, and CI never generates
+icons. `--check` reports the committed sizes without writing, and
+`--verify-ico` prints the entries of a finished `.ico`.
+
+| File | Used by |
+| --- | --- |
+| `tore-16.png` … `tore-64.png` | macOS `.iconset`, and the DIB entries of `tore.ico` |
+| `tore-128.png`, `tore-512.png` | macOS `.iconset` |
+| `tore-256.png` | Linux tar.gz and AppImage, macOS `.iconset`, the PNG entry of `tore.ico` |
+| `tore.ico` | the Windows executable, the MSI, both Windows shortcuts |
+
+Downscaling uses a Lanczos filter, with a light unsharp pass at 64 px and below
+so the small sizes stay legible. Two size decisions keep the committed set
+under its 600 KB budget: 1024 px is not committed at all, because the source is
+photographic and a lossless 1024 px PNG costs about 2 MB, and 512 px is
+quantized to 255 colours, because it is only ever shown as a macOS Retina
+512 pt icon. Every smaller size is full colour. The budget is enforced by the
+script itself.
+
+`tore.ico` holds 16, 32, 48 and 64 px as uncompressed 32-bit DIBs and 256 px as
+a PNG, which is the layout Windows documents. The 256 px entry is the bytes of
+`tore-256.png`, so the two cannot drift apart.
+
+`tools/package/tore-fighters.desktop` is the Linux desktop entry, used by both
+the tar.gz and the AppImage.
+
+### The icon inside tore-app.exe
+
+Explorer, the taskbar and Alt-Tab read an executable's icon from an embedded
+`RT_GROUP_ICON` resource, so it has to be linked into the binary. The usual
+answer is a crate such as `winres`, but that is outside the dependency budget
+in [AGENTS.md](../AGENTS.md), so `crates/tore-app/build.rs` writes the resource
+object itself.
+
+The script runs on every target and does nothing unless
+`CARGO_CFG_TARGET_OS` is `windows` and `CARGO_CFG_TARGET_ENV` is `msvc`. On
+that target it reads `assets/icon/tore.ico`, writes a Win32 `.res` file into
+`OUT_DIR` holding one `RT_ICON` per image plus the `RT_GROUP_ICON` that names
+them, and emits `cargo:rustc-link-arg-bins`. `link.exe` accepts a `.res` on its
+command line exactly as if `rc.exe` had produced it. Linux and macOS builds are
+unaffected; an unreadable or malformed `.ico` is a warning and the build
+continues without an icon.
+
+The byte layout was checked without a Windows host by running the same writer
+over the committed `.ico`, parsing the result with
+`python3 tools/package/build_icons.py --verify-res PATH`, and rebuilding an
+`.ico` from the parsed resources: it came back byte for byte identical. That
+the linker accepts the file is proven by the Windows job in
+`release.yml`; that the icon then appears in Explorer is a manual check on an
+installed build.
+
+### The Windows installer
+
+The MSI uses the WiX `WixUI_FeatureTree` dialog set: welcome, the licence, a
+feature page with an install-folder Browse button, a confirmation page, then
+the finish page.
+
+The feature page offers three entries. **T.O.R.E-Fighters** is the program and
+cannot be deselected. **Start menu shortcut** and **Desktop shortcut** both
+start ticked and can be turned off. Each shortcut lives in its own component
+keyed on a value under `HKCU\Software\T.O.R.E-Fighters`, which is what ICE38
+and ICE43 require of a component holding a non-advertised shortcut. The
+shortcuts are not advertised because an advertised shortcut cannot carry its
+own icon.
+
+The finish page offers a **Launch T.O.R.E-Fighters** checkbox, which runs the
+installed executable through `WixShellExec` from `WixUtilExtension`, as the
+installing user rather than as the elevated installer. `candle` and `light` are
+both given `-ext WixUtilExtension` alongside `-ext WixUIExtension`; both ship
+with WiX 3.14 on the `windows-2022` runner.
+
+`ICE61` is the only suppressed validation check. It rejects
+`AllowSameVersionUpgrades`, which we want so that reinstalling the same version
+replaces the existing install instead of stacking a second copy.
 
 ### appimagetool
 
@@ -265,7 +347,10 @@ That proves the packages build and carry no detectable retail data. It does not
 prove they install. Installing the MSI on Windows, opening the DMG and running
 the app from `/Applications` on both macOS architectures, and running the
 AppImage on a machine that is not the build host are manual checks, and they
-stay recorded as pending until someone performs them on a tag.
+stay recorded as pending until someone performs them on a tag. The same is
+true of everything the icon is for: the Windows job proves `link.exe` accepts
+the generated `.res`, but only an installed build shows whether Explorer, the
+Start menu, the desktop shortcut and the macOS Dock draw the icon.
 
 ## Troubleshooting
 
