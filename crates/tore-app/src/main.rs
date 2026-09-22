@@ -44,6 +44,7 @@ mod smoke_renderer;
 mod surface_lighting;
 mod target_window;
 mod terrain;
+mod version;
 mod weapon_hud;
 mod weather;
 
@@ -3179,6 +3180,9 @@ fn main() -> AppResult<()> {
 }
 
 fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Outcome> {
+    if matches!(session, Session::First) {
+        println!("{}", version::label());
+    }
     let mut args = std::env::args().skip(1);
     let mut live_fire = false;
     let mut dummy_aircraft = Vec::new();
@@ -3651,6 +3655,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--smoke-test" => smoke_test = true,
             "--no-audio" => no_audio = true,
+            "--version" | "-V" => {
+                println!("T.O.R.E-Fighters v{}", version::version());
+                return Ok(Outcome::Done);
+            }
             "--import-only" => import_only = true,
             "--validate-creator" => validate_creator = true,
             "--sensor-summary" => sensor_summary = true,

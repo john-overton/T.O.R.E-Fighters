@@ -53,6 +53,28 @@ jobs:
       - name: Check documentation headers
         run: python tools/check_docs.py
 
+      # A tag must match the crate version so the app, the package names and
+      # the release all say the same thing.
+      - name: Check the tag against Cargo.toml
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          crate=$(grep -m1 '^version' crates/tore-app/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$crate" != "$tag" ]; then
+            echo "Tag v$tag does not match crates/tore-app/Cargo.toml version $crate" >&2
+            exit 1
+          fi
+      - name: Stamp the build version
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(git describe --tags --always)"
+          fi
+          echo "TORE_BUILD_VERSION=$version" >> "$GITHUB_ENV"
+          echo "Build version $version"
       - name: Build release binaries
         run: cargo build --release --locked -p tore-app -p tore-extract
       - name: Check release binaries

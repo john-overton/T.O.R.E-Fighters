@@ -55,6 +55,9 @@ fn in_rect(point: (f64, f64), rect: (i32, i32, i32, i32)) -> bool {
         && point.1 < (rect.1 + rect.3) as f64
 }
 const BARS: [(i32, i32, i32, i32); 3] = [(78, 38, 17, 19), (96, 38, 39, 19), (135, 38, 45, 19)];
+/// Lower-left anchor of the version label, above the canvas edge and clear of
+/// the activity buttons.
+const VERSION_LABEL: (i32, i32) = (14, 462);
 impl State {
     pub fn new(buttons: Vec<Button>, music: bool) -> Self {
         let count = buttons.len();
@@ -508,6 +511,16 @@ impl Menu {
             canvas.centered_text(menu_font, label, rect);
         }
         let body = &self.sprites["ARMFONT.PIC"];
+        // Opinionated (John, 2026-09-22): the build's version sits in the lower
+        // left corner of the main menu. Drawn before popups and toasts so they
+        // can cover it.
+        canvas.text(
+            menu_font,
+            &crate::version::label(),
+            VERSION_LABEL.0,
+            VERSION_LABEL.1,
+            Some([235, 239, 243]),
+        );
         if let Some(bar) = self.state.open {
             let (x, y, w, h) = self.state.popup_rect(bar);
             canvas.rect((x + 3, y + 3, w, h), [20, 23, 26, 255]);

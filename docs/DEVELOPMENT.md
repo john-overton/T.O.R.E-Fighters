@@ -178,10 +178,18 @@ is running for, then from `git describe`, then falls back to `0.0.0-dev`. A
 leading `v` is stripped. Packages are written to ignored `dist/`, and the
 staged bundle each package is built from stays in `dist/stage/`.
 
-Build the release binaries first:
+The app carries its own version. The main menu shows `T.O.R.E - vX.Y.Z` in the
+lower left corner and `tore-app --version` prints it. A release build reads
+`TORE_BUILD_VERSION` at compile time; the workflow sets it to the tag (or to
+`git describe` on a test branch) and refuses a tag that does not match the
+version in `crates/tore-app/Cargo.toml`. A build without the variable reports
+the crate version. Bump `Cargo.toml` before tagging.
+
+Build the release binaries first, stamping the same version the package will
+carry:
 
 ```sh
-cargo build --release --locked -p tore-app -p tore-extract
+TORE_BUILD_VERSION=0.1.0 cargo build --release --locked -p tore-app -p tore-extract
 ```
 
 | Platform | Command | Produces |
