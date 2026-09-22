@@ -32,9 +32,9 @@
 
     <MediaTemplate EmbedCab="yes" />
 
-    <!-- Shown in Settings, Installed apps, next to the uninstall entry. -->
-    <Property Id="ARPCONTACT" Value="https://github.com/jroverton/T.O.R.E-Fighters" />
-    <Property Id="ARPNOMODIFY" Value="1" />
+    <!-- Shown in Settings, Installed apps, next to the uninstall entry.
+         WixUI_InstallDir already sets ARPNOMODIFY; declaring it again fails the link. -->
+    <Property Id="ARPCONTACT" Value="https://github.com/john-overton/T.O.R.E-Fighters" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">
