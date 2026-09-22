@@ -7,8 +7,48 @@ use std::{
     path::{Component, Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
-use tore_formats::Archive;
+use tore_formats::{Archive, esa};
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
+/// One archive to extract: a loose file, or an entry stored inside a `SETUP.ESA`.
+struct ArchiveSource {
+    path: PathBuf,
+    entry: Option<String>,
+}
+impl ArchiveSource {
+    fn open(&self) -> Result<Archive> {
+        Ok(match &self.entry {
+            None => Archive::open(&self.path)?,
+            Some(name) => esa::Container::open(&self.path)?.archive(name)?,
+        })
+    }
+    /// Source-relative label with container provenance, e.g. `SETUP.ESA:FA_1.LIB`.
+    fn label(&self, root: &Path) -> Result<String> {
+        let mut text = self
+            .path
+            .strip_prefix(root)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if let Some(name) = &self.entry {
+            text.push(':');
+            text.push_str(name);
+        }
+        Ok(text)
+    }
+    /// Output location: one directory level per archive boundary, container included.
+    fn relative(&self, root: &Path) -> Result<PathBuf> {
+        let mut path = self.path.strip_prefix(root)?.to_path_buf();
+        if let Some(name) = &self.entry {
+            path.push(name);
+        }
+        Ok(path)
+    }
+    fn display(&self) -> String {
+        match &self.entry {
+            None => self.path.to_string_lossy().into_owned(),
+            Some(name) => format!("{}:{name}", self.path.to_string_lossy()),
+        }
+    }
+}
 struct Options {
     source: PathBuf,
     out: PathBuf,
@@ -102,9 +142,12 @@ fn discover(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
             }
         }
     } else if path.is_file() {
-        let mut header = [0; 5];
+        let mut header = [0; 32];
         let count = fs::File::open(path)?.read(&mut header)?;
-        if (count == 5 && &header == b"EALIB")
+        let header = &header[..count];
+        // Containers and archives are recognised by signature, never by filename.
+        if header.starts_with(b"EALIB")
+            || esa::has_magic(header)
             || path
                 .extension()
                 .is_some_and(|e| e.eq_ignore_ascii_case("lib"))
@@ -113,6 +156,52 @@ fn discover(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
         }
     }
     Ok(())
+}
+/// Turn discovered files into archives, opening any installer container in place.
+fn expand(files: Vec<PathBuf>, list: bool) -> Result<Vec<ArchiveSource>> {
+    let mut sources = Vec::new();
+    for path in files {
+        let mut header = [0; 32];
+        let count = fs::File::open(&path)?.read(&mut header)?;
+        if !esa::has_magic(&header[..count]) {
+            sources.push(ArchiveSource { path, entry: None });
+            continue;
+        }
+        let container =
+            esa::Container::open(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        if list {
+            println!(
+                "{}: {} container entries",
+                path.display(),
+                container.entries().len()
+            );
+            for entry in container.entries() {
+                println!(
+                    "  {} [{}] {} {} packed / {} decoded bytes at {}",
+                    entry.name,
+                    entry.group,
+                    if entry.method == esa::Method::Stored {
+                        "stored"
+                    } else {
+                        "DCL"
+                    },
+                    entry.packed_size,
+                    entry.decoded_size,
+                    entry.offset
+                );
+            }
+        }
+        // Stored entries that are themselves EALIB archives are served without copying.
+        for entry in container.entries() {
+            if entry.method == esa::Method::Stored && container.archive(&entry.name).is_ok() {
+                sources.push(ArchiveSource {
+                    path: path.clone(),
+                    entry: Some(entry.name.clone()),
+                });
+            }
+        }
+    }
+    Ok(sources)
 }
 fn safe_directory(root: &Path, relative: &Path) -> Result<PathBuf> {
     let mut path = root.to_path_buf();
@@ -366,8 +455,9 @@ fn analyze(
 
 fn extract(options: Options) -> Result<bool> {
     let source = options.source.canonicalize()?;
-    let mut archives = Vec::new();
-    discover(&source, &mut archives)?;
+    let mut files = Vec::new();
+    discover(&source, &mut files)?;
+    let mut archives = expand(files, options.list)?;
     // Retail discs also bundle other games/installers whose .LIB files are not EALIB.
     // Only directory-based profile discovery skips them; explicit/raw inputs stay strict.
     if source.is_dir()
@@ -377,22 +467,22 @@ fn extract(options: Options) -> Result<bool> {
             || options.music)
     {
         let mut supported = Vec::new();
-        for path in archives {
+        for archive in archives {
             let mut magic = [0; 5];
-            let count = fs::File::open(&path)?.read(&mut magic)?;
-            if count == 5 && &magic == b"EALIB" {
-                supported.push(path);
+            let count = fs::File::open(&archive.path)?.read(&mut magic)?;
+            if archive.entry.is_some() || (count == 5 && &magic == b"EALIB") {
+                supported.push(archive);
             } else {
                 eprintln!(
                     "Skipping non-EALIB file in profile scan: {}",
-                    path.display()
+                    archive.path.display()
                 );
             }
         }
         archives = supported;
     }
     if archives.is_empty() {
-        return Err("No EALIB archives found. Supply a loose archive or an installed/extracted media directory; ISO/ESA containers are not supported yet.".into());
+        return Err("No EALIB archives found. Supply a loose archive, an installed/extracted media directory, or a disc folder containing SETUP.ESA; raw ISO images are not supported.".into());
     }
     let source_root = if source.is_dir() {
         source.as_path()
@@ -413,25 +503,22 @@ fn extract(options: Options) -> Result<bool> {
     let mut profile_paths = Vec::new();
     if !options.aircraft.is_empty() || options.weapons || options.music || options.theater.is_some()
     {
-        for path in &archives {
-            let relative = path
-                .strip_prefix(source_root)?
-                .to_string_lossy()
-                .replace('\\', "/");
+        for source_archive in &archives {
+            let relative = source_archive.label(source_root)?;
             if !options
                 .exclude_archives
                 .iter()
                 .any(|p| wildcard(p, &relative))
             {
-                match Archive::open(path) {
+                match source_archive.open() {
                     Ok(archive) => {
                         profile_archives.push(archive);
-                        profile_paths.push(path.clone());
+                        profile_paths.push(source_archive.display());
                     }
                     Err(error)
                         if !options.aircraft.is_empty() || options.weapons || options.music =>
                     {
-                        return Err(error.into());
+                        return Err(error);
                     }
                     Err(_) => {} // The extraction pass below records unsupported archives.
                 }
@@ -468,11 +555,8 @@ fn extract(options: Options) -> Result<bool> {
     let mut errors = Vec::new();
     let mut selected = 0;
     let mut destinations = HashSet::new();
-    for path in archives {
-        let relative_name = path
-            .strip_prefix(source_root)?
-            .to_string_lossy()
-            .replace('\\', "/");
+    for source_archive in archives {
+        let relative_name = source_archive.label(source_root)?;
         if options
             .exclude_archives
             .iter()
@@ -481,14 +565,14 @@ fn extract(options: Options) -> Result<bool> {
             eprintln!("Skipping excluded archive: {relative_name}");
             continue;
         }
-        let archive = match Archive::open(&path) {
+        let archive = match source_archive.open() {
             Ok(archive) => archive,
             Err(error) => {
-                errors.push(format!("{}: {error}", path.display()));
+                errors.push(format!("{}: {error}", source_archive.display()));
                 continue;
             }
         };
-        let relative = path.strip_prefix(source_root)?;
+        let relative = &source_archive.relative(source_root)?;
         let mut matched = 0;
         for entry in archive.entries.values() {
             let profile = options.theater.is_some()
@@ -516,7 +600,7 @@ fn extract(options: Options) -> Result<bool> {
             selected += 1;
             let output = relative.join(&entry.name);
             let mut record = Record {
-                archive: path.to_string_lossy().into_owned(),
+                archive: source_archive.display(),
                 name: entry.name.clone(),
                 output: output.to_string_lossy().replace('\\', "/"),
                 offset: entry.offset,
@@ -536,10 +620,7 @@ fn extract(options: Options) -> Result<bool> {
                     if options.list {
                         println!(
                             "{} / {} ({} stored bytes, flag {})",
-                            relative.display(),
-                            entry.name,
-                            entry.size,
-                            entry.flag
+                            relative_name, entry.name, entry.size, entry.flag
                         );
                     }
                     return Ok(());
@@ -575,8 +656,7 @@ fn extract(options: Options) -> Result<bool> {
             records.push(record);
         }
         println!(
-            "{}: {matched} selected / {} unique resources",
-            relative.display(),
+            "{relative_name}: {matched} selected / {} unique resources",
             archive.entries.len()
         );
     }
@@ -617,12 +697,12 @@ fn extract(options: Options) -> Result<bool> {
                     quote(name),
                     indices
                         .iter()
-                        .map(|&i| quote(&profile_paths[i].to_string_lossy()))
+                        .map(|&i| quote(&profile_paths[i]))
                         .collect::<Vec<_>>()
                         .join(","),
-                    indices.last().map_or("null".into(), |&i| quote(
-                        &profile_paths[i].to_string_lossy()
-                    ))
+                    indices
+                        .last()
+                        .map_or("null".into(), |&i| quote(&profile_paths[i]))
                 )
             })
             .collect::<Vec<_>>()
@@ -741,7 +821,7 @@ fn main() -> Result<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n] [--weapons] [--music] [--creator] [--wav-previews] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nISO, ESA installers, coded-literal DCL, and general format conversion are not implemented. --music --wav-previews adds lossless PCM WAV wrappers.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
+                    "Usage: tore-extract --source FILE_OR_DIRECTORY [--out DIRECTORY] [--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n] [--weapons] [--music] [--creator] [--wav-previews] [--theater CODE|all] [--include GLOB] [--exclude-archive GLOB] [--list | --dry-run] [--overwrite] [--max-entry-mib N]\n\nRecursively discovers EALIB archives by signature, independent of game/archive names.\n--source may also name a disc folder or a SETUP.ESA installer container, recognised\nby its signature; archives stored inside it are read in place and keep their\ncontainer provenance (SETUP.ESA:FA_1.LIB). --list also prints the container directory.\nExtracts stored and raw-literal DCL entries. Source files remain untouched.\nFilters match resource names case-insensitively (* and ?), and may repeat.\nExisting identical files are reused; differing files require --overwrite.\nOutput preserves source hierarchy/archive names. No resource code is executed.\nRaw ISO images, coded-literal DCL, and general format conversion are not implemented. --music --wav-previews adds lossless PCM WAV wrappers.\nUse tools/extract_assets.py for the portable entry point and SHA-256 report hashes."
                 );
                 return Ok(());
             }

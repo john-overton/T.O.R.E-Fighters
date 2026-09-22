@@ -100,9 +100,21 @@ Default decoded-resource cap: 256 MiB. Raise deliberately with `--max-entry-mib 
 
 The extractor is format-based, not tied to `FA_1.LIB` or another title's filenames. It discovers files with an EALIB signature, validates directories/sentinels, and handles stored entries plus raw-literal PKWare DCL compression. This covers the archive structure used by the supplied Fighters Anthology installation and the USNF/ATF format references. Actual other-title media has not been tested in this session.
 
+It also recognises the Electronic Arts installer container a retail disc ships instead of loose archives. `--source` accepts a disc folder containing `SETUP.ESA`, or that file directly; both are recognised by the container signature, never by filename. See the [SETUP.ESA notes](formats/esa-installer.md) for the layout.
+
+```sh
+# A mounted disc 1, or a folder it was copied into.
+cargo run --release --locked -p tore-extract -- --source /run/media/you/FA_DISC1 --out .local/disc1
+
+# The container alone. --list prints its directory before the archive listings.
+cargo run --release --locked -p tore-extract -- --source /run/media/you/FA_DISC1/SETUP.ESA --list
+```
+
+The four `FA_LIBS` archives are stored uncompressed inside the container, so they are read in place by offset rather than copied out. They are reported with their container provenance, `SETUP.ESA:FA_1.LIB`, and their output keeps the same archive boundaries one level deeper, `SETUP.ESA/FA_1.LIB/CHOOSEV.PIC`. Compressed container entries such as `FA.EXE` are listed but not extracted by this command; the app's importer decodes the ones it needs. Loose archive folders behave exactly as before.
+
 It unpacks **all resource types** as their original decompressed bytes. It does not claim to decode every resource: a `.SH` remains a shape resource, `.PIC` remains an indexed game image, `.FNT` remains a compiled resource, and `.11K` remains PCM. Nothing extracted is executed. The app interprets its menu subset and the initial T2/mission/weather data subset described in [theater recovery](formats/theater.md).
 
-ISO images, ESA installer containers (format recovered in [SETUP.ESA notes](formats/esa-installer.md); reader planned in [M1g](ROADMAP.md#1g-installer-and-first-run-import)), coded-literal DCL mode 1, missing/truncated media repair, general PNG/WAV/model conversion, and cross-title gameplay import are not implemented by this command. The explicit `--music --wav-previews` option described below supports lossless music PCM WAV wrapping. Supply loose archives from your own installed or extracted media. Unknown/non-EALIB `.LIB` files are reported as errors rather than silently accepted.
+Raw ISO images, coded-literal DCL mode 1, missing/truncated media repair, general PNG/WAV/model conversion, and cross-title gameplay import are not implemented by this command. Mount an image and point `--source` at the mounted folder. The explicit `--music --wav-previews` option described below supports lossless music PCM WAV wrapping. Supply loose archives from your own installed or extracted media. Unknown/non-EALIB `.LIB` files are reported as errors rather than silently accepted.
 
 ## Native command and tests
 
@@ -158,7 +170,7 @@ Defined codes live in Rust's shared `THEATERS` table: APA, BAL, CUB, EGY, FRA, G
 
 Discovery recursively includes `disc1/` and `disc2/`. Directory-based theater scans print and skip non-EALIB files such as the bundled MPlayer `_SETUP.LIB`; corrupt/unsupported EALIB archives still fail. Explicit archive inputs and generic extraction remain strict. The bundled LHX demo has unsupported EALIB compression flags, so exclude that separate game explicitly with `--exclude-archive 'disc1/LHX/*'`. The option is repeatable, case-insensitive, matches source-relative archive paths using `/`, and also works for generic extraction. Adjust the path when using a different source root; exclusions are printed and excluded resources are absent from the report.
 
-On the supplied installation plus both disc folders, the command above extracted **1,129 resources with zero errors**: 852 from FA_1 and 277 from FA_2, including 16 T2 grids and 75 MM layouts. No additional terrain-profile matches came from the added disc archives. They add reference pictures, video and audio for later work; keep them available. `disc1/SETUP.ESA` is also present but is not decoded by this tool. Its presence alone does not establish package completeness.
+On the supplied installation plus both disc folders, the command above extracted **1,129 resources with zero errors**: 852 from FA_1 and 277 from FA_2, including 16 T2 grids and 75 MM layouts. No additional terrain-profile matches came from the added disc archives. They add reference pictures, video and audio for later work; keep them available. `disc1/SETUP.ESA` is also present; it is now decoded, and that run predates the container reader, so its counts cover the loose archives only. Its presence alone does not establish package completeness.
 
 Pakistan and Persian Gulf layouts contain `tmap` coordinates of -4 along grid borders. These are preserved as signed values in metadata, not rejected or converted to large unsigned positions. Rendering those border patches and native edge semantics remains future work.
 

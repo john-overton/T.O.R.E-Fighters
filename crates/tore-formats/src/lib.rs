@@ -58,6 +58,8 @@ pub struct Entry {
 }
 pub struct Archive {
     source: Source,
+    /// File offset the archive starts at; nonzero when it is stored inside a container.
+    base: u64,
     pub entries: BTreeMap<String, Entry>,
 }
 enum Source {
@@ -69,14 +71,32 @@ impl Archive {
         let entries = Self::directory(&data, data.len())?;
         Ok(Self {
             source: Source::Memory(data),
+            base: 0,
             entries,
         })
     }
     /// Read just the directory; resource reads seek directly into the archive.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let mut file = File::open(path)?;
-        let file_size = usize::try_from(file.metadata()?.len())
-            .map_err(|_| invalid("archive too large for this host"))?;
+        let file = File::open(path)?;
+        let len = file.metadata()?.len();
+        Self::from_file(file, 0, len)
+    }
+    /// Serve an archive stored inside a larger file, such as a LIB inside `SETUP.ESA`.
+    /// `len` is the archive's own length; every read is offset by `offset`.
+    pub fn open_at(path: impl AsRef<Path>, offset: u64, len: u64) -> Result<Self> {
+        let file = File::open(path)?;
+        let end = offset
+            .checked_add(len)
+            .ok_or_else(|| invalid("archive window overflows the file"))?;
+        if end > file.metadata()?.len() {
+            return Err(invalid("archive window lies outside the file"));
+        }
+        Self::from_file(file, offset, len)
+    }
+    fn from_file(mut file: File, base: u64, len: u64) -> Result<Self> {
+        let file_size =
+            usize::try_from(len).map_err(|_| invalid("archive too large for this host"))?;
+        file.seek(SeekFrom::Start(base))?;
         let mut header = [0; 7];
         file.read_exact(&mut header)?;
         if &header[..5] != b"EALIB" {
@@ -92,6 +112,7 @@ impl Archive {
         let entries = Self::directory(&directory, file_size)?;
         Ok(Self {
             source: Source::File(Mutex::new(file)),
+            base,
             entries,
         })
     }
@@ -164,7 +185,7 @@ impl Archive {
                 let mut file = file
                     .lock()
                     .map_err(|_| io::Error::other("archive file lock poisoned"))?;
-                file.seek(SeekFrom::Start(entry.offset as u64))?;
+                file.seek(SeekFrom::Start(self.base + entry.offset as u64))?;
                 let mut data = vec![0; entry.size];
                 file.read_exact(&mut data)?;
                 data
@@ -202,6 +223,28 @@ mod tests {
         assert_eq!(archive.read("test.txt").unwrap(), b"abc");
         data[39] = 45;
         assert!(Archive::parse(data).is_err());
+    }
+    #[test]
+    fn open_at_reads_an_archive_stored_inside_a_larger_file() {
+        let mut archive = b"EALIB\x01\x00".to_vec();
+        archive.extend_from_slice(b"TEST.TXT\0\0\0\0\0\0");
+        archive.extend_from_slice(&43_u32.to_le_bytes());
+        archive.extend_from_slice(&[0; 14]);
+        archive.extend_from_slice(&46_u32.to_le_bytes());
+        archive.extend_from_slice(b"abc");
+        let base = 17_u64;
+        let mut file = vec![0xcd; base as usize];
+        file.extend_from_slice(&archive);
+        file.extend_from_slice(b"trailing bytes");
+        let path = std::env::temp_dir().join(format!("tore-open-at-{}.bin", std::process::id()));
+        std::fs::write(&path, &file).unwrap();
+        let opened = Archive::open_at(&path, base, archive.len() as u64).unwrap();
+        assert_eq!(opened.read("test.txt").unwrap(), b"abc");
+        // The sentinel compares against the archive length, not the whole file.
+        assert!(Archive::open_at(&path, base, archive.len() as u64 + 1).is_err());
+        assert!(Archive::open_at(&path, base, file.len() as u64).is_err());
+        assert!(Archive::open(&path).is_err());
+        let _ = std::fs::remove_file(&path);
     }
 }
 
