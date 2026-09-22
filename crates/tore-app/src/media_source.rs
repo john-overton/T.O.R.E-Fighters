@@ -413,11 +413,14 @@ pub(crate) fn candidates(budget: Duration) -> Vec<MediaSource> {
 
 /// Record the source a successful import read, beside the pack.
 pub(crate) fn remember(data_dir: &Path, source: &MediaSource) -> io::Result<()> {
-    let text = format!(
-        "path={}\nkind={}\n",
-        source.path.display(),
-        source.kind.word()
-    );
+    // A relative path only means something from the directory the app was
+    // launched in; store an absolute one so a later launch elsewhere finds it.
+    let path = if source.path.is_absolute() {
+        source.path.clone()
+    } else {
+        std::env::current_dir()?.join(&source.path)
+    };
+    let text = format!("path={}\nkind={}\n", path.display(), source.kind.word());
     preferences::write(&data_dir.join(REMEMBERED), &text)
 }
 
@@ -738,6 +741,21 @@ mod tests {
         assert!(remembered(&data.0).is_none());
         fs::write(data.join(REMEMBERED), "path=/a\nkind=floppy\n").unwrap();
         assert!(remembered(&data.0).is_none());
+    }
+
+    #[test]
+    fn a_relative_source_is_remembered_absolutely() {
+        let data = TempDir::new();
+        let relative = MediaSource {
+            path: PathBuf::from("gameassets/fighters-anthology"),
+            kind: Kind::Installed,
+            container: None,
+        };
+        remember(&data.0, &relative).unwrap();
+        let (path, kind) = remembered(&data.0).unwrap();
+        assert!(path.is_absolute(), "{}", path.display());
+        assert!(path.ends_with("gameassets/fighters-anthology"));
+        assert_eq!(kind, Kind::Installed);
     }
 
     #[test]
