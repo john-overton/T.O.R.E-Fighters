@@ -684,12 +684,11 @@ impl Combat {
             pose.brake = 0.;
             pose.hook = 0.;
             let vertices = model.vertices(&pose, &camera, world);
-            crate::target_window::fit_with_objective(
+            crate::target_window::fit(
                 &mut camera,
                 vertices
                     .chunks_exact(10)
                     .map(|v| [f64::from(v[0]), f64::from(v[1]), f64::from(v[2])]),
-                self.ai_poses,
             );
         }
         Some(camera)

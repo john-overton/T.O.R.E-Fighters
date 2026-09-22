@@ -107,7 +107,8 @@ Restart restores all six groups.
 
 The existing combat AI remains partial. Scoped [player wing commands and radio](ai.md#live-wing-command-and-radio-integration)
 are connected, including recipient outcomes and cancellation. Broader mission
-orders, persistent protection policy and full missile acquisition remain. Separate wing placement and formation following do not
+campaign routes and scoring remain. Persistent protection and reviewed missile
+acquisition are connected through the current AI services. Separate wing placement and formation following do not
 establish combat or retail parity.
 
 ## Straight-flight mission fixtures
@@ -173,10 +174,19 @@ restart, real runway support, takeoff probes and rendering checks.
 
 ## Group objectives
 
-All six groups carry editable objective stamps in addition to aircraft, count
-and skill. The stamps use the existing creator font, field styling and popup
-controls. Click to choose, right-click to cycle backward, or use Tab/arrows and
-Enter. Mission inheritance, free engagement, CAP, opposing-group intercept,
-same-side-group escort, self-defense and weapons hold are available. Inactive
-groups preserve their selection. [Assignment semantics and Shift-4 display](ai-awareness.md#quick-mission-objective-stamps)
-are defined once in the AI specification.
+All six groups carry objective selectors in ordinary briefing sentences, using
+the same `line` layout, font and beveled inline fields as the other mission
+parameters. Wing counts use 14-pixel row spacing; objective sentences occupy
+rows 201, 215 and 229 in each column. Separate survival-required/optional
+sentences occupy rows 249, 263 and 277. Other mission parameters begin at row
+301, with the optional airport row at 399, clear of the bottom buttons.
+
+For example, `Your primary target is enemy group 1.` identifies that group as
+the player's mission objective. `Your flight will use free fire.` permits any
+observed eligible hostile without assigning every enemy as a primary objective.
+CAP, protection, self-defense, hold and mission inheritance remain available.
+Click an objective field to choose, right-click to cycle backward, or use
+Tab/arrows and Enter. Survival fields toggle between required and optional.
+Inactive groups preserve both settings. [Assignment and target-label rules](ai-awareness.md#quick-mission-objective-stamps)
+define the semantics; [validation](../baselines/mission-objectives.md) covers
+styling and two opposing-group discrimination.

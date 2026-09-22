@@ -114,8 +114,8 @@ four-tier memory, searching in Target view, shared AI/RWR missile information,
 blinking incoming-missile plots, skill-based defensive timing, jink/notch/dive,
 chaff/flare responses and mission roles. Visual awareness, frozen memory and
 search/Target-view activity, missile defense and shared RWR missile information
-are implemented. Mission roles, six Quick Mission group objectives and their
-Shift-4 stamps are connected. Full campaign routes/scoring and human balance
+are implemented. Mission roles, six sentence-style Quick Mission objective/survival selectors
+and player-relative Shift-4 Survive/Destroy labels are connected. Full campaign routes/scoring and human balance
 review remain separate work. The rules are authored behavior, not a claim of retail
 parity. [Stage validation](baselines/ai-awareness.md). The
 [delivery sequence](ROADMAP.md#m1-air-to-air-awareness-delivery) builds

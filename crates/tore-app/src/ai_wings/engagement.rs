@@ -216,6 +216,26 @@ impl AiWings {
         }
     }
 
+    pub fn apply_group_survival(&mut self, groups: &[bool; 6]) {
+        let ids = groups
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, required)| *required)
+            .flat_map(|(index, _)| {
+                let side = if index < 3 {
+                    launch::Side::Friendly
+                } else {
+                    launch::Side::Enemy
+                };
+                self.group_members(
+                    launch::WingId::new(side, index as u8 % 3).expect("fixed Quick Mission group"),
+                )
+            })
+            .collect();
+        self.mission.set_must_survive(ids);
+    }
+
     fn group_members(&self, group: launch::WingId) -> Vec<u32> {
         let mut ids: Vec<_> = self
             .slots
@@ -229,50 +249,34 @@ impl AiWings {
         ids
     }
 
-    pub fn objective_stamp(&self, id: u32) -> Option<String> {
-        let assignment = self.mission.actor(id)?.assignment();
-        let group = |ids: &[u32]| {
-            let id = *ids.first()?;
-            if id == PLAYER_ID {
-                Some("FRIENDLY 1".to_owned())
-            } else {
-                self.slot(id).map(|slot| {
-                    format!(
-                        "{} {}",
-                        if slot.side == launch::Side::Friendly {
-                            "FRIENDLY"
-                        } else {
-                            "ENEMY"
-                        },
-                        slot.wing_number
-                    )
-                })
-            }
+    /// Player-relative mission requirement for an aircraft target. Allegiance
+    /// is checked before assignment lists so invalid cross-side metadata cannot
+    /// manufacture a destroy or survival requirement.
+    pub fn target_objective(&self, id: u32) -> Option<crate::target_window::TargetObjective> {
+        use crate::target_window::TargetObjective;
+        let side = if id == PLAYER_ID {
+            launch::Side::Friendly
+        } else {
+            self.slot(id)?.side
         };
-        Some(match assignment.stance {
-            Stance::WeaponsHold => "HOLD FIRE".into(),
-            Stance::SelfDefense => "SELF DEFENSE".into(),
-            Stance::ProtectAssigned => format!(
-                "PROTECT {}",
-                group(&assignment.protected_ids).unwrap_or("NONE".into())
-            ),
-            Stance::EngageAssigned => match assignment.role {
-                Role::FreeEngagement => "FREE ENGAGEMENT".into(),
-                Role::CombatAirPatrol => "AIR PATROL".into(),
-                Role::Intercept | Role::Escort => format!(
-                    "INTERCEPT {}",
-                    group(&assignment.destroy_ids).unwrap_or("NONE".into())
-                ),
-                Role::Disengage => "SELF DEFENSE".into(),
-            },
-        })
+        let assignment = self.mission.player_assignment();
+        match side {
+            launch::Side::Friendly
+                if assignment.protected_ids.contains(&id)
+                    || self.mission.must_survive().contains(&id) =>
+            {
+                Some(TargetObjective::Survive)
+            }
+            launch::Side::Enemy if assignment.destroy_ids.contains(&id) => {
+                Some(TargetObjective::Destroy)
+            }
+            launch::Side::Friendly | launch::Side::Enemy => None,
+        }
     }
 
-    /// Whether this target is an explicit protect or destroy objective for the
-    /// player. Allegiance and mere presence never establish an objective.
+    #[cfg(test)]
     pub fn objective_for_player(&self, id: u32) -> bool {
-        let assignment = self.mission.player_assignment();
-        assignment.protected_ids.contains(&id) || assignment.destroy_ids.contains(&id)
+        self.target_objective(id).is_some()
     }
 }
 
@@ -401,17 +405,46 @@ mod tests {
         );
         assert!(wings.objective_for_player(3));
         assert!(!wings.objective_for_player(1));
-        assert_eq!(
-            wings.objective_stamp(1).as_deref(),
-            Some("INTERCEPT ENEMY 1")
-        );
-        assert_eq!(wings.objective_stamp(3).as_deref(), Some("SELF DEFENSE"));
         let actor = wings.mission.actor(3).unwrap();
         let mut readout =
             crate::target_window::Readout::new(&targets[2], actor.flight(), "TEST".into());
         readout.with_activity(&wings);
-        assert_eq!(readout.objective, Some(true));
-        assert_eq!(readout.objective_stamp.as_deref(), Some("SELF DEFENSE"));
+        assert_eq!(
+            readout.objective,
+            Some(crate::target_window::TargetObjective::Destroy)
+        );
+    }
+
+    #[test]
+    fn target_objectives_are_player_relative_and_side_checked() {
+        use crate::target_window::TargetObjective;
+        let (mut wings, _) = super::super::tests::build(None);
+
+        let mut survival = [false; 6];
+        survival[1] = true;
+        survival[3] = true;
+        wings.apply_group_survival(&survival);
+        assert_eq!(wings.mission.must_survive(), [1, 2, 3, 4]);
+        assert_eq!(wings.target_objective(1), Some(TargetObjective::Survive));
+        assert_eq!(wings.target_objective(3), None);
+
+        survival[1] = false;
+        wings.apply_group_survival(&survival);
+        let mut objectives = [GroupObjective::Inherit; 6];
+        objectives[0] =
+            GroupObjective::Escort(launch::WingId::new(launch::Side::Friendly, 1).unwrap());
+        objectives[1] = GroupObjective::Free;
+        wings.apply_group_objectives(&objectives, [0.; 3]);
+        assert_eq!(wings.target_objective(1), Some(TargetObjective::Survive));
+        assert_eq!(wings.target_objective(2), Some(TargetObjective::Survive));
+
+        objectives[0] =
+            GroupObjective::Intercept(launch::WingId::new(launch::Side::Enemy, 0).unwrap());
+        wings.apply_group_objectives(&objectives, [0.; 3]);
+        assert_eq!(wings.target_objective(3), Some(TargetObjective::Destroy));
+        assert_eq!(wings.target_objective(4), Some(TargetObjective::Destroy));
+        assert_eq!(wings.target_objective(1), None);
+        assert_eq!(wings.target_objective(99), None);
     }
 
     #[test]

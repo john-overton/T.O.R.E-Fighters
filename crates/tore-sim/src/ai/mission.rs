@@ -458,6 +458,7 @@ pub struct AiMission {
     external_leaders: Vec<(super::targeting::Side, u8, u32)>,
     missiles: Vec<MissileSnapshot>,
     player_assignment: engagement::Assignment,
+    must_survive: Vec<u32>,
     pending_attack_reports: Vec<(u32, ObservedAttack)>,
 }
 
@@ -479,8 +480,20 @@ impl AiMission {
             external_leaders: Vec::new(),
             missiles: Vec::new(),
             player_assignment: engagement::Assignment::default(),
+            must_survive: Vec::new(),
             pending_attack_reports: Vec::new(),
         }
+    }
+
+    pub fn must_survive(&self) -> &[u32] {
+        &self.must_survive
+    }
+
+    /// Mission requirements do not silently replace aircraft combat orders.
+    pub fn set_must_survive(&mut self, mut ids: Vec<u32>) {
+        ids.sort_unstable();
+        ids.dedup();
+        self.must_survive = ids;
     }
 
     pub fn player_assignment(&self) -> &engagement::Assignment {

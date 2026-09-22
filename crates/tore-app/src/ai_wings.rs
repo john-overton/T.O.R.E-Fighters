@@ -1578,6 +1578,8 @@ mod tests {
     use tore_sim::{
         ai::{
             Experience,
+            controller::TargetView,
+            engagement::{GroupObjective, Policy, Priority},
             experience::{EnemySkillOverride, ExperienceOrigin},
             launch::{WingId, WingSelection, resolve_wings},
         },
@@ -1868,6 +1870,115 @@ mod tests {
             target(3, [0., 20000., 40000.], std::f64::consts::PI),
             target(4, [1500., 20000., 40000.], std::f64::consts::PI),
         ]
+    }
+
+    #[test]
+    fn player_group_objective_distinguishes_two_populated_enemy_groups_from_free_fire() {
+        let selections = [
+            (launch::Side::Friendly, 1u8),
+            (launch::Side::Enemy, 0),
+            (launch::Side::Enemy, 1),
+        ]
+        .map(|(side, index)| WingSelection {
+            wing: WingId::new(side, index).unwrap(),
+            aircraft: AircraftId::F18,
+            count: 2,
+            skill_level: 1,
+        });
+        let payload = resolve_wings(&selections, None).unwrap();
+        let targets = vec![
+            target(1, [0., 20000., 0.], 0.),
+            target(2, [1500., 20000., 0.], 0.),
+            target(3, [0., 20000., 40000.], std::f64::consts::PI),
+            target(4, [1500., 20000., 40000.], std::f64::consts::PI),
+            target(5, [8000., 20000., 40000.], std::f64::consts::PI),
+            target(6, [9500., 20000., 40000.], std::f64::consts::PI),
+        ];
+        let mut wings =
+            AiWings::build_with(&payload, &targets, 0, |_| Ok((aircraft(), None))).unwrap();
+        let enemy_one = WingId::new(launch::Side::Enemy, 0).unwrap();
+        let mut objectives = [GroupObjective::Inherit; 6];
+        objectives[0] = GroupObjective::Intercept(enemy_one);
+        objectives[1] = GroupObjective::Intercept(enemy_one);
+        wings.apply_group_objectives(&objectives, [0., 20000., 0.]);
+
+        assert_eq!(wings.mission.player_assignment().destroy_ids, [3, 4]);
+        for id in [1, 2] {
+            assert_eq!(
+                wings.mission.actor(id).unwrap().assignment().destroy_ids,
+                [3, 4]
+            );
+        }
+        for id in [3, 4] {
+            assert!(wings.objective_for_player(id));
+        }
+        for id in [5, 6] {
+            assert!(!wings.objective_for_player(id));
+        }
+        let mut group_one = crate::target_window::Readout::new(
+            &targets[2],
+            wings.mission.actor(3).unwrap().flight(),
+            "TEST".into(),
+        );
+        group_one.with_activity(&wings);
+        let mut group_two = crate::target_window::Readout::new(
+            &targets[4],
+            wings.mission.actor(5).unwrap().flight(),
+            "TEST".into(),
+        );
+        group_two.with_activity(&wings);
+        assert_eq!(
+            group_one.objective,
+            Some(crate::target_window::TargetObjective::Destroy)
+        );
+        assert_eq!(group_two.objective, None);
+
+        objectives[0] = GroupObjective::Free;
+        wings.apply_group_objectives(&objectives, [0., 20000., 0.]);
+        assert!(wings.mission.player_assignment().destroy_ids.is_empty());
+        assert!(
+            [3, 4, 5, 6]
+                .into_iter()
+                .all(|id| !wings.objective_for_player(id))
+        );
+        let contact = |id, position| TargetView {
+            id,
+            side: ENEMY_SIDE,
+            position,
+            heading_deg: 0.,
+            pitch_deg: 0.,
+            speed: ScalarSpeed(400.),
+            maximum_speed: ScalarSpeed(800.),
+            is_aircraft: true,
+            is_fighter: true,
+            human_controlled: false,
+            valid: true,
+            type_allowed: true,
+            seeker_eligible: true,
+            wing_attackers: 0,
+            terrain_blocked: false,
+            sensor_supported: true,
+        };
+        for candidate in [
+            contact(3, [1000., 20000., 0.]),
+            contact(5, [1000., 20000., 0.]),
+        ] {
+            let selected = Policy::default()
+                .select(
+                    PLAYER_ID,
+                    FRIENDLY_SIDE,
+                    [0., 20000., 0.],
+                    wings.mission.player_assignment(),
+                    &[candidate],
+                    &[],
+                    &[],
+                    None,
+                    1,
+                )
+                .unwrap();
+            assert_eq!(selected.id, candidate.id);
+            assert_eq!(selected.priority, Priority::Free);
+        }
     }
 
     #[test]

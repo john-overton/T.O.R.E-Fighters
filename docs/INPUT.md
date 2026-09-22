@@ -696,8 +696,10 @@ existing controller profiles. See [systems behavior](spec/systems-damage.md).
 
 ## Quick Mission group objectives
 
-Click the objective stamp below any friendly or enemy group to choose its duty.
-Right-click cycles backward. Tab/Shift-Tab and the arrow keys reach all six
-stamps; Enter opens the selection. Shift-4 shows the selected aircraft's group
-objective separately from its current activity and the player's objective
-marker. [Available objectives and rules](spec/ai-awareness.md#quick-mission-objective-stamps).
+Click the highlighted objective in a friendly or enemy group's briefing sentence
+to choose its primary group, free fire or other duty. Right-click cycles
+backward. Click its survival field to toggle required/optional. Tab/Shift-Tab
+and arrow keys reach all objective and survival fields; Enter activates them.
+Shift-4 shows only `Obj: Survive` for a protected/required friendly or `Obj:
+Destroy` for a designated enemy objective. Other contacts have no objective
+label. [Assignment rules](spec/ai-awareness.md#quick-mission-objective-stamps).

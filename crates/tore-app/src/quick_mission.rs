@@ -24,6 +24,7 @@ const UP: usize = 72;
 const DOWN: usize = 73;
 const OBJECTIVE_BASE: usize = 80;
 const OBJECTIVE_COUNT: usize = 6;
+const SURVIVAL_BASE: usize = OBJECTIVE_BASE + OBJECTIVE_COUNT;
 #[derive(Clone, Debug)]
 pub struct Draft {
     pub values: [usize; 35],
@@ -59,6 +60,8 @@ pub struct QuickMission {
     pub draft: Draft,
     /// Friendly groups 1 through 3, then enemy groups 1 through 3.
     pub group_objectives: [GroupObjective; OBJECTIVE_COUNT],
+    /// Whole-group survival requirement, independent of its combat orders.
+    pub group_must_survive: [bool; OBJECTIVE_COUNT],
     /// Mission-wide setting used when a group inherits its objective.
     pub ai_mission: crate::ai_wings::Preset,
     options: Options,
@@ -163,6 +166,7 @@ impl QuickMission {
             aircraft_files,
             draft,
             group_objectives: [GroupObjective::Inherit; OBJECTIVE_COUNT],
+            group_must_survive: [false; OBJECTIVE_COUNT],
             ai_mission: crate::ai_wings::Preset::Free,
             options,
             selector: None,
@@ -219,6 +223,23 @@ impl QuickMission {
         }
     }
     fn value(&self, id: usize) -> String {
+        if let Some(group) = id
+            .checked_sub(OBJECTIVE_BASE)
+            .filter(|group| *group < OBJECTIVE_COUNT)
+        {
+            return self.objective_label(group);
+        }
+        if let Some(group) = id
+            .checked_sub(SURVIVAL_BASE)
+            .filter(|group| *group < OBJECTIVE_COUNT)
+        {
+            return if self.group_must_survive[group] {
+                "required"
+            } else {
+                "optional"
+            }
+            .into();
+        }
         self.values(id)
             .get(self.draft.values[id])
             .cloned()
@@ -238,13 +259,24 @@ impl QuickMission {
         };
         let mut choices = vec![
             ("Use mission setting".into(), GroupObjective::Inherit),
-            ("Free engagement".into(), GroupObjective::Free),
+            (
+                "Free fire (any opposing group)".into(),
+                GroupObjective::Free,
+            ),
             ("Combat air patrol".into(), GroupObjective::Cap),
         ];
         for index in 0..3 {
             let target = WingId::new(opposing, index).expect("fixed Quick Mission wing");
             choices.push((
-                format!("Intercept opposing group {}", index + 1),
+                format!(
+                    "Primary target: {} group {}",
+                    if opposing == Side::Enemy {
+                        "enemy"
+                    } else {
+                        "friendly"
+                    },
+                    index + 1
+                ),
                 GroupObjective::Intercept(target),
             ));
         }
@@ -252,7 +284,15 @@ impl QuickMission {
             if index != wing {
                 let target = WingId::new(side, index as u8).expect("fixed Quick Mission wing");
                 choices.push((
-                    format!("Escort own group {}", index + 1),
+                    format!(
+                        "Protect {} group {}",
+                        if side == Side::Friendly {
+                            "friendly"
+                        } else {
+                            "enemy"
+                        },
+                        index + 1
+                    ),
                     GroupObjective::Escort(target),
                 ));
             }
@@ -263,21 +303,46 @@ impl QuickMission {
         ]);
         choices
     }
+    fn objective_prefix(&self, group: usize) -> String {
+        let primary = matches!(self.group_objectives[group], GroupObjective::Intercept(_));
+        match (group, primary) {
+            (0, true) => "Your primary target is ".into(),
+            (0, false) => "Your flight will ".into(),
+            (_, true) => format!("Wing {}'s primary target is ", group % 3 + 1),
+            (_, false) => format!("Wing {} will ", group % 3 + 1),
+        }
+    }
     fn objective_label(&self, group: usize) -> String {
         match self.group_objectives[group] {
-            GroupObjective::Inherit => {
-                let inherited = match self.ai_mission {
-                    crate::ai_wings::Preset::SelfDefense => "SELF DEF",
-                    preset => preset.name(),
-                };
-                format!("MISSION: {}", inherited.to_ascii_uppercase())
-            }
-            GroupObjective::Free => "FREE".into(),
-            GroupObjective::Cap => "CAP".into(),
-            GroupObjective::Intercept(wing) => format!("INTERCEPT {}", wing.display_number()),
-            GroupObjective::Escort(wing) => format!("ESCORT {}", wing.display_number()),
-            GroupObjective::SelfDefense => "SELF-DEFENSE".into(),
-            GroupObjective::Hold => "HOLD".into(),
+            GroupObjective::Inherit => match self.ai_mission {
+                crate::ai_wings::Preset::Free => "use free fire (mission)".into(),
+                crate::ai_wings::Preset::Cap => "patrol (mission)".into(),
+                crate::ai_wings::Preset::SelfDefense => "defend itself (mission)".into(),
+                crate::ai_wings::Preset::Hold => "hold fire (mission)".into(),
+                _ => "follow mission orders".into(),
+            },
+            GroupObjective::Free => "use free fire".into(),
+            GroupObjective::Cap => "patrol the area".into(),
+            GroupObjective::Intercept(wing) => format!(
+                "{} group {}",
+                if wing.side == Side::Enemy {
+                    "enemy"
+                } else {
+                    "friendly"
+                },
+                wing.display_number()
+            ),
+            GroupObjective::Escort(wing) => format!(
+                "protect {} group {}",
+                if wing.side == Side::Friendly {
+                    "friendly"
+                } else {
+                    "enemy"
+                },
+                wing.display_number()
+            ),
+            GroupObjective::SelfDefense => "defend itself".into(),
+            GroupObjective::Hold => "hold fire".into(),
         }
     }
     fn selector_values(&self, id: usize) -> Vec<String> {
@@ -442,6 +507,18 @@ impl QuickMission {
     pub fn preview_selector(&mut self, name: &str) -> crate::AppResult<()> {
         match name {
             "normal" | "ordnance" => {}
+            "objectives" => {
+                self.draft.values[7] = 2;
+                self.draft.values[24] = 2;
+                self.group_objectives[0] = GroupObjective::Intercept(WingId::new(Side::Enemy, 0)?);
+                self.group_objectives[1] = GroupObjective::Free;
+                self.group_must_survive[1] = true;
+                self.group_objectives[2] = GroupObjective::Escort(WingId::new(Side::Friendly, 1)?);
+                self.group_objectives[3] =
+                    GroupObjective::Intercept(WingId::new(Side::Friendly, 0)?);
+                self.group_objectives[4] = GroupObjective::Free;
+                self.group_objectives[5] = GroupObjective::Escort(WingId::new(Side::Enemy, 1)?);
+            }
             "aircraft" => self.open(6),
             "theaters" => self.open(13),
             "help" => self.help = true,
@@ -510,7 +587,7 @@ impl QuickMission {
             self.pressed = None;
             self.right_pressed = self.hover.filter(|id| {
                 (3..=34).contains(id)
-                    || (OBJECTIVE_BASE..OBJECTIVE_BASE + OBJECTIVE_COUNT).contains(id)
+                    || (OBJECTIVE_BASE..SURVIVAL_BASE + OBJECTIVE_COUNT).contains(id)
             });
             return Action::None;
         }
@@ -523,6 +600,11 @@ impl QuickMission {
         };
         if id == 34 && !self.ground_start() {
             return Action::None;
+        }
+        if (SURVIVAL_BASE..SURVIVAL_BASE + OBJECTIVE_COUNT).contains(&id) {
+            self.group_must_survive[id - SURVIVAL_BASE] ^= true;
+            self.focus = id;
+            return Action::Click;
         }
         if let Some(group) = id
             .checked_sub(OBJECTIVE_BASE)
@@ -638,6 +720,10 @@ impl QuickMission {
                 self.focus = id;
                 self.open(id);
             }
+            SURVIVAL_BASE..=91 => {
+                self.focus = id;
+                self.group_must_survive[id - SURVIVAL_BASE] ^= true;
+            }
             _ => return Action::None,
         }
         Action::Click
@@ -677,7 +763,7 @@ impl QuickMission {
             "Tab" | "ArrowDown" | "ArrowUp" => {
                 let backwards = shift || key == "ArrowUp";
                 let focus_order: Vec<_> = (1..=if self.ground_start() { 34 } else { 33 })
-                    .chain(OBJECTIVE_BASE..OBJECTIVE_BASE + OBJECTIVE_COUNT)
+                    .chain(OBJECTIVE_BASE..SURVIVAL_BASE + OBJECTIVE_COUNT)
                     .collect();
                 self.focus = if let Some(position) =
                     focus_order.iter().position(|field| *field == self.focus)
@@ -745,8 +831,7 @@ impl QuickMission {
         for (x, start) in [(35, 4), (340, 21)] {
             for wing in 0..3 {
                 let id = start + wing * 3;
-                let group = wing + usize::from(start == 21) * 3;
-                let y = 153 + wing as i32 * 21;
+                let y = 153 + wing as i32 * 14;
                 self.line(
                     &mut c,
                     font,
@@ -761,27 +846,48 @@ impl QuickMission {
                         ("", Some(id + 2)),
                     ],
                 );
-                let objective_id = OBJECTIVE_BASE + group;
-                let label = self.objective_label(group);
-                let stamp_x = if start == 4 { 176 } else { 481 };
-                let rect = (stamp_x, y + 10, 123, 11);
-                self.controls.push((objective_id, rect));
-                c.rect(
-                    rect,
-                    if self.hover == Some(objective_id) {
-                        [127, 139, 144, 255]
-                    } else {
-                        [72, 82, 86, 255]
-                    },
+            }
+            for wing in 0..3 {
+                let group = wing + usize::from(start == 21) * 3;
+                let prefix = self.objective_prefix(group);
+                self.line(
+                    &mut c,
+                    font,
+                    x,
+                    201 + wing as i32 * 14,
+                    &[
+                        (&prefix, None),
+                        ("", Some(OBJECTIVE_BASE + group)),
+                        (".", None),
+                    ],
                 );
-                bevel(&mut c, rect, false);
-                c.text(font, &fit(font, &label, 117), stamp_x + 3, y + 11, None);
+            }
+        }
+        for (x, side_offset) in [(35, 0), (340, 3)] {
+            for wing in 0..3 {
+                let group = side_offset + wing;
+                let prefix = if group == 0 {
+                    "Your group's survival is ".to_owned()
+                } else {
+                    format!("Wing {}'s survival is ", wing + 1)
+                };
+                self.line(
+                    &mut c,
+                    font,
+                    x,
+                    249 + wing as i32 * 14,
+                    &[
+                        (&prefix, None),
+                        ("", Some(SURVIVAL_BASE + group)),
+                        (".", None),
+                    ],
+                );
             }
         }
         for (y, parts) in [
-            (221, vec![("You are flying over ", None), ("", Some(13))]),
+            (301, vec![("You are flying over ", None), ("", Some(13))]),
             (
-                235,
+                315,
                 vec![
                     (
                         if self.ground_start() {
@@ -796,31 +902,31 @@ impl QuickMission {
                     ("", Some(15)),
                 ],
             ),
-            (249, vec![("Your situation is ", None), ("", Some(16))]),
+            (329, vec![("Your situation is ", None), ("", Some(16))]),
             (
-                263,
+                343,
                 vec![
                     ("You are ", None),
                     ("", Some(17)),
                     (" from enemy forces.", None),
                 ],
             ),
-            (291, vec![("You are carrying ", None), ("", Some(18))]),
-            (305, vec![("Air combat is with ", None), ("", Some(19))]),
+            (371, vec![("You are carrying ", None), ("", Some(18))]),
+            (385, vec![("Air combat is with ", None), ("", Some(19))]),
         ] {
             self.line(&mut c, font, 35, y, &parts);
         }
-        self.line(&mut c, font, 35, 277, &[("Start: ", None), ("", Some(33))]);
+        self.line(&mut c, font, 35, 357, &[("Start: ", None), ("", Some(33))]);
         if self.ground_start() {
             self.line(
                 &mut c,
                 font,
                 35,
-                319,
+                399,
                 &[("Airport: ", None), ("", Some(34))],
             );
         }
-        let (mut x, mut y) = (340, 221);
+        let (mut x, mut y) = (340, 301);
         for (text, id) in [
             ("Friendly ground target is ", None),
             ("", Some(30)),
@@ -1169,6 +1275,29 @@ mod tests {
     }
 
     #[test]
+    fn survival_requirement_is_independent_of_orders_and_inactive_group_count() {
+        let mut q = setup();
+        let group = 1;
+        q.draft.values[7] = 0;
+        q.group_objectives[group] = GroupObjective::Intercept(WingId::new(Side::Enemy, 0).unwrap());
+        assert!(matches!(q.activate(SURVIVAL_BASE + group), Action::Click));
+        assert!(q.group_must_survive[group]);
+        assert_eq!(q.value(SURVIVAL_BASE + group), "required");
+        q.draft.values[7] = 3;
+        assert!(q.group_must_survive[group]);
+        assert_eq!(
+            q.group_objectives[group],
+            GroupObjective::Intercept(WingId::new(Side::Enemy, 0).unwrap())
+        );
+        assert!(matches!(
+            right_click(&mut q, SURVIVAL_BASE + group),
+            Action::Click
+        ));
+        assert!(!q.group_must_survive[group]);
+        assert_eq!(q.value(SURVIVAL_BASE + group), "optional");
+    }
+
+    #[test]
     fn objective_choices_restrict_targets_by_side_and_exclude_self_escort() {
         for group in 0..OBJECTIVE_COUNT {
             let side = if group < 3 {
@@ -1218,15 +1347,15 @@ mod tests {
     #[test]
     fn inherited_stamp_names_the_actual_mission_setting() {
         let mut q = setup();
-        assert_eq!(q.objective_label(0), "MISSION: FREE");
+        assert_eq!(q.objective_label(0), "use free fire (mission)");
         q.ai_mission = crate::ai_wings::Preset::Escort;
-        assert_eq!(q.objective_label(5), "MISSION: ESCORT");
+        assert_eq!(q.objective_label(5), "follow mission orders");
         q.ai_mission = crate::ai_wings::Preset::SelfDefense;
-        assert_eq!(q.objective_label(2), "MISSION: SELF DEF");
+        assert_eq!(q.objective_label(2), "defend itself (mission)");
         q.group_objectives[2] = GroupObjective::Intercept(
             WingId::new(Side::Enemy, 2).expect("fixed Quick Mission wing"),
         );
-        assert_eq!(q.objective_label(2), "INTERCEPT 3");
+        assert_eq!(q.objective_label(2), "enemy group 3");
     }
     #[test]
     fn all_six_skill_selectors_launch_dummy_members() {
@@ -1327,7 +1456,7 @@ mod tests {
         assert_eq!(q.focus, 33);
         q.key("Tab", false);
         assert_eq!(q.focus, OBJECTIVE_BASE);
-        for expected in OBJECTIVE_BASE + 1..OBJECTIVE_BASE + OBJECTIVE_COUNT {
+        for expected in OBJECTIVE_BASE + 1..SURVIVAL_BASE + OBJECTIVE_COUNT {
             q.key("Tab", false);
             assert_eq!(q.focus, expected);
         }
@@ -1343,7 +1472,7 @@ mod tests {
         assert_eq!(q.focus, 34);
         q.focus = 1;
         q.key("Tab", true);
-        assert_eq!(q.focus, OBJECTIVE_BASE + OBJECTIVE_COUNT - 1);
+        assert_eq!(q.focus, SURVIVAL_BASE + OBJECTIVE_COUNT - 1);
         q.key("ArrowDown", false);
         assert_eq!(q.focus, 1);
     }

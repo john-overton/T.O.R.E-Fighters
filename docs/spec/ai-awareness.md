@@ -15,7 +15,7 @@ defense, RWR missile presentation and mission engagement. Visual awareness,
 aircraft memory and contact-loss search are implemented in the existing aircraft
 runtime. Missile defense and shared AI/RWR missile information are implemented
 for reviewed missile profiles. Mission roles, engagement rules and per-group
-Quick Mission objective stamps are connected to both sides' aircraft. Delivery sequencing is defined in
+Quick Mission objective and survival selectors are connected to both sides' aircraft. Delivery sequencing is defined in
 [M1e](../ROADMAP.md#m1-air-to-air-awareness-delivery).
 
 The requirements are **opinionated** gameplay behavior. Existing equipment,
@@ -176,8 +176,7 @@ orbit geometry or scan timing.
 Expose these states from the simulation to the existing Target window activity
 line. Keep the existing tactical goal codes; SEARCHING is an activity, not a new
 unsupported goal letter. Preserve the distinction between attacking the player
-and attacking somebody else. Populate MISSION OBJECTIVE only from a real
-protect/destroy assignment. The display reads state and cannot drive decisions.
+and attacking somebody else. Populate the objective row only from player-relative mission requirements. The display reads state and cannot drive decisions.
 
 Optional development visualization: cone extent, last observation point, age,
 source and decision reason. Keep this in a debug overlay. Target-view activity
@@ -548,19 +547,24 @@ Immediate missile defense and fuel recovery take precedence. CAP returns toward
 its assigned center outside the patrol radius. Full route navigation and
 mission success/failure scoring remain outside this slice.
 
-### Quick Mission objective stamps
+<a id="quick-mission-objective-stamps"></a>
 
-Each of the three friendly and three enemy groups has its own objective stamp.
-Click the stamp to choose an objective. Right-click cycles backward. Tab and
-arrow navigation include all six stamps; popup navigation uses existing keys.
-Use the original creator art and font.
+### Quick Mission objective selectors
+
+Each of the three friendly and three enemy groups has an objective selector in
+a briefing sentence, using the same font, inline field boxes, spacing and popup
+controls as the other Quick Mission parameters. A primary assignment reads
+`Your primary target is enemy group 1.` or `Wing 2's primary target is friendly
+group 1.` Free fire reads `Your flight will use free fire.` Click the highlighted
+field to choose; right-click cycles backward. Tab and arrow navigation reach all
+six objective fields and the six survival fields.
 
 | Objective | Assignment |
 | --- | --- |
 | Use mission setting | Inherit the selected mission preset; normal default is free engagement |
-| Free engagement | Engage observed eligible hostiles |
+| Free fire (any opposing group) | Engage observed eligible hostiles without a designated primary group |
 | Combat air patrol | Patrol a 10 NM horizontal circle centered on the player launch position |
-| Intercept opposing group 1, 2 or 3 | Assign every aircraft in that group as a destroy objective |
+| Primary target: opposing group 1, 2 or 3 | Assign every aircraft in that group as a destroy objective; unrelated groups are not primary objectives |
 | Escort another same-side group | Protect every aircraft in the chosen group |
 | Self-defense | Engage only independently identified immediate attackers |
 | Weapons hold | No offensive fire; defense and countermeasures remain available |
@@ -573,8 +577,16 @@ from a different group. Inactive groups retain their selected stamps for later
 editing. Mission restart rebuilds the same group assignments with fresh memory.
 The settings are session-local; campaign/save persistence remains separate.
 
+Each group also has a separate `survival is required/optional` field. Required
+marks every actual group member as a must-survive mission object. Friendly group
+1 includes the player. An inactive group contributes no object IDs; its setting
+is retained when its aircraft count changes. Both sides can carry their own
+survival requirements, independently of their combat orders. The flag supplies
+mission metadata and presentation; it does not silently replace an intercept,
+escort or free-fire order. Mission result/scoring evaluation remains separate.
+
 `--ai-mission free|cap|intercept|escort|self-defense|hold` selects the inherited
-Quick Mission preset. Explicit group stamps override it. Intercept targets the
+Quick Mission preset. Explicit group selections override it. Intercept targets the
 first enemy aircraft; its other aircraft protect it. Escort assigns friendly
 AI to protect the player, the enemy principal to intercept the player, and
 enemy escorts to protect that principal. These are authored M1 presets using
@@ -582,13 +594,20 @@ current fighter aircraft, not additional bomber or transport behavior families.
 Hostile escort relationships are explicit metadata derived from assignments;
 they affect priority only after observation and a perceived threat report.
 
-Every AI aircraft inherits its group's resolved duty, on both sides. Shift-4
-shows that duty in a separate objective line, such as `INTERCEPT ENEMY 1`,
-`PROTECT FRIENDLY 2`, `AIR PATROL` or `HOLD FIRE`. Activity remains a separate
-live field. The `MISSION OBJECTIVE` marker still means the selected aircraft
-is a protect/destroy objective for the player's assignment. The player's group
-stamp supplies objectives and AI-wingman orders; it does not automate human
-controls or enforce player trigger discipline. Dummy aircraft retain straight
+Every AI aircraft inherits its group's resolved duty on both sides. Shift-4
+shows a single player-relative requirement for the selected aircraft:
+
+- `Obj: Survive` for a friendly assigned to the player's protection, or marked
+  must-survive in the mission requirements.
+- `Obj: Destroy` for an enemy explicitly assigned as the player's destroy
+  objective. Merely appearing in another group's orders does not qualify.
+- No objective label for other contacts, including unrelated enemy groups and
+  free-fire contacts without a specific requirement.
+
+Live activity, skill and tactical goal remain separate from the objective row. Enemy-side survival
+requirements cannot appear as a player-side survival objective. The player's
+group setting supplies objectives and AI-wingman orders; it does not automate
+human controls or restrict the player's trigger. Dummy aircraft retain straight
 flight regardless of their stored objective.
 
 ## Acceptance criteria

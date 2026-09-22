@@ -1139,14 +1139,10 @@ impl Instruments {
                     r.rect(145, 23, 2, 46, [0, 0, 0, 255]);
                     let filled = (target.damage * 46.).round() as i32;
                     r.rect(145, 69 - filled, 2, filled, [255, 255, 255, 255]);
-                    if let Some(stamp) = &target.objective_stamp {
-                        let stamp = fit(stamp, 134);
-                        r.text(f, &stamp, 12 + (134 - width(&stamp)) / 2, 100, ink);
-                    }
                     let objective = match target.objective {
-                        Some(true) => "MISSION OBJECTIVE",
-                        Some(false) => "",
-                        None => "OBJECTIVE ?",
+                        Some(crate::target_window::TargetObjective::Survive) => "Obj: Survive",
+                        Some(crate::target_window::TargetObjective::Destroy) => "Obj: Destroy",
+                        None => "",
                     };
                     r.text(f, objective, 12 + (134 - width(objective)) / 2, 111, ink);
                     r.text(f, &target.bearing, 12, 124, ink);

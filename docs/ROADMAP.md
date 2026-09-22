@@ -443,7 +443,7 @@ Exit: the loop can be run a hundred times headless with a fixed seed and produce
 skill-scaled memory, search, missile defense, shared AI/RWR threat information
 and mission rules. Observation/memory and search/Target-view activity are
 implemented. Missile defense and shared RWR information are implemented;
-mission rules and six per-group objective stamps are implemented. Surface AI
+mission rules and six per-group objective/survival selectors are implemented. Surface AI
 and additional behavior families remain in the broader backlog, outside this scope.
 
 The [main AI behavior specification](spec/ai.md) now covers established fighter

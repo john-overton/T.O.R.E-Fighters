@@ -45,14 +45,12 @@ on 2026-09-21, an opinionated timing choice.
   threshold is opinionated; the manual does not give the original number.
 - Bottom right alternates slant distance in NM and ground speed in KTS every
   360 simulation ticks at 120 Hz, starting with distance. Pausing freezes it.
-- `MISSION OBJECTIVE` identifies an assigned objective. Allegiance alone never
-  establishes an objective. The requested meaning is destroy enemies or protect
-  friendlies. Quick Mission launch data supplies explicit objective assignments. Other
-  contexts display `OBJECTIVE ?` until assignments exist. Known non-objectives
-  have no label.
-- AI targets show their group's resolved objective on a separate row above the
-  player's objective marker. It does not replace the live activity, tactical
-  goal or skill. Both friendly and enemy groups use their own assignments.
+- The objective row shows only `Obj: Survive` or `Obj: Destroy`, relative to the
+  player's assignment. Survive identifies an escorted friendly or a friendly
+  marked must-survive in mission requirements. Destroy identifies an enemy
+  explicitly required by the player's destroy assignment. Other contacts have
+  no objective label. Allegiance alone does not establish a requirement.
+- Activity, tactical goal and skill keep their existing independent meanings.
 - Goal A means attack, E evade, N neutral, T takeoff, C crash, L land.
   Underline A/E only when directed at the player. Skill has 0..3 dots.
 
@@ -70,8 +68,7 @@ remain finite and use that same position. Displayed range, bearing and Hi/Lo
 still measure from the player, never from this presentation camera.
 Agent-chosen framing keeps image roll level and fits aircraft mesh vertices into
 90% of image width and 52% of image height, reserving the top/bottom text rows.
-AI views with a group objective line reserve an additional text band at row 100
-and use 36% of image height. This is an authored layout margin.
+The single objective row is at y=111 and uses the original instrument font.
 One dimension fills that area without cropping the other. Zoom follows projected
 geometry each camera refresh, so range, target size, and aspect cannot leave a
 small target surrounded by empty space. Ground objects use their oriented bounds.

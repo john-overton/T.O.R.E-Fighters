@@ -1218,6 +1218,7 @@ impl App {
                                 &self.quick.group_objectives,
                                 self.flight.position,
                             );
+                            bridge.apply_group_survival(&self.quick.group_must_survive);
                             bridge.mirror_pose_out(&mut self.combat.state.targets);
                             self.combat.ai_poses = !bridge.is_empty();
                             if bridge.is_empty() {
@@ -2670,6 +2671,7 @@ fn ai_probe_run(
     )?;
     bridge.apply_mission_preset(ai_mission, flight.position);
     bridge.apply_group_objectives(&quick.group_objectives, flight.position);
+    bridge.apply_group_survival(&quick.group_must_survive);
     bridge.mirror_pose_out(&mut combat.state.targets);
     println!(
         "AI probe: aircraft={} actors={} ticks={ticks} enemy_skill={enemy_skill:?} mission={ai_mission}",

@@ -749,4 +749,5 @@ cargo run --locked -p tore-app -- --quick-mission --snapshot-state objective-1 -
 ```
 
 Objective popup snapshots accept `objective-1` through `objective-6`, friendly
-then enemy groups. These diagnostics do not replace campaign mission loading.
+then enemy groups. `--snapshot-state objectives` shows a primary-group/free-fire
+example with a required-survival friendly group. These diagnostics do not replace campaign mission loading.

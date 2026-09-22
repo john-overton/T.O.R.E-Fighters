@@ -277,8 +277,9 @@ rolls. RWR drawing reads the same records and never drives the decision clock.
 ranking. `AiMission` delivers perception-only attack reports to assigned escorts
 on the next tick, with a fixed expiry; bearings never become synthetic targets.
 Quick Mission group objectives resolve through stable side/wing/member metadata
-into per-actor assignments. The Target window reads the same assignments for
-its group stamp and independent player-objective marker. Source missions and
+into per-actor assignments. Whole-group survival requirements are stored separately from combat orders.
+The Target window combines player assignments, these requirements and allegiance
+to select a typed Survive/Destroy label, with no label for other contacts. Source missions and
 campaign outcomes remain outside the M1 assignment adapter.
 `ai::formation` owns routine repositioning, trailing, breakout, intercept, stabilization and
 capture guidance. Traffic and arrival states are snapshotted before any actor
