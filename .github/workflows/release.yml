@@ -88,6 +88,23 @@ jobs:
             python tools/check_assets.py target/release/tore-extract
           fi
 
+      # Record what each binary needs at run time, so a missing system library
+      # (the VCRUNTIME140.dll incident of 2026-09-22) shows up in the log
+      # before anyone installs a package.
+      - name: List runtime library dependencies
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            vs=$(/c/Program\ Files\ \(x86\)/Microsoft\ Visual\ Studio/Installer/vswhere.exe -latest -property installationPath | tr -d '\r')
+            dumpbin=$(find "$vs/VC/Tools/MSVC" -name dumpbin.exe -path '*Hostx64/x64*' | head -1)
+            "$dumpbin" /dependents target/release/tore-app.exe
+            "$dumpbin" /dependents target/release/tore-extract.exe
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            otool -L target/release/tore-app target/release/tore-extract
+          else
+            ldd target/release/tore-app target/release/tore-extract
+          fi
+
       # Each script stages a bundle directory, scans it with check_assets.py,
       # builds the package, and scans the finished package too.
       - name: Package (Linux)
