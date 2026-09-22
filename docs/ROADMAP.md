@@ -441,8 +441,9 @@ Exit: the loop can be run a hundred times headless with a fixed seed and produce
 **M1 scope: air-to-air awareness and engagement.** The
 [development specification](spec/ai-awareness.md) covers visual cones,
 skill-scaled memory, search, missile defense, shared AI/RWR threat information
-and mission rules. Implementation is pending. Surface AI and additional
-behavior families remain in the broader backlog, outside this scope.
+and mission rules. Observation/memory and search/Target-view activity are
+implemented; missile defense/RWR and mission rules remain pending. Surface AI
+and additional behavior families remain in the broader backlog, outside this scope.
 
 The [main AI behavior specification](spec/ai.md) now covers established fighter
 choices, other family differences, surface boundaries and proposed API inputs.
@@ -476,8 +477,8 @@ Behavior, provenance, initial tuning constants and acceptance cases have one hom
 
 | Slice | Concrete work | Exit evidence |
 | --- | --- | --- |
-| A: Observations and memory | Add actor-owned timestamped observation records between sensors and decisions; separate live observations, memories and bearing-only warnings; skill-filter visual acquisition | Cone/range boundaries, expiry, hidden-turn and Novice kill/reacquisition tests pass; no hidden world pose refresh |
-| B: Search and Target view | Connect remembered-position investigation, acquiring and return/rejoin to steering; expose real activity through the existing Target window | Lost-contact scenario visibly searches and reacquires or returns; deterministic headless transitions and display smoke |
+| A: Observations and memory, implemented | Add actor-owned timestamped observation records between sensors and decisions; separate live observations, memories and bearing-only warnings; skill-filter visual acquisition | Cone/range boundaries, expiry, hidden-turn and Novice kill/reacquisition tests pass; no hidden world pose refresh |
+| B: Search and Target view, implemented for current mission context | Connect remembered-position investigation, acquiring and return/rejoin to steering; expose real activity through the existing Target window | Lost-contact scenario visibly searches and reacquires or returns; deterministic headless transitions and display smoke |
 | C: Missile awareness and defense | Connect actual A pitbull, S supported launch and I/E visual sightings through shared actor-owned RWR threat records; show known missiles in player RWR with incoming threats blinking; add skill-based time-to-defend assessment, jink/notch/dive selection, timed inventory-backed bursts and re-engagement; specify missing missile notch response | Silent midcourse and unseen passive shots provoke no response; immediate supported-launch warning; matching AI/RWR knowledge, receiver-specific blinking, safe maneuvers, effective sensor/support coupling, bounded device use and no hidden launcher knowledge |
 | D: Mission roles and stances | Explicit protect/destroy/escort assignments and stance inputs, narrow protected-aircraft threat reports, priority selection and leash; connect minimal Quick Mission assignments | Escort protects its charge instead of chasing unrelated enemies; hostile escorts follow symmetric rules; objective label uses assignments |
 | E: Integrated combat acceptance | Finish required AI seeker acquisition/activation/pitbull hookup; run role, sensor, weapon and survival scenarios together | Twelve aircraft by four skills, mixed roles, Novice multi-kill limits, repeated-seed replay and measured 30-aircraft fixture; full repository checks and display smoke |
@@ -488,7 +489,8 @@ Keep simulation state independent of `tore-app`; the app passes assignments and
 renders activity. Existing tactics and weapon services remain reusable. Each
 slice needs its own specified behavior and tests before being described as
 complete. No new runtime dependency or flight-adapter default change is planned.
-The remaining fitted search-orbit constants must be documented before slice B.
+Search-orbit constants and current route/visibility limits are documented in the
+[specification](spec/ai-awareness.md); [stage validation](baselines/ai-awareness.md).
 Slice C depends on real missile lifecycle events, so bring the required seeker
 activation/support adapters forward from slice E. Specify missing missile notch
 rejection before accepting defensive effectiveness; attempted maneuvers alone

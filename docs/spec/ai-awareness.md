@@ -11,7 +11,9 @@
 ## Scope and status
 
 Development specification for M1 air-to-air awareness, memory, search, missile
-defense, RWR missile presentation and mission engagement. Implementation is
+defense, RWR missile presentation and mission engagement. Visual awareness,
+aircraft memory and contact-loss search are implemented in the existing aircraft
+runtime. Missile defense, RWR missile presentation and mission roles remain
 pending. Delivery sequencing is defined in
 [M1e](../ROADMAP.md#m1-air-to-air-awareness-delivery).
 
@@ -41,16 +43,25 @@ The [AI spec](ai.md) and [experience spec](ai-experience.md) describe existing
 rules. Four resolved skills exist: Novice, Average, Experienced and Ace. Use the
 resolved pilot skill, after existing assignment rules, not the menu selection.
 
-The existing runtime provides actor-owned sensors, weapons, flight
-state and controllers. `ai::mission::observe` passes radar/infrared and visual
-contact identities to `target_views`, which currently obtains their poses from
-the world. This is not a remembered-observation store. Do not extend that path
-by retaining IDs and continuing to fetch hidden live positions. `ai::targeting`
-ranks supplied candidates and explicitly leaves `MissionDefensePriority`
-unspecified. `controller::Activity` has pursuit, attack and defensive states but
-no searching or acquiring state. The Target window already displays activity and
-skill; objective assignment is still unknown. Reuse these components and add the
-missing observation, activity and assignment contracts.
+The runtime provides actor-owned sensors, weapons, flight state and controllers.
+`ai::awareness` holds current observations separately from frozen aircraft memory.
+`ai::mission` feeds only current observations into combat selection and supplies
+lost hostile snapshots to the controller's search input. Visual attention uses
+its own skill-scaled cone. Radar and infrared use the shared sensor component;
+terrain blocks both sensor and visual observations. Production sensor import
+failures are reported instead of using the sensorless fixture path.
+
+`controller::Activity` exposes searching, acquiring and rejoining through the
+existing Target window. SEARCHING also describes an airborne leader following
+its current heading before first acquisition; wingmen retain formation activity.
+Mission route import and protect/destroy assignments are not connected.
+`MissionDefensePriority` remains unspecified. Search therefore returns to the
+existing formation/heading behavior when its investigation ends.
+
+The current host supplies terrain but no weather visibility limit to AI
+perception. Cloud/night visibility remains a fitted clear-air assumption, not
+complete environmental visibility. Initial integration and validation limits
+are recorded in the [awareness baseline](../baselines/ai-awareness.md).
 
 ### Evidence references
 
@@ -147,9 +158,18 @@ through the existing steering adapter. Stop investigating on memory expiry, a
 higher-priority threat, mission completion or the escort leash. For an Ace, cap
 one uninterrupted investigation at 120 seconds before returning to its mission,
 while retaining the record. This prevents unlimited recall from causing
-unlimited abandonment of an escort. Search-orbit geometry must use a named
-fitted maneuver with documented constants before implementation. The manual's
-SEARCHING label does not establish scan timing.
+unlimited abandonment of an escort.
+
+The fitted search orbit is clockwise, level at entry altitude, with a 0.75 NM
+(4,557 feet) radius. Correct radial error proportionally over 0.25 NM (1,519
+feet), clamped to 45 degrees toward or away from the center. Measure orbit
+radius horizontally. Correct altitude toward entry altitude over one orbit
+radius of horizontal look-ahead, with pitch limited to plus or minus 45 degrees.
+Reevaluate guidance each simulation tick using bounded 3-second motion requests
+at corner speed through the existing flight adapter. Approach
+the last observation directly outside the 1 NM entry radius. These are
+agent-authored search constants; the manual's SEARCHING label does not establish
+orbit geometry or scan timing.
 
 Expose these states from the simulation to the existing Target window activity
 line. Keep the existing tactical goal codes; SEARCHING is an activity, not a new
@@ -521,7 +541,6 @@ objectives/import and general contact-sharing doctrine are outside M1 scope.
 
 Before implementing the affected behavior, resolve and document:
 
-- Search-orbit geometry and its fitted steering constants.
 - Environmental visibility where cloud/night occlusion is incomplete.
 - Active-missile seeker notch rejection and supported-missile support loss.
 - Passive-guidance countermeasure susceptibility where no weapon rule exists.

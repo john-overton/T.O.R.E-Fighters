@@ -821,3 +821,13 @@ The map also observes surface entities with the existing active-channel search
 and visual rules. These presentation-only observations never enter the airborne
 scope, designation or weapon support. Visual observation supplies map identity;
 radar/IR alone supplies an unknown marker. [Map rules](spec/flight-map.md).
+
+## AI observation integration
+
+AI actors consume current radar/infrared measurements from this component.
+Their visual attention and lost-contact memory are defined separately in
+[air-to-air awareness](spec/ai-awareness.md#visual-awareness-and-memory).
+Terrain masks the AI sensor feed using the same host terrain intersection query
+as player sensing. Skill does not alter imported radar capabilities. Sensor
+history and stale plots never refresh AI memory or authorize firing. The
+player's sensor profiles and visual channel retain their existing behavior.

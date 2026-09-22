@@ -29,9 +29,11 @@ use crate::models::FlightModel;
 use crate::research::Surface;
 use crate::sensors::{self, Observable, Observer, Sensors};
 
+use super::awareness::{self, Memory, Observation, ObservationSource};
 use super::controller::{
     Activity, ActorIdentity, BehaviorProfile, Controller, DecisionFrame, FrameEvent, IntentBatch,
-    LeaderView, MotionIntent, OwnState, RouteView, StationView, TargetView, ThreatReport, WingView,
+    LeaderView, MotionIntent, OwnState, RouteView, SearchContact, StationView, TargetView,
+    ThreatReport, WingView,
 };
 use super::experience::ResolvedExperience;
 use super::fitted::Fallback;
@@ -169,6 +171,8 @@ pub struct AiActor {
     adapter: ControlAdapter,
     flight: flight::State,
     sensors: Option<Sensors>,
+    awareness: Memory,
+    search_target: Option<u32>,
     stations: Vec<StationSpec>,
     dispensers: Vec<DispenserStore>,
     wing_slot: u8,
@@ -192,6 +196,8 @@ impl AiActor {
             adapter: ControlAdapter::new(),
             flight: setup.flight,
             sensors: setup.sensors,
+            awareness: Memory::new(setup.experience, setup.identity.side),
+            search_target: None,
             stations: setup.stations,
             dispensers: setup.dispensers,
             wing_slot: setup.wing_slot,
@@ -245,6 +251,11 @@ impl AiActor {
 
     pub fn sensors(&self) -> Option<&Sensors> {
         self.sensors.as_ref()
+    }
+
+    /// Current observations and frozen records, exposed for diagnostics only.
+    pub fn awareness(&self) -> &Memory {
+        &self.awareness
     }
 
     pub fn stations(&self) -> &[StationSpec] {
@@ -305,6 +316,11 @@ impl AiActor {
 
     pub fn set_alive(&mut self, alive: bool) {
         self.alive = alive;
+        if !alive {
+            self.awareness.clear();
+            self.search_target = None;
+            self.controller.set_search_contact(None);
+        }
     }
 
     /// Deliver one wing command to this actor (B46).
@@ -489,6 +505,9 @@ impl AiMission {
         let actor = &mut self.actors[index];
         actor.controller.set_formation_observation(traffic.to_vec());
         if !actor.alive() {
+            actor.awareness.clear();
+            actor.search_target = None;
+            actor.controller.set_search_contact(None);
             actor.activity = Activity::Destroyed;
             output.activities.push((actor_id, Activity::Destroyed));
             return Ok(());
@@ -507,14 +526,14 @@ impl AiMission {
         }
 
         // 1. The actor's own sensors, stepped with the actor as observer.
-        let permitted = actor.observe(world, ground);
+        let mut targets = actor.observe(tick, world, ground);
+        actor.update_search_contact();
 
         // 2. Own state from the actor's own flight model.
         let own = actor.own_state(ground);
 
         // 3. The frame.
         let events = actor.drain_events(tick);
-        let mut targets = actor.target_views(&permitted, world);
         for target in &mut targets {
             target.wing_attackers =
                 assignments.iter().filter(|id| **id == target.id).count() as u32;
@@ -564,10 +583,20 @@ impl AiMission {
             actor.controller.step(&frame)?
         };
 
-        if let Some(sensors) = &mut actor.sensors
-            && let Some(target) = batch.sensor.designate
-        {
-            sensors.designate(target);
+        // Choosing a currently visible target is the only way to fill or
+        // replace the Novice's one remembered hostile. Losing contact leaves
+        // that frozen record intact until its own deadline.
+        actor.awareness.select_target(actor.controller.target());
+        if actor.controller.target().is_some() {
+            actor.search_target = None;
+        }
+        if let Some(sensors) = &mut actor.sensors {
+            if batch.sensor.clear_designation {
+                sensors.clear_selection();
+            }
+            if let Some(target) = batch.sensor.designate {
+                sensors.designate(target);
+            }
         }
         output
             .wing
@@ -745,20 +774,20 @@ impl AiMission {
 }
 
 impl AiActor {
-    /// Step this actor's own sensors and return the ids it may engage.
-    ///
-    /// With a sensor component, only the actor's own contacts are permitted,
-    /// so nothing becomes a target merely by existing in the world. Without
-    /// one, the host's world list is the permitted list, which is the headless
-    /// fixture path and is documented as such.
-    fn observe(&mut self, world: &[WorldObject], ground: &dyn Fn(f64, f64) -> f64) -> Vec<u32> {
-        let Some(sensors) = self.sensors.as_mut() else {
-            return world
-                .iter()
-                .filter(|o| o.id != self.identity.actor.0)
-                .map(|o| o.id)
-                .collect();
-        };
+    /// Collect fresh measurements, then update frozen aircraft memory. Only
+    /// the current observation set is allowed into combat target selection.
+    fn observe(
+        &mut self,
+        tick: u64,
+        world: &[WorldObject],
+        ground: &dyn Fn(f64, f64) -> f64,
+    ) -> Vec<TargetView> {
+        let live: Vec<u32> = world
+            .iter()
+            .filter(|o| o.alive && !o.destroyed)
+            .map(|o| o.id)
+            .collect();
+        self.awareness.prune_lifecycle(&live);
         let observer = Observer {
             position: self.flight.position,
             basis: crate::attitude::Basis::new(
@@ -771,23 +800,116 @@ impl AiActor {
             infrared_failed: false,
             visual_failed: false,
         };
-        let observables: Vec<Observable> = world
-            .iter()
-            .filter(|o| o.id != self.identity.actor.0)
-            .filter_map(|o| o.observable.clone())
-            .collect();
-        let environment = sensors::Environment {
-            ground: &|x, z| ground(x, z),
-            obscured: &|_, _| false,
+        let contacts = if let Some(sensors) = self.sensors.as_mut() {
+            let observables: Vec<Observable> = world
+                .iter()
+                .filter(|o| o.id != self.identity.actor.0)
+                .filter_map(|o| o.observable.clone())
+                .collect();
+            let obscured = |from, to| crate::combat::live::terrain_hit(from, to, &ground).is_some();
+            let environment = sensors::Environment {
+                ground,
+                obscured: &obscured,
+            };
+            sensors.step(&observer, &observables, &environment);
+            Some(sensors.contacts().to_vec())
+        } else {
+            None
         };
-        sensors.step(&observer, &observables, &environment);
-        let mut ids: Vec<u32> = sensors.contacts().iter().map(|c| c.id).collect();
-        for contact in sensors.visual() {
-            if !ids.contains(&contact.id) {
-                ids.push(contact.id);
+        let mut observations = Vec::new();
+        for object in world
+            .iter()
+            .filter(|o| o.id != self.identity.actor.0 && o.alive && !o.destroyed && o.is_aircraft)
+        {
+            if let Some(contacts) = &contacts {
+                for contact in contacts
+                    .iter()
+                    .filter(|c| c.id == object.id && !c.destroyed)
+                {
+                    observations.push(Observation {
+                        target: self.observed_target(object, contact.position),
+                        velocity: contact.velocity,
+                        source: match contact.channel {
+                            sensors::Channel::Radar => ObservationSource::Radar,
+                            sensors::Channel::Infrared => ObservationSource::Infrared,
+                            sensors::Channel::Visual => ObservationSource::Visual,
+                        },
+                    });
+                }
+                // Pilot attention has its own circular, skill-scaled cone.
+                // Imported visual equipment remains unchanged for player use.
+                // Cloud/night visibility is not supplied by this host yet;
+                // the explicit None limit is the fitted clear-air assumption.
+                if let Some(observable) = object.observable.as_ref()
+                    && !observable.destroyed
+                    && observable.airborne
+                    && awareness::visual_eligible(
+                        self.controller.experience().level,
+                        observer.position,
+                        self.flight.yaw.to_degrees(),
+                        self.flight.pitch.to_degrees(),
+                        observable.position,
+                        None,
+                        crate::combat::live::terrain_hit(
+                            observer.position,
+                            observable.position,
+                            &ground,
+                        )
+                        .is_none(),
+                    )
+                {
+                    observations.push(Observation {
+                        target: self.observed_target(object, observable.position),
+                        velocity: observable.velocity,
+                        source: ObservationSource::Visual,
+                    });
+                }
+            } else {
+                // Explicit sensorless synthetic/replay fixtures supply the
+                // whole permitted list. Production actor loading must never
+                // select this path as a fallback after a sensor import error.
+                observations.push(Observation {
+                    target: self.observed_target(object, object.position),
+                    velocity: object.velocity,
+                    source: ObservationSource::Fixture,
+                });
             }
         }
-        ids
+        self.awareness.observe(tick, &observations);
+        self.awareness
+            .current_observations()
+            .map(|snapshot| snapshot.target)
+            .collect()
+    }
+
+    /// Choose a stable, lost hostile observation for investigation. Current
+    /// observations stay in the ordinary selector; a frozen record never does.
+    fn update_search_contact(&mut self) {
+        let lost = |snapshot: &&awareness::Snapshot| {
+            snapshot.target.side != self.identity.side
+                && !self
+                    .awareness
+                    .current_observations()
+                    .any(|current| current.target.id == snapshot.target.id)
+        };
+        let preferred = self.controller.target().or(self.search_target);
+        let snapshot = preferred
+            .and_then(|id| self.awareness.snapshot(id))
+            .filter(lost)
+            .or_else(|| {
+                self.awareness.remembered().filter(lost).min_by(|a, b| {
+                    distance(self.flight.position, a.target.position)
+                        .total_cmp(&distance(self.flight.position, b.target.position))
+                        .then_with(|| a.target.id.cmp(&b.target.id))
+                })
+            });
+        self.search_target = snapshot.map(|s| s.target.id);
+        self.controller
+            .set_search_contact(snapshot.map(|s| SearchContact {
+                id: s.target.id,
+                position: s.target.position,
+                observed_tick: s.last_observed_tick,
+            }));
     }
 
     fn drain_events(&mut self, tick: u64) -> Vec<FrameEvent> {
@@ -959,45 +1081,38 @@ impl AiActor {
         Some(distance / cruise.0)
     }
 
-    /// Build the permitted target views for this actor.
-    fn target_views(&self, permitted: &[u32], world: &[WorldObject]) -> Vec<TargetView> {
-        world
-            .iter()
-            .filter(|o| o.id != self.identity.actor.0)
-            .filter(|o| permitted.contains(&o.id))
-            .filter(|o| o.alive && !o.destroyed)
-            .map(|o| TargetView {
-                id: o.id,
-                side: o.side,
-                position: o.position,
-                heading_deg: o.heading_deg,
-                pitch_deg: o.pitch_deg,
-                speed: o.speed,
-                maximum_speed: o.maximum_speed,
-                is_aircraft: o.is_aircraft,
-                is_fighter: o.is_fighter,
-                human_controlled: o.human_controlled,
-                valid: o.alive && !o.destroyed,
-                type_allowed: true,
-                seeker_eligible: self.seeker_eligible(o),
-                wing_attackers: 0,
-                terrain_blocked: false,
-                sensor_supported: self
-                    .sensors
-                    .as_ref()
-                    .is_none_or(|sensor| sensor.supports(o.id)),
-            })
-            .collect()
+    /// Capture permitted classification/attitude metadata at the time of an
+    /// observation. The measured position comes from that observation, not a
+    /// later lookup of a remembered object ID in the world.
+    fn observed_target(&self, object: &WorldObject, position: [f64; 3]) -> TargetView {
+        TargetView {
+            id: object.id,
+            side: object.side,
+            position,
+            heading_deg: object.heading_deg,
+            pitch_deg: object.pitch_deg,
+            speed: object.speed,
+            maximum_speed: object.maximum_speed,
+            is_aircraft: object.is_aircraft,
+            is_fighter: object.is_fighter,
+            human_controlled: object.human_controlled,
+            valid: object.alive && !object.destroyed,
+            type_allowed: true,
+            seeker_eligible: self.seeker_eligible(object.is_aircraft, position),
+            wing_attackers: 0,
+            terrain_blocked: false,
+            sensor_supported: self.sensors.as_ref().is_none_or(|s| s.supports(object.id)),
+        }
     }
 
     /// Whether any carried store's envelope could engage this object (B45).
-    fn seeker_eligible(&self, object: &WorldObject) -> bool {
-        let class = if object.is_aircraft {
+    fn seeker_eligible(&self, is_aircraft: bool, position: [f64; 3]) -> bool {
+        let class = if is_aircraft {
             weapon_service::TargetClass::Air
         } else {
             weapon_service::TargetClass::Surface
         };
-        let range = distance(self.flight.position, object.position);
+        let range = distance(self.flight.position, position);
         self.stations.iter().any(|s| {
             !s.store.inhibited
                 && !s.is_empty()
@@ -1446,6 +1561,291 @@ mod tests {
 
     fn flat(_x: f64, _z: f64) -> f64 {
         0.0
+    }
+
+    fn perception_actor(level: Experience) -> AiActor {
+        let mut setup = setup(1, 1, 0, [0., 20000., 0.], 0.);
+        setup.experience = resolved(level);
+        setup.sensors = Some(Sensors::new(sensors::SensorProfiles {
+            aircraft: AircraftId::F18,
+            radar: None,
+            infrared: None,
+            visual: None,
+            jammer: None,
+            signature: sensors::SignatureProfile::default(),
+        }));
+        AiActor::new(setup).unwrap()
+    }
+
+    fn visible_object(actor: &AiActor, id: u32, position: [f64; 3]) -> WorldObject {
+        let mut target = object(actor, 2);
+        target.id = id;
+        target.position = position;
+        target.observable = Some(Observable {
+            id,
+            position,
+            velocity: target.velocity,
+            basis: crate::attitude::Basis::new(0., 0., 0.),
+            configuration: sensors::Configuration::default(),
+            signature: sensors::SignatureProfile::default(),
+            jammer: None,
+            jammer_active: false,
+            radar_emitting: false,
+            airborne: true,
+            destroyed: false,
+        });
+        target
+    }
+
+    #[test]
+    fn skill_attention_is_independent_of_imported_visual_hardware_and_blocks_terrain() {
+        for level in Experience::ALL {
+            let mut actor = perception_actor(level);
+            let range = awareness::visual_range_feet(level);
+            let target = visible_object(&actor, 2, [0., 20000., range]);
+            assert_eq!(
+                actor.observe(0, std::slice::from_ref(&target), &flat).len(),
+                1
+            );
+            let too_far = visible_object(&actor, 2, [0., 20000., range + 1.]);
+            assert!(actor.observe(1, &[too_far], &flat).is_empty());
+            let behind = visible_object(&actor, 2, [0., 20000., -1000.]);
+            assert!(actor.observe(2, &[behind], &flat).is_empty());
+            let ridge = |_: f64, z: f64| {
+                if z > range / 4. && z < range * 0.75 {
+                    21000.
+                } else {
+                    0.
+                }
+            };
+            assert!(actor.observe(3, &[target], &ridge).is_empty());
+        }
+    }
+
+    #[test]
+    fn measured_pose_is_frozen_and_lifecycle_removes_hidden_memories() {
+        let mut actor = perception_actor(Experience::Ace);
+        let mut target = visible_object(&actor, 2, [0., 20000., 5000.]);
+        // A sensor snapshot can differ from later host body metadata. The
+        // measured position must be the one retained and used for geometry.
+        target.position = [90000., 22000., 90000.];
+        let views = actor.observe(10, std::slice::from_ref(&target), &flat);
+        assert_eq!(views[0].position, [0., 20000., 5000.]);
+        let frozen = *actor.awareness.snapshot(2).unwrap();
+        target.observable = None;
+        target.position = [-90000., 1000., -90000.];
+        target.velocity = [100., -100., 500.];
+        assert!(
+            actor
+                .observe(11, std::slice::from_ref(&target), &flat)
+                .is_empty()
+        );
+        assert_eq!(actor.awareness.snapshot(2), Some(&frozen));
+        actor.observe(1_000_000, std::slice::from_ref(&target), &flat);
+        assert_eq!(actor.awareness.snapshot(2), Some(&frozen));
+        target.destroyed = true;
+        actor.observe(1_000_001, &[target], &flat);
+        assert!(actor.awareness.snapshot(2).is_none());
+    }
+
+    #[test]
+    fn novice_kill_does_not_recover_a_forgotten_hostile_without_a_new_observation() {
+        let mut actor = perception_actor(Experience::Novice);
+        let mut first = visible_object(&actor, 2, [0., 20000., 5000.]);
+        let mut second = visible_object(&actor, 3, [1000., 20000., 5000.]);
+        assert_eq!(
+            actor
+                .observe(0, &[first.clone(), second.clone()], &flat)
+                .len(),
+            2
+        );
+        actor.awareness.select_target(Some(2));
+        assert!(actor.awareness.snapshot(3).is_none());
+        first.destroyed = true;
+        second.observable = None;
+        assert!(actor.observe(1, &[first.clone(), second], &flat).is_empty());
+        actor.update_search_contact();
+        assert!(actor.awareness.remembered().next().is_none());
+        assert_eq!(actor.search_target, None);
+        let fresh = visible_object(&actor, 3, [1000., 20000., 5000.]);
+        assert_eq!(actor.observe(2, &[first, fresh], &flat).len(), 1);
+        actor.awareness.select_target(Some(3));
+        assert!(actor.awareness.snapshot(3).is_some());
+    }
+
+    #[test]
+    fn lost_contact_inside_retention_distance_searches_without_firing_then_reacquires() {
+        let mut mission = AiMission::new();
+        mission.push(perception_actor(Experience::Novice));
+        let target = visible_object(mission.actor(1).unwrap(), 2, [0., 20000., 5000.]);
+        mission
+            .step(std::slice::from_ref(&target), &flat, TimeOfDay(0))
+            .unwrap();
+        assert_eq!(mission.actor(1).unwrap().controller.target(), Some(2));
+        let snapshot = *mission.actor(1).unwrap().awareness.snapshot(2).unwrap();
+        let rounds = mission.actor(1).unwrap().rounds_remaining();
+        let mut hidden = target.clone();
+        hidden.observable = None;
+        hidden.position = [3000., 20000., 4000.];
+        for tick in 1..240 {
+            let output = mission
+                .step(std::slice::from_ref(&hidden), &flat, TimeOfDay(tick))
+                .unwrap();
+            let actor = mission.actor(1).unwrap();
+            assert_eq!(actor.controller.target(), None);
+            assert_eq!(actor.activity(), Activity::Searching);
+            assert!(output.launches.is_empty());
+            assert_eq!(actor.awareness.snapshot(2), Some(&snapshot));
+        }
+        assert_eq!(mission.actor(1).unwrap().rounds_remaining(), rounds);
+        // Place a fresh observation in front of the actor after the search turn.
+        let actor = mission.actor(1).unwrap();
+        let forward =
+            crate::attitude::Basis::new(actor.flight.yaw, actor.flight.pitch, actor.flight.bank)
+                .forward;
+        let position = std::array::from_fn(|i| actor.flight.position[i] + forward[i] * 5000.);
+        let reacquired = visible_object(actor, 2, position);
+        mission.step(&[reacquired], &flat, TimeOfDay(240)).unwrap();
+        assert_eq!(mission.actor(1).unwrap().controller.target(), Some(2));
+        assert_ne!(mission.actor(1).unwrap().activity(), Activity::Searching);
+        assert_eq!(
+            mission
+                .actor(1)
+                .unwrap()
+                .awareness
+                .snapshot(2)
+                .unwrap()
+                .last_observed_tick,
+            240
+        );
+    }
+
+    #[test]
+    fn thirty_sensor_owned_actors_replay_observations_and_search_identically() {
+        fn mission() -> AiMission {
+            let mut mission = AiMission::new();
+            for id in 1..=30 {
+                let mut actor = perception_actor(Experience::ALL[(id as usize - 1) % 4]);
+                // Each actor owns an independent sensor component and identity.
+                let mut setup = setup(
+                    id,
+                    if id % 2 == 0 { 1 } else { 2 },
+                    0,
+                    [id as f64 * 250., 20000., id as f64 * 100.],
+                    0.,
+                );
+                setup.experience = actor.controller.experience();
+                setup.sensors = actor.sensors.take();
+                mission.push(AiActor::new(setup).unwrap());
+            }
+            mission
+        }
+        fn advance(mission: &mut AiMission, tick: u64) -> MissionOutput {
+            let world: Vec<_> = mission
+                .actors()
+                .iter()
+                .map(|a| {
+                    let mut o = visible_object(a, a.id(), a.flight.position);
+                    o.side = a.identity.side;
+                    o
+                })
+                .collect();
+            mission.step(&world, &flat, TimeOfDay(tick)).unwrap()
+        }
+        let mut a = mission();
+        let mut b = mission();
+        for tick in 0..120 {
+            assert_eq!(advance(&mut a, tick), advance(&mut b, tick));
+            for (a, b) in a.actors().iter().zip(b.actors()) {
+                assert_eq!(a.awareness(), b.awareness());
+                assert_eq!(a.flight(), b.flight());
+                assert_eq!(a.controller(), b.controller());
+            }
+        }
+    }
+
+    fn enable_test_radar(actor: &mut AiActor) {
+        let volume = sensors::Volume {
+            azimuth_rad: 60_f64.to_radians(),
+            elevation_rad: 60_f64.to_radians(),
+            minimum_ft: 0.,
+            maximum_ft: 20. * sensors::FEET_PER_NAUTICAL_MILE,
+            minimum_relative_ft: f64::NEG_INFINITY,
+            maximum_relative_ft: f64::INFINITY,
+        };
+        let preset = sensors::Preset::Advanced;
+        actor.sensors.as_mut().unwrap().profiles.radar = Some(sensors::RadarProfile {
+            record: "TEST.SEE".into(),
+            search: volume,
+            track: volume,
+            look_down: 0.,
+            preset,
+            notch: preset.notch(),
+            resistance: preset.resistance(),
+            band: 0,
+            source_flags: [0; 2],
+            source_doppler: [0; 3],
+        });
+        actor.sensors.as_mut().unwrap().controls.range_index = 0;
+    }
+
+    #[test]
+    fn radar_refreshes_memory_beyond_skill_visual_range_and_terrain_masks_both_channels() {
+        for level in Experience::ALL {
+            let mut actor = perception_actor(level);
+            enable_test_radar(&mut actor);
+            let target = visible_object(
+                &actor,
+                2,
+                [0., 20000., 6. * sensors::FEET_PER_NAUTICAL_MILE],
+            );
+            assert_eq!(
+                actor.observe(1, std::slice::from_ref(&target), &flat).len(),
+                1
+            );
+            actor.awareness.select_target(Some(2));
+            let snapshot = actor.awareness.snapshot(2).unwrap();
+            assert_eq!(snapshot.source_ticks.radar, Some(1));
+            assert_eq!(snapshot.source_ticks.visual, None);
+            actor.observe(2, std::slice::from_ref(&target), &flat);
+            assert_eq!(actor.awareness.snapshot(2).unwrap().last_observed_tick, 2);
+            let ridge = |_: f64, z: f64| if z > 10000. && z < 20000. { 21000. } else { 0. };
+            assert!(actor.observe(3, &[target], &ridge).is_empty());
+            assert_eq!(actor.awareness.snapshot(2).unwrap().last_observed_tick, 2);
+        }
+    }
+
+    #[test]
+    fn hold_fire_clears_live_sensor_designation_without_erasing_memory() {
+        let mut actor = perception_actor(Experience::Ace);
+        enable_test_radar(&mut actor);
+        let target = visible_object(&actor, 2, [0., 20000., 5000.]);
+        let mut mission = AiMission::new();
+        mission.push(actor);
+        mission
+            .step(std::slice::from_ref(&target), &flat, TimeOfDay(0))
+            .unwrap();
+        assert_eq!(
+            mission.actor(1).unwrap().sensors().unwrap().selected(),
+            Some(2)
+        );
+        mission
+            .actor_mut(1)
+            .unwrap()
+            .order(
+                super::super::wing::WingRequest::TargetAssignment(
+                    super::super::wing::TargetOrder::HoldFire,
+                ),
+                1,
+            )
+            .unwrap();
+        let output = mission.step(&[target], &flat, TimeOfDay(1)).unwrap();
+        assert!(output.launches.is_empty());
+        assert_eq!(
+            mission.actor(1).unwrap().sensors().unwrap().selected(),
+            None
+        );
+        assert!(mission.actor(1).unwrap().awareness.snapshot(2).is_some());
     }
 
     #[test]
@@ -2302,8 +2702,11 @@ mod tests {
         let retained = actor.controller().target().expect("no target retained");
         let world = world_of(&mission);
         let own = actor.own_state(&flat);
-        let permitted: Vec<u32> = world.iter().map(|o| o.id).collect();
-        let targets = actor.target_views(&permitted, &world);
+        let targets: Vec<_> = world
+            .iter()
+            .filter(|o| o.id != actor.id())
+            .map(|o| actor.observed_target(o, o.position))
+            .collect();
         let views = actor.station_views(&targets, &own);
         let expected = targets.iter().find(|t| t.id == retained).unwrap();
         let expected_error = pointing_error_deg(&own, expected.position);
@@ -2471,13 +2874,13 @@ mod tests {
         let mut target = object(&actor, 2);
         target.id = 2;
         target.position = [0.0, 20000.0, 1000.0];
-        let views = actor.target_views(&[2], &[target.clone()]);
+        let views = [actor.observed_target(&target, target.position)];
         assert_eq!(
             actor.station_views(&views, &own)[0].employment_fit,
             Some(0.0)
         );
         target.position = [2000.0, 20000.0, 1000.0];
-        let views = actor.target_views(&[2], &[target]);
+        let views = [actor.observed_target(&target, target.position)];
         assert_eq!(actor.station_views(&views, &own)[0].employment_fit, None);
     }
 
@@ -2620,7 +3023,7 @@ mod tests {
         let mut target = object(&actor, 2);
         target.id = 2;
         target.position[2] = 2000.0;
-        let targets = actor.target_views(&[2], &[target]);
+        let targets = [actor.observed_target(&target, target.position)];
         let stations = actor.station_views(&targets, &own);
         let mut fired = None;
         for tick in 0..2400 {

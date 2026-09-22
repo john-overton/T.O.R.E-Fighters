@@ -1,7 +1,8 @@
 //! Aircraft and surface AI: isolated, spec-derived calculation components.
 //!
 //! Everything here is built from [`docs/spec/ai.md`](../../../../docs/spec/ai.md)
-//! and [`docs/spec/ai-experience.md`](../../../../docs/spec/ai-experience.md).
+//! [`docs/spec/ai-experience.md`](../../../../docs/spec/ai-experience.md), and
+//! [`docs/spec/ai-awareness.md`](../../../../docs/spec/ai-awareness.md).
 //! Behavior IDs (B01, B15, ...) in doc comments refer to those specs. Nothing in
 //! this module drives the human player. The mission and steering adapters
 //! connect aircraft decisions to physical controls, with synthetic replay tests.
@@ -17,6 +18,7 @@
 //!   thresholds, not a promise to reproduce the original sequence.
 //! - The simulation runs at a fixed 120 Hz; nominal timings are simulation
 //!   seconds on a quarter-second clock ([`QUARTER_SECOND_TICKS`]).
+pub mod awareness;
 pub mod controller;
 pub mod experience;
 pub mod fitted;

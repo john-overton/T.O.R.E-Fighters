@@ -82,8 +82,10 @@ Text is shortened to its pixel budget so it cannot overlap the goal/damage strip
 
 Existing aircraft activity and skill are read only. Pursuing/attacking maps to
 A; defending/evading/breaking maps to E; destroyed maps to C. Other current
-activities map to N. An attack goal's player underline uses the existing selected
-target identity. The evaded threat's identity is not exposed, so E is not
+activities map to N. SEARCHING, ACQUIRING and REJOINING are explicit neutral
+goal mappings from the [AI awareness service](ai-awareness.md); searching and
+rejoining never imply an active weapon target. An attack goal's player underline
+uses the existing selected target identity. The evaded threat's identity is not exposed, so E is not
 underlined. Ground objects and fixtures have unknown activity/skill/goal.
 There is no invented firing prediction: activity describes current state, not
 whether a launch will occur. Return-to-base is not labeled L before landing.

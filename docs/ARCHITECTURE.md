@@ -258,6 +258,14 @@ after reset. AI emits aircraft inputs and the flight model alone advances
 its pose; no steering pose overwrite follows physics. The bridge mirrors results into `combat::live::Target` for sensors,
 rendering and damage. Each wing follows its own leader from the shared world
 snapshot; the human leader remains outside the AI actor list.
+`ai::awareness` owns timestamped current observations and frozen aircraft memory
+for each actor. Only current observations enter target selection, weapon geometry
+and firing; lost hostile records enter a separate controller search input. The
+AI visual cone is skill-filtered independently of imported player sensor
+profiles, and the mission terrain query masks visual and radar/infrared sensing.
+Production sensor loading fails explicitly rather than enabling the sensorless
+synthetic-fixture path. SEARCHING/ACQUIRING/REJOINING are simulation activities
+read by Target view. [Behavior and limitations](spec/ai-awareness.md).
 `ai::formation` owns routine repositioning, trailing, breakout, intercept, stabilization and
 capture guidance. Traffic and arrival states are snapshotted before any actor
 advances, so iteration order cannot grant approach priority. Its trace hook is

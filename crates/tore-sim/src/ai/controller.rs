@@ -68,6 +68,13 @@ use super::wing::{
 };
 use super::{AiError, DecisionRandom, Result, ScalarSpeed, SpeedLimits};
 
+const SEARCH_ORBIT_ENTRY_FT: f64 = 6_076.0;
+const SEARCH_ORBIT_RADIUS_FT: f64 = 4_557.0;
+const SEARCH_ORBIT_CORRECTION_BAND_FT: f64 = 1_519.0;
+const SEARCH_ORBIT_MAX_CORRECTION_DEG: f64 = 45.0;
+const SEARCH_COMMAND_SECONDS: u8 = 3;
+const ACE_SEARCH_LIMIT_TICKS: u64 = 120 * 120;
+
 /// The behavior family an actor belongs to.
 ///
 /// All twelve ported aircraft bind to the fighter/strike family
@@ -190,6 +197,14 @@ pub struct TargetView {
     /// Terrain blocks the firing path.
     pub terrain_blocked: bool,
     pub sensor_supported: bool,
+}
+
+/// A frozen aircraft observation that may be investigated but never attacked.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SearchContact {
+    pub id: u32,
+    pub position: [f64; 3],
+    pub observed_tick: u64,
 }
 
 /// A launch warning delivered to this actor and nobody else (B47).
@@ -388,11 +403,14 @@ pub struct DeviceIntent {
 pub enum Activity {
     Idle,
     Formation,
+    Searching,
+    Acquiring,
     Pursuing,
     Attacking,
     Defending,
     Evading,
     Breaking,
+    Rejoining,
     ReturningToBase,
     OutOfFuel,
     Destroyed,
@@ -403,11 +421,14 @@ impl Activity {
         match self {
             Self::Idle => "Idle",
             Self::Formation => "In formation",
+            Self::Searching => "Searching",
+            Self::Acquiring => "Acquiring",
             Self::Pursuing => "Pursuing",
             Self::Attacking => "Attacking",
             Self::Defending => "Defending",
             Self::Evading => "Evading",
             Self::Breaking => "Breaking",
+            Self::Rejoining => "Rejoining",
             Self::ReturningToBase => "Returning to base",
             Self::OutOfFuel => "Out of fuel",
             Self::Destroyed => "Destroyed",
@@ -477,6 +498,8 @@ struct ActiveManeuver {
     intent: MotionIntent,
     submitted_at: CommandClock,
     formation: bool,
+    search: bool,
+    ordered: bool,
 }
 
 /// One aircraft's persistent decision state.
@@ -514,9 +537,27 @@ pub struct Controller {
     formation_guidance: super::formation::Guidance,
     formation_traffic: Vec<super::formation::Traffic>,
     ordered_approach: Option<(u32, f64, f64, bool)>,
+    search_contact: Option<SearchContact>,
+    search_started_tick: Option<u64>,
+    search_orbit_altitude_ft: Option<f64>,
+    completed_search: Option<SearchContact>,
 }
 
 impl Controller {
+    /// Supply the remembered contact to investigate. This record is frozen:
+    /// it is never admitted to target selection or weapon employment.
+    pub fn set_search_contact(&mut self, contact: Option<SearchContact>) {
+        if self.search_contact != contact {
+            if self.active.is_some_and(|active| active.search) {
+                self.active = None;
+            }
+            self.search_started_tick = None;
+            self.search_orbit_altitude_ft = None;
+            self.completed_search = None;
+        }
+        self.search_contact = contact;
+    }
+
     /// Supply one immutable mission snapshot before advancing this controller.
     pub fn set_formation_observation(&mut self, traffic: Vec<super::formation::Traffic>) {
         self.formation_traffic = traffic;
@@ -597,6 +638,10 @@ impl Controller {
             formation_guidance: super::formation::Guidance::default(),
             formation_traffic: Vec::new(),
             ordered_approach: None,
+            search_contact: None,
+            search_started_tick: None,
+            search_orbit_altitude_ft: None,
+            completed_search: None,
         })
     }
 
@@ -692,10 +737,17 @@ impl Controller {
         }
         self.target = selected;
         let view = selected.and_then(|id| frame.targets.iter().find(|t| t.id == id).copied());
+        if view.is_some() && self.search_started_tick.is_some() {
+            if self.active.is_some_and(|active| active.search) {
+                self.active = None;
+            }
+            self.search_started_tick = None;
+            self.search_orbit_altitude_ft = None;
+        }
         let geometry = view.map(|t| self.geometry(frame, &t)).transpose()?;
 
         // 4. Weapons, on the service's own clock (B42, B45).
-        self.weapons(frame, view, geometry.as_ref(), &mut batch)?;
+        let has_firing_solution = self.weapons(frame, view, geometry.as_ref(), &mut batch)?;
 
         // 5. Wing requests (B43).
         self.wing_requests(frame, &mut batch);
@@ -715,6 +767,9 @@ impl Controller {
 
         if batch.activity.is_none() {
             batch.activity = Some(self.activity(frame, recovering, view.is_some()));
+        }
+        if view.is_some() && !has_firing_solution && batch.activity == Some(Activity::Pursuing) {
+            batch.activity = Some(Activity::Acquiring);
         }
         // B48: an aircraft whose internal fuel has reached zero is lost. That
         // outranks whatever tactical activity the rest of the tick produced.
@@ -770,6 +825,8 @@ impl Controller {
         match &outcome {
             ReceiverOutcome::MotionInstalled(summary) => {
                 self.install_ordered_motion(summary, tick);
+                self.search_started_tick = None;
+                self.search_orbit_altitude_ft = None;
                 if matches!(request, WingRequest::Approach { .. })
                     && let Some(target) = self.recipient.target
                 {
@@ -853,6 +910,8 @@ impl Controller {
             intent,
             submitted_at: clock,
             formation: false,
+            search: false,
+            ordered: true,
         });
         // A wing command cancels whatever tactic was pending.
         self.next_choice_quarters =
@@ -1070,7 +1129,7 @@ impl Controller {
         target: Option<TargetView>,
         geometry: Option<&geometry::TargetGeometry>,
         batch: &mut IntentBatch,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let class = match target {
             Some(t) if t.is_aircraft => weapon_service::TargetClass::Air,
             Some(_) => weapon_service::TargetClass::Surface,
@@ -1120,7 +1179,7 @@ impl Controller {
                     self.identity.actor,
                     TimingProfile::for_aircraft(self.identity.aircraft),
                 );
-                return Ok(());
+                return Ok(locked);
             }
             Err(other) => return Err(other),
         };
@@ -1131,7 +1190,7 @@ impl Controller {
             batch.weapons.push(WeaponIntent { request });
             batch.activity = Some(Activity::Attacking);
         }
-        Ok(())
+        Ok(locked)
     }
 
     /// B45 store choice by score, with the fitted hit-chance term.
@@ -1222,6 +1281,17 @@ impl Controller {
         geometry: Option<&geometry::TargetGeometry>,
         batch: &mut IntentBatch,
     ) -> Result<()> {
+        if (reason.is_some()
+            || recovering
+            || self.recipient.target_order == Some(wing::TargetOrder::HoldFire))
+            && self.search_started_tick.is_some()
+        {
+            if self.active.is_some_and(|active| active.search) {
+                self.active = None;
+            }
+            self.search_started_tick = None;
+            self.search_orbit_altitude_ft = None;
+        }
         if let Some((id, mut heading_offset, mut pitch_offset, absolute)) = self.ordered_approach {
             let observed = frame.targets.iter().find(|t| t.id == id && t.valid);
             if reason.is_none()
@@ -1256,6 +1326,24 @@ impl Controller {
                 self.target = None;
                 self.recipient.target_order = Some(wing::TargetOrder::HoldFire);
             }
+        }
+        if let Some(active) = self.active.filter(|active| active.ordered) {
+            let finished = match active.intent.completion {
+                Completion::Deadline(deadline) => motion::is_expired(deadline, clock),
+                Completion::Axis(_) => self.axis_complete(frame, &active.intent),
+            };
+            if !finished && reason.is_none() && !recovering {
+                batch.motion = Some(active.intent);
+                return Ok(());
+            }
+        }
+        if reason.is_none()
+            && !recovering
+            && target.is_none()
+            && self.recipient.target_order != Some(wing::TargetOrder::HoldFire)
+            && self.search_motion(frame, clock, batch)?
+        {
+            return Ok(());
         }
         // An active maneuver keeps flying until its completion rule fires.
         if let Some(active) = self.active {
@@ -1304,9 +1392,134 @@ impl Controller {
             intent,
             submitted_at: clock,
             formation: false,
+            search: false,
+            ordered: false,
         });
         batch.motion = Some(intent);
         Ok(())
+    }
+
+    /// Investigate one frozen observation without turning it into a live
+    /// target. Outside one nautical mile the actor flies to the observation;
+    /// inside it flies a fitted, bounded clockwise level orbit.
+    fn search_motion(
+        &mut self,
+        frame: &DecisionFrame<'_>,
+        clock: CommandClock,
+        batch: &mut IntentBatch,
+    ) -> Result<bool> {
+        let Some(contact) = self.search_contact else {
+            return Ok(false);
+        };
+        if self.completed_search == Some(contact) {
+            return Ok(false);
+        }
+        let started = *self.search_started_tick.get_or_insert(frame.tick);
+        if self.experience.level == super::Experience::Ace
+            && frame.tick.saturating_sub(started) >= ACE_SEARCH_LIMIT_TICKS
+        {
+            if self.active.is_some_and(|active| active.search) {
+                self.active = None;
+            }
+            self.completed_search = Some(contact);
+            batch.activity = Some(Activity::Rejoining);
+            return Ok(true);
+        }
+
+        let dx = contact.position[0] - frame.own.position[0];
+        let dy = contact.position[1] - frame.own.position[1];
+        let dz = contact.position[2] - frame.own.position[2];
+        let horizontal = dx.hypot(dz);
+        let spatial = horizontal.hypot(dy);
+        let bearing = if horizontal > f64::EPSILON {
+            dx.atan2(dz).to_degrees()
+        } else {
+            frame.own.heading_deg
+        };
+        let (heading, pitch, steering_point) = if spatial > SEARCH_ORBIT_ENTRY_FT {
+            self.search_orbit_altitude_ft = None;
+            (
+                bearing,
+                dy.atan2(horizontal.max(f64::EPSILON)).to_degrees(),
+                Some(contact.position),
+            )
+        } else {
+            let orbit_altitude = *self
+                .search_orbit_altitude_ft
+                .get_or_insert(frame.own.position[1]);
+            let correction = ((horizontal - SEARCH_ORBIT_RADIUS_FT)
+                / SEARCH_ORBIT_CORRECTION_BAND_FT
+                * SEARCH_ORBIT_MAX_CORRECTION_DEG)
+                .clamp(
+                    -SEARCH_ORBIT_MAX_CORRECTION_DEG,
+                    SEARCH_ORBIT_MAX_CORRECTION_DEG,
+                );
+            let altitude_error = orbit_altitude - frame.own.position[1];
+            (
+                bearing - 90.0 + correction,
+                altitude_error
+                    .atan2(SEARCH_ORBIT_RADIUS_FT)
+                    .to_degrees()
+                    .clamp(
+                        -SEARCH_ORBIT_MAX_CORRECTION_DEG,
+                        SEARCH_ORBIT_MAX_CORRECTION_DEG,
+                    ),
+                None,
+            )
+        };
+        let duration = Duration::Timed(SEARCH_COMMAND_SECONDS);
+        let request = MotionRequest::new(
+            heading.round() as i32,
+            PitchRequest::Explicit(pitch.round() as i32),
+            Bank::Unconstrained,
+            SpeedRequest::Corner,
+            duration,
+        );
+        let continuing = self.active.filter(|active| {
+            active.search
+                && matches!(active.intent.completion,
+                    Completion::Deadline(deadline) if !motion::is_expired(deadline, clock))
+        });
+        let (id, completion, submitted_at) = if let Some(active) = continuing {
+            (
+                active.intent.id,
+                active.intent.completion,
+                active.submitted_at,
+            )
+        } else {
+            let id = self.next_motion_id;
+            self.next_motion_id += 1;
+            (
+                id,
+                Completion::Deadline(
+                    motion::deadline_for(duration, clock).expect("timed search maneuver"),
+                ),
+                clock,
+            )
+        };
+        let intent = MotionIntent {
+            id,
+            request,
+            heading_deg: heading.rem_euclid(360.0),
+            flight_path_pitch_deg: pitch.clamp(-90.0, 90.0),
+            speed: frame.own.limits.corner,
+            bank: Bank::Unconstrained,
+            completion,
+            steering_point,
+            mode: CommandMode::OtherState,
+            formation_flight: false,
+            afterburner: false,
+        };
+        self.active = Some(ActiveManeuver {
+            intent,
+            submitted_at,
+            formation: false,
+            search: true,
+            ordered: false,
+        });
+        batch.motion = Some(intent);
+        batch.activity = Some(Activity::Searching);
+        Ok(true)
     }
 
     /// B43 slot geometry with opinionated physical departure/rejoin guidance.
@@ -1408,6 +1621,8 @@ impl Controller {
             intent,
             submitted_at,
             formation: true,
+            search: false,
+            ordered: false,
         });
         batch.motion = Some(intent);
         batch.activity = Some(Activity::Formation);
@@ -2016,6 +2231,9 @@ impl Controller {
         }
         if !self.identity.is_leader() && frame.wing.leader.is_some() {
             return Activity::Formation;
+        }
+        if self.profile.role == MissionRole::AirToAir {
+            return Activity::Searching;
         }
         Activity::Idle
     }
@@ -2859,11 +3077,14 @@ mod tests {
         let all = [
             Activity::Idle,
             Activity::Formation,
+            Activity::Searching,
+            Activity::Acquiring,
             Activity::Pursuing,
             Activity::Attacking,
             Activity::Defending,
             Activity::Evading,
             Activity::Breaking,
+            Activity::Rejoining,
             Activity::ReturningToBase,
             Activity::OutOfFuel,
             Activity::Destroyed,
@@ -2875,6 +3096,212 @@ mod tests {
         labels.dedup();
         assert_eq!(labels.len(), before);
     }
+
+    #[test]
+    fn remembered_contact_searches_frozen_point_without_targeting_or_firing() {
+        let mut scene = Scene::new();
+        scene.targets.clear();
+        let mut c = controller(Experience::Average);
+        c.set_search_contact(Some(SearchContact {
+            id: 91,
+            position: [0.0, 20_000.0, 10_000.0],
+            observed_tick: 0,
+        }));
+
+        let output = c.step(&scene.frame(1, own())).unwrap();
+        assert_eq!(output.activity, Some(Activity::Searching));
+        assert_eq!(output.sensor.designate, None);
+        assert_eq!(c.target(), None);
+        assert!(output.weapons.is_empty());
+        let motion = output.motion.unwrap();
+        assert_eq!(motion.steering_point, Some([0.0, 20_000.0, 10_000.0]));
+        assert!(motion.heading_deg.abs() < 1e-9);
+    }
+
+    #[test]
+    fn air_to_air_leader_without_a_contact_reports_mission_search() {
+        let mut scene = Scene::new();
+        scene.targets.clear();
+        let output = controller(Experience::Average)
+            .step(&scene.frame(1, own()))
+            .unwrap();
+        assert_eq!(output.activity, Some(Activity::Searching));
+        assert!(output.motion.is_some());
+    }
+
+    #[test]
+    fn search_orbit_is_level_bounded_and_does_not_restart_each_tick() {
+        let mut scene = Scene::new();
+        scene.targets.clear();
+        let mut c = controller(Experience::Average);
+        let contact = SearchContact {
+            id: 91,
+            position: [0.0, 20_000.0, SEARCH_ORBIT_RADIUS_FT],
+            observed_tick: 0,
+        };
+        c.set_search_contact(Some(contact));
+        let first = c.step(&scene.frame(1, own())).unwrap().motion.unwrap();
+        c.set_search_contact(Some(contact));
+        let second = c.step(&scene.frame(2, own())).unwrap().motion.unwrap();
+
+        assert_eq!(first.id, second.id);
+        assert!((first.heading_deg - 270.0).abs() < 1e-9);
+        assert!(first.flight_path_pitch_deg.abs() < 1e-9);
+        assert_eq!(first.steering_point, None);
+
+        let mut displaced = own();
+        displaced.position[1] += 100.0;
+        let correcting = c.step(&scene.frame(3, displaced)).unwrap().motion.unwrap();
+        assert!(correcting.flight_path_pitch_deg < 0.0);
+        assert!(correcting.flight_path_pitch_deg >= -SEARCH_ORBIT_MAX_CORRECTION_DEG);
+    }
+
+    #[test]
+    fn level_search_orbit_radius_ignores_the_lost_targets_altitude() {
+        let mut scene = Scene::new();
+        scene.targets.clear();
+        let mut c = controller(Experience::Average);
+        c.set_search_contact(Some(SearchContact {
+            id: 91,
+            position: [0.0, 21_000.0, SEARCH_ORBIT_RADIUS_FT],
+            observed_tick: 0,
+        }));
+        let motion = c.step(&scene.frame(1, own())).unwrap().motion.unwrap();
+        assert!((motion.heading_deg - 270.0).abs() < 1e-9);
+        assert!(motion.flight_path_pitch_deg.abs() < 1e-9);
+    }
+
+    #[test]
+    fn clockwise_search_orbit_has_the_expected_cardinal_tangents() {
+        let mut scene = Scene::new();
+        scene.targets.clear();
+        let cases = [
+            ([0.0, 20_000.0, SEARCH_ORBIT_RADIUS_FT], 270.0),
+            ([SEARCH_ORBIT_RADIUS_FT, 20_000.0, 0.0], 0.0),
+            ([0.0, 20_000.0, -SEARCH_ORBIT_RADIUS_FT], 90.0),
+            ([-SEARCH_ORBIT_RADIUS_FT, 20_000.0, 0.0], 180.0),
+        ];
+        for (position, expected_heading) in cases {
+            let mut c = controller(Experience::Average);
+            c.set_search_contact(Some(SearchContact {
+                id: 91,
+                position,
+                observed_tick: 0,
+            }));
+            let heading = c
+                .step(&scene.frame(1, own()))
+                .unwrap()
+                .motion
+                .unwrap()
+                .heading_deg;
+            assert!((heading - expected_heading).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn ace_search_cap_rejoins_without_discarding_the_remembered_contact() {
+        let mut scene = Scene::new();
+        scene.targets.clear();
+        let mut c = controller(Experience::Ace);
+        let contact = SearchContact {
+            id: 91,
+            position: [0.0, 20_000.0, 10_000.0],
+            observed_tick: 0,
+        };
+        c.set_search_contact(Some(contact));
+        assert_eq!(
+            c.step(&scene.frame(1, own())).unwrap().activity,
+            Some(Activity::Searching)
+        );
+        c.set_search_contact(Some(contact));
+        let capped = c
+            .step(&scene.frame(1 + ACE_SEARCH_LIMIT_TICKS, own()))
+            .unwrap();
+        assert_eq!(capped.activity, Some(Activity::Rejoining));
+        assert!(capped.motion.is_none());
+        assert_eq!(c.search_contact, Some(contact));
+        let resumed = c
+            .step(&scene.frame(2 + ACE_SEARCH_LIMIT_TICKS, own()))
+            .unwrap();
+        assert_eq!(resumed.activity, Some(Activity::Searching));
+        assert!(resumed.motion.is_some());
+    }
+
+    #[test]
+    fn live_contact_preempts_search_and_without_a_solution_is_acquiring() {
+        let mut scene = Scene::new();
+        scene.targets.clear();
+        scene.targets.push(enemy(22, [0.0, 20_000.0, -10_000.0]));
+        let mut c = controller(Experience::Average);
+        c.set_search_contact(Some(SearchContact {
+            id: 91,
+            position: [0.0, 20_000.0, 10_000.0],
+            observed_tick: 0,
+        }));
+        let output = c.step(&scene.frame(1, own())).unwrap();
+        assert_eq!(c.target(), Some(22));
+        assert_eq!(output.activity, Some(Activity::Acquiring));
+        assert!(output.weapons.is_empty());
+    }
+
+    #[test]
+    fn explicit_break_preempts_a_remembered_contact_search() {
+        let mut scene = Scene::new();
+        scene.targets.clear();
+        let mut c = controller(Experience::Average);
+        c.set_search_contact(Some(SearchContact {
+            id: 91,
+            position: [0.0, 20_000.0, 10_000.0],
+            observed_tick: 0,
+        }));
+        c.receive_order(
+            WingRequest::Break {
+                heading_offset_deg: 170,
+                pitch_deg: 0,
+            },
+            0,
+        )
+        .unwrap();
+
+        let output = c.step(&scene.frame(1, own())).unwrap();
+        assert_eq!(output.motion.unwrap().heading_deg, 170.0);
+    }
+
+    #[test]
+    fn motion_order_interrupt_restarts_the_ace_investigation_clock() {
+        let mut scene = Scene::new();
+        scene.targets.clear();
+        let mut c = controller(Experience::Ace);
+        c.set_search_contact(Some(SearchContact {
+            id: 91,
+            position: [0.0, 20_000.0, 10_000.0],
+            observed_tick: 0,
+        }));
+        assert_eq!(
+            c.step(&scene.frame(1, own())).unwrap().activity,
+            Some(Activity::Searching)
+        );
+        c.receive_order(
+            WingRequest::Break {
+                heading_offset_deg: 170,
+                pitch_deg: 0,
+            },
+            2,
+        )
+        .unwrap();
+
+        assert_eq!(
+            c.step(&scene.frame(603, own())).unwrap().activity,
+            Some(Activity::Searching)
+        );
+        assert_eq!(
+            c.step(&scene.frame(1 + ACE_SEARCH_LIMIT_TICKS, own()))
+                .unwrap()
+                .activity,
+            Some(Activity::Searching)
+        );
+    }
+
     #[test]
     fn pursuit_tracks_lateral_and_moving_targets_without_restarting_or_redirecting_breaks() {
         let mut scene = Scene::new();

@@ -139,7 +139,13 @@ fn activity_goal(
         Activity::Pursuing | Activity::Attacking => "A",
         Activity::Defending | Activity::Evading | Activity::Breaking => "E",
         Activity::Destroyed => "C",
-        _ => "N",
+        Activity::Idle
+        | Activity::Formation
+        | Activity::Searching
+        | Activity::Acquiring
+        | Activity::Rejoining
+        | Activity::ReturningToBase
+        | Activity::OutOfFuel => "N",
     };
     (
         goal,
@@ -331,6 +337,9 @@ mod tests {
         assert_eq!(activity_goal(Activity::Pursuing, None), ("A", false));
         // Selected attack target does not identify the threat being evaded.
         assert_eq!(activity_goal(Activity::Evading, Some(0)), ("E", false));
+        assert_eq!(activity_goal(Activity::Searching, Some(0)), ("N", false));
+        assert_eq!(activity_goal(Activity::Acquiring, Some(0)), ("N", false));
+        assert_eq!(activity_goal(Activity::Rejoining, Some(0)), ("N", false));
         assert_eq!(activity_goal(Activity::ReturningToBase, None), ("N", false));
         assert_eq!(activity_goal(Activity::Destroyed, None), ("C", false));
     }

@@ -290,17 +290,13 @@ impl AiWings {
                 .ok_or_else(|| format!("aircraft cache missing {}", id.pt()))?;
             let mut aircraft = Aircraft::parse(bytes)?;
             aircraft.id = id;
-            // A missing or unreviewed sensor record is not fatal: the actor
-            // simply flies without its own sensors, which the AI documents as
-            // the host-supplied permitted-target path.
             let found = sensors::SensorProfiles::from_source(&aircraft, |name| {
                 resources
                     .get(name)
                     .cloned()
                     .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
-            })
-            .ok();
-            Ok((aircraft, found))
+            })?;
+            Ok((aircraft, Some(found)))
         })?;
         for actor in bridge.mission.actors_mut() {
             let aircraft = Aircraft::parse(&resources[actor.identity().aircraft.pt()])?;
