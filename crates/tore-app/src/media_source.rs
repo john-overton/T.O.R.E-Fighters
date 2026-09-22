@@ -714,29 +714,23 @@ mod tests {
     fn the_remembered_source_round_trips() {
         let data = TempDir::new();
         assert!(remembered(&data.0).is_none());
+        // Absolute on every host: a Unix-style root is relative on Windows.
+        let disc = data.join("FA_DISC1");
         let source = MediaSource {
-            path: PathBuf::from("/run/media/pilot/FA_DISC1"),
+            path: disc.clone(),
             kind: Kind::Disc,
-            container: Some(PathBuf::from("/run/media/pilot/FA_DISC1/SETUP.ESA")),
+            container: Some(disc.join("SETUP.ESA")),
         };
         remember(&data.0, &source).unwrap();
-        assert_eq!(
-            remembered(&data.0),
-            Some((PathBuf::from("/run/media/pilot/FA_DISC1"), Kind::Disc))
-        );
+        assert_eq!(remembered(&data.0), Some((disc, Kind::Disc)));
+        let folder = data.join("Fighters Anthology");
         let installed = MediaSource {
-            path: PathBuf::from("/games/Janes/Fighters Anthology"),
+            path: folder.clone(),
             kind: Kind::Installed,
             container: None,
         };
         remember(&data.0, &installed).unwrap();
-        assert_eq!(
-            remembered(&data.0),
-            Some((
-                PathBuf::from("/games/Janes/Fighters Anthology"),
-                Kind::Installed
-            ))
-        );
+        assert_eq!(remembered(&data.0), Some((folder, Kind::Installed)));
         fs::write(data.join(REMEMBERED), "kind=disc\n").unwrap();
         assert!(remembered(&data.0).is_none());
         fs::write(data.join(REMEMBERED), "path=/a\nkind=floppy\n").unwrap();
