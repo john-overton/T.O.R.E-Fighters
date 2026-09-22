@@ -135,9 +135,11 @@ whatever the file holds.
 ### Modifiers
 
 A modifier is a held control that switches its device to another layer of
-bindings, like Ctrl or Shift on a keyboard. A device can have up to four. Add
-one on the device's settings row (right, or click the value's right side, then
-press the button or D-pad direction); remove the last one with left. Any button
+bindings, like Ctrl or Shift on a keyboard. A device can have up to four. Select
+the **Modifier buttons** row with a click, Enter or the controller's A button,
+then press a button or D-pad direction: a new one is added, and one that is
+already a modifier is removed. Left and right on the D-pad do nothing on that
+row, so moving through the settings never starts a capture. Esc cancels. Any button
 or a single D-pad direction can be a modifier, so D-pad left and D-pad right can
 be two separate modifiers. While capturing, hold one or two modifiers and press
 the control: `View + D-pad left + A` is a valid binding. When several held

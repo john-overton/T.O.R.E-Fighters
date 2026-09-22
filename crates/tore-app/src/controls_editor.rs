@@ -151,6 +151,12 @@ impl Setting {
                 | Setting::HeadInvertPitch
         )
     }
+    /// Stepped values show arrows and take left/right. Toggles flip on any
+    /// activation; Modifiers starts a capture only when activated, so the
+    /// D-pad can move past it without starting one.
+    fn arrows(self) -> bool {
+        !self.toggle() && self != Setting::Modifiers
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -670,19 +676,9 @@ impl Editor {
                 self.profile.gamepad_defaults = !self.profile.gamepad_defaults
             }
             Setting::Modifiers => {
-                if delta < 0 {
-                    let Some(i) = self.modifiers(&tab).last().copied() else {
-                        return ResultAction::None;
-                    };
-                    self.profile.modifiers.remove(i);
-                    self.message = "Modifier removed; it acts as an ordinary button again".into();
-                } else if self.modifiers(&tab).len() >= 4 {
-                    self.message = "A device can have four modifier buttons".into();
-                    return ResultAction::Changed;
-                } else {
-                    self.begin(Target::Modifier);
-                    return ResultAction::Changed;
-                }
+                // Adding and removing both happen in the capture that follows.
+                self.begin(Target::Modifier);
+                return ResultAction::Changed;
             }
             Setting::Deadzone => {
                 let v = ((self.deadzone(&tab) + 0.01 * step) * 100.).round() / 100.;
@@ -743,7 +739,7 @@ impl Editor {
         }
         self.message = match (&target, &tab) {
             (Target::Modifier, _) => {
-                "Press the button or D-pad direction to use as a modifier. Esc cancels.".into()
+                "Press a button or D-pad direction to add it as a modifier, or a modifier to remove it. Esc cancels.".into()
             }
             (Target::Slot(i, _), Tab::Keyboard) => format!(
                 "Press a key for {}. Hold Ctrl/Alt/Shift to combine. Esc cancels.",
@@ -1206,6 +1202,14 @@ impl Editor {
         match key {
             "Escape" => ResultAction::Close,
             "ArrowLeft" | "ArrowRight" if matches!(self.focus, Focus::Setting(_)) => {
+                if let Focus::Setting(i) = self.focus
+                    && self
+                        .settings()
+                        .get(i)
+                        .is_some_and(|s| *s == Setting::Modifiers)
+                {
+                    return ResultAction::None;
+                }
                 let delta = if key == "ArrowLeft" { -1 } else { 1 };
                 match self.focused_hit(delta) {
                     Some(hit) => self.activate(hit),
@@ -1341,13 +1345,23 @@ impl Editor {
             let Some(token) = pressed else {
                 return false;
             };
-            if !declared.contains(&token) {
-                self.profile.modifiers.push((reference, token.clone()));
+            let name = catalog::control_label("pad", &token, Mode::Press, self.gamepad_tab(&tab));
+            if let Some(i) = self
+                .modifiers(&tab)
+                .into_iter()
+                .find(|i| self.profile.modifiers[*i].1 == token)
+            {
+                self.profile.modifiers.remove(i);
+                self.message = format!("{name} is an ordinary button again.");
+            } else if declared.len() >= 4 {
+                self.message =
+                    "A device can have four modifier buttons; press one to remove it".into();
+                return true;
+            } else {
+                self.profile.modifiers.push((reference, token));
+                self.message =
+                    format!("{name} is now a modifier. Hold it while capturing to combine.");
             }
-            self.message = format!(
-                "{} is now a modifier. Hold it while capturing to combine.",
-                catalog::control_label("pad", &token, Mode::Press, self.gamepad_tab(&tab))
-            );
             self.capture = None;
             self.dirty = true;
             return true;
@@ -1549,7 +1563,7 @@ impl Editor {
             if s.focusable() && inside(p, r) {
                 // The left third of the value box steps down; the rest steps up.
                 let v = Self::value_rect(r);
-                let delta = if !s.toggle() && p.0 < (v.0 + v.2 / 3) as f64 {
+                let delta = if s.arrows() && p.0 < (v.0 + v.2 / 3) as f64 {
                     -1
                 } else {
                     1
@@ -1801,7 +1815,7 @@ impl Editor {
             Self::text(pixels, font, r, WHITE, &label, (r.0 + 6, r.1 + 3));
             let v = Self::value_rect(r);
             Canvas(pixels).outline(v, [110, 130, 156, 255]);
-            let value = if setting.toggle() {
+            let value = if !setting.arrows() {
                 fit(font, &value, 200)
             } else {
                 format!("<   {}   >", fit(font, &value, 170))
@@ -2229,6 +2243,34 @@ mod tests {
         assert!(e.profile.to_text().is_ok());
         e.activate(Hit::Cell(roll, 4));
         assert_eq!(e.profile.bindings.len(), 2);
+    }
+    #[test]
+    fn modifiers_start_only_on_activation_and_toggle_in_capture() {
+        let mut e = Editor::new(Profile::default(), vec![pad()], "Main menu");
+        let row = e
+            .settings()
+            .iter()
+            .position(|s| *s == Setting::Modifiers)
+            .unwrap();
+        e.focus = Focus::Setting(row);
+        // D-pad left/right arrive as arrow keys and must not start a capture.
+        assert_eq!(e.key("ArrowRight", false, false, false), ResultAction::None);
+        assert_eq!(e.key("ArrowLeft", false, false, false), ResultAction::None);
+        assert!(!e.capturing());
+        // A arrives as Enter.
+        e.key("Enter", false, false, false);
+        assert!(e.capturing());
+        event(&mut e, "axis:16", 1.);
+        event(&mut e, "axis:16", 0.);
+        assert_eq!(
+            e.profile.modifiers,
+            [("linux-pad".into(), "axis:16=1".into())]
+        );
+        // Pressing an existing modifier in the next capture removes it.
+        e.key("Enter", false, false, false);
+        event(&mut e, "axis:16", 1.);
+        assert!(e.profile.modifiers.is_empty());
+        assert!(!e.capturing());
     }
     #[test]
     fn replacing_a_primary_keeps_it_primary() {
