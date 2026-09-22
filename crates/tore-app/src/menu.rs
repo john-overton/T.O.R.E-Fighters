@@ -29,6 +29,7 @@ pub enum Action {
     Exit,
     Music(bool),
     Effects(bool),
+    ReimportMedia,
 }
 pub struct State {
     pub buttons: Vec<Button>,
@@ -83,6 +84,7 @@ impl State {
                 "Graphics...".into(),
                 "Sound...".into(),
                 "Controls...".into(),
+                "Re-import media...".into(),
                 format!("Music: {}", if self.music { "On" } else { "Off" }),
                 format!("Effects: {}", if self.effects { "On" } else { "Off" }),
             ],
@@ -182,10 +184,14 @@ impl State {
                         return Action::Exit;
                     }
                     if bar == 1 && row == 3 {
+                        self.cancel();
+                        return Action::ReimportMedia;
+                    }
+                    if bar == 1 && row == 4 {
                         self.music = !self.music;
                         return Action::Music(self.music);
                     }
-                    if bar == 1 && row == 4 {
+                    if bar == 1 && row == 5 {
                         self.effects = !self.effects;
                         return Action::Effects(self.effects);
                     }
@@ -653,7 +659,7 @@ impl Canvas<'_> {
             }
         }
     }
-    fn outline(&mut self, (x, y, w, h): (i32, i32, i32, i32), color: [u8; 4]) {
+    pub(crate) fn outline(&mut self, (x, y, w, h): (i32, i32, i32, i32), color: [u8; 4]) {
         for rect in [
             (x, y, w, 1),
             (x, y + h - 1, w, 1),
