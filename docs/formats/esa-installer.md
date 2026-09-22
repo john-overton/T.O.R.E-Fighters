@@ -124,8 +124,9 @@ record and phrase is identical between builds.
 | Radio phrase pointer pairs | `radio` | `0x4ff170` .. `0x4ff990` | each 1.02F address minus `0x4608` | all 26 stems and texts identical |
 
 Code moved by a uniform `0x4d0` in the creator region; `.data` moved by
-`0x4608` for the radio table and `0x4710` for the cloud table, so the readers
-should carry a per-build address set rather than a single delta.
+`0x4608` for the radio table, `0x4710` for the cloud table and `0x4748` for
+the lens-flare table, so the readers carry a per-build address set rather
+than a single delta.
 
 ## Implementation notes for the readers
 
