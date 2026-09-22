@@ -157,6 +157,11 @@ not have to be replaced by a `native` one before acceptance. See
 - Correct stale status claims in place. Do not append a success note beneath a
   contradictory summary.
 
+## Headless development
+
+From the repository root, use `TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --headless-flight 1200 --no-audio`, or the CPU menu snapshot commands in [headless development](docs/DEVELOPMENT.md#headless-development).
+`--no-audio` alone does not disable the window; the linked guide covers isolated imports and the dev profile, while GPU captures and `--smoke-test` require a display.
+
 ## Development checks
 
 On a fresh clone, run `python3 tools/setup_dev.py` once. It points Git at the

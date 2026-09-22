@@ -202,6 +202,9 @@ impl QuickMission {
             .get(self.draft.values[6])
             .and_then(|n| AircraftId::parse(n).ok())
     }
+    pub fn guns_only(&self) -> bool {
+        self.draft.values[19] == 0
+    }
     pub fn theater_index(&self) -> usize {
         let code = source_theaters()[self.draft.values[13]];
         tore_formats::theater::THEATERS
@@ -507,6 +510,11 @@ impl QuickMission {
     pub fn preview_selector(&mut self, name: &str) -> crate::AppResult<()> {
         match name {
             "normal" | "ordnance" => {}
+            "ordnance-empty" | "ordnance-drag" => {
+                if let Some(ordnance) = &mut self.ordnance {
+                    ordnance.preview(name);
+                }
+            }
             "objectives" => {
                 self.draft.values[7] = 2;
                 self.draft.values[24] = 2;

@@ -978,19 +978,10 @@ impl App {
                         self.quick.ordnance =
                             Some(ordnance::Ordnance::new(load, &self.theater_resources)?);
                     }
+                    let guns_only = self.quick.guns_only();
                     let o = self.quick.ordnance.as_mut().unwrap();
-                    if self.quick.draft.values[19] == 0 {
-                        for (s, n) in o
-                            .loadout
-                            .configuration
-                            .stations
-                            .iter()
-                            .zip(&mut o.loadout.quantities)
-                        {
-                            if !s.internal {
-                                *n = 0;
-                            }
-                        }
+                    if guns_only {
+                        o.loadout.restrict_to_guns();
                     }
                     o.visible = true;
                     o.message = None;
@@ -1008,15 +999,15 @@ impl App {
                     return;
                 }
                 let load = &self.quick.ordnance.as_ref().unwrap().loadout;
-                if self.quick.draft.values[19] == 0
+                if self.quick.guns_only()
                     && load
                         .configuration
                         .stations
                         .iter()
                         .zip(&load.quantities)
-                        .any(|(s, n)| !s.internal && *n > 0)
+                        .any(|(s, n)| s.weapon.source != load.aircraft.gun() && *n > 0)
                 {
-                    self.quick.ordnance.as_mut().unwrap().message=Some("Guns only is selected. Unload external weapons or return to setup and change the restriction.".into());
+                    self.quick.ordnance.as_mut().unwrap().message=Some("Guns only is selected. Unload other weapons or return to setup and change the restriction.".into());
                     return;
                 }
                 let altitude = [5000., 10000., 20000., 40000.][self.quick.draft.values[14]];
@@ -1207,7 +1198,7 @@ impl App {
                             ai_wings::AiWings::build(
                                 &wings,
                                 &self.combat.state.targets,
-                                self.combat.state.configuration(),
+                                self.quick.guns_only(),
                                 &self.theater_resources,
                             )
                         });
@@ -1314,6 +1305,14 @@ impl App {
         }
         self.save_preferences();
         if let Some(renderer) = &self.renderer {
+            renderer.window.set_cursor_visible(
+                !(self.screen == Screen::Quick
+                    && self
+                        .quick
+                        .ordnance
+                        .as_ref()
+                        .is_some_and(|o| o.visible && o.dragging())),
+            );
             renderer.window.set_cursor(
                 if (self.screen == Screen::Main && self.menu.state.hover.is_some())
                     || (self.screen == Screen::Quick && self.quick.hover.is_some())
@@ -2663,12 +2662,8 @@ fn ai_probe_run(
     combat.mission_aircraft(&wings, quick.separation_feet(), resources)?;
     let mut flight = hornet.start(world);
     combat.reset(&mut flight)?;
-    let mut bridge = ai_wings::AiWings::build(
-        &wings,
-        &combat.state.targets,
-        combat.state.configuration(),
-        resources,
-    )?;
+    let mut bridge =
+        ai_wings::AiWings::build(&wings, &combat.state.targets, quick.guns_only(), resources)?;
     bridge.apply_mission_preset(ai_mission, flight.position);
     bridge.apply_group_objectives(&quick.group_objectives, flight.position);
     bridge.apply_group_survival(&quick.group_must_survive);
@@ -3814,7 +3809,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             if let Some(object) = ground_start {
                 quick.choose_ground_runway(object)?;
             }
-            if snapshot_state == "ordnance" {
+            if matches!(
+                snapshot_state.as_str(),
+                "ordnance" | "ordnance-empty" | "ordnance-drag"
+            ) {
                 quick.ordnance = Some(ordnance::Ordnance::new(
                     tore_sim::combat::loadout::Loadout::new(&hornet.profile, |n| {
                         theater_resources

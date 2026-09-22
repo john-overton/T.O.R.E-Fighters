@@ -142,6 +142,33 @@ capacity at +0x15, except a projectile without flag 2 is rejected when a
 nonmatching station default name exists. Cheat does not authorize unsupported
 projectile execution in the port.
 
+## Sound selection
+
+Static evidence against the hash-identified FA.EXE/SMS and FA_2.LIB in
+[ordnance audio validation](../baselines/ordnance-audio.md). At `0x41b686`, a
+zero quantity delta skips the entire mutation/sound branch to `0x41b8cc`.
+After HARDLoad/HARDUnload, `0x41b7fb..0x41b83e` selects the edited store's cue:
+
+| Condition | Literal | Playback call |
+| --- | --- | --- |
+| Projectile type 7 and projectile flags bit `0x80` | `&ARMBLLT.5K` at `0x4ee83c` | `0x41b828` |
+| Other store | `&ARMWPN.5K` at `0x4ee830` | `0x41b839` |
+
+The flag is read from byte `+0xa6`, the low byte of the projectile `flags`
+field in the reviewed OBJECT + PROJECTILE layout. The weapon parser exposes
+that field as `Weapon::flags`. Both calls target SMS-named `BasicSound` at
+`0x4335c0` with the second argument zero. The preceding transfer branch and
+quantity clamps feed this same successful-edit path. The bounded pickup path
+changes the cursor but does not call these sounds.
+
+Fuel changes at `0x41b1e1..0x41b2d6` clamp the amount and skip playback at the
+limits. `0x41b2a0..0x41b2c3` starts `&ARMDRIP.11K` from literal `0x4ee8c0`
+through the same BasicSound entry, retaining the active handle so successive
+changes do not start another concurrent copy. Exact shell repeat timing and
+original device mix remain unknown. Unload All's separate helper and catalog
+selection feedback have not been traced in this pass. The player-facing rule
+lives in the [sound specification](../spec/ordnance-presentation.md#sound-effects).
+
 ## Entry and outstanding flow
 
 `0x47fa50–0x47fa96` calls ArmPlane only when global `0x552820` is set; otherwise

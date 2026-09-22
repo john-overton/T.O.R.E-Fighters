@@ -295,7 +295,7 @@ impl AiWings {
     pub fn build(
         wings: &[WingLaunch],
         targets: &[live::Target],
-        _config: &live::Configuration,
+        guns_only: bool,
         resources: &BTreeMap<String, Vec<u8>>,
     ) -> AppResult<Self> {
         let mut bridge = Self::build_with(wings, targets, 0, |id| {
@@ -329,6 +329,9 @@ impl AiWings {
                 } else {
                     simple_stations(u32::from(station.count), 0, AI_STORE_SPEED).remove(0)
                 };
+                if guns_only && !gun {
+                    spec.store.rounds = tore_sim::ai::weapon_service::Rounds::Finite(0);
+                }
                 spec.station = tore_sim::ai::weapon_service::StationId(index as u8);
                 spec.guided = w.flags & 1 != 0;
                 spec.capability = tore_sim::ai::weapon_service::StoreCapability {
@@ -1498,7 +1501,7 @@ pub fn roster_probe(
                 [0.0, 30000.0, 30000.0],
                 Basis::new(std::f64::consts::PI, 0.0, 0.0),
             );
-            let mut bridge = AiWings::build(&wings, &combat.targets, &config, resources)?;
+            let mut bridge = AiWings::build(&wings, &combat.targets, false, resources)?;
             for actor in bridge.mission.actors() {
                 if actor.stations().len() != config.stations.len()
                     || actor
@@ -1575,7 +1578,7 @@ pub fn roster_probe(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::terrain::tests::world;
     use tore_sim::{
@@ -1664,7 +1667,7 @@ mod tests {
     /// `velocity / 120` to every live target once per tick.
     const FIXTURE_TICK_RATE: f64 = 120.0;
 
-    fn combat_fixture(guided: bool) -> live::State {
+    pub(crate) fn combat_fixture(guided: bool) -> live::State {
         use live::{Configuration, State, Station};
         use tore_formats::weapons::*;
         let zone = Zone {

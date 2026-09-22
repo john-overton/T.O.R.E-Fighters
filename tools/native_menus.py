@@ -10,6 +10,8 @@ REGIONS = (
     ('creator_aircraft_filters', 0x42ed13, 0x42edd3, 'creator'),
     ('creator_filter_checkmarks', 0x42ee15, 0x42eeaa, 'creator'),
     ('ordnance_overweight', 0x41b2d6, 0x41b2fd, 'ordnance'),
+    ('ordnance_quantity_sound', 0x41b686, 0x41b8cc, 'ordnance'),
+    ('ordnance_fuel_sound', 0x41b1e1, 0x41b2d6, 'ordnance'),
     ('load', 0x452c20, 0x452d10, 'loading'),
     ('can_load', 0x452980, 0x452c20, 'loading'),
     ('store_weight', 0x452940, 0x452980, 'loading'),

@@ -65,15 +65,44 @@ impl Loadout {
     pub fn change(&mut self, slot: usize, direction: i32) {
         if let Some(s) = self.configuration.stations.get(slot) {
             let cap = self.capacity(slot, &s.weapon);
-            let step = if cap > 300 {
-                100
-            } else if cap > 100 {
-                10
-            } else {
-                1
-            };
+            let step = quantity_step(cap);
             self.quantities[slot] =
                 (i32::from(self.quantities[slot]) + direction.signum() * step).clamp(0, cap) as u16;
+        }
+    }
+    /// Move one quantity step, preserving both loads if the destination rejects it.
+    pub fn transfer(&mut self, source: usize, target: usize) -> Result<()> {
+        if source == target || self.quantities.get(source).copied().unwrap_or(0) == 0 {
+            return Ok(());
+        }
+        let weapon = &self.configuration.stations[source].weapon;
+        let capacity = self.capacity(target, weapon);
+        if capacity <= 0 || capacity >= 32767 {
+            return Err(super::invalid(
+                "This store cannot be loaded at this station.",
+            ));
+        }
+        let existing = if self.configuration.stations[target].weapon.source == weapon.source {
+            i32::from(self.quantities[target])
+        } else {
+            0
+        };
+        let moved = quantity_step(capacity)
+            .min(i32::from(self.quantities[source]))
+            .min((capacity - existing).max(0)) as u16;
+        if moved > 0 {
+            self.configuration.stations[target].weapon = weapon.clone();
+            self.configuration.stations[target].count = capacity as u16;
+            self.quantities[target] = existing as u16 + moved;
+            self.quantities[source] -= moved;
+        }
+        Ok(())
+    }
+    pub fn restrict_to_guns(&mut self) {
+        for (station, count) in self.configuration.stations.iter().zip(&mut self.quantities) {
+            if station.weapon.source != self.aircraft.gun() {
+                *count = 0;
+            }
         }
     }
     pub fn fuel(&mut self, up: bool) {
@@ -122,6 +151,15 @@ impl Loadout {
             ));
         }
         Ok(())
+    }
+}
+fn quantity_step(capacity: i32) -> i32 {
+    if capacity > 300 {
+        100
+    } else if capacity > 100 {
+        10
+    } else {
+        1
     }
 }
 pub fn supported(name: &str) -> bool {

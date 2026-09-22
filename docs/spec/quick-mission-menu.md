@@ -78,6 +78,14 @@ y=38..58, matching the [ordnance menu bar](ordnance-presentation.md).
 
 ## Mission wings
 
+Guns only applies to the player and every member of all six wings, on both
+launch and restart. Each aircraft retains ammunition for its own gun; every
+other weapon has zero ammunition, including missiles in internal bays. Choosing
+Guns and missiles with Standard load restores normal default weapons. Custom
+player loads still reject non-gun weapons at launch while Guns only is selected. This scope is an
+opinionated requirement requested by John on 2026-09-22. It changes loadout
+initialization only. It does not change flight or combat decision rules.
+
 Implementation mode. Normal creator launches use AI for every selected non-player
 aircraft, requested by John on 2026-09-17. Friendly Wing 1 includes the player,
 so a count of 5 creates four wingmen. The other five wings each launch their

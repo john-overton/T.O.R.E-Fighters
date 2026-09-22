@@ -8,6 +8,20 @@ use std::collections::BTreeMap;
 use tore_formats::{Pic, weapons::Weapon};
 use tore_sim::{combat::loadout::Loadout, models::FlightModel};
 type Rect = (i32, i32, i32, i32);
+const CATALOG: Rect = (64, 103, 235, 272);
+const CATALOG_AREA: usize = 15;
+const CARD_WIDTH: i32 = 109;
+const CARD_HEIGHT: i32 = 23;
+#[derive(Clone, Copy)]
+enum DragSource {
+    Catalog(usize),
+    Station(usize),
+}
+struct Drag {
+    source: DragSource,
+    origin: (f64, f64),
+    moved: bool,
+}
 pub struct Ordnance {
     pub loadout: Loadout,
     pub visible: bool,
@@ -20,6 +34,8 @@ pub struct Ordnance {
     hover: Option<usize>,
     pressed: Option<usize>,
     right_pressed: Option<usize>,
+    pointer: Option<(f64, f64)>,
+    drag: Option<Drag>,
     controls: Vec<(usize, Rect)>,
     pub message: Option<String>,
     menu: bool,
@@ -120,6 +136,8 @@ impl Ordnance {
             hover: None,
             pressed: None,
             right_pressed: None,
+            pointer: None,
+            drag: None,
             controls: vec![],
             message: None,
             menu: false,
@@ -134,6 +152,15 @@ impl Ordnance {
             .collect()
     }
     pub fn pointer(&mut self, p: Option<(f64, f64)>) {
+        self.pointer = p;
+        if let (Some(drag), Some(p)) = (&mut self.drag, p) {
+            drag.moved |= (p.0 - drag.origin.0).powi(2) + (p.1 - drag.origin.1).powi(2) >= 9.;
+        }
+        if p.is_none() {
+            self.drag = None;
+            self.pressed = None;
+            self.right_pressed = None;
+        }
         self.hover = p.and_then(|p| {
             self.controls
                 .iter()
@@ -147,17 +174,66 @@ impl Ordnance {
                 .map(|(i, _)| *i)
         });
     }
+    pub fn dragging(&self) -> bool {
+        self.drag.as_ref().is_some_and(|drag| drag.moved)
+    }
     pub fn down(&mut self) {
+        self.right_pressed = None;
         self.pressed = self.hover;
+        let source = match self.hover {
+            Some(id @ 100..=107) => self.card_index(id).map(DragSource::Catalog),
+            Some(id @ 200..=231) if self.loadout.quantities[id - 200] > 0 => {
+                Some(DragSource::Station(id - 200))
+            }
+            _ => None,
+        };
+        self.drag = source.zip(self.pointer).map(|(source, origin)| Drag {
+            source,
+            origin,
+            moved: false,
+        });
     }
     pub fn cancel(&mut self) {
         self.pressed = None;
         self.right_pressed = None;
         self.hover = None;
+        self.pointer = None;
+        self.drag = None;
         self.menu = false;
     }
     pub fn up(&mut self) -> Action {
         let p = self.pressed.take();
+        if let Some(drag) = self.drag.take().filter(|drag| drag.moved) {
+            self.message = None;
+            if let Some(target) = self.hover.filter(|id| (200..232).contains(id)) {
+                self.station = target - 200;
+                let station = self.station;
+                return match drag.source {
+                    DragSource::Catalog(index) => {
+                        self.selected = Some(index);
+                        let weapon = self.catalog[index].clone();
+                        self.edit_loadout(|load| load.select(station, weapon))
+                    }
+                    DragSource::Station(source) => {
+                        self.selected = None;
+                        self.edit_loadout(|load| load.transfer(source, station))
+                    }
+                };
+            }
+            if let DragSource::Station(source) = drag.source
+                && self
+                    .hover
+                    .is_some_and(|id| id == CATALOG_AREA || (100..108).contains(&id))
+            {
+                self.selected = None;
+                self.station = source;
+                return self.edit_loadout(|load| {
+                    load.quantities[source] = 0;
+                    Ok(())
+                });
+            }
+            return Action::None;
+        }
         if let (Some(source), Some(target)) = (p, self.hover) {
             if (100..108).contains(&source) && (200..232).contains(&target) {
                 self.select_card(source);
@@ -170,13 +246,17 @@ impl Ordnance {
         Action::None
     }
     fn select_card(&mut self, id: usize) {
-        self.selected = self
-            .page_entries()
+        self.selected = self.card_index(id);
+    }
+    fn card_index(&self, id: usize) -> Option<usize> {
+        self.page_entries()
             .get(self.pages[self.category] * 8 + id - 100)
-            .copied();
+            .copied()
     }
     pub fn right(&mut self, down: bool) -> Action {
         if down {
+            self.pressed = None;
+            self.drag = None;
             self.right_pressed = self.hover;
             return Action::None;
         }
@@ -186,8 +266,57 @@ impl Ordnance {
             .filter(|i| Some(*i) == pressed && (200..232).contains(i))
         {
             self.station = id - 200;
-            self.loadout.change(self.station, -1);
-            Action::Click
+            let station = self.station;
+            self.edit_loadout(|load| {
+                load.change(station, -1);
+                Ok(())
+            })
+        } else {
+            Action::None
+        }
+    }
+    /// Sound follows a completed edit, independent of the input gesture.
+    fn edit_loadout(
+        &mut self,
+        edit: impl FnOnce(&mut Loadout) -> tore_formats::Result<()>,
+    ) -> Action {
+        let before: Vec<_> = self
+            .loadout
+            .configuration
+            .stations
+            .iter()
+            .zip(&self.loadout.quantities)
+            .map(|(station, count)| (station.weapon.source.clone(), station.weapon.flags, *count))
+            .collect();
+        let fuel = self.loadout.fuel_lbs;
+        self.message = None;
+        if let Err(error) = edit(&mut self.loadout) {
+            self.message = Some(error.to_string());
+            return Action::None;
+        }
+        for ((station, count), (source, old_flags, old_count)) in self
+            .loadout
+            .configuration
+            .stations
+            .iter()
+            .zip(&self.loadout.quantities)
+            .zip(before)
+        {
+            if *count != old_count || station.weapon.source != source {
+                let flags = if *count == 0 {
+                    old_flags
+                } else {
+                    station.weapon.flags
+                };
+                return if flags & 0x80 != 0 {
+                    Action::OrdnanceAmmunition
+                } else {
+                    Action::OrdnanceWeapon
+                };
+            }
+        }
+        if self.loadout.fuel_lbs != fuel {
+            Action::OrdnanceFuel
         } else {
             Action::None
         }
@@ -204,8 +333,12 @@ impl Ordnance {
                 self.category = id - 3;
                 self.selected = None;
             }
-            5 => self.loadout.fuel(true),
-            6 => self.loadout.fuel(false),
+            5 | 6 => {
+                return self.edit_loadout(|load| {
+                    load.fuel(id == 5);
+                    Ok(())
+                });
+            }
             7 => {
                 if let Err(e) = self.loadout.validate() {
                     self.message = Some(e.to_string());
@@ -217,8 +350,13 @@ impl Ordnance {
                 self.visible = false;
                 self.cancel();
             }
-            9 => self.loadout.change(self.station, 1),
-            10 => self.loadout.change(self.station, -1),
+            9 | 10 => {
+                let station = self.station;
+                return self.edit_loadout(|load| {
+                    load.change(station, if id == 9 { 1 } else { -1 });
+                    Ok(())
+                });
+            }
             11 => self.menu = !self.menu,
             12 => {
                 self.loadout.quantities.fill(0);
@@ -232,17 +370,34 @@ impl Ordnance {
             100..=107 => self.select_card(id),
             200..=231 => {
                 self.station = id - 200;
-                if let Some(w) = self.selected
-                    && let Err(e) = self.loadout.select(self.station, self.catalog[w].clone())
-                {
-                    self.message = Some(e.to_string());
+                let station = self.station;
+                if self.loadout.quantities[station] > 0 {
+                    self.selected = None;
+                    return self.edit_loadout(|load| {
+                        let capacity =
+                            load.capacity(station, &load.configuration.stations[station].weapon);
+                        if i32::from(load.quantities[station]) < capacity {
+                            load.quantities[station] += 1;
+                        }
+                        Ok(())
+                    });
+                } else if let Some(w) = self.selected {
+                    let weapon = self.catalog[w].clone();
+                    return self.edit_loadout(|load| load.select(station, weapon));
                 }
+                return Action::None;
             }
             _ => return Action::None,
         }
         Action::Click
     }
     pub fn key(&mut self, key: &str) -> Action {
+        if self.drag.is_some() {
+            if key == "Escape" {
+                self.cancel();
+            }
+            return Action::None;
+        }
         match key {
             "Escape" => {
                 if self.menu {
@@ -268,9 +423,22 @@ impl Ordnance {
             _ => Action::None,
         }
     }
+    /// Reproducible presentation fixtures for the existing menu snapshot command.
+    pub fn preview(&mut self, state: &str) {
+        match state {
+            "ordnance-empty" => self.loadout.quantities.fill(0),
+            "ordnance-drag" => {
+                self.pointer(Some((100., 120.)));
+                self.down();
+                self.pointer(Some((325., 190.)));
+            }
+            _ => {}
+        }
+    }
     pub fn render(&mut self, pixels: &mut [u8]) {
         pixels.copy_from_slice(&self.sprites["ORD_AIR3.PIC"].rgba);
         self.controls.clear();
+        self.controls.push((CATALOG_AREA, CATALOG));
         let mut c = Canvas(pixels);
         let font = &self.sprites["QUICKFONT"];
         let menu_font = &self.sprites["MENUFONT.PIC"];
@@ -290,7 +458,8 @@ impl Ordnance {
         let entries = self.page_entries();
         let page = self.pages[self.category];
         for (row, index) in entries.iter().skip(page * 8).take(8).enumerate() {
-            let x = 68 + (row % 2) as i32 * 120;
+            // Imported black wells are 113 pixels wide at x=66/185.
+            let x = 68 + (row % 2) as i32 * 119;
             let y = 108 + (row / 2) as i32 * 68;
             self.controls.push((100 + row, (x - 4, y - 5, 115, 68)));
             card(
@@ -326,25 +495,27 @@ impl Ordnance {
             .copied()
             .unwrap_or("Station");
             c.text(font, location, x + 1, y, None);
-            if *n > 0 || s.internal {
+            if *n > 0 {
                 card(
                     &mut c,
                     &self.sprites,
                     &s.weapon,
-                    x + 2,
+                    x + 3,
                     y + 14,
                     self.station == i,
                     false,
                 );
+                let amount = if s.internal {
+                    format!("{n} (max {})", self.loadout.capacity(i, &s.weapon))
+                } else {
+                    format!("{n} loaded (max {})", self.loadout.capacity(i, &s.weapon))
+                };
+                c.text(font, &amount, x + 3, y + 52, None);
             } else {
-                c.text(font, "Empty", x + 2, y + 39, None);
+                // Imported black wells start at x+1; keep two black pixels
+                // on each side of the 109-pixel outline, even when empty.
+                card_outline(&mut c, x + 3, y + 14, false);
             }
-            let amount = if s.internal {
-                format!("{n} (max {})", self.loadout.capacity(i, &s.weapon))
-            } else {
-                format!("{n} loaded (max {})", self.loadout.capacity(i, &s.weapon))
-            };
-            c.text(font, &amount, x + 2, y + 52, None);
         }
         let total = self.loadout.total_lbs();
         for (y, value) in [
@@ -440,6 +611,26 @@ impl Ordnance {
         if let Some(message) = &self.message {
             notice(&mut c, font, message);
         }
+        if let Some(drag) = self.drag.as_ref().filter(|drag| drag.moved)
+            && let Some((x, y)) = self.pointer
+        {
+            let weapon = match drag.source {
+                DragSource::Catalog(index) => &self.catalog[index],
+                DragSource::Station(index) => &self.loadout.configuration.stations[index].weapon,
+            };
+            if let Some(sprite) = thumbnail(&self.sprites, weapon) {
+                c.blit(
+                    sprite,
+                    (
+                        x as i32 - sprite.width as i32 / 2,
+                        y as i32 - sprite.height as i32 / 2,
+                    ),
+                    0,
+                    sprite.width,
+                    1.,
+                );
+            }
+        }
     }
 }
 fn grouped(value: f64) -> String {
@@ -466,18 +657,18 @@ fn card(
     selected: bool,
     catalog: bool,
 ) {
-    let edge = if selected {
-        [201, 179, 49, 255]
-    } else {
-        [94, 30, 20, 255]
-    };
-    c.rect((x, y - 1, 109, 1), edge);
-    c.rect((x, y + 21, 109, 1), edge);
-    c.rect((x, y - 1, 1, 23), edge);
-    c.rect((x + 108, y - 1, 1, 23), edge);
-    let pic = format!("${}.PIC", w.source.trim_end_matches(".JT"));
-    if let Some(p) = sprites.get(&pic) {
-        c.blit(p, (x + 1, y), 0, p.width, 1.);
+    card_outline(c, x, y, selected);
+    if let Some(p) = thumbnail(sprites, w) {
+        c.blit(
+            p,
+            (
+                x + (CARD_WIDTH - p.width as i32) / 2,
+                y - 1 + (CARD_HEIGHT - p.height as i32) / 2,
+            ),
+            0,
+            p.width,
+            1.,
+        );
     }
     let font = &sprites[if selected { "WPNYELLOW" } else { "QUICKFONT" }];
     let mut name = w.name.clone();
@@ -509,12 +700,45 @@ fn card(
         );
     }
 }
+fn thumbnail<'a>(sprites: &'a BTreeMap<String, Sprite>, weapon: &Weapon) -> Option<&'a Sprite> {
+    sprites.get(&format!("${}.PIC", weapon.source.trim_end_matches(".JT")))
+}
+fn card_outline(c: &mut Canvas, x: i32, y: i32, selected: bool) {
+    let edge = if selected {
+        [201, 179, 49, 255]
+    } else {
+        [94, 30, 20, 255]
+    };
+    c.rect((x, y - 1, CARD_WIDTH, 1), edge);
+    c.rect((x, y + CARD_HEIGHT - 2, CARD_WIDTH, 1), edge);
+    c.rect((x, y - 1, 1, CARD_HEIGHT), edge);
+    c.rect((x + CARD_WIDTH - 1, y - 1, 1, CARD_HEIGHT), edge);
+}
 
 /// Source-cache regression probe. No GPU, native execution, or invented targets.
 pub fn validate_sources(
     data: &BTreeMap<String, Vec<u8>>,
     world: &crate::terrain::World,
 ) -> AppResult<()> {
+    // Run editor/loadout checks for the complete roster before unrelated flight
+    // appearance probes, so their failures cannot hide preflight coverage.
+    for id in tore_formats::aircraft::AircraftId::SELECTABLE {
+        let airframe = crate::aircraft::Airframe::load(data, id)?;
+        let load = Loadout::new(&airframe.profile, |name| {
+            data.get(name)
+                .cloned()
+                .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+        })?;
+        let mut combat = crate::combat::Combat::with_loadout(&airframe, data, &load)?;
+        combat.mission_dummies(&[(id, 29)], 5280., data)?;
+        combat.reset(&mut airframe.start(world))?;
+        validate_guns_only(&load, &airframe, &combat.state.targets, data, world)?;
+        validate_dragging(&load, data)?;
+        println!(
+            "{}: guns-only across all six wings, player/wing restart, standard loads and ordnance dragging passed",
+            id.label()
+        );
+    }
     for id in tore_formats::aircraft::AircraftId::SELECTABLE {
         let airframe = crate::aircraft::Airframe::load(data, id)?;
         let mut load = Loadout::new(&airframe.profile, |n| {
@@ -716,9 +940,438 @@ pub fn validate_sources(
             return Err("empty loadout gained ammunition".into());
         }
         println!(
-            "{}: {alternatives} supported store/placement cases, edited fuel, empty stations, normal weapons, 1000-foot gun sights, glowing gun tracers, nine regional damage stages, 29 dummy models and restart passed",
+            "{}: {alternatives} supported store/placement cases, edited fuel, empty stations, normal weapons, guns-only for all six wings and restart, 1000-foot gun sights, glowing gun tracers, nine regional damage stages, 29 dummy models and restart passed",
             id.label()
         );
     }
     Ok(())
+}
+
+fn validate_dragging(load: &Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
+    let mut ui = Ordnance::new(load.clone(), data)?;
+    let mut pixels = vec![0; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
+    ui.render(&mut pixels);
+    let source = load
+        .configuration
+        .stations
+        .iter()
+        .position(|station| !station.internal)
+        .ok_or("no external station in ordnance validation")?;
+    let from = (
+        360. + (source % 2) as f64 * 119.,
+        145. + (source / 2) as f64 * 71.,
+    );
+    ui.pointer(Some(from));
+    ui.down();
+    ui.pointer(Some((290., 370.)));
+    ui.up();
+    if ui.loadout.quantities[source] != 0 {
+        return Err("catalog drop did not empty the imported station".into());
+    }
+    let weapon = &load.configuration.stations[source].weapon;
+    let index = ui
+        .catalog
+        .iter()
+        .position(|candidate| candidate.source == weapon.source)
+        .ok_or("imported station weapon missing from catalog")?;
+    ui.category = usize::from(weapon.flags & 0x10000 == 0);
+    let entry = ui.page_entries().iter().position(|i| *i == index).unwrap();
+    ui.pages[ui.category] = entry / 8;
+    ui.render(&mut pixels);
+    let row = entry % 8;
+    ui.pointer(Some((
+        80. + (row % 2) as f64 * 120.,
+        120. + (row / 2) as f64 * 68.,
+    )));
+    ui.down();
+    ui.pointer(Some(from));
+    ui.up();
+    if i32::from(ui.loadout.quantities[source]) != load.capacity(source, weapon) {
+        return Err("catalog drag did not refill the imported station".into());
+    }
+    if let Some(target) =
+        (0..load.quantities.len()).find(|i| *i != source && load.capacity(*i, weapon) > 0)
+    {
+        ui.loadout.quantities[target] = 0;
+        let before = ui.loadout.quantities[source];
+        ui.pointer(Some(from));
+        ui.down();
+        ui.pointer(Some((
+            360. + (target % 2) as f64 * 119.,
+            145. + (target / 2) as f64 * 71.,
+        )));
+        ui.up();
+        if ui.loadout.quantities[target] == 0
+            || ui.loadout.quantities[source] + ui.loadout.quantities[target] != before
+        {
+            return Err("station transfer did not conserve imported ammunition".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_guns_only(
+    load: &Loadout,
+    airframe: &crate::aircraft::Airframe,
+    targets: &[tore_sim::combat::live::Target],
+    data: &BTreeMap<String, Vec<u8>>,
+    world: &crate::terrain::World,
+) -> AppResult<()> {
+    use tore_sim::ai::{
+        launch::{Side, WingId, WingSelection, resolve_wings},
+        weapon_service::Rounds,
+    };
+    let selections: Vec<_> = (0..6)
+        .map(|group| WingSelection {
+            wing: WingId::new(
+                if group < 3 {
+                    Side::Friendly
+                } else {
+                    Side::Enemy
+                },
+                group % 3,
+            )
+            .unwrap(),
+            aircraft: load.aircraft,
+            count: if group == 0 { 4 } else { 5 },
+            skill_level: 1,
+        })
+        .collect();
+    let wings = resolve_wings(&selections, None)?;
+    // Rebuilding is also the live restart path. Standard loads after guns-only
+    // must still come from the unmodified imported aircraft records.
+    for guns_only in [true, true, false] {
+        let bridge = crate::ai_wings::AiWings::build(&wings, targets, guns_only, data)?;
+        if bridge.len() != 29 {
+            return Err("guns-only validation lost wing members".into());
+        }
+        for actor in bridge.mission().actors() {
+            if actor.stations().len() != load.configuration.stations.len() {
+                return Err("guns-only validation lost stations".into());
+            }
+            for (actual, original) in actor.stations().iter().zip(&load.configuration.stations) {
+                let count = if guns_only && original.weapon.source != load.aircraft.gun() {
+                    0
+                } else {
+                    u32::from(original.count)
+                };
+                if actual.rounds() != Rounds::Finite(count) {
+                    return Err("wing weapon restriction mismatch".into());
+                }
+            }
+        }
+    }
+    let mut guns = load.clone();
+    guns.restrict_to_guns();
+    let mut combat = crate::combat::Combat::with_loadout(airframe, data, &guns)?;
+    let mut flight = airframe.start(world);
+    for _ in 0..2 {
+        combat.reset(&mut flight)?;
+        if combat.state.ammo != guns.quantities {
+            return Err("player guns-only load lost at launch or restart".into());
+        }
+        combat.state.ammo.fill(0);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::menu::{HEIGHT, WIDTH};
+    use tore_formats::aircraft::Hardpoint;
+
+    fn fixture() -> Ordnance {
+        let mut config = crate::ai_wings::tests::combat_fixture(true)
+            .configuration()
+            .clone();
+        config.stations[0].weapon.source = "AIM9M.JT".into();
+        config.stations[0].weapon.flags |= 0x10002;
+        config.stations[0].count = 4;
+        let mut gun = config.stations[0].clone();
+        gun.weapon.source = "M61.JT".into();
+        gun.weapon.flags |= 0x80;
+        gun.internal = true;
+        gun.count = 500;
+        config.stations.push(config.stations[0].clone());
+        config.stations.push(gun);
+        let catalog = vec![config.stations[0].weapon.clone()];
+        let loadout = Loadout {
+            aircraft: config.aircraft,
+            configuration: config,
+            quantities: vec![2, 0, 500],
+            fuel_lbs: 1000.,
+            internal_capacity_lbs: 1000.,
+            empty_lbs: 10000.,
+            maximum_lbs: 20000.,
+            hardpoints: (0..3)
+                .map(|i| Hardpoint {
+                    location: if i == 2 { 2 } else { 4 },
+                    flags: if i == 2 { 8 } else { 0x20 },
+                    position: [0; 3],
+                    store: Some(if i == 2 { "M61.JT" } else { "AIM9M.JT" }.into()),
+                    count: if i == 2 { 500 } else { 4 },
+                    weight_class: 0,
+                })
+                .collect(),
+        };
+        let mut sprites = BTreeMap::new();
+        sprites.insert(
+            "ORD_AIR3.PIC".into(),
+            Sprite {
+                width: WIDTH,
+                height: HEIGHT,
+                rgba: [17, 19, 23, 255].repeat(WIDTH * HEIGHT),
+                glyphs: vec![],
+            },
+        );
+        for name in [
+            "QUICKFONT",
+            "MENUFONT.PIC",
+            "ARMFONT.PIC",
+            "WPNBLUE",
+            "WPNYELLOW",
+            "FONTACT.PIC",
+        ] {
+            sprites.insert(name.into(), crate::menu::flat_font([200, 200, 200]));
+        }
+        for name in [
+            "ROCKER00.PIC",
+            "DIAL11.PIC",
+            "DIAL13.PIC",
+            "LIGHTON.PIC",
+            "LIGHTOFF.PIC",
+            "ACTDFLT.PIC",
+            "ACTDFT0L.PIC",
+            "ACTDFT0M.PIC",
+            "ACTDFT0R.PIC",
+            "ACTION0L.PIC",
+            "ACTION0M.PIC",
+            "ACTION0R.PIC",
+        ] {
+            sprites.insert(
+                name.into(),
+                Sprite {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![0; 4],
+                    glyphs: vec![],
+                },
+            );
+        }
+        let mut rgba = vec![0; 5 * 3 * 4];
+        rgba[(5 + 2) * 4..(5 + 3) * 4].copy_from_slice(&[0, 255, 0, 255]);
+        sprites.insert(
+            "$AIM9M.PIC".into(),
+            Sprite {
+                width: 5,
+                height: 3,
+                rgba,
+                glyphs: vec![],
+            },
+        );
+        let mut ui = Ordnance {
+            loadout,
+            visible: true,
+            catalog,
+            sprites,
+            category: 0,
+            pages: [0; 2],
+            selected: None,
+            station: 0,
+            hover: None,
+            pressed: None,
+            right_pressed: None,
+            pointer: None,
+            drag: None,
+            controls: vec![],
+            message: None,
+            menu: false,
+        };
+        ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
+        ui
+    }
+    fn drag(ui: &mut Ordnance, from: (f64, f64), to: (f64, f64)) -> Action {
+        ui.pointer(Some(from));
+        ui.down();
+        ui.pointer(Some(to));
+        ui.up()
+    }
+    #[test]
+    fn catalog_drag_draws_only_transparent_thumbnail_and_loads_station() {
+        let mut ui = fixture();
+        let mut before = vec![0; WIDTH * HEIGHT * 4];
+        ui.render(&mut before);
+        ui.pointer(Some((100., 120.)));
+        ui.down();
+        ui.pointer(Some((310., 280.)));
+        let mut after = before.clone();
+        ui.render(&mut after);
+        let changed: Vec<_> = before
+            .chunks_exact(4)
+            .zip(after.chunks_exact(4))
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(changed, vec![280 * WIDTH + 310]);
+        assert_eq!(
+            &after[changed[0] * 4..changed[0] * 4 + 4],
+            &[0, 255, 0, 255]
+        );
+        ui.pointer(Some((500., 145.)));
+        ui.up();
+        assert_eq!(ui.loadout.quantities, [2, 4, 500]);
+        assert!(ui.drag.is_none());
+    }
+    #[test]
+    fn station_transfer_and_catalog_unload_preserve_other_stations() {
+        let mut ui = fixture();
+        drag(&mut ui, (400., 145.), (500., 145.));
+        assert_eq!(ui.loadout.quantities, [1, 1, 500]);
+        // Unused space in the catalog is a valid unload destination.
+        drag(&mut ui, (500., 145.), (280., 360.));
+        assert_eq!(ui.loadout.quantities, [1, 0, 500]);
+        // An occupied catalog card unloads too, without selecting that card.
+        drag(&mut ui, (400., 145.), (100., 120.));
+        assert_eq!(ui.loadout.quantities, [0, 0, 500]);
+        assert!(ui.selected.is_none());
+    }
+    #[test]
+    fn invalid_same_station_outside_and_cancelled_drops_do_not_mutate_loads() {
+        let mut ui = fixture();
+        drag(&mut ui, (400., 145.), (400., 215.));
+        assert!(ui.message.is_some());
+        assert_eq!(ui.loadout.quantities, [2, 0, 500]);
+        for destination in [(410., 145.), (600., 300.), (520., 430.)] {
+            drag(&mut ui, (400., 145.), destination);
+            assert_eq!(ui.loadout.quantities, [2, 0, 500]);
+        }
+        for cancel in 0..3 {
+            ui.pointer(Some((400., 145.)));
+            ui.down();
+            ui.pointer(Some((100., 120.)));
+            match cancel {
+                0 => ui.cancel(),
+                1 => {
+                    ui.key("Escape");
+                }
+                _ => ui.pointer(None),
+            }
+            ui.pointer(Some((100., 120.)));
+            ui.up();
+            assert_eq!(ui.loadout.quantities, [2, 0, 500]);
+            assert!(ui.visible);
+        }
+    }
+    #[test]
+    fn empty_station_has_only_red_card_outline_below_location_heading() {
+        let mut ui = fixture();
+        ui.loadout.quantities.fill(0);
+        let mut pixels = vec![0; WIDTH * HEIGHT * 4];
+        ui.render(&mut pixels);
+        for (x, y) in [(353, 135), (472, 135), (353, 206)] {
+            for yy in y - 1..y + 51 {
+                for xx in x..x + 109 {
+                    let edge =
+                        yy <= y + 21 && (yy == y - 1 || yy == y + 21 || xx == x || xx == x + 108);
+                    let expected = if edge {
+                        [94, 30, 20, 255]
+                    } else {
+                        [17, 19, 23, 255]
+                    };
+                    let at = (yy * WIDTH + xx) * 4;
+                    assert_eq!(pixels[at..at + 4], expected, "pixel {xx},{yy}");
+                }
+            }
+        }
+    }
+    #[test]
+    fn click_loading_and_right_click_decrement_still_work() {
+        let mut ui = fixture();
+        drag(&mut ui, (100., 120.), (101., 120.));
+        assert_eq!(ui.selected, Some(0));
+        drag(&mut ui, (500., 145.), (500., 145.));
+        assert_eq!(ui.loadout.quantities, [2, 4, 500]);
+        ui.right(true);
+        ui.right(false);
+        assert_eq!(ui.loadout.quantities, [2, 3, 500]);
+    }
+    #[test]
+    fn loaded_station_click_adds_exactly_one_without_replacing_or_overfilling() {
+        let mut ui = fixture();
+        let mut other = ui.catalog[0].clone();
+        other.source = "AIM120.JT".into();
+        ui.catalog.push(other);
+        ui.selected = Some(1);
+        drag(&mut ui, (400., 145.), (401., 145.));
+        assert_eq!(ui.loadout.quantities, [3, 0, 500]);
+        assert_eq!(
+            ui.loadout.configuration.stations[0].weapon.source,
+            "AIM9M.JT"
+        );
+        drag(&mut ui, (400., 145.), (400., 145.));
+        drag(&mut ui, (400., 145.), (400., 145.));
+        assert_eq!(ui.loadout.quantities, [4, 0, 500]);
+        // Click adds one even where keyboard/right-click steps are 100 rounds.
+        ui.loadout.quantities[2] = 498;
+        drag(&mut ui, (400., 215.), (400., 215.));
+        assert_eq!(ui.loadout.quantities, [4, 0, 499]);
+    }
+    #[test]
+    fn ordnance_sounds_follow_successful_edits_and_not_failed_or_empty_actions() {
+        let mut ui = fixture();
+        assert_eq!(
+            drag(&mut ui, (400., 145.), (400., 145.)),
+            Action::OrdnanceWeapon
+        );
+        ui.right(true);
+        assert_eq!(ui.right(false), Action::OrdnanceWeapon);
+        assert_eq!(ui.key("+"), Action::OrdnanceWeapon);
+        assert_eq!(
+            drag(&mut ui, (100., 120.), (500., 145.)),
+            Action::OrdnanceWeapon
+        );
+        assert_eq!(drag(&mut ui, (400., 145.), (500., 145.)), Action::None);
+        ui.loadout.quantities[1] = 0;
+        assert_eq!(
+            drag(&mut ui, (400., 145.), (500., 145.)),
+            Action::OrdnanceWeapon
+        );
+        assert_eq!(
+            drag(&mut ui, (500., 145.), (100., 120.)),
+            Action::OrdnanceWeapon
+        );
+        assert_eq!(drag(&mut ui, (400., 145.), (400., 215.)), Action::None);
+        assert!(ui.message.is_some());
+        assert_eq!(drag(&mut ui, (400., 145.), (410., 145.)), Action::None);
+        ui.loadout.quantities[2] = 499;
+        assert_eq!(
+            drag(&mut ui, (400., 215.), (400., 215.)),
+            Action::OrdnanceAmmunition
+        );
+        assert_eq!(drag(&mut ui, (400., 215.), (400., 215.)), Action::None);
+        assert_eq!(
+            drag(&mut ui, (400., 215.), (100., 120.)),
+            Action::OrdnanceAmmunition
+        );
+        ui.pointer(Some((400., 215.)));
+        ui.right(true);
+        assert_eq!(ui.right(false), Action::None);
+        // The imported flag chooses the sound, including ammunition in a pod.
+        ui.loadout.configuration.stations[0].weapon.flags |= 0x80;
+        assert_eq!(
+            drag(&mut ui, (400., 145.), (400., 145.)),
+            Action::OrdnanceAmmunition
+        );
+    }
+    #[test]
+    fn fuel_sound_requires_an_actual_fuel_change() {
+        let mut ui = fixture();
+        assert_eq!(ui.activate(5), Action::None);
+        assert_eq!(ui.activate(6), Action::OrdnanceFuel);
+        assert_eq!(ui.activate(6), Action::OrdnanceFuel);
+        assert_eq!(ui.activate(6), Action::None);
+        assert_eq!(ui.activate(5), Action::OrdnanceFuel);
+    }
 }

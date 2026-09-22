@@ -681,6 +681,16 @@ list pickers. The player's wing never cycles below one. Right-click requires a
 matching press/release and cannot launch, cancel or select through a modal list.
 The ordnance view retains right-click quantity decrement.
 
+In Load Ordnance, drag a catalog weapon onto a compatible station to load it.
+Its picture follows the pointer. Drag a loaded station to another station to
+transfer ammunition, or back into the catalog area to empty it. Escape cancels
+a drag. Left-click a loaded station to add one, up to its capacity. Click an
+empty station to load the selected catalog weapon. Empty stations retain a red
+outline. See the
+[drag and quantity rules](spec/ordnance-presentation.md#dragging-and-empty-stations).
+Quick Mission's Guns only restriction applies to every friendly and enemy wing
+and remains active after restart.
+
 View 4 target-camera fields and status meanings are described in the
 [flight controls guide](FLIGHT-CONTROLS.md#target-camera-view-4).
 
