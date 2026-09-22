@@ -52,6 +52,7 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | Ctrl-Q | End mission and return to creator | FA menu; does not quit the application |
 | Alt-F4 / Command-Q on macOS | Exit to desktop | FA menu / macOS app shortcut |
 | F11 | Open keyboard help | Development shortcut |
+| Alt-Enter | Switch between borderless fullscreen and the previous windowed size | Opinionated, requested by John on 2026-09-22; F11 is already keyboard help, so the window mode uses Alt-Enter alone |
 
 These replace the earlier provisional **A/D rudder, +/- throttle, T afterburner, F2/F3 external views**. T is reserved for original target cycling. The headless simulation still uses the same deterministic state model; desktop key translation is separate.
 

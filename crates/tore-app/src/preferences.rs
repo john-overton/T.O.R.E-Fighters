@@ -80,9 +80,14 @@ pub struct Preferences {
     pub brightness: i16,
     pub music: bool,
     pub effects: bool,
+    /// Borderless fullscreen, the default for an interactive start. A future
+    /// Pref menu row hooks into this `fullscreen` field; `menu.rs` owns that
+    /// row.
+    // TODO: add a Pref row that toggles `Preferences::fullscreen`.
+    pub fullscreen: bool,
 }
 impl Preferences {
-    pub fn capture(ui: &FlightUi, i: &Instruments, m: &State) -> Self {
+    pub fn capture(ui: &FlightUi, i: &Instruments, m: &State, fullscreen: bool) -> Self {
         let (large, small) = if i.layout == Layout::Large {
             (&i.pages, &i.other_pages)
         } else {
@@ -105,6 +110,7 @@ impl Preferences {
             brightness: ui.brightness,
             music: m.music,
             effects: m.effects,
+            fullscreen,
         }
     }
     pub fn apply(&self, ui: &mut FlightUi, i: &mut Instruments, m: &mut State) {
@@ -144,7 +150,7 @@ impl Preferences {
             }
         }
         format!(
-            "tore-preferences 3\nzoom {}\nrwr-range {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nbrightness {}\nmusic {}\neffects {}\n",
+            "tore-preferences 4\nzoom {}\nrwr-range {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nbrightness {}\nmusic {}\neffects {}\nfullscreen {}\n",
             self.zoom,
             self.rwr_range,
             self.radar_range,
@@ -160,7 +166,8 @@ impl Preferences {
             self.ladder,
             self.brightness,
             self.music,
-            self.effects
+            self.effects,
+            self.fullscreen
         )
     }
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -173,6 +180,7 @@ impl Preferences {
             Some("tore-preferences 1") => 1,
             Some("tore-preferences 2") => 2,
             Some("tore-preferences 3") => 3,
+            Some("tore-preferences 4") => 4,
             _ => return Err("unsupported preferences version".into()),
         };
         for line in lines {
@@ -204,7 +212,12 @@ impl Preferences {
             }
             Ok(p)
         };
-        if values.len() != if version < 3 { 14 } else { 16 } {
+        let expected = match version {
+            1 | 2 => 14,
+            3 => 16,
+            _ => 17,
+        };
+        if values.len() != expected {
             return Err("unknown preference".into());
         }
         let brightness = get("brightness")?
@@ -279,6 +292,13 @@ impl Preferences {
             brightness,
             music: boolean("music")?,
             effects: boolean("effects")?,
+            // Files written before version 4 predate the window mode, and
+            // borderless fullscreen is the default, so they start fullscreen.
+            fullscreen: if version < 4 {
+                true
+            } else {
+                boolean("fullscreen")?
+            },
         })
     }
 }
@@ -296,7 +316,7 @@ mod tests {
         i.pages = vec![9, 5];
         i.other_pages = vec![7, 8, 4];
         i.radar_range = 1;
-        let saved = Preferences::capture(&ui, &i, &menu);
+        let saved = Preferences::capture(&ui, &i, &menu, false);
         let path = std::env::temp_dir().join(format!(
             "tore-prefs-{}-{}",
             std::process::id(),
@@ -317,6 +337,7 @@ mod tests {
         assert!(!ui.cockpit && !menu.effects);
         assert_eq!(ui.zoom, 1.7);
         assert_eq!(i.radar_range, 1);
+        assert!(!loaded.fullscreen);
     }
     #[test]
     fn roundtrip_layouts_and_reject_malformed() {
@@ -337,8 +358,31 @@ mod tests {
             brightness: 3,
             music: false,
             effects: true,
+            fullscreen: false,
         };
         assert_eq!(Preferences::parse(&p.text()).unwrap(), p);
+        assert!(p.text().starts_with("tore-preferences 4\n"));
+        let on = Preferences {
+            fullscreen: true,
+            ..p.clone()
+        };
+        assert!(Preferences::parse(&on.text()).unwrap().fullscreen);
+        // A version 3 file has no window mode, and borderless fullscreen is
+        // the default, so it loads as fullscreen.
+        let three = p
+            .text()
+            .replace("tore-preferences 4", "tore-preferences 3")
+            .replace("fullscreen false\n", "");
+        let migrated3 = Preferences::parse(&three).unwrap();
+        assert!(migrated3.fullscreen);
+        assert_eq!(
+            Preferences {
+                fullscreen: false,
+                ..migrated3
+            },
+            p
+        );
+        assert!(Preferences::parse(&(three + "fullscreen false\n")).is_err());
         // Earlier files keep loading: the retired scope mode is dropped and the
         // saved scope range migrates by its nautical-mile value.
         let old = "tore-preferences 2\nzoom 1.2\nrwr-range 3\nradar-range 2\nradar-mode 1\nselected 0\nsmall true\nlarge-pages 9,5\nsmall-pages -\ncockpit false\nhud true\nladder false\nbrightness 3\nmusic false\neffects true\n";
@@ -346,6 +390,7 @@ mod tests {
         assert_eq!(migrated.radar_range, 3);
         assert_eq!(migrated.radar_channel, 0);
         assert!(!migrated.radar_history);
+        assert!(migrated.fullscreen);
         for (saved, expected) in [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5)] {
             let text = old.replace("radar-range 2", &format!("radar-range {saved}"));
             assert_eq!(Preferences::parse(&text).unwrap().radar_range, expected);

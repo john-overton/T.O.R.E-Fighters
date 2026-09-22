@@ -1,3 +1,12 @@
+// A release build on Windows is a GUI application, so the player never sees a
+// console window behind the game. The cost is that nothing printed to stdout or
+// stderr is visible there: `--version`, `--help`, `--import-only` and import
+// errors are silent on a Windows release build. A fatal startup error is
+// written to `last-error.txt` in the data directory instead, next to
+// `import-report.txt`. Debug builds keep the console, so development output and
+// the headless probes still print. Reattaching a console needs unsafe FFI,
+// which this workspace forbids.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod additional_animation;
 mod ai_wings;
 mod aircraft;
@@ -65,9 +74,62 @@ use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, ModifiersState},
     platform::run_on_demand::EventLoopExtRunOnDemand,
-    window::{CursorIcon, Window, WindowId},
+    window::{CursorIcon, Fullscreen, Window, WindowId},
 };
 type AppResult<T> = Result<T, Box<dyn Error>>;
+/// How an interactive start opens its window. Requested by John on 2026-09-22:
+/// the game runs native borderless fullscreen by default on every platform.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowMode {
+    Fullscreen,
+    Windowed,
+}
+impl WindowMode {
+    fn fullscreen(self) -> bool {
+        self == WindowMode::Fullscreen
+    }
+}
+/// The window mode shared by the locate shell and the game window, so one
+/// Alt-Enter in the shell holds for the rest of the session.
+struct WindowState {
+    /// The mode the next window opens in.
+    fullscreen: bool,
+    /// What the `fullscreen` preference is saved as. Only a toggle changes it,
+    /// so `--windowed` does not overwrite the player's saved choice.
+    preference: bool,
+}
+impl WindowState {
+    fn toggle(&mut self) {
+        self.fullscreen = !self.fullscreen;
+        self.preference = self.fullscreen;
+    }
+}
+/// The winit setting for a window mode. `Borderless(None)` uses whichever
+/// monitor the window would otherwise have opened on.
+fn fullscreen_attribute(on: bool) -> Option<Fullscreen> {
+    on.then_some(Fullscreen::Borderless(None))
+}
+/// Decide the initial window mode. Borderless fullscreen is the default; a
+/// window is used when the player asked for one, when a flag fixes the window
+/// size, or when the saved preference says so.
+///
+/// * `windowed_flag`: `--windowed` was given.
+/// * `window_size_flag`: `--window-size` was given.
+/// * `fixed_size`: a capture, snapshot or `--smoke-test` run, all of which
+///   depend on a known window size.
+/// * `preference`: the saved `fullscreen` preference, default on.
+fn initial_window_mode(
+    windowed_flag: bool,
+    window_size_flag: bool,
+    fixed_size: bool,
+    preference: bool,
+) -> WindowMode {
+    if windowed_flag || window_size_flag || fixed_size || !preference {
+        WindowMode::Windowed
+    } else {
+        WindowMode::Fullscreen
+    }
+}
 #[derive(Clone, Copy, PartialEq)]
 enum Screen {
     Main,
@@ -96,6 +158,12 @@ struct App {
     flight_view: u8,
     flight_canvas: flight_canvas::FlightCanvas,
     window_size: [u32; 2],
+    /// Live window mode. Alt-Enter toggles it.
+    fullscreen: bool,
+    /// What the `fullscreen` preference is saved as. A flag such as
+    /// `--windowed` chooses the mode for one run without overwriting the
+    /// player's saved choice; only Alt-Enter changes this.
+    fullscreen_preference: bool,
     flight_ui: flight_ui::FlightUi,
     instruments: instruments::Instruments,
     world: terrain::World,
@@ -378,13 +446,41 @@ impl App {
         );
     }
 
+    /// Switch between borderless fullscreen and the previous windowed size.
+    /// winit restores the window's pre-fullscreen size and position, so the
+    /// player returns to the window they had. Works on every screen: the
+    /// menus, the creator and flight.
+    fn toggle_fullscreen(&mut self) {
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
+        self.fullscreen = !self.fullscreen;
+        self.fullscreen_preference = self.fullscreen;
+        renderer
+            .window
+            .set_fullscreen(fullscreen_attribute(self.fullscreen));
+        renderer.window.request_redraw();
+        // The letterbox and the pointer mapping both follow the new size, and
+        // a press in flight must not survive the change.
+        self.menu.state.cancel();
+        self.quick.cancel();
+        self.instruments.cancel_press();
+        self.flight_ui.cancel_press();
+        self.pointer = None;
+        self.save_preferences();
+    }
+
     fn save_preferences(&mut self) {
         let Some(path) = &self.preference_path else {
             return;
         };
-        let text =
-            preferences::Preferences::capture(&self.flight_ui, &self.instruments, &self.menu.state)
-                .text();
+        let text = preferences::Preferences::capture(
+            &self.flight_ui,
+            &self.instruments,
+            &self.menu.state,
+            self.fullscreen_preference,
+        )
+        .text();
         if text == self.preference_saved {
             return;
         }
@@ -1254,6 +1350,7 @@ impl App {
                     &self.flight_ui,
                     &self.instruments,
                     &self.menu.state,
+                    self.fullscreen_preference,
                 );
                 self.flight_ui.reset_for_flight();
                 saved.apply(
@@ -1360,8 +1457,10 @@ impl ApplicationHandler for App {
                         // Fixed-size diagnostic windows preserve requested capture aspect ratios
                         // on compositors that otherwise tile/rescale newly created windows.
                         .with_resizable(!self.smoke_test)
+                        // The inner size is also the size Alt-Enter returns to.
                         .with_inner_size(LogicalSize::new(self.window_size[0], self.window_size[1]))
-                        .with_min_inner_size(LogicalSize::new(640.0, 480.0)),
+                        .with_min_inner_size(LogicalSize::new(640.0, 480.0))
+                        .with_fullscreen(fullscreen_attribute(self.fullscreen)),
                 )?,
             );
             pollster::block_on(Renderer::new(window, &self.world))
@@ -1622,6 +1721,18 @@ impl ApplicationHandler for App {
                 };
                 if self.screen == Screen::Flight {
                     name = flight_key(event.physical_key, &name);
+                }
+                // Alt-Enter switches window mode on every screen, before any
+                // screen claims the key. F11 is not used: it already opens the
+                // flight keyboard help (docs/FLIGHT-CONTROLS.md).
+                if name == "Enter"
+                    && self.modifiers.alt_key()
+                    && event.state == ElementState::Pressed
+                {
+                    if !event.repeat {
+                        self.toggle_fullscreen();
+                    }
+                    return;
                 }
                 if self.screen == Screen::Flight
                     && !(event.state == ElementState::Pressed
@@ -2810,6 +2921,11 @@ struct LocateShell {
     auto_continue: bool,
     outcome: ShellOutcome,
     error: Option<Box<dyn Error>>,
+    /// Live window mode, carried back to the game window so one Alt-Enter in
+    /// the shell holds for the rest of the session.
+    fullscreen: bool,
+    /// Alt state, which winit reports separately from the key event.
+    modifiers: ModifiersState,
 }
 
 /// winit key names the locate screen understands. Printable characters go
@@ -2948,7 +3064,8 @@ impl ApplicationHandler for LocateShell {
                     Window::default_attributes()
                         .with_title("T.O.R.E-Fighters - Locate Fighters Anthology")
                         .with_inner_size(LogicalSize::new(960.0, 720.0))
-                        .with_min_inner_size(LogicalSize::new(640.0, 480.0)),
+                        .with_min_inner_size(LogicalSize::new(640.0, 480.0))
+                        .with_fullscreen(fullscreen_attribute(self.fullscreen)),
                 )?,
             );
             pollster::block_on(canvas_present::CanvasPresenter::new(window))
@@ -2979,7 +3096,11 @@ impl ApplicationHandler for LocateShell {
                 self.outcome = ShellOutcome::Quit;
                 event_loop.exit();
             }
-            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => presenter.resize(),
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                self.last_pointer = None;
+                presenter.resize();
+            }
+            WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::DroppedFile(path) => {
                 // A dropped file or folder is classified before it reaches the
                 // field, so the field always holds a folder the importer can read.
@@ -2993,6 +3114,21 @@ impl ApplicationHandler for LocateShell {
                 self.redraw();
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                // Same window-mode toggle the game uses, before the field sees
+                // the key, so Alt-Enter never submits the locate form.
+                if self.modifiers.alt_key()
+                    && event.logical_key == Key::Named(winit::keyboard::NamedKey::Enter)
+                {
+                    if !event.repeat {
+                        self.fullscreen = !self.fullscreen;
+                        presenter
+                            .window
+                            .set_fullscreen(fullscreen_attribute(self.fullscreen));
+                        self.last_pointer = None;
+                        self.redraw();
+                    }
+                    return;
+                }
                 if let Some(name) = locate_key_name(&event.logical_key) {
                     let result = self.locate.key(name);
                     self.settle(event_loop, result);
@@ -3067,6 +3203,13 @@ impl ApplicationHandler for LocateShell {
     }
 }
 
+/// What the shell does without waiting for the player: the source to import as
+/// soon as it opens, and whether a finished import continues into the game.
+struct AutoImport {
+    path: Option<PathBuf>,
+    continue_when_done: bool,
+}
+
 /// Show the locate screen until the player quits or continues.
 fn locate_shell(
     event_loop: &mut EventLoop<()>,
@@ -3074,8 +3217,8 @@ fn locate_shell(
     prefill: Option<PathBuf>,
     candidates: Vec<media_source::MediaSource>,
     background: Option<Vec<u8>>,
-    auto_import: Option<PathBuf>,
-    auto_continue: bool,
+    auto: AutoImport,
+    window: &mut WindowState,
 ) -> AppResult<ShellOutcome> {
     let candidates: Vec<locate::Candidate> = candidates
         .into_iter()
@@ -3087,7 +3230,7 @@ fn locate_shell(
             },
         })
         .collect();
-    match &auto_import {
+    match &auto.path {
         Some(path) => println!(
             "Locate Fighters Anthology: {} detected source(s), importing {}",
             candidates.len(),
@@ -3107,13 +3250,18 @@ fn locate_shell(
         background: background.filter(|art| art.len() == menu::WIDTH * menu::HEIGHT * 4),
         pixels: vec![0; menu::WIDTH * menu::HEIGHT * 4],
         worker: None,
-        auto_import,
-        auto_continue,
+        auto_import: auto.path,
+        auto_continue: auto.continue_when_done,
         outcome: ShellOutcome::Quit,
         error: None,
         last_pointer: None,
+        fullscreen: window.fullscreen,
+        modifiers: ModifiersState::empty(),
     };
     event_loop.run_app_on_demand(&mut shell)?;
+    if shell.fullscreen != window.fullscreen {
+        window.toggle();
+    }
     match shell.error {
         Some(error) => Err(error),
         None => Ok(shell.outcome),
@@ -3157,6 +3305,18 @@ fn locate_snapshot(path: &Path) -> AppResult<()> {
     Ok(())
 }
 
+/// The saved window-mode preference. Borderless fullscreen is the default, so
+/// a missing, unreadable or older preferences file starts fullscreen.
+fn saved_fullscreen() -> bool {
+    let Ok(directory) = assets::data_directory() else {
+        return true;
+    };
+    preferences::read(&directory.join("preferences-v1.conf"))
+        .ok()
+        .and_then(|text| preferences::Preferences::parse(&text).ok())
+        .is_none_or(|saved| saved.fullscreen)
+}
+
 /// The event loop is created at most once per process and only when a window
 /// is actually wanted, so headless runs still work without a display.
 fn shared_event_loop(slot: &mut Option<EventLoop<()>>) -> AppResult<&mut EventLoop<()>> {
@@ -3166,17 +3326,55 @@ fn shared_event_loop(slot: &mut Option<EventLoop<()>>) -> AppResult<&mut EventLo
     Ok(slot.as_mut().expect("the event loop was just created"))
 }
 
-fn main() -> AppResult<()> {
-    let mut event_loop = None;
+/// Where a fatal startup error is left for the player. A release build on
+/// Windows has no console, so this file is the only place the message appears
+/// there; on Linux and macOS it duplicates the terminal message.
+fn last_error_path() -> Option<PathBuf> {
+    assets::data_directory()
+        .ok()
+        .map(|d| d.join("last-error.txt"))
+}
+
+/// Record a fatal error where a player without a console can find it. A
+/// failure to write is ignored: there is nowhere left to report it.
+fn record_last_error(error: &dyn Error) {
+    if let Some(path) = last_error_path() {
+        let text = format!(
+            "T.O.R.E-Fighters {} could not start.\n\n{error}\n",
+            version::version()
+        );
+        let _ = preferences::write(&path, &text);
+    }
+}
+
+/// Clear a previous failure once the game has run, so the file always
+/// describes the most recent start.
+fn clear_last_error() {
+    if let Some(path) = last_error_path() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn sessions(event_loop: &mut Option<EventLoop<()>>) -> AppResult<()> {
     let mut session = Session::First;
     loop {
-        match run(&mut event_loop, session)? {
+        match run(event_loop, session)? {
             Outcome::Done => return Ok(()),
             // Pref asked for another import: the shell runs again, and on
             // Continue the game is rebuilt from the new pack.
             Outcome::Reimport(frame) => session = Session::Reimport(frame),
         }
     }
+}
+
+fn main() -> AppResult<()> {
+    let mut event_loop = None;
+    let result = sessions(&mut event_loop);
+    match &result {
+        Ok(()) => clear_last_error(),
+        Err(error) => record_last_error(error.as_ref()),
+    }
+    result
 }
 
 fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Outcome> {
@@ -3253,6 +3451,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut ground_start_airport: Option<u32> = None;
     let mut launch_creator = false;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
+    // `--windowed`, and any flag that fixes the window size, opt out of the
+    // borderless fullscreen default.
+    let mut windowed_flag = false;
+    let mut window_size_flag = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--no-controllers" => native_input = false,
@@ -3477,6 +3679,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     .split_once('x')
                     .ok_or("--window-size needs WIDTHxHEIGHT")?;
                 window_size = [w.parse()?, h.parse()?];
+                window_size_flag = true;
                 if !(640..=3840).contains(&window_size[0])
                     || !(480..=2160).contains(&window_size[1])
                 {
@@ -3654,6 +3857,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 ))
             }
             "--smoke-test" => smoke_test = true,
+            "--windowed" => windowed_flag = true,
             "--no-audio" => no_audio = true,
             "--version" | "-V" => {
                 println!("T.O.R.E-Fighters v{}", version::version());
@@ -3708,7 +3912,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -3901,6 +4105,23 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && !validate_weather
         && !(airport_probe.is_some() && !(smoke_test && initial_screen == Screen::Flight))
         && std::env::var_os("TORE_ENVIRONMENT_PROBE").is_none();
+    // Borderless fullscreen on the monitor the window would have opened on is
+    // the default for an interactive start, and the locate shell and the game
+    // window share the choice for the rest of the session.
+    let preference = saved_fullscreen();
+    let mut window = WindowState {
+        fullscreen: initial_window_mode(
+            windowed_flag,
+            window_size_flag,
+            smoke_test
+                || capture_terrain.is_some()
+                || snapshot.is_some()
+                || panel_snapshot.is_some(),
+            preference,
+        )
+        .fullscreen(),
+        preference,
+    };
     let reimport_background = match session {
         Session::Reimport(frame) => Some(frame),
         Session::First => None,
@@ -3960,8 +4181,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                             prefill,
                             candidates,
                             reimport_background,
-                            auto,
-                            smoke_test,
+                            AutoImport {
+                                path: auto,
+                                continue_when_done: smoke_test,
+                            },
+                            &mut window,
                         )?;
                         if outcome == ShellOutcome::Quit {
                             return Ok(Outcome::Done);
@@ -4981,6 +5205,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         flight_view,
         flight_canvas: Default::default(),
         window_size,
+        fullscreen: window.fullscreen,
+        fullscreen_preference: window.preference,
         flight_ui: {
             let mut ui = flight_ui::FlightUi::default();
             ui.no_turbulence = !turbulence_enabled;
@@ -5066,8 +5292,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     if app.native_tables.is_some() {
         app.flight_ui.no_turbulence = true;
     }
-    app.preference_saved =
-        preferences::Preferences::capture(&app.flight_ui, &app.instruments, &app.menu.state).text();
+    app.preference_saved = preferences::Preferences::capture(
+        &app.flight_ui,
+        &app.instruments,
+        &app.menu.state,
+        app.fullscreen_preference,
+    )
+    .text();
     if let Some(audio) = &app.audio {
         audio.scene(match app.screen {
             Screen::Flight => audio::music::Scene::Score(0),
@@ -5221,6 +5452,25 @@ mod startup_tests {
         );
     }
 
+    #[test]
+    fn fullscreen_is_the_default_and_the_flags_win() {
+        use super::{WindowMode::*, initial_window_mode};
+        // An ordinary interactive start.
+        assert_eq!(initial_window_mode(false, false, false, true), Fullscreen);
+        // Each opt-out on its own.
+        assert_eq!(initial_window_mode(true, false, false, true), Windowed);
+        assert_eq!(initial_window_mode(false, true, false, true), Windowed);
+        assert_eq!(initial_window_mode(false, false, true, true), Windowed);
+        assert_eq!(initial_window_mode(false, false, false, false), Windowed);
+        // A saved fullscreen preference never overrides a flag.
+        assert_eq!(initial_window_mode(true, false, true, true), Windowed);
+        // And a windowed preference is not undone by a fixed-size run.
+        assert_eq!(initial_window_mode(false, false, true, false), Windowed);
+        assert!(Fullscreen.fullscreen());
+        assert!(!Windowed.fullscreen());
+        assert!(super::fullscreen_attribute(false).is_none());
+        assert!(super::fullscreen_attribute(true).is_some());
+    }
     #[test]
     fn the_smoke_test_imports_the_prefilled_source() {
         let ask = Step::Ask(path("/mnt/disc1"));

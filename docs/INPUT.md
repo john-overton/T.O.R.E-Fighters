@@ -60,6 +60,14 @@ bridge tests without touching hardware.
 
 ## In-game controls and saved preferences
 
+**Alt-Enter** switches between native borderless fullscreen and the previous
+windowed size, on every screen: the menus, the Quick Mission creator, the locate
+screen and flight. It is not rebindable and no controller button is assigned to
+it. F11 is not used, because it already opens the in-flight keyboard help. The
+game starts in borderless fullscreen; the choice is saved as `fullscreen` in
+`preferences-v1.conf` and `--windowed` starts one run in a window without
+changing it.
+
 Open **Escape → Control** during flight. This authored replacement for the old
 input-device submenu uses the existing raster font and paused menu canvas.
 

@@ -53,7 +53,11 @@ cargo build --workspace --locked
 cargo run --locked -p tore-app
 ```
 
-Expect a 960 × 720 logical-pixel window showing Choose Activity and a terminal message such as `Renderer: Apple M3 (Metal, IntegratedGpu)`. The original 640 × 480 canvas scales proportionally, with letterboxing in wider windows. Close the window or use `? → Exit to Desktop`; Escape dismisses menus. On macOS, Command-Q also quits.
+Expect native borderless fullscreen on the monitor the window would have opened on, showing Choose Activity, and a terminal message such as `Renderer: Apple M3 (Metal, IntegratedGpu)`. The original 640 × 480 canvas scales proportionally and is letterboxed, so a 16:9 screen shows black bars either side. Close the window or use `? → Exit to Desktop`; Escape dismisses menus. On macOS, Command-Q also quits.
+
+Alt-Enter switches between borderless fullscreen and the previous windowed size, on every screen: the menus, the Quick Mission creator, the locate screen and flight. F11 is not used for this, because it already opens the in-flight keyboard help. The choice is saved as `fullscreen` in `preferences-v1.conf`, which is now format version 4; a version 3 file still loads and starts fullscreen. `--windowed` starts in a 960 × 720 window for one run without changing the saved choice, and `--window-size`, `--smoke-test` and the captures keep their fixed-size windows as before.
+
+On Windows a release build is a GUI application, so no console window appears behind the game. Nothing printed reaches a terminal there: `--version`, `--help`, `--import-only` output and import errors are silent on a Windows release build. Debug builds keep the console, so development output and the headless probes still print. A fatal startup error is also written to `last-error.txt` in the application data directory, next to `import-report.txt`, and that file is removed after the next successful start; on Windows release builds it is the only place the message appears.
 
 Startup chooses randomly among all five original backgrounds; it does not run a timed slideshow. Force a variant for comparison with `--background CHOOSEV` (also accepts CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM). The top bar moves to match each artwork's native origin. Hovering and keyboard focus are silent. An older menu-only cache requires re-import; the local default media is automatically used if available.
 
@@ -141,7 +145,7 @@ With a working desktop session, also run:
 cargo run --locked -p tore-app -- --smoke-test
 ```
 
-This uses the imported menu, a real window and GPU, prints the renderer, presents one frame without audio, and exits. It is not a headless simulation test. Normal mode waits while idle and schedules frames for short hover transitions and placeholder messages.
+This uses the imported menu, a real 960 × 720 window (never fullscreen, so the presented frame keeps a known size) and GPU, prints the renderer, presents one frame without audio, and exits. It is not a headless simulation test. Normal mode waits while idle and schedules frames for short hover transitions and placeholder messages.
 
 `--no-audio` silences a session. Normal playback uses the system's default output device, original PCM effects, recorded main/briefing playlists and the NORMAL score during free flight when available. Device initialization failure is reported and the menu continues silently. Main-menu M toggles music; `Pref` exposes music/effect toggles. Music follows the saved preference into flight and freezes on flight pause. In-flight Sound still toggles effects only. No MIDI or synth is used. See [audio behavior and limits](formats/music.md). Music/effects and flight display preferences are restored from `preferences-v1.conf` in the application data directory.
 
