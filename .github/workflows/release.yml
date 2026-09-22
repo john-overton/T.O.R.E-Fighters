@@ -1,13 +1,15 @@
 name: Release packages
 
-# Tag-triggered. workflow_dispatch is here so the packaging path can be
-# exercised on a branch without publishing anything: the release job only runs
-# for a tag. Nothing built here is signed.
+# Tag-triggered. A push to a release-test/... branch, or workflow_dispatch,
+# exercises the packaging path without publishing anything: the release job
+# only runs for a tag. Nothing built here is signed.
 
 on:
   push:
     tags:
       - 'v*'
+    branches:
+      - 'release-test/**'
   workflow_dispatch:
 
 permissions:

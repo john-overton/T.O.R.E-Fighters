@@ -168,8 +168,10 @@ This is an initial guard, not proof that an artifact contains no retail derivati
 
 The release packages are built by `.github/workflows/release.yml` when a `v*`
 tag is pushed, and by the same three scripts when a developer runs them by
-hand. `workflow_dispatch` runs the build half only, so the packaging path can
-be exercised on a branch without publishing anything.
+hand. A push to any branch named `release-test/...` runs the build half only,
+so the packaging path can be exercised without publishing anything; download
+the four `packages-*` artifacts from that run with `gh run download`.
+`workflow_dispatch` does the same once the workflow exists on `main`.
 
 Every script takes the version from `--version`, then from the tag the workflow
 is running for, then from `git describe`, then falls back to `0.0.0-dev`. A
