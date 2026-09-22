@@ -276,6 +276,9 @@ rolls. RWR drawing reads the same records and never drives the decision clock.
 `ai::engagement` gates current target selection by role and stance before B41
 ranking. `AiMission` delivers perception-only attack reports to assigned escorts
 on the next tick, with a fixed expiry; bearings never become synthetic targets.
+Escorts also assess detected aircraft against each assigned friendly's protection
+zone using observed relative motion. Confirmed attackers outrank prospective
+threats. Frozen contacts can guide investigation but still cannot authorize fire.
 Quick Mission group objectives resolve through stable side/wing/member metadata
 into per-actor assignments. Whole-group survival requirements are stored separately from combat orders.
 The Target window combines player assignments, these requirements and allegiance

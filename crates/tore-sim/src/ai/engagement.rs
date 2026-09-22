@@ -10,6 +10,9 @@ use super::{controller::TargetView, targeting};
 const FEET_PER_NAUTICAL_MILE: f64 = 6_076.;
 pub const ESCORT_EXIT_LEASH_FT: f64 = 10. * FEET_PER_NAUTICAL_MILE;
 pub const ESCORT_REENTRY_LEASH_FT: f64 = 8. * FEET_PER_NAUTICAL_MILE;
+pub const ESCORT_ASSESSMENT_RADIUS_FT: f64 = 30. * FEET_PER_NAUTICAL_MILE;
+pub const ESCORT_DEFENSE_RADIUS_FT: f64 = 10. * FEET_PER_NAUTICAL_MILE;
+pub const ESCORT_ASSESSMENT_TIME_S: f64 = 60.;
 pub const SUPPORTING_RADAR_IDENTIFICATION_TOLERANCE_DEG: f64 = 2.;
 
 /// Group-level Quick Mission objective before aircraft IDs are assigned.
@@ -97,6 +100,7 @@ pub struct ProtectedView {
     /// must not populate this from an enemy world object or private AI state.
     pub id: u32,
     pub position: [f64; 3],
+    pub velocity: [f64; 3],
     pub alive: bool,
 }
 
@@ -113,6 +117,7 @@ pub enum Priority {
     OwnDefense,
     ProtectedThreat,
     HostileEscort,
+    ApproachingThreat,
     Assigned,
     Free,
 }
@@ -148,6 +153,7 @@ impl Policy {
         &self,
         assignment: &Assignment,
         remembered: &TargetView,
+        protected: &[ProtectedView],
         reports: &[ThreatReport],
         own_id: u32,
     ) -> bool {
@@ -175,7 +181,7 @@ impl Policy {
             .filter(|report| assignment.protected_ids.contains(&report.defended_id))
             .filter_map(|report| report.attacker_id)
             .collect();
-        self.mission_priority(assignment, remembered, &protected_attackers)
+        self.mission_priority(assignment, remembered, protected, &protected_attackers)
             .is_some()
     }
 
@@ -217,7 +223,7 @@ impl Policy {
             {
                 None
             } else {
-                self.mission_priority(assignment, target, &protected_attackers)
+                self.mission_priority(assignment, target, protected, &protected_attackers)
             };
             if let Some(priority) = priority {
                 candidates.push((target, priority));
@@ -269,6 +275,7 @@ impl Policy {
         &self,
         assignment: &Assignment,
         target: &TargetView,
+        protected: &[ProtectedView],
         protected_attackers: &[u32],
     ) -> Option<Priority> {
         match assignment.stance {
@@ -281,6 +288,12 @@ impl Policy {
                         && protected_attackers.contains(&relationship.principal_id)
                 }) {
                     Some(Priority::HostileEscort)
+                } else if protected.iter().any(|charge| {
+                    charge.alive
+                        && assignment.protected_ids.contains(&charge.id)
+                        && threatens_charge(target, charge)
+                }) {
+                    Some(Priority::ApproachingThreat)
                 } else if assignment.destroy_ids.contains(&target.id) {
                     Some(Priority::Assigned)
                 } else {
@@ -379,8 +392,64 @@ fn eligible(own_id: u32, own_side: targeting::Side, target: &TargetView) -> bool
     target.id != own_id
         && target.side != own_side
         && target.valid
+        && target.is_aircraft
         && target.type_allowed
         && target.seeker_eligible
+}
+
+/// An observed aircraft near a charge, or one whose relative course reaches
+/// the defended radius during the assessment horizon. This is an authored M1
+/// escort rule, not evidence of the hostile's intent or missile ownership.
+fn threatens_charge(target: &TargetView, charge: &ProtectedView) -> bool {
+    if !target.position.iter().all(|v| v.is_finite())
+        || !charge.position.iter().all(|v| v.is_finite())
+        || !charge.velocity.iter().all(|v| v.is_finite())
+        || !target.heading_deg.is_finite()
+        || !target.pitch_deg.is_finite()
+        || !target.speed.0.is_finite()
+        || target.speed.0 < 0.
+    {
+        return false;
+    }
+    let displacement =
+        std::array::from_fn::<_, 3, _>(|axis| target.position[axis] - charge.position[axis]);
+    let range_sq = displacement.iter().map(|d| d * d).sum::<f64>();
+    if !range_sq.is_finite() {
+        return false;
+    }
+    if range_sq <= ESCORT_DEFENSE_RADIUS_FT.powi(2) {
+        return true;
+    }
+    if range_sq > ESCORT_ASSESSMENT_RADIUS_FT.powi(2) {
+        return false;
+    }
+
+    let heading = target.heading_deg.to_radians();
+    let pitch = target.pitch_deg.to_radians();
+    let horizontal_speed = target.speed.0 * pitch.cos();
+    let velocity = [
+        horizontal_speed * heading.sin(),
+        target.speed.0 * pitch.sin(),
+        horizontal_speed * heading.cos(),
+    ];
+    let relative_velocity =
+        std::array::from_fn::<_, 3, _>(|axis| velocity[axis] - charge.velocity[axis]);
+    let dot = displacement
+        .iter()
+        .zip(relative_velocity)
+        .map(|(position, velocity)| position * velocity)
+        .sum::<f64>();
+    let speed_sq = relative_velocity.iter().map(|v| v * v).sum::<f64>();
+    if !dot.is_finite() || !speed_sq.is_finite() || dot >= 0. || speed_sq <= 0. {
+        return false;
+    }
+    let time = (-dot / speed_sq).clamp(0., ESCORT_ASSESSMENT_TIME_S);
+    let closest_sq = displacement
+        .iter()
+        .zip(relative_velocity)
+        .map(|(position, velocity)| (position + velocity * time).powi(2))
+        .sum::<f64>();
+    closest_sq.is_finite() && closest_sq <= ESCORT_DEFENSE_RADIUS_FT.powi(2)
 }
 
 fn spatial_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -439,6 +508,15 @@ mod tests {
         }
     }
 
+    fn charge(position: [f64; 3], velocity: [f64; 3]) -> ProtectedView {
+        ProtectedView {
+            id: 10,
+            position,
+            velocity,
+            alive: true,
+        }
+    }
+
     fn select(
         policy: &mut Policy,
         assignment: &Assignment,
@@ -467,6 +545,7 @@ mod tests {
         let protected = [ProtectedView {
             id: 10,
             position: [0.; 3],
+            velocity: [0.; 3],
             alive: true,
         }];
         let selected = select(
@@ -487,6 +566,189 @@ mod tests {
     }
 
     #[test]
+    fn escort_engages_observed_hostiles_near_charge_and_on_intercept_course() {
+        let mut a = assignment(Role::Escort, Stance::ProtectAssigned);
+        a.protected_ids.push(10);
+        let protected = [charge([0.; 3], [0.; 3])];
+        let near = target(2, ESCORT_DEFENSE_RADIUS_FT);
+        assert_eq!(
+            select(&mut Policy::default(), &a, &[near], &protected, &[], None),
+            Some(Selection {
+                id: 2,
+                priority: Priority::ApproachingThreat,
+            })
+        );
+
+        let mut approaching = target(3, 20. * FEET_PER_NAUTICAL_MILE);
+        approaching.heading_deg = 270.;
+        approaching.speed = ScalarSpeed(1_200.);
+        assert_eq!(
+            select(
+                &mut Policy::default(),
+                &a,
+                &[approaching],
+                &protected,
+                &[],
+                None,
+            ),
+            Some(Selection {
+                id: 3,
+                priority: Priority::ApproachingThreat,
+            })
+        );
+        assert_eq!(
+            select(&mut Policy::default(), &a, &[], &protected, &[], None),
+            None
+        );
+    }
+
+    #[test]
+    fn escort_assessment_rejects_outside_range_receding_and_tangent_tracks() {
+        let mut a = assignment(Role::Escort, Stance::ProtectAssigned);
+        a.protected_ids.push(10);
+        let protected = [charge([0.; 3], [0.; 3])];
+        let mut outside = target(2, ESCORT_ASSESSMENT_RADIUS_FT + 1.);
+        outside.heading_deg = 270.;
+        outside.speed = ScalarSpeed(2_000.);
+        let mut receding = target(3, 20. * FEET_PER_NAUTICAL_MILE);
+        receding.heading_deg = 90.;
+        receding.speed = ScalarSpeed(1_200.);
+        let tangent = target(4, 20. * FEET_PER_NAUTICAL_MILE);
+        for contact in [outside, receding, tangent] {
+            assert_eq!(
+                select(
+                    &mut Policy::default(),
+                    &a,
+                    &[contact],
+                    &protected,
+                    &[],
+                    None
+                ),
+                None
+            );
+        }
+        let mut nonfinite = target(5, 100.);
+        nonfinite.speed = ScalarSpeed(f64::NAN);
+        assert_eq!(
+            select(
+                &mut Policy::default(),
+                &a,
+                &[nonfinite],
+                &protected,
+                &[],
+                None
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn escort_assessment_includes_exact_range_and_time_boundaries() {
+        let protected = charge([0.; 3], [0.; 3]);
+        for (range, speed, expected) in [
+            (ESCORT_ASSESSMENT_RADIUS_FT, 3_000., true),
+            (ESCORT_ASSESSMENT_RADIUS_FT + 1., 3_000., false),
+            (ESCORT_DEFENSE_RADIUS_FT + 600. * 60., 600., true),
+            (ESCORT_DEFENSE_RADIUS_FT + 600. * 60. + 1., 600., false),
+        ] {
+            let mut contact = target(2, 0.);
+            contact.position = [0., 0., -range];
+            contact.speed = ScalarSpeed(speed);
+            assert_eq!(threatens_charge(&contact, &protected), expected);
+        }
+    }
+
+    #[test]
+    fn escort_assessment_uses_charge_motion_and_preserves_confirmed_priority() {
+        let mut a = assignment(Role::Escort, Stance::ProtectAssigned);
+        a.protected_ids.push(10);
+        let mut approaching = target(2, 20. * FEET_PER_NAUTICAL_MILE);
+        approaching.heading_deg = 270.;
+        approaching.speed = ScalarSpeed(600.);
+        assert_eq!(
+            select(
+                &mut Policy::default(),
+                &a,
+                &[approaching],
+                &[charge([0.; 3], [0.; 3])],
+                &[],
+                None,
+            ),
+            None
+        );
+        let protected = [charge([0.; 3], [600., 0., 0.])];
+        assert_eq!(
+            select(
+                &mut Policy::default(),
+                &a,
+                &[approaching],
+                &protected,
+                &[],
+                None,
+            )
+            .map(|selection| selection.id),
+            Some(2)
+        );
+        let confirmed = target(3, 15. * FEET_PER_NAUTICAL_MILE);
+        assert_eq!(
+            select(
+                &mut Policy::default(),
+                &a,
+                &[approaching, confirmed],
+                &protected,
+                &[ThreatReport {
+                    attacker_id: Some(3),
+                    defended_id: 10,
+                }],
+                Some(2),
+            ),
+            Some(Selection {
+                id: 3,
+                priority: Priority::ProtectedThreat,
+            })
+        );
+    }
+
+    #[test]
+    fn escort_assessment_does_not_override_hold_leash_or_dead_charge() {
+        let mut a = assignment(Role::Escort, Stance::ProtectAssigned);
+        a.protected_ids.push(10);
+        let near = target(2, 100.);
+        let mut dead = charge([0.; 3], [0.; 3]);
+        dead.alive = false;
+        assert_eq!(
+            select(&mut Policy::default(), &a, &[near], &[dead], &[], None),
+            None
+        );
+        a.stance = Stance::WeaponsHold;
+        assert_eq!(
+            select(
+                &mut Policy::default(),
+                &a,
+                &[near],
+                &[charge([0.; 3], [0.; 3])],
+                &[],
+                None,
+            ),
+            None
+        );
+        a.stance = Stance::ProtectAssigned;
+        let mut policy = Policy::default();
+        assert_eq!(
+            select(
+                &mut policy,
+                &a,
+                &[near],
+                &[charge([ESCORT_EXIT_LEASH_FT + 1., 0., 0.], [0.; 3])],
+                &[],
+                None,
+            ),
+            None
+        );
+        assert!(policy.escort_outside_leash());
+    }
+
+    #[test]
     fn own_defense_preempts_protection_and_current_retention() {
         let mut a = assignment(Role::Escort, Stance::ProtectAssigned);
         a.protected_ids.push(10);
@@ -503,6 +765,7 @@ mod tests {
         let protected = [ProtectedView {
             id: 10,
             position: [0.; 3],
+            velocity: [0.; 3],
             alive: true,
         }];
         assert_eq!(
@@ -599,6 +862,7 @@ mod tests {
             [ProtectedView {
                 id: 10,
                 position: [distance, 0., 0.],
+                velocity: [0.; 3],
                 alive: true,
             }]
         };
@@ -701,6 +965,19 @@ mod tests {
             ),
             None
         );
+        let mut ground_object = target(2, 100.);
+        ground_object.is_aircraft = false;
+        assert_eq!(
+            select(
+                &mut Policy::default(),
+                &intercept,
+                &[ground_object],
+                &[],
+                &[],
+                None,
+            ),
+            None
+        );
     }
 
     #[test]
@@ -740,13 +1017,14 @@ mod tests {
         let policy = Policy::default();
 
         let hold = assignment(Role::FreeEngagement, Stance::WeaponsHold);
-        assert!(!policy.allows_investigation(&hold, &remembered, &[], OWN));
+        assert!(!policy.allows_investigation(&hold, &remembered, &[], &[], OWN));
 
         let self_defense = assignment(Role::Disengage, Stance::SelfDefense);
-        assert!(!policy.allows_investigation(&self_defense, &remembered, &[], OWN));
+        assert!(!policy.allows_investigation(&self_defense, &remembered, &[], &[], OWN));
         assert!(policy.allows_investigation(
             &self_defense,
             &remembered,
+            &[],
             &[ThreatReport {
                 attacker_id: Some(2),
                 defended_id: OWN,
@@ -756,10 +1034,11 @@ mod tests {
 
         let mut protect = assignment(Role::Escort, Stance::ProtectAssigned);
         protect.protected_ids.push(10);
-        assert!(!policy.allows_investigation(&protect, &remembered, &[], OWN));
+        assert!(!policy.allows_investigation(&protect, &remembered, &[], &[], OWN));
         assert!(policy.allows_investigation(
             &protect,
             &remembered,
+            &[],
             &[ThreatReport {
                 attacker_id: Some(2),
                 defended_id: 10,
@@ -772,12 +1051,12 @@ mod tests {
             center_ft: [0.; 3],
             radius_ft: 100.,
         });
-        assert!(policy.allows_investigation(&cap, &remembered, &[], OWN));
+        assert!(policy.allows_investigation(&cap, &remembered, &[], &[], OWN));
         let outside = target(3, 101.);
-        assert!(!policy.allows_investigation(&cap, &outside, &[], OWN));
+        assert!(!policy.allows_investigation(&cap, &outside, &[], &[], OWN));
 
         // Investigation permission cannot create a current combat target.
-        assert!(policy.allows_investigation(&Assignment::default(), &remembered, &[], OWN));
+        assert!(policy.allows_investigation(&Assignment::default(), &remembered, &[], &[], OWN));
         assert_eq!(
             select(
                 &mut Policy::default(),
@@ -799,11 +1078,34 @@ mod tests {
         let protected = [ProtectedView {
             id: 10,
             position: [ESCORT_EXIT_LEASH_FT + 1., 0., 0.],
+            velocity: [0.; 3],
             alive: true,
         }];
         let mut policy = Policy::default();
         assert_eq!(select(&mut policy, &a, &[], &protected, &[], None), None);
-        assert!(!policy.allows_investigation(&a, &target(2, 100.), &[], OWN));
+        assert!(!policy.allows_investigation(&a, &target(2, 100.), &protected, &[], OWN));
+    }
+
+    #[test]
+    fn remembered_approach_can_guide_search_but_cannot_create_weapon_target() {
+        let mut a = assignment(Role::Escort, Stance::ProtectAssigned);
+        a.protected_ids.push(10);
+        let protected = [charge([0.; 3], [0.; 3])];
+        let remembered = target(2, ESCORT_DEFENSE_RADIUS_FT);
+        let policy = Policy::default();
+        assert!(policy.allows_investigation(&a, &remembered, &protected, &[], OWN));
+        assert_eq!(
+            select(&mut Policy::default(), &a, &[], &protected, &[], None),
+            None
+        );
+
+        let outside = target(3, ESCORT_ASSESSMENT_RADIUS_FT + 1.);
+        assert!(!policy.allows_investigation(&a, &outside, &protected, &[], OWN));
+        let dead = [ProtectedView {
+            alive: false,
+            ..protected[0]
+        }];
+        assert!(!policy.allows_investigation(&a, &remembered, &dead, &[], OWN));
     }
 
     #[test]

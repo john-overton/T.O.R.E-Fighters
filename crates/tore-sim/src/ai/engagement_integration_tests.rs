@@ -1,4 +1,4 @@
-use super::tests::{flat, object, perception_actor, setup, visible_object};
+use super::tests::{enable_test_radar, flat, object, perception_actor, setup, visible_object};
 use super::*;
 use crate::ai::{
     Experience,
@@ -34,6 +34,156 @@ fn charge(id: u32, position: [f64; 3]) -> WorldObject {
     let mut object = object(&actor, 1);
     object.human_controlled = true;
     object
+}
+
+fn radar_escort() -> AiActor {
+    let mut actor = perception_actor(Experience::Ace);
+    enable_test_radar(&mut actor);
+    let mut duty = assignment(
+        engagement::Role::Escort,
+        engagement::Stance::ProtectAssigned,
+    );
+    duty.protected_ids.push(10);
+    actor.set_assignment(duty);
+    actor
+}
+
+#[test]
+fn escort_acquires_and_engages_a_radar_detected_threat_beyond_visual_range() {
+    let mut mission = AiMission::new();
+    let mut escort = radar_escort();
+    escort.stations[0].requires_radar = true;
+    escort.stations[0].requires_sensor = true;
+    mission.push(escort);
+    let mut hostile = visible_object(
+        mission.actor(1).unwrap(),
+        2,
+        [0., 20_000., 5.5 * sensors::FEET_PER_NAUTICAL_MILE],
+    );
+    hostile.velocity = [0., 0., -500.];
+    hostile.observable.as_mut().unwrap().velocity = hostile.velocity;
+    let charge = charge(10, [0., 20_000., 1_000.]);
+
+    let first = world_with(&mission, [charge.clone(), hostile.clone()]);
+    let first_output = mission.step(&first, &flat, TimeOfDay(0)).unwrap();
+    assert!(first_output.launches.is_empty());
+    let actor = mission.actor(1).unwrap();
+    assert_eq!(
+        actor.sensors().unwrap().contact(2).unwrap().channel,
+        sensors::Channel::Radar
+    );
+    assert_eq!(actor.controller().target(), Some(2));
+    assert_eq!(actor.sensors().unwrap().selected(), Some(2));
+    assert_ne!(actor.activity(), Activity::Formation);
+
+    let mut launched = false;
+    for tick in 1..7_200 {
+        let world = world_with(&mission, [charge.clone(), hostile.clone()]);
+        let output = mission.step(&world, &flat, TimeOfDay(tick)).unwrap();
+        if output
+            .launches
+            .iter()
+            .any(|launch| launch.actor == 1 && launch.station == StationId(0))
+        {
+            assert!(mission.actor(1).unwrap().sensors().unwrap().supports(2));
+            launched = true;
+            break;
+        }
+    }
+    assert!(
+        launched,
+        "escort never launched at its radar detected threat"
+    );
+}
+
+#[test]
+fn escort_cannot_select_a_terrain_hidden_aircraft_near_its_charge() {
+    let mut mission = AiMission::new();
+    mission.push(radar_escort());
+    let hostile = visible_object(mission.actor(1).unwrap(), 2, [0., 20_000., 30_000.]);
+    let charge = charge(10, [0., 20_000., 1_000.]);
+    let world = world_with(&mission, [charge, hostile]);
+    let ridge = |_x: f64, z: f64| {
+        if (10_000. ..20_000.).contains(&z) {
+            30_000.
+        } else {
+            0.
+        }
+    };
+    let output = mission.step(&world, &ridge, TimeOfDay(0)).unwrap();
+
+    let actor = mission.actor(1).unwrap();
+    assert!(actor.sensors().unwrap().contact(2).is_none());
+    assert_eq!(actor.controller().target(), None);
+    assert!(output.launches.is_empty());
+}
+
+#[test]
+fn escort_defends_against_a_supported_missile_and_waits_for_active_seeker_acquisition() {
+    use crate::combat::missiles::Guidance;
+    let incoming = |guidance, acquired| MissileSnapshot {
+        id: 90,
+        owner: 2,
+        position: [0., 20_000., -1_000.],
+        velocity: [0., 0., 2_000.],
+        guidance,
+        target: Some(1),
+        radar_active: guidance == Guidance::Active,
+        radar_acquired: acquired,
+        supported: guidance == Guidance::Supported,
+        supporting_radar_position: Some([0., 20_000., -60_000.]),
+        alive: true,
+    };
+    let mut mission = AiMission::new();
+    mission.push(radar_escort());
+    let world = world_with(&mission, [charge(10, [0., 20_000., 1_000.])]);
+
+    mission.set_missiles(vec![incoming(Guidance::Active, false)]);
+    mission.step(&world, &flat, TimeOfDay(0)).unwrap();
+    assert!(mission.actor(1).unwrap().defense_decision().is_none());
+    mission.set_missiles(vec![incoming(Guidance::Active, true)]);
+    mission.step(&world, &flat, TimeOfDay(1)).unwrap();
+    assert_eq!(mission.actor(1).unwrap().activity(), Activity::Defending);
+
+    let mut supported = AiMission::new();
+    supported.push(radar_escort());
+    supported.set_missiles(vec![incoming(Guidance::Supported, false)]);
+    let world = world_with(&supported, [charge(10, [0., 20_000., 1_000.])]);
+    supported.step(&world, &flat, TimeOfDay(0)).unwrap();
+    assert_eq!(supported.actor(1).unwrap().activity(), Activity::Defending);
+}
+
+#[test]
+fn protected_receivers_active_warning_cues_escort_without_revealing_the_launcher() {
+    use crate::combat::missiles::Guidance;
+    let mut mission = AiMission::new();
+    mission.push(radar_escort());
+    mission.push(AiActor::new(setup(10, 1, 0, [0., 20_000., 1_000.], 0.)).unwrap());
+    mission.set_missiles(vec![MissileSnapshot {
+        id: 90,
+        owner: 2,
+        position: [0., 20_000., -1_000.],
+        velocity: [0., 0., 2_000.],
+        guidance: Guidance::Active,
+        target: Some(10),
+        radar_active: true,
+        radar_acquired: true,
+        supported: false,
+        supporting_radar_position: None,
+        alive: true,
+    }]);
+    let world = world_with(&mission, []);
+    mission.step(&world, &flat, TimeOfDay(0)).unwrap();
+    assert!(mission.actor(1).unwrap().perceived_attacks().is_empty());
+    mission.step(&world, &flat, TimeOfDay(1)).unwrap();
+    let escort = mission.actor(1).unwrap();
+    assert!(
+        escort.perceived_attacks().iter().any(|attack| {
+            attack.report.defended_id == 10 && attack.report.attacker_id.is_none()
+        })
+    );
+    assert_eq!(escort.controller().target(), None);
+    assert_eq!(escort.activity(), Activity::Searching);
 }
 
 #[test]

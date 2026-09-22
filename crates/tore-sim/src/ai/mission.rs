@@ -791,6 +791,7 @@ impl AiMission {
             .map(|object| engagement::ProtectedView {
                 id: object.id,
                 position: object.position,
+                velocity: object.velocity,
                 alive: object.alive && !object.destroyed,
             })
             .collect();
@@ -847,7 +848,7 @@ impl AiMission {
             })
             .flatten();
         actor.controller.set_mission_search_bearing(cue);
-        actor.update_search_contact();
+        actor.update_search_contact(&protected);
         let stations = actor.station_views(&targets, &own);
         let wing = WingView {
             control: self.wing_control,
@@ -1263,12 +1264,13 @@ impl AiActor {
 
     /// Choose a stable, lost hostile observation for investigation. Current
     /// observations stay in the ordinary selector; a frozen record never does.
-    fn update_search_contact(&mut self) {
+    fn update_search_contact(&mut self, protected: &[engagement::ProtectedView]) {
         let lost = |snapshot: &&awareness::Snapshot| {
             snapshot.target.side != self.identity.side
                 && self.mission_policy.allows_investigation(
                     &self.assignment,
                     &snapshot.target,
+                    protected,
                     &self
                         .observed_attacks
                         .iter()
@@ -2121,7 +2123,7 @@ mod tests {
         first.destroyed = true;
         second.observable = None;
         assert!(actor.observe(1, &[first.clone(), second], &flat).is_empty());
-        actor.update_search_contact();
+        actor.update_search_contact(&[]);
         assert!(actor.awareness.remembered().next().is_none());
         assert_eq!(actor.search_target, None);
         let fresh = visible_object(&actor, 3, [1000., 20000., 5000.]);
@@ -2221,7 +2223,7 @@ mod tests {
         }
     }
 
-    fn enable_test_radar(actor: &mut AiActor) {
+    pub(super) fn enable_test_radar(actor: &mut AiActor) {
         let volume = sensors::Volume {
             azimuth_rad: 60_f64.to_radians(),
             elevation_rad: 60_f64.to_radians(),

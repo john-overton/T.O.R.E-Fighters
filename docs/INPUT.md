@@ -577,7 +577,7 @@ not issue orders. The imported flight menu has no wing-order submenu.
 | Alt-B / Alt-R | Break left / right |
 | Alt-H / Alt-V / Alt-T | Break high / low / fly straight |
 | Alt-E | Engage the designated target |
-| Alt-P | Protect me, assign a currently observed attacker |
+| Alt-P | Protect me, maintain an escort duty |
 | Alt-W | Attack on contact |
 | Alt-F | Engage designated target from formation, medium control |
 | Alt-D | Disengage and stop selecting targets |
@@ -613,8 +613,10 @@ Normal vertical wandering now requests at most five feet, with smooth changes.
 Formation selection changes the slot setting; disengage stops the engagement
 and lets the safe rejoin procedure return the aircraft. Approaches assign the
 selected target and continue that engagement after reaching the fitted approach
-point. Protect me currently assigns a detected attacker once, rather than
-maintaining a persistent escort policy. [Behavior and limits](spec/ai.md#live-wing-command-and-radio-integration).
+point. Protect me assigns a persistent escort duty: wingmen assess detected
+hostiles near or approaching your aircraft and respond to shared attack reports.
+They return when the escort pursuit limit is reached.
+[Behavior and limits](spec/ai-awareness.md#mission-roles-and-rules-of-engagement).
 
 For live testing, use a Quick Mission with at least three friendly aircraft:
 

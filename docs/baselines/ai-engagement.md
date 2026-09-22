@@ -8,10 +8,11 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode. Source base: `064da4c`. This pass connects the
-[mission rules](../spec/ai-awareness.md#mission-roles-and-rules-of-engagement)
-and [six group objective stamps](../spec/ai-awareness.md#quick-mission-objective-stamps).
-All committed fixtures are synthetic.
+Implementation mode. Source base: `d2c7bff`. This pass validates proactive escort
+assessment and the existing shared missile warnings against the
+[mission rules](../spec/ai-awareness.md#mission-roles-and-rules-of-engagement).
+All committed fixtures are synthetic. Group-selector presentation has its own
+[validation](mission-objectives.md).
 
 ## Validation
 
@@ -20,49 +21,50 @@ Validated on Linux with Rust 1.91.1 and locked dependencies.
 | Check | Result |
 | --- | --- |
 | Formatting and workspace Clippy with warnings denied | Passed |
-| `cargo test --workspace --locked` | 1,117 passed; 3 existing ignored tests |
+| `cargo test --workspace --locked` | 1,129 passed; 3 existing ignored tests |
 | `cargo build --workspace --locked` | Passed |
-| Python tool tests | 68 passed |
+| Python tool tests | 70 passed |
 | Source and both executable asset scans | Passed |
 | Documentation headers and diff whitespace | Passed |
-| Imported roster probe, 3,600 ticks per case | All 52 aircraft/skill cases passed |
-| Display smoke tests | Main menu and direct Quick Mission escort launch passed on NVIDIA GeForce RTX 4070 using Vulkan; restart check passed |
+| Imported escort probe, 2,400 ticks | Both friendly escorts fired; both enemy aircraft destroyed; no dropped launches |
+| Display smoke test | Main menu passed on NVIDIA GeForce RTX 4070 using Vulkan |
 
-Twelve mission integration scenarios exercise protected-threat priority,
+Sixteen mission integration scenarios exercise protected-threat priority,
 same-side assigned reporting, unknown bearing cues without hostile memory or
 firing, exact report expiry without forwarding refresh, hidden attacker
 rejection, escort leash and formation, accepted explicit orders, weapons hold
 with missile defense, CAP boundaries, distant assigned targets and role-gated
-memory investigation. Additional policy, creator, group-resolution and
-Target-window tests verify both sides and separate objective/activity fields.
+memory investigation. The added scenarios exercise actor-owned radar acquisition
+and supported weapon release beyond Ace visual range, terrain-masked contacts,
+supported-missile defense, active-missile warning onset at seeker acquisition,
+and next-tick warning delivery from a protected AI aircraft without leaking its
+attacker's identity. Seventeen policy tests include the exact protection range
+and time boundaries, relative charge motion, departing/passing tracks,
+confirmed-attack priority, and search-only permission for frozen observations.
 
-All six inherited presets completed `--ai-probe-ticks 1200 --ai-mission PRESET
---no-audio`, with four AI actors in the imported Quick Mission fixture. The
-player did not attack during this probe. These results verify delivery and
-bounded operation, not relative combat effectiveness:
+`target/debug/tore-app --ai-probe-ticks 2400 --ai-mission escort --no-audio`
+ran the imported Quick Mission fixture with four AI aircraft for 20 simulated
+seconds. The player did not attack. The same command on the source base
+reproduced the reported inactivity:
 
-| Preset | Shots | Dropped launches | Current warning records |
+| Encounter | Friendly escort shots | Total shots | Dropped launches |
 | --- | ---: | ---: | ---: |
-| free | 4 | 0 | 4 |
-| cap | 4 | 0 | 4 |
-| intercept | 3 | 0 | 1 |
-| escort | 1 | 0 | 0 |
-| self-defense | 0 | 0 | 0 |
-| hold | 0 | 0 | 0 |
+| Source base | 0 | 3 | 0 |
+| Updated policy | 2, one per escort | 4 | 0 |
 
-The original-art Quick Mission creator and its objective popup were captured
-and visually inspected in `.local/mission-objective-review/`. All six stamps
-fit their group rows; the ten-choice popup is readable without overlap. The
-long inherited self-defense label was also captured and inspected. Tests
-cover the Shift-4 assignment readout and extra camera/text margin; no human
-review of a complete escort encounter was performed. Captures and imported
-media remain local, not committed.
+Both friendly escorts survived with 116 hit points each; the player retained
+85 hit points. Both enemy aircraft reached zero hit points. Final checksum was
+`56f6eee45c9f919a`. This verifies encounter behavior, not combat balance or retail
+parity. No human review of a complete escort encounter was performed. The full
+imported roster probe was not repeated for this policy-only change.
 
 ## Limits
 
-Presets, report-identification tolerances, report expiry, pursuit limits and
-objective layout margins are authored rules. Warnings with an unidentified
-attacker can cue a search but never produce an aircraft firing solution.
+Presets, protection-zone geometry, report-identification tolerances, report
+expiry and pursuit limits are authored rules. Warnings with an unidentified
+attacker can cue a search but never identify a launcher or produce a firing
+solution by themselves. An independently detected aircraft may qualify as a
+prospective threat based on its observed proximity and relative course.
 Assignments identify duties, not hidden enemy positions. Group settings persist
 within the session and mission restart; saved campaigns and mission scoring
 remain outside scope. Missing patrol routes use the existing formation/heading

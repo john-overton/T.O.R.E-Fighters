@@ -477,12 +477,41 @@ and fuel limits authoritative.
 | --- | --- | --- |
 | Free engagement / combat air patrol | Immediate threats, then assigned hostiles, using existing distance/wing assignment ranking within a priority | Target knowledge expires, patrol boundary or survival limit |
 | Intercept | Assigned hostile aircraft, with self-defense interruption | Objective destroyed, order canceled, or survival limit |
-| Escort / protect | Observed attacks or perceived incoming missiles threatening the protected aircraft, then known hostile escorts obstructing that defense, then other assigned threats | Threat clears and a higher duty applies, or escort leash exceeded |
+| Escort / protect | Identified attacks threatening the protected aircraft, then known hostile escorts obstructing that defense, then detected aircraft threatening its protection zone, then other assigned threats | Threat clears and a higher duty applies, or escort leash exceeded |
 | Self-defense / disengage | Immediate threats to self; otherwise return to assigned flight | Threat clears; do not chase incidental enemies |
 
 Before each role's ranking, handle immediate inbound threats to self using the
 existing defense service. Escort response must restore protection after the immediate threat clears. Enemy escorts use the
 same rules to protect their own assigned aircraft.
+
+Escorts assess their own current radar, infrared and visual contacts every
+simulation tick. Their installed radar searches while powered, using its normal
+physical coverage, terrain masking, interference and acquisition limits. The
+default radar channel and 10 NM TWS setting retain search and fire-control
+capability; that display scale does not limit physical detection. Protection
+does not require waiting for a hostile to fire first.
+
+A detected hostile aircraft threatens a charge if it is within 10 NM spatial
+distance of that charge, or if it is within 30 NM and its observed relative
+course will enter the 10 NM protection zone within 60 seconds. Use the observed
+heading, pitch and speed and the assigned friendly charge's velocity to project
+constant relative motion. Beyond the immediate zone, require closing motion;
+a passing or departing aircraft whose projected course misses the zone does
+not qualify. Assess each live assigned charge independently. These distances
+and the projection horizon are agent-authored, opinionated threat-assessment
+settings, not recovered original behavior. The protection zone admits only
+independently detected hostiles; it grants no additional sensor coverage.
+
+Confirmed identified attacks outrank these prospective threats. An unknown
+missile warning cues a bearing search when there is no eligible observed
+aircraft, without identifying its launcher. A qualifying observed threat can
+be intercepted while its launcher identity remains unknown. Lost aircraft can
+be investigated using their frozen observation and the same protection-zone
+assessment, subject to skill memory and the escort leash; firing still requires
+reacquisition. Incoming missiles aimed at the escort itself interrupt this duty
+through the shared defense service. A warning for a charge does not make that
+missile an incoming threat to the escort or trigger wasteful defensive bursts
+on the charge's behalf.
 
 Mission context must identify protected aircraft, destroy objectives, escort
 relationships and any patrol region. Allegiance or proximity alone does not
