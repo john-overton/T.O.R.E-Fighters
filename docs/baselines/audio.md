@@ -93,7 +93,8 @@ hybrid contact state; no arbitrary terrain sample is treated as native contact.
 Original host priorities, transition timings, mixer gains, wheel-brake behavior
 and hook/flap argument polarity need further native/audible checks. All situation
 scripts are ready as data, but only NORMAL is automatically selected during free
-flight. Combat, danger, carrier, success and ejection events remain unavailable.
+flight. Danger, carrier and success score events remain unavailable. Ejection now has
+a separate [implementation and validation](ejection.md).
 No MIDI-only fallback is planned in this slice. Main/briefing context resets and
 their use in the development creator/viewer are explicitly authored.
 

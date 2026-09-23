@@ -249,3 +249,5 @@ mod tests {
 }
 
 pub mod flight_model;
+
+pub mod ejection;

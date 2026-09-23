@@ -81,7 +81,8 @@ agent choices, not tuning requested by John. Healthy state is unchanged.
   Expiry is fatal; landing alive on a supporting surface stops the bleeding.
   This is a fitted stand-in for medical treatment, without a campaign hospital.
   Nose/cockpit loss, a critical cockpit hit or an aircraft explosion kills the
-  pilot immediately. Ground treatment cannot revive a dead pilot. Pilot death
+  pilot immediately while still aboard. An [ejected pilot](ejection.md) is
+  independent of later aircraft damage. Ground treatment cannot revive a dead pilot. Pilot death
   selects the F10 exterior view without stopping wreck motion.
 - Flight-sensor failure suppresses flight HUD data. The first display failure
   blanks the radar page, the second the RWR page. Navigation failure replaces

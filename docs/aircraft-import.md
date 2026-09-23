@@ -226,6 +226,11 @@ Researched flight is now the default; `--legacy-flight` preserves the previous
 model. HUD and audio share the [stall warning signal](spec/stall-warnings.md),
 including the original imported warning samples.
 
+[Pilot escape](spec/ejection.md) reads seat availability from each aircraft's
+PLANE flags and uses the shared original pilot/seat/chute resources at runtime.
+Refresh older caches to include the optional [ejection media](formats/ejection.md).
+The pilot remains separate from the abandoned aircraft and its damage state.
+
 Quick Mission lists only supported aircraft with parsed imported flight profiles,
 not the wider metadata catalog. See [selector behaviour](spec/quick-mission-menu.md).
 

@@ -207,6 +207,7 @@ pub struct AiActor {
     last_input: PilotInput,
     alive: bool,
     dummy: bool,
+    escape_monitor: crate::ejection::Monitor,
 }
 
 impl AiActor {
@@ -242,6 +243,9 @@ impl AiActor {
             device_schedule: Vec::new(),
             activity: Activity::Idle,
             last_input: PilotInput::default(),
+            escape_monitor: crate::ejection::Monitor::seeded(
+                setup.seed ^ u64::from(setup.identity.actor.0).wrapping_mul(0x9e3779b97f4a7c15),
+            ),
             alive: true,
             dummy: false,
         })
@@ -822,6 +826,18 @@ impl AiMission {
             .collect();
         let actor = &mut self.actors[index];
         actor.controller.set_formation_observation(traffic.to_vec());
+        if !actor.dummy {
+            if actor.flight.escape.is_some() {
+                actor.flight.step_escape(ground);
+            } else if actor
+                .escape_monitor
+                .step(crate::ejection::assess(&actor.flight, ground))
+                .is_some()
+            {
+                actor.flight.eject();
+            }
+        }
+
         if !actor.alive() {
             actor.awareness.clear();
             actor.search_target = None;
@@ -2231,6 +2247,35 @@ mod tests {
             destroyed: false,
         });
         target
+    }
+
+    #[test]
+    fn ejection_preempts_weapons_and_keeps_pilot_descent_running_without_ai_control() {
+        let mut mission = one_v_one();
+        let actor = &mut mission.actors[0];
+        let mut source = crate::flight::integration_tests::profile();
+        source.fields.get_mut("flags").unwrap().value = "16".into();
+        actor.flight = flight::State::new(&source, [0., 10000., 0.]).unwrap();
+        actor.flight.crashed = true;
+        actor.escape_monitor = crate::ejection::Monitor::seeded(0);
+        let id = actor.id();
+        let out = run(&mut mission, 120);
+        assert!(!out.launches.iter().any(|e| e.actor == id));
+        let actor = mission.actor(id).unwrap();
+        assert!(actor.flight.escape.is_some());
+        let aircraft_position = actor.flight.position;
+        let pilot_position = actor.flight.escape.as_ref().unwrap().position;
+        run(&mut mission, 120);
+        let actor = mission.actor(id).unwrap();
+        assert_eq!(
+            actor.flight.position, aircraft_position,
+            "combat owns the wreck"
+        );
+        assert_ne!(
+            actor.flight.escape.as_ref().unwrap().position,
+            pilot_position
+        );
+        assert!(!actor.alive());
     }
 
     #[test]

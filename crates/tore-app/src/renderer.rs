@@ -156,6 +156,9 @@ impl Renderer {
     pub fn combat(&mut self, geometry: &crate::sim_renderer::CombatGeometry) {
         self.sim.combat(&self.device, &self.queue, geometry);
     }
+    pub fn escapees(&mut self, art: &crate::ejection_art::Art, vertices: &[f32]) {
+        self.sim.escapees(&self.device, &self.queue, art, vertices);
+    }
     pub fn airports(&mut self, vertices: &[f32]) {
         self.sim.airports(&self.device, &self.queue, vertices);
     }

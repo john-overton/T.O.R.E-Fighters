@@ -65,6 +65,7 @@ fn spot_instances(contacts: &[&Contact]) -> Vec<f32> {
 pub struct SimRenderer {
     lighting: crate::surface_lighting::SurfaceLighting,
     aircraft_visible: bool,
+    escapees: Option<AircraftBatch>,
     lens_flare: crate::lens_flare::LensFlare,
     smoke: crate::smoke_renderer::SmokeRenderer,
     battle: Option<(wgpu::Buffer, u32)>,
@@ -681,6 +682,7 @@ impl SimRenderer {
         Self {
             terrain_normals,
             lighting,
+            escapees: None,
             aircraft_visible: true,
             lens_flare: crate::lens_flare::LensFlare::new(device, format),
             smoke: crate::smoke_renderer::SmokeRenderer::new(device, format, &shader, samples),
@@ -832,6 +834,7 @@ impl SimRenderer {
         self.canopy_visible = canopy;
     }
     pub fn clear_aircraft(&mut self) {
+        self.escapees = None;
         self.aircraft = None;
         self.canopy_visible = false;
     }
@@ -842,9 +845,41 @@ impl SimRenderer {
         hornet: &crate::aircraft::Airframe,
         vertices: &[f32],
     ) {
+        self.textured_model(
+            device,
+            queue,
+            &hornet.atlas,
+            hornet.engine_material.as_ref(),
+            vertices,
+        );
+    }
+    pub fn escapees(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        art: &crate::ejection_art::Art,
+        vertices: &[f32],
+    ) {
+        let ownship = self.aircraft.take();
+        let visible = self.aircraft_visible;
+        let canopy = self.canopy_visible;
+        self.aircraft = self.escapees.take();
+        self.textured_model(device, queue, &art.atlas, None, vertices);
+        self.escapees = self.aircraft.take();
+        self.aircraft = ownship;
+        self.aircraft_visible = visible;
+        self.canopy_visible = canopy;
+    }
+    fn textured_model(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pic: &tore_formats::Pic,
+        engine: Option<&crate::engine_material::Image>,
+        vertices: &[f32],
+    ) {
         self.aircraft_visible = true;
         if self.aircraft.is_none() {
-            let pic = &hornet.atlas;
             // The aircraft atlas takes the same index-plus-palette path as the
             // terrain, with its own airframe palette rather than the weather one.
             let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -901,10 +936,7 @@ impl SimRenderer {
             // Remap and the palette worker share the world's indexed palette.
             assert!(pic.palette.is_empty(), "unreviewed aircraft atlas palette");
             let palette_view = self.palette.create_view(&Default::default());
-            let engine_view = hornet
-                .engine_material
-                .as_ref()
-                .map(|image| image.upload(device, queue));
+            let engine_view = engine.map(|image| image.upload(device, queue));
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Aircraft textures"),
                 layout: &self.p.pipeline.get_bind_group_layout(0),
@@ -1428,6 +1460,12 @@ impl SimRenderer {
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_vertex_buffer(1, self.terrain_normals.slice(..));
         pass.draw(0..self.count, 0..1);
+        if let Some((bind, buffer, count)) = &self.escapees {
+            pass.set_pipeline(&self.p.pipeline);
+            pass.set_bind_group(0, bind, &[]);
+            pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.draw(0..*count, 0..1);
+        }
         if let Some((buffer, count)) = &self.airports {
             pass.set_pipeline(&self.p.airport_pipeline);
             pass.set_bind_group(0, &self.bind, &[]);

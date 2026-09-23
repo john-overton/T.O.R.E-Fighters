@@ -4,6 +4,7 @@ pub struct Pilot {
     pub(super) remaining: Option<f64>,
     warning: bool,
     pub dead: bool,
+    pub ejected: bool,
 }
 impl Pilot {
     /// Immediate lethal injury, distinct from the timed wound progression.
@@ -16,7 +17,7 @@ impl Pilot {
         true
     }
     pub fn hit(&mut self, index: usize) {
-        if index == 34 && !self.dead {
+        if index == 34 && !self.dead && !self.ejected {
             self.remaining = Some(self.remaining.map_or(900., |t| t * 0.5));
             self.warning = false;
         }

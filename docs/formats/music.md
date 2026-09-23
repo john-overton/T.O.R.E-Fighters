@@ -127,8 +127,9 @@ development creator/viewer to briefing are authored. AIR003 is no longer an
 arbitrary menu loop. Gain (0.16 music), resampling and sample-boundary transitions
 remain authored; no native mixer/device or RNG/timing parity is claimed.
 
-All nine scripts are prepared at audio initialization, but only NORMAL is
-selected by flight. F9 is retained as a host flag; no missing mission, carrier,
+All nine scripts are prepared at audio initialization. Flight selects NORMAL
+until the player ejects, then selects EJECT. This ejection event binding is
+fitted; imported score data and missing-track diagnostics are unchanged. F9 is retained as a host flag; no missing mission, carrier,
 threat or combat event is invented to respond to it. Score and playlist state
 belongs to audio, independent of authoritative 120 Hz simulation. A local xorshift
 RNG chooses phrases; it does not consume simulation RNG. Music uses wall-clock
@@ -164,3 +165,5 @@ actuator audit: native flap/hook routines reference flap recordings and their
 argument polarity requires further review.
 
 See [extraction](../EXTRACTION.md) and [acceptance evidence](../baselines/audio.md).
+
+[Escape behaviour](../spec/ejection.md) does not depend on score availability.

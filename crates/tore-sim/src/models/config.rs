@@ -59,6 +59,7 @@ pub struct Configuration {
     pub equipment: Equipment,
     /// Reviewed carrier hook or explicitly authored concept equipment.
     pub hook_available: bool,
+    pub ejection_seat: bool,
     pub tuning: Tuning,
     /// Required PT turbulence coefficient; mutable event state lives outside configuration.
     pub turbulence_percent: i16,
@@ -78,6 +79,13 @@ impl Configuration {
             Ok(token.number()? as f64)
         };
         let result = Self {
+            ejection_seat: a
+                .fields
+                .get("flags")
+                .ok_or_else(|| std::io::Error::other("missing PLANE flags"))?
+                .number()?
+                & 0x10
+                != 0,
             hook_available: matches!(
                 a.id,
                 tore_formats::aircraft::AircraftId::F18

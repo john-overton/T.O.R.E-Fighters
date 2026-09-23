@@ -7,6 +7,7 @@ pub mod attitude;
 pub mod autopilot;
 pub mod cheats;
 pub mod combat;
+pub mod ejection;
 pub mod environment;
 pub mod flight;
 pub mod g_effects;

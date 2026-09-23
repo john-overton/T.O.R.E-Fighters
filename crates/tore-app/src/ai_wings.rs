@@ -222,6 +222,7 @@ pub struct AiWings {
     ai_shots: BTreeMap<u32, u32>,
     /// Last observed hit points per actor, for the damage mirror.
     last_hp: BTreeMap<u32, i32>,
+    pub ejection_events: Vec<(u32, String, bool)>,
     last_activity: BTreeMap<u32, Activity>,
     next_projectile_id: u32,
     weapon_rules: Rules,
@@ -514,6 +515,7 @@ impl AiWings {
             device_effectiveness: BTreeMap::new(),
             seen_projectiles: Vec::new(),
             ai_shots: BTreeMap::new(),
+            ejection_events: Vec::new(),
             last_hp: BTreeMap::new(),
             last_activity: BTreeMap::new(),
             reports: reports::Reports::default(),
@@ -1000,6 +1002,14 @@ impl AiWings {
         ground: &dyn Fn(f64, f64) -> f64,
     ) -> AppResult<tore_sim::ai::mission::MissionOutput> {
         self.mirror_damage_in(targets);
+        let escaped: Vec<_> = self
+            .mission
+            .actors()
+            .iter()
+            .filter(|a| a.flight().escape.is_some())
+            .map(AiActor::id)
+            .collect();
+
         let objects = self.snapshot(player, targets);
         // `fitted`: `TimeOfDay` is an opaque host clock the AI only orders
         // against a mission hold time, so the mission tick is used directly. It
@@ -1009,6 +1019,24 @@ impl AiWings {
             .mission
             .step(&objects, ground, now)
             .map_err(|e| e.to_string())?;
+
+        for slot in &self.slots {
+            let Some(actor) = self.mission.actor(slot.id) else {
+                continue;
+            };
+            if actor.flight().escape.is_some() && !escaped.contains(&slot.id) {
+                self.ejection_events.push((
+                    slot.id,
+                    format!("{} pilot ejected", slot.label()),
+                    slot.side == launch::Side::Friendly,
+                ));
+                if let Some(target) = targets.iter_mut().find(|t| t.id == slot.id) {
+                    target.hp = 0;
+                    target.radar_emitting = false;
+                    target.jammer_active = false;
+                }
+            }
+        }
         self.record_formation_trace();
         self.formation_reports();
         self.mirror_pose_out(targets);
@@ -1111,6 +1139,13 @@ impl AiWings {
         }
     }
 
+    pub fn escapees(&self) -> impl Iterator<Item = &tore_sim::ejection::Escape> {
+        self.mission
+            .actors()
+            .iter()
+            .filter_map(|a| a.flight().escape.as_ref())
+    }
+
     /// A missile blast knocks an AI aircraft around, like the player's.
     pub fn jolt(&mut self, id: u32, from: [f64; 3], strength: f64) {
         if let Some(actor) = self.mission.actor_mut(id) {
@@ -1126,7 +1161,28 @@ impl AiWings {
             let Some(target) = targets.iter().find(|t| t.id == slot.id) else {
                 continue;
             };
+            let was_alive = self.mission.actor(slot.id).is_some_and(AiActor::alive);
             if let Some(actor) = self.mission.actor_mut(slot.id) {
+                let flight = actor.flight_mut();
+                flight.damage_regions = target.localized_damage.fractions(target.initial_hp);
+                if target.hp <= 0 {
+                    flight.crashed = true;
+                    flight.position = target.position;
+                    flight.velocity = target.velocity;
+                    [flight.yaw, flight.pitch, flight.bank] = target.basis.angles();
+                    flight.wreck = target.wreck.clone();
+                    if target
+                        .wreck
+                        .as_ref()
+                        .is_some_and(|w| w.phase != tore_sim::wreck::Phase::Falling)
+                        || matches!(
+                            target.localized_damage.structural_section,
+                            Some(live::DamageSection::Nose | live::DamageSection::Cockpit)
+                        )
+                    {
+                        flight.systems.kill_pilot("Pilot killed before escape");
+                    }
+                }
                 actor.flight_mut().damage_fraction = 1.0
                     - (f64::from(target.hp) / f64::from(target.initial_hp.max(1))).clamp(0.0, 1.0);
             }
@@ -1137,7 +1193,7 @@ impl AiWings {
                 actor.report_hit();
             }
             self.last_hp.insert(slot.id, target.hp);
-            if target.hp <= 0 && self.mission.actor(slot.id).is_some_and(AiActor::alive) {
+            if target.hp <= 0 && was_alive {
                 if let Some(actor) = self.mission.actor_mut(slot.id) {
                     actor.set_alive(false);
                 }
@@ -2464,6 +2520,43 @@ pub(crate) mod tests {
 
     /// A destroyed target row stops its actor, and a damaged one is reported as
     /// a hit exactly once per hit point drop.
+    #[test]
+    fn ejection_mirrors_a_surviving_pilot_once_but_never_revives_a_killed_pilot() {
+        let mut targets = spawned();
+        let mut wings = AiWings::build_with(&payload(None), &targets, 0, |_| {
+            let mut profile = aircraft();
+            profile.fields.get_mut("flags").unwrap().value = "16".into();
+            Ok((profile, None))
+        })
+        .unwrap();
+        targets[0].hp = 0;
+        targets[1].hp = 0;
+        targets[1].localized_damage.structural_section = Some(live::DamageSection::Cockpit);
+        run(&mut wings, &mut targets, 1200);
+        assert!(wings.mission.actor(1).unwrap().flight().escape.is_some());
+        assert!(!wings.mission.actor(1).unwrap().alive());
+        assert!(wings.mission.actor(2).unwrap().flight().systems.pilot.dead);
+        assert!(wings.mission.actor(2).unwrap().flight().escape.is_none());
+        assert_eq!(
+            wings
+                .ejection_events
+                .iter()
+                .filter(|(id, _, _)| *id == 1)
+                .count(),
+            1
+        );
+        assert!(
+            wings
+                .ejection_events
+                .iter()
+                .find(|(id, _, _)| *id == 1)
+                .unwrap()
+                .2
+        );
+        assert_eq!(targets[0].hp, 0);
+        assert_eq!(wings.escapees().count(), 1);
+    }
+
     #[test]
     fn damage_flows_from_the_combat_world_into_the_actors() {
         let (mut wings, mut targets) = build(None);

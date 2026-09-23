@@ -319,6 +319,12 @@ Deltas are limited to 32 steps per event. Native discrete hats/selectors can use
 silently guessed to be one three-position selector. Device-specific neutral
 combinations need explicit bindings or future reviewed composition support.
 
+`eject` is a one-shot pilot action, normally bound with `press`. Press twice
+within the [confirmation interval](spec/ejection.md#host-rules), releasing
+between presses; holding or key repeat cannot confirm. It is not an on/off
+switch and has no default gamepad button. The stock shortcut is Shift+E,
+also available through the `key:Shift-e` shortcut alias.
+
 Equipment actions: `gear`, `flaps`, `airbrake`, `hook`, `engine`, `burner`, `radar`,
 `jammer`, `autopilot`, `waypoint-autopilot`. A and Ctrl-A toggle the two
 [autopilot modes](spec/autopilot.md); controller bindings and pilot recordings
@@ -849,3 +855,13 @@ and arrow keys reach all objective and survival fields; Enter activates them.
 Shift-4 shows only `Obj: Survive` for a protected/required friendly or `Obj:
 Destroy` for a designated enemy objective. Other contacts have no objective
 label. [Assignment rules](spec/ai-awareness.md#quick-mission-objective-stamps).
+
+## Ejection
+
+Press **Shift+E twice** to eject. The first press asks for confirmation; holding
+the key does not confirm. The eject action can be rebound in Controls. A living
+pilot can escape an already destroyed airborne aircraft. The camera follows
+the pilot and parachute while the abandoned aircraft falls independently.
+Low or inverted escapes can be fatal. See [ejection behaviour](spec/ejection.md)
+for timing, survival and the AI recovery assessment. Undamaged AI aircraft above
+200 feet AGL never eject automatically, as requested by John on 2026-09-23.

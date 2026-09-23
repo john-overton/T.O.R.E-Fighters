@@ -70,3 +70,8 @@ that latest reply is repeated. Those
 event bindings are fitted. Selection, cancellation, rejection and runway
 invalidation remain text only because no matching retail event recording has
 been established.
+
+Ejection clips also enter the existing serial speech queue from discrete escape
+and cockpit warning transitions. Their reviewed filenames, source call sites
+and unresolved speaker assignments are in [ejection source notes](ejection.md).
+They do not require speculative phrase-to-speaker mappings.

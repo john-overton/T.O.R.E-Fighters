@@ -411,3 +411,11 @@ Player ground crashes and falling-wreck impacts now end in a guaranteed explosio
 Nose/cockpit loss kills the pilot, but surviving engine thrust remains active
 until impact or an airburst. Pilot death switches presentation to the exterior
 view without affecting the fixed-tick wreck physics.
+
+## Pilot escape
+
+[Ejection](spec/ejection.md) detaches pilot motion from the abandoned aircraft.
+All existing flight adapters retain their selection; the shared fixed-step
+escape component runs independently of the existing wreck component. The AI
+recovery estimate uses imported G envelopes, remaining authority and terrain.
+Its thresholds are fitted, with John's healthy-aircraft guard above 200 AGL.

@@ -68,6 +68,9 @@ impl Action {
         if let Some(axis) = axis {
             return Ok(Self::Axis(axis));
         }
+        if s == "eject" {
+            return Ok(Self::Pilot(PilotCommand::Eject));
+        }
         for (name, switch) in [
             ("gear", Switch::Gear),
             ("flaps", Switch::Flaps),

@@ -1018,3 +1018,13 @@ cargo run --locked -p tore-app -- --quick-mission --snapshot-state objective-1 -
 Objective popup snapshots accept `objective-1` through `objective-6`, friendly
 then enemy groups. `--snapshot-state objectives` shows a primary-group/free-fire
 example with a required-survival friendly group. These diagnostics do not replace campaign mission loading.
+
+## Ejection inspection
+
+After reimporting into an isolated profile, use `--ejection-preview seat`,
+`--ejection-preview freefall` or `--ejection-preview chute` with
+`--capture-flight .local/ejection/chute.ppm --no-audio`. These pause a presentation
+fixture with the pilot separated from the aircraft so its original art is visible.
+Pilot tapes accept `eject` as a one-shot command. Two entries within the documented
+confirmation interval exercise the complete headless escape path; replay prints
+phase, pilot survival and position. See [validation](baselines/ejection.md).

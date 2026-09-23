@@ -20,6 +20,7 @@ pub enum Command {
     TargetVisual,
     RangeReset,
     DamageReport,
+    Eject,
     Combat(tore_sim::combat::live::Command),
     Click,
     End,
@@ -595,6 +596,7 @@ impl FlightUi {
             return match key {
                 "/" => Command::CenterLook,
                 "b" => Command::Toggle(Switch::Burner),
+                "e" => Command::Eject,
                 "o" => Command::Toggle(Switch::Bay),
                 "u" => {
                     self.hud = !self.hud;
@@ -769,6 +771,7 @@ impl FlightUi {
                     "Arrows: pitch/bank | Z/X: rudder | PageUp/Down: throttle".into(),
                     "1..9: 10..90%, 0: full | Shift-B: burner | E: engine".into(),
                     "G: gear | F: flaps | B: brake | H: hook | J: jammer".into(),
+                    "Shift-E twice within 2 seconds: eject (release between presses)".into(),
                     "Shift/Ctrl-arrows: look/orbit | Shift-/: center | F1: cockpit".into(),
                     "Shift-M: map | M/O: sensor channel | Shift-U: HUD".into(),
                     "Ctrl-Tab/Ctrl-Shift-Tab: instrument | Ctrl-1..6: slot".into(),
@@ -898,6 +901,20 @@ impl FlightUi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ejection_shortcut_alias_is_shift_only_and_does_not_fire_in_menus() {
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.key("e", true, false, false, &tree()), Command::Eject);
+        assert_eq!(
+            ui.key("e", false, false, false, &tree()),
+            Command::Toggle(Switch::Engine)
+        );
+        assert_eq!(ui.key("e", false, true, false, &tree()), Command::None);
+        assert_eq!(ui.key("e", true, true, false, &tree()), Command::None);
+        assert_eq!(ui.key("e", true, false, true, &tree()), Command::None);
+        ui.menu = true;
+        assert_eq!(ui.key("e", true, false, false, &tree()), Command::None);
+    }
     #[test]
     fn pilot_death_switches_to_f10_once_without_pausing() {
         let mut ui = FlightUi {

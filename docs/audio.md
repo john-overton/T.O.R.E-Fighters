@@ -113,3 +113,13 @@ terrain/building occlusion and calibrated pressure levels. These are known
 approximations, not claims of full acoustic or retail parity.
 
 [Validation and local listening previews](baselines/flight-sound.md).
+
+## Pilot escape audio
+
+Ejection schedules the imported pilot announcement, seat launch and chute-opening
+recordings once at their respective transitions. Friendly AI pilots announce
+their own escape. A cockpit danger warning is separate from manual confirmation.
+After separation, the cockpit engine loop stops and the wreck remains a spatial
+sound source. [Source clips and unresolved speaker routing](formats/ejection.md)
+and [event rules](spec/ejection.md#audio-and-art) distinguish measured identities
+from fitted assignments. Missing optional clips keep text and simulation working.

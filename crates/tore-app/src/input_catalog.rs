@@ -216,6 +216,7 @@ pub const ENTRIES: &[Entry] = &[
         Flight,
         &["Ctrl-a"],
     ),
+    cmd("eject", "Eject (press twice)", Systems, &["Shift-e"]),
     cmd("gear", "Landing gear", Systems, &["g"]),
     cmd("flaps", "Flaps", Systems, &["f"]),
     cmd("airbrake", "Airbrake / wheel brakes", Systems, &["b"]),

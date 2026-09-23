@@ -468,3 +468,12 @@ use it after destruction; living AI decisions are untouched. The AI bridge only
 copies live propulsion metadata for later use by the wreck. Airburst events
 trigger existing audio/effects and hide the whole airframe and detached pieces.
 [Behavior contract](spec/destroyed-aircraft.md).
+
+## Pilot escape ownership
+
+`tore-sim::ejection` owns seat/chute motion, survival and the fitted recovery
+assessment. Player commands are recorded in the existing pilot tape; AI decides
+before weapon releases. Combat continues to own AI wreck motion, while the
+mission retains the detached pilot. The app imports original indexed art into
+a separate texture batch and schedules voice/effect transitions. See the
+[ejection specification](spec/ejection.md) and [source notes](formats/ejection.md).

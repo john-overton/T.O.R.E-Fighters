@@ -1,0 +1,20 @@
+//! Runtime-only escape resources identified in the reviewed FA media.
+pub const RESOURCES: &[&str] = &[
+    "EJECT.NT",
+    "EJECT.SH",
+    "EJECT_S.SH",
+    "_EJECTA.PIC",
+    "_EJECTB.PIC",
+    "_EJECTC.PIC",
+    "_EJECTD.PIC",
+    "KBAIL.SEQ",
+    "&EJECT.5K",
+    "&EJECT.11K",
+    "&CHUTE.5K",
+    "#EJECT.5K",
+    "^EJECT.5K",
+    "^EJECTNG.5K",
+    "^EJECTX3.5K",
+    "^PUNCH.5K",
+    "^OUTFUEL.5K",
+];

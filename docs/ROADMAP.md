@@ -437,6 +437,12 @@ Deliverable: a complete quick fight from menu to debrief against scripted oppone
 
 Exit: the loop can be run a hundred times headless with a fixed seed and produce identical results.  This is the harness for 1e and 1f.
 
+### Ejection and pilot survival
+
+Implemented player escape and requested AI recovery decisions. [Behaviour and fitted thresholds](spec/ejection.md),
+[source evidence](formats/ejection.md), [validation](baselines/ejection.md).
+Remaining: campaign rescue/capture, additional crew and original speaker routing.
+
 ### 1e. AI
 
 **M1 scope: air-to-air awareness and engagement.** The

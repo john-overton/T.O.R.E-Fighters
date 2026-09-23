@@ -61,5 +61,7 @@ capability survey, the installed visual and ECM records and the recovered range
 and mode rules; the shared component built against it has its own
 [guide](../radar.md). [Instrument window bezels](instrument-bezel.md) records
 each aircraft's instrument window frame, its colours and its geometry.
+[Ejection](ejection.md) specifies player confirmation, pilot survival and the
+fitted AI recovery assessment, including the requested safety and chance rules.
 Supporting research lives in [`../formats/`](../formats/), measured evidence in
 [`../baselines/`](../baselines/), and frozen archives in [`../research/`](../research/).

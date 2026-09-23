@@ -35,7 +35,8 @@ finish fading normally. Normal restart clears this state.
 
 As further requested by John on 2026-09-21, losing the player aircraft's nose or
 cockpit kills its pilot immediately. Timed wound death, a critical cockpit hit,
-an airburst and fatal ground impact also mark the pilot dead. A dead pilot cannot
+an airburst and fatal ground impact also mark a pilot still aboard dead.
+A separated [ejected pilot](ejection.md) survives the abandoned aircraft's later destruction. A dead pilot cannot
 be revived by reaching the ground. Pilot death does not shut down surviving
 engines in an airborne wreck.
 

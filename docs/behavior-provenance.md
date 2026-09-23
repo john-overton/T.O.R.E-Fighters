@@ -101,6 +101,10 @@ Labels describe origin only. None of these is a blocker.
 
 | Component | Origin | Notes |
 | --- | --- | --- |
+| Ejection control, seat capability and separate pilot object | Spec-derived | [Manual and reviewed source](formats/ejection.md) |
+| Seat impulse, descent, survival and recovery estimate | Fitted, agent decisions 2026-09-23 | [Ejection rules](spec/ejection.md) |
+| 70% automatic-ejection chance each qualifying second | Opinionated, requested by John 2026-09-23 | Independent deterministic stream per pilot; manual escape is unaffected |
+| No automatic ejection for an undamaged aircraft above 200 AGL | Opinionated, requested by John 2026-09-23 | Hard guard before recovery assessment |
 | Warning/stall timers, spin entry/recovery predicates | Native | Translated and tested; initial stall classification is fitted |
 | Stall control/lift attenuation | Native arithmetic | Connected in hybrid; clean-envelope reference speed and later force integration are fitted |
 | Timed warning-transition rotation (“tumble”) and stalled movement fall | Native | Tested with both PTs and imported tables; legacy/hybrid unchanged |

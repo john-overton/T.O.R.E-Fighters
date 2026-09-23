@@ -17,6 +17,7 @@ bind keyboard flight-yaw yaw axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-throttle throttle-rate axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-look-x look-x axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-look-y look-y axis -1 0 1 0 1 1 100\n\
+bind keyboard Shift-e eject press\n\
 bind keyboard Shift-n airport-nav press\n\
 bind keyboard Shift-a airport-next press\n\
 bind keyboard Shift-l airport-request-landing press\n\
@@ -852,6 +853,38 @@ mod tests {
         input.resolver.profile.aliases.extend(profile.aliases);
         input.resolver.profile.bindings.extend(profile.bindings);
         input
+    }
+    #[test]
+    fn ejection_chord_requires_two_real_presses_and_is_rebindable() {
+        use winit::keyboard::ModifiersState;
+        let mut input = input("");
+        assert!(input.key("e", true, ModifiersState::SHIFT));
+        assert_eq!(
+            input
+                .resolver
+                .drain()
+                .into_iter()
+                .map(|(_, a)| a)
+                .collect::<Vec<_>>(),
+            vec![Action::Pilot(tore_input::PilotCommand::Eject)]
+        );
+        assert!(input.key("e", true, ModifiersState::SHIFT));
+        assert!(input.resolver.drain().is_empty(), "repeat does not confirm");
+        input.key("e", false, ModifiersState::empty());
+        input.key("e", true, ModifiersState::SHIFT);
+        assert_eq!(
+            input
+                .resolver
+                .drain()
+                .into_iter()
+                .map(|(_, a)| a)
+                .collect::<Vec<_>>(),
+            vec![Action::Pilot(tore_input::PilotCommand::Eject)]
+        );
+        assert_eq!(
+            tore_input::Action::parse("eject").unwrap(),
+            tore_input::Action::Pilot(tore_input::PilotCommand::Eject)
+        );
     }
     #[test]
     fn settings_save_reload_and_invalid_edit_preserve_previous_file() {

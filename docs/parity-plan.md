@@ -35,6 +35,11 @@ bullets with intermittent tracers across the roster
 focus on runway rotation, easing the stick after liftoff, continuous gun fire,
 and the [expanded HUD with NAV/gun startup defaults](spec/hud-layout.md).
 
+[Ejection](spec/ejection.md) now includes player confirmation, surviving-pilot
+escape, original art/audio and fitted AI recovery decisions. Healthy AI aircraft
+above 200 feet AGL cannot auto-eject. Campaign recovery and additional crew remain
+open. See [validation](baselines/ejection.md).
+
 ## The decision this plan follows
 
 **D30, 2026-09-15. Parity by expression of feature.** Recorded from John's

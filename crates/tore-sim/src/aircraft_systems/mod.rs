@@ -108,7 +108,7 @@ impl Systems {
         }
     }
     pub fn kill_pilot(&mut self, reason: &str) {
-        if self.pilot.kill() {
+        if !self.pilot.ejected && self.pilot.kill() {
             self.notify(reason);
         }
     }

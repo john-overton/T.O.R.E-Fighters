@@ -1105,6 +1105,7 @@ pub(crate) mod tests {
             address: 0,
         };
         let shape = Shape {
+            lines: vec![],
             faces: vec![
                 face(40., 100., -1.),
                 face(40., 100., -1.),
@@ -1115,6 +1116,7 @@ pub(crate) mod tests {
         assert_eq!(pavement_height(&shape), -1.);
         assert_eq!(
             pavement_height(&Shape {
+                lines: vec![],
                 faces: vec![],
                 state_words: Default::default()
             }),

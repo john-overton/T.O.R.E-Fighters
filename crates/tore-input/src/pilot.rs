@@ -15,6 +15,7 @@ pub enum Switch {
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PilotCommand {
+    Eject,
     Toggle(Switch),
     Set(Switch, bool),
     Throttle(f64),

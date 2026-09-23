@@ -234,6 +234,7 @@ mod tests {
             stall_cue: None,
             flight_on: true,
             flight_paused: false,
+            ejection_warning: false,
             engine_gain: 0.,
             burner_gain: 0.,
             voices: Vec::new(),

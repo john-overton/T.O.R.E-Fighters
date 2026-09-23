@@ -14,6 +14,10 @@ Start. Players change any of these in **Pref → Controls...** on the main menu
 or **Escape → Control** in flight; see [input](INPUT.md) for how bindings,
 modifiers and profiles work.
 
+The [keyboard map](tore-keyboard-map.html) is the printable flight, comms and
+view reference. Its [update conventions](tore-keyboard-map-rules.md) keep test
+commands out of that reference.
+
 The tables below are generated from `crates/tore-app/src/input_catalog.rs` and
 the standard gamepad defaults in `crates/tore-app/src/input.rs`. A test fails
 when they drift. After changing a default, regenerate with:
@@ -64,6 +68,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 
 | Action | Keyboard | Mouse | Gamepad (Xbox) |
 | --- | --- | --- | --- |
+| Eject (press twice) | Shift+E | - | - |
 | Landing gear | G | - | A |
 | Flaps | F | - | X |
 | Airbrake / wheel brakes | B | - | B |

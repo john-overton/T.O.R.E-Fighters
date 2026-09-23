@@ -405,6 +405,16 @@ impl Airframe {
         c.pitch = state.pitch as f32;
         c.roll = -state.bank as f32;
         c.view_fraction = 1.;
+        if let Some(pilot) = &state.escape {
+            c.position = pilot.position.map(|v| v as f32);
+            c.yaw = pilot.heading as f32;
+            c.position[0] -= c.yaw.sin() * 60.;
+            c.position[2] -= c.yaw.cos() * 60.;
+            c.position[1] += 22.;
+            c.pitch = -0.34;
+            c.roll = 0.;
+            return c;
+        }
         if view == 3 {
             c.yaw += std::f32::consts::PI;
         } else if view == 4 {

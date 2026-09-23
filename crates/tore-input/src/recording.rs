@@ -39,6 +39,7 @@ pub fn write_frame(mut out: impl Write, tick: u64, input: &PilotInput) -> io::Re
     )?;
     for command in &input.commands {
         let s = match command {
+            PilotCommand::Eject => "eject".into(),
             PilotCommand::Toggle(s) => format!("toggle:{}", switch_name(*s)),
             PilotCommand::Set(s, on) => format!("set:{}:{}", switch_name(*s), u8::from(*on)),
             PilotCommand::Throttle(v) => format!("throttle:{v}"),
@@ -109,6 +110,7 @@ pub fn read(mut input: impl BufRead) -> io::Result<Vec<PilotInput>> {
         for text in &w[6..] {
             let p: Vec<_> = text.split(':').collect();
             let command = match p.as_slice() {
+                ["eject"] => PilotCommand::Eject,
                 ["throttle", v] => PilotCommand::Throttle(number(v)?),
                 ["adjust", v] => PilotCommand::AdjustThrottle(number(v)?),
                 ["toggle", s] => match Action::parse(s).map_err(|_| invalid())? {
@@ -150,6 +152,7 @@ mod tests {
                 PilotCommand::Toggle(crate::Switch::Gear),
                 PilotCommand::Set(crate::Switch::Gear, true),
                 PilotCommand::Throttle(0.8),
+                PilotCommand::Eject,
                 PilotCommand::Toggle(crate::Switch::Bay),
                 PilotCommand::Set(crate::Switch::Bay, true),
             ],

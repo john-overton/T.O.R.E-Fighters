@@ -2,6 +2,7 @@
 use crate::*;
 pub fn action_name(action: &Action) -> String {
     match action {
+        Action::Pilot(PilotCommand::Eject) => "eject".into(),
         Action::Axis(a) => match a {
             Axis::Pitch => "pitch",
             Axis::Roll => "roll",

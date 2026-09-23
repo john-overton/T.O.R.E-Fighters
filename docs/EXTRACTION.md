@@ -444,3 +444,10 @@ coverage. Generated shapes, archives and editable donor YAML stay local.
 The application importer also selects `MCICONS.PIC` for the in-flight map. It is
 read as bounded PIC data at runtime, never embedded. Older caches keep working
 with geometric map symbols; re-import user-owned media to add the original sheet.
+
+## Ejection media
+
+The importer now selects the reviewed [ejection resources](formats/ejection.md),
+including pilot/shadow shapes, four textures, seat/chute effects and voice clips.
+Reimport older caches to add them. Missing optional ejection art or audio is
+reported while pilot simulation remains available. No retail bytes are embedded.

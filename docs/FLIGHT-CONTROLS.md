@@ -27,6 +27,7 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | PageUp / PageDown | Increase/decrease throttle while held | Development mapping |
 | 1…9 / 0 | 10…90% / full throttle | Development mapping |
 | Shift-B / E | Afterburner / engine toggle | Development mapping; afterburner requires engine and >95% throttle |
+| Shift+E twice | Eject, release between presses and confirm within 2 seconds | Manual p. 161; [ejection](spec/ejection.md) |
 | Shift+O | F-22 main weapon bays | Fitted 1-second presentation; other aircraft ignore it |
 | G / F / B / H | Gear / flaps / airbrake / hook | Adapter controls; full FA keyboard table still needs verification |
 | R / J | Radar / jammer | R returns to the radar channel when infrared is selected, and otherwise toggles radar power. Radar power gates radar contacts and locks; powered ECM applies recovered contact-probability terms; decoy behavior remains open |
@@ -602,3 +603,13 @@ The player wreck explodes on ground impact; a safe landing does not.
 
 A destroyed player aircraft continues trailing damage smoke while airborne,
 even after pilot death. Impact or explosion stops emission; existing smoke fades.
+
+## Ejection
+
+Press **Shift+E twice** to eject. The first press asks for confirmation; holding
+the key does not confirm. The eject action can be rebound in Controls. A living
+pilot can escape an already destroyed airborne aircraft. The camera follows
+the pilot and parachute while the abandoned aircraft falls independently.
+Low or inverted escapes can be fatal. See [ejection behaviour](spec/ejection.md)
+for timing, survival and the AI recovery assessment. Undamaged AI aircraft above
+200 feet AGL never eject automatically, as requested by John on 2026-09-23.

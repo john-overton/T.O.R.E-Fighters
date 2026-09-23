@@ -21,6 +21,7 @@ struct Voice {
 enum RadioSource {
     Wing,
     Airport,
+    Ejection,
 }
 struct RadioVoice {
     source: RadioSource,
@@ -40,6 +41,7 @@ struct Mixer {
     stall_cue: Option<&'static str>,
     flight_on: bool,
     flight_paused: bool,
+    ejection_warning: bool,
     engine_gain: f32,
     burner_gain: f32,
     voices: Vec<Voice>,
@@ -182,6 +184,7 @@ impl Audio {
             stall_cue: None,
             flight_on: false,
             flight_paused: false,
+            ejection_warning: false,
             engine_gain: 0.,
             burner_gain: 0.,
             voices: Vec::with_capacity(8),
@@ -222,6 +225,22 @@ impl Audio {
                 Some((stem.to_string(), String::from_utf8(bytes.clone()).ok()?))
             })
             .collect();
+        let missing_ejection: Vec<_> = [
+            "^EJECTX3.5K",
+            "^EJECTNG.5K",
+            "^PUNCH.5K",
+            "&EJECT.5K",
+            "&CHUTE.5K",
+        ]
+        .into_iter()
+        .filter(|name| !clips.contains_key(*name))
+        .collect();
+        if !missing_ejection.is_empty() {
+            eprintln!(
+                "Optional ejection audio unavailable: {}. Reimport retail media; pilot simulation remains available.",
+                missing_ejection.join(", ")
+            );
+        }
         let missing = missing_airport_audio(&clips, &radio_phrases);
         if !missing.is_empty() {
             eprintln!(
@@ -249,6 +268,48 @@ impl Audio {
         }
     }
 
+    /// Transition-owned cockpit/seat audio. Speaker assignment is fitted, see the spec.
+    pub fn ejection(
+        &self,
+        before: &crate::flight::State,
+        after: &crate::flight::State,
+        danger: bool,
+    ) {
+        use tore_sim::ejection::Phase;
+        if let Ok(mut mixer) = self.mixer.lock() {
+            if mixer.flight_paused {
+                return;
+            }
+            if danger
+                && !mixer.ejection_warning
+                && after.escape.is_none()
+                && !after.systems.pilot.dead
+            {
+                mixer.escape_voice(&self.clips, "^EJECTX3.5K", true);
+            }
+            mixer.ejection_warning = danger;
+            if before.escape.is_none() && after.escape.is_some() {
+                mixer.escape_voice(&self.clips, "^EJECTNG.5K", true);
+                mixer.escape_effect(&self.clips, "&EJECT.5K");
+            }
+            if after
+                .escape
+                .as_ref()
+                .is_some_and(|p| p.phase == Phase::Inflating)
+                && before
+                    .escape
+                    .as_ref()
+                    .is_none_or(|p| p.phase != Phase::Inflating)
+            {
+                mixer.escape_effect(&self.clips, "&CHUTE.5K");
+            }
+        }
+    }
+    pub fn wingman_ejected(&self) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.escape_voice(&self.clips, "^PUNCH.5K", false);
+        }
+    }
     /// Airport speech supersedes stale airport speech without cancelling wing radio.
     pub fn airport_radio(&self, stems: &[&str]) {
         if let Ok(mut mixer) = self.mixer.lock() {
@@ -347,6 +408,7 @@ impl Audio {
             m.voices.clear();
             m.radio.clear();
             m.flight_paused = false;
+            m.ejection_warning = false;
         }
     }
     pub fn pause_flight(&self, paused: bool) {
@@ -382,7 +444,8 @@ impl Audio {
                 eprintln!("Music stopped: {fault:?}; see import-report.txt for missing resources");
             }
             if let Some((a, s, ground)) = state {
-                m.music.scene(music::Scene::Score(0));
+                m.music
+                    .scene(music::Scene::Score(if s.escape.is_some() { 6 } else { 0 }));
                 if m.engine_aircraft != Some(a.id) {
                     m.stall = None;
                     m.stall_cue = None;
@@ -422,7 +485,8 @@ impl Audio {
                             position: 0.,
                         });
                 }
-                if (m.engine_gain > 0.) != s.engine
+                if s.escape.is_none()
+                    && (m.engine_gain > 0.) != s.engine
                     && m.effects_on
                     && m.voices.len() < 8
                     && let Some(clip) = a
@@ -439,12 +503,16 @@ impl Audio {
                         position: 0.,
                     });
                 }
-                m.engine_gain = if s.engine {
+                m.engine_gain = if s.engine && s.escape.is_none() {
                     0.08 + 0.15 * s.throttle as f32
                 } else {
                     0.
                 };
-                m.burner_gain = if s.afterburner_active() { 0.15 } else { 0. };
+                m.burner_gain = if s.afterburner_active() && s.escape.is_none() {
+                    0.15
+                } else {
+                    0.
+                };
             }
         }
     }
@@ -584,6 +652,42 @@ fn stall_cue(
     }
 }
 impl Mixer {
+    fn escape_voice(&mut self, clips: &BTreeMap<String, Arc<Clip>>, name: &str, urgent: bool) {
+        if !self.effects_on || self.flight_paused {
+            return;
+        }
+        if urgent {
+            self.cancel_radio(RadioSource::Ejection);
+        }
+        if self.radio.len() < 16
+            && let Some(clip) = clips.get(name)
+        {
+            let voice = RadioVoice {
+                source: RadioSource::Ejection,
+                voice: Voice {
+                    clip: clip.clone(),
+                    position: 0.,
+                },
+            };
+            if urgent {
+                self.radio.push_front(voice);
+            } else {
+                self.radio.push_back(voice);
+            }
+        }
+    }
+    fn escape_effect(&mut self, clips: &BTreeMap<String, Arc<Clip>>, name: &str) {
+        if self.effects_on
+            && !self.flight_paused
+            && self.voices.len() < 8
+            && let Some(clip) = clips.get(name)
+        {
+            self.voices.push(Voice {
+                clip: clip.clone(),
+                position: 0.,
+            });
+        }
+    }
     fn enqueue_radio(
         &mut self,
         clips: &BTreeMap<String, Arc<Clip>>,
@@ -808,6 +912,36 @@ mod tests {
         }
         assert_eq!(m.seeker.gain, 0.);
     }
+    #[test]
+    fn ejection_audio_is_optional_serial_and_pause_aware() {
+        let mut mixer = test_mixer();
+        mixer.effects_on = true;
+        mixer.flight_on = true;
+        let clip = Arc::new(Clip {
+            samples: vec![150; 80],
+            rate: 8000.,
+        });
+        let clips = BTreeMap::from([("voice".into(), clip.clone()), ("seat".into(), clip)]);
+        mixer.escape_voice(&clips, "missing", true);
+        assert!(mixer.radio.is_empty());
+        mixer.escape_voice(&clips, "voice", false);
+        mixer.escape_voice(&clips, "voice", true);
+        assert_eq!(
+            mixer.radio.len(),
+            1,
+            "urgent cockpit speech replaces stale ejection speech"
+        );
+        mixer.escape_effect(&clips, "seat");
+        assert_eq!(mixer.voices.len(), 1);
+        mixer.flight_paused = true;
+        mixer.escape_voice(&clips, "voice", false);
+        mixer.escape_effect(&clips, "seat");
+        assert_eq!(mixer.radio.len(), 1);
+        assert_eq!(mixer.voices.len(), 1);
+        let before = mixer.radio.front().unwrap().voice.position;
+        mixer.sample(8000.);
+        assert_eq!(mixer.radio.front().unwrap().voice.position, before);
+    }
     fn test_mixer() -> Mixer {
         Mixer {
             spatial: spatial::Scene::default(),
@@ -829,6 +963,7 @@ mod tests {
             stall_cue: Some("&STALL.5K"),
             flight_on: true,
             flight_paused: false,
+            ejection_warning: false,
             engine_gain: 0.,
             burner_gain: 0.,
             voices: Vec::new(),

@@ -161,6 +161,8 @@ not have to be replaced by a `native` one before acceptance. See
   defaults in `crates/tore-app/src/input.rs`), then run
   `TORE_UPDATE_CONTROLS_DOC=1 cargo test --locked -p tore-app controls_doc`.
   The test fails while the document is stale.
+- **Keyboard map:** Updates to `docs/tore-keyboard-map.html` follow the linked
+  [keyboard map conventions](docs/tore-keyboard-map-rules.md).
 - Correct stale status claims in place. Do not append a success note beneath a
   contradictory summary.
 

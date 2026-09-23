@@ -391,6 +391,7 @@ impl Assets {
                         || tore_formats::ui::creator::resource(n)
                         || tore_formats::music::resource(n)
                         || tore_formats::radio::resource(n)
+                        || tore_formats::ejection::RESOURCES.contains(&n.as_str())
                         || tore_formats::theater::theater_resource(n, "ALL")
                 })
                 .cloned()

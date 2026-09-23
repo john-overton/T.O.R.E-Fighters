@@ -56,6 +56,8 @@ pub struct State {
     pub damage_variant: Option<usize>,
     pub damage_regions: [f64; crate::combat::live::DAMAGE_SECTIONS],
     pub autopilot: crate::autopilot::Autopilot,
+    pub escape: Option<crate::ejection::Escape>,
+    pub(crate) eject_armed_at: Option<u64>,
     pub crashed: bool,
     pub wreck: Option<crate::wreck::Wreck>,
     pub ticks: u64,
@@ -172,6 +174,8 @@ impl State {
             damage_variant: None,
             damage_regions: [0.; crate::combat::live::DAMAGE_SECTIONS],
             autopilot: Default::default(),
+            escape: None,
+            eject_armed_at: None,
             crashed: false,
             wreck: None,
             ticks: 0,
@@ -354,10 +358,15 @@ impl State {
         self.model.configuration().hook_available
     }
     pub fn command(&mut self, command: PilotCommand) {
+        if command == PilotCommand::Eject {
+            self.request_ejection();
+            return;
+        }
         if self.crashed {
             return;
         }
         let (switch, setting) = match command {
+            PilotCommand::Eject => unreachable!(),
             PilotCommand::Throttle(value) => {
                 if value.is_finite() && self.systems.controls.throttle_lock.is_none() {
                     self.throttle = value.clamp(0., 1.);
@@ -604,10 +613,19 @@ impl State {
         input: &PilotInput,
         ground: impl Fn(f64, f64) -> crate::research::Surface,
     ) {
+        for command in &input.commands {
+            if *command == PilotCommand::Eject {
+                self.request_ejection();
+            }
+        }
+        self.step_escape(|x, z| ground(x, z).height);
         if self.crashed {
             self.autopilot.disengage();
             self.finish_ground_crash(ground(self.position[0], self.position[2]).height);
             if self.wreck_gone() {
+                if self.escape.is_some() {
+                    self.ticks += 1;
+                }
                 return;
             }
             if self.wreck.is_none() {
@@ -655,6 +673,9 @@ impl State {
         }
         let mut input = input.bounded();
         input.commands.retain(|command| {
+            if *command == PilotCommand::Eject {
+                return false;
+            }
             if matches!(
                 command,
                 PilotCommand::Toggle(Switch::Autopilot | Switch::WaypointAutopilot)

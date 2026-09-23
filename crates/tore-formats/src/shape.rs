@@ -45,7 +45,14 @@ pub struct Face {
     pub normal: Option<[f32; 3]>,
     pub address: usize,
 }
+#[derive(Clone, Debug)]
+pub struct Line {
+    pub positions: [[f32; 3]; 2],
+    pub color: u8,
+    pub fog: FogMode,
+}
 pub struct Shape {
+    pub lines: Vec<Line>,
     pub faces: Vec<Face>,
     pub state_words: BTreeSet<usize>,
 }
@@ -226,6 +233,7 @@ impl Shape {
         let mut slots = BTreeMap::<usize, [f32; 3]>::new();
         let mut colors = BTreeMap::new();
         let mut faces = Vec::new();
+        let mut lines = Vec::new();
         let mut fog = FogMode::Enabled;
         let mut seen = BTreeSet::new();
         let mut state_words = BTreeSet::new();
@@ -278,7 +286,18 @@ impl Shape {
                 }
                 0xf0 => {
                     let mut start = p + 2;
-                    if slice(c, start, 3)? == [0x66, 0x83, 0x3d] {
+                    // EJECT.SH: inert presentation flag followed by the usual state guard.
+                    // Do not write the flag or execute any original instruction.
+                    if slice(c, start, 2)? == [0x83, 0x0d]
+                        && slice(c, start + 6, 1)? == [2]
+                        && slice(c, start + 7, 3)? == [0x66, 0x83, 0x3d]
+                    {
+                        start += 7;
+                    }
+                    for _ in 0..16 {
+                        if slice(c, start, 3)? != [0x66, 0x83, 0x3d] {
+                            break;
+                        }
                         let addr = u32_at(c, start + 3)?;
                         state_words.insert(addr);
                         let imm = slice(c, start + 7, 1)?[0] as i8 as i32;
@@ -291,6 +310,9 @@ impl Shape {
                         };
                         if take {
                             start = target(start + 10, slice(c, start + 9, 1)?[0] as i8 as i32, c)?;
+                        } else {
+                            start += 10;
+                            break;
                         }
                     }
                     let mut next = None;
@@ -434,6 +456,25 @@ impl Shape {
                 0x40 => p += 4 + 2 * u16_at(c, p + 2)?,
                 0x44 => p += 8 + 2 * u16_at(c, p + 6)?,
                 0xbc => {
+                    // Inferred bounded line grammar for the explicit branch projection.
+                    // Preserve the established gameplay projection for other shapes.
+                    if export && slice(c, p + 2, 2)? == [0x96, 0] {
+                        let mut positions = [[0.; 3]; 2];
+                        for (i, point) in positions.iter_mut().enumerate() {
+                            let slot = u16_at(c, p + 4 + i * 2)?;
+                            if slot % 8 != 0 {
+                                return Err(invalid("unaligned shape line slot"));
+                            }
+                            *point = *slots
+                                .get(&(slot / 8))
+                                .ok_or_else(|| invalid("missing shape line slot"))?;
+                        }
+                        lines.push(Line {
+                            positions,
+                            color: slice(c, p + 1, 1)?[0],
+                            fog,
+                        });
+                    }
                     p += match slice(c, p + 2, 1)?[0] {
                         0x72 | 0x08 => 6,
                         0x96 | 0x3a => 8,
@@ -468,7 +509,11 @@ impl Shape {
         if !finished || faces.is_empty() {
             return Err(invalid("shape instruction bound or no geometry"));
         }
-        Ok(Self { faces, state_words })
+        Ok(Self {
+            faces,
+            lines,
+            state_words,
+        })
     }
 }
 #[cfg(test)]
@@ -585,6 +630,47 @@ mod tests {
         }
         c.extend_from_slice(&[0xfc, 0, 0, 100, 0, 3, 0, 1, 2, 0]);
         c
+    }
+    #[test]
+    fn ejection_lines_resolve_bounded_vertex_slots() {
+        let mut code = program();
+        code.pop();
+        let at = code.len();
+        code.extend([0xbc, 155, 0x96, 0, 0, 0, 8, 0, 0]);
+        let shape = Shape::with_export_state(&module::fixture(&code), &BTreeMap::new()).unwrap();
+        assert_eq!(shape.lines.len(), 1);
+        assert_eq!(shape.lines[0].positions, [[0., 0., 0.], [10., 0., 0.]]);
+        assert_eq!(shape.lines[0].color, 155);
+        code[at + 6] = 7;
+        assert!(Shape::with_export_state(&module::fixture(&code), &BTreeMap::new()).is_err());
+        code[at + 6] = 248;
+        assert!(Shape::with_export_state(&module::fixture(&code), &BTreeMap::new()).is_err());
+    }
+    #[test]
+    fn ejection_guard_chain_selects_geometry_without_running_side_effects() {
+        let mut code = vec![0xf0, 0, 0x83, 0x0d, 0, 0x70, 0, 0, 2];
+        let mut guards = Vec::new();
+        for state in [34u8, 35] {
+            code.extend([0x66, 0x83, 0x3d, 0, 0x71, 0, 0, state, 0x75, 11]);
+            guards.push(code.len() + 1);
+            code.extend([0x68, 0, 0, 0, 0, 0x68, 0, 0, 0, 0, 0xc3]);
+        }
+        guards.push(code.len() + 1);
+        code.extend([0x68, 0, 0, 0, 0, 0x68, 0, 0, 0, 0, 0xc3]);
+        for (index, pointer) in guards.iter().enumerate() {
+            let dest = 0x1000 + code.len() as u32;
+            code[*pointer..*pointer + 4].copy_from_slice(&dest.to_le_bytes());
+            let mut geometry = program();
+            geometry[27] = 100 + index as u8;
+            code.extend(geometry);
+        }
+        let data = module::fixture(&code);
+        for (state, color) in [(34, 100), (35, 101), (38, 102)] {
+            let shape =
+                Shape::with_export_state(&data, &BTreeMap::from([(0x7100, state)])).unwrap();
+            assert_eq!(shape.faces.len(), 1);
+            assert_eq!(shape.faces[0].colors, vec![color; 3]);
+        }
     }
     #[test]
     fn export_keeps_indexed_decals_that_gameplay_projection_omits() {

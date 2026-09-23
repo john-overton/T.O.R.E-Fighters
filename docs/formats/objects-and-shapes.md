@@ -482,3 +482,12 @@ Opaque imported world geometry participates in the shared
 submits complete animated meshes so camera-hidden faces can cast shadows;
 stepped mode keeps the earlier face rejection and light maps. This does not
 interpret or execute original shadow-shape commands.
+
+## Pilot escape shapes
+
+[EJECT.SH](ejection.md) uses a bounded chain of the reviewed word-state guards
+and relative shape jumps. The reader skips its presentation-only effects flag
+write and selects inert geometry without executing module code. The app packs
+its four runtime textures into an indexed atlas and draws seat, free-fall,
+inflating and open-parachute poses. Native shadow placement, camera-dependent
+detail selection and animation timing remain unverified.

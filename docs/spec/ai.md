@@ -1222,3 +1222,12 @@ sections without waiting for byte-level closure of the entire executable.
 The user-requested [Dummy training mode](dummy-aircraft.md) bypasses the combat
 controller and aerodynamic flight. Its constant 400-knot motion is an explicit
 exception to the normal AI flight-model path described above.
+
+## Pilot ejection
+
+The [ejection specification](ejection.md#fitted-ai-decision) owns the requested
+recovery calculation, healthy-aircraft safety guard and per-second chance.
+The mission evaluates escape before weapon releases; a successful ejection
+stops aircraft control while the detached pilot continues descending. Combat
+retains ownership of the abandoned wreck. These additions are fitted and
+opinionated where labelled, not recovered retail AI decision predicates.

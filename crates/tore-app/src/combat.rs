@@ -112,6 +112,7 @@ pub struct Combat {
     pub recorder: Option<crate::combat_tape::Recorder>,
     last_launcher: Option<Launcher>,
     shapes: BTreeMap<String, Shape>,
+    pub escape_art: Option<crate::ejection_art::Art>,
     explosions: Vec<Vec<([f32; 2], [f32; 3])>>,
     ground_impacts: Vec<Vec<([f32; 2], [f32; 3])>>,
 }
@@ -258,6 +259,13 @@ impl Combat {
             presentation: TargetPresentation::default(),
             recorder: None,
             last_launcher: None,
+            escape_art: match crate::ejection_art::Art::load(data) {
+                Ok(art) => Some(art),
+                Err(error) => {
+                    eprintln!("Optional ejection artwork unavailable: {error}");
+                    None
+                }
+            },
             shapes,
             explosions,
             ground_impacts,
@@ -1924,6 +1932,7 @@ mod tests {
         let mut exhaust = face.clone();
         exhaust.subtype = 0x4c;
         let shape = Shape {
+            lines: vec![],
             faces: vec![face, exhaust],
             state_words: Default::default(),
         };
