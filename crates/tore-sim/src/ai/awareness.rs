@@ -105,6 +105,11 @@ impl Memory {
     pub fn experience(&self) -> ResolvedExperience {
         self.experience
     }
+    /// A Novice keeps its extra remembered contacts until its next target
+    /// choice, where the one-target limit already discards them.
+    pub fn set_experience(&mut self, experience: ResolvedExperience) {
+        self.experience = experience;
+    }
 
     /// Replace the same-tick observation set and refresh retained snapshots.
     /// Invalid and non-aircraft contacts are never admitted.

@@ -80,6 +80,8 @@ carried in external tanks still counts as fuel weight.
 
 **Enemy AI.** Changes the skill of every enemy aircraft at once, live. Unchanged
 restores each aircraft's mission skill. Friendly AI is unaffected.
+**Proposed:** straight-flight fixture aircraft are unaffected, and decisions an
+aircraft has already timed keep their old timing until they come due.
 
 **Ignore midair collisions.** Aircraft pass through each other. With the cheat
 off, [midair collisions](#midair-collisions) happen.
@@ -94,7 +96,10 @@ Depends on [target selection](#target-selection).
 
 **Air combat guns only.** Every aircraft, player and AI, can fire only its gun.
 An aircraft without a gun cannot fire. **Proposed:** missiles already in flight
-continue; turning the cheat off restores the stores.
+continue; turning the cheat off restores the stores. The player's weapon
+selection skips every other station, and a missile selected when the cheat
+turns on switches to the gun, or to NAV without one. The Quick Mission Guns
+only setting, which removes the other stores at launch, is separate.
 
 **Easy aiming.** Aircraft hitboxes are **50% larger**, missiles get extra
 maneuverability, and missile seekers have a **25% wider** tracking cone.

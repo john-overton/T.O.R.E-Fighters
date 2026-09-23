@@ -750,6 +750,11 @@ impl Controller {
     pub fn experience(&self) -> ResolvedExperience {
         self.experience
     }
+    /// The Enemy AI cheat changes skill mid-flight. Every use reads the level
+    /// live, so only timers already running keep their old values.
+    pub fn set_experience(&mut self, experience: ResolvedExperience) {
+        self.experience = experience;
+    }
 
     pub fn target(&self) -> Option<u32> {
         self.target

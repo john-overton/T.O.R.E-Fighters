@@ -109,6 +109,7 @@ fn cheat_switch<'a>(cheats: &'a mut tore_sim::cheats::Cheats, label: &str) -> Op
         "Easy aiming?" => &mut cheats.easy_aiming,
         "Ignore midair collisions?" => &mut cheats.ignore_midair_collisions,
         "Easy targeting?" => &mut cheats.easy_targeting,
+        "Air combat guns only?" => &mut cheats.guns_only,
         "No screen-shaking?" => &mut cheats.no_screen_shake,
         _ => return None,
     })
@@ -129,6 +130,9 @@ impl FlightUi {
         let on = match label {
             "Invulnerable" => cheats.invulnerable,
             "Normal" => !cheats.invulnerable,
+            "Novice" => cheats.enemy_ai == Some(tore_sim::ai::Experience::Novice),
+            "Average" => cheats.enemy_ai == Some(tore_sim::ai::Experience::Average),
+            "Unchanged" => cheats.enemy_ai.is_none(),
             _ => *cheat_switch(&mut cheats, label)?,
         };
         Some(if on { "On" } else { "Off" })
@@ -235,6 +239,16 @@ impl FlightUi {
                 } else {
                     "Sun glare: on"
                 });
+                Command::Click
+            }
+            "Novice" | "Average" | "Unchanged" => {
+                use tore_sim::ai::Experience;
+                self.cheats.enemy_ai = match label {
+                    "Novice" => Some(Experience::Novice),
+                    "Average" => Some(Experience::Average),
+                    _ => None,
+                };
+                self.message(format!("Enemy AI: {}", label.to_lowercase()));
                 Command::Click
             }
             "Invulnerable" | "Normal" => {
@@ -978,6 +992,7 @@ mod tests {
             "Easy aiming?",
             "Ignore midair collisions?",
             "Easy targeting?",
+            "Air combat guns only?",
         ] {
             assert_eq!(ui.cheat_state(label), Some("Off"));
             assert_eq!(ui.activate(label, ""), Command::Click);
@@ -995,6 +1010,14 @@ mod tests {
         assert!(!ui.cheats.invulnerable);
         assert_eq!(ui.cheat_state("Realistic"), None);
         assert_eq!(ui.cheat_state("Enemy AI?"), None);
+        assert_eq!(ui.cheat_state("Unchanged"), Some("On"));
+        ui.activate("Novice", "");
+        assert_eq!(ui.cheat_state("Novice"), Some("On"));
+        assert_eq!(ui.cheat_state("Unchanged"), Some("Off"));
+        ui.reset_for_flight();
+        assert_eq!(ui.cheats.enemy_ai, Some(tore_sim::ai::Experience::Novice));
+        ui.activate("Unchanged", "");
+        assert_eq!(ui.cheats.enemy_ai, None);
     }
 
     #[test]

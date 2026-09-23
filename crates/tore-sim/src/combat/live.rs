@@ -970,11 +970,18 @@ impl State {
     pub fn cycle_selection(&mut self, forward: bool) {
         let count = self.ammo.len();
         let current = if self.armed { self.selected + 1 } else { 0 };
-        let next = if forward {
-            (current + 1) % (count + 1)
-        } else {
-            (current + count) % (count + 1)
-        };
+        let mut next = current;
+        // Air combat guns only skips every station but the gun.
+        loop {
+            next = if forward {
+                (next + 1) % (count + 1)
+            } else {
+                (next + count) % (count + 1)
+            };
+            if next == 0 || next == current || self.station_allowed(next - 1) {
+                break;
+            }
+        }
         self.release();
         self.bore_observation = None;
         self.mounted = Seeker::default();
@@ -983,6 +990,25 @@ impl State {
         self.armed = next != 0;
         if self.armed {
             self.selected = next - 1;
+        }
+    }
+    fn station_allowed(&self, station: usize) -> bool {
+        !self.cheats.guns_only || is_gun(&self.config.stations[station].weapon)
+    }
+    /// Guns only turned on with a missile selected moves to the gun, or to
+    /// NAV when the aircraft has none.
+    fn enforce_guns_only(&mut self) {
+        if !self.armed || self.station_allowed(self.selected) {
+            return;
+        }
+        self.release();
+        self.bore_observation = None;
+        self.mounted = Seeker::default();
+        self.mounted_key = None;
+        self.launch_mode = LaunchMode::Cued;
+        match (0..self.ammo.len()).find(|i| self.station_allowed(*i)) {
+            Some(gun) => self.selected = gun,
+            None => self.armed = false,
         }
     }
     pub fn select_next(&mut self) {
@@ -1805,6 +1831,7 @@ impl State {
         ground: impl Fn(f64, f64) -> f64,
     ) -> Vec<Event> {
         let mut events = Vec::new();
+        self.enforce_guns_only();
         if std::mem::take(&mut self.pending_damage) && self.player_hp > 0 {
             // Explicit no-AI hit fixture uses this aircraft's gun damage. Native
             // percent input is 100; deterministic adapter RNG is not native RNG.
@@ -4275,6 +4302,29 @@ mod tests {
                 .any(|e| matches!(e, Event::Jolt(Jolt { target: None, .. })))
         );
         assert!(!events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))));
+    }
+    #[test]
+    fn guns_only_leaves_the_player_the_gun_and_nav() {
+        let mut s = fixture(false);
+        let mut gun = s.config.stations[0].clone();
+        gun.weapon.source = AircraftId::F18.gun().into();
+        s.config.stations.push(gun);
+        s.ammo.push(100);
+        s.armed = true;
+        s.selected = 0;
+        s.cheats.guns_only = true;
+        s.enforce_guns_only();
+        assert_eq!((s.armed, s.selected), (true, 1), "moved to the gun");
+        s.cycle_selection(true);
+        assert!(!s.armed, "NAV follows the gun");
+        s.cycle_selection(true);
+        assert_eq!((s.armed, s.selected), (true, 1), "the missile is skipped");
+        s.cycle_selection(false);
+        s.cycle_selection(false);
+        assert_eq!((s.armed, s.selected), (true, 1));
+        s.cheats.guns_only = false;
+        s.cycle_selection(false);
+        assert_eq!((s.armed, s.selected), (true, 0));
     }
     #[test]
     fn midair_collisions_destroy_everyone_involved_unless_ignored() {

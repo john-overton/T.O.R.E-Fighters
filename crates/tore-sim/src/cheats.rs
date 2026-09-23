@@ -26,4 +26,7 @@ pub struct Cheats {
     pub easy_aiming: bool,
     pub ignore_midair_collisions: bool,
     pub easy_targeting: bool,
+    pub guns_only: bool,
+    /// Enemy AI: every enemy aircraft at this level; None is Unchanged.
+    pub enemy_ai: Option<crate::ai::Experience>,
 }

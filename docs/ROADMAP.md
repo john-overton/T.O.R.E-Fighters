@@ -812,8 +812,10 @@ Slices, in order:
 6. **AI cheats.** Live Enemy AI skill and Air combat guns only for AI aircraft.
    Touches AI files.
 
-Slices 4 and 6 change files another agent is working in; they wait until that
-work is merged. Damage Realistic is parked until its behaviour is described.
+Current (2026-09-23): slices 1 to 6 are implemented on the `cheats` branch.
+Slices 4 and 6 touch AI files another agent is working in, so merging needs a
+check against that work. Damage Realistic is parked until its behaviour is
+described. The fitted numbers in the specification await John's review.
 
 Deliverable: each cheat toggles mid-flight from the menu, shows On or Off, and
 survives Restart.

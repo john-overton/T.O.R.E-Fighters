@@ -236,6 +236,12 @@ pub struct AiWings {
     /// A line for `FlightUi::message`, taken by the host once.
     pending_message: Option<String>,
     pending_guns: BTreeMap<(u32, u8), PendingGun>,
+    /// Enemy AI cheat level in force; None leaves each aircraft its own.
+    enemy_skill: Option<tore_sim::ai::Experience>,
+    /// Each enemy's mission skill, kept so Unchanged can restore it.
+    mission_skill: BTreeMap<u32, tore_sim::ai::experience::ResolvedExperience>,
+    /// Air combat guns only cheat in force.
+    guns_only: bool,
 }
 
 struct PendingGun {
@@ -519,6 +525,9 @@ impl AiWings {
             threat_reports: Vec::new(),
             pending_message: None,
             pending_guns: BTreeMap::new(),
+            enemy_skill: None,
+            mission_skill: BTreeMap::new(),
+            guns_only: false,
         })
     }
 
@@ -545,6 +554,56 @@ impl AiWings {
 
     pub fn slot(&self, id: u32) -> Option<&Slot> {
         self.slots.iter().find(|s| s.id == id)
+    }
+
+    /// Enemy AI cheat: every enemy aircraft flies at `level` from now on, or
+    /// at its own mission skill again for None. Friendly aircraft and
+    /// straight-flight fixtures are unaffected.
+    pub fn set_enemy_skill(&mut self, level: Option<tore_sim::ai::Experience>) {
+        use tore_sim::ai::experience::{ExperienceOrigin, ResolvedExperience};
+        if level == self.enemy_skill {
+            return;
+        }
+        self.enemy_skill = level;
+        for slot in self.slots.iter().filter(|s| s.side == launch::Side::Enemy) {
+            let Some(actor) = self.mission.actor_mut(slot.id) else {
+                continue;
+            };
+            if actor.is_dummy() {
+                continue;
+            }
+            let own = *self
+                .mission_skill
+                .entry(slot.id)
+                .or_insert_with(|| actor.experience());
+            actor.set_experience(level.map_or(own, |level| ResolvedExperience {
+                level,
+                origin: ExperienceOrigin::EnemyOverride,
+            }));
+        }
+    }
+
+    /// Air combat guns only: every AI aircraft may fire only its gun. Turning
+    /// it off restores the other stores; missiles in flight are unaffected.
+    pub fn set_guns_only(&mut self, on: bool) {
+        if on == self.guns_only {
+            return;
+        }
+        self.guns_only = on;
+        for slot in &self.slots {
+            let Some(actor) = self.mission.actor_mut(slot.id) else {
+                continue;
+            };
+            for spec in actor.stations_mut() {
+                let gun = self
+                    .weapons
+                    .get(&(slot.id, spec.station.0))
+                    .is_some_and(|w| w.source == slot.aircraft.gun());
+                if !gun {
+                    spec.store.inhibited = on;
+                }
+            }
+        }
     }
 
     /// Friendly aircraft identities, which the player's T and Enter skip.
@@ -2232,6 +2291,65 @@ pub(crate) mod tests {
                 .level,
             Experience::Average
         );
+    }
+
+    #[test]
+    fn enemy_ai_cheat_changes_enemy_skill_live_and_unchanged_restores_it() {
+        let (mut wings, _) = build(None);
+        let skill =
+            |wings: &AiWings, id| wings.mission().actor(id).unwrap().controller().experience();
+        wings.set_enemy_skill(Some(Experience::Novice));
+        for slot in wings.slots().to_vec() {
+            let resolved = skill(&wings, slot.id);
+            match slot.side {
+                launch::Side::Friendly => assert_eq!(resolved.level, Experience::Average),
+                launch::Side::Enemy => {
+                    assert_eq!(resolved.level, Experience::Novice);
+                    assert_eq!(resolved.origin, ExperienceOrigin::EnemyOverride);
+                }
+            }
+        }
+        wings.set_enemy_skill(Some(Experience::Average));
+        wings.set_enemy_skill(None);
+        for slot in wings.slots().to_vec() {
+            let resolved = skill(&wings, slot.id);
+            assert!(matches!(
+                resolved.origin,
+                ExperienceOrigin::QuickMission { .. }
+            ));
+            if slot.side.is_enemy() {
+                assert_eq!(resolved.level, Experience::Ace, "mission skill restored");
+            }
+        }
+    }
+
+    #[test]
+    fn guns_only_cheat_inhibits_every_other_store_and_restores_them() {
+        let (mut wings, _) = build(None);
+        let slot = wings.slots()[0];
+        let stations = wings.mission.actor(slot.id).unwrap().stations().to_vec();
+        assert!(stations.len() > 1);
+        let mut gun = combat_fixture(false).configuration().stations[0]
+            .weapon
+            .clone();
+        gun.source = slot.aircraft.gun().into();
+        wings.weapons.insert((slot.id, stations[0].station.0), gun);
+        let inhibited = |wings: &AiWings| -> Vec<bool> {
+            wings
+                .mission
+                .actor(slot.id)
+                .unwrap()
+                .stations()
+                .iter()
+                .map(|s| s.store.inhibited)
+                .collect()
+        };
+        wings.set_guns_only(true);
+        let on = inhibited(&wings);
+        assert!(!on[0], "the gun stays usable");
+        assert!(on[1..].iter().all(|i| *i));
+        wings.set_guns_only(false);
+        assert!(inhibited(&wings).iter().all(|i| !*i));
     }
 
     /// With `--fixture-wings` this bridge is absent, so a target row only

@@ -336,6 +336,8 @@ are not saved to disk. Behaviour: [cheats specification](spec/cheats.md).
 | No crashes? | Ground, water and unsafe landings bounce the aircraft back into the air instead of crashing it; a building turns it around. Safe runway landings still land. |
 | Easy aiming? | The player's rounds and missiles see targets 50% larger; the player's missiles turn 50% faster and their in-flight seeker cone is 25% wider. |
 | Easy targeting? | The target square stays on the target anywhere on screen, and the HUD keeps showing a target the sensors have dropped, including behind you in a merge. Awareness only: no lock, radar lead or missile support is kept. |
+| Enemy AI? → Novice / Average / Unchanged | Every enemy aircraft flies at that skill from now on; Unchanged restores each one's mission skill. Friendly aircraft are unaffected. |
+| Air combat guns only? | Every aircraft may fire only its gun. The player's weapon keys skip the other stations and a selected missile switches to the gun; AI aircraft stop choosing their other stores. Turning it off restores them. |
 | Ignore midair collisions? | Aircraft pass through each other. With it off, two aircraft whose 28 ft contact spheres touch are both destroyed, the player included, even with Invulnerable on, and nobody is credited with a kill. |
 
 Every missile or bomb burst on an aircraft, the player's or an AI's, now jolts
@@ -344,8 +346,8 @@ on. Details: [missile hit jolt](spec/cheats.md#missile-hit-jolt).
 | No turbulence?, No sun whiteout? | Described below. |
 
 Flight cheats apply to the default and legacy flight models; the native research
-path ignores them. Damage Realistic and the other rows still report that they
-are not implemented yet.
+path ignores them. Damage Realistic still reports that it is not implemented
+yet.
 
 ## Sun glare cheat
 

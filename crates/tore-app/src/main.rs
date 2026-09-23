@@ -2133,8 +2133,10 @@ impl ApplicationHandler for App {
                         self.flight.sensors = self.instruments.controls();
                         self.flight.cheats = self.flight_ui.cheats;
                         self.combat.state.cheats = self.flight_ui.cheats;
-                        if let Some(wings) = &self.ai_wings {
+                        if let Some(wings) = &mut self.ai_wings {
                             self.combat.state.friendlies = wings.friendly_ids();
+                            wings.set_enemy_skill(self.flight_ui.cheats.enemy_ai);
+                            wings.set_guns_only(self.flight_ui.cheats.guns_only);
                         }
                         for _ in 0..steps {
                             for button in std::mem::take(&mut self.instruments.weapon_controls) {

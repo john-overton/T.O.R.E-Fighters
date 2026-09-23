@@ -368,6 +368,20 @@ impl AiActor {
         &self.stations
     }
 
+    pub fn experience(&self) -> ResolvedExperience {
+        self.controller.experience()
+    }
+
+    /// Change skill mid-flight, for decisions and awareness alike.
+    pub fn set_experience(&mut self, experience: ResolvedExperience) {
+        self.controller.set_experience(experience);
+        self.awareness.set_experience(experience);
+    }
+
+    pub fn stations_mut(&mut self) -> &mut [StationSpec] {
+        &mut self.stations
+    }
+
     pub fn set_stations(&mut self, stations: Vec<StationSpec>) {
         self.stations = stations;
     }
