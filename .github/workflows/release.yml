@@ -25,7 +25,7 @@ jobs:
         os: [macos-14, macos-15-intel, ubuntu-24.04, windows-2022]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # The packaging scripts fall back to `git describe`.
       - name: Install Linux windowing libraries
@@ -34,7 +34,7 @@ jobs:
       - name: Install pinned Rust toolchain
         shell: bash
         run: rustup show
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
 
@@ -124,7 +124,7 @@ jobs:
         run: tools/package/package-windows.ps1
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: packages-${{ matrix.os }}
           if-no-files-found: error
@@ -141,12 +141,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
       - name: Download packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: packages-*
           merge-multiple: true
