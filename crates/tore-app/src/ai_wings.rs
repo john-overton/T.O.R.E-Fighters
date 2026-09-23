@@ -26,6 +26,7 @@
 mod engagement;
 pub use engagement::Preset;
 mod orders;
+pub mod outcome;
 mod reports;
 
 use std::collections::{BTreeMap, VecDeque};

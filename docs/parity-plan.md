@@ -99,6 +99,7 @@ player-visible numbers out of those files and leaving the byte layouts behind.
 
 | Area | State | Provenance | Evidence |
 | --- | --- | --- | --- |
+| In-flight situation music | Nine retail scores chosen by rank and situation, boundary-timed downgrades, once-per-flight success and home music | spec-derived selection, fitted TORE inputs and in-flight mission result | [flight music](spec/flight-music.md#current-tore-state) |
 | Combat and passing sounds | Correct original IR growl, percentage/lock gain, delayed explosions, spatial pass cues and external booms | spec-derived recording identities, opinionated realism and fitted acoustics | [sound](spec/sound.md), [audio guide](audio.md) |
 | Main menu and Choose Activity | Original art, fonts, sounds, five backgrounds | native assets, spec-derived layout | [main-menu](baselines/main-menu.md) |
 | Quick Mission creator | Briefing screen, aircraft and theater selection, editable fields | mixed | [creator/ordnance](baselines/creator-ordnance.md) |

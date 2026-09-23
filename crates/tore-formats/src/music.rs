@@ -83,7 +83,7 @@ pub struct Score {
 pub struct Cursor {
     offset: usize,
     pub stopped: bool,
-    /// F9 requests host reevaluation; no absent combat/mission event is synthesized.
+    /// F9 marks a reevaluation boundary; the host clears the flag once it has read it.
     pub host_flag: bool,
 }
 impl Score {

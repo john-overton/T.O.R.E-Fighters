@@ -2,6 +2,7 @@
 use crate::{AppResult, menu::Action};
 pub mod music;
 mod seeker;
+pub mod situation;
 mod spatial;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::{
@@ -37,6 +38,7 @@ struct Mixer {
     seeker_cue: Option<&'static str>,
     seeker_volume: f64,
     music: music::Music,
+    situation: situation::Selector,
     engine: Option<Voice>,
     engine_aircraft: Option<tore_formats::aircraft::AircraftId>,
     burner: Option<Voice>,
@@ -182,6 +184,7 @@ impl Audio {
             seeker_cue: None,
             seeker_volume,
             music,
+            situation: situation::Selector::default(),
             engine: None,
             engine_aircraft: None,
             burner: None,
@@ -413,8 +416,9 @@ impl Audio {
     }
     pub fn restart_flight(&self) {
         if let Ok(mut m) = self.mixer.lock() {
-            m.music.scene(music::Scene::Score(0));
-            m.music.restart();
+            // Silent until the first fixed step chooses the situation score.
+            m.situation.new_flight();
+            m.music.stop();
             m.spatial.clear();
             m.seeker = seeker::Tone::default();
             m.seeker_voice = None;
@@ -430,6 +434,22 @@ impl Audio {
             m.flight_paused = false;
             m.ejection_warning = false;
         }
+    }
+    /// One fixed flight step of situation music, in game seconds since the
+    /// flight started. Called only while the simulation advances, so a paused
+    /// flight chooses nothing. Audio never feeds back into the simulation.
+    pub fn situation(&self, inputs: &situation::Inputs, now: f64) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.situation(inputs, now);
+        }
+    }
+    /// Ctrl+V: toggles the Valkyries score for the session and stops the
+    /// current score. Returns the new state.
+    pub fn toggle_valkyries(&self) -> Option<bool> {
+        let mut m = self.mixer.lock().ok()?;
+        let on = m.situation.toggle_valkyries();
+        m.music.stop();
+        Some(on)
     }
     pub fn pause_flight(&self, paused: bool) {
         if let Ok(mut mixer) = self.mixer.lock() {
@@ -460,12 +480,10 @@ impl Audio {
                 m.radio.clear();
             }
             m.flight_on = state.is_some();
-            if let Some(fault) = m.music.fault.take() {
+            if let Some(fault) = m.music.new_fault() {
                 eprintln!("Music stopped: {fault:?}; see import-report.txt for missing resources");
             }
             if let Some((a, s, ground)) = state {
-                m.music
-                    .scene(music::Scene::Score(if s.escape.is_some() { 6 } else { 0 }));
                 if m.engine_aircraft != Some(a.id) {
                     m.stall = None;
                     m.stall_cue = None;
@@ -602,6 +620,20 @@ impl Mixer {
     }
 }
 impl Mixer {
+    fn situation(&mut self, inputs: &situation::Inputs, now: f64) {
+        if !self.music_on {
+            self.situation.silence();
+            self.music.set_hold(false);
+            return;
+        }
+        if self.situation.due(now) {
+            let playback = self.music.playback();
+            if let Some(rank) = self.situation.update(now, inputs, playback) {
+                self.music.start(rank.score());
+            }
+        }
+        self.music.set_hold(self.situation.waiting(inputs));
+    }
     fn play_ui(&mut self, clip: &Arc<Clip>, reuse_active: bool) {
         if self.effects_on
             && self.ui_voices.len() < 8
@@ -989,6 +1021,7 @@ mod tests {
             seeker_cue: None,
             seeker_volume: 0.30,
             music: music::Music::new(&BTreeMap::new(), &BTreeMap::new(), 1),
+            situation: situation::Selector::default(),
             engine: None,
             engine_aircraft: None,
             burner: None,

@@ -186,14 +186,63 @@ normally happens at the end of the current phrase: up to about 70 seconds later.
 
 ## Current TORE state
 
-TORE plays NORMAL for the whole flight and EJECT after ejection
-([format notes](../formats/music.md#runtime-scope-and-boundaries)). That binding
-is fitted. The rules above are the parity target. They need these host inputs:
-the player's designated target and its side, class and range; projectile hits
-on the player; AI missile targeting of the player; missiles guided at the
-player; the player's airport and carrier phase; mission result and the home
-base check. Inputs that do not exist yet should leave their condition false,
-not invent events.
+Implementation mode, 2026-09-23. TORE plays the situation scores by the rules
+above. The rank order, the condition order, the 1 second lockout, immediate
+upgrades, downgrades at marked boundaries, a re-chosen score continuing, SUCC
+and HOME once per flight, LAUNCH restarting, the 30 second hit hold and the
+distances are **spec-derived**. The selector is
+`crates/tore-app/src/audio/situation.rs`, its inputs come from
+`crates/tore-app/src/flight_music.rs`, and the mission result from
+`crates/tore-app/src/ai_wings/outcome.rs`. Audio only reads simulation state;
+headless and `--no-audio` runs do not compute any of it.
+
+| Condition | What feeds it in TORE | Provenance |
+| --- | --- | --- |
+| VALK | Ctrl+V while flying an aircraft (not ejected, not crashed, not paused). The toggle lasts for the session and is not saved. It stops the current score. The message "Valkyries music on" or "off" is an agent addition (2026-09-23). The recording is absent, so the result is silence. | spec-derived; message opinionated |
+| SUCC | The in-flight mission result below reaching success. "Mission accomplished!" (`^MISSACC`) is queued on the wing radio the first time. Which voice speaks it is not established. | fitted |
+| EJECT | The player has ejected. | spec-derived |
+| LAUNCH | Takeoff roll: on a runway surface at 7 ft/s or more, having not just landed. Climb-out: after lifting off, within 25,000 ft of the liftoff point, under 4,000 ft above the ground, gear down and at 954 ft/s or less. Leaving the window ends it for good. | fitted state tracking, spec-derived numbers |
+| AIR | The player's designated target (T, Enter or a scope click) is an aircraft with hit points left, on the enemy side, and within 40,000 ft; or a projectile damaged the player in the last 30 game seconds. Enemy side is the AI wing side; without AI wings (range and fixture aircraft) any target not marked friendly counts. | spec-derived; fixture side rule fitted |
+| DANGER, target | The same designated enemy aircraft at 40,000 ft or more. The moving-vehicle class stays false: TORE has no object class that matches it. | spec-derived; vehicle class unknown |
+| DANGER, AI aim | A live AI aircraft whose current target is the player and which still carries a usable guided air-to-air store. TORE's AI keeps no selected station, so carrying one stands in for having it selected. The warning lasts 4 seconds after the last such step; the 1 second final-attack memory has no TORE equivalent. | fitted |
+| DANGER, missile inbound | A live projectile fired at the player whose guidance target is the player. An AIM-120 farther than 30,380 ft is not counted. Checked every simulation step rather than at acquisition plus every 2 seconds. | spec-derived; cadence fitted |
+| HOME | After success, checked every 4 game seconds: within 42,240 ft of the home base and below 20,000 ft above sea level. The home base is the Quick Mission ground-start airport, at the mean centre of its runways; an airborne start has none, so HOME never plays there. "We're almost home!" (`^ALMSTHM`) is queued once, only while airborne. | fitted home base and altitude datum |
+| DECK | On a runway surface below 7 ft/s, or in the touchdown and rollout after a landing until stopped. A bounce during the rollout counts as airborne, not as a new takeoff. There is no carrier, catapult or taxiway state. | fitted |
+
+**In-flight mission result** (fitted). TORE has no mission evaluator in flight
+yet; the separate debrief work evaluates at mission end and is to replace this
+stand-in when it merges. Every 4 game seconds the Quick Mission is judged with
+the debrief's rules: shooting down a friendly aircraft fails it, losing a
+friendly objective fails it, and it succeeds once every target is shot down,
+crashed or has ejected. Targets are the enemy group the player's flight is
+assigned to destroy; with no such group every enemy aircraft is a target (agent
+decision). Friendly objectives are the aircraft the player's flight protects and
+the members of friendly must-survive groups, the player included when that
+group is marked. A player kill in the same step as a friendly aircraft's
+destruction counts as friendly fire. If the result is already decided at the
+first check, for example with no enemy aircraft, SUCC and HOME are off for the
+flight. Free flight, the range and fixture wings have no mission, so SUCC and
+HOME never play there. Failure plays no score and no radio call.
+
+**Transitions in TORE.**
+
+- Choices run once per 120 Hz simulation step in game time, so nothing is chosen
+  while paused. Holds and timers count game seconds, so time compression
+  shortens them on the clock; the music itself plays at normal speed.
+- The score player reports each marked boundary. While the situation wants a
+  different score, it stops at the boundary instead of starting the old score's
+  next phrase, and the selector switches on the next step. The retail game
+  starts the next phrase and cuts it one frame later; TORE leaves a gap of a few
+  milliseconds instead. Agent decision, fitted.
+- A missing script or phrase stops the score, and the next choice comes 10 game
+  seconds later. Retail applies the 10 second retry to a failed load; in TORE a
+  missing phrase is only found when it is due. Each distinct fault is printed
+  once. Fitted.
+- Pause keeps freezing the current phrase, which resumes where it stopped. This
+  is TORE's existing behaviour; the retail behaviour is unknown.
+- With Music off nothing plays and nothing is chosen; turning it on starts a
+  fresh choice. Music can currently only be switched from the main menu.
+- A crash without ejecting keeps the situation music, as retail is unknown.
 
 ## Unknowns and next research steps
 

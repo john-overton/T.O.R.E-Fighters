@@ -29,6 +29,7 @@ mod engine_material;
 mod flight;
 mod flight_canvas;
 mod flight_map;
+mod flight_music;
 mod flight_ui;
 mod flight_views;
 mod graphics;
@@ -160,6 +161,8 @@ struct App {
     native_tables: Option<std::sync::Arc<tore_sim::native::Tables>>,
     previous_flight: flight::State,
     flight_clock: flight::Clock,
+    /// Situation music observations; audio only, never read by the simulation.
+    flight_music: flight_music::Observer,
     vapor: tore_sim::vapor::Vapor,
     turbulence: tore_sim::turbulence::Turbulence,
     turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng,
@@ -832,6 +835,22 @@ impl App {
             Command::End => Action::Back,
             Command::Exit => Action::Exit,
             Command::Restart => Action::FreeFlight,
+            // Retail Ctrl+V works only while flying an aircraft. The message is
+            // an opinionated agent addition (2026-09-23).
+            Command::Valkyries => {
+                if !self.flight_ui.frozen()
+                    && self.flight.escape.is_none()
+                    && !self.flight.crashed
+                    && let Some(on) = self.audio.as_ref().and_then(audio::Audio::toggle_valkyries)
+                {
+                    self.flight_ui.message(if on {
+                        "Valkyries music on"
+                    } else {
+                        "Valkyries music off"
+                    });
+                }
+                Action::None
+            }
             Command::Eject => {
                 if !self.flight_ui.frozen() {
                     self.input.queue(tore_input::PilotCommand::Eject);
@@ -1533,6 +1552,10 @@ impl App {
                         }
                     }
                 }
+                self.flight_music = flight_music::Observer::new(
+                    flight_music::home_base(&self.world, ground_airport),
+                    &self.combat.state,
+                );
                 self.reset_vapor();
                 self.previous_flight = self.flight.clone();
                 self.g_effects = Default::default();
@@ -2619,6 +2642,19 @@ impl ApplicationHandler for App {
                             .is_some();
                             if let Some(audio) = &self.audio {
                                 audio.ejection(&self.previous_flight, &self.flight, danger);
+                            }
+                            if let Some(audio) = &self.audio {
+                                let music = self.flight_music.step(
+                                    &self.flight,
+                                    &self.combat.state,
+                                    &events,
+                                    self.ai_wings.as_ref(),
+                                    &self.world,
+                                );
+                                audio.situation(&music.inputs, music.now);
+                                for stem in music.radio {
+                                    audio.radio(&[stem], false);
+                                }
                             }
                             // Audio observes authoritative poses and consumes each emission once.
                             let emissions = self.combat.state.take_sound_events();
@@ -5959,6 +5995,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         previous_flight: flight.clone(),
         flight,
         flight_clock: flight::Clock { remainder: 0. },
+        flight_music: Default::default(),
         vapor: probe_vapor,
         turbulence: probe_turbulence,
         turbulence_rng: probe_turbulence_rng,

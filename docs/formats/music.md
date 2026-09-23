@@ -120,29 +120,35 @@ again. Music PCM resources are excluded from the retained theater/airframe resou
 and kept as bytes in the mixer, rather than four-byte floats for every sample.
 
 Main menu uses the recovered main playlist; Quick Mission Creator and the
-development viewer use the briefing playlist. Free flight for either aircraft
-starts M_NORMAL. Returning to a context selects a fresh start; restarting flight
-restarts its score and clears aircraft loops. Context resets and mapping the
+development viewer use the briefing playlist. Flight plays the situation scores.
+Returning to a context selects a fresh start; starting or restarting flight
+silences the score until the first simulation step chooses one, and clears
+aircraft loops. Context resets and mapping the
 development creator/viewer to briefing are authored. AIR003 is no longer an
 arbitrary menu loop. Gain (0.16 music), resampling and sample-boundary transitions
 remain authored; no native mixer/device or RNG/timing parity is claimed.
 
-All nine scripts are prepared at audio initialization. The retail in-flight
-selection rules are in [in-flight score selection](#in-flight-score-selection)
-and [flight music](../spec/flight-music.md). Before 2026-09-23 flight selected
-NORMAL until the player ejected, then EJECT; imported score data and missing-track diagnostics are unchanged. F9 is retained as a host flag; no missing mission, carrier,
-threat or combat event is invented to respond to it. Score and playlist state
+All nine scripts are prepared at audio initialization. Flight chooses among
+them with the retail rules in [in-flight score selection](#in-flight-score-selection)
+and [flight music](../spec/flight-music.md); what feeds each condition in TORE,
+and its provenance, is in that spec's current TORE state. F9 latches a
+reevaluation boundary that the selector reads on the next simulation step.
+While a different score is wanted, the player stops at that boundary instead of
+starting the old score's next phrase. Inputs that TORE lacks stay false; no
+mission, carrier, threat or combat event is invented. Score and playlist state
 belongs to audio, independent of authoritative 120 Hz simulation. A local xorshift
 RNG chooses phrases; it does not consume simulation RNG. Music uses wall-clock
 audio samples and is not sped up by flight time scaling.
 
-Mute and flight pause retain playheads, with no hidden catch-up. UI clicks have a
+Menu mute and flight pause retain playheads, with no hidden catch-up. In flight,
+Music off also stops the situation choice, and Music on starts a fresh one. UI clicks have a
 separate bounded voice pool and remain audible while the flight menu is paused.
 Local effects pools permit eight voices each; [spatial effects](../audio.md) have
 a separate sixteen-voice limit. Ordinary playback resolves clips before
 opening the audio device and does not allocate clips, read files or run a synth
 in its callback. Missing selected phrases and exhausted score budgets stop that
-music context; diagnostics are emitted outside the callback.
+music context; diagnostics are emitted outside the callback, once per scene and
+fault. In flight the selector chooses again 10 game seconds later.
 
 Main-menu M / Pref still controls saved music preference. In-flight Sound still
 controls effects only; a full flight volume/settings mixer remains deferred.

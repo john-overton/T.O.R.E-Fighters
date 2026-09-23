@@ -48,6 +48,8 @@ pub enum Command {
     InstrumentControl(usize),
     /// Alt-S: toggle radio silence.
     RadioSilence,
+    /// Ctrl+V: the Valkyries situation score.
+    Valkyries,
 }
 type Control = (usize, (i32, i32, i32, i32), String);
 /// Authored Pref row for the weapon diagnostic panel. It is not in the
@@ -551,6 +553,9 @@ impl FlightUi {
             }
         }
         if ctrl && !alt {
+            if key == "v" && !shift {
+                return Command::Valkyries;
+            }
             if key == "Tab" {
                 return Command::InstrumentCycle(if shift { -1 } else { 1 });
             }
