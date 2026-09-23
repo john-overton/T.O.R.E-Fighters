@@ -20,14 +20,12 @@ enum Row {
     RenderScale,
     SpottingAid,
     TerrainFiltering,
-    SunGlint,
 }
-const ROWS: [Row; 5] = [
+const ROWS: [Row; 4] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
     Row::TerrainFiltering,
-    Row::SunGlint,
 ];
 impl Row {
     fn label(self) -> &'static str {
@@ -36,7 +34,6 @@ impl Row {
             Row::RenderScale => "Render scale",
             Row::SpottingAid => "Spotting aid",
             Row::TerrainFiltering => "Terrain filtering",
-            Row::SunGlint => "Sun glint",
         }
     }
     fn description(self) -> &'static str {
@@ -51,7 +48,6 @@ impl Row {
                 "Outlines distant aircraft so they are easier to see against the sky and ground."
             }
             Row::TerrainFiltering => "Reduces shimmer and crawling patterns on distant ground.",
-            Row::SunGlint => "Shows a brief sparkle when sunlight catches another aircraft.",
         }
     }
     fn choices(self) -> Vec<String> {
@@ -59,7 +55,7 @@ impl Row {
             Row::AntiAliasing => AntiAliasing::ALL.map(|a| a.label().to_owned()).to_vec(),
             Row::RenderScale => RENDER_SCALES.map(|s| format!("{s}%")).to_vec(),
             Row::SpottingAid => SpottingAid::ALL.map(|a| a.label().to_owned()).to_vec(),
-            Row::TerrainFiltering | Row::SunGlint => vec!["Off".into(), "On".into()],
+            Row::TerrainFiltering => vec!["Off".into(), "On".into()],
         }
     }
 }
@@ -144,7 +140,6 @@ impl Editor {
                 .position(|a| *a == d.spotting_aid)
                 .unwrap_or(0),
             Row::TerrainFiltering => usize::from(d.terrain_filtering),
-            Row::SunGlint => usize::from(d.sun_glint),
         }
     }
     fn set_choice(&mut self, row: usize, i: usize) {
@@ -154,7 +149,6 @@ impl Editor {
             Row::RenderScale => d.render_scale = RENDER_SCALES[i],
             Row::SpottingAid => d.spotting_aid = SpottingAid::ALL[i],
             Row::TerrainFiltering => d.terrain_filtering = i == 1,
-            Row::SunGlint => d.sun_glint = i == 1,
         }
     }
     fn available(&self, row: usize, i: usize) -> bool {
@@ -550,10 +544,10 @@ mod tests {
         assert_eq!(e.focus, Focus::Row(0));
         press(&mut e, "ArrowUp");
         assert_eq!(e.focus, Focus::Row(0), "the top row stops the focus");
-        for _ in 0..4 {
+        for _ in 0..3 {
             press(&mut e, "ArrowDown");
         }
-        assert_eq!(e.focus, Focus::Row(4));
+        assert_eq!(e.focus, Focus::Row(3));
         press(&mut e, "ArrowDown");
         assert_eq!(e.focus, Focus::Footer(0));
         press(&mut e, "ArrowRight");
@@ -561,7 +555,7 @@ mod tests {
         press(&mut e, "ArrowRight");
         assert_eq!(e.focus, Focus::Footer(2));
         press(&mut e, "ArrowUp");
-        assert_eq!(e.focus, Focus::Row(4));
+        assert_eq!(e.focus, Focus::Row(3));
         // Tab walks every control and wraps; Shift-Tab goes back.
         for _ in 0..4 {
             press(&mut e, "Tab");
@@ -594,9 +588,6 @@ mod tests {
         press(&mut e, "ArrowDown");
         press(&mut e, "Space");
         assert!(!e.draft.terrain_filtering);
-        press(&mut e, "ArrowDown");
-        press(&mut e, "ArrowLeft");
-        assert!(!e.draft.sun_glint);
         // A click on a choice picks it and focuses its row.
         assert_eq!(
             click(&mut e, Editor::choice_rect(1, 4)),
@@ -605,10 +596,10 @@ mod tests {
         assert_eq!(e.draft.render_scale, 200);
         assert_eq!(e.focus, Focus::Row(1));
         assert_eq!(
-            click(&mut e, Editor::choice_rect(4, 1)),
+            click(&mut e, Editor::choice_rect(3, 1)),
             ResultAction::Changed
         );
-        assert!(e.draft.sun_glint);
+        assert!(e.draft.terrain_filtering);
         // Press and release must land on the same control.
         e.pointer(Some(center(Editor::choice_rect(1, 0))), true);
         e.pointer(Some(center(Editor::choice_rect(1, 2))), false);

@@ -1080,12 +1080,12 @@ impl SimRenderer {
             0.,
             0.,
         ]);
-        // Graphics options: spotting aid strength, terrain filtering, sun
-        // glint; then the world image size in pixels, samples and scale.
+        // Graphics options: spotting aid strength, terrain filtering and a
+        // reserved slot; then the world image size in pixels, samples and scale.
         uniform.extend([
             self.options.spotting_aid.strength(),
             f32::from(self.options.terrain_filtering),
-            f32::from(self.options.sun_glint),
+            0.,
             0.,
             size[0] as f32,
             size[1] as f32 * camera.view_fraction,

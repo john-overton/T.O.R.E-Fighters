@@ -1,5 +1,5 @@
 //! Player graphics choices for the 3D view: anti-aliasing, render scale, the
-//! spotting aid, terrain distance filtering and sun glint. These are
+//! spotting aid and terrain distance filtering. These are
 //! opinionated host additions requested by John on 2026-09-22; the original
 //! game had none of them. The values and defaults are agent choices. They are
 //! saved in their own small file, `graphics-v1.conf`, beside the preferences.
@@ -91,7 +91,6 @@ pub struct Options {
     pub render_scale: u32,
     pub spotting_aid: SpottingAid,
     pub terrain_filtering: bool,
-    pub sun_glint: bool,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -100,7 +99,6 @@ impl Default for Options {
             render_scale: 100,
             spotting_aid: SpottingAid::Subtle,
             terrain_filtering: true,
-            sun_glint: true,
         }
     }
 }
@@ -112,7 +110,6 @@ impl Options {
             render_scale: 100,
             spotting_aid: SpottingAid::Off,
             terrain_filtering: false,
-            sun_glint: false,
         }
     }
     pub fn scale(&self) -> f32 {
@@ -120,12 +117,11 @@ impl Options {
     }
     pub fn text(&self) -> String {
         format!(
-            "tore-graphics 1\nanti-aliasing {}\nrender-scale {}\nspotting-aid {}\nterrain-filtering {}\nsun-glint {}\n",
+            "tore-graphics 1\nanti-aliasing {}\nrender-scale {}\nspotting-aid {}\nterrain-filtering {}\n",
             self.anti_aliasing.key(),
             self.render_scale,
             self.spotting_aid.key(),
             self.terrain_filtering,
-            self.sun_glint,
         )
     }
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -143,7 +139,7 @@ impl Options {
                 return Err("invalid or duplicate graphics setting".into());
             }
         }
-        if values.len() != 5 {
+        if values.len() != 4 {
             return Err("unknown or missing graphics setting".into());
         }
         let get = |k: &str| values.get(k).copied().ok_or(format!("missing {k}"));
@@ -159,7 +155,6 @@ impl Options {
             render_scale,
             spotting_aid: SpottingAid::parse(get("spotting-aid")?).ok_or("invalid spotting-aid")?,
             terrain_filtering: boolean("terrain-filtering")?,
-            sun_glint: boolean("sun-glint")?,
         })
     }
     /// Command-line overrides for one run; they are not saved by themselves.
@@ -188,7 +183,6 @@ impl Options {
                         .ok_or("--spotting-aid needs off, subtle or strong")?
                 }
                 "--terrain-filtering" => self.terrain_filtering = switch(flag, value)?,
-                "--sun-glint" => self.sun_glint = switch(flag, value)?,
                 _ => return Err(format!("unknown graphics flag {flag}")),
             }
         }
@@ -216,7 +210,6 @@ mod tests {
             render_scale: 150,
             spotting_aid: SpottingAid::Strong,
             terrain_filtering: false,
-            sun_glint: false,
         };
         assert_eq!(Options::parse(&options.text()).unwrap(), options);
         assert_eq!(
@@ -226,6 +219,7 @@ mod tests {
         let text = options.text();
         assert!(Options::parse(&text.replace("150", "140")).is_err());
         assert!(Options::parse(&text.replace("8x", "16x")).is_err());
+        assert!(Options::parse(&(text.clone() + "terrain-filtering true\n")).is_err());
         assert!(Options::parse(&(text.clone() + "sun-glint true\n")).is_err());
         assert!(Options::parse(&text.replace("tore-graphics 1", "tore-graphics 2")).is_err());
         assert!(Options::parse("tore-graphics 1\n").is_err());
@@ -249,6 +243,10 @@ mod tests {
                 .apply_flags(&[flag("--render-scale", "110")])
                 .is_err()
         );
-        assert!(options.apply_flags(&[flag("--sun-glint", "yes")]).is_err());
+        assert!(
+            options
+                .apply_flags(&[flag("--terrain-filtering", "yes")])
+                .is_err()
+        );
     }
 }
