@@ -445,6 +445,29 @@ Implemented player escape and requested AI recovery decisions. [Behaviour and fi
 [source evidence](formats/ejection.md), [validation](baselines/ejection.md).
 Remaining: campaign rescue/capture, additional crew and original speaker routing.
 
+### Situation audio
+
+Implemented 2026-09-23: [radio chatter](spec/radio-chatter.md), the
+[cockpit crew voice](spec/cockpit-voice.md) and [situation music](spec/flight-music.md),
+from the imported retail recordings. Open items for a later pass:
+
+- **Doubled ejection call.** When a wingman ejects, "Punching out!" can play
+  twice: once from the [ejection](spec/ejection.md#audio-and-art) sound and
+  once from the new death call.
+- **Not yet voiced, because TORE has nothing to trigger them.** Waypoint calls
+  (no routes), carrier deck and catapult calls (no carrier model), and "You're
+  the Wingleader now" and the AWACS report (the original's triggers are
+  unknown).
+- **Vietnamese voice set.** The second (`#`) set of recordings is imported but
+  only matters once Vietnam missions exist; see
+  [the second voice set](spec/cockpit-voice.md#the-second-voice-set).
+- **Agent choices open to tuning.** Radio traffic is on at the start of a
+  session (radio silence off), and the Alt-S setting is not saved between
+  sessions. The other approximations, such as contact report thresholds, fuel
+  call estimates and takeoff detection, are listed in the "Implementation in
+  TORE" sections of radio chatter and cockpit voice, and the "Current TORE
+  state" section of flight music.
+
 ### 1e. AI
 
 **M1 scope: air-to-air awareness and engagement.** The
