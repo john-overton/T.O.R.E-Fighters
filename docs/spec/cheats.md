@@ -121,11 +121,14 @@ it red (redout). **Proposed numbers:**
 | Value | Proposed |
 | --- | --- |
 | Blackout onset | sustained above +6 G |
-| Full blackout | about 5 s at +9 G, sooner above 9 G |
+| Blackout delay | 5 s just over 6 G before any darkening, shorter the harder the pull (John, 2026-09-23); proposed: 1 s less per extra G, never under 1 s, so 4 s at 7 G and 2 s at 9 G |
+| Full blackout | about 5 s after the delay at +9 G, so about 7 s in all; sooner above 9 G |
 | Redout onset | sustained below -2 G |
-| Full redout | about 3 s at -3.5 G |
+| Redout delay | 3 s before any reddening (John, 2026-09-23) |
+| Full redout | about 3 s after the delay at -3.5 G, so about 6 s in all |
 | Recovery | vision returns over about 3 s once G is back inside the limits |
-| Onset speed | proportional to G beyond the onset; above 9 G it is faster |
+| Delay after an unload | proposed: the used delay drains over the same 3 s, so a brief unload does not reset it |
+| Darkening speed | proportional to G beyond the onset; above 9 G it is faster |
 | Appearance | the edges darken first, like tunnel vision, then the whole view; redout is a deep red |
 | Views | every flight view; the map and menus stay readable |
 | Controls | still respond; only vision is affected (John, 2026-09-23) |
