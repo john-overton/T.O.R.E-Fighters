@@ -1468,7 +1468,7 @@ impl App {
                     return;
                 }
                 if let Some(renderer) = &mut self.renderer {
-                    renderer.combat(&[]);
+                    renderer.combat(&Default::default());
                 }
                 if self.recorded_ticks > 0 {
                     self.finish_recording();

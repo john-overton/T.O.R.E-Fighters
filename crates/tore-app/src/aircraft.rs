@@ -466,6 +466,17 @@ impl Airframe {
     pub fn vertices(&self, s: &flight::State, camera: &Camera, world: &World) -> Vec<f32> {
         self.visual_vertices(s, camera, world, false)
     }
+    /// Largest bounding-box dimension of the clean airframe in feet. The
+    /// spotting aid uses it to judge how large the aircraft appears on screen.
+    pub fn visual_extent(&self) -> f32 {
+        let scale = self.rig.as_ref().map_or(1. / 3., |r| r.scale());
+        self.poses.first().map_or(0., |shape| {
+            extent(
+                shape.faces.iter().flat_map(|f| f.positions.iter().copied()),
+                scale,
+            )
+        })
+    }
     pub fn fragment_vertices(&self, s: &flight::State, camera: &Camera, world: &World) -> Vec<f32> {
         self.visual_vertices(s, camera, world, true)
     }
@@ -697,6 +708,23 @@ impl Airframe {
     }
 }
 
+/// Largest axis-aligned dimension of a point cloud, scaled.
+fn extent(points: impl Iterator<Item = [f32; 3]>, scale: f32) -> f32 {
+    let mut low = [f32::INFINITY; 3];
+    let mut high = [f32::NEG_INFINITY; 3];
+    for p in points {
+        for i in 0..3 {
+            low[i] = low[i].min(p[i]);
+            high[i] = high[i].max(p[i]);
+        }
+    }
+    (0..3)
+        .map(|i| high[i] - low[i])
+        .filter(|d| d.is_finite())
+        .fold(0., f32::max)
+        * scale
+}
+
 fn streamer_world_points(
     def: &tore_formats::shape::StreamerDef,
     position: [f64; 3],
@@ -718,6 +746,12 @@ fn streamer_world_points(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn extent_is_the_largest_scaled_dimension() {
+        let points = [[-60., 0., 10.], [60., 5., -150.], [0., -3., 18.]];
+        assert_eq!(extent(points.into_iter(), 1. / 3.), 56.);
+        assert_eq!(extent(std::iter::empty(), 1. / 3.), 0.);
+    }
     #[test]
     fn ce_uses_up_then_forward_and_follows_body_axes() {
         let def = tore_formats::shape::StreamerDef {

@@ -143,11 +143,18 @@ impl Renderer {
             self.sim.hide_aircraft();
         }
     }
-    pub fn dummies(&mut self, geometry: Vec<(&crate::aircraft::Airframe, Vec<f32>)>) {
+    pub fn dummies(
+        &mut self,
+        geometry: Vec<(
+            &crate::aircraft::Airframe,
+            Vec<f32>,
+            Vec<crate::sim_renderer::Contact>,
+        )>,
+    ) {
         self.sim.dummies(&self.device, &self.queue, geometry);
     }
-    pub fn combat(&mut self, vertices: &[f32]) {
-        self.sim.combat(&self.device, &self.queue, vertices);
+    pub fn combat(&mut self, geometry: &crate::sim_renderer::CombatGeometry) {
+        self.sim.combat(&self.device, &self.queue, geometry);
     }
     pub fn airports(&mut self, vertices: &[f32]) {
         self.sim.airports(&self.device, &self.queue, vertices);

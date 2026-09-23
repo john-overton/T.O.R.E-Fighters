@@ -3,6 +3,7 @@ use crate::{
     AppResult,
     aircraft::Airframe,
     flight,
+    sim_renderer::{CombatGeometry, Contact},
     terrain::{Camera, World},
 };
 use std::collections::BTreeMap;
@@ -266,12 +267,20 @@ impl Combat {
         self.presentation.alpha = alpha;
     }
 
-    pub fn dummy_geometry(&self, camera: &Camera, world: &World) -> Vec<(&Airframe, Vec<f32>)> {
+    /// Per-model vertices for the dummy formation, with each airborne
+    /// aircraft's vertex range for the spotting aid.
+    pub fn dummy_geometry(
+        &self,
+        camera: &Camera,
+        world: &World,
+    ) -> Vec<(&Airframe, Vec<f32>, Vec<Contact>)> {
         self.dummy_models
             .iter()
             .enumerate()
             .map(|(index, model)| {
                 let mut vertices = Vec::new();
+                let mut contacts = Vec::new();
+                let extent = model.visual_extent();
                 for target in self.state.targets.iter().filter(|t| t.airborne) {
                     if self
                         .dummies
@@ -294,7 +303,14 @@ impl Combat {
                     pose.flaps = 0.;
                     pose.exhaust = 0.;
                     pose.bay = 0.;
+                    let first = vertices.len() / 10;
                     vertices.extend(model.vertices(&pose, camera, world));
+                    contacts.extend(Contact::new(
+                        first,
+                        vertices.len() / 10,
+                        pose.position,
+                        extent,
+                    ));
                 }
                 for piece in self.state.debris.iter().filter(|p| {
                     p.owner > 0
@@ -315,7 +331,7 @@ impl Combat {
                     [pose.yaw, pose.pitch, pose.bank] = piece.basis.angles();
                     vertices.extend(model.fragment_vertices(&pose, camera, world));
                 }
-                (model, vertices)
+                (model, vertices, contacts)
             })
             .collect()
     }
@@ -930,8 +946,11 @@ impl Combat {
         s: &flight::State,
         camera: &Camera,
         world: &crate::terrain::World,
-    ) -> Vec<f32> {
+    ) -> CombatGeometry {
         let mut v = Vec::new();
+        // Targets drawn with the ownship airframe, when no dummy models load.
+        let mut contacts = Vec::new();
+        let extent = h.visual_extent();
         for t in self.state.targets.iter().filter(|t| t.airborne) {
             let mut pose = s.clone();
             pose.wreck = t.wreck.clone();
@@ -954,7 +973,9 @@ impl Combat {
             pose.brake = 0.;
             pose.hook = 0.;
             if self.dummies.is_empty() {
+                let first = v.len() / 10;
                 v.extend(h.vertices(&pose, camera, world));
+                contacts.extend(Contact::new(first, v.len() / 10, pose.position, extent));
             }
         }
         for piece in self
@@ -1080,7 +1101,10 @@ impl Combat {
                 }
             }
         }
-        v
+        CombatGeometry {
+            vertices: v,
+            contacts,
+        }
     }
 }
 

@@ -8,14 +8,75 @@ fn bytes(values: &[f32]) -> Vec<u8> {
 /// `viewport` vectors.
 const UNIFORM_BYTES: u64 = 1392;
 type AircraftBatch = (wgpu::BindGroup, wgpu::Buffer, u32);
+/// One other aircraft inside a geometry batch, for the spotting aid: its
+/// vertex range, presented position and airframe extent in feet.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Contact {
+    pub first: u32,
+    pub count: u32,
+    pub center: [f32; 3],
+    pub extent: f32,
+}
+impl Contact {
+    /// The aircraft whose vertices span `first..end`; none when empty.
+    pub fn new(first: usize, end: usize, center: [f64; 3], extent: f32) -> Option<Self> {
+        (end > first).then(|| Self {
+            first: first as u32,
+            count: (end - first) as u32,
+            center: center.map(|v| v as f32),
+            extent,
+        })
+    }
+}
+/// Combat geometry drawn with the ownship airframe: targets when no dummy
+/// models load, then debris, weapons, tracers and effects.
+#[derive(Default)]
+pub struct CombatGeometry {
+    pub vertices: Vec<f32>,
+    pub contacts: Vec<Contact>,
+}
+/// Spotting-aid copies per aircraft. Each contact's center, extent and first
+/// vertex are repeated for its eight instance slots; the instance index picks
+/// the copy.
+const SPOT_INSTANCES: u64 = 8;
+const SPOT_INSTANCE_FLOATS: usize = 8;
+const SPOT_CONTACT_BYTES: u64 = SPOT_INSTANCES * SPOT_INSTANCE_FLOATS as u64 * 4;
+fn spot_instances(contacts: &[&Contact]) -> Vec<f32> {
+    contacts
+        .iter()
+        .flat_map(|c| {
+            std::iter::repeat_n(
+                [
+                    c.center[0],
+                    c.center[1],
+                    c.center[2],
+                    c.extent,
+                    c.first as f32,
+                    0.,
+                    0.,
+                    0.,
+                ],
+                SPOT_INSTANCES as usize,
+            )
+        })
+        .flatten()
+        .collect()
+}
 pub struct SimRenderer {
     lighting: crate::surface_lighting::SurfaceLighting,
     aircraft_visible: bool,
     lens_flare: crate::lens_flare::LensFlare,
     smoke: crate::smoke_renderer::SmokeRenderer,
     battle: Option<(wgpu::Buffer, u32)>,
+    battle_contacts: Vec<Contact>,
     airports: Option<(wgpu::Buffer, u32)>,
-    dummies: Vec<(tore_formats::aircraft::AircraftId, AircraftBatch)>,
+    /// Per-model formation batches, with each aircraft's vertex range.
+    dummies: Vec<(
+        tore_formats::aircraft::AircraftId,
+        AircraftBatch,
+        Vec<Contact>,
+    )>,
+    spot_instances: wgpu::Buffer,
     vapor: Option<(wgpu::Buffer, u32)>,
     p: Pipelines,
     shader: wgpu::ShaderModule,
@@ -45,6 +106,8 @@ struct Targets {
     size: [u32; 2],
     samples: u32,
     depth: wgpu::TextureView,
+    /// The world depth as the spotting aid reads it.
+    rim_depth: wgpu::BindGroup,
     /// Multisampled color, resolved at the end of the world pass.
     color: Option<wgpu::TextureView>,
     /// The render-scale image and its resample bindings, when the world is
@@ -65,6 +128,11 @@ struct Pipelines {
     sky_pipeline: wgpu::RenderPipeline,
     celestial_pipeline: wgpu::RenderPipeline,
     cloud_pipeline: wgpu::RenderPipeline,
+    /// The spotting-aid pass: single-sample, after the world image resolves,
+    /// reading the world depth through `rim_depth_layout`.
+    rim_dark_pipeline: wgpu::RenderPipeline,
+    rim_light_pipeline: wgpu::RenderPipeline,
+    rim_depth_layout: wgpu::BindGroupLayout,
 }
 impl Pipelines {
     fn new(
@@ -211,6 +279,89 @@ impl Pipelines {
             .unwrap()
             .depth_compare = wgpu::CompareFunction::Less;
         let tracer_pipeline = device.create_render_pipeline(&surface_descriptor);
+        // Spotting aid: aircraft vertices plus per-aircraft instance data,
+        // drawn at output resolution without multisampling so every rim pixel
+        // is whole. Occlusion comes from reading the world depth.
+        let spot_buffers = [
+            surface_buffers[0].clone(),
+            wgpu::VertexBufferLayout {
+                array_stride: SPOT_INSTANCE_FLOATS as u64 * 4,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &wgpu::vertex_attr_array![10=>Float32x4, 11=>Float32x4],
+            },
+        ];
+        let rim_depth_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Spotting aid world depth"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: u32::from(samples > 1),
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Depth,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: samples > 1,
+                },
+                count: None,
+            }],
+        });
+        let rim_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Spotting aid layout"),
+            bind_group_layouts: &[material_layout, lighting_layout, &rim_depth_layout],
+            push_constant_ranges: &[],
+        });
+        // Min for a dark rim and max for a light one: overlapping copies are
+        // idempotent, and the rim never lightens (or darkens) the background.
+        let rim = |label, fragment: &str, operation| {
+            let fragment = format!("{fragment}{}", if samples > 1 { "_ms" } else { "" });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&rim_layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: Some("rim_vertex"),
+                    compilation_options: Default::default(),
+                    buffers: &spot_buffers,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: Some(&fragment),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::Zero,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::COLOR,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
+            })
+        };
+        let rim_dark_pipeline = rim(
+            "Spotting aid dark rim",
+            "rim_dark_fragment",
+            wgpu::BlendOperation::Min,
+        );
+        let rim_light_pipeline = rim(
+            "Spotting aid light rim",
+            "rim_light_fragment",
+            wgpu::BlendOperation::Max,
+        );
         let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Retail sky preview"),
             layout: Some(&sky_layout),
@@ -308,6 +459,9 @@ impl Pipelines {
             sky_pipeline,
             celestial_pipeline,
             cloud_pipeline,
+            rim_dark_pipeline,
+            rim_light_pipeline,
+            rim_depth_layout,
         }
     }
 }
@@ -324,9 +478,10 @@ impl SimRenderer {
             label: Some("Simulation terrain"),
             source: wgpu::ShaderSource::Wgsl(
                 format!(
-                    "{}\n{}",
+                    "{}\n{}\n{}",
                     include_str!("surface_lighting.wgsl"),
-                    include_str!("terrain.wgsl")
+                    include_str!("terrain.wgsl"),
+                    include_str!("spotting.wgsl")
                 )
                 .into(),
             ),
@@ -530,6 +685,7 @@ impl SimRenderer {
             lens_flare: crate::lens_flare::LensFlare::new(device, format),
             smoke: crate::smoke_renderer::SmokeRenderer::new(device, format, &shader, samples),
             battle: None,
+            battle_contacts: Vec::new(),
             airports: None,
             vapor: None,
             p: pipelines,
@@ -542,6 +698,7 @@ impl SimRenderer {
             canopy_visible: false,
             aircraft: None,
             dummies: Vec::new(),
+            spot_instances: Self::spot_buffer(device, 16),
             celestial_vertices,
             cloud_vertices,
             bind,
@@ -570,7 +727,13 @@ impl SimRenderer {
             smoke,
         );
     }
-    pub fn combat(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
+    pub fn combat(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        geometry: &CombatGeometry,
+    ) {
+        let vertices = geometry.vertices.as_slice();
         if self.battle.is_none() {
             self.battle = Some((
                 device.create_buffer(&wgpu::BufferDescriptor {
@@ -588,6 +751,15 @@ impl SimRenderer {
                 queue.write_buffer(buffer, 0, &bytes(&vertices[..length]));
             }
             *count = (length / 10) as u32;
+            // Aircraft cut off by the buffer budget are not drawn at all.
+            let drawn = *count;
+            self.battle_contacts.clear();
+            self.battle_contacts.extend(
+                geometry
+                    .contacts
+                    .iter()
+                    .filter(|c| c.first + c.count <= drawn),
+            );
         }
     }
     pub fn airports(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
@@ -640,20 +812,20 @@ impl SimRenderer {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        geometry: Vec<(&crate::aircraft::Airframe, Vec<f32>)>,
+        geometry: Vec<(&crate::aircraft::Airframe, Vec<f32>, Vec<Contact>)>,
     ) {
         let ownship = self.aircraft.take();
         let visible = self.aircraft_visible;
         let canopy = self.canopy_visible;
         let mut old = std::mem::take(&mut self.dummies);
-        for (model, vertices) in geometry {
+        for (model, vertices, contacts) in geometry {
             self.aircraft = old
                 .iter()
-                .position(|(id, _)| *id == model.profile.id)
+                .position(|(id, _, _)| *id == model.profile.id)
                 .map(|i| old.swap_remove(i).1);
             self.aircraft(device, queue, model, &vertices);
             self.dummies
-                .push((model.profile.id, self.aircraft.take().unwrap()));
+                .push((model.profile.id, self.aircraft.take().unwrap(), contacts));
         }
         self.aircraft = ownship;
         self.aircraft_visible = visible;
@@ -841,6 +1013,14 @@ impl SimRenderer {
             .set_samples(device, self.format, &self.shader, samples);
         self.targets.clear();
     }
+    fn spot_buffer(device: &wgpu::Device, contacts: u64) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Spotting aid instances"),
+            size: contacts * SPOT_CONTACT_BYTES,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    }
     fn resample_pipeline(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
@@ -932,16 +1112,26 @@ impl SimRenderer {
             });
             (view, bind)
         });
+        let depth = texture(
+            "Simulation depth",
+            self.samples,
+            wgpu::TextureFormat::Depth32Float,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        );
+        let rim_depth = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Spotting aid world depth"),
+            layout: &self.p.rim_depth_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: u32::from(self.samples > 1),
+                resource: wgpu::BindingResource::TextureView(&depth),
+            }],
+        });
         let targets = Targets {
             output,
             size,
             samples: self.samples,
-            depth: texture(
-                "Simulation depth",
-                self.samples,
-                wgpu::TextureFormat::Depth32Float,
-                wgpu::TextureUsages::RENDER_ATTACHMENT,
-            ),
+            depth,
+            rim_depth,
             color: (self.samples > 1).then(|| {
                 texture(
                     "Multisampled world",
@@ -1149,11 +1339,34 @@ impl SimRenderer {
                     objects.push((bind, buffer, *count));
                 }
             }
-            for (_, (bind, buffer, count)) in &self.dummies {
+            for (_, (bind, buffer, count), _) in &self.dummies {
                 objects.push((bind, buffer, *count));
             }
             self.lighting
                 .draw(encoder, (&self.bind, &self.vertices, self.count), &objects);
+        }
+        // The spotting aid covers other aircraft in the main view and the
+        // mirrors, not the instrument camera panels. The ownship batch is
+        // excluded; combat targets share its airframe when no dummies load.
+        let rim = camera.weather_slot <= 1 && self.options.spotting_aid.strength() > 0.;
+        let mut others: Vec<(&wgpu::BindGroup, &wgpu::Buffer, &[Contact])> = Vec::new();
+        if rim {
+            if let (Some((bind, _, _)), Some((buffer, _))) = (&self.aircraft, &self.battle) {
+                others.push((bind, buffer, &self.battle_contacts));
+            }
+            for (_, (bind, buffer, _), contacts) in &self.dummies {
+                others.push((bind, buffer, contacts));
+            }
+            others.retain(|(_, _, contacts)| !contacts.is_empty());
+        }
+        let contacts: Vec<&Contact> = others.iter().flat_map(|o| o.2.iter()).collect();
+        if !contacts.is_empty() {
+            let needed = contacts.len() as u64 * SPOT_CONTACT_BYTES;
+            if self.spot_instances.size() < needed {
+                self.spot_instances =
+                    Self::spot_buffer(device, (contacts.len() as u64).next_power_of_two());
+            }
+            queue.write_buffer(&self.spot_instances, 0, &bytes(&spot_instances(&contacts)));
         }
         let destination = flare_target.as_ref().unwrap_or(target);
         let targets = &self.targets[slot];
@@ -1235,7 +1448,7 @@ impl SimRenderer {
                 pass.draw(0..*count, 0..1);
             }
         }
-        for (_, (bind, vertices, count)) in &self.dummies {
+        for (_, (bind, vertices, count), _) in &self.dummies {
             pass.set_pipeline(&self.p.pipeline);
             pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, vertices.slice(..));
@@ -1297,6 +1510,52 @@ impl SimRenderer {
             pass.set_bind_group(0, bind, &[]);
             pass.draw(0..3, 0..1);
         }
+        // The spotting aid goes over the finished image at output resolution.
+        if rim && !contacts.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Spotting aid"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: destination,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_viewport(
+                0.,
+                0.,
+                output[0] as f32,
+                output[1] as f32 * camera.view_fraction,
+                0.,
+                1.,
+            );
+            pass.set_bind_group(1, &self.lighting.bind, &[]);
+            pass.set_bind_group(2, &targets.rim_depth, &[]);
+            pass.set_vertex_buffer(1, self.spot_instances.slice(..));
+            for pipeline in [&self.p.rim_dark_pipeline, &self.p.rim_light_pipeline] {
+                pass.set_pipeline(pipeline);
+                // Each contact draws its own vertex range; its instance slots
+                // start at a multiple of eight, so `instance_index % 8` is the
+                // copy.
+                let mut slot = 0;
+                for (bind, buffer, contacts) in &others {
+                    pass.set_bind_group(0, *bind, &[]);
+                    pass.set_vertex_buffer(0, buffer.slice(..));
+                    for contact in contacts.iter() {
+                        let base = slot * SPOT_INSTANCES as u32;
+                        pass.draw(
+                            contact.first..contact.first + contact.count,
+                            base..base + SPOT_INSTANCES as u32,
+                        );
+                        slot += 1;
+                    }
+                }
+            }
+        }
         if flare_target.is_some() {
             self.lens_flare.draw(encoder, target);
         }
@@ -1306,6 +1565,26 @@ impl SimRenderer {
 #[cfg(test)]
 mod lighting_tests {
     use super::*;
+
+    #[test]
+    fn contacts_cover_nonempty_ranges_and_repeat_per_copy() {
+        assert_eq!(Contact::new(30, 30, [0.; 3], 56.), None);
+        let a = Contact::new(0, 90, [1., 2., 3.], 56.).unwrap();
+        let b = Contact::new(90, 120, [4., 5., 6.], 40.).unwrap();
+        assert_eq!((b.first, b.count), (90, 30));
+        let data = spot_instances(&[&a, &b]);
+        assert_eq!(data.len() as u64 * 4, 2 * SPOT_CONTACT_BYTES);
+        assert!(
+            data[..64]
+                .chunks(8)
+                .all(|v| v == [1., 2., 3., 56., 0., 0., 0., 0.])
+        );
+        assert!(
+            data[64..]
+                .chunks(8)
+                .all(|v| v == [4., 5., 6., 40., 90., 0., 0., 0.])
+        );
+    }
 
     fn plane(y: f32, radius: f32) -> Vec<f32> {
         [

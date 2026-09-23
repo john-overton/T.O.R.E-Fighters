@@ -840,7 +840,7 @@ pub fn validate_sources(
             return Err(format!("{id:?}: invalid imported gun sight/range").into());
         }
         let tracer = gun.vertices(&airframe, &gun_flight, &camera, world);
-        if !tracer.chunks_exact(10).any(|v| v[5] == -8.) {
+        if !tracer.vertices.chunks_exact(10).any(|v| v[5] == -8.) {
             return Err(format!("{id:?}: imported gun has no luminous tracer geometry").into());
         }
         flight.damage_fraction = 0.8;
