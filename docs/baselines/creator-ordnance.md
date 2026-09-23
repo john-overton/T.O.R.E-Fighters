@@ -41,7 +41,9 @@ weapon thumbnails, station headings, dial and rocker art. Catalog categories ret
 separate pages. Click a weapon then a compatible station, or drag it there, to load.
 Tab selects the next station; +/- adjusts its quantity; right-click decrements.
 Fuel rocker changes internal fuel by 500 lb with source-capacity bounds. Weapons
-provides Unload All; Airbase/Cheat operations report their unavailable status.
+provides Unload All and Cheat loading; Airbase cycling remains unavailable.
+Current catalog filtering follows the
+[supported-weapon rule](../spec/ordnance-presentation.md#catalog-availability).
 Select Plane returns to the retained creator draft; custom loads survive that return
 for the same aircraft. Standard load currently uses reviewed PT defaults, then flies;
 it is not acceptance of retail mission-specific standard-load assignment.

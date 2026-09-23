@@ -11,8 +11,32 @@
 Implementation specification, 2026-09-16. The supplied retail screenshot guides
 presentation; its executable identity is unknown. Recovered card positions and
 loadout interactions remain documented in the [ordnance contract](../formats/ordnance-menu.md).
-Store compatibility, fuel steps, launch validation, flight adapters and combat
-behaviour retain their existing contracts.
+Store placement, fuel steps, launch validation, flight adapters and combat
+behaviour retain their existing contracts. Catalog visibility is specified below.
+
+## Catalog availability
+
+John requested this opinionated visibility rule on 2026-09-23: hide weapons
+whose flight behaviour is not hooked up yet, including when Cheat is enabled.
+An imported definition alone does not make a weapon available. The catalog uses
+the same supported-weapon list as flight launch validation.
+
+With Cheat off, show a supported weapon only when at least one station on the
+selected aircraft can load it, with an editable capacity of 1 through 32,766.
+With Cheat on, show every imported supported weapon, regardless of aircraft
+compatibility. Station placement still follows the existing Cheat rules,
+including fixed-station restrictions. Visibility does not bypass launch weight
+checks, sensor requirements or weapon firing limits.
+
+Toggling Cheat still unloads every station. Rebuild both catalog categories,
+reset their pages to the first page and clear the catalog selection. Keep the
+existing display-name ordering and eight cards per page; an empty category has
+no selectable cards and its page rocker stays on the first page. Unsupported
+weapons return only after their flight behaviour is implemented and validated,
+following the [weapon update passes](../ROADMAP.md#weapon-catalog-update-passes).
+Validation is recorded in the [catalog baseline](../baselines/ordnance-catalog.md).
+
+## Presentation
 
 The original ORD_AIR3 background, thumbnail images, dial, rocker and button
 pieces remain runtime imports. Catalog cards use two columns at x=68/187,
@@ -62,6 +86,18 @@ vertically inside y=38..58, using visible glyph bounds. Ordnance Weapons and
 Airbase begin at x=103 and x=178; matching hit regions do not overlap. Main-menu
 bar labels are centered within their existing interactive rectangles. The exact
 original font alignment and dial placement remain unknown; these are fitted rules.
+
+### Game messages
+
+John requested single-line ordnance messages with a background sized to the text
+on 2026-09-23. This is an opinionated presentation rule. Preserve the existing
+message content, pale text and dark background colours. Agent-selected layout:
+anchor the strip at (30,335), with four pixels of horizontal padding and two
+pixels of vertical padding around the font row. The background is only as wide
+as the displayed text plus padding and only one font row tall plus padding.
+Collapse whitespace to single spaces. Messages wider than 572 pixels end with
+`...` within that width, so the strip never exceeds 580 pixels or wraps.
+An empty message draws no strip. Other screens retain their own message layout.
 
 ## Dragging and empty stations
 

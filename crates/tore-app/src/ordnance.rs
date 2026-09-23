@@ -3,12 +3,15 @@ use crate::rocker::Rocker;
 use crate::{
     AppResult,
     menu::{Action, Canvas, Sprite, text_width},
-    quick_mission::notice,
+    quick_mission::fit,
 };
 use std::collections::BTreeMap;
 use std::time::Instant;
 use tore_formats::{Pic, weapons::Weapon};
-use tore_sim::{combat::loadout::Loadout, models::FlightModel};
+use tore_sim::{
+    combat::loadout::{Loadout, supported},
+    models::FlightModel,
+};
 type Rect = (i32, i32, i32, i32);
 const CATALOG: Rect = (64, 103, 235, 272);
 const CATALOG_AREA: usize = 15;
@@ -27,7 +30,7 @@ struct Drag {
 pub struct Ordnance {
     pub loadout: Loadout,
     pub visible: bool,
-    /// Every imported store; the catalog is the part this loadout accepts.
+    /// Every imported weapon; the catalog applies flight support and Cheat rules.
     weapons: Vec<Weapon>,
     catalog: Vec<Weapon>,
     sprites: BTreeMap<String, Sprite>,
@@ -151,7 +154,11 @@ impl Ordnance {
         self.catalog = self
             .weapons
             .iter()
-            .filter(|w| (0..load.hardpoints.len()).any(|i| load.capacity(i, w) > 0))
+            .filter(|w| supported(&w.source))
+            .filter(|w| {
+                load.cheat
+                    || (0..load.hardpoints.len()).any(|i| (1..32767).contains(&load.capacity(i, w)))
+            })
             .cloned()
             .collect();
         self.pages = [0; 2];
@@ -411,7 +418,7 @@ impl Ordnance {
                 self.menu = false;
                 self.message = Some(
                     if self.loadout.cheat {
-                        "Cheat loading on: any store fits any station."
+                        "Cheat loading on."
                     } else {
                         "Cheat loading off."
                     }
@@ -486,6 +493,15 @@ impl Ordnance {
                 self.pointer(Some((100., 120.)));
                 self.down();
                 self.pointer(Some((325., 190.)));
+            }
+            "ordnance-message" => {
+                self.activate(13);
+            }
+            "ordnance-message-long" => {
+                self.message = Some(
+                    "This is a long ordnance message preview. It stays on one line, with a background sized to the displayed text and an ellipsis when the message reaches the available screen width."
+                        .into(),
+                );
             }
             _ => {}
         }
@@ -699,6 +715,18 @@ impl Ordnance {
         }
         animating
     }
+}
+fn notice(c: &mut Canvas, font: &Sprite, message: &str) {
+    let line = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    let line = fit(font, &line, 572);
+    if line.is_empty() {
+        return;
+    }
+    c.rect(
+        (30, 335, text_width(font, &line) + 8, font.height as i32 + 4),
+        [35, 44, 46, 255],
+    );
+    c.text(font, &line, 34, 337, Some([235, 225, 179]));
 }
 fn grouped(value: f64) -> String {
     let digits = format!("{value:.0}");
@@ -1312,6 +1340,37 @@ mod tests {
         assert!(ui.selected.is_none());
     }
     #[test]
+    fn normal_catalog_hides_unimplemented_weapons_even_when_they_fit() {
+        let mut ui = fixture();
+        let mut missile = ui.weapons[0].clone();
+        missile.source = "AIM120.JT".into();
+        missile.flags = 0x10003;
+        missile.seeker.signature = 3;
+        ui.weapons.push(missile.clone());
+        missile.source = "AIM7.JT".into();
+        assert_eq!(ui.loadout.capacity(0, &missile), 4);
+        ui.weapons.push(missile);
+        ui.weapons
+            .push(ui.loadout.configuration.stations[2].weapon.clone());
+        ui.rebuild_catalog();
+        assert_eq!(
+            ui.catalog
+                .iter()
+                .map(|w| w.source.as_str())
+                .collect::<Vec<_>>(),
+            ["AIM9M.JT", "AIM120.JT", "M61.JT"]
+        );
+        // A compatible alternative can be selected, loaded and flown.
+        ui.activate(101);
+        ui.activate(201);
+        assert_eq!(
+            ui.loadout.configuration.stations[1].weapon.source,
+            "AIM120.JT"
+        );
+        assert_eq!(ui.loadout.quantities[1], 4);
+        assert_eq!(ui.activate(7), Action::MissionFly);
+    }
+    #[test]
     fn cheat_button_unloads_and_toggles_any_store_on_any_station() {
         let mut ui = fixture();
         let mut bomb = ui.weapons[0].clone();
@@ -1319,18 +1378,67 @@ mod tests {
         bomb.flags = 2;
         bomb.seeker.signature = 0;
         ui.weapons.push(bomb.clone());
+        let mut unsupported = bomb.clone();
+        unsupported.source = "GBU10.JT".into();
+        ui.weapons.push(unsupported.clone());
+        let mut gun = bomb.clone();
+        gun.source = "DEFA.JT".into();
+        gun.flags = 0x80;
+        ui.weapons.push(gun.clone());
         ui.rebuild_catalog();
-        let listed = |ui: &Ordnance| ui.catalog.iter().any(|w| w.source == "MK82.JT");
-        assert!(!listed(&ui));
+        let names = |ui: &Ordnance| {
+            ui.catalog
+                .iter()
+                .map(|w| w.source.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&ui), ["AIM9M.JT"]);
         ui.activate(13);
         assert!(ui.loadout.cheat);
         assert_eq!(ui.loadout.quantities, [0, 0, 0]);
-        assert!(listed(&ui));
+        assert_eq!(names(&ui), ["AIM9M.JT", "MK82.JT", "DEFA.JT"]);
+        // Even a cheat-compatible unimplemented weapon stays hidden.
+        assert_eq!(ui.loadout.capacity(0, &unsupported), 4);
+        // Cheat lists all supported weapons, including other aircraft's guns.
+        assert!((0..3).all(|i| ui.loadout.capacity(i, &gun) == 0));
         assert_eq!(ui.loadout.capacity(0, &bomb), 4);
         assert_eq!(ui.loadout.capacity(2, &bomb), 0, "the fixed gun station");
+        ui.activate(4);
+        ui.activate(100);
+        ui.activate(200);
+        assert_eq!(
+            ui.loadout.configuration.stations[0].weapon.source,
+            "MK82.JT"
+        );
+        assert_eq!(ui.loadout.quantities, [4, 0, 0]);
+        assert_eq!(ui.activate(7), Action::MissionFly);
+        ui.pages = [1, 2];
         ui.activate(13);
         assert!(!ui.loadout.cheat);
-        assert!(!listed(&ui));
+        assert_eq!(ui.loadout.quantities, [0, 0, 0]);
+        assert_eq!(names(&ui), ["AIM9M.JT"]);
+        assert_eq!(ui.pages, [0; 2]);
+        assert!(ui.selected.is_none());
+    }
+    #[test]
+    fn filtered_empty_catalog_has_no_selectable_cards_or_extra_pages() {
+        let mut ui = fixture();
+        ui.weapons[0].source = "AIM7.JT".into();
+        for cheat in [false, true] {
+            ui.loadout.cheat = cheat;
+            ui.rebuild_catalog();
+            assert!(ui.catalog.is_empty());
+            for category in [3, 4] {
+                ui.activate(category);
+                ui.activate(2);
+                ui.activate(100);
+                assert_eq!(ui.pages, [0; 2]);
+                assert!(ui.selected.is_none());
+                let mut pixels = vec![0; WIDTH * HEIGHT * 4];
+                ui.render(&mut pixels);
+                assert!(!ui.controls.iter().any(|(id, _)| (100..108).contains(id)));
+            }
+        }
     }
     #[test]
     fn invalid_same_station_outside_and_cancelled_drops_do_not_mutate_loads() {

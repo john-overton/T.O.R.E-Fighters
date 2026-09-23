@@ -209,5 +209,7 @@ dial angle selection, menu presentation and event timing.
 
 The app implements JT catalog cards, station compatibility, quantity/fuel controls,
 weight validation and custom-load flight/restart. Auxiliary stores and native stock,
-year, cheat and airbase lifecycle remain open. See
+year and airbase lifecycle remain open. Cheat loading and the supported-weapon
+catalog are described in the
+[current spec](../spec/ordnance-presentation.md#catalog-availability). See
 [implementation evidence and user testing gate](../baselines/creator-ordnance.md).

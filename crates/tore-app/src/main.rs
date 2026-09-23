@@ -5415,7 +5415,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             }
             if matches!(
                 snapshot_state.as_str(),
-                "ordnance" | "ordnance-empty" | "ordnance-drag"
+                "ordnance"
+                    | "ordnance-empty"
+                    | "ordnance-drag"
+                    | "ordnance-message"
+                    | "ordnance-message-long"
             ) {
                 quick.ordnance = Some(ordnance::Ordnance::new(
                     tore_sim::combat::loadout::Loadout::new(&hornet.profile, |n| {
