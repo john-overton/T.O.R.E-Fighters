@@ -1,5 +1,8 @@
 struct Band { info:vec4<f32>, ramp:vec4<f32> }
-struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32> }
+struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32> }
+// quality: spotting aid strength (0 off), terrain filtering (0/1), sun glint
+// (0/1), unused. viewport: world image width and height in pixels, MSAA
+// samples, render scale. See graphics.rs.
 @group(0) @binding(0) var<uniform> scene:Scene;
 // Only target-camera readbacks use alpha as scenery/subject coverage.
 fn scenery(color:vec3<f32>)->vec4<f32> {

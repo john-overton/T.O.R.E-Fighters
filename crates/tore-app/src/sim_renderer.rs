@@ -4,6 +4,9 @@ use wgpu::util::DeviceExt;
 fn bytes(values: &[f32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
+/// The shared `Scene` uniform, ending with the graphics `quality` and
+/// `viewport` vectors.
+const UNIFORM_BYTES: u64 = 1392;
 type AircraftBatch = (wgpu::BindGroup, wgpu::Buffer, u32);
 pub struct SimRenderer {
     lighting: crate::surface_lighting::SurfaceLighting,
@@ -14,120 +17,78 @@ pub struct SimRenderer {
     airports: Option<(wgpu::Buffer, u32)>,
     dummies: Vec<(tore_formats::aircraft::AircraftId, AircraftBatch)>,
     vapor: Option<(wgpu::Buffer, u32)>,
-    vapor_pipeline: wgpu::RenderPipeline,
-    tracer_pipeline: wgpu::RenderPipeline,
+    p: Pipelines,
+    shader: wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+    material_layout: wgpu::BindGroupLayout,
     vapor_bind: wgpu::BindGroup,
     palette: wgpu::Texture,
     weather_tiles: wgpu::TextureView,
+    canopy_visible: bool,
+    aircraft: Option<(wgpu::BindGroup, wgpu::Buffer, u32)>,
+    bind: wgpu::BindGroup,
+    celestial_vertices: wgpu::Buffer,
+    cloud_vertices: wgpu::Buffer,
+    uniform: wgpu::Buffer,
+    vertices: wgpu::Buffer,
+    terrain_normals: wgpu::Buffer,
+    count: u32,
+    targets: Vec<Targets>,
+    resample: wgpu::RenderPipeline,
+    options: crate::graphics::Options,
+    samples: u32,
+}
+/// World-pass attachments for one output size. The main view, mirrors and
+/// instrument previews alternate sizes within a frame, so a few are cached.
+struct Targets {
+    output: [u32; 2],
+    size: [u32; 2],
+    samples: u32,
+    depth: wgpu::TextureView,
+    /// Multisampled color, resolved at the end of the world pass.
+    color: Option<wgpu::TextureView>,
+    /// The render-scale image and its resample bindings, when the world is
+    /// drawn at a different size than the output.
+    scaled: Option<(wgpu::TextureView, wgpu::BindGroup)>,
+}
+/// Every pipeline that draws into the world pass. They are rebuilt together
+/// when the anti-aliasing sample count changes.
+struct Pipelines {
+    vapor_pipeline: wgpu::RenderPipeline,
+    tracer_pipeline: wgpu::RenderPipeline,
     pipeline: wgpu::RenderPipeline,
     airport_pipeline: wgpu::RenderPipeline,
     airport_decal_pipeline: wgpu::RenderPipeline,
     terrain_pipeline: wgpu::RenderPipeline,
     canopy_depth_pipeline: wgpu::RenderPipeline,
     canopy_pipeline: wgpu::RenderPipeline,
-    canopy_visible: bool,
-    aircraft: Option<(wgpu::BindGroup, wgpu::Buffer, u32)>,
-    bind: wgpu::BindGroup,
     sky_pipeline: wgpu::RenderPipeline,
     celestial_pipeline: wgpu::RenderPipeline,
-    celestial_vertices: wgpu::Buffer,
     cloud_pipeline: wgpu::RenderPipeline,
-    cloud_vertices: wgpu::Buffer,
-    uniform: wgpu::Buffer,
-    vertices: wgpu::Buffer,
-    terrain_normals: wgpu::Buffer,
-    count: u32,
-    spare_depth: Option<([u32; 2], wgpu::TextureView)>,
-    depth: wgpu::TextureView,
-    size: [u32; 2],
 }
-impl SimRenderer {
-    pub fn new(
+impl Pipelines {
+    fn new(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        shader: &wgpu::ShaderModule,
         format: wgpu::TextureFormat,
-        world: &World,
-        width: u32,
-        height: u32,
+        samples: u32,
+        material_layout: &wgpu::BindGroupLayout,
+        lighting_layout: &wgpu::BindGroupLayout,
     ) -> Self {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Simulation terrain"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!(
-                    "{}\n{}",
-                    include_str!("surface_lighting.wgsl"),
-                    include_str!("terrain.wgsl")
-                )
-                .into(),
-            ),
-        });
-        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("World surface material"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(1360),
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-            ],
-        });
-        let lighting =
-            crate::surface_lighting::SurfaceLighting::new(device, &material_layout, &shader);
+        let multisample = wgpu::MultisampleState {
+            count: samples,
+            ..Default::default()
+        };
         let surface_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Shared world surface layout"),
-            bind_group_layouts: &[&material_layout, &lighting.layout],
+            bind_group_layouts: &[material_layout, &lighting_layout],
             push_constant_ranges: &[],
         });
         let mut surface_descriptor = wgpu::RenderPipelineDescriptor {
             label: Some("Simulation terrain"),
             layout: Some(&surface_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: shader,
                 entry_point: Some("vertex"),
                 compilation_options: Default::default(),
                 buffers: &[wgpu::VertexBufferLayout {
@@ -137,7 +98,7 @@ impl SimRenderer {
                 }],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: shader,
                 entry_point: Some("fragment"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -157,7 +118,7 @@ impl SimRenderer {
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
-            multisample: Default::default(),
+            multisample,
             multiview: None,
             cache: None,
         };
@@ -183,7 +144,7 @@ impl SimRenderer {
         surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("fragment");
         let sky_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Sky layout"),
-            bind_group_layouts: &[&material_layout, &lighting.layout],
+            bind_group_layouts: &[material_layout, &lighting_layout],
             push_constant_ranges: &[],
         });
         surface_descriptor.label = Some("Shoreline terrain");
@@ -254,13 +215,13 @@ impl SimRenderer {
             label: Some("Retail sky preview"),
             layout: Some(&sky_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: shader,
                 entry_point: Some("sky_vertex"),
                 compilation_options: Default::default(),
                 buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: shader,
                 entry_point: Some("sky_fragment"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -277,34 +238,22 @@ impl SimRenderer {
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
-            multisample: Default::default(),
+            multisample,
             multiview: None,
             cache: None,
         });
         let celestial_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Original celestial primitives"), layout: Some(&sky_layout),
-            vertex: wgpu::VertexState { module:&shader,entry_point:Some("celestial_vertex"),compilation_options:Default::default(),
+            vertex: wgpu::VertexState { module:shader,entry_point:Some("celestial_vertex"),compilation_options:Default::default(),
                 buffers:&[wgpu::VertexBufferLayout {array_stride:40,step_mode:wgpu::VertexStepMode::Vertex,attributes:&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3,4=>Float32]}]},
-            fragment:Some(wgpu::FragmentState {module:&shader,entry_point:Some("celestial_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState {format,blend:Some(wgpu::BlendState::ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})]}),
-            primitive:Default::default(),depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:false,depth_compare:wgpu::CompareFunction::Always,stencil:Default::default(),bias:Default::default()}),multisample:Default::default(),multiview:None,cache:None,
-        });
-        let celestial_vertices = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Celestial vertices"),
-            size: 256 * 1024,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+            fragment:Some(wgpu::FragmentState {module:shader,entry_point:Some("celestial_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState {format,blend:Some(wgpu::BlendState::ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})]}),
+            primitive:Default::default(),depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:false,depth_compare:wgpu::CompareFunction::Always,stencil:Default::default(),bias:Default::default()}),multisample,multiview:None,cache:None,
         });
         let cloud_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label:Some("Original cloud sheets"),layout:Some(&sky_layout),
-            vertex:wgpu::VertexState {module:&shader,entry_point:Some("vertex"),compilation_options:Default::default(),buffers:&[wgpu::VertexBufferLayout {array_stride:40,step_mode:wgpu::VertexStepMode::Vertex,attributes:&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3,4=>Float32]}]},
-            fragment:Some(wgpu::FragmentState {module:&shader,entry_point:Some("cloud_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState {format,blend:None,write_mask:wgpu::ColorWrites::ALL})]}),
-            primitive:wgpu::PrimitiveState {cull_mode:None,..Default::default()},depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:true,depth_compare:wgpu::CompareFunction::Less,stencil:Default::default(),bias:Default::default()}),multisample:Default::default(),multiview:None,cache:None,
-        });
-        let cloud_vertices = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Cloud vertices"),
-            size: 256 * 1024,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+            vertex:wgpu::VertexState {module:shader,entry_point:Some("vertex"),compilation_options:Default::default(),buffers:&[wgpu::VertexBufferLayout {array_stride:40,step_mode:wgpu::VertexStepMode::Vertex,attributes:&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3,4=>Float32]}]},
+            fragment:Some(wgpu::FragmentState {module:shader,entry_point:Some("cloud_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState {format,blend:None,write_mask:wgpu::ColorWrites::ALL})]}),
+            primitive:wgpu::PrimitiveState {cull_mode:None,..Default::default()},depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:true,depth_compare:wgpu::CompareFunction::Less,stencil:Default::default(),bias:Default::default()}),multisample,multiview:None,cache:None,
         });
         // Wing vapor is five one-pixel line segments per side, exactly as
         // `_DrawStreamer@12` draws them, so it needs its own blended pipeline.
@@ -312,7 +261,7 @@ impl SimRenderer {
             label: Some("Wing vapor"),
             layout: None,
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: shader,
                 entry_point: Some("vapor_vertex"),
                 compilation_options: Default::default(),
                 buffers: &[wgpu::VertexBufferLayout {
@@ -322,7 +271,7 @@ impl SimRenderer {
                 }],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: shader,
                 entry_point: Some("vapor_fragment"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -343,13 +292,125 @@ impl SimRenderer {
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
-            multisample: Default::default(),
+            multisample,
             multiview: None,
             cache: None,
         });
+        Self {
+            vapor_pipeline,
+            tracer_pipeline,
+            pipeline,
+            airport_pipeline,
+            airport_decal_pipeline,
+            terrain_pipeline,
+            canopy_depth_pipeline,
+            canopy_pipeline,
+            sky_pipeline,
+            celestial_pipeline,
+            cloud_pipeline,
+        }
+    }
+}
+impl SimRenderer {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        world: &World,
+        options: crate::graphics::Options,
+        samples: u32,
+    ) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Simulation terrain"),
+            source: wgpu::ShaderSource::Wgsl(
+                format!(
+                    "{}\n{}",
+                    include_str!("surface_lighting.wgsl"),
+                    include_str!("terrain.wgsl")
+                )
+                .into(),
+            ),
+        });
+        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("World surface material"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(UNIFORM_BYTES),
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let lighting =
+            crate::surface_lighting::SurfaceLighting::new(device, &material_layout, &shader);
+        let pipelines = Pipelines::new(
+            device,
+            &shader,
+            format,
+            samples,
+            &material_layout,
+            &lighting.layout,
+        );
+        let celestial_vertices = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Celestial vertices"),
+            size: 256 * 1024,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let cloud_vertices = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Cloud vertices"),
+            size: 256 * 1024,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera and atmosphere"),
-            size: 1360,
+            size: UNIFORM_BYTES,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -413,7 +474,7 @@ impl SimRenderer {
         let palette_view = palette.create_view(&wgpu::TextureViewDescriptor::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Simulation scene bindings"),
-            layout: &pipeline.get_bind_group_layout(0),
+            layout: &pipelines.pipeline.get_bind_group_layout(0),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -440,7 +501,7 @@ impl SimRenderer {
         // Vapor reads this view's camera and palette, with its own derived layout.
         let vapor_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Wing vapor bindings"),
-            layout: &vapor_pipeline.get_bind_group_layout(0),
+            layout: &pipelines.vapor_pipeline.get_bind_group_layout(0),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -467,36 +528,30 @@ impl SimRenderer {
             lighting,
             aircraft_visible: true,
             lens_flare: crate::lens_flare::LensFlare::new(device, format),
-            smoke: crate::smoke_renderer::SmokeRenderer::new(device, format, &shader),
+            smoke: crate::smoke_renderer::SmokeRenderer::new(device, format, &shader, samples),
             battle: None,
             airports: None,
             vapor: None,
-            vapor_pipeline,
-            tracer_pipeline,
+            p: pipelines,
+            shader,
+            format,
+            material_layout,
             vapor_bind,
             palette,
             weather_tiles: view,
-            pipeline,
-            airport_pipeline,
-            airport_decal_pipeline,
-            terrain_pipeline,
-            canopy_depth_pipeline,
-            canopy_pipeline,
             canopy_visible: false,
             aircraft: None,
             dummies: Vec::new(),
-            sky_pipeline,
-            celestial_pipeline,
             celestial_vertices,
-            cloud_pipeline,
             cloud_vertices,
             bind,
             uniform,
             vertices,
             count: (world.vertices.len() / 10) as u32,
-            spare_depth: None,
-            depth: Self::depth(device, width, height),
-            size: [width, height],
+            targets: Vec::new(),
+            resample: Self::resample_pipeline(device, format),
+            options,
+            samples,
         }
     }
     pub fn smoke(
@@ -680,7 +735,7 @@ impl SimRenderer {
                 .map(|image| image.upload(device, queue));
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Aircraft textures"),
-                layout: &self.pipeline.get_bind_group_layout(0),
+                layout: &self.p.pipeline.get_bind_group_layout(0),
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -745,23 +800,164 @@ impl SimRenderer {
         self.canopy_visible = false;
         self.aircraft_visible = false;
     }
-    fn depth(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
-        device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("Simulation depth"),
-                size: wgpu::Extent3d {
-                    width: width.max(1),
-                    height: height.max(1),
-                    depth_or_array_layers: 1,
+    /// Apply new graphics choices. A different sample count rebuilds every
+    /// world pipeline; the caller clamps it to what the adapter supports.
+    pub fn set_graphics(
+        &mut self,
+        device: &wgpu::Device,
+        options: crate::graphics::Options,
+        samples: u32,
+    ) {
+        self.options = options;
+        if samples == self.samples {
+            return;
+        }
+        self.samples = samples;
+        self.p = Pipelines::new(
+            device,
+            &self.shader,
+            self.format,
+            samples,
+            &self.material_layout,
+            &self.lighting.layout,
+        );
+        self.vapor_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Wing vapor bindings"),
+            layout: &self.p.vapor_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform.as_entire_binding(),
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Depth32Float,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            })
-            .create_view(&Default::default())
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(
+                        &self.palette.create_view(&Default::default()),
+                    ),
+                },
+            ],
+        });
+        self.smoke
+            .set_samples(device, self.format, &self.shader, samples);
+        self.targets.clear();
+    }
+    fn resample_pipeline(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+    ) -> wgpu::RenderPipeline {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Render scale resample"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("resample.wgsl").into()),
+        });
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Render scale resample"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vertex"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fragment"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        })
+    }
+    /// The cached attachments for an output size, created on first use.
+    fn targets(&mut self, device: &wgpu::Device, output: [u32; 2]) -> usize {
+        let scale = self.options.scale();
+        let size = output.map(|v| ((v as f32 * scale).round() as u32).clamp(1, 8192));
+        if let Some(i) = self
+            .targets
+            .iter()
+            .position(|t| t.output == output && t.size == size && t.samples == self.samples)
+        {
+            return i;
+        }
+        let texture = |label, samples, format, usage| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d {
+                        width: size[0],
+                        height: size[1],
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: samples,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        };
+        let scaled = (size != output).then(|| {
+            let view = texture(
+                "Render scale image",
+                1,
+                self.format,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            );
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Render scale resample"),
+                layout: &self.resample.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            });
+            (view, bind)
+        });
+        let targets = Targets {
+            output,
+            size,
+            samples: self.samples,
+            depth: texture(
+                "Simulation depth",
+                self.samples,
+                wgpu::TextureFormat::Depth32Float,
+                wgpu::TextureUsages::RENDER_ATTACHMENT,
+            ),
+            color: (self.samples > 1).then(|| {
+                texture(
+                    "Multisampled world",
+                    self.samples,
+                    self.format,
+                    wgpu::TextureUsages::RENDER_ATTACHMENT,
+                )
+            }),
+            scaled,
+        };
+        // Main view, mirrors and up to three instrument previews.
+        if self.targets.len() >= 5 {
+            self.targets.remove(0);
+        }
+        self.targets.push(targets);
+        self.targets.len() - 1
     }
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
@@ -774,14 +970,11 @@ impl SimRenderer {
         camera: &Camera,
         world: &World,
     ) {
-        if self.size != size {
-            let next = match self.spare_depth.take() {
-                Some((old_size, depth)) if old_size == size => depth,
-                _ => Self::depth(device, size[0], size[1]),
-            };
-            self.spare_depth = Some((self.size, std::mem::replace(&mut self.depth, next)));
-            self.size = size;
-        }
+        // The world renders at the render-scale size; the lens flare and the
+        // resample work at the output size.
+        let output = size;
+        let slot = self.targets(device, output);
+        let size = self.targets[slot].size;
         let weather = world.sample_view(f64::from(camera.position[1]), camera.weather_slot);
         // The recovered haze color the visibility ramp blends toward.
         let sky = weather.haze;
@@ -887,6 +1080,19 @@ impl SimRenderer {
             0.,
             0.,
         ]);
+        // Graphics options: spotting aid strength, terrain filtering, sun
+        // glint; then the world image size in pixels, samples and scale.
+        uniform.extend([
+            self.options.spotting_aid.strength(),
+            f32::from(self.options.terrain_filtering),
+            f32::from(self.options.sun_glint),
+            0.,
+            size[0] as f32,
+            size[1] as f32 * camera.view_fraction,
+            self.samples as f32,
+            self.options.scale(),
+        ]);
+        debug_assert_eq!(uniform.len() * 4, UNIFORM_BYTES as usize);
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         self.smoke.update(
             queue,
@@ -931,7 +1137,7 @@ impl SimRenderer {
         let linear = |v: u8| ((v as f64 / 255.0 + 0.055) / 1.055).powf(2.4);
         let flare_target =
             self.lens_flare
-                .prepare(device, queue, world, camera, size, &weather.palette);
+                .prepare(device, queue, world, camera, output, &weather.palette);
         if self.lighting.prepare(queue, camera, world) {
             let mut objects = Vec::new();
             if let Some((buffer, count)) = &self.airports {
@@ -949,12 +1155,24 @@ impl SimRenderer {
             self.lighting
                 .draw(encoder, (&self.bind, &self.vertices, self.count), &objects);
         }
+        let destination = flare_target.as_ref().unwrap_or(target);
+        let targets = &self.targets[slot];
+        // Multisampled color resolves into the render-scale image when there
+        // is one, otherwise straight into the destination.
+        let direct = targets
+            .scaled
+            .as_ref()
+            .map_or(destination, |(view, _)| view);
+        let (view, resolve_target) = match &targets.color {
+            Some(color) => (color, Some(direct)),
+            None => (direct, None),
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Simulation world"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: flare_target.as_ref().unwrap_or(target),
+                view,
                 depth_slice: None,
-                resolve_target: None,
+                resolve_target,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
                         r: linear(sky[0]),
@@ -966,7 +1184,7 @@ impl SimRenderer {
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.depth,
+                view: &targets.depth,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
                     store: wgpu::StoreOp::Store,
@@ -983,29 +1201,29 @@ impl SimRenderer {
             0.,
             1.,
         );
-        pass.set_pipeline(&self.sky_pipeline);
+        pass.set_pipeline(&self.p.sky_pipeline);
         pass.set_bind_group(1, &self.lighting.bind, &[]);
         pass.set_bind_group(0, &self.bind, &[]);
         pass.draw(0..3, 0..1);
         if celestial_count > 0 {
-            pass.set_pipeline(&self.celestial_pipeline);
+            pass.set_pipeline(&self.p.celestial_pipeline);
             pass.set_vertex_buffer(0, self.celestial_vertices.slice(..));
             pass.draw(0..celestial_count, 0..1);
         }
-        pass.set_pipeline(&self.terrain_pipeline);
+        pass.set_pipeline(&self.p.terrain_pipeline);
         pass.set_bind_group(0, &self.bind, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_vertex_buffer(1, self.terrain_normals.slice(..));
         pass.draw(0..self.count, 0..1);
         if let Some((buffer, count)) = &self.airports {
-            pass.set_pipeline(&self.airport_pipeline);
+            pass.set_pipeline(&self.p.airport_pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
             pass.set_vertex_buffer(0, buffer.slice(..));
             pass.draw(0..*count, 0..1);
-            pass.set_pipeline(&self.airport_decal_pipeline);
+            pass.set_pipeline(&self.p.airport_decal_pipeline);
             pass.draw(0..*count, 0..1);
         }
-        pass.set_pipeline(&self.pipeline);
+        pass.set_pipeline(&self.p.pipeline);
         if let Some((bind, vertices, count)) = &self.aircraft {
             pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, vertices.slice(..));
@@ -1018,13 +1236,13 @@ impl SimRenderer {
             }
         }
         for (_, (bind, vertices, count)) in &self.dummies {
-            pass.set_pipeline(&self.pipeline);
+            pass.set_pipeline(&self.p.pipeline);
             pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, vertices.slice(..));
             pass.draw(0..*count, 0..1);
-            pass.set_pipeline(&self.canopy_depth_pipeline);
+            pass.set_pipeline(&self.p.canopy_depth_pipeline);
             pass.draw(0..*count, 0..1);
-            pass.set_pipeline(&self.canopy_pipeline);
+            pass.set_pipeline(&self.p.canopy_pipeline);
             pass.draw(0..*count, 0..1);
         }
         if self.canopy_visible
@@ -1032,13 +1250,13 @@ impl SimRenderer {
         {
             pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, vertices.slice(..));
-            pass.set_pipeline(&self.canopy_depth_pipeline);
+            pass.set_pipeline(&self.p.canopy_depth_pipeline);
             pass.draw(0..*count, 0..1);
-            pass.set_pipeline(&self.canopy_pipeline);
+            pass.set_pipeline(&self.p.canopy_pipeline);
             pass.draw(0..*count, 0..1);
         }
         if cloud_count > 0 {
-            pass.set_pipeline(&self.cloud_pipeline);
+            pass.set_pipeline(&self.p.cloud_pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
             pass.set_vertex_buffer(0, self.cloud_vertices.slice(..));
             pass.draw(0..cloud_count, 0..1);
@@ -1048,19 +1266,37 @@ impl SimRenderer {
         if let Some((buffer, count)) = &self.vapor
             && *count > 0
         {
-            pass.set_pipeline(&self.vapor_pipeline);
+            pass.set_pipeline(&self.p.vapor_pipeline);
             pass.set_bind_group(0, &self.vapor_bind, &[]);
             pass.set_vertex_buffer(0, buffer.slice(..));
             pass.draw(0..*count, 0..1);
         }
         if let Some((buffer, count)) = &self.battle {
-            pass.set_pipeline(&self.tracer_pipeline);
+            pass.set_pipeline(&self.p.tracer_pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
             pass.set_vertex_buffer(0, buffer.slice(..));
             pass.draw(0..*count, 0..1);
         }
         self.smoke.draw(&mut pass);
         drop(pass);
+        if let Some((_, bind)) = &targets.scaled {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render scale resample"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: destination,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.resample);
+            pass.set_bind_group(0, bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
         if flare_target.is_some() {
             self.lens_flare.draw(encoder, target);
         }
@@ -1166,8 +1402,8 @@ mod lighting_tests {
                     &queue,
                     wgpu::TextureFormat::Rgba8Unorm,
                     &world,
-                    256,
-                    256,
+                    crate::graphics::Options::original(),
+                    1,
                 );
                 if water {
                     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1178,7 +1414,7 @@ mod lighting_tests {
                     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                         label: None,
                         bind_group_layouts: &[
-                            &renderer.pipeline.get_bind_group_layout(0),
+                            &renderer.p.pipeline.get_bind_group_layout(0),
                             &renderer.lighting.layout,
                         ],
                         push_constant_ranges: &[],
@@ -1189,8 +1425,8 @@ mod lighting_tests {
                         fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("reflection_probe"), compilation_options: Default::default(), targets: &[Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Rgba8Unorm, blend: None, write_mask: wgpu::ColorWrites::ALL })] }),
                         primitive: Default::default(), depth_stencil: Some(wgpu::DepthStencilState { format: wgpu::TextureFormat::Depth32Float, depth_write_enabled: true, depth_compare: wgpu::CompareFunction::Less, stencil: Default::default(), bias: Default::default() }), multisample: Default::default(), multiview: None, cache: None,
                     });
-                    renderer.terrain_pipeline = pipeline.clone();
-                    renderer.pipeline = pipeline;
+                    renderer.p.terrain_pipeline = pipeline.clone();
+                    renderer.p.pipeline = pipeline;
                 }
                 let mut object = if terrain_caster {
                     plane(0., 120.)

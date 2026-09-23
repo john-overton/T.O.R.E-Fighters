@@ -49,18 +49,9 @@ impl SmokeRenderer {
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         shader: &wgpu::ShaderModule,
+        samples: u32,
     ) -> Self {
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Original smoke billboards"), layout: None,
-            vertex: wgpu::VertexState { module: shader, entry_point: Some("smoke_vertex"), compilation_options: Default::default(), buffers: &[wgpu::VertexBufferLayout {
-                array_stride: INSTANCE_BYTES as u64, step_mode: wgpu::VertexStepMode::Instance,
-                attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32,2=>Float32,3=>Float32],
-            }] },
-            fragment: Some(wgpu::FragmentState {module:shader,entry_point:Some("smoke_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState{format,blend:Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})]}),
-            primitive:wgpu::PrimitiveState { cull_mode:None,..Default::default() },
-            depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:false,depth_compare:wgpu::CompareFunction::Less,stencil:Default::default(),bias:Default::default()}),
-            multisample:Default::default(),multiview:None,cache:None,
-        });
+        let pipeline = Self::pipeline(device, format, shader, samples);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Bounded smoke puffs"),
             size: (MAX_INSTANCES * INSTANCE_BYTES) as u64,
@@ -74,6 +65,36 @@ impl SmokeRenderer {
             puffs: Vec::new(),
             count: 0,
         }
+    }
+    /// Rebuild for a new anti-aliasing sample count. The bindings follow the
+    /// pipeline's derived layout, so the next `prepare` recreates them.
+    pub fn set_samples(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        shader: &wgpu::ShaderModule,
+        samples: u32,
+    ) {
+        self.pipeline = Self::pipeline(device, format, shader, samples);
+        self.bind = None;
+    }
+    fn pipeline(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        shader: &wgpu::ShaderModule,
+        samples: u32,
+    ) -> wgpu::RenderPipeline {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Original smoke billboards"), layout: None,
+            vertex: wgpu::VertexState { module: shader, entry_point: Some("smoke_vertex"), compilation_options: Default::default(), buffers: &[wgpu::VertexBufferLayout {
+                array_stride: INSTANCE_BYTES as u64, step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32,2=>Float32,3=>Float32],
+            }] },
+            fragment: Some(wgpu::FragmentState {module:shader,entry_point:Some("smoke_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState{format,blend:Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})]}),
+            primitive:wgpu::PrimitiveState { cull_mode:None,..Default::default() },
+            depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:false,depth_compare:wgpu::CompareFunction::Less,stencil:Default::default(),bias:Default::default()}),
+            multisample:wgpu::MultisampleState {count:samples,..Default::default()},multiview:None,cache:None,
+        })
     }
     pub fn prepare(
         &mut self,
@@ -285,7 +306,7 @@ mod tests {
             camera.yaw = 0.;
             camera.pitch = 0.;
             let mut values = camera.uniform(1., [0., 1000000., 0., 0.], [0; 3]);
-            values.resize(340, 0.);
+            values.resize(348, 0.);
             values[336] = 1.;
             let raw: Vec<_> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
             let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -344,7 +365,7 @@ mod tests {
                 }
                 let alpha = smoke.puffs[0].opacity();
                 let mut renderer =
-                    SmokeRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, &shader);
+                    SmokeRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, &shader, 1);
                 renderer.prepare(
                     &device,
                     &queue,

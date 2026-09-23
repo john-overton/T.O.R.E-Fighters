@@ -80,6 +80,9 @@ pub struct Renderer {
     mirror_vertices: Vec<f32>,
     pub mirror_frames: u64,
     mirrors_enabled: bool,
+    graphics: crate::graphics::Options,
+    /// MSAA sample counts the adapter supports for the surface and depth.
+    sample_counts: Vec<u32>,
     // Fields drop in declaration order; keep the window alive through GPU cleanup.
     pub window: Arc<Window>,
 }
@@ -161,12 +164,39 @@ impl Renderer {
             &self.queue,
             self.config.format,
             world,
-            self.config.width,
-            self.config.height,
+            self.graphics,
+            self.samples(self.graphics.anti_aliasing),
         );
     }
+    pub fn graphics(&self) -> crate::graphics::Options {
+        self.graphics
+    }
+    /// Apply graphics choices at once; an anti-aliasing change rebuilds the
+    /// world pipelines.
+    pub fn set_graphics(&mut self, options: crate::graphics::Options) {
+        self.graphics = options;
+        let samples = self.samples(options.anti_aliasing);
+        self.sim.set_graphics(&self.device, options, samples);
+    }
+    /// Whether this adapter can draw the given anti-aliasing level exactly.
+    pub fn supports(&self, level: crate::graphics::AntiAliasing) -> bool {
+        self.sample_counts.contains(&level.samples())
+    }
+    /// The highest supported sample count not above the requested one.
+    fn samples(&self, level: crate::graphics::AntiAliasing) -> u32 {
+        self.sample_counts
+            .iter()
+            .copied()
+            .filter(|&n| n <= level.samples())
+            .max()
+            .unwrap_or(1)
+    }
 
-    pub async fn new(window: Arc<Window>, world: &crate::terrain::World) -> AppResult<Self> {
+    pub async fn new(
+        window: Arc<Window>,
+        world: &crate::terrain::World,
+        graphics: crate::graphics::Options,
+    ) -> AppResult<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let surface = instance.create_surface(window.clone())?;
         let adapter = instance
@@ -181,8 +211,15 @@ impl Renderer {
             "Renderer: {} ({:?}, {:?})",
             info.name, info.backend, info.device_type
         );
+        // Sample counts beyond 1 and 4 are adapter specific; opt in when
+        // offered so 2x and 8x anti-aliasing can be used.
+        let specific =
+            adapter.features() & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default())
+            .request_device(&wgpu::DeviceDescriptor {
+                required_features: specific,
+                ..Default::default()
+            })
             .await?;
         let size = window.inner_size();
         let mut config = surface
@@ -202,6 +239,29 @@ impl Renderer {
             config.present_mode, config.desired_maximum_frame_latency
         );
         surface.configure(&device, &config);
+        let sample_counts: Vec<u32> = [1, 2, 4, 8]
+            .into_iter()
+            .filter(|&n| {
+                if specific.is_empty() {
+                    return matches!(n, 1 | 4);
+                }
+                [config.format, wgpu::TextureFormat::Depth32Float]
+                    .iter()
+                    .all(|&f| {
+                        adapter
+                            .get_texture_format_features(f)
+                            .flags
+                            .sample_count_supported(n)
+                    })
+            })
+            .collect();
+        let samples = sample_counts
+            .iter()
+            .copied()
+            .filter(|&n| n <= graphics.anti_aliasing.samples())
+            .max()
+            .unwrap_or(1);
+        println!("Anti-aliasing: {samples}x (supported {sample_counts:?})");
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Retail menu canvas"),
             size: wgpu::Extent3d {
@@ -270,8 +330,8 @@ impl Renderer {
             &queue,
             config.format,
             world,
-            config.width,
-            config.height,
+            graphics,
+            samples,
         );
         let cockpit = crate::cockpit_renderer::CockpitRenderer::new(&device, config.format);
         Ok(Self {
@@ -279,6 +339,8 @@ impl Renderer {
             mirror_vertices: Vec::new(),
             mirror_frames: 0,
             mirrors_enabled: std::env::var("TORE_MIRRORS").as_deref() != Ok("0"),
+            graphics,
+            sample_counts,
             cockpit,
             previews: Default::default(),
             sim,

@@ -27,6 +27,7 @@ mod flight;
 mod flight_canvas;
 mod flight_map;
 mod flight_ui;
+mod graphics;
 mod hud;
 mod hud_aperture;
 mod input;
@@ -193,6 +194,10 @@ struct App {
     audio: Option<audio::Audio>,
     wing_recipient: Option<u8>,
     renderer: Option<Renderer>,
+    /// Graphics choices for the 3D view, applied to the renderer.
+    graphics: graphics::Options,
+    /// Where the Graphics screen saves them; `None` for diagnostics.
+    graphics_path: Option<PathBuf>,
     pointer: Option<(f64, f64)>,
     modifiers: ModifiersState,
     smoke_test: bool,
@@ -1507,7 +1512,7 @@ impl ApplicationHandler for App {
                         .with_fullscreen(fullscreen_attribute(self.fullscreen)),
                 )?,
             );
-            pollster::block_on(Renderer::new(window, &self.world))
+            pollster::block_on(Renderer::new(window, &self.world, self.graphics))
         })();
         match result {
             Ok(mut renderer) => {
@@ -3654,6 +3659,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     // `--windowed`, and any flag that fixes the window size, opt out of the
     // borderless fullscreen default.
     let mut windowed_flag = false;
+    let mut graphics_flags: Vec<(String, String)> = Vec::new();
     let mut window_size_flag = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -4061,6 +4067,12 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--smoke-test" => smoke_test = true,
             "--windowed" => windowed_flag = true,
+            flag @ ("--anti-aliasing" | "--render-scale" | "--spotting-aid"
+            | "--terrain-filtering" | "--sun-glint") => {
+                let value = args.next().ok_or(format!("{flag} needs a value"))?;
+                graphics_flags.push((flag.to_owned(), value));
+            }
+            "--original-graphics" => graphics_flags.push((arg.clone(), String::new())),
             "--no-audio" => no_audio = true,
             "--version" | "-V" => {
                 println!("T.O.R.E-Fighters v{}", version::version());
@@ -5376,6 +5388,16 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && capture_terrain.is_none()
         && !animation_capture
         && std::env::var_os("TORE_PERF_FRAMES").is_none();
+    // Diagnostics ignore saved choices, like the other display preferences.
+    let graphics_path = if preferences_enabled {
+        Some(assets::data_directory()?.join("graphics-v1.conf"))
+    } else {
+        None
+    };
+    let mut graphics = graphics_path
+        .as_deref()
+        .map_or_else(graphics::Options::default, graphics::Options::load);
+    graphics.apply_flags(&graphics_flags)?;
     let mut airport_service =
         tore_sim::airport::Service::new(&world.airport_scene).map_err(std::io::Error::other)?;
     let airport_nav_mode = airport_probe.map_or_else(
@@ -5422,6 +5444,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             None
         },
         preference_saved: String::new(),
+        graphics,
+        graphics_path,
         input_recording,
         recorded_ticks: 0,
         input: input::Input::new(input_profile.as_deref(), native_input)?,
