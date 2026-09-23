@@ -737,7 +737,10 @@ mod tests {
         const START: &str = "<!-- controls-table:start -->\n";
         const END: &str = "<!-- controls-table:end -->";
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/CONTROLS.md");
-        let text = std::fs::read_to_string(&path).expect("docs/CONTROLS.md");
+        // Windows checkouts may convert the doc to CRLF line endings.
+        let text = std::fs::read_to_string(&path)
+            .expect("docs/CONTROLS.md")
+            .replace("\r\n", "\n");
         let (head, rest) = text.split_once(START).expect("start marker");
         let (current, tail) = rest.split_once(END).expect("end marker");
         let generated = controls_markdown() + "\n";
