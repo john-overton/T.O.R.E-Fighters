@@ -455,6 +455,8 @@ pub struct Target {
 }
 
 pub const DAMAGE_SECTIONS: usize = 6;
+/// Contact sphere for an aircraft, feet.
+const AIRCRAFT_RADIUS_FT: f64 = 28.;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DamageSection {
     Nose = 0,
@@ -1456,7 +1458,7 @@ impl State {
             jammer: config.sensors.jammer.clone(),
             jammer_active: false,
             airborne: true,
-            radius: 28.,
+            radius: AIRCRAFT_RADIUS_FT,
             hp: config.hit_points,
             initial_hp: config.hit_points,
             fragment_offsets: config.fragment_offsets,
@@ -1568,7 +1570,7 @@ impl State {
             jammer: self.config.sensors.jammer.clone(),
             jammer_active: self.target_jammer,
             airborne: true,
-            radius: 28.,
+            radius: AIRCRAFT_RADIUS_FT,
             hp: self.config.hit_points,
             initial_hp: self.config.hit_points,
             fragment_offsets: self.config.fragment_offsets,
@@ -2196,7 +2198,7 @@ impl State {
             jammer: None,
             jammer_active: false,
             airborne: launcher.alive,
-            radius: 28.,
+            radius: AIRCRAFT_RADIUS_FT,
             hp: if launcher.alive { self.player_hp } else { 0 },
             initial_hp: self.config.damage_capacity,
             fragment_offsets: self.config.fragment_offsets,
@@ -2679,7 +2681,58 @@ impl State {
             &snapshots,
             |from, to| !obscured(from, to),
         );
+        if !self.cheats.ignore_midair_collisions {
+            self.midair_collisions(launcher, &mut events);
+        }
         events
+    }
+    /// Aircraft whose paths came within their combined radii this tick
+    /// collided. A midair collision destroys every aircraft involved,
+    /// Invulnerable or not (John, 2026-09-23). No kill is credited.
+    fn midair_collisions(&mut self, launcher: Launcher, events: &mut Vec<Event>) {
+        const PLAYER: usize = usize::MAX;
+        let mut bodies: Vec<(usize, Vector, Vector, f64)> = self
+            .targets
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.role == TargetRole::Aircraft && t.airborne && t.hp > 0)
+            .map(|(i, t)| (i, t.position, t.velocity, t.radius))
+            .collect();
+        if launcher.alive && self.player_hp > 0 {
+            bodies.push((
+                PLAYER,
+                launcher.position,
+                launcher.velocity,
+                AIRCRAFT_RADIUS_FT,
+            ));
+        }
+        let mut struck = std::collections::BTreeSet::new();
+        let mut blasts = Vec::new();
+        for (n, a) in bodies.iter().enumerate() {
+            for b in &bodies[n + 1..] {
+                let now = sub(a.1, b.1);
+                let before = sub(now, sub(a.2, b.2).map(|v| v * crate::flight::DT));
+                if segment_sphere(before, now, a.3 + b.3).is_some() {
+                    struck.extend([a.0, b.0]);
+                    blasts.push(std::array::from_fn(|i| (a.1[i] + b.1[i]) / 2.));
+                }
+            }
+        }
+        for index in struck {
+            if index == PLAYER {
+                self.player_hp = 0;
+                self.player_damage = self.player_damage.max(self.config.damage_capacity);
+                self.release();
+                events.push(Event::PlayerDestroyed);
+            } else {
+                let t = &mut self.targets[index];
+                t.hp = 0;
+                events.push(Event::Destroyed(t.id));
+            }
+        }
+        for blast in blasts {
+            self.effect(blast, EffectKind::Destroyed);
+        }
     }
 }
 fn sub(a: Vector, b: Vector) -> Vector {
@@ -4158,6 +4211,35 @@ mod tests {
                 .any(|e| matches!(e, Event::Jolt(Jolt { target: None, .. })))
         );
         assert!(!events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))));
+    }
+    #[test]
+    fn midair_collisions_destroy_everyone_involved_unless_ignored() {
+        let run = |ignore: bool| {
+            let mut s = fixture(false);
+            s.cheats.invulnerable = true;
+            s.cheats.ignore_midair_collisions = ignore;
+            // Two AI aircraft closing head-on, and one well clear.
+            let mut a = target(7, [0., 5000., 1000.], 20, 0x80);
+            a.velocity = [0., 0., 600.];
+            let mut b = target(8, [0., 5000., 1035.], 20, 0x80);
+            b.velocity = [0., 0., -600.];
+            let clear = target(9, [3000., 5000., 1000.], 20, 0x80);
+            // A third aircraft sitting on the player.
+            let on_player = target(10, [5., 1000., 5.], 20, 0x80);
+            s.targets.extend([a, b, clear, on_player]);
+            let events = s.step(false, launcher(), |_, _| 0.);
+            (s, events)
+        };
+        let (s, events) = run(false);
+        let hp: Vec<_> = s.targets.iter().map(|t| t.hp).collect();
+        assert_eq!(hp, [0, 0, 20, 0]);
+        assert_eq!(s.player_hp, 0, "Invulnerable does not prevent it");
+        assert!(events.contains(&Event::PlayerDestroyed));
+        assert!(events.contains(&Event::Destroyed(7)) && events.contains(&Event::Destroyed(8)));
+        assert_eq!(s.kills, 0);
+        let (s, events) = run(true);
+        assert!(s.targets.iter().all(|t| t.hp == 20) && s.player_hp > 0);
+        assert!(!events.iter().any(|e| matches!(e, Event::Destroyed(_))));
     }
     #[test]
     fn fixed_ticks_replay_across_presentation_rates_and_pause() {

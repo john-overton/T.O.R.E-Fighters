@@ -102,6 +102,7 @@ fn cheat_switch<'a>(cheats: &'a mut tore_sim::cheats::Cheats, label: &str) -> Op
         "No redout or blackout?" => &mut cheats.no_g_effects,
         "No crashes?" => &mut cheats.no_crashes,
         "Easy aiming?" => &mut cheats.easy_aiming,
+        "Ignore midair collisions?" => &mut cheats.ignore_midair_collisions,
         "No screen-shaking?" => &mut cheats.no_screen_shake,
         _ => return None,
     })
@@ -951,6 +952,7 @@ mod tests {
             "No screen-shaking?",
             "No crashes?",
             "Easy aiming?",
+            "Ignore midair collisions?",
         ] {
             assert_eq!(ui.cheat_state(label), Some("Off"));
             assert_eq!(ui.activate(label, ""), Command::Click);

@@ -24,4 +24,5 @@ pub struct Cheats {
     pub no_screen_shake: bool,
     pub no_crashes: bool,
     pub easy_aiming: bool,
+    pub ignore_midair_collisions: bool,
 }

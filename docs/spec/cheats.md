@@ -152,7 +152,10 @@ also with Invulnerable on. It applies to AI aircraft too. Gun hits do not jolt.
 
 Aircraft that touch collide, and a midair collision is always fatal to every
 aircraft involved, player and AI. Invulnerable does not prevent it; only Ignore
-midair collisions does.
+midair collisions does. **Proposed:** aircraft touch when their paths come
+within 56 ft of each other (two 28 ft contact spheres, the size the game
+already uses for weapon hits), only airborne live aircraft collide, and a
+collision credits no kill.
 
 ### Target selection
 
