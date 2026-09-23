@@ -139,6 +139,36 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Look back | F2 | - | - |
 | Look up (view) | F3 | - | - |
 | External view | F10 | - | - |
+| Track current target | F4 | - | - |
+| Player to inbound missile | F5 | - | - |
+| Player to wingman | F6 | - | - |
+| Player to target | F7 | - | - |
+| Target to player | F8 | - | - |
+| Fixed fly-by view | F9 | - | - |
+| Missile to its target | F12 | - | - |
+| Save and open Other View | V | - | - |
+| Target-relative tracking (Alt-F4 exits) | - | - | - |
+| Last missile: forward view | Ctrl+F1 | - | - |
+| Last missile: back view | Ctrl+F2 | - | - |
+| Last missile: up view | Ctrl+F3 | - | - |
+| Last missile: tracking view | Ctrl+F4 | - | - |
+| Last missile: threat view | Ctrl+F5 | - | - |
+| Last missile: wingman view | Ctrl+F6 | - | - |
+| Last missile: to target view | Ctrl+F7 | - | - |
+| Last missile: target to reference view | Ctrl+F8 | - | - |
+| Last missile: fly-by view | Ctrl+F9 | - | - |
+| Last missile: external view | Ctrl+F10 | - | - |
+| Last missile: missile to target view | Ctrl+F12 | - | - |
+| Target: forward view | Alt+F1 | - | - |
+| Target: back view | Alt+F2 | - | - |
+| Target: up view | Alt+F3 | - | - |
+| Target: threat view | Alt+F5 | - | - |
+| Target: wingman view | Alt+F6 | - | - |
+| Target: to target view | Alt+F7 | - | - |
+| Target: target to reference view | Alt+F8 | - | - |
+| Target: fly-by view | Alt+F9 | - | - |
+| Target: external view | Alt+F10 | - | - |
+| Target: missile to target view | Alt+F12 | - | - |
 | Look left/right | - | Hold right button and drag | Right stick X |
 | Look left | Shift+Left or Ctrl+Left | - | - |
 | Look right | Shift+Right or Ctrl+Right | - | - |

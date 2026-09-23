@@ -415,6 +415,8 @@ Work:
 - Fixed-rate sim loop, decoupled from render, headless-capable.
 - Flight model from PT.  Engine, gear, flaps, hook, brakes, throttle, afterburner.
 - Cockpit view, HUD, external and chase cameras, control surface animation.
+  The [retail view suite](spec/flight-views.md), reference modifiers and Other View
+  are implemented with fitted placement; [validation](baselines/flight-views.md).
 - Navigation display and waypoints.
 - Keyboard, gamepad, and joystick input.
 - Engine, actuator, stall, and environment audio from retail samples.

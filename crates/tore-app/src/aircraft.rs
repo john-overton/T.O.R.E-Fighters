@@ -384,16 +384,9 @@ impl Airframe {
     }
     /// Shared fitted instrument camera pose for fixed-tick weather and rendering.
     pub fn panel_camera(&self, state: &flight::State, page: u8) -> Camera {
-        let mut camera = self.camera(state, if page == 2 { 0 } else { 2 }, Default::default());
+        let mut camera = self.camera(state, if page == 2 { 0 } else { 3 }, Default::default());
         camera.weather_slot = usize::from(page);
         camera.view_fraction = 1.;
-        if page == 3 {
-            for i in 0..3 {
-                camera.position[i] = state.position[i] as f32
-                    + (camera.position[i] - state.position[i] as f32) * 0.5;
-            }
-            camera.pitch = -(30f32 / 65.).atan();
-        }
         camera
     }
 

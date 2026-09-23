@@ -83,6 +83,13 @@ mode retains palette lighting and camera face rejection. See the
 
 
 
+`flight_views.rs` resolves manual-described camera relations from read-only flight,
+combat and wing snapshots. The camera rig owns only presentation state: the
+reference, last player missile, fixed fly-by position and saved Other View.
+Weather, spatial audio, main rendering and the Other View panel use the same
+camera rules. Remote aircraft/missile interior cameras hide the reference body without removing
+it from simulation. [Behavior and fitted constants](spec/flight-views.md).
+
 `flight_ui.rs` owns desktop command dispatch, imported menu navigation, session presentation settings and pause state. `hud.rs` draws the forward-flight HUD from state and source font glyphs, projecting the ladder/path through the renderer's 60-degree camera convention. Simulation remains independent of both. The full-canvas cockpit is transparent art over the world; instrument windows are independent rasters. Menu/focus pauses stop fixed ticks and engine loops, and input transitions clear held controls. Shader zoom is shared by terrain and sky projection; camera previews restore the main camera before drawing.
 
 

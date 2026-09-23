@@ -898,6 +898,8 @@ impl World {
 pub struct Camera {
     /// 0 main, 1 rear mirror, 2 forward panel, 3 other panel, 4 target.
     pub weather_slot: usize,
+    pub hidden_target: Option<u32>,
+    pub hidden_projectile: Option<u32>,
     pub position: [f32; 3],
     pub yaw: f32,
     pub pitch: f32,
@@ -912,6 +914,8 @@ impl Camera {
     pub fn new() -> Self {
         Self {
             weather_slot: 0,
+            hidden_target: None,
+            hidden_projectile: None,
             position: [1_070_000.0, 28_000.0, 590_000.0],
             yaw: 0.3,
             pitch: -0.32,

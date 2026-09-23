@@ -337,7 +337,9 @@ are `button:right`, `button:middle`, `button:back`, `button:forward`, `wheel:up`
 and `wheel:down`; each wheel notch is one press.
 
 UI actions: `pause`, `menu`, `end-flight`, `restart`, `view-front`, `view-back`,
-`view-up`, `view-external`, `center-look`, `cockpit`, `hud`, `zoom-in`, `zoom-out`,
+`view-up`, `view-external`, `view-track`, `view-threat`, `view-wing`,
+`view-target`, `view-target-player`, `view-fly-by`, `view-missile`, `store-view`,
+`view-target-track`, `center-look`, `cockpit`, `hud`, `zoom-in`, `zoom-out`,
 `range-down`, `range-up`, `radar-mode`, `sensor-channel`, `sensor-infrared`,
 `sensor-history`, `page-0` through `page-9`, instrument
 commands below, and `menu-up/down/left/right/accept/back`. `sensor-channel` is an
@@ -865,3 +867,19 @@ the pilot and parachute while the abandoned aircraft falls independently.
 Low or inverted escapes can be fatal. See [ejection behaviour](spec/ejection.md)
 for timing, survival and the AI recovery assessment. Undamaged AI aircraft above
 200 feet AGL never eject automatically, as requested by John on 2026-09-23.
+
+## Flight view shortcuts
+
+F1/F2/F3 remain Forward/Back/Up and F10 remains External. F4 tracks the target;
+F5 faces the nearest inbound missile; F6 faces a wingman; F7 faces the target
+from the player; F8 faces the player from the target; F9 is a fixed fly-by;
+F12 follows the last player missile toward its own target. V saves the current
+camera into Other View and opens Shift+3. F11 still opens keyboard help.
+
+Alt+view selects a target reference and Ctrl+view a last-missile reference.
+These are separately rebindable catalog commands (`key:Alt-F7`, for example).
+Alt+F4 remains protected Exit; `view-target-track` is available without a default
+binding. Unmodified view keys restore the normal reference. Missing subjects
+produce feedback without changing the requested selection's predecessor.
+Automatic views control direction; pan/orbit remains available in F1/F2/F3/F10.
+See [view behavior and fitted rules](spec/flight-views.md).

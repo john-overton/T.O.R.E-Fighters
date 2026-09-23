@@ -289,7 +289,12 @@ impl Combat {
                 let mut vertices = Vec::new();
                 let mut contacts = Vec::new();
                 let extent = model.visual_extent();
-                for target in self.state.targets.iter().filter(|t| t.airborne) {
+                for target in self
+                    .state
+                    .targets
+                    .iter()
+                    .filter(|t| t.airborne && Some(t.id) != camera.hidden_target)
+                {
                     if self
                         .dummies
                         .get(target.id.saturating_sub(1) as usize)
@@ -651,6 +656,14 @@ impl Combat {
         }
         Ok(events)
     }
+    pub fn view_pose(&self, target: &live::Target, presented: bool) -> ([f64; 3], [f64; 3]) {
+        if presented {
+            self.presentation.pose(target, self.ai_poses)
+        } else {
+            (target.position, target.basis.angles())
+        }
+    }
+
     pub fn target_camera(&self, player: &flight::State) -> Option<Camera> {
         let target = self.state.display_target()?;
         let (position, _) = self.presentation.pose(target, self.ai_poses);
@@ -959,7 +972,12 @@ impl Combat {
         // Targets drawn with the ownship airframe, when no dummy models load.
         let mut contacts = Vec::new();
         let extent = h.visual_extent();
-        for t in self.state.targets.iter().filter(|t| t.airborne) {
+        for t in self
+            .state
+            .targets
+            .iter()
+            .filter(|t| t.airborne && Some(t.id) != camera.hidden_target)
+        {
             let mut pose = s.clone();
             pose.wreck = t.wreck.clone();
             pose.crashed = t.hp <= 0;
@@ -1012,6 +1030,9 @@ impl Combat {
         // rendering pass. Loadout/flight state and launched projectiles remain
         // independent of this presentation decision in every camera.
         for p in &self.state.projectiles {
+            if Some(p.id) == camera.hidden_projectile {
+                continue;
+            }
             let gun = live::is_gun(p.weapon(self.state.configuration()));
             if !gun
                 && let Some(shape) = p

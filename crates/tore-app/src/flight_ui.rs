@@ -28,6 +28,8 @@ pub enum Command {
     Restart,
     Toggle(Switch),
     View(u8),
+    ViewRelative(u8, crate::flight_views::Reference),
+    StoreView,
     CenterLook,
     Panel(u8),
     WindowLayout,
@@ -150,7 +152,9 @@ impl FlightUi {
     /// Whether the weapon diagnostic panel is drawn and takes clicks: only
     /// when chosen, with the HUD shown, in the cockpit, back and up views.
     pub fn weapon_diagnostics_shown(&self, flight_view: u8) -> bool {
-        self.weapon_diagnostics && self.hud && matches!(flight_view, 0 | 3 | 4)
+        self.weapon_diagnostics
+            && self.hud
+            && matches!(flight_view, 0 | 3 | 4 | crate::flight_views::TRACK)
     }
     /// On/Off for a working cheat row or the authored diagnostics row; the
     /// selected Damage choice reads On.
@@ -228,6 +232,9 @@ impl FlightUi {
         rows
     }
     pub fn activate(&mut self, label: &str, shortcut: &str) -> Command {
+        if let Some(view) = crate::flight_views::key(shortcut) {
+            return Command::View(view);
+        }
         match label {
             "Resume flight" => {
                 self.menu = false;
@@ -340,10 +347,6 @@ impl FlightUi {
             _ => match shortcut {
                 "A" | "a" => Command::Toggle(Switch::Autopilot),
                 "Ctrl-A" | "Ctrl-a" => Command::Toggle(Switch::WaypointAutopilot),
-                "F1" => Command::View(0),
-                "F2" => Command::View(3),
-                "F3" => Command::View(4),
-                "F10" => Command::View(1),
                 "Shift-0" => Command::Panel(0),
                 s if s.starts_with("Shift-")
                     && s.len() == 7
@@ -465,6 +468,20 @@ impl FlightUi {
             }
             return Command::None;
         }
+        if alt && !ctrl && !shift && key == "F4" {
+            return Command::Exit;
+        }
+        if !(shift || ctrl && alt)
+            && let Some(view) = crate::flight_views::key(key)
+        {
+            return if alt {
+                Command::ViewRelative(view, crate::flight_views::Reference::Target)
+            } else if ctrl {
+                Command::ViewRelative(view, crate::flight_views::Reference::Missile)
+            } else {
+                Command::View(view)
+            };
+        }
         if alt && !ctrl && shift {
             use tore_sim::ai::wing::{PlayerApproach as A, PlayerOrder as O};
             let approach = match key {
@@ -506,9 +523,6 @@ impl FlightUi {
             if let Some(order) = order {
                 return Command::Wing(order);
             }
-            if key.starts_with('F') {
-                return self.unavailable("Target-relative camera (no target)");
-            }
             if matches!(
                 key,
                 "1" | "2"
@@ -545,9 +559,6 @@ impl FlightUi {
                     return Command::InstrumentSelect(n - 1);
                 }
             }
-        }
-        if ctrl && key.starts_with('F') {
-            return self.unavailable("Missile-relative camera (no missile)");
         }
         let shortcut = format!(
             "{}{}{}{}",
@@ -655,7 +666,7 @@ impl FlightUi {
 
             "Enter" | "'" => Command::TargetVisual,
             "Space" => Command::None,
-            "v" => self.unavailable("Store Other View camera"),
+            "v" => Command::StoreView,
             _ => Command::None,
         }
     }
@@ -772,7 +783,11 @@ impl FlightUi {
                     "1..9: 10..90%, 0: full | Shift-B: burner | E: engine".into(),
                     "G: gear | F: flaps | B: brake | H: hook | J: jammer".into(),
                     "Shift-E twice within 2 seconds: eject (release between presses)".into(),
-                    "Shift/Ctrl-arrows: look/orbit | Shift-/: center | F1: cockpit".into(),
+                    "F1 front / F2 back / F3 up / F4 track / F5 inbound missile".into(),
+                    "F6 wing / F7 player-target / F8 target-player / F9 fly-by".into(),
+                    "F10 external / F12 missile-target / V save Other View".into(),
+                    "Alt+view target / Ctrl+view last missile (Alt-F4 exits)".into(),
+                    "Shift/Ctrl-arrows look/orbit / Shift-/ center".into(),
                     "Shift-M: map | M/O: sensor channel | Shift-U: HUD".into(),
                     "Ctrl-Tab/Ctrl-Shift-Tab: instrument | Ctrl-1..6: slot".into(),
                     "Ctrl-Shift-1..4: stock instrument buttons (T.O.R.E)".into(),
@@ -901,6 +916,37 @@ impl FlightUi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retail_views_work_without_menu_data_and_modifiers_do_not_leak() {
+        use crate::flight_views::{self, Reference};
+        let mut ui = FlightUi::default();
+        for key in [
+            "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F12",
+        ] {
+            let view = flight_views::key(key).unwrap();
+            assert_eq!(ui.key(key, false, false, false, &[]), Command::View(view));
+            assert_eq!(ui.activate("Retail view", key), Command::View(view));
+            assert_eq!(
+                ui.key(key, false, true, false, &[]),
+                Command::ViewRelative(view, Reference::Missile)
+            );
+            assert_eq!(
+                ui.key(key, false, false, true, &[]),
+                if key == "F4" {
+                    Command::Exit
+                } else {
+                    Command::ViewRelative(view, Reference::Target)
+                }
+            );
+            assert_eq!(ui.key(key, true, false, false, &[]), Command::None);
+            assert_eq!(ui.key(key, false, true, true, &[]), Command::None);
+        }
+        assert_eq!(ui.key("v", false, false, false, &[]), Command::StoreView);
+        assert_eq!(ui.activate("Current", ""), Command::Panel(1));
+        ui.key("F11", false, false, false, &[]);
+        assert!(ui.help && ui.menu);
+        assert_eq!(ui.key("F7", false, false, false, &[]), Command::None);
+    }
     #[test]
     fn ejection_shortcut_alias_is_shift_only_and_does_not_fire_in_menus() {
         let mut ui = FlightUi::default();

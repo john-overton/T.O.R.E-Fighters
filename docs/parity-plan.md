@@ -40,6 +40,10 @@ escape, original art/audio and fitted AI recovery decisions. Healthy AI aircraft
 above 200 feet AGL cannot auto-eject. Campaign recovery and additional crew remain
 open. See [validation](baselines/ejection.md).
 
+The remaining [retail flight views](spec/flight-views.md) are implemented on
+F4-F9/F12, with reference modifiers and V to save Other View. Camera placement
+and missing-subject behavior remain fitted; [validation](baselines/flight-views.md).
+
 ## The decision this plan follows
 
 **D30, 2026-09-15. Parity by expression of feature.** Recorded from John's

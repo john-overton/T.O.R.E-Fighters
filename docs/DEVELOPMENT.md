@@ -1028,3 +1028,13 @@ fixture with the pilot separated from the aircraft so its original art is visibl
 Pilot tapes accept `eject` as a one-shot command. Two entries within the documented
 confirmation interval exercise the complete headless escape path; replay prints
 phase, pilot survival and position. See [validation](baselines/ejection.md).
+
+## Flight view inspection
+
+`--flight-view 0..11` preserves 0 front, 1 external, 2 oblique, 3 back and 4 up.
+The additions are 5 tracking, 6 inbound threat, 7 wingman, 8 player-to-target,
+9 target-to-player, 10 fly-by and 11 missile-to-target. These are capture indices,
+not the function-key numbers. `--flight-reference player|target|missile` selects
+the reference for capture. Missing subjects return to Forward with feedback.
+Use an isolated profile with `--capture-flight .local/retail-views/view.ppm`.
+The [view validation](baselines/flight-views.md) records fixtures and limitations.

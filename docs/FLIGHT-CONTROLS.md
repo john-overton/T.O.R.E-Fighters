@@ -36,8 +36,15 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | Y | Toggle scope contact history | Draws past observations as dimming dots; see the [sensor component](radar.md) |
 | F1 | Forward cockpit view; reset pan/zoom | FA `FMENUD.MNU` |
 | F2 / F3 | Look back / up | FA menu; authored angles, forward artwork projects out of view naturally |
+| F4 | Track current target within head-look limits | Manual p. 103; fitted limits |
+| F5 / F6 | Player to nearest inbound missile / wingman | Manual p. 103; fitted placement |
+| F7 / F8 | Player to target / target to player | Manual p. 103; fitted placement |
+| F9 | Fixed-position fly-by; press again for another pass | Manual p. 103; fitted placement |
 | F10 | External chase view | FA menu; authored camera placement |
-| Shift + arrows / Ctrl + arrows | Cockpit look-around; exterior orbit | Shift is a convenience alias; Ctrl has USNF manual evidence; FA-specific dispatch unverified |
+| F12 | Last player missile to its own target | Manual p. 103; fitted placement |
+| Alt + view key / Ctrl + view key | Reference selected target / last player missile; Alt+F4 still exits | Manual p. 104; [view rules](spec/flight-views.md) |
+| V | Save current camera into Other View and open its window | Manual p. 89 |
+| Shift + arrows / Ctrl + arrows | Cockpit look-around; exterior orbit | Shift is documented on FA manual p. 104; Ctrl remains a compatibility alias |
 | Shift + / | Recenter look/orbit without changing view or zoom; also recenters a head tracker | Development shortcut |
 | Hold right mouse button and drag | Mouse look, with the same limits as keyboard look | Opinionated agent choice, 2026-09-22; see [input](INPUT.md#mouse-look) |
 | Head tracker (opentrack UDP 4242) | Turns the view on top of keyboard, stick and mouse look, with the same limits | See [head tracking](INPUT.md#head-tracking-and-trackir) |
@@ -86,13 +93,8 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized. This is
 
 | Key | Reserved original action / remaining work |
 | --- | --- |
-| F4 | Track target |
-| F5 / F6 / F7 / F8 | Player-to-missile / wingman / target; target-to-player cameras |
-| F9 / F12 | Fly-by / missile camera |
-| Ctrl + view key / Alt + view key | Missile-relative / target-relative camera |
 | W / Shift-W, N | Waypoint selection, navigation/weapons mode |
 | M | HARM seeker was the reserved action on this key. M now cycles sensor channels, so HARM has no binding until air-to-ground exists |
-| V | Set Other View camera |
 | Shift-J / Shift-K | Jettison fuel / air-to-ground stores |
 | Ctrl-T / Alt-S | Target information / radio silence |
 | Alt-1…9 | Wingman straight/level, break and approach directions |
@@ -121,7 +123,7 @@ The HUD uses imported `HUD11.FNT`; instrument/menu text uses `WIN11.FNT`. It sho
 
 Layout, line symbology, frame scaling, pan, zoom and camera placement are authored. `~F18H.PIC` is uniformly scaled to cover the actual flight aspect ratio, showing more side artwork on wider screens and cropping only what is required to avoid stretching. Mirrors render live rear views every visible frame. ILS appears only with the runway threshold inside the aircraft's full 90-degree
 forward cone and existing 5-NM/4,000-foot airport-relative band. The airport
-service publishes tested localizer and glide deviations, but dedicated ILS HUD art remains open. Native F18 HUD callers, HUDSYM glyph meanings, full cockpit composition, corner-speed/weapon modes and native pixel parity remain open. The HUD remains aligned with the aircraft-forward datum and pans opposite head-look with the cockpit. External views omit it.
+service publishes tested localizer and glide deviations, but dedicated ILS HUD art remains open. Native F18 HUD callers, HUDSYM glyph meanings, full cockpit composition, corner-speed/weapon modes and native pixel parity remain open. The HUD remains aligned with the aircraft-forward datum and pans opposite head-look with the cockpit. External and remotely referenced views omit it; F4 keeps the player cockpit and nose-aligned HUD while the camera tracks the target.
 
 See [recovery details](formats/aircraft.md), [progress](research/progress.md), and [validation](baselines/cockpit-controls.md).
 
@@ -135,7 +137,7 @@ instrument rasters are cached.
 
 ## View and smoothness clarification
 
-F2/F3 replaced the early prototype exterior bindings when the native menu controls were recovered. They look back/up from ownship and omit the exterior mesh. The forward cockpit/HUD overlay translates opposite head-look and fades at its viewing limits; back/up views do not duplicate the forward frame behind or above the pilot. **F10 shows the aircraft from outside**; F1 restores the cockpit. The oblique developer camera remains available through `--flight-view 2` and instrument 3.
+F2/F3 replaced the early prototype exterior bindings when the native menu controls were recovered. They look back/up from ownship and omit the exterior mesh. The forward cockpit/HUD overlay translates opposite head-look and fades at its viewing limits; back/up views do not duplicate the forward frame behind or above the pilot. **F10 shows the aircraft from outside**; F1 restores the cockpit. The oblique developer camera remains available through `--flight-view 2`. Other View (Shift+3) defaults to Back. Press V to save the current view, reference, look and zoom there; it opens automatically and keeps following that relation after you return to F1. Missing subjects leave a requested view unchanged, or return an active main view to F1 with feedback. See [all views and fitted placement](spec/flight-views.md).
 
 The performance pass removes the extra post-render wait, interpolates camera/aircraft/HUD poses between fixed 120 Hz ticks, and keeps live instrument GPU readbacks asynchronous. Controls still drive the same authored flight adapter; this is not a new native flight-model claim. [Measurements and diagnostics](baselines/flight-performance.md).
 
@@ -162,7 +164,7 @@ cockpit artwork and mirrors disappear; HUD and instrument windows remain. At
 translates the aircraft-forward datum with the camera. The finite source art provides no rear/overhead interior.
 Mirrors use their original source silhouettes with live rear views. See [sliding cockpit validation](baselines/cockpit-slide.md).
 
-The local USNF manual's “View Panning & Zooming” section specifies Ctrl+arrows when keyboard flight control is used, and Right Shift plus joystick for joystick panning. The reference app chose Shift+arrows. The supplied FA readme did not resolve the Anthology-specific binding, so Shift remains an explicitly documented convenience alias rather than claimed recovered FA behavior. [Validation](baselines/look-around.md).
+The FA manual, printed page 104, specifies Shift+arrows for keyboard panning and right Shift plus joystick for joystick panning. Ctrl+arrows remains the earlier USNF-compatible alias. [View evidence](spec/flight-views.md), [existing look validation](baselines/look-around.md).
 
 ## Flight response and vertical flight
 
