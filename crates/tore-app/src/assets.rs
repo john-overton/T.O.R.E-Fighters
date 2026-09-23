@@ -149,6 +149,9 @@ impl Assets {
         if resources.get("TORE_AIRPORTS_V1").map(Vec::as_slice) != Some(b"SCENE1") {
             return Err("cache predates airport scene dependencies; re-import media".into());
         }
+        if resources.get("TORE_SPEECH_V1").map(Vec::as_slice) != Some(b"ALL1") {
+            return Err("cache predates the full radio speech set; re-import media".into());
+        }
         for &name in tore_formats::ui::creator::ORDNANCE_SOUNDS {
             let bytes = resources
                 .get(name)
@@ -535,6 +538,7 @@ impl Assets {
         resources.insert("TORE_MUSIC_V1".into(), b"PCM1".to_vec());
         resources.insert("TORE_COMBAT_V1".into(), b"RAW1".to_vec());
         resources.insert("TORE_AIRPORTS_V1".into(), b"SCENE1".to_vec());
+        resources.insert("TORE_SPEECH_V1".into(), b"ALL1".to_vec());
         let assets = Self::decode(&resources)?;
         fs::create_dir_all(destination)?;
         // Generation files keep the previous import usable until the new pack is complete.
