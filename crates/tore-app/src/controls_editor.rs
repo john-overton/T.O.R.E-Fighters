@@ -203,7 +203,7 @@ struct Capture {
     rest: BTreeMap<String, f64>,
 }
 
-type Rect = (i32, i32, i32, i32);
+pub(crate) type Rect = (i32, i32, i32, i32);
 const LEFT: Rect = (6, 24, 150, 412);
 const TAB_TOP: i32 = 42;
 const TAB_HEIGHT: i32 = 34;
@@ -220,19 +220,19 @@ const FOOTER_Y: i32 = 456;
 const FOOTER: [&str; 3] = ["Apply", "Reset device", "Back"];
 const COLUMNS: [(i32, i32); 5] = [(158, 104), (264, 104), (372, 16), (390, 34), (428, 40)];
 
-const INK: [u8; 4] = [20, 39, 65, 255];
-const PAPER: [u8; 4] = [24, 34, 45, 255];
-const PANEL: [u8; 4] = [36, 52, 72, 255];
-const TITLE: [u8; 4] = [240, 233, 194, 255];
-const PALE: [u8; 4] = [201, 210, 222, 255];
+pub(crate) const INK: [u8; 4] = [20, 39, 65, 255];
+pub(crate) const PAPER: [u8; 4] = [24, 34, 45, 255];
+pub(crate) const PANEL: [u8; 4] = [36, 52, 72, 255];
+pub(crate) const TITLE: [u8; 4] = [240, 233, 194, 255];
+pub(crate) const PALE: [u8; 4] = [201, 210, 222, 255];
 const PALE_ALT: [u8; 4] = [190, 200, 214, 255];
 const GROUP: [u8; 4] = [150, 166, 188, 255];
-const FOCUS: [u8; 4] = [62, 86, 118, 255];
-const WHITE: [u8; 4] = [247, 250, 255, 255];
-const MUTED: [u8; 4] = [150, 162, 178, 255];
-const GOOD: [u8; 4] = [120, 214, 140, 255];
-const BUTTON: [u8; 4] = [98, 118, 146, 255];
-const HEADER: [u8; 4] = [44, 64, 88, 255];
+pub(crate) const FOCUS: [u8; 4] = [62, 86, 118, 255];
+pub(crate) const WHITE: [u8; 4] = [247, 250, 255, 255];
+pub(crate) const MUTED: [u8; 4] = [150, 162, 178, 255];
+pub(crate) const GOOD: [u8; 4] = [120, 214, 140, 255];
+pub(crate) const BUTTON: [u8; 4] = [98, 118, 146, 255];
+pub(crate) const HEADER: [u8; 4] = [44, 64, 88, 255];
 
 pub struct Editor {
     pub profile: Profile,
@@ -265,12 +265,12 @@ fn is_hat(control: &tore_input_native::Control) -> bool {
     matches!(control.kind, Kind::Position)
         || (matches!(control.kind, Kind::Axis) && control.min == -1. && control.max == 1.)
 }
-fn text_width(font: &Font, text: &str) -> i32 {
+pub(crate) fn text_width(font: &Font, text: &str) -> i32 {
     text.bytes()
         .map(|c| font.glyphs[c as usize].advance as i32)
         .sum()
 }
-fn fit(font: &Font, text: &str, width: i32) -> String {
+pub(crate) fn fit(font: &Font, text: &str, width: i32) -> String {
     if text_width(font, text) <= width {
         return text.into();
     }
@@ -286,7 +286,7 @@ fn fit(font: &Font, text: &str, width: i32) -> String {
     }
     out + ".."
 }
-fn inside(p: (f64, f64), r: Rect) -> bool {
+pub(crate) fn inside(p: (f64, f64), r: Rect) -> bool {
     p.0 >= r.0 as f64 && p.1 >= r.1 as f64 && p.0 < (r.0 + r.2) as f64 && p.1 < (r.1 + r.3) as f64
 }
 /// Removal order that keeps the remaining binding indices valid.
@@ -295,6 +295,51 @@ fn highest_first(sources: &mut [Source]) {
         Source::Binding(i) => std::cmp::Reverse(*i),
         Source::Stock(_) => std::cmp::Reverse(usize::MAX),
     });
+}
+
+/// Clears the canvas and draws the title strip: the screen name on the left,
+/// where it was opened from on the right. Shared with the Graphics screen.
+pub(crate) fn title_bar(pixels: &mut [u8], font: &Font, title: &str, context: &str) {
+    let full = (0, 0, 640, 480);
+    Canvas(pixels).rect(full, PAPER);
+    Canvas(pixels).rect((0, 0, 640, 20), PANEL);
+    Editor::text(pixels, font, full, TITLE, title, (8, 5));
+    let context = context.to_ascii_uppercase();
+    Editor::text(
+        pixels,
+        font,
+        full,
+        TITLE,
+        &context,
+        (632 - text_width(font, &context), 5),
+    );
+}
+/// The bottom strip: a message line above the navigation hint. Footer
+/// buttons sit to the right of the hint.
+pub(crate) fn status_bar(pixels: &mut [u8], font: &Font, message: &str) {
+    Canvas(pixels).rect((0, 438, 640, 42), PANEL);
+    Editor::text(
+        pixels,
+        font,
+        (8, 440, 624, 14),
+        TITLE,
+        &fit(font, message, 620),
+        (8, 442),
+    );
+    Editor::text(
+        pixels,
+        font,
+        (8, 456, 300, 20),
+        MUTED,
+        "Arrows move, Enter selects, Esc backs out",
+        (8, 461),
+    );
+}
+pub(crate) fn footer_button(pixels: &mut [u8], font: &Font, r: Rect, label: &str, focused: bool) {
+    Canvas(pixels).rect(r, if focused { FOCUS } else { PALE });
+    let color = if focused { WHITE } else { INK };
+    let x = r.0 + (r.2 - text_width(font, label)) / 2;
+    Editor::text(pixels, font, r, color, label, (x, r.1 + 4));
 }
 
 impl Editor {
@@ -1608,7 +1653,7 @@ impl Editor {
 
     // ---- drawing --------------------------------------------------------
 
-    fn text(
+    pub(crate) fn text(
         pixels: &mut [u8],
         font: &Font,
         clip: Rect,
@@ -1629,68 +1674,29 @@ impl Editor {
         Self::text(pixels, font, r, WHITE, label, (x, r.1 + 2));
     }
     pub fn draw(&self, pixels: &mut [u8], font: &Font) {
-        let full = (0, 0, 640, 480);
-        Canvas(pixels).rect(full, PAPER);
-        Canvas(pixels).rect((0, 0, 640, 20), PANEL);
-        Self::text(
+        title_bar(
             pixels,
             font,
-            full,
-            TITLE,
             "INPUT CONFIGURATION   |   Control mappings",
-            (8, 5),
-        );
-        let context = self.context.to_ascii_uppercase();
-        Self::text(
-            pixels,
-            font,
-            full,
-            TITLE,
-            &context,
-            (632 - text_width(font, &context), 5),
+            self.context,
         );
         self.draw_tabs(pixels, font);
         self.draw_settings(pixels, font);
         self.draw_mappings(pixels, font);
-        Canvas(pixels).rect((0, 438, 640, 42), PANEL);
         let message = if self.dirty && self.capture.is_none() {
             format!("{}  (not applied)", self.message)
         } else {
             self.message.clone()
         };
-        Self::text(
-            pixels,
-            font,
-            (8, 440, 624, 14),
-            TITLE,
-            &fit(font, &message, 620),
-            (8, 442),
-        );
-        Self::text(
-            pixels,
-            font,
-            (8, 456, 300, 20),
-            MUTED,
-            "Arrows move, Enter selects, Esc backs out",
-            (8, 461),
-        );
+        status_bar(pixels, font, &message);
         for (i, label) in FOOTER.iter().enumerate() {
-            let r = Self::footer_rect(i);
-            Canvas(pixels).rect(
-                r,
-                if self.focus == Focus::Footer(i) {
-                    FOCUS
-                } else {
-                    PALE
-                },
+            footer_button(
+                pixels,
+                font,
+                Self::footer_rect(i),
+                label,
+                self.focus == Focus::Footer(i),
             );
-            let color = if self.focus == Focus::Footer(i) {
-                WHITE
-            } else {
-                INK
-            };
-            let x = r.0 + (r.2 - text_width(font, label)) / 2;
-            Self::text(pixels, font, r, color, label, (x, r.1 + 4));
         }
     }
     fn draw_tabs(&self, pixels: &mut [u8], font: &Font) {

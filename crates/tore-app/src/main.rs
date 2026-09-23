@@ -28,6 +28,7 @@ mod flight_canvas;
 mod flight_map;
 mod flight_ui;
 mod graphics;
+mod graphics_screen;
 mod hud;
 mod hud_aperture;
 mod input;
@@ -208,6 +209,8 @@ struct App {
     /// The input configuration screen, open over the main menu or the
     /// paused flight menu. One component serves both.
     controls: Option<controls_editor::Editor>,
+    /// The Graphics options screen, open over the main menu.
+    graphics_screen: Option<graphics_screen::Editor>,
     /// Cursor position while the right button drags mouse look.
     mouse_look: Option<(f64, f64)>,
     /// Unused fraction of a smooth-scrolling wheel notch.
@@ -554,6 +557,14 @@ impl App {
             "menu-back" | "menu" => Some("Escape"),
             _ => None,
         };
+        // Controller menu buttons navigate the Graphics screen while it is open.
+        if let Some(editor) = &mut self.graphics_screen {
+            let Some(key) = key else {
+                return Action::None;
+            };
+            let result = editor.key(key, false);
+            return self.graphics_result(result);
+        }
         if self.screen != Screen::Flight {
             return match (self.screen, key) {
                 (Screen::Main, Some(key)) => self.menu.state.key(key, false),
@@ -983,6 +994,42 @@ impl App {
             }
         }
     }
+    fn open_graphics(&mut self, context: &'static str) {
+        // The renderer exists whenever the menu is shown; without one every
+        // level is offered and the renderer clamps on creation.
+        let supported = graphics::AntiAliasing::ALL
+            .map(|level| self.renderer.as_ref().is_none_or(|r| r.supports(level)));
+        let current = self
+            .renderer
+            .as_ref()
+            .map_or(self.graphics, |r| r.graphics());
+        self.graphics_screen = Some(graphics_screen::Editor::new(current, supported, context));
+        self.mouse_look = None;
+    }
+    fn graphics_result(&mut self, result: controls_editor::ResultAction) -> Action {
+        use controls_editor::ResultAction;
+        match result {
+            ResultAction::None => Action::None,
+            ResultAction::Changed => Action::Click,
+            ResultAction::Save => {
+                if let Some(editor) = &mut self.graphics_screen {
+                    // Applied at once; renderers created later start from
+                    // `self.graphics`, and the world rebuild on entering
+                    // flight keeps the renderer's copy.
+                    self.graphics = editor.apply(self.graphics_path.as_deref());
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.set_graphics(self.graphics);
+                    }
+                }
+                Action::Click
+            }
+            ResultAction::Close => {
+                self.graphics_screen = None;
+                self.menu.state.cancel();
+                Action::Click
+            }
+        }
+    }
     fn action(&mut self, event_loop: &ActiveEventLoop, action: Action) {
         if action == Action::Exit {
             self.finished = true;
@@ -991,6 +1038,7 @@ impl App {
         }
         match action {
             Action::Controls => self.open_controls("Main menu"),
+            Action::Graphics => self.open_graphics("Main menu"),
             Action::ReimportMedia => {
                 // The pack on disk is still valid here, so the menu the player
                 // is looking at becomes the locate screen's background.
@@ -1617,6 +1665,9 @@ impl ApplicationHandler for App {
                 if let Some(editor) = &mut self.controls {
                     editor.cancel_capture();
                 }
+                if let Some(editor) = &mut self.graphics_screen {
+                    editor.cancel_press();
+                }
                 self.mouse_look = None;
                 self.pointer = None;
                 self.camera.keys.clear();
@@ -1627,7 +1678,7 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let point = renderer.viewport().point(position.x, position.y);
                 self.pointer = Some((position.x, position.y));
-                if self.controls.is_some() {
+                if self.controls.is_some() || self.graphics_screen.is_some() {
                     return;
                 }
                 match self.screen {
@@ -1674,6 +1725,9 @@ impl ApplicationHandler for App {
                 if let Some(editor) = &mut self.controls {
                     let result = editor.wheel(notches);
                     self.controls_result(result)
+                } else if let Some(editor) = &mut self.graphics_screen {
+                    let result = editor.wheel(notches);
+                    self.graphics_result(result)
                 } else if self.screen == Screen::Flight && !self.flight_ui.frozen() {
                     self.input.mouse_wheel(notches);
                     Action::None
@@ -1703,6 +1757,9 @@ impl ApplicationHandler for App {
                 if let Some(editor) = &mut self.controls {
                     editor.cancel_capture();
                 }
+                if let Some(editor) = &mut self.graphics_screen {
+                    editor.cancel_press();
+                }
                 self.mouse_look = None;
                 self.pointer = None;
                 self.camera.keys.clear();
@@ -1722,6 +1779,18 @@ impl ApplicationHandler for App {
                     _ => controls_editor::ResultAction::None,
                 };
                 self.controls_result(result)
+            }
+            WindowEvent::MouseInput { state, button, .. } if self.graphics_screen.is_some() => {
+                let point = self
+                    .pointer
+                    .and_then(|(x, y)| renderer.viewport().point(x, y));
+                let editor = self.graphics_screen.as_mut().expect("guarded");
+                let result = if button == MouseButton::Left {
+                    editor.pointer(point, state == ElementState::Pressed)
+                } else {
+                    controls_editor::ResultAction::None
+                };
+                self.graphics_result(result)
             }
             WindowEvent::MouseInput {
                 state,
@@ -1879,6 +1948,14 @@ impl ApplicationHandler for App {
                     self.action(event_loop, action);
                     return;
                 }
+                if event.state == ElementState::Pressed
+                    && let Some(editor) = &mut self.graphics_screen
+                {
+                    let result = editor.key(&name, self.modifiers.shift_key());
+                    let action = self.graphics_result(result);
+                    self.action(event_loop, action);
+                    return;
+                }
                 if self.screen == Screen::Flight
                     && !(event.state == ElementState::Pressed
                         && self.flight_ui.map.open
@@ -2011,6 +2088,9 @@ impl ApplicationHandler for App {
                     Screen::Main => {
                         let animating = self.menu.render();
                         if let Some(editor) = &self.controls {
+                            editor.draw(&mut self.menu.pixels, &self.hornet.font);
+                        }
+                        if let Some(editor) = &self.graphics_screen {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
                         }
                         animating
@@ -4127,7 +4207,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, graphics. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -4831,6 +4911,23 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             for p in menu.pixels.chunks_exact(4) {
                 f.write_all(&p[..3])?;
             }
+        } else if snapshot_state == "graphics" {
+            // No GPU here: a fixed support list stands in for the adapter,
+            // with 8x unavailable so the struck-through style is visible.
+            let editor = graphics_screen::Editor::new(
+                graphics::Options::default(),
+                [true, true, true, false],
+                "Main menu",
+            );
+            menu.preview_state("normal")?;
+            menu.render();
+            editor.draw(&mut menu.pixels, &hornet.font);
+            use std::io::Write;
+            let mut f = std::fs::File::create(&path)?;
+            write!(f, "P6\n640 480\n255\n")?;
+            for p in menu.pixels.chunks_exact(4) {
+                f.write_all(&p[..3])?;
+            }
         } else if let Some(tab) = snapshot_state.strip_prefix("controls") {
             // A synthetic Xbox-layout pad with its defaults, so the screen
             // can be inspected without hardware.
@@ -5505,6 +5602,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         capture_terrain,
         reimport: None,
         controls: None,
+        graphics_screen: None,
         mouse_look: None,
         wheel: 0.,
         head_look: [0.; 2],

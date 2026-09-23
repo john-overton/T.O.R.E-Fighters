@@ -34,6 +34,7 @@ pub enum Action {
     Effects(bool),
     ReimportMedia,
     Controls,
+    Graphics,
 }
 pub struct State {
     pub buttons: Vec<Button>,
@@ -189,6 +190,10 @@ impl State {
                 if let Some(bar) = self.open {
                     if bar == 0 && row == 2 {
                         return Action::Exit;
+                    }
+                    if bar == 1 && row == 0 {
+                        self.cancel();
+                        return Action::Graphics;
                     }
                     if bar == 1 && row == 2 {
                         self.cancel();
@@ -958,6 +963,26 @@ mod tests {
         s.pointer(Some((90.0, 110.0)));
         s.down();
         assert_eq!(s.up(), Action::Exit);
+    }
+    #[test]
+    fn pref_graphics_opens_the_graphics_screen() {
+        let mut s = state();
+        // Keyboard: Tab to the Pref bar, open it, first row, Enter.
+        s.key("Tab", false);
+        s.key("Tab", false);
+        s.key("Enter", false);
+        assert_eq!(s.open, Some(1));
+        s.key("ArrowDown", false);
+        assert_eq!(s.key("Enter", false), Action::Graphics);
+        assert_eq!(s.open, None, "the dropdown closes behind the screen");
+        assert!(s.toast.is_none());
+        // Mouse: the same row by click.
+        s.pointer(Some((110.0, 44.0)));
+        s.down();
+        s.up();
+        s.pointer(Some((110.0, 70.0)));
+        s.down();
+        assert_eq!(s.up(), Action::Graphics);
     }
     #[test]
     fn keyboard_skips_disabled_actions_and_toggles_music() {
