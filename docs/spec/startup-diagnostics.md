@@ -45,15 +45,17 @@ unavailable storage falls back to a T.O.R.E directory under the OS temporary
 directory, then stderr. The actual destination or inability to save is reported
 in the failure message. Logs never require writing into the install directory.
 
-Each process owns a uniquely named, stable session file with a lifetime file
-lock. Retain five recent closed session logs; simultaneous processes must not
+Each process owns a uniquely named, stable session file. A separate empty
+`.lock` sidecar holds its lifetime lock, so the log remains readable while the
+game is running on Windows as well as Unix systems. Retain five recent closed session logs; simultaneous processes must not
 overwrite each other's files. A session
 keeps at most 5 MiB of routine records, then records that further routine output
 was suppressed. Fatal reports have a separate 256 KiB file and remain available
 after the routine limit. Retain five closed fatal files independently. Routine
 records are capped at 16 KiB; each fatal reason/backtrace is capped at 32 KiB.
-Retention probes file locks so killed sessions can be reclaimed without
-removing another live process's output. Maintenance lock contention waits at
+Retention probes sidecar locks so killed sessions can be reclaimed without
+removing another live process's output. Unlocked sidecars are removed after
+both their session log and fatal report have been removed. Maintenance lock contention waits at
 most 20 ms before falling back or skipping cleanup. Records are bounded and
 repeated backend warnings
 must not produce unlimited disk use. Startup milestones and fatal reports are

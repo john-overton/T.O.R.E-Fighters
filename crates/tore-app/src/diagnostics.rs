@@ -18,6 +18,8 @@ static PANIC_SUMMARY: Mutex<Option<String>> = Mutex::new(None);
 
 struct Output {
     file: Option<File>,
+    // A separate file keeps Windows byte-range locking away from readable logs.
+    lease: Option<File>,
     bytes: usize,
     suppressed: bool,
 }
@@ -80,10 +82,11 @@ fn maintenance_lock(directory: &Path) -> io::Result<File> {
     }
     Err(io::Error::other("diagnostics maintenance lock unavailable"))
 }
-fn open_session(directory: &Path) -> io::Result<(PathBuf, File)> {
+fn open_session(directory: &Path) -> io::Result<(PathBuf, File, File)> {
     let directory = std::path::absolute(directory)?;
     fs::create_dir_all(&directory)?;
     let _maintenance = maintenance_lock(&directory)?;
+    cleanup_orphan_leases(&directory);
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -93,13 +96,30 @@ fn open_session(directory: &Path) -> io::Result<(PathBuf, File)> {
             "tore-{stamp:039}-{}-{counter}.log",
             std::process::id()
         ));
+        let lease_path = path.with_extension("lock");
+        let lease = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lease_path)
+        {
+            Ok(lease) => lease,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+        if let Err(error) = lease.try_lock() {
+            drop(lease);
+            let _ = fs::remove_file(&lease_path);
+            return Err(io::Error::other(error));
+        }
         match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(file) => {
-                file.try_lock().map_err(io::Error::other)?;
-                return Ok((path, file));
+            Ok(file) => return Ok((path, file, lease)),
+            Err(error) => {
+                drop(lease);
+                let _ = fs::remove_file(&lease_path);
+                if error.kind() != io::ErrorKind::AlreadyExists {
+                    return Err(error);
+                }
             }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
         }
     }
     Err(io::Error::new(
@@ -122,17 +142,17 @@ fn retain(directory: &Path, suffix: &str) {
         })
         .map(|entry| entry.path())
         .filter(|path| {
-            let active = if suffix == ".fatal.txt" {
+            let lease_path = if suffix == ".fatal.txt" {
                 path.with_file_name(
                     path.file_name()
                         .unwrap_or_default()
                         .to_string_lossy()
-                        .replace(".fatal.txt", ".log"),
+                        .replace(".fatal.txt", ".lock"),
                 )
             } else {
-                path.clone()
+                path.with_extension("lock")
             };
-            match OpenOptions::new().write(true).open(active) {
+            match OpenOptions::new().write(true).open(lease_path) {
                 Ok(file) => file.try_lock().is_ok(),
                 Err(error) => error.kind() == io::ErrorKind::NotFound,
             }
@@ -142,6 +162,36 @@ fn retain(directory: &Path, suffix: &str) {
     let excess = files.len().saturating_sub(KEEP);
     for file in files.into_iter().take(excess) {
         let _ = fs::remove_file(file);
+    }
+    cleanup_orphan_leases(directory);
+}
+// Called only while the directory maintenance lock excludes session creation.
+fn cleanup_orphan_leases(directory: &Path) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            continue;
+        }
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with("tore-")
+            || !name.ends_with(".lock")
+            || path.with_extension("log").exists()
+            || path.with_extension("fatal.txt").exists()
+        {
+            continue;
+        }
+        let Ok(file) = OpenOptions::new().write(true).open(&path) else {
+            continue;
+        };
+        if file.try_lock().is_ok() {
+            drop(file);
+            let _ = fs::remove_file(path);
+        }
     }
 }
 impl Logger {
@@ -273,9 +323,9 @@ pub fn init() {
             )),
         }
     }
-    let (path, file) = match opened {
-        Some((path, file)) => (Some(path), Some(file)),
-        None => (None, None),
+    let (path, file, lease) = match opened {
+        Some((path, file, lease)) => (Some(path), Some(file), Some(lease)),
+        None => (None, None, None),
     };
     let fatal_path = path.as_ref().map(|p| p.with_extension("fatal.txt"));
     let logger = Logger {
@@ -284,6 +334,7 @@ pub fn init() {
         fatal_path,
         output: Mutex::new(Output {
             file,
+            lease,
             bytes: 0,
             suppressed: false,
         }),
@@ -353,6 +404,7 @@ pub fn finish_success() {
         logger.write(log::Level::Info, "Session completed successfully");
         if let Ok(mut output) = logger.output.try_lock() {
             output.file.take();
+            output.lease.take();
         }
         if let Some(directory) = logger.path.as_ref().and_then(|path| path.parent())
             && let Ok(_maintenance) = maintenance_lock(directory)
@@ -531,8 +583,8 @@ mod tests {
     #[test]
     fn unique_sessions_and_retention_preserve_active_and_unrelated_files() {
         let dir = directory();
-        let (first, a) = open_session(&dir).unwrap();
-        let (second, b) = open_session(&dir).unwrap();
+        let (first, a, a_lease) = open_session(&dir).unwrap();
+        let (second, b, b_lease) = open_session(&dir).unwrap();
         assert_ne!(first, second);
         for i in 0..8 {
             fs::write(dir.join(format!("tore-{i:02}.log")), "test").unwrap();
@@ -542,19 +594,20 @@ mod tests {
         assert!(first.exists() && second.exists() && dir.join("unrelated.log").exists());
         assert!(!dir.join("tore-02.log").exists());
         assert!(dir.join("tore-03.log").exists());
-        drop((a, b));
+        drop((a, a_lease, b, b_lease));
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn routine_limit_is_bounded_and_does_not_block_reentrant_logging() {
         let dir = directory();
-        let (path, file) = open_session(&dir).unwrap();
+        let (path, file, lease) = open_session(&dir).unwrap();
         let logger = Logger {
             start: Instant::now(),
             path: Some(path.clone()),
             fatal_path: None,
             output: Mutex::new(Output {
                 file: Some(file),
+                lease: Some(lease),
                 bytes: 0,
                 suppressed: false,
             }),
@@ -582,14 +635,78 @@ mod tests {
     #[test]
     fn closed_session_paths_remain_stable_and_live_sessions_survive() {
         let dir = directory();
-        let (closed, file) = open_session(&dir).unwrap();
-        drop(file);
-        let (live, live_file) = open_session(&dir).unwrap();
+        let (closed, file, lease) = open_session(&dir).unwrap();
+        drop((file, lease));
+        let (live, live_file, live_lease) = open_session(&dir).unwrap();
         retain(&dir, ".log");
         assert!(closed.exists());
         assert!(live.exists());
         assert!(closed.is_absolute() && live.is_absolute());
-        drop(live_file);
+        drop((live_file, live_lease));
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn live_logs_are_readable_while_their_sidecars_protect_retention() {
+        let dir = directory();
+        let (path, mut file, lease) = open_session(&dir).unwrap();
+        file.write_all(b"live diagnostic record\n").unwrap();
+        file.flush().unwrap();
+        let fatal = path.with_extension("fatal.txt");
+        fs::write(&fatal, "live fatal report").unwrap();
+        let probe = OpenOptions::new()
+            .write(true)
+            .open(path.with_extension("lock"))
+            .unwrap();
+        assert!(matches!(
+            probe.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        // Sort newer closed sessions after the live one: without the lease check,
+        // retention would remove this readable live log and its fatal report.
+        for index in 0..8 {
+            for extension in ["log", "fatal.txt", "lock"] {
+                fs::write(dir.join(format!("tore-z{index:02}.{extension}")), "closed").unwrap();
+            }
+        }
+        let _maintenance = maintenance_lock(&dir).unwrap();
+        retain(&dir, ".log");
+        retain(&dir, ".fatal.txt");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "live diagnostic record\n"
+        );
+        assert_eq!(fs::read_to_string(&fatal).unwrap(), "live fatal report");
+        assert!(!dir.join("tore-z02.lock").exists());
+        assert!(dir.join("tore-z03.lock").exists());
+        drop((file, lease, probe));
+        retain(&dir, ".log");
+        retain(&dir, ".fatal.txt");
+        assert!(!path.exists());
+        assert!(!fatal.exists());
+        assert!(!path.with_extension("lock").exists());
+        drop(_maintenance);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn orphan_sidecars_are_removed_only_when_their_owner_is_gone() {
+        let dir = directory();
+        let stale = dir.join("tore-stale.lock");
+        fs::write(&stale, "").unwrap();
+        let live_path = dir.join("tore-live.lock");
+        let live = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&live_path)
+            .unwrap();
+        live.try_lock().unwrap();
+        let _maintenance = maintenance_lock(&dir).unwrap();
+        cleanup_orphan_leases(&dir);
+        assert!(!stale.exists());
+        assert!(live_path.exists());
+        drop(live);
+        cleanup_orphan_leases(&dir);
+        assert!(!live_path.exists());
+        drop(_maintenance);
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

@@ -382,6 +382,8 @@ are outside application logging. See [diagnostic evidence](baselines/startup-dia
 ### Startup logs and fatal errors
 
 Every executable launch creates a diagnostic session before loading game data.
+The log can be opened while the game is running, including on Windows; only a
+separate empty sidecar is locked to protect active sessions from cleanup.
 On an interactive failure, Windows shows a native dialog and macOS shows an
 alert with the failed stage and saved-report location. Linux writes stderr and
 files and attempts a desktop notification when `notify-send` is available.

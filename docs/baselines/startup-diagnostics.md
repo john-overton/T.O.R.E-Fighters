@@ -9,7 +9,8 @@
 > <!-- tore-header v2 -->
 
 Implementation mode. Validation on Linux, 2026-09-23, for the changes based on
-`fb5cbd4504a9ee900cf3fa3d58dbd67eb6819df4`. The authored behavior is in the
+`fb5cbd4504a9ee900cf3fa3d58dbd67eb6819df4`, including the Windows
+live-log correction after the initial `42d7757` CI run. The authored behavior is in the
 [startup diagnostics contract](../spec/startup-diagnostics.md); this is not
 retail parity evidence. Local artifacts and raw logs stay under ignored
 `.local/startup-diagnostics-validation/` and `dist/`.
@@ -60,14 +61,22 @@ passed startup checks, including deliberate errors and panic reports. Source,
 binary, staged and package asset guards passed. Matching release debug data is
 enabled; the workflow retains platform symbols as separate artifacts.
 
+The first [GitHub package run](https://github.com/john-overton/T.O.R.E-Fighters/actions/runs/35910079610)
+passed Linux and Apple Silicon builds and package checks. Windows reached the
+logger tests and exposed error 33 when another handle read a log held under a
+Windows byte-range lock. Session ownership now uses a separate sidecar, with a
+regression that reads a live log and verifies retention still protects it.
+This corrects a portability issue that Linux file-lock behavior did not expose.
+The Intel Mac and corrected Windows native runs were still pending when this
+fix was committed.
+
 ## Remaining acceptance
 
 Windows and macOS execution is unavailable on this Linux host. Native Windows
 MessageBox and macOS AppKit alert behavior, MSI installation/upgrade/uninstall,
 readable Event Viewer entries, both macOS DMGs and Finder launches, and Windows
-shortcut/direct launches must be checked on those systems. CI is configured to
-validate native builds and package payloads, but no remote workflow was run in
-this session. Linux desktop-menu installation and AppImage mounting on another
+shortcut/direct launches must be checked on those systems. CI validates native builds and package payloads; follow-up native results
+are available through the package run associated with the tested source commit. Linux desktop-menu installation and AppImage mounting on another
 machine are also not proven by extracting and launching the payload here.
 
 OS launch blocking, missing loader dependencies and native driver crashes are
