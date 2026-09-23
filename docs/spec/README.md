@@ -64,5 +64,7 @@ each aircraft's instrument window frame, its colours and its geometry.
 [Mission debrief](debrief.md) specifies the five result pages, their counting
 rules and the Quick Mission outcome. [Ejection](ejection.md) specifies player confirmation, pilot survival and the
 fitted AI recovery assessment, including the requested safety and chance rules.
+[Flight music](flight-music.md) specifies which recorded score plays during
+flight, its rank and when a change is immediate or waits for a phrase boundary.
 Supporting research lives in [`../formats/`](../formats/), measured evidence in
 [`../baselines/`](../baselines/), and frozen archives in [`../research/`](../research/).
