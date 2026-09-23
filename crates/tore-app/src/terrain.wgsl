@@ -220,6 +220,73 @@ fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec
  if sum.a<=0.0 { return vec4<f32>(0.0); }
  return vec4<f32>(sum.rgb/sum.a,sum.a);
 }
+// Opinionated terrain filtering (graphics option, scene.quality.y). Palette
+// indices cannot be averaged and there are no mipmaps, so each coarser level is
+// a virtual lattice: one texel per 2^level square block, at a fixed hashed
+// position inside that block. Its index resolves through the live palette and
+// remaps like any texel, and only resolved colors are blended. The lattice is
+// fixed to the texture, so moving the camera changes blend weights smoothly
+// instead of picking new texels each frame.
+const FILTER_PROBES:i32=4;
+fn lattice_hash(v:u32)->u32 {
+ let s=v*747796405u+2891336453u;
+ let w=((s>>((s>>28u)+4u))^s)*277803737u;
+ return (w>>22u)^w;
+}
+fn lattice_texel(block:vec2<i32>,level:i32,layer:i32,sun_passes:i32,core:i32,remaps:vec2<f32>)->vec4<f32>{
+ let blocks=vec2<i32>(textureDimensions(tiles))>>vec2<u32>(u32(level));
+ let at=clamp(block,vec2<i32>(0),blocks-vec2<i32>(1));
+ if level==0 {return texel(at,layer,0,sun_passes,core,remaps);}
+ let h=lattice_hash(u32(at.x)|(u32(at.y)<<9u)|(u32(level)<<18u));
+ let mask=(1u<<u32(level))-1u;
+ let offset=vec2<i32>(vec2<u32>(h&mask,(h>>9u)&mask));
+ return texel((at<<vec2<u32>(u32(level)))+offset,layer,0,sun_passes,core,remaps);
+}
+// Premultiplied bilinear blend of four lattice texels around p (base texels).
+fn lattice_bilinear(p:vec2<f32>,level:i32,layer:i32,sun_passes:i32,core:i32,remaps:vec2<f32>)->vec4<f32>{
+ let q=p*exp2(-f32(level))-vec2<f32>(0.5);
+ let base=vec2<i32>(floor(q));let f=q-floor(q);
+ var sum=vec4<f32>(0.0);
+ for(var j=0;j<2;j++){
+  for(var i=0;i<2;i++){
+   let c=lattice_texel(base+vec2<i32>(i,j),level,layer,sun_passes,core,remaps);
+   let w=select(1.0-f.x,f.x,i==1)*select(1.0-f.y,f.y,j==1);
+   sum+=vec4<f32>(c.rgb*c.a,c.a)*w;
+  }
+ }
+ return sum;
+}
+// grad holds dpdx(uv) and dpdy(uv), taken by the caller in uniform control
+// flow. The pixel footprint ellipse gives a major and a minor axis in texels.
+// Up to FILTER_PROBES probes run along the major axis; each blends two
+// adjacent lattice levels sized to the remaining footprint. Footprints of one
+// texel or less take the unfiltered path unchanged.
+fn filtered_tile(uv:vec2<f32>,grad:vec4<f32>,layer:i32,sun_passes:i32,core:i32,remaps:vec2<f32>)->vec4<f32>{
+ let size=vec2<f32>(textureDimensions(tiles));
+ let dx=grad.xy*size;let dy=grad.zw*size;
+ let m11=dx.x*dx.x+dy.x*dy.x;let m22=dx.y*dx.y+dy.y*dy.y;let m12=dx.x*dx.y+dy.x*dy.y;
+ let mid=0.5*(m11+m22);let spread=sqrt(0.25*(m11-m22)*(m11-m22)+m12*m12);
+ let major=sqrt(mid+spread);let minor=sqrt(max(mid-spread,0.0));
+ if scene.quality.y<=0.5 || major<=1.0 {return sample_tile(uv,layer,0,sun_passes,core,remaps);}
+ var axis=vec2<f32>(1.0,0.0);
+ if spread>0.000001 {axis=normalize(vec2<f32>(m12,mid+spread-m11));}
+ if abs(m12)<=0.000001 {axis=select(vec2<f32>(0.0,1.0),vec2<f32>(1.0,0.0),m11>=m22);}
+ let probes=clamp(i32(ceil(major/max(minor,1.0))),1,FILTER_PROBES);
+ let footprint=max(minor,major/f32(probes));
+ let top=i32(log2(size.x));
+ let lod=clamp(log2(max(footprint,1.0)),0.0,f32(top));
+ let fine=min(i32(floor(lod)),top);let coarse=min(fine+1,top);let t=lod-f32(fine);
+ let center=uv*size;
+ var sum=vec4<f32>(0.0);
+ for(var n=0;n<probes;n++){
+  let p=center+axis*major*((f32(n)+0.5)/f32(probes)-0.5);
+  sum+=lattice_bilinear(p,fine,layer,sun_passes,core,remaps)*(1.0-t);
+  if t>0.0 {sum+=lattice_bilinear(p,coarse,layer,sun_passes,core,remaps)*t;}
+ }
+ sum/=f32(probes);
+ if sum.a<=0.0 {return vec4<f32>(0.0);}
+ return vec4<f32>(sum.rgb/sum.a,sum.a);
+}
 fn world_vertex(position:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec3<f32>,index:f32)->VertexOut {
  let p=position-scene.eye.xyz;
  let z=dot(p,scene.forward.xyz);
@@ -246,12 +313,14 @@ fn world_vertex(position:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec3<f32>,index:
 // Terrain cutouts expose the already rendered ocean/horizon, never the T2
 // land color. Keep this separate from aircraft's base-color texture blending.
 @fragment fn terrain_fragment(in:VertexOut)->@location(0) vec4<f32>{
+ // Derivatives must be taken before the untextured early return.
+ let grad=vec4<f32>(dpdx(in.uv),dpdy(in.uv));
  let receiver=surface_normal(in.direction);
  let normal=select(receiver,normalize(in.terrain_normal),dot(in.terrain_normal,in.terrain_normal)>0.1 && smooth_weather());
  if in.layer<0.0 {return scenery(aerial_perspective(surface_color(in.color,in.direction,normal,false,receiver),in.direction,in.altitude));}
  var remaps=vec2<f32>(-1.0);
  if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
- let tex=sample_tile(in.uv,i32(in.layer),0,-1,in.light_row,remaps);
+ let tex=filtered_tile(in.uv,grad,i32(in.layer),-1,in.light_row,remaps);
  // Fitted bilinear coverage boundary; discarded water writes no depth.
  if tex.a<0.5 {discard;}
  return scenery(aerial_perspective(surface_color(tex.rgb,in.direction,normal,false,receiver),in.direction,in.altitude));
