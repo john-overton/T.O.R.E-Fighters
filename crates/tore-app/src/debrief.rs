@@ -1,14 +1,12 @@
 //! Post-mission debrief over the retail clipboard art. The BRIEFSCR.DLG
 //! controls, page text fonts and mission text are imported; page layout is
 //! fitted to John's retail screenshots. Spec: docs/spec/debrief.md.
+use crate::rocker::Rocker;
 use crate::{
     AppResult,
     menu::{Action, Canvas, HEIGHT, Sprite, WIDTH, text_width},
 };
-use std::{
-    collections::BTreeMap,
-    time::{Duration, Instant},
-};
+use std::{collections::BTreeMap, time::Instant};
 use tore_formats::{Pic, mission_text::MissionText};
 use tore_sim::combat::ledger::{Kill, Ledger, ShotKind, Tally};
 
@@ -25,10 +23,6 @@ pub const ART: &[&str] = &[
     "BODYFONT.PIC",
     "BOLDFONT.PIC",
     "HEADFONT.PIC",
-    "ROCKER01.PIC",
-    "ROCKER02.PIC",
-    "ROCKER03.PIC",
-    "ROCKER04.PIC",
 ];
 pub const DATA: &[&str] = &["BRIEFSCR.DLG", "QUICK.MT", "&ROCKUP.11K", "&ROCKDN.11K"];
 
@@ -571,61 +565,6 @@ pub fn pages(report: &Report, text: &MissionText) -> Vec<Vec<String>> {
     vec![first, outcome, kills, hits, enemy]
 }
 
-/// The PREV/NEXT rocker's five ROCKER0n frames: 2 is level, 0 and 4 hold the
-/// top (previous) and bottom (next) halves down. Retail steps one frame at a
-/// time toward the pose.
-#[derive(Clone, Copy, Debug)]
-struct Rocker {
-    frame: usize,
-    target: usize,
-    /// The mouse still holds the rocker down.
-    held: bool,
-    next: Instant,
-}
-impl Rocker {
-    const LEVEL: usize = 2;
-    /// Fitted: retail waits one screen update per frame.
-    const FRAME: Duration = Duration::from_millis(40);
-    fn new() -> Self {
-        Self {
-            frame: Self::LEVEL,
-            target: Self::LEVEL,
-            held: false,
-            next: Instant::now(),
-        }
-    }
-    fn push(&mut self, forward: bool, held: bool, now: Instant) {
-        if self.frame == self.target {
-            self.next = now + Self::FRAME;
-        }
-        self.target = if forward { 4 } else { 0 };
-        self.held = held;
-    }
-    fn release(&mut self, now: Instant) {
-        if self.frame == self.target {
-            self.next = now + Self::FRAME;
-        }
-        self.held = false;
-        self.target = Self::LEVEL;
-    }
-    /// Steps toward the pose; a push that is not held springs back once it
-    /// lands. Returns true while still moving.
-    fn advance(&mut self, now: Instant) -> bool {
-        while self.frame != self.target && now >= self.next {
-            self.frame = if self.frame < self.target {
-                self.frame + 1
-            } else {
-                self.frame - 1
-            };
-            self.next += Self::FRAME;
-            if self.frame == self.target && !self.held && self.target != Self::LEVEL {
-                self.target = Self::LEVEL;
-            }
-        }
-        self.frame != self.target
-    }
-}
-
 pub struct Debrief {
     pages: Vec<Vec<String>>,
     pub page: usize,
@@ -668,6 +607,10 @@ impl Debrief {
         let mut sprites = BTreeMap::new();
         for name in ART.iter().copied().chain([
             "ROCKER00.PIC",
+            "ROCKER01.PIC",
+            "ROCKER02.PIC",
+            "ROCKER03.PIC",
+            "ROCKER04.PIC",
             "MENUFONT.PIC",
             "ACTDFLT.PIC",
             "ACTDFT0L.PIC",
@@ -761,7 +704,7 @@ impl Debrief {
     /// `Some(action)` while the debrief stays open; `None` once OK closes it.
     pub fn up(&mut self) -> Option<Action> {
         let pressed = self.pressed.take();
-        if matches!(pressed, Some(PREVIOUS | NEXT)) && self.rocker.held {
+        if matches!(pressed, Some(PREVIOUS | NEXT)) && self.rocker.held() {
             self.rocker.release(Instant::now());
             return Some(Action::RockerUp);
         }
@@ -792,7 +735,7 @@ impl Debrief {
         self.right_pressed = false;
         self.hover = None;
         self.help = false;
-        if self.rocker.held {
+        if self.rocker.held() {
             self.rocker.release(Instant::now());
         }
     }
@@ -872,7 +815,7 @@ impl Debrief {
         let panel = &s["PANELFNT.PIC"];
         c.text(panel, "PREV", ox + 20, oy + 41, None);
         c.text(panel, "NEXT", ox + 20, oy + 63, None);
-        let rocker = &s[&format!("ROCKER0{}.PIC", self.rocker.frame)];
+        let rocker = &s[&self.rocker.sprite()];
         c.blit(rocker, (ox + 48, oy + 39), 0, rocker.width, 1.);
         self.controls.extend([
             (PREVIOUS, (ox + 48, oy + 39, 18, 16)),
@@ -1146,33 +1089,6 @@ mod tests {
             ..ending(&ledger)
         });
         assert!(alone.wingman.is_none());
-    }
-    #[test]
-    fn rocker_tilts_one_frame_at_a_time_holds_and_springs_back() {
-        let start = Instant::now();
-        let at = |frames: u32| start + Rocker::FRAME * frames;
-        let mut rocker = Rocker::new();
-        assert_eq!(rocker.frame, Rocker::LEVEL);
-        // Held on the bottom half: 3, then 4, then it stays down.
-        rocker.push(true, true, start);
-        assert!(rocker.advance(at(1)));
-        assert_eq!(rocker.frame, 3);
-        assert!(!rocker.advance(at(2)));
-        assert_eq!(rocker.frame, 4);
-        assert!(!rocker.advance(at(9)));
-        assert_eq!(rocker.frame, 4);
-        // Released: back through 3 to level.
-        rocker.release(at(9));
-        rocker.advance(at(10));
-        assert_eq!(rocker.frame, 3);
-        assert!(!rocker.advance(at(11)));
-        assert_eq!(rocker.frame, Rocker::LEVEL);
-        // A key or clipboard click taps the top half and springs back.
-        rocker.push(false, false, at(20));
-        assert!(rocker.advance(at(22)));
-        assert_eq!(rocker.frame, 0);
-        assert!(!rocker.advance(at(24)));
-        assert_eq!(rocker.frame, Rocker::LEVEL);
     }
     #[test]
     fn kill_rows_take_the_first_matching_class_bit() {

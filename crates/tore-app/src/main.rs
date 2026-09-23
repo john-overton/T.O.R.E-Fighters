@@ -52,6 +52,7 @@ mod preferences;
 mod quick_mission;
 mod rafale_animation;
 mod renderer;
+mod rocker;
 mod roster_animation;
 mod scope;
 mod sim_renderer;

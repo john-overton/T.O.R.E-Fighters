@@ -54,6 +54,8 @@ pub struct QuickMission {
     pub hover: Option<usize>,
     pressed: Option<usize>,
     right_pressed: Option<usize>,
+    /// The selector's PREV/NEXT page rocker.
+    rocker: crate::rocker::Rocker,
     pub focus: usize,
     pub selection: usize,
     pub aircraft_selection: usize,
@@ -162,6 +164,7 @@ impl QuickMission {
             hover: None,
             pressed: None,
             right_pressed: None,
+            rocker: Default::default(),
             focus: 6,
             selection: 0,
             aircraft_selection: selected,
@@ -578,11 +581,20 @@ impl QuickMission {
             return d.down();
         }
         if let Some(o) = self.ordnance.as_mut().filter(|o| o.visible) {
-            o.down();
-            return Action::None;
+            return o.down();
         }
         self.pressed = self.hover;
-        Action::None
+        // The selector's rocker pages on press and tilts while held.
+        match self.hover.filter(|_| self.selector.is_some()) {
+            Some(id @ (UP | DOWN)) => self.rock(id, true),
+            _ => Action::None,
+        }
+    }
+    fn rock(&mut self, id: usize, held: bool) -> Action {
+        self.rocker
+            .push(id == DOWN, held, std::time::Instant::now());
+        self.activate(id);
+        Action::RockerDown
     }
     pub fn up(&mut self) -> Action {
         if let Some(d) = &mut self.debrief {
@@ -592,6 +604,10 @@ impl QuickMission {
             return o.up();
         }
         let p = self.pressed.take();
+        if matches!(p, Some(UP | DOWN)) && self.rocker.held() {
+            self.rocker.release(std::time::Instant::now());
+            return Action::RockerUp;
+        }
         if let Some(i) = p.filter(|p| Some(*p) == self.hover) {
             self.activate(i)
         } else {
@@ -679,6 +695,9 @@ impl QuickMission {
         }
         self.pressed = None;
         self.right_pressed = None;
+        if self.rocker.held() {
+            self.rocker.release(std::time::Instant::now());
+        }
         self.hover = None;
         self.selector = None;
         self.help = false;
@@ -792,8 +811,17 @@ impl QuickMission {
                 "ArrowUp" => self.cursor = (self.cursor + n - 1) % n,
                 "Home" => self.cursor = 0,
                 "End" => self.cursor = n - 1,
-                "PageDown" => self.cursor = (self.cursor + ROWS).min(n - 1),
-                "PageUp" => self.cursor = self.cursor.saturating_sub(ROWS),
+                "PageDown" | "PageUp" => {
+                    let down = key == "PageDown";
+                    self.cursor = if down {
+                        (self.cursor + ROWS).min(n - 1)
+                    } else {
+                        self.cursor.saturating_sub(ROWS)
+                    };
+                    self.scroll = self.cursor / ROWS * ROWS;
+                    self.rocker.push(down, false, std::time::Instant::now());
+                    return Action::RockerDown;
+                }
                 "Enter" => return self.activate(POP_OK),
                 _ => {}
             }
@@ -833,12 +861,12 @@ impl QuickMission {
         sprites: &BTreeMap<String, Sprite>,
         _world: &World,
     ) -> bool {
+        let animating = self.rocker.advance(std::time::Instant::now());
         if let Some(d) = &mut self.debrief {
             return d.render(pixels);
         }
         if let Some(o) = self.ordnance.as_mut().filter(|o| o.visible) {
-            o.render(pixels);
-            return false;
+            return o.render(pixels);
         }
         pixels.copy_from_slice(&sprites["QUIKMIS3.PIC"].rgba);
         self.controls.clear();
@@ -1067,7 +1095,7 @@ impl QuickMission {
             );
             c.text(font, "PREV", 380, 394, None);
             c.text(font, "NEXT", 380, 417, None);
-            let rocker = &sprites["ROCKER00.PIC"];
+            let rocker = &sprites[&self.rocker.sprite()];
             c.blit(rocker, (410, 393), 0, rocker.width, 1.);
             self.controls
                 .extend([(UP, (410, 393, 18, 17)), (DOWN, (410, 410, 18, 17))]);
@@ -1077,7 +1105,7 @@ impl QuickMission {
             self.button(&mut c, sprites, POP_OK, "OK", (217, 437, 85, 24));
             self.button(&mut c, sprites, POP_CANCEL, "Cancel", (312, 437, 85, 24));
         }
-        false
+        animating
     }
     fn line(
         &mut self,

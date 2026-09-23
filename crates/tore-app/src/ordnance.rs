@@ -1,10 +1,12 @@
 //! Retail art and recovered card/control geometry over a transactional loadout.
+use crate::rocker::Rocker;
 use crate::{
     AppResult,
     menu::{Action, Canvas, Sprite, text_width},
     quick_mission::notice,
 };
 use std::collections::BTreeMap;
+use std::time::Instant;
 use tore_formats::{Pic, weapons::Weapon};
 use tore_sim::{combat::loadout::Loadout, models::FlightModel};
 type Rect = (i32, i32, i32, i32);
@@ -36,6 +38,8 @@ pub struct Ordnance {
     hover: Option<usize>,
     pressed: Option<usize>,
     right_pressed: Option<usize>,
+    /// Page rocker, then fuel rocker.
+    rockers: [Rocker; 2],
     pointer: Option<(f64, f64)>,
     drag: Option<Drag>,
     controls: Vec<(usize, Rect)>,
@@ -59,6 +63,7 @@ impl Ordnance {
                 && (n.starts_with('$')
                     || n.starts_with("ACTION0")
                     || n.starts_with("ACTDFT0")
+                    || n.starts_with("ROCKER0")
                     || [
                         "ORD_AIR3.PIC",
                         "DIAL00.PIC",
@@ -68,7 +73,6 @@ impl Ordnance {
                         "LIGHTON.PIC",
                         "LIGHTOFF.PIC",
                         "ACTDFLT.PIC",
-                        "ROCKER00.PIC",
                         "PANELFNT.PIC",
                         "ARMFONT.PIC",
                         "SMLFONT.PIC",
@@ -132,6 +136,7 @@ impl Ordnance {
             hover: None,
             pressed: None,
             right_pressed: None,
+            rockers: Default::default(),
             pointer: None,
             drag: None,
             controls: vec![],
@@ -186,9 +191,14 @@ impl Ordnance {
     pub fn dragging(&self) -> bool {
         self.drag.as_ref().is_some_and(|drag| drag.moved)
     }
-    pub fn down(&mut self) {
+    /// The page (1, 2) and fuel (5, 6) rockers act on press and tilt while
+    /// held, as retail rockers do.
+    pub fn down(&mut self) -> Action {
         self.right_pressed = None;
         self.pressed = self.hover;
+        if let Some(id @ (1 | 2 | 5 | 6)) = self.hover.filter(|_| !self.menu) {
+            return self.rock(id, true);
+        }
         let source = match self.hover {
             Some(id @ 100..=107) => self.card_index(id).map(DragSource::Catalog),
             Some(id @ 200..=231) if self.loadout.quantities[id - 200] > 0 => {
@@ -201,10 +211,25 @@ impl Ordnance {
             origin,
             moved: false,
         });
+        Action::None
+    }
+    /// Tilts rocker control `id` and applies it. Page turns sound the rocker;
+    /// fuel keeps its own cue.
+    fn rock(&mut self, id: usize, held: bool) -> Action {
+        self.rockers[usize::from(id > 2)].push(matches!(id, 2 | 6), held, Instant::now());
+        match self.activate(id) {
+            Action::Click => Action::RockerDown,
+            action => action,
+        }
     }
     pub fn cancel(&mut self) {
         self.pressed = None;
         self.right_pressed = None;
+        for rocker in &mut self.rockers {
+            if rocker.held() {
+                rocker.release(Instant::now());
+            }
+        }
         self.hover = None;
         self.pointer = None;
         self.drag = None;
@@ -212,6 +237,13 @@ impl Ordnance {
     }
     pub fn up(&mut self) -> Action {
         let p = self.pressed.take();
+        if let Some(id @ (1 | 2 | 5 | 6)) = p {
+            let rocker = &mut self.rockers[usize::from(id > 2)];
+            if rocker.held() {
+                rocker.release(Instant::now());
+                return Action::RockerUp;
+            }
+        }
         if let Some(drag) = self.drag.take().filter(|drag| drag.moved) {
             self.message = None;
             if let Some(target) = self.hover.filter(|id| (200..232).contains(id)) {
@@ -434,8 +466,8 @@ impl Ordnance {
             "Enter" => self.activate(7),
             "+" | "=" => self.activate(9),
             "-" => self.activate(10),
-            "ArrowRight" => self.activate(2),
-            "ArrowLeft" => self.activate(1),
+            "ArrowRight" => self.rock(2, false),
+            "ArrowLeft" => self.rock(1, false),
             "a" | "A" => self.activate(3),
             "s" | "S" => self.activate(4),
             "Tab" => {
@@ -458,7 +490,13 @@ impl Ordnance {
             _ => {}
         }
     }
-    pub fn render(&mut self, pixels: &mut [u8]) {
+    /// Draws the screen; true while a rocker is still moving.
+    pub fn render(&mut self, pixels: &mut [u8]) -> bool {
+        let now = Instant::now();
+        let animating = self
+            .rockers
+            .iter_mut()
+            .fold(false, |moving, rocker| rocker.advance(now) | moving);
         pixels.copy_from_slice(&self.sprites["ORD_AIR3.PIC"].rgba);
         self.controls.clear();
         self.controls.push((CATALOG_AREA, CATALOG));
@@ -577,9 +615,10 @@ impl Ordnance {
             &format!("{} of {}", page + 1, entries.len().div_ceil(8).max(1)),
             (248, 388, 48, 15),
         );
-        let rocker = &self.sprites["ROCKER00.PIC"];
-        c.blit(rocker, (260, 408), 0, rocker.width, 1.);
-        c.blit(rocker, (547, 356), 0, rocker.width, 1.);
+        for (rocker, at) in self.rockers.iter().zip([(260, 408), (547, 356)]) {
+            let sprite = &self.sprites[&rocker.sprite()];
+            c.blit(sprite, at, 0, sprite.width, 1.);
+        }
         self.controls.extend([
             (1, (260, 408, 18, 17)),
             (2, (260, 425, 18, 17)),
@@ -658,6 +697,7 @@ impl Ordnance {
                 );
             }
         }
+        animating
     }
 }
 fn grouped(value: f64) -> String {
@@ -1165,6 +1205,10 @@ mod tests {
         }
         for name in [
             "ROCKER00.PIC",
+            "ROCKER01.PIC",
+            "ROCKER02.PIC",
+            "ROCKER03.PIC",
+            "ROCKER04.PIC",
             "DIAL11.PIC",
             "DIAL13.PIC",
             "LIGHTON.PIC",
@@ -1211,6 +1255,7 @@ mod tests {
             hover: None,
             pressed: None,
             right_pressed: None,
+            rockers: Default::default(),
             pointer: None,
             drag: None,
             controls: vec![],
@@ -1423,5 +1468,24 @@ mod tests {
         assert_eq!(ui.activate(6), Action::OrdnanceFuel);
         assert_eq!(ui.activate(6), Action::None);
         assert_eq!(ui.activate(5), Action::OrdnanceFuel);
+    }
+    #[test]
+    fn rockers_act_on_press_and_spring_back_on_release() {
+        let mut ui = fixture();
+        // The fuel rocker's bottom half removes fuel as soon as it is pressed.
+        let fuel = ui.loadout.fuel_lbs;
+        ui.pointer(Some((550., 380.)));
+        assert_eq!(ui.down(), Action::OrdnanceFuel);
+        assert!(ui.loadout.fuel_lbs < fuel);
+        assert!(ui.rockers[1].held());
+        assert_eq!(ui.up(), Action::RockerUp);
+        assert!(!ui.rockers[1].held());
+        assert!(ui.loadout.fuel_lbs < fuel);
+        // The page rocker sounds its own press, even at the first page.
+        ui.pointer(Some((265., 410.)));
+        assert_eq!(ui.down(), Action::RockerDown);
+        ui.pointer(Some((300., 300.)));
+        assert_eq!(ui.up(), Action::RockerUp);
+        assert_eq!(ui.pages, [0, 0]);
     }
 }

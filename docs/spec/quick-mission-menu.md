@@ -38,7 +38,8 @@ right-click retains its existing station-quantity decrement.
 The selector shows 15 rows per page, black inset wells, blue diagonal markers,
 a gold selected marker, a page count, a Prev/Next rocker, and beveled OK/Cancel
 buttons. Arrow keys move selection, Home/End reach the ends, and Page Up/Down
-move 15 entries. Pointer paging preserves the pending selection until another
+move 15 entries. The rocker animates and pages on press like the
+[debrief rocker](debrief.md#presentation); Page Up/Down tap it. Pointer paging preserves the pending selection until another
 row is chosen. All 15 black wells remain visible on every page. Unused wells contain no marker
 or label and have no hit region; the last page may contain fewer than 15 entries.
 

@@ -32,6 +32,12 @@ the 109 by 23 pixel outline in both directions; original 105 by 19 pixel images
 have two pixels of inset on each edge, including the outline. These measured
 background bounds guide fitted placement, not a retail interaction claim.
 
+The page and fuel rockers use the retail rocker frames and behaviour of the
+[debrief rocker](debrief.md#presentation): level at rest, tilted while pressed,
+acting on press and springing back on release. Page turns sound the rocker;
+fuel changes keep their fuel cue. Arrow keys tap the page rocker. Requested by
+John on 2026-09-23.
+
 The category dial uses DIAL13 for air-to-air and DIAL11 for air-to-surface,
 at (148,393), pointing toward the corresponding category lamp. LIGHTON and LIGHTOFF overlay both background lamps at (115,394) and (115,422),
 so active and inactive indicators both use the original blue outer rim. These images were visually inspected; the angle choices

@@ -57,6 +57,7 @@ Quick Mission (medium confidence, see the research).
 | Rocker hit halves | (96,402,18,16) previous, (96,418,18,16) next | retail |
 | Rocker frames | Level is ROCKER02. Pressing the top half steps 01 then 00 and holds; the bottom half steps 03 then 04. Releasing steps back to 02. The page turns on press | retail |
 | Rocker frame time | 40 ms per frame | fitted; retail waits one screen update |
+| Other menus | The Quick Mission selector and ordnance page and fuel rockers share this rocker. Requested by John on 2026-09-23 | retail frames |
 | Keys and clipboard clicks | Tap the rocker: it steps to the held frame and straight back | agent decision |
 | Clipboard click area | The brown board: (248,66,333,404) on DEBSCV/DEBSCU, (278,66,303,404) on DEBSCR/DEBSC3; the panel controls stay on top | fitted |
 | Page fonts | BODYFONT body, BOLDFONT for `.bold`, HEADFONT for `.header`; imported colours on the background palette | retail fonts, face match to screenshots |
