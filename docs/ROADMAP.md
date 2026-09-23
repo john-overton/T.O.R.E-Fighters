@@ -601,9 +601,12 @@ Missing evidence (research, in priority order):
    event handler, then SAM, AAA, vehicle, ship and carrier contracts (B30).
 4. Wing remainder: approach steering point, mode 9 negative-band entry,
    loose-versus-medium self-engagement, 20 second target deadline expiry,
-   bug-out helpers, reply voicing (B43, B46).
-5. Recovery and survival: takeoff and landing sequences, leader and singleton
-   return to base, damage-triggered disengagement, attack-state producers (B48).
+   reply voicing (B43, B46).
+5. Recovery and survival: damage-triggered disengagement and attack-state
+   producers (B48); vertical, STOVL and carrier airfield variants. Takeoff and
+   landing sequences and leader and singleton return to base are implemented
+   ([AI airfield sequences](spec/ai-airfield.md)); retail timing comparison is
+   still unmeasured.
 6. Small units: B05 thrust-to-weight scale, pursuit offset signs, lead speed
    estimator, minimum-speed exemption producer, bank bound second term, burst
    policy after a shot, decoyed-missile time shortening, template ground skill

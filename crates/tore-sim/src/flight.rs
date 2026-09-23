@@ -1192,7 +1192,7 @@ const JOLT_PUSH_FPS: f64 = 15.;
 const RICOCHET_RESTITUTION: f64 = 0.5;
 const RICOCHET_MIN_FPS: f64 = 20.;
 
-fn low_speed_positive_g_ceiling(
+pub(crate) fn low_speed_positive_g_ceiling(
     c: &crate::models::config::Configuration,
     altitude_ft: f64,
     speed_fps: f64,

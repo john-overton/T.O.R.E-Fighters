@@ -198,6 +198,18 @@ impl Scene {
     pub fn runway(&self, id: ObjectId) -> Option<&Runway> {
         self.runways.iter().find(|r| r.object == id)
     }
+    /// A vertical-landing pad (the DTSTRP type, type flags `$108021`), where
+    /// conventional aircraft can neither take off nor land
+    /// (docs/formats/native-strip.md, `@APLandingType@8` returns -1).
+    pub fn vertical_pad(&self, runway: ObjectId) -> bool {
+        self.objects.iter().any(|o| {
+            o.id == runway
+                && o.object_type
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("DTSTRP.OT"))
+        })
+    }
     pub fn runway_surface(&self, x: f64, z: f64) -> Option<(ObjectId, f64)> {
         self.runways
             .iter()

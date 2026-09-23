@@ -13,8 +13,33 @@ struct ReportState {
     category: u8,
     last_tick: Option<u64>,
     requested: bool,
+    /// The airfield activity last seen, while the aircraft is in a takeoff
+    /// or landing sequence rather than in formation.
+    airfield: Option<Activity>,
+}
+/// Activities of the takeoff and landing sequences. An aircraft in one of
+/// them is not flying formation, so it makes no formation reports.
+fn airfield(activity: Activity) -> bool {
+    matches!(
+        activity,
+        Activity::Waiting
+            | Activity::Taxiing
+            | Activity::TakingOff
+            | Activity::HoldingMarshal
+            | Activity::Landing
+            | Activity::Landed
+    )
 }
 impl Reports {
+    /// Airfield actors are excluded from formation chatter. Their status
+    /// and recorded airport calls are owned by `airfield_radio`.
+    fn observe_airfield(&mut self, id: u32, _label: &str, activity: Activity) -> bool {
+        self.states.entry(id).or_default().airfield = airfield(activity).then_some(activity);
+        if airfield(activity) {
+            self.pending.retain(|(actor, _)| *actor != id);
+        }
+        airfield(activity)
+    }
     fn observe(&mut self, id: u32, label: &str, tick: u64, trace: &Trace) {
         let state = self.states.entry(id).or_default();
         let category = match trace.phase {
@@ -73,6 +98,13 @@ impl AiWings {
                 continue;
             };
             if actor.alive()
+                && self
+                    .reports
+                    .observe_airfield(slot.id, &slot.label(), actor.activity())
+            {
+                continue;
+            }
+            if actor.alive()
                 && let Some(trace) = actor.controller().formation_trace()
             {
                 self.reports
@@ -127,5 +159,25 @@ mod tests {
         t.phase = Phase::Close;
         reports.observe(1, "Wingman 1", 6000, &t);
         assert!(reports.take().unwrap().contains("In position"));
+    }
+
+    #[test]
+    fn airfield_reports_are_owned_by_the_radio_producer() {
+        let mut reports = Reports::default();
+        reports
+            .pending
+            .push_back((1, "Stale formation report".into()));
+        for activity in [
+            Activity::Waiting,
+            Activity::Taxiing,
+            Activity::TakingOff,
+            Activity::HoldingMarshal,
+            Activity::Landing,
+            Activity::Landed,
+        ] {
+            assert!(reports.observe_airfield(1, "Wingman", activity));
+            assert!(reports.take().is_none());
+        }
+        assert!(!reports.observe_airfield(1, "Wingman", Activity::Formation));
     }
 }

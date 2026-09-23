@@ -153,13 +153,18 @@ impl ControlAdapter {
         // Fitted feedback controller. These are control requests only: the
         // aircraft model owns every achieved attitude, velocity and position.
         let config = state.model().configuration();
-        let stall = config
+        let (clean_stall, maximum) = config
             .aerodynamics
             .envelopes
             .iter()
             .find(|e| e.g == 1)
             .and_then(|e| e.speeds(state.position[1]))
-            .map_or(900.0, |e| e.0);
+            .unwrap_or((900.0, 1000.0));
+        let stall = if state.research.is_some() {
+            clean_stall * (1.0 - 0.25 * state.flaps)
+        } else {
+            clean_stall
+        };
         let authority = (state.speed / stall.max(1.0)).powi(2).clamp(0.0, 1.0);
         let bank_error = heading_error_deg(current.bank_deg, bank_request_deg).to_radians();
         let desired_roll = (bank_error / 0.7 - state.roll_rate * 0.5).clamp(
@@ -198,11 +203,40 @@ impl ControlAdapter {
             }
         }
         let loading = 1.0
-            + (state.fuel + state.payload_lbs) / config.mass.empty_lbs
+            + (state.fuel + state.carried_lbs()) / config.mass.empty_lbs
                 * config.aerodynamics.loaded_elevator_percent
                 / 100.0;
         low /= loading;
         high /= loading;
+        let mut flap_gain = 1.0;
+        if state.research.is_some() {
+            if let Some(continuous) = crate::flight::low_speed_positive_g_ceiling(
+                config,
+                state.position[1],
+                state.speed,
+                stall,
+                false,
+            ) {
+                high = continuous / loading;
+            }
+            // Invert the same flap lift used by the researched flight model.
+            // Otherwise a clean-aircraft elevator request adds excess lift
+            // and the aircraft floats above the runway on every attempt.
+            let drag = tore_formats::flight_model::drag_percent(
+                (state.speed * 256.0) as i32,
+                (state.position[1] * 256.0) as i32,
+                maximum.round().clamp(1.0, f64::from(i16::MAX)) as i16,
+            )
+            .unwrap_or_else(|_| ((state.speed / maximum.max(1.0)) * 100.0).round() as i32)
+            .clamp(0, 100) as f64;
+            let lift = config.aerodynamics.flaps_lift_f8
+                * if on_ground {
+                    drag / 200.0
+                } else {
+                    1.0 - state.gear + drag / 100.0 * state.gear
+                };
+            flap_gain += state.flaps * lift / 256.0;
+        }
         let pitch_goal = intent
             .flight_path_pitch_deg
             .max(terrain_pitch_floor_deg.unwrap_or(-90.0))
@@ -212,7 +246,7 @@ impl ControlAdapter {
             + state.speed * pitch_error / (3.0 * 32.174))
             / state.bank.cos().max(0.25))
         .clamp(low, g_limit.max(low));
-        let delta = desired_g / authority.max(0.01) - 1.0;
+        let delta = desired_g / (authority * flap_gain).max(0.01) - 1.0;
         let pitch_input = delta
             / if delta > 0.0 {
                 (high - 1.0).max(0.01)
@@ -408,6 +442,46 @@ mod tests {
                 dt_s,
             )
             .unwrap()
+    }
+
+    #[test]
+    fn researched_flaps_follow_a_shallow_descent_without_ballooning() {
+        let mut aircraft = profile();
+        aircraft.fields.get_mut("flapsLift").unwrap().value = "256".into();
+        for envelope in &mut aircraft.envelopes {
+            if envelope.g > 1 {
+                envelope.points[0][0] = 300.0 + f64::from(envelope.g) * 20.0;
+                envelope.points[1][0] = 350.0 + f64::from(envelope.g) * 20.0;
+            }
+        }
+        let mut s = State::new(&aircraft, [0.0, 8_000.0, 0.0]).unwrap();
+        s.enable_research(1).unwrap();
+        s.yaw = 0.0;
+        s.pitch = -1.5_f64.to_radians();
+        s.bank = 0.0;
+        s.speed = 220.0;
+        s.velocity = crate::attitude::Basis::new(s.yaw, s.pitch, s.bank)
+            .forward
+            .map(|v| v * s.speed);
+        s.gear_down = true;
+        s.gear = 1.0;
+        s.flaps_down = true;
+        s.flaps = 1.0;
+        let command = intent(0.0, -1.5, 220.0);
+        let mut replay = s.clone();
+        for _ in 0..30 * 120 {
+            let output = controls(&s, &command, crate::flight::DT);
+            s.step(&output.input, |_, _| 0.0);
+            replay.step(&output.input, |_, _| 0.0);
+        }
+        assert_eq!(s, replay);
+        let path = attitude(&s).unwrap().flight_path_pitch_deg;
+        assert!(
+            (path + 1.5).abs() < 0.5,
+            "requested -1.5 degrees, achieved {path}"
+        );
+        assert!(s.position[1] < 7_900.0);
+        assert!(!s.crashed);
     }
 
     #[test]

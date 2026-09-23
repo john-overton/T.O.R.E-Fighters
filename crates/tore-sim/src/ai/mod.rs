@@ -18,6 +18,7 @@
 //!   thresholds, not a promise to reproduce the original sequence.
 //! - The simulation runs at a fixed 120 Hz; nominal timings are simulation
 //!   seconds on a quarter-second clock ([`QUARTER_SECOND_TICKS`]).
+pub mod airfield;
 pub mod awareness;
 pub mod controller;
 pub mod defense;

@@ -737,6 +737,37 @@ fn a_destroyed_aircraft_stays_a_contact_until_it_stops_being_airborne() {
 }
 
 #[test]
+fn a_grounded_aircraft_is_hidden_from_radar_but_not_from_eyes_or_infrared() {
+    // Manual p.208: grounded aircraft do not appear on enemy radar until they
+    // take to the air.
+    let air = clear_air();
+    let o = observer();
+    // Level geometry keeps look-down clutter out of the comparison.
+    let parked = || ahead(1, 5.).on_ground(true);
+
+    let mut s = Sensors::new(with_visual(profiles(Some(radar(90., 50.)), None), 10.));
+    s.step(&o, &[parked()], &air);
+    assert!(s.contact(1).is_none());
+    assert!(!s.designate(1));
+    // The eyes still see it, as an air-to-air visual contact.
+    assert_eq!(s.visual().len(), 1);
+    assert_eq!(s.visual()[0].id, 1);
+
+    // Taking to the air makes it an ordinary radar contact on the next step.
+    s.step(&o, &[ahead(1, 5.).on_ground(false)], &air);
+    assert_eq!(s.contact(1).map(|c| c.channel), Some(Channel::Radar));
+
+    // Infrared is a passive channel and still sees the parked aircraft.
+    let mut ir = Sensors::new(profiles(
+        Some(radar(90., 50.)),
+        Some(passive("TESTI.SEE", 9., 10.)),
+    ));
+    ir.controls.channel = Channel::Infrared;
+    ir.step(&o, &[parked()], &air);
+    assert_eq!(ir.contact(1).map(|c| c.channel), Some(Channel::Infrared));
+}
+
+#[test]
 fn a_jamming_target_denies_its_own_return_until_ownship_closes() {
     let air = clear_air();
     let o = observer();

@@ -148,3 +148,10 @@ terrain behavior. See the [shared surface spec](../spec/surface-lighting.md).
 The in-flight map fits the original briefing image to the T2 grid extents,
 with positive world Z at image north. T2 cell colors provide a fallback. This
 is fitted cartography; the exact source projection has not been recovered. See the [map specification](../spec/flight-map.md).
+
+
+Airport terrain recesses are a fitted rendering layer, not a change to T2
+samples. The renderer splits triangles along each oriented airport footprint,
+retains the original texture coordinates, and lowers only the inside surface
+beneath the fixed runway plane. See [airport integration](../spec/airports.md#integration-choices)
+and [the visibility regression](../baselines/airfield-radio.md#ground-visibility).

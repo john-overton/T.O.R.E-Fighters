@@ -86,6 +86,23 @@ impl TargetPresentation {
     }
 }
 
+fn apply_devices(pose: &mut flight::State, before: &[f64; 11], after: &[f64; 11], alpha: f64) {
+    let a = alpha.clamp(0., 1.);
+    [
+        pose.gear,
+        pose.flaps,
+        pose.brake,
+        pose.hook,
+        pose.bay,
+        pose.exhaust,
+        pose.elevator,
+        pose.aileron,
+        pose.rudder,
+        pose.speed,
+        pose.throttle,
+    ] = std::array::from_fn(|i| before[i] + (after[i] - before[i]) * a);
+}
+
 pub struct Combat {
     pub state: live::State,
     pub smoke_art: Pic,
@@ -103,8 +120,12 @@ pub struct Combat {
     pub clean_recording: bool,
     initial_ammo: Option<Vec<u16>>,
     presentation: TargetPresentation,
+    /// Previous and current AI device poses, sampled on simulation ticks.
+    ai_devices: BTreeMap<u32, ([f64; 11], [f64; 11])>,
     dummies: Vec<(usize, Vector)>,
     mission_spawns: Option<Vec<crate::ai_wings::MissionSpawn>>,
+    /// The accepted Quick Mission layout, kept so restart rebuilds it exactly.
+    pub mission_layout: Option<crate::quick_mission::MissionLayout>,
     dummy_models: Vec<Airframe>,
     dummy_configs: Vec<live::Configuration>,
     dummy_contrail_offsets: Vec<Vec<Vector>>,
@@ -246,6 +267,7 @@ impl Combat {
             state: live::State::new(config, true)?,
             dummies: Vec::new(),
             mission_spawns: None,
+            mission_layout: None,
             dummy_models: Vec::new(),
             dummy_configs: Vec::new(),
             dummy_contrail_offsets: Vec::new(),
@@ -257,6 +279,7 @@ impl Combat {
             clean_recording: false,
             initial_ammo,
             presentation: TargetPresentation::default(),
+            ai_devices: BTreeMap::new(),
             recorder: None,
             last_launcher: None,
             escape_art: match crate::ejection_art::Art::load(data) {
@@ -273,6 +296,24 @@ impl Combat {
     }
     pub fn present_targets(&mut self, alpha: f64) {
         self.presentation.alpha = alpha;
+    }
+
+    pub fn sync_ai_devices(&mut self, wings: &crate::ai_wings::AiWings) {
+        for actor in wings.mission().actors().iter().filter(|a| a.alive()) {
+            let f = actor.flight();
+            let next = [
+                f.gear, f.flaps, f.brake, f.hook, f.bay, f.exhaust, f.elevator, f.aileron,
+                f.rudder, f.speed, f.throttle,
+            ];
+            let entry = self.ai_devices.entry(actor.id()).or_insert((next, next));
+            *entry = (entry.1, next);
+        }
+    }
+
+    fn apply_ai_devices(&self, id: u32, pose: &mut flight::State) {
+        if let Some((before, after)) = self.ai_devices.get(&id) {
+            apply_devices(pose, before, after, self.presentation.alpha);
+        }
     }
 
     /// Per-model vertices for the dummy formation, with each airborne
@@ -316,6 +357,7 @@ impl Combat {
                     pose.flaps = 0.;
                     pose.exhaust = 0.;
                     pose.bay = 0.;
+                    self.apply_ai_devices(target.id, &mut pose);
                     let first = vertices.len() / 10;
                     vertices.extend(model.vertices(&pose, camera, world));
                     contacts.extend(Contact::new(
@@ -352,11 +394,16 @@ impl Combat {
     pub fn mission_aircraft(
         &mut self,
         wings: &[tore_sim::ai::launch::WingLaunch],
-        separation: f64,
+        layout: &crate::quick_mission::MissionLayout,
         data: &BTreeMap<String, Vec<u8>>,
     ) -> AppResult<()> {
-        self.mission_dummies(&tore_sim::ai::launch::legacy_pairs(wings), separation, data)?;
-        self.mission_spawns = Some(crate::ai_wings::mission_spawns(wings, separation));
+        self.mission_dummies(
+            &tore_sim::ai::launch::legacy_pairs(wings),
+            layout.enemy.distance_ft,
+            data,
+        )?;
+        self.mission_spawns = Some(crate::ai_wings::mission_spawns(wings, &layout.spawn_plan()));
+        self.mission_layout = Some(layout.clone());
         Ok(())
     }
 
@@ -428,6 +475,7 @@ impl Combat {
     }
     pub fn reset(&mut self, s: &mut flight::State) -> AppResult<()> {
         self.presentation = TargetPresentation::default();
+        self.ai_devices.clear();
         self.contrails = Default::default();
         self.contrail_sortie = self.contrail_sortie.wrapping_add(1);
         let l = launcher(s);
@@ -720,6 +768,7 @@ impl Combat {
             pose.rudder = 0.;
             pose.brake = 0.;
             pose.hook = 0.;
+            self.apply_ai_devices(target.id, &mut pose);
             let vertices = model.vertices(&pose, &camera, world);
             crate::target_window::fit(
                 &mut camera,
@@ -998,6 +1047,7 @@ impl Combat {
             pose.rudder = 0.;
             pose.brake = 0.;
             pose.hook = 0.;
+            self.apply_ai_devices(t.id, &mut pose);
             if self.dummies.is_empty() {
                 let first = v.len() / 10;
                 v.extend(h.vertices(&pose, camera, world));
@@ -1900,6 +1950,27 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
 mod tests {
     use super::*;
     #[test]
+    fn ai_render_devices_follow_simulation_and_interpolate() {
+        let mut pose =
+            crate::flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let before = [1., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.];
+        let after = [0., 0., 1., 1., 1., 1., 0.4, -0.4, 0.2, 400., 1.];
+        apply_devices(&mut pose, &before, &after, 0.);
+        assert_eq!((pose.gear, pose.flaps), (1., 1.));
+        apply_devices(&mut pose, &before, &after, 0.25);
+        assert_eq!(
+            (pose.gear, pose.flaps, pose.brake, pose.speed),
+            (0.75, 0.75, 0.25, 100.)
+        );
+        assert_eq!(
+            (pose.elevator, pose.aileron, pose.rudder),
+            (0.1, -0.1, 0.05)
+        );
+        apply_devices(&mut pose, &before, &after, 1.);
+        assert_eq!((pose.gear, pose.flaps), (0., 0.));
+    }
+
+    #[test]
     fn tracer_ribbon_is_finite_camera_facing_and_visible_end_on() {
         let mut camera = Camera::new();
         camera.position = [0., 0., -100.];
@@ -1996,6 +2067,7 @@ mod ai_pose_tests {
             jammer: None,
             jammer_active: false,
             airborne: true,
+            on_ground: false,
             radius: 28.,
             hp: 100,
             initial_hp: 100,

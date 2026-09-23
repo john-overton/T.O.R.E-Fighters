@@ -321,6 +321,11 @@ impl Audio {
             mixer.enqueue_speech(&self.clips, stems);
         }
     }
+    pub fn airport_speech(&self, stems: &[String]) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.enqueue_speech_from(&self.clips, stems, RadioSource::Airport);
+        }
+    }
     /// A recording played directly rather than over the radio, such as the
     /// player's death scream.
     pub fn direct_voice(&self, stem: &str) {
@@ -772,6 +777,14 @@ impl Mixer {
         }
     }
     fn enqueue_speech(&mut self, clips: &BTreeMap<String, Arc<Clip>>, stems: &[String]) {
+        self.enqueue_speech_from(clips, stems, RadioSource::Wing);
+    }
+    fn enqueue_speech_from(
+        &mut self,
+        clips: &BTreeMap<String, Arc<Clip>>,
+        stems: &[String],
+        source: RadioSource,
+    ) {
         if !self.effects_on || self.flight_paused {
             return;
         }
@@ -779,7 +792,7 @@ impl Mixer {
             .iter()
             .filter_map(|stem| clips.get(&format!("{stem}.5K")))
             .map(|clip| RadioVoice {
-                source: RadioSource::Wing,
+                source,
                 voice: Voice {
                     clip: clip.clone(),
                     position: 0.,

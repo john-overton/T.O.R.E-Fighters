@@ -212,7 +212,7 @@ impl Pipelines {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_compare: wgpu::CompareFunction::Greater,
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -221,23 +221,25 @@ impl Pipelines {
             cache: None,
         };
         let pipeline = device.create_render_pipeline(&surface_descriptor);
-        surface_descriptor.label = Some("Static airport depth-biased surfaces");
+        surface_descriptor.label = Some("Static airport surfaces");
         surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("airport_solid_fragment");
-        surface_descriptor.depth_stencil.as_mut().unwrap().bias = wgpu::DepthBiasState {
-            constant: -4,
-            slope_scale: -1.0,
-            clamp: 0.0,
-        };
-        let airport_pipeline = device.create_render_pipeline(&surface_descriptor);
-        surface_descriptor.label = Some("Static airport coplanar texture details");
-        surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("airport_fragment");
+        // Rendered terrain is recessed below the fixed airport plane. Neither
+        // slope nor constant depth bias may pull pavement over aircraft.
+        // Later coplanar artwork wins equal-depth samples without a world lift.
         surface_descriptor
             .depth_stencil
             .as_mut()
             .unwrap()
-            .bias
-            .constant = -8;
+            .depth_compare = wgpu::CompareFunction::GreaterEqual;
+        let airport_pipeline = device.create_render_pipeline(&surface_descriptor);
+        surface_descriptor.label = Some("Static airport coplanar texture details");
+        surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("airport_fragment");
         let airport_decal_pipeline = device.create_render_pipeline(&surface_descriptor);
+        surface_descriptor
+            .depth_stencil
+            .as_mut()
+            .unwrap()
+            .depth_compare = wgpu::CompareFunction::Greater;
         surface_descriptor.depth_stencil.as_mut().unwrap().bias = Default::default();
         surface_descriptor.primitive.topology = wgpu::PrimitiveTopology::LineList;
         surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("scenery_line_fragment");
@@ -311,7 +313,7 @@ impl Pipelines {
             .depth_stencil
             .as_mut()
             .unwrap()
-            .depth_compare = wgpu::CompareFunction::Less;
+            .depth_compare = wgpu::CompareFunction::Greater;
         let tracer_pipeline = device.create_render_pipeline(&surface_descriptor);
         // Spotting aid: aircraft vertices plus per-aircraft instance data,
         // drawn at output resolution without multisampling so every rim pixel
@@ -438,7 +440,7 @@ impl Pipelines {
             label:Some("Original cloud sheets"),layout:Some(&sky_layout),
             vertex:wgpu::VertexState {module:shader,entry_point:Some("vertex"),compilation_options:Default::default(),buffers:&[wgpu::VertexBufferLayout {array_stride:40,step_mode:wgpu::VertexStepMode::Vertex,attributes:&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3,4=>Float32]}]},
             fragment:Some(wgpu::FragmentState {module:shader,entry_point:Some("cloud_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState {format,blend:None,write_mask:wgpu::ColorWrites::ALL})]}),
-            primitive:wgpu::PrimitiveState {cull_mode:None,..Default::default()},depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:true,depth_compare:wgpu::CompareFunction::Less,stencil:Default::default(),bias:Default::default()}),multisample,multiview:None,cache:None,
+            primitive:wgpu::PrimitiveState {cull_mode:None,..Default::default()},depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:true,depth_compare:wgpu::CompareFunction::Greater,stencil:Default::default(),bias:Default::default()}),multisample,multiview:None,cache:None,
         });
         // Wing vapor is five one-pixel line segments per side, exactly as
         // `_DrawStreamer@12` draws them, so it needs its own blended pipeline.
@@ -473,7 +475,7 @@ impl Pipelines {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_compare: wgpu::CompareFunction::Greater,
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -1502,7 +1504,7 @@ impl SimRenderer {
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &targets.depth,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                    load: wgpu::LoadOp::Clear(0.0),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -1732,6 +1734,310 @@ mod lighting_tests {
         .collect()
     }
 
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn gpu_airport_pavement_does_not_hide_aircraft_above_it() {
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions::default())
+                .await
+                .unwrap();
+            let (device, queue) = adapter
+                .request_device(&wgpu::DeviceDescriptor::default())
+                .await
+                .unwrap();
+            let render = |distance: f32, pavement: u8, overhead: bool, height: f32| {
+                let mut world = crate::terrain::tests::world();
+                world.vertices = plane(0., 20_000.);
+                world.texture_indices = vec![100; 65536];
+                world.sky_indices = vec![100; 65536];
+                world.smooth_weather = false;
+                let mut renderer = SimRenderer::new(
+                    &device,
+                    &queue,
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    &world,
+                    crate::graphics::Options::default(),
+                    1,
+                );
+                // A red fuselage proxy: eight feet high, safely above contact.
+                let mut aircraft: Vec<f32> = [
+                    (-32., 4.),
+                    (-32., 12.),
+                    (32., 4.),
+                    (32., 4.),
+                    (-32., 12.),
+                    (32., 12.),
+                ]
+                .into_iter()
+                .flat_map(|(x, y)| [x, y, 0., 0., 0., -1., 1., 0., 0., -1.])
+                .collect();
+                if overhead {
+                    aircraft = plane(8., 32.);
+                    for v in aircraft.chunks_exact_mut(10) {
+                        v[6] = 1.;
+                        v[7] = 0.;
+                        v[8] = 0.;
+                    }
+                }
+                for v in aircraft.chunks_exact_mut(10) {
+                    v[1] += height - 8.;
+                }
+                let vertex = |data: &[f32]| {
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Synthetic runway visibility"),
+                        contents: &bytes(data),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    })
+                };
+                renderer.aircraft = Some((renderer.bind.clone(), vertex(&aircraft), 6));
+                if pavement > 0 {
+                    let mut apron = plane(0., 20_000.);
+                    if pavement == 2 {
+                        for v in apron.chunks_exact_mut(10) {
+                            v[5] = 0.;
+                        }
+                    }
+                    renderer.airports = Some((vertex(&apron), 6));
+                }
+                let mut camera = Camera::new();
+                camera.position = [0., 15., -distance];
+                camera.pitch = (-7.0_f32).atan2(distance);
+                camera.yaw = 0.;
+                if overhead {
+                    camera.position = [0., distance, 0.];
+                    camera.pitch = -std::f32::consts::FRAC_PI_2;
+                }
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size: wgpu::Extent3d {
+                        width: 256,
+                        height: 256,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None,
+                    size: 256 * 256 * 4,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
+                let mut encoder = device.create_command_encoder(&Default::default());
+                renderer.draw(
+                    &device,
+                    &queue,
+                    &mut encoder,
+                    &texture.create_view(&Default::default()),
+                    [256, 256],
+                    &camera,
+                    &world,
+                );
+                encoder.copy_texture_to_buffer(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &buffer,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(1024),
+                            rows_per_image: Some(256),
+                        },
+                    },
+                    wgpu::Extent3d {
+                        width: 256,
+                        height: 256,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                queue.submit([encoder.finish()]);
+                let (tx, rx) = std::sync::mpsc::channel();
+                buffer
+                    .slice(..)
+                    .map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+                device
+                    .poll(wgpu::PollType::Wait {
+                        submission_index: None,
+                        timeout: None,
+                    })
+                    .unwrap();
+                rx.recv().unwrap().unwrap();
+                let pixels = buffer.slice(..).get_mapped_range().to_vec();
+                buffer.unmap();
+                pixels
+                    .chunks_exact(4)
+                    .filter(|p| u16::from(p[0]) > u16::from(p[1]) + 30 && p[0] > p[2])
+                    .count()
+            };
+            for (distance, overhead) in
+                [(500., false), (1000., false), (1500., false), (5000., true)]
+            {
+                let reference = render(distance, 0, overhead, 8.);
+                let solid = render(distance, 1, overhead, 8.);
+                assert_eq!(solid, reference, "solid airport surface at {distance} feet");
+                let with_airport = render(distance, 2, overhead, 8.);
+                assert!(reference > 0, "fixture invisible at {distance} feet");
+                assert_eq!(
+                    with_airport, reference,
+                    "pavement hides an aircraft at {distance} feet"
+                );
+            }
+            assert_eq!(
+                render(500., 2, true, -8.),
+                0,
+                "buried geometry must still be occluded"
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn gpu_airport_stays_visible_with_distant_moving_cameras() {
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions::default())
+                .await
+                .unwrap();
+            let (device, queue) = adapter
+                .request_device(&wgpu::DeviceDescriptor::default())
+                .await
+                .unwrap();
+            let render = |distance: f32, shift: f32, ground: bool, samples: u32| {
+                let mut world = crate::terrain::tests::world();
+                world.smooth_weather = false;
+                world.texture_indices = vec![100; 65536];
+                world.sky_indices = vec![100; 65536];
+                let origin = [1_107_332., 1024., 587_544.];
+                let transform = |v: &mut Vec<f32>, color: [f32; 3]| {
+                    for vertex in v.chunks_exact_mut(10) {
+                        for axis in 0..3 {
+                            vertex[axis] += origin[axis];
+                        }
+                        vertex[6..9].copy_from_slice(&color);
+                    }
+                };
+                world.vertices = plane(if ground { -1. } else { -1000. }, 80_000.);
+                transform(&mut world.vertices, [0., 0.5, 0.]);
+                let mut runway = plane(0., 2400.);
+                transform(&mut runway, [1., 0., 0.]);
+                let mut renderer = SimRenderer::new(
+                    &device,
+                    &queue,
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    &world,
+                    crate::graphics::Options::default(),
+                    samples,
+                );
+                renderer.airports = Some((
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("One-foot runway/terrain separation"),
+                        contents: &bytes(&runway),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+                    6,
+                ));
+                let mut camera = Camera::new();
+                camera.position = [
+                    origin[0] + 1000. + shift,
+                    origin[1] + 1500.,
+                    origin[2] - distance,
+                ];
+                camera.yaw = (-1000. - shift).atan2(distance);
+                camera.pitch = (-1500_f32).atan2(distance.hypot(1000. + shift));
+                let image = device.create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size: wgpu::Extent3d {
+                        width: 256,
+                        height: 256,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let readback = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None,
+                    size: 256 * 256 * 4,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
+                let mut encoder = device.create_command_encoder(&Default::default());
+                renderer.draw(
+                    &device,
+                    &queue,
+                    &mut encoder,
+                    &image.create_view(&Default::default()),
+                    [256, 256],
+                    &camera,
+                    &world,
+                );
+                encoder.copy_texture_to_buffer(
+                    image.as_image_copy(),
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &readback,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(1024),
+                            rows_per_image: Some(256),
+                        },
+                    },
+                    wgpu::Extent3d {
+                        width: 256,
+                        height: 256,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                queue.submit([encoder.finish()]);
+                let (tx, rx) = std::sync::mpsc::channel();
+                readback
+                    .slice(..)
+                    .map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+                device
+                    .poll(wgpu::PollType::Wait {
+                        submission_index: None,
+                        timeout: None,
+                    })
+                    .unwrap();
+                rx.recv().unwrap().unwrap();
+                let pixels = readback.slice(..).get_mapped_range().to_vec();
+                readback.unmap();
+                pixels
+            };
+            let red = |p: &[u8]| u16::from(p[0]) > u16::from(p[1]) + 30 && p[0] > p[2];
+            for (distance, samples) in [1, 4]
+                .into_iter()
+                .flat_map(|samples| [10_000., 20_000., 40_000.].map(|distance| (distance, samples)))
+            {
+                for frame in 0..8 {
+                    let shift = frame as f32 * 0.125;
+                    let reference = render(distance, shift, false, samples);
+                    let actual = render(distance, shift, true, samples);
+                    let expected = reference.chunks_exact(4).filter(|p| red(p)).count();
+                    let visible = actual.chunks_exact(4).filter(|p| red(p)).count();
+                    assert!(expected >= 10, "fixture too small at {distance}");
+                    assert_eq!(
+                        visible, expected,
+                        "runway flicker at {distance} ft, camera step {frame}, samples {samples}"
+                    );
+                }
+            }
+        });
+    }
+
     // Runs the production shader, shadow maps, surface pipelines and readback.
     // Synthetic geometry only; explicitly invoked on a GPU-capable host.
     #[test]
@@ -1834,7 +2140,7 @@ mod lighting_tests {
                         label: Some("Water receiver probe"), layout: Some(&layout),
                         vertex: wgpu::VertexState { module: &shader, entry_point: Some("vertex"), compilation_options: Default::default(), buffers: &[wgpu::VertexBufferLayout { array_stride: 40, step_mode: wgpu::VertexStepMode::Vertex, attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3,4=>Float32] }] },
                         fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("reflection_probe"), compilation_options: Default::default(), targets: &[Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Rgba8Unorm, blend: None, write_mask: wgpu::ColorWrites::ALL })] }),
-                        primitive: Default::default(), depth_stencil: Some(wgpu::DepthStencilState { format: wgpu::TextureFormat::Depth32Float, depth_write_enabled: true, depth_compare: wgpu::CompareFunction::Less, stencil: Default::default(), bias: Default::default() }), multisample: Default::default(), multiview: None, cache: None,
+                        primitive: Default::default(), depth_stencil: Some(wgpu::DepthStencilState { format: wgpu::TextureFormat::Depth32Float, depth_write_enabled: true, depth_compare: wgpu::CompareFunction::Greater, stencil: Default::default(), bias: Default::default() }), multisample: Default::default(), multiview: None, cache: None,
                     });
                     renderer.p.terrain_pipeline = pipeline.clone();
                     renderer.p.pipeline = pipeline;

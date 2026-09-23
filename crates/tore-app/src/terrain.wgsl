@@ -303,12 +303,18 @@ fn filtered_tile(uv:vec2<f32>,grad:vec4<f32>,layer:i32,sun_passes:i32,core:i32,r
  if sum.a<=0.0 {return vec4<f32>(0.0);}
  return vec4<f32>(sum.rgb/sum.a,sum.a);
 }
+// Reversed floating-point depth preserves small surface separations at
+// distance. Keep the existing finite far plane and the per-camera near plane.
+fn world_depth_clip(z:f32)->f32 {
+ let near=max(scene.view.x,1.0);let far=2200000.0;
+ return near*((far-z)/(far-near));
+}
 fn world_vertex(position:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec3<f32>,index:f32)->VertexOut {
  let p=position-scene.eye.xyz;
  let z=dot(p,scene.forward.xyz);
- let near=max(scene.view.x,1.0);let far=2200000.0;let f=1.7320508*scene.up.w;
+ let f=1.7320508*scene.up.w;
  var out:VertexOut;
- out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
+ out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,world_depth_clip(z),z);
  let fog_mode=(u32(max(index,0.0))/256u)%4u;
  out.light_row=i32(max(index,0.0))/1024-1;
  let fog_enabled=fog_mode==0u || (fog_mode==2u && (i32(scene.ray.w)&4)==0);
@@ -419,7 +425,7 @@ fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
 struct SkyOut { @builtin(position) clip:vec4<f32>, @location(0) screen:vec2<f32> }
 @vertex fn sky_vertex(@builtin(vertex_index) i:u32)->SkyOut {
  let p=array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0),vec2<f32>(3.0,-1.0),vec2<f32>(-1.0,3.0));
- var out:SkyOut;out.clip=vec4<f32>(p[i],1.0,1.0);out.screen=p[i];return out;
+ var out:SkyOut;out.clip=vec4<f32>(p[i],0.0,1.0);out.screen=p[i];return out;
 }
 // GouraudHorizon has camera-relative horizontal depth 32767/32,
 // upper Y=130..0 and lower Y=5..-clamp(130*alt/15000,10,130).
@@ -775,9 +781,9 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
 @vertex fn vapor_vertex(@location(0) position:vec3<f32>,@location(1) color:vec4<f32>)->VaporOut {
  let p=position-scene.eye.xyz;
  let z=dot(p,scene.forward.xyz);
- let near=max(scene.view.x,1.0);let far=2200000.0;let f=1.7320508*scene.up.w;
+ let f=1.7320508*scene.up.w;
  var out:VaporOut;
- out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
+ out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,world_depth_clip(z),z);
  out.color=color;out.distance=length(p);return out;
 }
 @fragment fn vapor_fragment(in:VaporOut)->@location(0) vec4<f32>{
@@ -789,7 +795,7 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
 @vertex fn celestial_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
  let z=dot(position,scene.forward.xyz);let f=1.7320508*scene.up.w;
  var out:VertexOut;
- out.clip=vec4<f32>(dot(position,scene.right.xyz)*f/scene.eye.w,dot(position,scene.up.xyz)*f,z,z);
+ out.clip=vec4<f32>(dot(position,scene.right.xyz)*f/scene.eye.w,dot(position,scene.up.xyz)*f,0.0,z);
  out.light_row=-1;out.fog_enabled=0u;out.uv=uv;out.layer=layer;out.color=shade(u32(index),0).rgb;out.distance=position.y;out.own_color=0.;out.altitude=position.y;out.direction=position;return out;
 }
 @fragment fn celestial_fragment(in:VertexOut)->@location(0) vec4<f32>{
@@ -819,9 +825,9 @@ struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, 
  let uv=vec2<f32>((cell+0.5+corner.x*42.0)/256.0,(0.5+corner.y*42.0)/43.0);
  let position=center+scene.right.xyz*offset.x+scene.up.xyz*offset.y;
  let p=position-scene.eye.xyz;let z=dot(p,scene.forward.xyz);
- let near=max(scene.view.x,1.0);let far=2200000.0;let f=1.7320508*scene.up.w;
+ let f=1.7320508*scene.up.w;
  var out:SmokeOut;
- out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
+ out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,world_depth_clip(z),z);
  out.uv=uv;out.opacity=opacity;out.distance=length(p);out.direction=p;out.altitude=position.y;return out;
 }
 @fragment fn smoke_fragment(in:SmokeOut)->@location(0) vec4<f32> {

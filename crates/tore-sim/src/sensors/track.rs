@@ -120,6 +120,21 @@ pub struct Observable {
     pub destroyed: bool,
 }
 
+impl Observable {
+    /// Manual p.208: "Grounded aircraft do not appear on enemy radar until
+    /// they take to the air." An aircraft on the ground returns no radar echo,
+    /// so radar search and track never form a contact on it. Visual and
+    /// infrared observation, and its own radar or jammer emissions, are
+    /// unchanged. `fitted`: the rule is applied as a zero radar signature for
+    /// as long as the host reports the aircraft on the ground.
+    pub fn on_ground(mut self, on_ground: bool) -> Self {
+        if on_ground {
+            self.signature.radar = 0.;
+        }
+        self
+    }
+}
+
 /// Terrain services supplied by the host, so this component never samples a
 /// world of its own.
 pub struct Environment<'a> {

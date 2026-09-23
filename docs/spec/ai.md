@@ -294,8 +294,9 @@ in movement without a legal shot.
 A controller needs feedback for invalid/lost targets, unavailable weapons,
 failed or completed movement, damage, fuel state and superseded orders. The
 host already models several weapon inhibition reasons. Route following,
-takeoff/recovery, formation rejoin and low-fuel disengagement have identified
-source entry points but do not yet have complete AI contracts. No distance,
+formation rejoin and damage disengagement have identified source entry points
+but do not yet have complete AI contracts; takeoff, landing and low-fuel
+recovery are specified in [AI airfield sequences](ai-airfield.md). No distance,
 fuel percentage or priority is invented here.
 
 ## B41: Target retention, eligibility and ranking
@@ -636,13 +637,16 @@ frequency is open.
 Other overrides: above its ceiling altitude the aircraft does not accept a
 climbing pitch request. On the ground it holds its entry pitch, and may pitch
 up only above minimum speed unless in the airborne part of a takeoff; the
-ground turn rate is at least 35 degrees per second. During airfield-attached
-states the pitch request is capped by the airfield's own limit. Aircraft with
+ground turn rate is at least 35 degrees per second. In the holding, taxi, roll
+and climb-out states the requested flight path is capped at the airport's
+4 degree limit. Aircraft with
 the gravity flag gain or lose 32 ft/s of speed per second times the sine of
 their flight-path pitch, halved when more than 100 ft/s above maximum speed,
 and never decelerate below minimum speed while climbing. The bank request is
 bounded by the aircraft's maximum bank and a second term that is still
-untraced. State labels for the airfield sequences remain unnamed.
+untraced. The airfield states are named and specified in
+[AI airfield sequences](ai-airfield.md); there the ground pitch hold governs
+rotation on the takeoff roll and the ground turn floor bounds taxi steering.
 
 The weapon-dependent lead used by B15 starts from the target position. For the
 predictive weapon branch, distances of 20000 feet or more bypass prediction.
@@ -798,8 +802,10 @@ orders receive no spoken reply.
 Disengage puts the wingman back in formation at once and stops it choosing a
 new target until the next engage order. A wingman whose target is lost or
 destroyed returns to formation by itself; a leader resumes its waypoint. There
-is no separate rejoin order or rejoin distance. Bug out hands the wingman to
-the return-to-base helpers, which are open. A wing-order subcode with no
+is no separate rejoin order or rejoin distance. Bug out is ignored while the
+wingman takes off, lands or is on the ground; otherwise it flies a private
+route home, lands, parks for good and no longer answers orders
+([AI airfield sequences](ai-airfield.md#orders-and-warnings)). A wing-order subcode with no
 found sender assigns a target in the second attack state.
 
 Break and approach do not install AI steering on a human-controlled recipient.
@@ -907,7 +913,8 @@ The minimum delay is half a second.
 
 An AI aircraft ignores launch warnings while taking off and during the later
 landing states. In the first two approach states it abandons the approach and
-returns to free flight. An aircraft with no countermeasure dispenser station
+returns to free flight. The AI's airfield phases map onto these states as
+listed in [AI airfield sequences](ai-airfield.md#orders-and-warnings). An aircraft with no countermeasure dispenser station
 does not react at all. A mission-authored hold time can suppress reactions
 until a given time of day. A launch by an aircraft on the same side causes no
 maneuver. The "SAM launch"/"AAM launch" radio call is sent only for an
@@ -960,8 +967,11 @@ endurance is under time-to-home plus five minutes, and on caution at or
 under time-to-home plus ten minutes. An AI wingman whose leader is AI-controlled
 leaves for its home airport on bingo, flying a private landing route at 5000
 to 10000 ft and cruise speed, and lands there. An aircraft whose internal
-fuel reaches zero is lost. Return-to-base for leaders and singletons,
-damage-triggered disengagement and the takeoff and landing sequences are open.
+fuel reaches zero is lost. The route ends in a Land goal, so the aircraft lands
+and stays parked; the takeoff and landing sequences are specified in
+[AI airfield sequences](ai-airfield.md). With a home runway, leaders,
+singletons and wingmen of a human leader land the same way (fitted).
+Damage-triggered disengagement is open.
 
 ## Implementation status
 
@@ -985,10 +995,11 @@ through `Controller::fallbacks`.
 | `motion` | B13 request limits, maneuver builders, quarter-second deadline clock, free-flight pitch early completion | Zero-duration axis selection |
 | `pursuit` | B15 frame and speed bands, B44 lead scaling and bypass | Speed estimator and prediction time |
 | `targeting` | B41 retention, eligibility and three-penalty ranking | Priority route, surface selector |
-| `steering` | B44 approach without overshoot, turn rate and radius from G and speed, roll caps, authority floors and mode limits, terrain floor and cadence, ceiling, ground and gravity overrides | Base pitch rate, airfield pitch cap, second bank-bound term; the authority curve shapes are labeled fitted |
+| `steering` | B44 approach without overshoot, turn rate and radius from G and speed, roll caps, authority floors and mode limits, terrain floor and cadence, ceiling, ground and gravity overrides (the ground pitch hold and turn floor are used by `airfield`) | Base pitch rate, second bank-bound term; the authority curve shapes are labeled fitted |
 | `weapon_service` | B42 phases and retries, timing profiles for all twelve aircraft, B45 ammunition debit, seeker envelopes by role, detection range and stated signature modifiers, class eligibility, store score, in-flight track check and AI support extension, device schedule | Burst pacing after a shot, hit-chance rule, signature producers that need sensor state |
 | `threat` | B47 warning delay, receiver gates, countermeasure gate and dispenser selection, decoy roll, script fallback reversal, reason ranking | Decoyed-missile time shortening, restart effect on an in-flight move |
-| `route` | B48 waypoint completion by octant, route command with landing hand-off, leader jitter and floors, join-landing, cruise speed, fuel states, wingman bingo route | Leader and singleton return to base, takeoff and landing sequences |
+| `route` | B48 waypoint completion by octant, route command with landing hand-off, leader jitter and floors, join-landing, cruise speed, fuel states, wingman bingo route (also flown by leaders and singletons, fitted) | Damage-triggered disengagement |
+| `airfield` | [AI airfield sequences](ai-airfield.md): hold, turn and runway-free gates, taxi-out, line-up, roll, climb-out, marshal square, approach gates, final, rollout, taxi-back and parking slots; bug-out, bingo, ordered and join landings; player landing priority | Vertical, STOVL and carrier variants; retail nose attitudes on final and rollout and the stopped pivot have fitted substitutes |
 | `wing` | B43 spacing clamps, formation table and names, player spacing values, mode 9 speed, control side effects, target sharing cap; B46 receiver outcomes, player break/approach values, reply rules | Approach steering point, mode 9 negative-band entry |
 | `fitted` | One named, documented fitted rule per unresolved branch a fighter/strike actor can reach, with its constants | Nothing; this file exists because the branches are unresolved |
 | `controller` | `Controller::new` and `Controller::step`, persistent state, seeded draws at documented decision points only, reason ranking, target selection, tactical choice, motion resolution, weapon cadence, wing requests, fuel | Families other than fighter/strike are rejected, not served fighter behavior |
@@ -1111,9 +1122,10 @@ B44's original fast turn formulas remain research facts and isolated reference
 services, not a reason to grant extra movement authority. Replaying a tick's
 AI inputs from the same flight state and environment must reproduce the whole
 resulting flight state exactly. Existing player flight adapter selection stays
-distinct; the AI bridge retains its existing legacy model setup, with hybrid
-also covered by synthetic input replay tests. Matching player adapter selection
-and the restricted native-table AI path are not newly introduced here.
+distinct. Airborne AI starts on the legacy model; ground-started AI and actors
+starting a landing sequence use the researched model for runway contact. Both
+are covered by synthetic input replay tests. AI does not inherit the player
+adapter setting, and the restricted native-table AI path is not introduced.
 
 The following feedback controller is **fitted, agent-authored**. The original
 input mapping is unknown. Unconstrained heading error divided by 1 second
@@ -1130,6 +1142,10 @@ Pitch feedback requests (cos(flight-path pitch) + speed times pitch error /
 negative limit and AI positive G limit. Pitch error includes the terrain floor.
 Invert the model's loaded stick-to-G mapping, with low-speed authority floored
 at 0.01 only for division, and clamp pitch input to [-1, 1]. Rudder stays zero.
+For the researched model, this includes its flap-adjusted minimum speed,
+continuous low-speed positive-G ceiling, current flap lift and carried mass.
+Using the clean-aircraft mapping with flaps extended caused repeated floating
+approaches. These are host flight-model inputs, not additional aircraft power.
 The aircraft model may lag, depart, stall, overshoot or fail to achieve the
 requested maneuver. Steep/inverted maneuver tracking remains approximate.
 Throttle retains the fitted speed-error rule: current throttle plus speed

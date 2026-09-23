@@ -56,6 +56,8 @@ pub enum Kind {
 pub enum Route {
     /// The serial radio channel, with a text line.
     Radio,
+    /// Tower speech, independently cancellable from wing and crew speech.
+    Airport,
     /// A sound played directly without text, such as the player's death scream.
     Direct,
 }
@@ -88,6 +90,10 @@ impl Call {
     }
     pub fn direct(mut self) -> Self {
         self.route = Route::Direct;
+        self
+    }
+    pub fn airport(mut self) -> Self {
+        self.route = Route::Airport;
         self
     }
     /// The HUD line, `Speaker: 'text'`.
@@ -315,7 +321,10 @@ impl Comms {
             }
         }
         ready.sort_by(|a, b| a.0.total_cmp(&b.0));
-        if ready.iter().any(|(_, c)| c.route == Route::Radio) {
+        if ready
+            .iter()
+            .any(|(_, c)| matches!(c.route, Route::Radio | Route::Airport))
+        {
             self.busy_until = now + BUSY_SECONDS;
         }
         ready.into_iter().map(|(_, call)| call).collect()
@@ -323,6 +332,10 @@ impl Comms {
     /// Lines spoken outside this channel, such as wing orders, still hold it.
     pub fn spoken(&mut self, now: f64) {
         self.busy_until = now + BUSY_SECONDS;
+    }
+    pub fn cancel_airport(&mut self) {
+        self.pending
+            .retain(|(_, call)| call.route != Route::Airport);
     }
     /// Alt-S. Returns the HUD confirmation.
     pub fn toggle_silence(&mut self) -> &'static str {

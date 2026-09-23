@@ -719,12 +719,34 @@ perceived attacks on their flight or protected aircraft.
 | Alt-8 | Toggle 512 / 2048 ft horizontal spacing |
 | Alt-K | Cycle level / 512 ft high / 512 ft low stacking |
 | Alt-C | Toggle loose / medium control |
+| Alt-U | Bug out: return to base and stop answering orders |
+| Alt-L | Land at the airport selected with Shift-A |
 | Alt-Shift-B / R / H / V | Approach the designated target from left / right / high / low |
 | Alt-0 / Alt-4 through Alt-7 | Address all wingmen / one wingman |
 
 Input profiles can use these as `key:Alt-b`, `key:Alt-8`,
 `key:Alt-Shift-b` and the corresponding keys above. Alt-S remains the unimplemented
 original radio-silence shortcut; it is not repurposed for spacing.
+
+The manual's wingman table puts bug out on Alt-B. T.O.R.E keeps Alt-B as break
+left, and John chose Alt-U for bug out and Alt-L for land at selected airport
+on 2026-09-23. Land at selected airport has no retail equivalent; it is an
+opinionated addition John requested the same day. Bug out sends each addressed
+wingman to its own home runway, the departure runway after a ground start or
+else the nearest friendly or neutral airport. A wingman with no known base
+stays and is counted in the reply. Land at selected airport sends the addressed
+wingmen to the airport the tower has selected (Shift-A): the runway you are
+cleared for there, or else its longest usable runway. Hostile, unknown or
+unpermitted neutral airports and airports with no usable runway are refused
+with a message. A bugged-out wingman no longer answers any order; later orders
+skip it and say so. Both orders print the call ("Bug out", "Land at Field")
+without voice, because the reviewed radio catalog has no recording for them.
+Bug out is ignored on the ground, during takeoff, or from landing marshal
+onward. It is accepted during the route home, as in retail; the reply counts it. Landing wingmen report holding
+at marshal, landing and landed. While you approach a friendly airport with the
+gear down, below 4,000 ft and within 25,000 ft, AI aircraft for that airport
+hold at marshal until you are down and clear
+([player priority](spec/airports.md#wing-landing-orders-and-player-priority)).
 
 The message gives applied, rejected and no-motion counts. An explicit attack target must be alive,
 hostile and present in each recipient's own radar or visual contacts. Synthetic
@@ -792,8 +814,11 @@ tower replies remain text only.
 In the creator, set **Start** to **Ground**, then choose **Airport**. Continue
 through the normal loadout screen. The player starts on that runway with engine
 idling, gear/flaps down and brakes applied. **B** releases brakes; use the normal
-throttle and flight controls to take off. Other selected aircraft start airborne
-at the displayed wing altitude. Restart restores the accepted airport/start.
+throttle and flight controls to take off. The player's AI wingmen queue on the taxiway
+and wait until the player is airborne before entering the runway. Startup
+takeoff clearance and wing departure/landing reports are automatic; Alt-S
+suppresses routine wing reports but keeps player clearance. Other
+wings start airborne at the displayed wing altitude. Restart restores the accepted airport/start.
 Airborne remains the default. Ground start requires the researched flight model;
 legacy and restricted native modes remain available for airborne starts.
 

@@ -48,8 +48,8 @@ runway. The horizontal indicator corrects height and the vertical indicator corr
 lateral alignment. Above-path guidance moves down; right-of-path guidance moves
 left. Centered indications show alignment. Airspeed brackets show the advised
 landing range. Manual page 65 gives the player first landing clearance while other
-aircraft hold at marshal. That is evidence to preserve for a later traffic feature,
-not authorization here to implement autonomous traffic.
+aircraft hold at marshal; AI traffic follows that rule as described in
+[wing landing orders and player priority](#wing-landing-orders-and-player-priority).
 
 Both pages 67 and 87 give a 5 nautical mile activation distance. Page 67 gives an
 altitude below 2,000 feet; page 87 gives below 4,000 feet and requires gear down
@@ -105,6 +105,32 @@ Next step: identify player input/menu producers and their visible responses.
 Capture or transfer of airport ownership is not established by nationality fields.
 Mission orders and ownership changes are outside this requested command scope.
 
+### Wing landing orders and player priority
+
+Manual p.65: "your aircraft always receives first landing clearance; all other
+aircraft will hold marshal while you land." The recovered retail condition
+([AI format notes](../formats/ai.md#airfield-takeoff-and-landing-sequences)) is
+spec-derived: the player counts as landing, and AI aircraft landing at that
+airport hold at marshal, while the gear is down, the aircraft is below 4,000 ft
+above the ground, no faster than 953 ft/s and within 25,000 ft of the nearest
+friendly airport. Friendly uses the tower's rule: a friendly airport or a
+neutral one that grants permission. No tower request is needed. The player must be airborne. Rollout and
+taxi do not claim landing priority; runway occupancy is checked separately.
+A departing player is excluded until leaving the condition or approaching a
+usable runway within 30 degrees of its heading with its near end ahead
+(fitted, agent decision 2026-09-23). It is re-evaluated every tick,
+so raising the gear, climbing or flying away, a crash, ejection or restart
+releases it. Agent decision (2026-09-23, fitted): an airport's distance is
+measured to its nearest usable runway centre, since the scene has no single
+airport position, and an airport with no usable runway is ignored. The
+player's Shift-A selection also chooses where Alt-L (land at selected airport,
+an opinionated addition John requested on 2026-09-23) sends the wing. The
+wingmen use the player's cleared runway at that airport, otherwise its longest
+usable runway, and share the tower's refusal of hostile, unknown and
+unpermitted neutral airports (agent decisions, 2026-09-23). The AI approach,
+marshal and landing rules are in [AI airfield sequences](ai-airfield.md); the
+keys are in [input](../INPUT.md#player-wing-orders).
+
 ## Integration choices
 
 Proposed agent choice: use typed world instances, stable source identities,
@@ -137,7 +163,7 @@ reverse engineering. Later measured evidence can replace a fitted rule locally.
 | Tower availability | The current base-layout free-flight host assigns airports neutral status with explicit landing permission because it has no mission player-side assignment. The service can also reject hostile, unknown or unpermitted neutral airports when a mission supplies those states. Disabled runways decline. | Opinionated base-layout policy, agent choice 2026-09-20; fitted mission service policy |
 | Clearance lifetime | Stays with the selected runway until cancellation, airport selection change, runway disablement, flight reset or landing completion. Repeating a request repeats status rather than allocating another clearance. | Opinionated |
 | Landing completion | Existing flight state reports supported, alive, on-runway contact and speed below 30 knots for 240 consecutive 120 Hz ticks. Taxi remains manual. | Fitted service completion, not flight damage criteria |
-| Radio output | Typed response and subtitle immediately at a simulation tick. A successful landing request and repeat use reviewed `^CLRLAND`. Deterministic landing completion and repeating its latest reply use reviewed `^WELHOME`. These event bindings are fitted because retail player-menu producers remain unresolved. Selection, cancellation, rejection and invalidation stay text only. Missing or old caches preserve text operation and report that a retail reimport is needed for optional airport audio. | Reviewed phrase/sample identity with fitted event binding |
+| Radio output | Manual landing replies retain their recordings. Automatic player takeoff/landing cues and named wingman status reports share a paced, cancellable channel. Startup takeoff clearance, airborne, farewell, wind, touchdown grade and welcome use reviewed recordings. Taxi and marshal status remain text-only. Carrier-only cues require carrier operations. | [Airfield radio specification](airfield-radio.md), reviewed phrase identities with fitted host event binding |
 | Runway damage | At zero imported hit points disable new clearance and ILS; preserve its surface for physical contact. Individual tower/building loss does not disable other runway services in this first host policy. | Fitted service consequence |
 | Missing destruction artwork | Remove the intact mesh when combat HP reaches zero, retain target/mission identity, and use the existing impact effect. Do not infer an A-suffix replacement. | Fitted visual fallback |
 
@@ -147,9 +173,17 @@ longitudinal span near -2748 through 3252 feet. That agrees with reviewed STRIP
 anchors near -2512 through 3090 feet and avoids an invisible support footprint.
 
 Runway support and the ILS datum use the authored airport ground elevation.
-A dedicated static-surface rendering depth bias avoids terrain overlap without
-changing that elevation. Textured coplanar detail faces use a separate depth-biased
-render pass, without a separate physical face lift. For composite runway shapes,
+Airport surfaces use no slope or constant depth bias. Either offset can pull
+pavement over an aircraft, at a grazing view or from a high overhead view.
+Solid surfaces draw before textured detail, with equal-depth samples allowed
+so later coplanar art remains visible. Geometry still obeys ordinary depth
+occlusion. Distant, moving views must keep pavement above terrain separated
+by one foot, with no camera-dependent surface lift. The shared world renderer
+uses reversed floating-point depth to retain that separation across its
+existing camera near planes and 2,200,000-foot far limit. This is a fitted
+host precision correction (agent, 2026-09-23), with airport placement and
+flight contact unchanged.
+For composite runway shapes,
 the horizontal layer with the greatest aggregate polygon area defines pavement.
 The mesh is translated vertically so that layer meets the runway surface, with
 all relative geometry retained. For example, RNWY1's source paving at -4 feet
@@ -179,9 +213,14 @@ into a 256-square GPU layer, with UVs adjusted to retain the entire artwork.
 This is a fitted resolution reduction for the current shared texture-array path;
 small sheets retain original texels, and extracted media remains unchanged.
 
-The runway-plane rule requires visual inspection for burial or terrain protrusion.
-If a site fails, record a per-shape/per-site fitted correction or implement a
-bounded runway-footprint terrain cutout; do not silently move the airport.
+The rendered terrain is split exactly at each oriented airport footprint and
+recessed to at most one foot below its existing support plane. Boundary walls
+join higher terrain outside the footprint. Intersections interpolate the
+original texture coordinates and colors. Terrain outside the footprint, the
+source height grid, the airport transform and flight contact remain unchanged.
+This fitted rendering-only correction (agent, 2026-09-23) prevents low cockpit
+views from exposing overlapping terrain through pavement. Ordered equal-depth passes separate coplanar airport details without
+changing their depth.
 Mesh scale comes from reviewed SH transform/header consumers, not the aircraft
 renderer’s one-third-foot convention. If unresolved, record a measured per-type
 scale before accepting that type. No universal guessed scale is approved here.

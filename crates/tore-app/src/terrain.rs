@@ -1,4 +1,6 @@
 //! Renderer-independent world data and free-camera controls (feet, X east/Y up/Z north).
+mod runway_cutout;
+
 use crate::AppResult;
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::{
@@ -25,6 +27,10 @@ pub struct World {
     pub environment: Environment,
     /// Immutable imported placement/airport geometry. Mutable health belongs to combat.
     pub airport_scene: tore_sim::airport::Scene,
+    /// Each runway's taxi, takeoff, landing and parking points from its STRIP
+    /// shape, by runway object id. A runway is absent when its shape lacks a
+    /// point or a point is off the airport surface.
+    pub airfield_anchors: BTreeMap<u32, tore_sim::ai::airfield::AirfieldAnchors>,
     /// Every source placement, including definitions the bounded SH projector cannot draw.
     pub static_manifest: Vec<(u32, tore_formats::mission::SourceKey, String, bool)>,
     pub catalog: Vec<(String, String)>,
@@ -103,6 +109,63 @@ fn append_ground_texture(out: &mut Vec<u8>, pic: &Pic) -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+/// Spec-derived: the STRIP template roles in `docs/formats/native-strip.md`
+/// ("Remaining template callback boundaries"). Box midpoints are feet in the
+/// shape's frame ([right, up, forward]); `place` puts one in the world. None
+/// unless every point the airfield sequences use is present.
+fn airfield_anchors(
+    boxes: &[tore_formats::shape::ContactBox],
+    heading: f64,
+    place: impl Fn([f64; 3]) -> [f64; 3],
+) -> Option<tore_sim::ai::airfield::AirfieldAnchors> {
+    // The native lookup returns the first box with an id.
+    let point = |id: u8| {
+        boxes
+            .iter()
+            .find(|b| b.id == id)
+            .map(|b| place(b.midpoint().map(f64::from)))
+    };
+    let points = |first: u8| -> Option<[[f64; 3]; 4]> {
+        Some([
+            point(first)?,
+            point(first + 1)?,
+            point(first + 2)?,
+            point(first + 3)?,
+        ])
+    };
+    let mut parking = [[0.; 3]; 9];
+    for (slot, place) in parking.iter_mut().enumerate() {
+        *place = point(0x19 + slot as u8)?;
+    }
+    Some(tore_sim::ai::airfield::AirfieldAnchors {
+        taxi_out: points(0x25)?,
+        takeoff_spot: point(0x11)?,
+        // Box 0x17's recorded orientation is zero on every reviewed STRIP, so
+        // the runway heading is the placed airport heading.
+        takeoff_heading: heading,
+        landing_point: point(0x12)?,
+        // `fitted`: box 0x18's heading is not decoded. The landing aim point
+        // is behind the takeoff spot, sometimes on a parallel centerline.
+        // The host uses the takeoff direction for landings.
+        landing_heading: heading,
+        taxi_in: points(0x29)?,
+        parking,
+        parking_heading: (heading + std::f64::consts::FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
+    })
+}
+
+fn anchor_points(
+    anchors: &tore_sim::ai::airfield::AirfieldAnchors,
+) -> impl Iterator<Item = [f64; 3]> + '_ {
+    anchors
+        .taxi_out
+        .iter()
+        .chain([&anchors.takeoff_spot, &anchors.landing_point])
+        .chain(&anchors.taxi_in)
+        .chain(&anchors.parking)
+        .copied()
 }
 
 impl World {
@@ -282,6 +345,7 @@ impl World {
             land_texture,
             environment,
             airport_scene: tore_sim::airport::Scene::default(),
+            airfield_anchors: BTreeMap::new(),
             static_manifest: Vec::new(),
             catalog,
             sky_indices,
@@ -313,6 +377,7 @@ impl World {
         out.resolve_palette(0.);
         out.build_mesh();
         out.build_airport_scene(resources, code.trim_end_matches(".MM"))?;
+        out.recess_airport_terrain();
         Ok(out)
     }
 
@@ -335,6 +400,7 @@ impl World {
         let mut shapes = BTreeMap::new();
         let mut shape_scales = BTreeMap::new();
         let mut runway_anchors = BTreeMap::new();
+        let mut strip_boxes = BTreeMap::new();
         for placement in &layout.placements {
             if definitions.contains_key(&placement.object_type) {
                 continue;
@@ -365,6 +431,7 @@ impl World {
                                 placement.object_type.clone(),
                                 anchor.midpoint().map(f64::from),
                             );
+                            strip_boxes.insert(placement.object_type.clone(), boxes.clone());
                         }
                         shape_scales.insert(
                             placement.object_type.clone(),
@@ -382,6 +449,7 @@ impl World {
         let mut objects = Vec::new();
         let mut runways = Vec::new();
         let mut airports = Vec::new();
+        let mut anchors = BTreeMap::new();
         let mut static_layers = BTreeMap::<String, crate::static_art::Image>::new();
         let mut static_float_count = 0usize;
         for placement in &layout.placements {
@@ -506,6 +574,17 @@ impl World {
                             + basis.forward[axis] * local[2]
                     });
                     length_ft = max[2] - anchor[2];
+                }
+                if let Some(found) = strip_boxes.get(&placement.object_type).and_then(|boxes| {
+                    airfield_anchors(boxes, heading, |local| {
+                        std::array::from_fn(|axis| {
+                            support_origin[axis]
+                                + basis.right[axis] * local[0]
+                                + basis.forward[axis] * local[2]
+                        })
+                    })
+                }) {
+                    anchors.insert(id, found);
                 }
                 runways.push(Runway {
                     object: id,
@@ -637,7 +716,21 @@ impl World {
             runways,
             airports,
         };
+        // Every point must stand on the airport's landable surface.
+        let scene = &self.airport_scene;
+        anchors.retain(|_, found: &mut tore_sim::ai::airfield::AirfieldAnchors| {
+            anchor_points(found).all(|p| scene.runway_surface(p[0], p[2]).is_some())
+        });
+        self.airfield_anchors = anchors;
         self.airport_scene.validate().map_err(|error| error.into())
+    }
+
+    /// The AI's view of one runway, with its airfield points when known.
+    pub fn runway_view(&self, object: u32) -> Option<tore_sim::ai::airfield::RunwayView> {
+        self.airport_scene.runway(object).map(|runway| {
+            tore_sim::ai::airfield::RunwayView::from(runway)
+                .with_anchors(self.airfield_anchors.get(&object).copied())
+        })
     }
     fn build_mesh(&mut self) {
         let t = &self.theater;
@@ -686,6 +779,12 @@ impl World {
             }
         }
     }
+    /// Split at footprint edges before lowering the rendered ground, so
+    /// neighboring terrain and all physics queries retain their original data.
+    pub(crate) fn recess_airport_terrain(&mut self) {
+        self.vertices = runway_cutout::terrain(&self.vertices, &self.airport_scene.runways);
+    }
+
     /// The mission's steady wind in world feet per second.
     pub fn wind(&self) -> [f64; 3] {
         self.weather.configuration().wind_world_fps()
@@ -1161,6 +1260,7 @@ pub(crate) mod tests {
             },
             environment: Environment::default(),
             airport_scene: tore_sim::airport::Scene::default(),
+            airfield_anchors: BTreeMap::new(),
             static_manifest: Vec::new(),
             catalog: vec![],
             vertices: vec![],
@@ -1285,6 +1385,71 @@ pub(crate) mod tests {
         w.theater.cells[0].elevation = 200;
         assert!(w.turbulence_reduced_surface(0., 0.));
         assert!(!w.turbulence_reduced_surface(f64::from(CELL_FEET), 0.));
+    }
+
+    #[test]
+    fn strip_boxes_become_world_airfield_points() {
+        use tore_formats::shape::ContactBox;
+        let at = |id: u8, x: i16, z: i16| ContactBox {
+            flags: 0xc0,
+            id,
+            pairs: [[x, x], [0, 32], [z - 10, z + 10]],
+        };
+        let mut boxes: Vec<_> = (0x19..=0x21)
+            .map(|id| at(id, 2688, -1266 + 100 * i16::from(id - 0x19)))
+            .collect();
+        boxes.extend([
+            at(0x11, -1723, -952),
+            at(0x12, -1723, -1110),
+            at(0x25, 2208, -794),
+            at(0x26, 1412, -1326),
+            at(0x27, -308, -1326),
+            at(0x28, -1723, -1326),
+            at(0x29, -1723, 1912),
+            at(0x2a, 288, 1912),
+            at(0x2b, 288, -1326),
+            at(0x2c, 2220, -1326),
+        ]);
+        // An east-facing field placed at (10000, 500, 20000): local forward is
+        // world +X and local right is world -Z.
+        let heading = std::f64::consts::FRAC_PI_2;
+        let basis = tore_sim::attitude::Basis::new(heading, 0., 0.);
+        let place = |local: [f64; 3]| -> [f64; 3] {
+            std::array::from_fn(|axis| {
+                [10_000., 500., 20_000.][axis]
+                    + basis.right[axis] * local[0]
+                    + basis.forward[axis] * local[2]
+            })
+        };
+        let anchors = airfield_anchors(&boxes, heading, place).unwrap();
+        let near = |a: [f64; 3], b: [f64; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-6);
+        assert!(near(
+            anchors.takeoff_spot,
+            [10_000. - 952., 500., 20_000. + 1723.]
+        ));
+        assert!(near(
+            anchors.landing_point,
+            [10_000. - 1110., 500., 20_000. + 1723.]
+        ));
+        assert!(near(
+            anchors.taxi_out[0],
+            [10_000. - 794., 500., 20_000. - 2208.]
+        ));
+        assert!(near(
+            anchors.taxi_in[3],
+            [10_000. - 1326., 500., 20_000. - 2220.]
+        ));
+        assert!(near(
+            anchors.parking[8],
+            [10_000. - 466., 500., 20_000. - 2688.]
+        ));
+        assert_eq!(anchors.takeoff_heading, heading);
+        assert_eq!(anchors.landing_heading, heading);
+        assert_eq!(anchors.parking_heading, std::f64::consts::PI);
+        assert_eq!(anchor_points(&anchors).count(), 19);
+        // Any missing point means the field has no usable anchors.
+        boxes.retain(|b| b.id != 0x21);
+        assert!(airfield_anchors(&boxes, heading, place).is_none());
     }
 
     #[test]

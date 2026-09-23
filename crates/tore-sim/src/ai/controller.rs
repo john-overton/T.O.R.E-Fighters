@@ -265,7 +265,10 @@ pub struct LeaderView {
     pub heading_deg: f64,
     pub speed: ScalarSpeed,
     pub target: Option<u32>,
+    /// The leader is landing (B48 join-landing reads this).
     pub recovering: bool,
+    /// The leader is on the ground. Wingmen do not formate on it.
+    pub on_ground: bool,
 }
 
 /// One carried store, as the weapon service sees it.
@@ -420,6 +423,15 @@ pub enum Activity {
     Breaking,
     Rejoining,
     ReturningToBase,
+    /// On the ground waiting for its turn to depart.
+    Waiting,
+    Taxiing,
+    TakingOff,
+    /// Holding at the marshal point while another aircraft lands first.
+    HoldingMarshal,
+    Landing,
+    /// Stopped on the ground after landing.
+    Landed,
     OutOfFuel,
     Destroyed,
 }
@@ -438,6 +450,12 @@ impl Activity {
             Self::Breaking => "Breaking",
             Self::Rejoining => "Rejoining",
             Self::ReturningToBase => "Returning to base",
+            Self::Waiting => "Waiting to take off",
+            Self::Taxiing => "Taxiing",
+            Self::TakingOff => "Taking off",
+            Self::HoldingMarshal => "Holding at marshal",
+            Self::Landing => "Landing",
+            Self::Landed => "Landed",
             Self::OutOfFuel => "Out of fuel",
             Self::Destroyed => "Destroyed",
         }
@@ -2789,6 +2807,7 @@ mod tests {
             speed: ScalarSpeed(800.),
             target: None,
             recovering: false,
+            on_ground: false,
         });
         let first = c.step(&frame).unwrap();
         assert_eq!(first.activity, Some(Activity::Formation));
@@ -3120,6 +3139,7 @@ mod tests {
             speed: ScalarSpeed(800.0),
             target: None,
             recovering: false,
+            on_ground: false,
         });
         let framed = DecisionFrame {
             tick: 0,
@@ -3726,6 +3746,7 @@ mod tests {
             speed: ScalarSpeed(800.),
             target: None,
             recovering: false,
+            on_ground: false,
         });
         frame.wing.vertical_spacing_ft = 0;
         let mut previous = [0.; 3];

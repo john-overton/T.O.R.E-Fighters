@@ -349,11 +349,18 @@ That model alone advances attitude, velocity, position, fuel and telemetry;
 there is no post-step AI movement override. Imported external stores contribute
 payload mass and releases reduce it. The controller and its fitted limits are
 specified in [input-only AI control](spec/ai.md#input-only-aircraft-control).
+Ground-started AI aircraft use the researched model for runway contact.
+An airborne AI actor switches to that model when its landing sequence begins.
+The control mapping accounts for current flap lift and low-speed G authority.
+[Takeoff, landing and return to base](spec/ai-airfield.md) define the sequence.
 The three player adapters stay distinct. Exact input-replay validation is
 recorded in the [AI baseline](baselines/ai-research.md).
 
 ## Creator ground initialization
 
+The player's whole wing starts on the ground. The player uses the takeoff
+anchor and wingmen queue on the taxiway near it, with a staggered runway
+fallback when the points are unusable. Wingmen wait until the player is airborne.
 The player ground-start path requires the existing researched adapter. It retains
 selected fuel and payload, resolves a source runway departure point, and adds the
 aircraft model's wheel/CG clearance to the shared runway surface height. All
@@ -418,4 +425,12 @@ view without affecting the fixed-tick wreck physics.
 All existing flight adapters retain their selection; the shared fixed-step
 escape component runs independently of the existing wreck component. The AI
 recovery estimate uses imported G envelopes, remaining authority and terrain.
-Its thresholds are fitted, with John's healthy-aircraft guard above 200 AGL.
+Its thresholds are fitted, with John's healthy-aircraft guard above 200 AGL
+and the [airfield catastrophe guard](spec/ai-airfield.md#ejection-during-an-airfield-sequence).
+
+
+AI exterior rendering now uses each actor's actual gear, flap, hook, brake,
+bay, exhaust and control-surface positions. Device poses interpolate between
+simulation ticks with the same fraction as aircraft positions. Straight-flight
+fixtures retain their existing fixed devices. This is a presentation correction,
+not an extra flight-model or ground-height offset.

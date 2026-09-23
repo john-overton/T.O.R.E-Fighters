@@ -24,10 +24,12 @@ with the aircraft's own wheel/CG offset, engine idling, gear/flaps down and brak
 applied. Selected fuel and stores survive initialization. Existing B releases
 brakes and the normal throttle/pitch inputs begin manual takeoff.
 
-Other selected aircraft use their existing airborne spawn reference at the chosen
-altitude. No autonomous ground traffic or new AI behavior was added. Legacy and
-restricted native modes reject ground start without changing adapters. Missing
-or obstructed runway starts produce a notice instead of a partial launch.
+Since 2026-09-23 the player's whole wing starts on the ground and the player
+stands on the airport's own takeoff spot; see
+[Whole-wing ground start](#whole-wing-ground-start-2026-09-23). The other wings
+keep the airborne launch at the chosen altitude. Legacy and restricted native
+modes reject ground start without changing adapters. Missing or obstructed
+starts produce a notice instead of a partial launch.
 
 ## Weight-class runway wind
 
@@ -130,5 +132,153 @@ Ground pilot-input replays require the same aircraft, theater and ground-start
 selection, consistent with the existing tape's matching-initial-state contract.
 
 No manual joystick takeoff session, Windows/macOS runtime check, cold start,
-carrier start or retail comparison was performed. Ground start is player-only;
-AI taxi/takeoff sequencing remains outside this work. No commit or push was made.
+carrier start or retail comparison was performed.
+
+## Whole-wing ground start, 2026-09-23
+
+Implementation mode. Behavior is specified in
+[Quick Mission](../spec/quick-mission-menu.md#player-ground-start),
+[AI airfield sequences](../spec/ai-airfield.md) and
+[player landing priority](../spec/airports.md#wing-landing-orders-and-player-priority).
+This work includes John's requests for whole-wing ground starts, landing and
+bug-out commands, 200/300 nautical mile separations, and go-arounds instead of
+non-catastrophic landing ejections. The extension of the ejection guard to
+takeoff and the safety constants are agent decisions.
+
+The Claude main session and nine subagent transcripts were recovered locally.
+Their final validation agent stopped at an API session limit while checking
+terrain clearance. Its prior review fixes were present: parked-player priority,
+climb-out priority, device cleanup after cancelled approaches, bug out on the
+inbound route, persistent cancellation of a joined landing, and preservation of
+legacy terrain height. The branch was brought onto main at `6521723`, preserving
+its radio, debrief, terrain and menu changes.
+
+### Airport data
+
+- **Airport points on real fields.** A throwaway probe loaded all 16 base
+  theaters from the import. 231 of 311 airport entries yield a full set of
+  takeoff, landing, taxi and parking points on the airport surface: every
+  STRIP, STRIP1 to STRIP7 and STRIP3A field. The 22 DTSTRP vertical pads and
+  the 58 STRIP5A, STRIP6A and STRIP7A entries do not: their shapes carry every
+  point, but the points fall off their own paving. Those use the staggered
+  runway fallback (`anchors-by-theater.log`).
+- **The takeoff spot is the old runway start line.** On every one of the 231
+  fields the takeoff spot (box 0x11) lies exactly on the host's near runway
+  end, 0 ft away, and 100 ft behind the previous fitted player start. The host
+  already used box 0x11 as the near end of its runway line, with the far end at
+  the far edge of the whole airport mesh; it never used box 0x11 as the runway
+  centre. Along the takeoff centerline the paving starts several hundred feet
+  before the spot (about 510 ft on RNWY4, 490 ft on RNWY1). On RNWY1, RNWY3 and
+  RNWY7 the landing aim point (box 0x12) is on a separate parallel centerline.
+  On RNWY1 the whole mesh reaches 5,556 ft forward of the shape origin while
+  the takeoff centerline's paving ends at 3,832 ft, so the host's runway line
+  is longer than that paved strip. The runway geometry itself was not changed.
+### Review fixes and regressions
+
+- A hazardous steep final over the runway could continue until it crashed.
+  It now requests a go-around while recoverable. Synthetic flights cover
+  recoverable hazards over and short of the runway, an ordinary low final,
+  and a critically damaged lander that still ejects.
+- Rafale C and MiG-21 repeatedly floated past the runway and went around.
+  The AI control mapping now accounts for the researched model's flap lift,
+  flap-adjusted minimum speed and continuous low-speed G ceiling. Both now
+  land and park. A synthetic shallow descent with flaps checks actual flight
+  path and exact replay from the generated inputs.
+- Correcting the control mapping exposed a fast touchdown after a ridge
+  approach. The flare now starts easing according to height and speed, rather
+  than waiting for a fixed 60 ft height. The synthetic ridge approach lands.
+- At Ivano Frankivs'k, a wingman hit rising terrain while holding after
+  takeoff. The terrain rule now covers climb-out, keeps the wings level
+  during the correction, uses full military power for the climb and closes
+  the speedbrake. Both wingmen complete the scenario below.
+
+### Imported aircraft and airports
+
+Linux, current local user-owned import in the isolated
+`.local/ground-start-review/data/` profile. Logs and readable transcripts stay
+under `.local/ground-start-review/`, outside Git. The shared development profile
+was not written. These headless runs advance the same 120 Hz AI, flight,
+terrain, combat and order services used by the app.
+
+For the twelve-aircraft sweep, each player's wing has one AI wingman. The
+scripted player takes off; the wingman receives Alt-L's order at tick 30,000
+(250 seconds). All use UKR airport 2, Simferopol, 200 nm separation and the
+normal imported loadout. The F-22 uses tick 15,000 instead, as explained below.
+Times are simulation seconds since launch, not retail comparisons.
+
+| Exact imported identity | Wingman liftoff | Parked |
+| --- | ---: | ---: |
+| F18.PT, F/A-18D | 137.9s | 1101.1s |
+| RAFALE.PT, Rafale C | 120.2s | 1129.2s |
+| F14.PT, F-14D | 133.0s | 1069.0s |
+| A4E.PT, A-4E | 135.3s | 1098.1s |
+| X31.PT, X-31 | 120.7s | 1087.7s |
+| MIG29.PT, MiG-29 | 121.9s | 1137.9s |
+| SU27.PT, Su-27 | 120.4s | 1127.3s |
+| MIG21.PT, MiG-21 | 131.6s | 1092.8s |
+| SU25.PT, Su-25 | 127.2s | 1101.7s |
+| MIG23.PT, MiG-23 | 134.4s | 1053.9s |
+| SU35.PT, Su-35 | 124.7s | 1104.5s |
+| F22.PT, F-22A | 106.1s | 698.5s |
+
+Every tested wingman above landed on its first approach and stayed alive.
+Additional scenarios, each run for 216,000 ticks (30 simulated minutes):
+
+| Scenario | Result |
+| --- | --- |
+| UKR airport 2, player plus three F/A-18D wingmen, order at tick 30,000 | All three parked by 1,715.1 s. Liftoff gaps 39.9 and 127.8 s, showing why there is no fixed takeoff interval. |
+| UKR airport 12, Ivano Frankivs'k, two F/A-18D wingmen, order during takeoff at tick 18,000 | Both cleared the rising terrain and parked by 1,191.0 s. |
+| UKR airport 1, two A-4E wingmen, bug out at tick 30,000 | Both returned, landed and parked by 1,158.7 s. |
+| FRA airport 24, two F/A-18D wingmen, order at tick 30,000 | Unusable anchors selected the staggered runway fallback. Both parked by 1,093.3 s. |
+
+A 300 nm start at UKR airport 12 was shortened to 292.7 nm and printed the
+map-fit notice. The 200 nm Simferopol start turned enemy placement by about
+32 degrees and retained the requested distance. Neither printed an off-map
+start. Synthetic layout tests cover bounds, shortening, blocked slots and
+fallbacks. The ordinary airborne probe and player headless flight also run. A parked
+wingman stays in Waiting through 1,200 ticks while the player remains grounded;
+two identical runs give checksum `3619c359cfcf68c3`.
+
+Reproduce a full wing scenario from the repository root:
+
+```sh
+TORE_DATA_DIR=.local/ground-start-review/data target/release/tore-app --theater UKR --ground-start 2 --aircraft f18 --probe-wing-size 4 --maneuver takeoff --probe-wing-order 30000:land-selected --separation 200 --ai-probe-ticks 216000 --no-audio
+```
+
+### Final checks
+
+All required Linux checks pass: formatting, workspace clippy with warnings
+as errors, locked workspace tests and build, 75 Python tests, source and both
+debug-binary asset guards, and documentation headers. The workspace tests
+include 785 passing simulation tests and 447 passing app tests (three GPU
+tests are ignored by the ordinary suite). The controls document was regenerated and checked.
+
+Display smoke tests pass for the menu, creator ground start, airborne start
+and `--fixture-wings` ground start; each creator smoke also passes its restart
+comparison. These use the default one-aircraft player wing, so they do not
+visually validate wingman taxi paths. The 1,200-tick headless player run ends
+without a crash, and the ordinary 1,200-tick airborne AI probe keeps every
+actor alive. The controller was detected only as hidraw on this host, so no
+manual gamepad takeoff was validated.
+
+### Scope of validation
+
+The scripted human pilot is a simple takeoff-and-cruise harness and can hit
+terrain later. It is not a validated player autopilot. In the original F-22
+sweep, its wingman crashed in free-flight formation at 210.3 s, before the
+250 s landing order. An order at 125 s exercised the same exact F22.PT aircraft's
+successful landing sequence. Enemy X-31 and F-22 free-flight actors also hit
+terrain. Those failures remain outside the airfield-sequence fixes; this is
+not whole-sortie acceptance. Taxi traces sometimes leave paving briefly while
+following the airport anchors, then return. No claim of collision-free taxi
+paths on every field is made.
+
+The keyboard map was checked in Chromium on all three sheets at 1920 by 1080
+and 960 by 720. Alt-U and Alt-L fit their keys. The integration review also
+restored main's Alt-S radio-silence binding to the map. Comms PNG exports at
+1080p and 4K include the labels; ZIP and PDF code was unchanged.
+
+Unvalidated: a creator launch with wingmen on a display, crosswind landing
+coverage, multi-wing runway contention, every airport layout, Windows/macOS
+runtime behavior and retail comparison. Vertical pads, STOVL and carriers
+remain outside the conventional-aircraft sequence.

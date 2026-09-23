@@ -515,6 +515,10 @@ impl FlightUi {
                 "8" => Some(O::Spacing),
                 "k" => Some(O::Stacking),
                 "c" => Some(O::ControlToggle),
+                // Retail bug out is Alt-B, which T.O.R.E keeps as break left.
+                // Alt-U and Alt-L were chosen by John on 2026-09-23.
+                "u" => Some(O::BugOut),
+                "l" => Some(O::LandAtSelected),
                 "1" => Some(O::Formation(F::Echelon)),
                 "2" => Some(O::Formation(F::LineAbreast)),
                 "3" => Some(O::Formation(F::LineAstern)),
@@ -1384,5 +1388,32 @@ mod tests {
             ui.key("2", false, false, true, &[]),
             Command::Wing(PlayerOrder::Formation(Formation::LineAbreast))
         );
+    }
+    #[test]
+    fn landing_orders_use_alt_u_and_alt_l() {
+        use tore_sim::ai::wing::PlayerOrder;
+        let mut ui = FlightUi::default();
+        assert_eq!(
+            ui.key("u", false, false, true, &[]),
+            Command::Wing(PlayerOrder::BugOut)
+        );
+        assert_eq!(
+            ui.key("l", false, false, true, &[]),
+            Command::Wing(PlayerOrder::LandAtSelected)
+        );
+        // Recipient addressing is unchanged, and the unmodified and Shift
+        // keys keep their own meanings.
+        assert_eq!(
+            ui.key("5", false, false, true, &[]),
+            Command::WingRecipient(Some(2))
+        );
+        assert!(!matches!(
+            ui.key("u", false, false, false, &[]),
+            Command::Wing(_)
+        ));
+        assert!(!matches!(
+            ui.key("l", true, false, false, &[]),
+            Command::Wing(_)
+        ));
     }
 }

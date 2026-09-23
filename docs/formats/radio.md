@@ -75,14 +75,12 @@ This establishes airport use of these recordings, not the complete original
 state, eligibility or timing conditions. Source: the same hash-reviewed EXE and
 its local `.local/weapons-research/native/fa-disassembly.txt`.
 
-This establishes the phrase/sample pairs. It does not establish that retail
-exposes TORE's authored select, repeat or cancel commands. TORE uses the
-clearance recording for a successful player landing request and its repeat, and
-the welcome recording after its deterministic landing-completion event and when
-that latest reply is repeated. Those
-event bindings are fitted. Selection, cancellation, rejection and runway
-invalidation remain text only because no matching retail event recording has
-been established.
+These phrase/sample identities do not establish TORE's authored select, repeat
+or cancel command interface. The current automatic and command-driven bindings
+are specified in [airfield radio](../spec/airfield-radio.md); the expanded
+consumer recheck is under [airport speech review](#airport-speech-review).
+Selection, cancellation, rejection and runway invalidation have no verified
+matching event recording and remain text-only.
 
 Ejection clips also enter the existing serial speech queue from discrete escape
 and cockpit warning transitions. Their reviewed filenames, source call sites
@@ -552,3 +550,36 @@ points 0x5224ca <= 3/4 of 0x5224cc on a carrier; wind with a 10% gust; call the
 ball within 90 deg and 30 deg heading; distance countdown; gear; hook; LSO
 corrections within 0x1388; "Steady" 20%), 0x16 landing grade 0x4ff960 +
 8*0x50d0f3, 0x1b welcome back within 10,000 ft. Callsign prefix 0x4900f0.
+
+
+### Airport speech review
+
+Static recheck on 2026-09-23 against the full 1.02F SHA-256 recorded above,
+using fresh disassembly of `0x48f6a0..0x49009f` and direct bounded reads of
+pairs `0x4ff840..0x4ff990`. Scratch disassembly and phrase inspection remain
+in `.local/airfield-radio/`. This confirms the preceding consumer notes and
+narrows their application:
+
+- `0x48f930..0x48f98a`: states 1 and 6 require a free strip and a one-shot
+  departure latch. Two variants start at `0x4ff840` for ordinary fields
+  (`^TAKOFF1`, `^RDYROLL`); the alternate group is `^TAKOFF2`, `^LAUNCH`.
+- `0x48fa30..0x48fb46`: state 0x12 gives `^AIRBORN` once, then `^GDLUCK` or
+  `^GDHUNT` after height above airport ground exceeds 10 feet. The rotate
+  warning is behind the carrier flag and a height below -10 feet.
+- `0x48fb4b..0x48fc64`: approach gives `^CLRLAND` when the strip is free,
+  then `^WINDAT`, numeric wind and `^KNOTS`. The 10% gust variant adds a
+  random 5 through 9 to the wind value. Host gust equivalence is unmeasured.
+- `0x48fc69` gates the subsequent distance, ball, gear, hook and landing-officer
+  branches on the carrier flag. They are not general land-airport calls.
+- `0x48ffa9..0x48ffd1`: the rollout grade indexes `^BADLAND`, `^FRLAND`,
+  `^GDLAND`; the host's grade producer remains fitted. `0x48ffd8..0x49003c`
+  selects `^WELBACK` or `^WELHOME` while taxiing back within 10,000 feet.
+- The actor-selection loop requires a human aircraft. Voicing the same
+  airport states for AI wingmen is therefore a host extension, not recovered
+  original wingman behavior. No separate taxi or marshal phrase was found in
+  this reviewed pair range. Next evidence for those would be other plane
+  comment consumers or an identified recording, not a filename guess.
+
+The shared channel busy check precedes the state dispatch. Failed submissions
+retry; the host uses bounded semantic report queues instead of copying that
+control flow. [Player-visible specification](../spec/airfield-radio.md).

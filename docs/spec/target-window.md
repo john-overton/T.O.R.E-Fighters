@@ -53,6 +53,10 @@ on 2026-09-21, an opinionated timing choice.
 - Activity, tactical goal and skill keep their existing independent meanings.
 - Goal A means attack, E evade, N neutral, T takeoff, C crash, L land.
   Underline A/E only when directed at the player. Skill has 0..3 dots.
+  T covers waiting on the runway, taxiing and the takeoff itself. L covers
+  holding at marshal, the landing and the landed aircraft. Keeping L after the
+  aircraft stops is an agent decision (2026-09-23): rollout and parking end the
+  same landing sequence, and the manual lists no separate code for it.
 
 ## Fitted presentation and unresolved evidence
 
@@ -78,7 +82,9 @@ bounds fit are fitted implementation choices. Empty/degenerate geometry keeps
 unit zoom; points inside the one-foot near plane cannot supply a usable fit.
 To address surface flicker during magnification, the target camera's near clip
 is half the nearest fitted subject depth, with a one-foot minimum. This fitted
-choice improves depth precision while retaining every fitted subject vertex.
+choice retains every fitted subject vertex. The shared
+[reversed-depth mapping](../ARCHITECTURE.md#flight-presentation-and-measurement)
+also preserves distant surface separation with the default one-foot near plane.
 Foreground scenery closer than that plane can be clipped in this camera only.
 Ordinary views keep their existing one-foot near clip. True coplanar geometry
 and source-model defects are not repaired by this precision change.
