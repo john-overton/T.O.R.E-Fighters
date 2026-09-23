@@ -22,6 +22,7 @@ mod combat;
 mod combat_tape;
 mod comms;
 mod controls_editor;
+mod crew_voice;
 mod damage_art;
 mod debrief;
 mod ejection_art;
@@ -203,6 +204,8 @@ struct App {
     /// Imported phrase text for composing radio lines.
     #[allow(dead_code)] // Removed once the radio and crew producers read it.
     phrases: comms::Phrases,
+    /// The player's crew voice; see docs/spec/cockpit-voice.md.
+    crew_voice: crew_voice::CrewVoice,
     screen: Screen,
     frame_time: Instant,
     instrument_time: Instant,
@@ -1419,6 +1422,7 @@ impl App {
                 }
                 // A fixed seed keeps headless runs deterministic.
                 self.comms.restart(1);
+                self.crew_voice = crew_voice::CrewVoice::new(&self.hornet.profile);
                 if self.recorded_ticks > 0 {
                     self.finish_recording();
                 }
@@ -2629,6 +2633,16 @@ impl ApplicationHandler for App {
                                 }
                             }
 
+                            self.crew_voice.step_host(
+                                &mut self.comms,
+                                &self.phrases,
+                                &crew_voice::Host {
+                                    flight: &self.flight,
+                                    combat: &self.combat.state,
+                                    wings: self.ai_wings.as_ref(),
+                                    world: &self.world,
+                                },
+                            );
                             deliver_radio(
                                 &mut self.comms,
                                 &mut self.flight_ui,
@@ -5975,6 +5989,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         ai_mission,
         comms: comms::Comms::new(1),
         phrases: comms::phrases(&theater_resources),
+        crew_voice: crew_voice::CrewVoice::new(&hornet.profile),
         preference_path: if preferences_enabled {
             Some(assets::data_directory()?.join("preferences-v1.conf"))
         } else {

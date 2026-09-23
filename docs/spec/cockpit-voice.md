@@ -312,6 +312,73 @@ Stems are the recording names without the `.5K` extension.
 | Almost home | player side | `^ALMSTHM` |
 | Death scream | player | `^AARRRGH`, `^OHSH`, `^YAAAAAH` |
 
+## Implementation in TORE
+
+Implementation, 2026-09-23: `crates/tore-app/src/crew_voice.rs`, evaluated on
+every fixed 120 Hz tick just before due radio lines are delivered. Lines go
+through the shared channel (`crates/tore-app/src/comms.rs`), which applies the
+3 second hold, the radio silence filter and delivery. Components are
+spec-derived unless listed below.
+
+Implemented:
+
+- Crew label and fighter class from the aircraft data, read once per flight.
+- The four dogfight situations, the 105,600 ft aircraft limit, pacing (4 plus
+  0 to 3 seconds, 2 more beyond 8,000 ft, immediate on a change) and every row
+  of the dogfight table, including position calls composed from the imported
+  phrase text and clock recordings. Offensive lines other than the position
+  call add 4 seconds; the plain offensive line adds its 3 seconds on top.
+- Surface targets: "Approaching target" and whole-mile range calls.
+- The single-seat wingman: the player's wing member 1, alive, on the same
+  target (or both without one) and within 15,000 ft, speaking the "you" lines
+  under his radio label. TORE's player always leads Quick Mission wing 1.
+- G strain, "Ease up on the stick" and being sick, counted on the fixed tick.
+- Fuel calls, once each, never silenced.
+- Missile warnings one second after launch (the human-flown warning delay of
+  B47) plus half a second, with the shared 6 second limits.
+- The death scream, played directly, only when the aircraft is destroyed
+  without an ejection, so it never doubles the ejection calls.
+- Feet wet and feet dry.
+
+Fitted components:
+
+- **Water test.** Over water means the terrain grid cell under the aircraft
+  has class 1, the class the collision query reports as water; outside the
+  grid counts as water, as the original's fallback cell does
+  ([land contact](../formats/native-land-contact.md)). Which query
+  `_PLANESetFeetWet` uses is not read. The first sample of a flight is taken
+  silently, so an air start over water does not open with "Feet wet".
+- **Free flight.** "Past takeoff and landing" is read as airborne with the gear
+  up; TORE has no player takeoff or landing sequence state.
+- **Scheduled death.** The eject-warning danger test stands in for the
+  10 second crash countdown.
+- **Mission clock.** The G crossing minute is the minute of the flight's time
+  of day.
+- **Turning left or right.** The position call's turn angle is unknown; TORE
+  uses his heading relative to ours, and says "turning left" or "turning
+  right" when that is 20 to 160 degrees. The clock position is always level.
+- **A missile would lock.** A loaded infrared or radar air-to-air missile
+  whose own seeker would see the target now, using TORE's seeker model without
+  terrain masking, in place of the original's seeker evaluation.
+- **Corner speed.** The slowest speed of the highest-G envelope at the current
+  altitude, the same host rule the AI uses.
+- **Fuel state.** The AI's B48 thresholds, with endurance from all remaining
+  fuel at the military flow scaled by the current throttle (floored at 10%)
+  and time home from the straight distance to the flight's first position at
+  cruise speed. Known difference: at high throttle joker and bingo come earlier
+  than with the original's cruise-throttle estimate.
+- **Break and head-on geometry.** "His nose within 30 degrees of us" and the
+  head-on 10 degree test use our azimuth and elevation off his nose, ignoring
+  his bank.
+- **Extra wait after a G sound** is added to the later of the pending coaching
+  time and now.
+
+Not implemented here: the radar link report (no supplemental radar key), the
+mission result and "almost home" lines (music and debrief work), airport and
+carrier calls, the `#` second voice set (no Vietnamese speakers fly with the
+player) and the takeoff and landing states of AI targets (TORE's AI targets
+are always airborne; only "going down" silences the coaching).
+
 ## Unknown
 
 - **Voice identity.** Whether the `^` crew lines, strain sounds and the `#` set

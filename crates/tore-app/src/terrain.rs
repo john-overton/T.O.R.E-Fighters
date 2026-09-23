@@ -662,6 +662,23 @@ impl World {
         self.theater.cell(col, row).class == 1
     }
 
+    /// Whether the T2 cell under the point is water: terrain class 1, the
+    /// class the original's collision query reports as water. Outside the grid
+    /// the original's fallback cell is water too. See
+    /// docs/formats/native-land-contact.md.
+    pub fn over_water(&self, x: f64, z: f64) -> bool {
+        let col = (x / f64::from(CELL_FEET)).floor();
+        let row = (z / f64::from(CELL_FEET)).floor();
+        if col < 0.
+            || row < 0.
+            || col >= self.theater.cols as f64
+            || row >= self.theater.rows as f64
+        {
+            return true;
+        }
+        self.theater.cell(col as usize, row as usize).class == 1
+    }
+
     /// Explicit authored standard atmosphere, shared wind and rendered terrain.
     /// No weather-derived temperature/pressure is inferred from LAY colors.
     pub fn air_data(

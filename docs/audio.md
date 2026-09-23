@@ -123,3 +123,11 @@ After separation, the cockpit engine loop stops and the wreck remains a spatial
 sound source. [Source clips and unresolved speaker routing](formats/ejection.md)
 and [event rules](spec/ejection.md#audio-and-art) distinguish measured identities
 from fitted assignments. Missing optional clips keep text and simulation working.
+
+## Crew voice
+
+The player's crew and first wingman speak through the shared radio channel:
+each line prints `Speaker: 'text'` and queues its recordings after anything
+already playing. The player's death scream plays directly, without text. What
+is said and when is in [cockpit voice](spec/cockpit-voice.md#implementation-in-tore);
+missing recordings are skipped and the text still shows.
