@@ -558,7 +558,8 @@ cargo run --locked -p tore-app -- --quick-mission --snapshot-state theaters --sn
 ```
 
 `--aircraft f18` remains the default. Quick-mission snapshot states are `normal`,
-`aircraft`, `theaters`, `ordnance`, `ordnance-empty`, `ordnance-drag`, and `help`;
+`aircraft`, `theaters`, `ordnance`, `ordnance-empty`, `ordnance-drag`, `help`,
+and `debrief-1` through `debrief-5` (the retail reference result on DEBSCV);
 they use the original 640×480 menu canvas. The empty/drag ordnance fixtures
 support CPU snapshots for inspecting card outlines and the carried thumbnail.
 Old caches re-import when local media is present. Aircraft switching refreshes

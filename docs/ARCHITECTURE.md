@@ -174,6 +174,13 @@ reviewed ECM probability and damage-selection helpers. Unknown native subsystem
 side effects remain explicit gaps; the service reproduces combat behaviour rather
 than reconstructing the original executable's combat tick.
 
+`combat::ledger` records every projectile from its first step to its outcome
+(hit with damage, missed, spoofed by a decoy, jammed), keyed by shooter,
+intended target and retail weapon class, plus credited kills and each target's
+last attacker. Nothing in flight reads it. The app's `debrief.rs` turns it into
+the post-mission pages; `ai_wings.rs` supplies the aim of AI gun rounds and
+reports decoyed missiles. See the [debrief spec](spec/debrief.md).
+
 `combat::gunsight` supplies a renderer-independent fixed-step gun solution using
 live projectile speed/drop helpers and current radar observations. `weapon_hud`
 draws its pipper/range arc and projects a selected target into a square or edge

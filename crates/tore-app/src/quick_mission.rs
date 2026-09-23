@@ -48,6 +48,8 @@ impl Default for Draft {
     }
 }
 pub struct QuickMission {
+    /// Results of the mission just flown, shown over the creator until OK.
+    pub debrief: Option<crate::debrief::Debrief>,
     pub ordnance: Option<crate::ordnance::Ordnance>,
     pub hover: Option<usize>,
     pressed: Option<usize>,
@@ -152,6 +154,7 @@ impl QuickMission {
             airport_objects.push(ids);
         }
         Self {
+            debrief: None,
             ordnance: None,
             start_modes: vec!["Airborne".into(), "Ground".into()],
             airport_names,
@@ -529,6 +532,8 @@ impl QuickMission {
             }
             "aircraft" => self.open(6),
             "theaters" => self.open(13),
+            // Debrief pages are prepared by the snapshot host.
+            state if state.starts_with("debrief") => {}
             "help" => self.help = true,
             "ground-start" => self.apply(33, 1),
             "airports" => {
@@ -551,6 +556,10 @@ impl QuickMission {
         Ok(())
     }
     pub fn pointer(&mut self, p: Option<(f64, f64)>) {
+        if let Some(d) = &mut self.debrief {
+            d.pointer(p);
+            return;
+        }
         if let Some(o) = self.ordnance.as_mut().filter(|o| o.visible) {
             o.pointer(p);
             return;
@@ -563,15 +572,22 @@ impl QuickMission {
                 .map(|(i, _)| *i)
         });
     }
-    pub fn down(&mut self) {
+    pub fn down(&mut self) -> Action {
         self.right_pressed = None;
+        if let Some(d) = &mut self.debrief {
+            return d.down();
+        }
         if let Some(o) = self.ordnance.as_mut().filter(|o| o.visible) {
             o.down();
-            return;
+            return Action::None;
         }
         self.pressed = self.hover;
+        Action::None
     }
     pub fn up(&mut self) -> Action {
+        if let Some(d) = &mut self.debrief {
+            return d.up().unwrap_or_else(|| self.close_debrief());
+        }
         if let Some(o) = self.ordnance.as_mut().filter(|o| o.visible) {
             return o.up();
         }
@@ -583,6 +599,10 @@ impl QuickMission {
         }
     }
     pub fn right(&mut self, down: bool) -> Action {
+        if let Some(d) = &mut self.debrief {
+            self.right_pressed = None;
+            return d.right(down);
+        }
         if let Some(o) = self.ordnance.as_mut().filter(|o| o.visible) {
             self.right_pressed = None;
             return o.right(down);
@@ -643,7 +663,17 @@ impl QuickMission {
         self.apply(id, previous);
         Action::Click
     }
+    /// Leaves the debrief for the creator, keeping the mission just flown.
+    fn close_debrief(&mut self) -> Action {
+        self.debrief = None;
+        self.hover = None;
+        self.pressed = None;
+        Action::Click
+    }
     pub fn cancel(&mut self) {
+        if let Some(d) = &mut self.debrief {
+            d.cancel();
+        }
         if let Some(o) = &mut self.ordnance {
             o.cancel();
         }
@@ -737,6 +767,9 @@ impl QuickMission {
         Action::Click
     }
     pub fn key(&mut self, key: &str, shift: bool) -> Action {
+        if let Some(d) = &mut self.debrief {
+            return d.key(key).unwrap_or_else(|| self.close_debrief());
+        }
         if let Some(o) = self.ordnance.as_mut().filter(|o| o.visible) {
             return o.key(key);
         }
@@ -799,10 +832,13 @@ impl QuickMission {
         pixels: &mut [u8],
         sprites: &BTreeMap<String, Sprite>,
         _world: &World,
-    ) {
+    ) -> bool {
+        if let Some(d) = &mut self.debrief {
+            return d.render(pixels);
+        }
         if let Some(o) = self.ordnance.as_mut().filter(|o| o.visible) {
             o.render(pixels);
-            return;
+            return false;
         }
         pixels.copy_from_slice(&sprites["QUIKMIS3.PIC"].rgba);
         self.controls.clear();
@@ -1041,6 +1077,7 @@ impl QuickMission {
             self.button(&mut c, sprites, POP_OK, "OK", (217, 437, 85, 24));
             self.button(&mut c, sprites, POP_CANCEL, "Cancel", (312, 437, 85, 24));
         }
+        false
     }
     fn line(
         &mut self,

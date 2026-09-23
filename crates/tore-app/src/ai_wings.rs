@@ -291,6 +291,14 @@ fn maximum_speed(state: &flight::State) -> ScalarSpeed {
     }
 }
 
+/// Records the intended target of the rounds `realise` just added, so the
+/// debrief can count unguided fire aimed at each aircraft.
+fn aim_latest(state: &mut live::State, emitted: u32, target: u32) {
+    let first = state.projectiles.len().saturating_sub(emitted as usize);
+    for projectile in &state.projectiles[first..] {
+        state.ledger.aim(projectile.id, target);
+    }
+}
 impl AiWings {
     /// Build the bridge from a resolved launch payload and the targets the
     /// existing spawner has already placed.
@@ -676,7 +684,7 @@ impl AiWings {
                         pending.groups.push_back((event.target, accepted as u16));
                     }
                 } else {
-                    self.realise(
+                    let emitted = self.realise(
                         event,
                         &mut state.projectiles,
                         &weapon,
@@ -684,6 +692,7 @@ impl AiWings {
                         player.position,
                         None,
                     );
+                    aim_latest(state, emitted, event.target);
                 }
             } else {
                 self.dropped_launches += event.projectiles;
@@ -718,7 +727,7 @@ impl AiWings {
                     request_id: RequestId(0),
                     projectiles: 1,
                 };
-                self.realise(
+                let emitted = self.realise(
                     &event,
                     &mut state.projectiles,
                     &weapon,
@@ -726,6 +735,7 @@ impl AiWings {
                     player.position,
                     Some(pending.ordinal),
                 );
+                aim_latest(state, emitted, *target);
                 *remaining -= 1;
                 pending.ordinal = pending.ordinal.wrapping_add(1);
                 pending.next_scaled = pending
@@ -1434,6 +1444,9 @@ impl AiWings {
                 .map_err(|e| e.to_string())?
                     == DecoyOutcome::Decoyed
                 {
+                    state
+                        .ledger
+                        .resolve(projectile.id, tore_sim::combat::ledger::Resolution::Spoofed);
                     projectile.target = None;
                     projectile.guidance = None;
                     // Fitted: coast after decoy, using the existing record lifetime.

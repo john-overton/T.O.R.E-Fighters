@@ -19,6 +19,9 @@ pub enum Action {
     None,
     Hover,
     Click,
+    /// Debrief page rocker, previous and next.
+    RockerUp,
+    RockerDown,
     OrdnanceWeapon,
     OrdnanceAmmunition,
     OrdnanceFuel,

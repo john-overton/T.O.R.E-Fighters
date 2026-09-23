@@ -1,6 +1,7 @@
 //! Explicit development live-fire adapter. Source configuration and recovered scalar
 //! kernels are combined with authored scheduling, guidance and swept-sphere contacts.
 //! This is NOT the diagnostic native-parity update or a retail AI implementation.
+use super::ledger::{Kill, Resolution, ShotKind};
 use super::missiles::{
     self, Flight, Guidance, LaunchMode, Motion, Rules, TargetRole,
     seeker::{self, Heat, Seeker, Status},
@@ -734,6 +735,8 @@ pub struct State {
     pub shots: u32,
     pub hits: u32,
     pub kills: u32,
+    /// Launches, outcomes and kills by shooter, for the debrief.
+    pub ledger: super::ledger::Ledger,
     pub armed: bool,
     pub player_hp: i32,
     pub player_damage: i32,
@@ -871,6 +874,7 @@ impl State {
             shots: 0,
             hits: 0,
             kills: 0,
+            ledger: Default::default(),
             tick: 0,
             service_remainder: 0,
             triggers,
@@ -2359,6 +2363,16 @@ impl State {
             };
             if p.age == 0 {
                 p.direction = projectile_launch_direction(w, p.direction, p.id, p.owner, p.station);
+                self.ledger.launch(
+                    p.id,
+                    p.owner,
+                    if p.incoming {
+                        Some(PLAYER_OWNER)
+                    } else {
+                        p.target
+                    },
+                    ShotKind::of(w),
+                );
             }
             let m = &w.movement;
             if if p.motion.is_some() {
@@ -2366,6 +2380,7 @@ impl State {
             } else {
                 removal_due(m, now, p.launched_t, (p.position[1] * 256.) as i32)
             } {
+                self.ledger.resolve(p.id, Resolution::Missed);
                 return false;
             }
             p.previous = p.position;
@@ -2579,6 +2594,7 @@ impl State {
                         && i32::from(draw(&mut self.rng, 100))
                             >= super::systems::hit_chance(100, deception)
                     {
+                        self.ledger.resolve(p.id, Resolution::Jammed);
                         events.push(Event::Defeated(0));
                     } else {
                         let base = projectile_damage(
@@ -2588,6 +2604,8 @@ impl State {
                         ) as u16;
                         let amount =
                             super::systems::damage_amount(base, 100, draw(&mut self.rng, 40) as u8);
+                        self.ledger
+                            .resolve(p.id, Resolution::Hit(u32::try_from(amount).unwrap_or(0)));
                         let previous = std::array::from_fn(|i| {
                             p.previous[i] + player.position[i] - previous_player[i]
                         });
@@ -2618,6 +2636,7 @@ impl State {
                         && i32::from(draw(&mut self.rng, 100))
                             >= super::systems::hit_chance(100, deception)
                     {
+                        self.ledger.resolve(p.id, Resolution::Jammed);
                         events.push(Event::Defeated(t.id));
                         return false;
                     }
@@ -2660,11 +2679,21 @@ impl State {
                     if p.owner == PLAYER_OWNER {
                         self.hits += 1;
                     }
+                    self.ledger
+                        .resolve(p.id, Resolution::Hit(u32::try_from(applied).unwrap_or(0)));
+                    let credit = Kill {
+                        owner: p.owner,
+                        victim: t.id,
+                        category: t.category,
+                        aircraft: t.role == TargetRole::Aircraft,
+                    };
+                    self.ledger.damaged(credit);
                     events.push(Event::Hit(t.id));
                     if t.hp == 0 {
                         if p.owner == PLAYER_OWNER {
                             self.kills += 1;
                         }
+                        self.ledger.kill(credit);
                         events.push(Event::Destroyed(t.id));
                     }
                     impacts.push((
@@ -2676,6 +2705,7 @@ impl State {
                         },
                     ));
                 } else {
+                    self.ledger.resolve(p.id, Resolution::Missed);
                     events.push(Event::Ground);
                     impacts.push((position, EffectKind::Ground));
                 }
@@ -4347,6 +4377,19 @@ mod tests {
         }
         assert_eq!((s.hits, s.kills, kills, s.targets[0].hp), (2, 1, 1, 0));
         assert!(s.effects.iter().any(|e| e.kind == EffectKind::Destroyed));
+        // The debrief ledger saw the same rounds, hits, damage and kill.
+        let fired = s.ledger.total(|k| k.owner == PLAYER_OWNER);
+        assert_eq!(fired.launched, s.shots);
+        assert_eq!((fired.hit, fired.damage), (2, 20));
+        assert_eq!(
+            s.ledger.kills(),
+            [Kill {
+                owner: PLAYER_OWNER,
+                victim: 7,
+                category: 0x80,
+                aircraft: s.targets[0].role == TargetRole::Aircraft,
+            }]
+        );
     }
     #[test]
     fn easy_aiming_widens_the_hit_volume_and_blasts_jolt_the_target() {

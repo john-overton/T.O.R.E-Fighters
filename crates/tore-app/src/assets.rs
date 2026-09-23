@@ -197,6 +197,11 @@ impl Assets {
                 return Err(format!("cache missing {code}.MM; re-import all theaters").into());
             }
         }
+        for name in crate::debrief::ART.iter().chain(crate::debrief::DATA) {
+            if !resources.contains_key(*name) {
+                return Err(format!("cache missing debrief {name}; re-import media").into());
+            }
+        }
         if !resources.contains_key("TVI0.PIC") {
             return Err("cache missing Vietnam textures; re-import media".into());
         }
@@ -373,7 +378,10 @@ impl Assets {
             &aircraft_libs.iter().collect::<Vec<_>>(),
             &scene_layouts,
         )?;
-        for (filename, names) in [("FA_1.LIB", ART), ("FA_2.LIB", DATA)] {
+        for (filename, names, debrief) in [
+            ("FA_1.LIB", ART, crate::debrief::ART),
+            ("FA_2.LIB", DATA, crate::debrief::DATA),
+        ] {
             let lib = source.archive(filename)?;
             report.push_str(&format!(
                 "{filename}: {} unique entries\n",
@@ -385,6 +393,7 @@ impl Assets {
                 .keys()
                 .filter(|n| {
                     names.contains(&n.as_str())
+                        || debrief.contains(&n.as_str())
                         || n.as_str() == "MCICONS.PIC"
                         || aircraft_names.contains(*n)
                         || scene_names.contains(*n)

@@ -76,6 +76,13 @@ unknown. Further research would inspect the original dialog drawing data.
 The Aircraft menu label is vertically centered by visible glyph bounds within
 y=38..58, matching the [ordnance menu bar](ordnance-presentation.md).
 
+## Mission end
+
+End mission opens the [mission debrief](debrief.md). Its OK returns to this
+creator with every setting of the mission just flown, including a custom load,
+and the ordnance screen closed. Requested by John on 2026-09-23. Starting the
+next mission reopens the ordnance screen for a custom load as before.
+
 ## Mission wings
 
 Guns only applies to the player and every member of all six wings, on both

@@ -9,7 +9,7 @@ use tore_formats::{
     flight_model::{
         clock_rng::{FixedClock, NativeRng},
         departure::{self, DepartureMode, StallState},
-        ground::{LandingSeverity, landing_severity},
+        ground::{LandingLimits, LandingSeverity, landing_severity},
     },
 };
 #[derive(Clone, Copy, Debug)]
@@ -79,6 +79,38 @@ pub struct Research {
     pub clock: FixedClock,
     pub rng: NativeRng,
     pub elapsed: i32,
+    /// Graded touchdowns, for the debrief's landing grade.
+    pub landings: Landings,
+}
+
+/// Touchdowns after real flight, each scored 100 (good) or 50 (fair). A
+/// touchdown outside the aircraft's landing limits is a crash, not a grade.
+/// Fitted: see docs/spec/debrief.md#landing-grade.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Landings {
+    pub count: u32,
+    pub score: u32,
+    airborne_ticks: u32,
+}
+impl Landings {
+    /// Airborne time that separates a landing from a bounce or a spawn.
+    const FLIGHT_TICKS: u32 = 5 * 120;
+    /// Average score as a whole percentage, if any landing was graded.
+    pub fn grade(&self) -> Option<u32> {
+        (self.count > 0).then(|| self.score / self.count)
+    }
+    fn airborne(&mut self) {
+        self.airborne_ticks = self.airborne_ticks.saturating_add(1);
+    }
+    fn touchdown(&mut self, limits: LandingLimits, descent_fps: f64, bank_degrees: f64) {
+        if self.airborne_ticks >= Self::FLIGHT_TICKS {
+            let gentle = descent_fps <= f64::from(limits.descent_fps) / 2.
+                && bank_degrees.abs() <= f64::from(limits.roll_degrees) / 2.;
+            self.count += 1;
+            self.score += if gentle { 100 } else { 50 };
+        }
+        self.airborne_ticks = 0;
+    }
 }
 impl Research {
     pub fn new(seed: i32) -> Result<Self> {
@@ -92,6 +124,7 @@ impl Research {
             clock: FixedClock::default(),
             rng: NativeRng::seeded(seed)?,
             elapsed: 0,
+            landings: Landings::default(),
         })
     }
     /// Source stall warning rules with fitted soft entry and spin dynamics.
@@ -243,6 +276,7 @@ impl Research {
             return;
         }
         if !self.on_ground && s.position[1] > floor {
+            self.landings.airborne();
             return;
         }
         let basis = Basis::new(s.yaw, s.pitch, s.bank);
@@ -277,6 +311,10 @@ impl Research {
             s.velocity = [0.; 3];
             s.speed = 0.;
         } else {
+            if !self.on_ground {
+                self.landings
+                    .touchdown(c.native.landing, -s.velocity[1], s.bank.to_degrees());
+            }
             self.on_ground = true;
             s.position[1] = floor;
             s.velocity[1] = s.velocity[1].max(0.);
@@ -324,6 +362,31 @@ impl Research {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn landings_after_real_flight_are_graded_and_bounces_are_not() {
+        let limits = LandingLimits {
+            forward_fps: 300,
+            side_fps: 10,
+            descent_fps: 20,
+            pitch_degrees: 15,
+            roll_degrees: 10,
+        };
+        let mut landings = Landings::default();
+        // Spawning on the runway is not a landing.
+        landings.touchdown(limits, 0., 0.);
+        assert_eq!(landings.grade(), None);
+        let fly = |l: &mut Landings, ticks| (0..ticks).for_each(|_| l.airborne());
+        fly(&mut landings, Landings::FLIGHT_TICKS);
+        landings.touchdown(limits, 8., 2.);
+        assert_eq!(landings.grade(), Some(100));
+        // A short hop after touchdown is a bounce, not a second landing.
+        fly(&mut landings, 60);
+        landings.touchdown(limits, 15., 0.);
+        assert_eq!(landings.count, 1);
+        fly(&mut landings, Landings::FLIGHT_TICKS);
+        landings.touchdown(limits, 15., 0.);
+        assert_eq!(landings.grade(), Some(75));
+    }
     use crate::{flight::integration_tests::profile, models::FlightModel};
     fn config() -> crate::models::config::Configuration {
         crate::models::AircraftModel::for_aircraft(&profile())

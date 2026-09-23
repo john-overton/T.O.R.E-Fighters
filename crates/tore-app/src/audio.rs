@@ -103,6 +103,8 @@ fn cue(action: Action) -> Option<&'static str> {
         | Action::FreeFlight
         | Action::Back => Some("&BUTTON.11K"),
         Action::Music(_) | Action::Effects(_) => Some("&TOGGLE1.5K"),
+        Action::RockerUp => Some("&ROCKUP.11K"),
+        Action::RockerDown => Some("&ROCKDN.11K"),
         Action::OrdnanceWeapon => Some("&ARMWPN.5K"),
         Action::OrdnanceAmmunition => Some("&ARMBLLT.5K"),
         Action::OrdnanceFuel => Some("&ARMDRIP.11K"),

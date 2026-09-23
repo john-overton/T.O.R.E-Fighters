@@ -22,6 +22,7 @@ mod combat;
 mod combat_tape;
 mod controls_editor;
 mod damage_art;
+mod debrief;
 mod ejection_art;
 mod engine_material;
 mod flight;
@@ -1517,6 +1518,17 @@ impl App {
                 self.frame_time = Instant::now();
             }
             Action::Back => {
+                if self.screen == Screen::Flight && self.mission.is_some() {
+                    let report =
+                        debrief::capture(&self.combat, &self.flight, self.ai_wings.as_ref());
+                    match debrief::Debrief::new(report, &self.theater_resources, None) {
+                        Ok(debrief) => self.quick.debrief = Some(debrief),
+                        Err(error) => self.quick.notice = Some(error.to_string()),
+                    }
+                    if let Some(ordnance) = &mut self.quick.ordnance {
+                        ordnance.visible = false;
+                    }
+                }
                 self.ai_wings = None;
                 self.wing_recipient = None;
                 self.combat.ai_poses = false;
@@ -1577,7 +1589,12 @@ impl App {
             );
             renderer.window.set_cursor(
                 if (self.screen == Screen::Main && self.menu.state.hover.is_some())
-                    || (self.screen == Screen::Quick && self.quick.hover.is_some())
+                    || (self.screen == Screen::Quick
+                        && self
+                            .quick
+                            .debrief
+                            .as_ref()
+                            .map_or(self.quick.hover.is_some(), |d| d.hovering()))
                 {
                     CursorIcon::Pointer
                 } else {
@@ -1946,8 +1963,7 @@ impl ApplicationHandler for App {
                 } else if self.screen == Screen::Quick {
                     if state == ElementState::Pressed {
                         self.quick.shift = self.modifiers.shift_key();
-                        self.quick.down();
-                        Action::None
+                        self.quick.down()
                     } else {
                         self.quick.up()
                     }
@@ -2155,14 +2171,11 @@ impl ApplicationHandler for App {
                         }
                         animating
                     }
-                    Screen::Quick => {
-                        self.quick.render(
-                            &mut self.menu.pixels,
-                            &self.menu.quick_sprites,
-                            &self.world,
-                        );
-                        false
-                    }
+                    Screen::Quick => self.quick.render(
+                        &mut self.menu.pixels,
+                        &self.menu.quick_sprites,
+                        &self.world,
+                    ),
                     Screen::Flight => {
                         self.world.no_sun_whiteout = self.flight_ui.cheats.no_sun_whiteout;
                         let now = Instant::now();
@@ -3363,6 +3376,8 @@ fn ai_probe_run(
     for line in bridge.probe_lines() {
         println!("{line}");
     }
+    let report = debrief::capture(&combat, &flight, Some(&bridge));
+    println!("AI probe debrief: {}", report.summary());
     // A single number that changes if any actor's path changes, so two runs can
     // be compared without diffing every coordinate.
     let checksum = bridge
@@ -5206,6 +5221,18 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     })?,
                     &theater_resources,
                 )?);
+            }
+            if let Some(page) = snapshot_state.strip_prefix("debrief") {
+                let mut debrief = debrief::Debrief::new(
+                    debrief::Report::sample(),
+                    &theater_resources,
+                    Some("DEBSCV.PIC"),
+                )?;
+                debrief.page = page
+                    .trim_start_matches('-')
+                    .parse::<usize>()
+                    .map_or(0, |page| page.clamp(1, 5) - 1);
+                quick.debrief = Some(debrief);
             }
             quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
             quick.preview_selector(&snapshot_state)?;

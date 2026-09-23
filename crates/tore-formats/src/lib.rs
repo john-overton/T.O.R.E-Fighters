@@ -7,6 +7,7 @@ pub mod executable;
 pub mod font;
 pub mod hud;
 pub mod mission;
+pub mod mission_text;
 pub mod module;
 pub mod music;
 pub mod pcm;
