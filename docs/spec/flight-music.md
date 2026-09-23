@@ -192,14 +192,14 @@ upgrades, downgrades at marked boundaries, a re-chosen score continuing, SUCC
 and HOME once per flight, LAUNCH restarting, the 30 second hit hold and the
 distances are **spec-derived**. The selector is
 `crates/tore-app/src/audio/situation.rs`, its inputs come from
-`crates/tore-app/src/flight_music.rs`, and the mission result from
+`crates/tore-app/src/flight_music.rs`, and the mission result cadence from
 `crates/tore-app/src/ai_wings/outcome.rs`. Audio only reads simulation state;
 headless and `--no-audio` runs do not compute any of it.
 
 | Condition | What feeds it in TORE | Provenance |
 | --- | --- | --- |
 | VALK | Ctrl+V while flying an aircraft (not ejected, not crashed, not paused). The toggle lasts for the session and is not saved. It stops the current score. The message "Valkyries music on" or "off" is an agent addition (2026-09-23). The recording is absent, so the result is silence. | spec-derived; message opinionated |
-| SUCC | The in-flight mission result below reaching success. "Mission accomplished!" (`^MISSACC`) is queued on the wing radio the first time. Which voice speaks it is not established. | fitted |
+| SUCC | The in-flight mission result below reaching success. "Mission accomplished!" (`^MISSACC`) is sent on the radio channel about 2 seconds later, the first time. Retail does not establish its label; TORE uses the crew label in a multi-crew aircraft, otherwise `YOU`. | spec-derived; label fitted |
 | EJECT | The player has ejected. | spec-derived |
 | LAUNCH | Takeoff roll: on a runway surface at 7 ft/s or more, having not just landed. Climb-out: after lifting off, within 25,000 ft of the liftoff point, under 4,000 ft above the ground, gear down and at 954 ft/s or less. Leaving the window ends it for good. | fitted state tracking, spec-derived numbers |
 | AIR | The player's designated target (T, Enter or a scope click) is an aircraft with hit points left, on the enemy side, and within 40,000 ft; or a projectile damaged the player in the last 30 game seconds. Enemy side is the AI wing side; without AI wings (range and fixture aircraft) any target not marked friendly counts. | spec-derived; fixture side rule fitted |
@@ -209,20 +209,17 @@ headless and `--no-audio` runs do not compute any of it.
 | HOME | After success, checked every 4 game seconds: within 42,240 ft of the home base and below 20,000 ft above sea level. The home base is the Quick Mission ground-start airport, at the mean centre of its runways; an airborne start has none, so HOME never plays there. "We're almost home!" (`^ALMSTHM`) is queued once, only while airborne. | fitted home base and altitude datum |
 | DECK | On a runway surface below 7 ft/s, or in the touchdown and rollout after a landing until stopped. A bounce during the rollout counts as airborne, not as a new takeoff. There is no carrier, catapult or taxiway state. | fitted |
 
-**In-flight mission result** (fitted). TORE has no mission evaluator in flight
-yet; the separate debrief work evaluates at mission end and is to replace this
-stand-in when it merges. Every 4 game seconds the Quick Mission is judged with
-the debrief's rules: shooting down a friendly aircraft fails it, losing a
-friendly objective fails it, and it succeeds once every target is shot down,
-crashed or has ejected. Targets are the enemy group the player's flight is
-assigned to destroy; with no such group every enemy aircraft is a target (agent
-decision). Friendly objectives are the aircraft the player's flight protects and
-the members of friendly must-survive groups, the player included when that
-group is marked. A player kill in the same step as a friendly aircraft's
-destruction counts as friendly fire. If the result is already decided at the
-first check, for example with no enemy aircraft, SUCC and HOME are off for the
-flight. Free flight, the range and fixture wings have no mission, so SUCC and
-HOME never play there. Failure plays no score and no radio call.
+**In-flight mission result.** Every 4 game seconds the Quick Mission is judged
+by the [debrief](debrief.md) evaluator itself, so the success music and the
+debrief always agree: its retail rules decide success (every target shot down,
+crashed or ejected, no friendly objective lost, no friendly-fire kill by the
+player). The 4 second cadence is spec-derived. If the mission has already
+succeeded at the first check, for example with no enemy aircraft, SUCC and HOME
+are off for the flight. The debrief reports only success or failure, not an
+open result, so a mission already failed at flight start is not detected and
+does not disable them (fitted). Free flight, the range and fixture wings have no
+mission, so SUCC and HOME never play there. Failure plays no score and no radio
+call.
 
 **Transitions in TORE.**
 

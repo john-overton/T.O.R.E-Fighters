@@ -1556,10 +1556,10 @@ impl App {
                         }
                     }
                 }
-                self.flight_music = flight_music::Observer::new(
-                    flight_music::home_base(&self.world, ground_airport),
-                    &self.combat.state,
-                );
+                self.flight_music = flight_music::Observer::new(flight_music::home_base(
+                    &self.world,
+                    ground_airport,
+                ));
                 self.reset_vapor();
                 self.previous_flight = self.flight.clone();
                 self.g_effects = Default::default();
@@ -2658,12 +2658,26 @@ impl ApplicationHandler for App {
                                 audio.ejection(&self.previous_flight, &self.flight, danger);
                             }
                             if let Some(audio) = &self.audio {
+                                // The debrief's own evaluator, so the success
+                                // music and the debrief always agree.
+                                let succeeded = || {
+                                    debrief::capture(
+                                        &self.combat,
+                                        &self.flight,
+                                        self.ai_wings.as_ref(),
+                                    )
+                                    .outcome
+                                        == debrief::Outcome::Success
+                                };
+                                let mission = (self.mission.is_some() && self.ai_wings.is_some())
+                                    .then_some(&succeeded as &dyn Fn() -> bool);
                                 let music = self.flight_music.step(
                                     &self.flight,
                                     &self.combat.state,
                                     &events,
                                     self.ai_wings.as_ref(),
                                     &self.world,
+                                    mission,
                                 );
                                 audio.situation(&music.inputs, music.now);
                                 for stem in music.radio {

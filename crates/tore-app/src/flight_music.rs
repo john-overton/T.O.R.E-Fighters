@@ -28,7 +28,6 @@ pub struct Observer {
     aim: situation::Hold,
     airport: situation::Airport,
     outcome: outcome::Tracker,
-    kills: u32,
 }
 
 /// `fitted`: the Quick Mission home base is the ground-start airport, placed
@@ -56,10 +55,9 @@ fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 impl Observer {
-    pub fn new(home_base: Option<[f64; 3]>, combat: &live::State) -> Self {
+    pub fn new(home_base: Option<[f64; 3]>) -> Self {
         Self {
             outcome: outcome::Tracker::new(home_base),
-            kills: combat.kills,
             ..Self::default()
         }
     }
@@ -71,6 +69,9 @@ impl Observer {
         events: &[live::Event],
         wings: Option<&AiWings>,
         world: &World,
+        // Whether the mission has succeeded, from the debrief evaluator;
+        // `None` without a mission. Called only on the 4 second cadence.
+        mission: Option<&dyn Fn() -> bool>,
     ) -> Step {
         let now = self.steps as f64 * flight::DT;
         self.steps += 1;
@@ -143,25 +144,8 @@ impl Observer {
             gear_down: flight.gear_down,
         });
 
-        // `fitted`: friendly fire is a player kill in the same step as a
-        // friendly aircraft's destruction.
-        if combat.kills > self.kills
-            && let Some(w) = wings
-            && events
-                .iter()
-                .any(|e| matches!(e, live::Event::Destroyed(id) if w.is_friendly(*id)))
-        {
-            self.outcome.friendly_fire();
-        }
-        self.kills = combat.kills;
-        let player_lost = flight.escape.is_some() || flight.crashed || flight.systems.pilot.dead;
         let airborne = !on_runway && !flight.research.as_ref().is_some_and(|r| r.on_ground);
-        let status = self.outcome.step(
-            now,
-            wings.map(|w| move |friendly_fire| w.verdict(friendly_fire, player_lost)),
-            position,
-            airborne,
-        );
+        let status = self.outcome.step(now, mission, position, airborne);
 
         Step {
             now,
@@ -193,9 +177,9 @@ mod tests {
             [0., 20_000., 0.],
         )
         .unwrap();
-        let mut observer = Observer::new(None, &combat);
+        let mut observer = Observer::new(None);
         let step = |observer: &mut Observer, combat: &live::State, events: &[live::Event]| {
-            observer.step(&flight, combat, events, None, &world)
+            observer.step(&flight, combat, events, None, &world, None)
         };
         let first = step(&mut observer, &combat, &[live::Event::PlayerDamaged(3)]);
         assert_eq!(first.now, 0.);
