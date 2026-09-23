@@ -10,6 +10,8 @@ use tore_sim::ai::{
 
 pub struct OrderReport {
     pub message: String,
+    /// The player's own order call, played at once. The wingman's reply is
+    /// a [`Chatter`] event delivered through the radio channel.
     pub radio: Vec<&'static str>,
 }
 
@@ -56,7 +58,6 @@ impl AiWings {
         let mut applied = 0;
         let mut rejected = 0;
         let mut no_motion = 0;
-        let mut reply = None;
         let mut sender = None;
         for (_, id) in &members {
             let actor = self.mission.actor(*id).unwrap();
@@ -171,12 +172,18 @@ impl AiWings {
                             f64::from(a.pitch_offset_deg()),
                         );
                     }
+                    // The first wingman's reply goes through the radio
+                    // channel two seconds later (docs/spec/radio-chatter.md).
                     if Some(*id) == first {
-                        reply = match order {
-                            PlayerOrder::EngageMyTarget => Some("^ENGAGE"),
-                            PlayerOrder::ProtectMe => Some("^SHWTIME"),
-                            _ => None,
-                        };
+                        match order {
+                            PlayerOrder::EngageMyTarget
+                            | PlayerOrder::EngageFromFormation
+                            | PlayerOrder::AttackOnContact => self.engaged(*id, target),
+                            PlayerOrder::ProtectMe => {
+                                self.chat(Chatter::Showtime { speaker: *id });
+                            }
+                            _ => {}
+                        }
                     }
                 }
                 ReceiverOutcome::Rejected(_) => rejected += 1,
@@ -193,9 +200,6 @@ impl AiWings {
         }
         let mut radio = Vec::new();
         if let Some(stem) = sender.flatten() {
-            radio.push(stem);
-        }
-        if let Some(stem) = reply {
             radio.push(stem);
         }
         Ok(OrderReport {
@@ -285,9 +289,10 @@ fn sender_stem(
         }
         PlayerOrder::Disengage => "^DISENG",
         PlayerOrder::ProtectMe => "^CLRMY6",
-        PlayerOrder::EngageMyTarget => "^ATTACK",
-        // Sender mapping for policy orders is not yet established.
-        PlayerOrder::AttackOnContact | PlayerOrder::EngageFromFormation => return None,
+        // "Attack" alone for attack on contact (docs/spec/radio-chatter.md).
+        PlayerOrder::EngageMyTarget | PlayerOrder::AttackOnContact => "^ATTACK",
+        // Sender mapping for engage from formation is not yet established.
+        PlayerOrder::EngageFromFormation => return None,
     })
 }
 

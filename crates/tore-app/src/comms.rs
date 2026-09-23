@@ -284,6 +284,11 @@ impl Comms {
         self.cooldowns.insert(key, now + seconds);
         true
     }
+    /// Whether `key` is still cooling down, without starting it. For rules
+    /// that check a cooldown on every call but restart it only on some.
+    pub fn cooling(&self, key: &str, now: f64) -> bool {
+        self.cooldowns.get(key).is_some_and(|until| now < *until)
+    }
     /// Whether no line was delivered in the last three seconds. Comment
     /// producers wait for this; radio calls do not (native).
     pub fn channel_free(&self, now: f64) -> bool {
@@ -420,6 +425,7 @@ mod tests {
         assert!(c.cooldown("hit", 0., 4.));
         assert!(!c.cooldown("hit", 3.9, 4.));
         assert!(c.cooldown("hit", 4., 4.));
+        assert!(c.cooling("hit", 7.9) && !c.cooling("hit", 8.) && !c.cooling("kill", 0.));
         let rolls: Vec<_> = (0..1000).map(|_| c.roll()).collect();
         assert!(rolls.iter().all(|r| *r < 100));
         assert!(rolls.iter().any(|r| *r < 10) && rolls.iter().any(|r| *r > 90));

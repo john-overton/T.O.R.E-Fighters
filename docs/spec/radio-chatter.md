@@ -454,8 +454,8 @@ this pass.
 | I'm hit, by aircraft | `^IMHIT1`, `^IMDMGE1`, `^OFFME`, `^SCORCH`, `^HEAT` | 1 of 5 | yes |
 | I'm hit, by AAA | `^IMHIT2`, `^IMDMGE2`, `^IMAAA`, `^EATLD` | 1 of 4 | yes |
 | I'm hit, other | `^IMHIT2`, `^IMDMGE2` | 1 of 2 | yes |
-| Death, ejection seat | `^AARRGH`, `^OHSH`, `^YAAAAAH`, `^EJECT`, `^SEEHELL`, `^PUNCH` | 1 of 6 | no |
-| Death, other | `^AARRGH`, `^OHSH`, `^YAAAAAH` | 1 of 3 | no |
+| Death, ejection seat | `^AARRRGH`, `^OHSH`, `^YAAAAAH`, `^EJECT`, `^SEEHELL`, `^PUNCH` | 1 of 6 | no |
+| Death, other | `^AARRRGH`, `^OHSH`, `^YAAAAAH` | 1 of 3 | no |
 | SAM / AAM launch | `^SAMLCH` / `^MISSLCH` | by launcher | no |
 | Missile inbound, radar | `^APEXCHF` | 6 s global cooldown | no |
 | Missile inbound, IR | `^ATOLFLR` | 6 s global cooldown | no |
@@ -494,6 +494,91 @@ Every stem above is present in the local `FA_2.LIB` except `^FIRGUN`.
    volume word the playback reads.
 10. **Evade, Bug out and relative-position ("He's at") producers.** The
     comment-system triggers are in [cockpit voice](cockpit-voice.md).
+
+## Implementation in TORE
+
+Implementation mode, 2026-09-23. The calls in this spec are produced by
+`crates/tore-app/src/radio_calls.rs` (wording, listeners, cooldowns and
+per-aircraft limits) from the player's combat events and from AI events
+surfaced by `crates/tore-app/src/ai_wings/chatter.rs`. Delivery (delays, radio
+silence, the channel hold and playback) is the shared channel in
+`crates/tore-app/src/comms.rs`. To attribute hits, combat keeps a short list
+of every damaging projectile with its owner, victim and store flags; the AI
+reports each accepted opposite-side launch warning and exposes its fuel level
+read-only. The radio never changes a combat or AI decision.
+
+### Implemented
+
+Everything below is **spec-derived** unless the fitted table says otherwise.
+
+- **Listener rule.** The player hears their own calls, the whole-flight and
+  flight-leader calls of AI wingmen in their own flight while the player is
+  alive, and calls addressed to the player (friendly-fire complaints). Other
+  friendly flights, enemies and ground objects are silent. Unheard calls
+  still make their roll and start their global cooldowns, because those
+  cooldowns are shared by every speaker.
+- **Labels.** Flight colour plus position word, such as `Red two`. The player
+  is `YOU`; a whole-flight call from a player with no living wingman uses
+  `RIO` or `CO-PILOT` in a multi-crew aircraft (the F/A-18D speaks as the RIO,
+  the Rafale C as `YOU`).
+- **The player's own calls**, voiced at once: launch, hit, kill and "I'm hit".
+- **Launch calls** for the player and every AI release: Phoenix "Fox three",
+  bombs with the 4 second cooldown, the text-only "I'm using my gun", the 50%
+  "Fox one"/"Fox two" at aircraft and the generic 1 of 3. A release with no
+  target is announced only for a bomb.
+- **Hit calls**: guided 1 of 5; unguided 1 of 8 with the 4 second global
+  cooldown and the 8 second per-shooter limit. Own-side hits are never
+  announced.
+- **Kill calls**: aircraft 40% generic 1 of 12, else "Splash one" plus the
+  type with `^SPLASH` and `^AC<resource>` when that stem is at most eight
+  characters (so the Rafale is text only); anything else 1 of 10 with the
+  4 second cooldown that only bomb kills start.
+- **"I'm hit"** by attacker class, with the 8 second per-aircraft limit for
+  gun rounds; the player's own is voiced as `YOU`.
+- **Death calls** (never silenced), **SAM and AAM launch calls** (half a
+  second), **engage replies** (two seconds; 1 of 9 for an aircraft or attack
+  on contact, "Engaging" for a ground or sea target), **"Showtime!"** for
+  protect me, **wingman contact reports**, **AI fuel calls** (joker, bingo,
+  fumes, out, each once, worst new level first) and **friendly-fire
+  complaints** (two seconds, 1 of 8, 6 second global cooldown, 52,800 ft).
+- The engage reply and "Showtime!" now travel through the radio channel two
+  seconds after the player's order call, which still plays at once. Attack on
+  contact now says "Attack".
+
+### Fitted components
+
+| Component | Rule | Known difference |
+| --- | --- | --- |
+| Flight numbering | The player's flight is the first (Red), then the other populated friendly Quick Mission wings, then the enemy wings, each in setup order. Positions are the wing slots, the player being Red one. | The original numbers flights in mission order; a Quick Mission has no such file. A ninth flight, unreachable with six wings, is labelled `Flight 9`. |
+| AI releases announced | Every AI weapon release is announced. | The original announces on one of two AI release paths; which releases that covers is unknown. |
+| Gun launch cooldown | The 4 second gun cooldown silences the whole unguided launch call, so a burst makes one call. | The original may say the generic line for every round. |
+| "I'm using my gun" | Followed by ". " before the generic line. | The original joins the two texts directly. |
+| Laser-guided stores | Announced by the guided rules, never "Bombs away". | The condition that makes some laser-guided stores say "Bombs away" is unknown. |
+| Contact trigger | An AI aircraft reports when its own target choice changes to a new aircraft (TORE's closest match to the original's attack state 31). Only the first two slots of a wing report, so in the player's flight only Red two reports. | State 31's meaning and the target-state exclusions are unknown; TORE targets are always airborne aircraft. |
+| Contact geometry | Clock, high/low, miles, the size words and identification are measured from the player, the only voiced listener. Clock hours are 30 degree sectors centred on each hour; " high" or " low" at 2,000 ft or more above or below; the type is named within 8 statute miles. | The original clock and elevation thresholds and the visibility scaling are unknown. |
+| Contact size split | The call's roll picks "pair of" below 40, the two-ship form below 70, otherwise "multiple"; for three to twelve, the number below 50. | The spec gives the percentages, not which roll values map to which word. |
+| Engage from formation | Counted as an attack order, so it gets an engage reply. | TORE-specific order; the original's sender for it is not located. |
+| Fuel levels | TORE's B48 levels: caution is joker, bingo is bingo, critical is fumes, out of fuel is out. | The margins match the spec's table; the fuel-flow inputs are approximate. |
+| Death call seat | PLANE flags 0x10 marks the ejection seat. The call is random and independent of whether the pilot actually ejects. | The existing ejection pass still plays its own "Punching out!" when a friendly pilot ejects, so the two can overlap. |
+| Always-generic kills | Only the F-22 (`F22`) always gets the generic set. | TORE flies no rotorcraft, V-22 or blimp. |
+| Attacker class | The player and AI aircraft are aircraft; a ground target with the AAA class bit is AAA; anything else is other. | No TORE ground object fires yet, so only the aircraft set is reachable. |
+| Player launch target | The fired round's own target, else the current designation. | None known. |
+
+### Not implemented, and why
+
+- **Waypoint calls.** Quick Mission flights have no waypoint routes yet.
+- **"You're the Wingleader now".** The situations that pass leadership are
+  unknown, and the player always leads their flight.
+- **AWACS report.** Its trigger is unknown.
+- **Vietnam voice set.** No Quick Mission speaker is North or South
+  Vietnamese yet, and the per-event `#` mapping is only partly read.
+- **Mission accomplished, mission failure and "almost home".** They need the
+  mission result evaluator, which another pass is building.
+- **Crew calls to the player** (missile-inbound warnings, coaching, G sounds,
+  crew fuel calls): the [cockpit voice](cockpit-voice.md) pass.
+- **"Clear my six" or "Watch my tail".** Protect me still always says "Clear
+  my six"; the 50/50 choice is not rolled yet.
+- **Evade, Bug out and relative-position calls.** No producers are located.
 
 ## Source notes
 

@@ -458,6 +458,10 @@ pub struct IntentBatch {
     /// The reason the script is running under (B47 ranking).
     pub reason: Option<ScriptReason>,
     pub fuel_state: Option<FuelState>,
+    /// Launchers whose B47 warning this actor accepted this tick from the
+    /// other side while carrying a dispenser: its "SAM launch" or "AAM
+    /// launch" radio call (docs/spec/radio-chatter.md). Read-only output.
+    pub launch_calls: Vec<u32>,
 }
 
 /// A count of every fitted fallback this actor has applied since it was built.
@@ -962,6 +966,16 @@ impl Controller {
         self.recipient.target = self.target.map(WingTargetId);
     }
 
+    /// The B48 fuel level judged on the latest tick, for radio fuel calls.
+    /// Read-only: nothing here feeds a decision.
+    pub fn fuel_state(&self) -> Option<FuelState> {
+        if self.last_batch.activity == Some(Activity::OutOfFuel) {
+            Some(FuelState::OutOfFuel)
+        } else {
+            self.last_batch.fuel_state
+        }
+    }
+
     pub fn wing_settings(&self) -> (Option<WingControl>, Option<i32>, Option<i32>) {
         (
             self.recipient.wing_control,
@@ -1200,6 +1214,13 @@ impl Controller {
             now: frame.now,
         };
         let outcome = threat::receive_warning(&inputs, &mut self.random);
+        if matches!(
+            outcome.reaction,
+            WarningReaction::NoManeuver | WarningReaction::Maneuver { .. }
+        ) && !batch.launch_calls.contains(&report.launcher_id)
+        {
+            batch.launch_calls.push(report.launcher_id);
+        }
         if let Some(release) = outcome.devices {
             batch.devices = Some(DeviceIntent {
                 class: release.class,
@@ -2934,9 +2955,12 @@ mod tests {
         // experience term, so nothing happens on the first tick.
         let early = c.step(&scene.frame(0, own())).unwrap();
         assert_eq!(early.reason, None);
+        assert!(early.launch_calls.is_empty(), "no call before the warning");
         // Well past the delay the reason is raised.
         let late = c.step(&scene.frame(1200, own())).unwrap();
         assert_eq!(late.reason, Some(ScriptReason::IrLaunch));
+        // The accepted opposite-side warning is the radio's launch call.
+        assert_eq!(late.launch_calls, [77]);
     }
 
     #[test]
@@ -2953,6 +2977,7 @@ mod tests {
         let mut c = controller(Experience::Ace);
         let batch = c.step(&scene.frame(1200, own())).unwrap();
         assert_eq!(batch.reason, None);
+        assert!(batch.launch_calls.is_empty(), "same side: no launch call");
     }
 
     #[test]
@@ -3061,6 +3086,7 @@ mod tests {
         state.fuel_endurance_s = 700.0;
         let batch = c.step(&scene.frame(0, state)).unwrap();
         assert_eq!(batch.fuel_state, Some(FuelState::Bingo));
+        assert_eq!(c.fuel_state(), Some(FuelState::Bingo), "the radio reads it");
         assert_eq!(batch.activity, Some(Activity::ReturningToBase));
         assert!(batch.fallbacks.contains(&Fallback::LeaderReturnToBase));
     }

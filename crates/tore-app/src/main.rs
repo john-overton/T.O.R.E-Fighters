@@ -53,6 +53,7 @@ mod ordnance;
 mod performance;
 mod preferences;
 mod quick_mission;
+mod radio_calls;
 mod rafale_animation;
 mod renderer;
 mod rocker;
@@ -201,6 +202,8 @@ struct App {
     ai_mission: ai_wings::Preset,
     /// Radio and crew voice delivery; see docs/spec/radio-chatter.md.
     comms: comms::Comms,
+    /// Weapon, hit, kill and wing radio calls; see radio_calls.rs.
+    radio: radio_calls::Radio,
     /// Imported phrase text for composing radio lines.
     #[allow(dead_code)] // Removed once the radio and crew producers read it.
     phrases: comms::Phrases,
@@ -1423,6 +1426,7 @@ impl App {
                 // A fixed seed keeps headless runs deterministic.
                 self.comms.restart(1);
                 self.crew_voice = crew_voice::CrewVoice::new(&self.hornet.profile);
+                self.radio = Default::default();
                 if self.recorded_ticks > 0 {
                     self.finish_recording();
                 }
@@ -2643,6 +2647,16 @@ impl ApplicationHandler for App {
                                     world: &self.world,
                                 },
                             );
+                            radio_calls::step(
+                                &mut self.radio,
+                                &mut self.comms,
+                                &self.phrases,
+                                comms::crew(&self.hornet.profile),
+                                &events,
+                                &mut self.combat.state,
+                                self.ai_wings.as_mut(),
+                                &self.flight,
+                            );
                             deliver_radio(
                                 &mut self.comms,
                                 &mut self.flight_ui,
@@ -3482,18 +3496,46 @@ fn ai_probe_run(
         hornet.profile.name,
         bridge.len()
     );
+    // Radio calls are observed, never fed back, so the probe is unchanged.
+    let mut comms = comms::Comms::new(1);
+    let mut radio = radio_calls::Radio::default();
+    let phrases = comms::phrases(resources);
+    let mut heard = Vec::new();
     for _ in 0..ticks {
         flight.step(&flight::PilotInput::default(), |x, z| {
             f64::from(world.height(x as f32, z as f32))
         });
-        combat.step(&mut flight, world)?;
+        let events = combat.step(&mut flight, world)?;
         bridge.step(&mut combat.state, &flight, world)?;
+        let crew = comms::crew(&hornet.profile);
+        let state = &mut combat.state;
+        radio_calls::step(
+            &mut radio,
+            &mut comms,
+            &phrases,
+            crew,
+            &events,
+            state,
+            Some(&mut bridge),
+            &flight,
+        );
+        let now = state.tick() as f64 / 120.;
+        heard.extend(
+            comms
+                .due(now)
+                .iter()
+                .map(|c| format!("{now:.1}s {}", c.line())),
+        );
     }
     for line in bridge.probe_lines() {
         println!("{line}");
     }
     let report = debrief::capture(&combat, &flight, Some(&bridge));
     println!("AI probe debrief: {}", report.summary());
+    println!("AI probe radio: calls={} heard={}", radio.made, radio.heard);
+    for line in heard.iter().take(40) {
+        println!("  {line}");
+    }
     // A single number that changes if any actor's path changes, so two runs can
     // be compared without diffing every coordinate.
     let checksum = bridge
@@ -6002,6 +6044,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         ai_wings: None,
         ai_mission,
         comms: comms::Comms::new(1),
+        radio: Default::default(),
         phrases: comms::phrases(&theater_resources),
         crew_voice: crew_voice::CrewVoice::new(&hornet.profile),
         preference_path: if preferences_enabled {

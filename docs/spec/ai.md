@@ -813,8 +813,9 @@ The event handler's Boolean result is not an obedience or radio-acknowledgment
 contract: some settings are applied while returning false, and a human break
 or targetless approach can return true without installing motion. A host receiver
 needs distinct applied, rejected, and no-motion outcomes. The 20 second
-target deadline's expiry consumer, the approach steering point, the player-side
-voicing of wingman replies and loose-versus-medium self-engagement remain open.
+target deadline's expiry consumer, the approach steering point and
+loose-versus-medium self-engagement remain open. The player-side voicing of
+wingman replies is in [radio chatter](radio-chatter.md#engage-replies-correction-to-b46).
 
 ## Live wing command and radio integration
 
@@ -823,12 +824,14 @@ of playback. Receiver outcomes distinguish applied settings, installed motion,
 rejection and no motion. The UI reports those outcomes per addressed flight;
 an accepted assignment is not a claim that weapons have fired. Only an accepted
 assignment by the first living wingman may produce its B46 reply. The player
-call precedes that reply. Commands remain scoped to a side and wing; an optional
+call plays at once; the reply follows two seconds later through the shared
+radio channel, as [radio chatter](radio-chatter.md#implementation-in-tore)
+specifies, including its variants and radio silence. Commands remain scoped to a side and wing; an optional
 actor recipient must belong to that flight. Dead actors do not receive orders.
 
 The following are **opinionated, agent-authored** integration choices. New
-player orders interrupt queued command audio so obsolete acknowledgments do not
-play after a cancellation. Radio is a separate FIFO, capped at 16 clips, with
+player orders interrupt queued order audio so obsolete order calls do not play
+after a cancellation; a reply already queued in the radio channel still plays. Radio is a separate FIFO, capped at 16 clips, with
 one voice at a time and gain 0.4. Pause freezes it; leaving flight, restart or
 muting effects clears it. Missing metadata or recordings produces silence while
 text and commands continue. No synthetic speech or substitute phrase is used.
@@ -865,6 +868,8 @@ still intercepting after 30 seconds with nonpositive closure requests a steadier
 platform, without claiming it can never catch up. Reports have a 10-second
 per-aircraft cooldown. They are text-only: original mappings for separated,
 rejoining, unable to catch up and steady-platform requests remain **unknown**.
+Wingman combat calls (contacts, launches, hits, kills, damage, deaths, launch
+warnings and fuel) are voiced; see [radio chatter](radio-chatter.md#implementation-in-tore).
 Next research is tracing the remaining say-event tables and their senders.
 Human controls are never changed. AI leader cooperation remains future work.
 

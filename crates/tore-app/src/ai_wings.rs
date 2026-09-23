@@ -23,6 +23,8 @@
 //! information service as the player RWR. Compatibility steering remains an
 //! explicit weapon-rules option.
 
+mod chatter;
+pub use chatter::{Chatter, Contact, FuelLevel, Member};
 mod engagement;
 pub use engagement::Preset;
 mod orders;
@@ -224,6 +226,9 @@ pub struct AiWings {
     /// Last observed hit points per actor, for the damage mirror.
     last_hp: BTreeMap<u32, i32>,
     pub ejection_events: Vec<(u32, String, bool)>,
+    /// Radio events for `radio_calls`, drained by the host each tick.
+    pub chatter: Vec<Chatter>,
+    watch: chatter::Watch,
     last_activity: BTreeMap<u32, Activity>,
     next_projectile_id: u32,
     weapon_rules: Rules,
@@ -422,6 +427,7 @@ impl AiWings {
         mission.set_spacing(512, 0);
         mission.set_external_leader(FRIENDLY_SIDE, 0, PLAYER_ID);
         let mut slots = Vec::new();
+        let mut watch = chatter::Watch::default();
         let mut profiles: Vec<(AircraftId, Aircraft, Option<sensors::SensorProfiles>)> = Vec::new();
         let mut index = 0usize;
         for wing in wings {
@@ -436,6 +442,7 @@ impl AiWings {
                 .iter()
                 .find(|(id, _, _)| *id == wing.aircraft)
                 .expect("just inserted");
+            watch.learn(wing.aircraft, aircraft);
             for member in &wing.members {
                 // The player's wing reserves member zero for the human leader.
                 let member_index = member.member
@@ -525,6 +532,8 @@ impl AiWings {
             seen_projectiles: Vec::new(),
             ai_shots: BTreeMap::new(),
             ejection_events: Vec::new(),
+            chatter: Vec::new(),
+            watch,
             last_hp: BTreeMap::new(),
             last_activity: BTreeMap::new(),
             reports: reports::Reports::default(),
@@ -655,6 +664,7 @@ impl AiWings {
             });
         let object = self.player_object(player, state.player_hp, state.configuration());
         let output = self.advance(object, &mut state.targets, &ground)?;
+        self.observe_chatter(&output, player);
         for event in &output.launches {
             if let Some(weapon) = self.weapons.get(&(event.actor, event.station.0)).cloned() {
                 if live::is_gun(&weapon) {
@@ -1956,11 +1966,11 @@ pub(crate) mod tests {
         )
         .unwrap()
     }
-    fn aircraft() -> Aircraft {
+    pub(crate) fn aircraft() -> Aircraft {
         crate::flight::animation_tests::profile()
     }
 
-    fn flat(_x: f64, _z: f64) -> f64 {
+    pub(super) fn flat(_x: f64, _z: f64) -> f64 {
         0.0
     }
 
@@ -1998,7 +2008,7 @@ pub(crate) mod tests {
 
     /// Two friendly aircraft in wing 2 and two enemy aircraft in wing 1, the
     /// same shape `--ai-probe-ticks` flies.
-    fn payload(enemy_override: Option<EnemySkillOverride>) -> Vec<WingLaunch> {
+    pub(crate) fn payload(enemy_override: Option<EnemySkillOverride>) -> Vec<WingLaunch> {
         let selections = [
             (launch::Side::Friendly, 1u8, 2usize, 1i32),
             (launch::Side::Enemy, 0, 2, 3),
@@ -2014,7 +2024,7 @@ pub(crate) mod tests {
 
     /// The four rows `Combat::reset` would have spawned: friendly pair facing
     /// the enemy pair, which face back.
-    fn spawned() -> Vec<live::Target> {
+    pub(crate) fn spawned() -> Vec<live::Target> {
         vec![
             target(1, [0., 20000., 0.], 0.),
             target(2, [1500., 20000., 0.], 0.),
@@ -2204,7 +2214,7 @@ pub(crate) mod tests {
         assert!(wings.mission.actors().iter().all(AiActor::is_neutral));
     }
 
-    fn player_object(position: Vector) -> WorldObject {
+    pub(super) fn player_object(position: Vector) -> WorldObject {
         WorldObject {
             id: PLAYER_ID,
             side: FRIENDLY_SIDE,
@@ -3075,7 +3085,13 @@ pub(crate) mod tests {
         let before = bridge.mission.actor(1).unwrap().flight().clone();
         let report = bridge.command(O::EngageMyTarget, Some(3), Some(1)).unwrap();
         assert!(report.message.contains("1 applied"));
-        assert_eq!(report.radio, ["^ATTACK", "^ENGAGE"]);
+        // The player's call is immediate; the reply is a delayed radio event.
+        assert_eq!(report.radio, ["^ATTACK"]);
+        let engage = Chatter::Engage {
+            speaker: 1,
+            aircraft: true,
+        };
+        assert_eq!(std::mem::take(&mut bridge.chatter), [engage]);
         assert_eq!(
             bridge.mission.actor(1).unwrap().controller().target(),
             Some(3)
@@ -3094,9 +3110,9 @@ pub(crate) mod tests {
                 .is_empty()
         );
         let report = bridge.command(O::EngageMyTarget, Some(3), Some(2)).unwrap();
-        assert_eq!(
-            report.radio,
-            ["^ATTACK"],
+        assert_eq!(report.radio, ["^ATTACK"]);
+        assert!(
+            bridge.chatter.is_empty(),
             "only the first living wingman replies"
         );
         let report = bridge
@@ -3164,8 +3180,13 @@ pub(crate) mod tests {
             )
             .unwrap()
             .unwrap();
+        bridge.chatter.clear();
         let protected = bridge.command(O::ProtectMe, None, None).unwrap();
-        assert_eq!(protected.radio, ["^CLRMY6", "^SHWTIME"]);
+        assert_eq!(protected.radio, ["^CLRMY6"]);
+        assert_eq!(
+            std::mem::take(&mut bridge.chatter),
+            [Chatter::Showtime { speaker: 1 }]
+        );
         assert_eq!(
             bridge.mission.actor(1).unwrap().assignment().protected_ids,
             [PLAYER_ID]
@@ -3176,7 +3197,14 @@ pub(crate) mod tests {
                 .command(O::EngageMyTarget, Some(3), None)
                 .unwrap()
                 .radio,
-            ["^ATTACK", "^ENGAGE"]
+            ["^ATTACK"]
+        );
+        assert_eq!(
+            bridge.chatter,
+            [Chatter::Engage {
+                speaker: 2,
+                aircraft: true,
+            }]
         );
     }
     #[test]
@@ -3201,6 +3229,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(report.message.contains("0 applied, 2 rejected"));
         assert_eq!(report.radio, ["^ATTACK"]);
+        assert!(bridge.chatter.is_empty(), "a rejected order has no reply");
         for id in [1, 2] {
             assert!(
                 bridge

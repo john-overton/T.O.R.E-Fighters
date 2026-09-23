@@ -148,6 +148,9 @@ pub struct MissionOutput {
     /// Every fitted fallback applied this tick, by actor.
     pub fallbacks: Vec<(u32, Fallback)>,
     pub wing: Vec<(u32, super::wing::WingRequest)>,
+    /// Accepted opposite-side launch warnings as (actor, launcher), for the
+    /// radio's "SAM launch" and "AAM launch" calls.
+    pub launch_calls: Vec<(u32, u32)>,
 }
 
 /// Everything needed to build one AI aircraft.
@@ -1079,6 +1082,12 @@ impl AiMission {
         for fallback in &batch.fallbacks {
             output.fallbacks.push((actor_id, *fallback));
         }
+        output.launch_calls.extend(
+            batch
+                .launch_calls
+                .iter()
+                .map(|launcher| (actor_id, *launcher)),
+        );
         if let Some(mut activity) = batch.activity {
             if actor.neutral && matches!(activity, Activity::Idle | Activity::Searching) {
                 activity = Activity::Formation;

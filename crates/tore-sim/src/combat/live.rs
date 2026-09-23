@@ -135,6 +135,22 @@ pub struct HitRecord {
     pub applied: i32,
     pub hp_after: i32,
 }
+/// One projectile that damaged the player or a target, kept for the radio
+/// hit, kill and "I'm hit" calls (docs/spec/radio-chatter.md). The host drains
+/// the list each tick with [`State::take_strikes`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Strike {
+    /// Who fired it: [`PLAYER_OWNER`] or an AI actor id.
+    pub owner: u32,
+    /// The damaged target, or `None` for the player.
+    pub victim: Option<u32>,
+    /// The weapon's type flags: 0x1 guided, 0x10 bomb, 0x80 bullet.
+    pub weapon_flags: u32,
+    /// The damage left the victim with no hit points.
+    pub destroyed: bool,
+}
+/// Strikes kept between drains; older ones are dropped first.
+pub const MAX_STRIKES: usize = 64;
 #[derive(Clone, Debug)]
 pub struct Station {
     pub weapon: Weapon,
@@ -754,6 +770,7 @@ pub struct State {
     pending_damage: bool,
     previous_player_position: Option<Vector>,
     pub history: Vec<HitRecord>,
+    strikes: Vec<Strike>,
     pub range_category: u16,
     next_target_id: u32,
     external: bool,
@@ -852,6 +869,7 @@ impl State {
             range_estimate: None,
             armed: true,
             history: vec![],
+            strikes: vec![],
             range_category,
             next_target_id: 1,
             config,
@@ -1863,6 +1881,16 @@ impl State {
     pub fn take_sound_events(&mut self) -> Vec<crate::acoustics::Emission> {
         std::mem::take(&mut self.sound_events)
     }
+    /// Projectile damage since the last drain, oldest first.
+    pub fn take_strikes(&mut self) -> Vec<Strike> {
+        std::mem::take(&mut self.strikes)
+    }
+    fn strike(&mut self, strike: Strike) {
+        if self.strikes.len() == MAX_STRIKES {
+            self.strikes.remove(0);
+        }
+        self.strikes.push(strike);
+    }
 
     fn emit_sound(&mut self, position: Vector, kind: crate::acoustics::Kind) {
         if self.sound_events.len() == 256 {
@@ -2346,6 +2374,7 @@ impl State {
             category: self.config.target_category,
         };
         let mut player_hits = Vec::new();
+        let mut strikes = Vec::new();
         let mut impacts = Vec::new();
         let mut sources = Vec::new();
         self.projectiles.retain_mut(|p| {
@@ -2611,7 +2640,7 @@ impl State {
                         });
                         let section =
                             LocalizedDamage::section_segment(previous, p.position, &player);
-                        player_hits.push((amount, section, is_gun(w)));
+                        player_hits.push((amount, section, is_gun(w), p.owner, w.flags));
                         impacts.push((position, EffectKind::Hit));
                         if !is_gun(w) {
                             events.push(Event::Jolt(Jolt {
@@ -2689,6 +2718,12 @@ impl State {
                     };
                     self.ledger.damaged(credit);
                     events.push(Event::Hit(t.id));
+                    strikes.push(Strike {
+                        owner: p.owner,
+                        victim: Some(t.id),
+                        weapon_flags: w.flags,
+                        destroyed: t.hp == 0,
+                    });
                     if t.hp == 0 {
                         if p.owner == PLAYER_OWNER {
                             self.kills += 1;
@@ -2713,11 +2748,14 @@ impl State {
             }
             true
         });
+        for strike in strikes {
+            self.strike(strike);
+        }
         // Invulnerable: hits still show their impact effect but do no damage.
         if self.cheats.invulnerable {
             player_hits.clear();
         }
-        for (amount, section, direct_gun) in player_hits {
+        for (amount, section, direct_gun, owner, weapon_flags) in player_hits {
             self.player_localized_damage
                 .record(section, amount, self.config.damage_capacity);
             if direct_gun && section == DamageSection::Cockpit && self.player_hp > 0 {
@@ -2732,7 +2770,16 @@ impl State {
             } else {
                 amount
             };
+            let alive = self.player_hp > 0;
             self.apply_player_damage(amount, &mut events);
+            if alive && amount > 0 {
+                self.strike(Strike {
+                    owner,
+                    victim: None,
+                    weapon_flags,
+                    destroyed: self.player_hp == 0,
+                });
+            }
         }
         for (p, kind) in impacts {
             self.effect(p, kind);
@@ -4104,12 +4151,38 @@ mod tests {
             let l = launcher();
             s.range_target(l);
             let mut collected = Vec::new();
+            let mut strikes = Vec::new();
             for _ in 0..600 {
                 for p in &mut s.projectiles {
                     p.owner = owner;
                 }
                 collected.extend(s.step(true, l, |_, _| 0.));
+                strikes.extend(s.take_strikes());
             }
+            // Every damaging hit names its owner and victim for the radio.
+            let hits: Vec<_> = collected
+                .iter()
+                .filter_map(|e| match e {
+                    Event::Hit(id) => Some(*id),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                strikes
+                    .iter()
+                    .map(|s| s.victim.unwrap())
+                    .collect::<Vec<_>>(),
+                hits
+            );
+            assert!(strikes.iter().all(|s| s.owner == owner));
+            assert_eq!(
+                strikes.iter().filter(|s| s.destroyed).count(),
+                collected
+                    .iter()
+                    .filter(|e| matches!(e, Event::Destroyed(_)))
+                    .count()
+            );
+            assert!(s.take_strikes().is_empty(), "draining empties the log");
             (s.hits, s.kills, collected)
         }
 

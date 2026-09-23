@@ -370,7 +370,11 @@ and `reports` keep delivery and advisory text separate from physical steering.
 `audio::Mixer` owns a bounded serial radio queue, independent of simulation
 execution. `tore-formats::radio` reads reviewed inert phrase records during
 import; the existing archive and PCM readers load original recordings.
-[Command behavior](spec/ai.md#live-wing-command-and-radio-integration),
+Radio chatter is observation only: `ai_wings/chatter` turns mission output
+into events, combat's strike list attributes projectile damage, and
+`radio_calls` words them and applies the listener rule before `comms` delivers
+them. [Radio chatter](spec/radio-chatter.md#implementation-in-tore),
+[command behavior](spec/ai.md#live-wing-command-and-radio-integration),
 [radio data](formats/radio.md), [controls](INPUT.md#player-wing-orders).
 
 Routine formation transitions share previous-tick velocity intentions through

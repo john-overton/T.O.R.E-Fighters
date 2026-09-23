@@ -1,4 +1,5 @@
-//! Opinionated text reports. No unverified original audio is assigned.
+//! Opinionated formation text reports. Their original recordings are
+//! unknown, so no audio is assigned. Voiced combat chatter is in `chatter.rs`.
 use super::*;
 use tore_sim::ai::formation::{Phase, Trace};
 
