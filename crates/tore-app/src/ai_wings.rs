@@ -1043,6 +1043,13 @@ impl AiWings {
         }
     }
 
+    /// A missile blast knocks an AI aircraft around, like the player's.
+    pub fn jolt(&mut self, id: u32, from: [f64; 3], strength: f64) {
+        if let Some(actor) = self.mission.actor_mut(id) {
+            actor.flight_mut().jolt_from(from, strength);
+        }
+    }
+
     /// Damage and death flow from the combat world into the actors: an actor
     /// whose target row lost hit points is told it was hit, and one whose row
     /// reached zero stops flying.

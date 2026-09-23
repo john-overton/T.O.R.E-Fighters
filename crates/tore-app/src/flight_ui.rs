@@ -100,6 +100,8 @@ fn cheat_switch<'a>(cheats: &'a mut tore_sim::cheats::Cheats, label: &str) -> Op
         "Ignore weapon weights?" => &mut cheats.ignore_weapon_weights,
         "No sun whiteout?" => &mut cheats.no_sun_whiteout,
         "No redout or blackout?" => &mut cheats.no_g_effects,
+        "No crashes?" => &mut cheats.no_crashes,
+        "Easy aiming?" => &mut cheats.easy_aiming,
         "No screen-shaking?" => &mut cheats.no_screen_shake,
         _ => return None,
     })
@@ -947,6 +949,8 @@ mod tests {
             "Ignore weapon weights?",
             "No redout or blackout?",
             "No screen-shaking?",
+            "No crashes?",
+            "Easy aiming?",
         ] {
             assert_eq!(ui.cheat_state(label), Some("Off"));
             assert_eq!(ui.activate(label, ""), Command::Click);
@@ -963,7 +967,7 @@ mod tests {
         ui.activate("Normal", "");
         assert!(!ui.cheats.invulnerable);
         assert_eq!(ui.cheat_state("Realistic"), None);
-        assert_eq!(ui.cheat_state("Easy aiming?"), None);
+        assert_eq!(ui.cheat_state("Easy targeting?"), None);
     }
 
     #[test]

@@ -261,6 +261,15 @@ impl Research {
                 || !surface.landable
                 || s.gear < 0.99
                 || severity != LandingSeverity::WithinLimits)
+            && s.cheats.no_crashes
+        {
+            s.ricochet(floor);
+            return;
+        } else if !self.on_ground
+            && (surface.water
+                || !surface.landable
+                || s.gear < 0.99
+                || severity != LandingSeverity::WithinLimits)
         {
             s.crashed = true;
             s.engine = false;
@@ -444,6 +453,39 @@ mod tests {
         assert_eq!([s.velocity[0], s.velocity[2]], [0., 0.]);
     }
 
+    #[test]
+    fn no_crashes_bounces_every_unsafe_touchdown_but_lands_a_safe_one() {
+        let c = config();
+        for (surface, gear, vertical_speed) in [
+            (Surface::runway(0.), 0., -30.),
+            (
+                Surface {
+                    water: true,
+                    ..Surface::runway(0.)
+                },
+                1.,
+                -30.,
+            ),
+            (Surface::runway(0.), 1., -100.),
+        ] {
+            let mut s = contact_state(&c);
+            s.cheats.no_crashes = true;
+            s.gear = gear;
+            s.velocity = [400., vertical_speed, 0.];
+            let mut r = Research::new(1).unwrap();
+            let previous = s.position;
+            r.contact(&mut s, surface, &c, 1., 0., previous);
+            assert!(!s.crashed && !r.on_ground);
+            assert!(s.velocity[1] >= 20.);
+            assert_eq!(s.velocity[0], 400.);
+        }
+        let mut s = contact_state(&c);
+        s.cheats.no_crashes = true;
+        let mut r = Research::new(1).unwrap();
+        let previous = s.position;
+        r.contact(&mut s, Surface::runway(0.), &c, 1., 0., previous);
+        assert!(r.on_ground && !s.crashed);
+    }
     #[test]
     fn touchdown_keeps_safety_classification() {
         let c = config();

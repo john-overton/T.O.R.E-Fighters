@@ -496,14 +496,20 @@ impl LocalizedDamage {
         }
     }
     pub fn section_segment(from: Vector, to: Vector, target: &Target) -> DamageSection {
-        Self::contact(from, to, target)
+        Self::contact(from, to, target, 1.)
             .map(|(_, section)| section)
             .unwrap_or_else(|| Self::section(to, target))
     }
-    fn contact(from: Vector, to: Vector, target: &Target) -> Option<(f64, DamageSection)> {
+    /// `scale` enlarges every section, as Easy aiming does for the player's rounds.
+    fn contact(
+        from: Vector,
+        to: Vector,
+        target: &Target,
+        scale: f64,
+    ) -> Option<(f64, DamageSection)> {
         let local = |point: Vector| {
             let offset = sub(point, target.position);
-            let radius = target.radius.max(1.);
+            let radius = target.radius.max(1.) * scale;
             [
                 crate::attitude::dot(offset, target.basis.right) / radius,
                 crate::attitude::dot(offset, target.basis.up) / radius,
@@ -647,6 +653,16 @@ pub enum Event {
     PilotKilled,
     PlayerGroundImpact,
     Defeated(u32),
+    /// A missile or bomb burst on an aircraft; the host knocks it around.
+    Jolt(Jolt),
+}
+/// Blast on an aircraft: `target` None is the player. `strength` is the
+/// warhead's damage against that aircraft over 100.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Jolt {
+    pub target: Option<u32>,
+    pub from: Vector,
+    pub strength: f64,
 }
 /// Mounted weapon audio state, independent of playback and rendering.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2198,6 +2214,14 @@ impl State {
             let w = owned
                 .as_ref()
                 .unwrap_or_else(|| &self.config.stations[p.station].weapon);
+            let easy = self.cheats.easy_aiming && p.owner == PLAYER_OWNER && !p.incoming;
+            let eased = (easy && !is_gun(w)).then(|| eased_weapon(w));
+            let w = eased.as_ref().unwrap_or(w);
+            let hitbox = if easy {
+                crate::cheats::EASY_AIMING_HITBOX
+            } else {
+                1.
+            };
             if p.age == 0 {
                 p.direction = projectile_launch_direction(w, p.direction, p.id, p.owner, p.station);
             }
@@ -2359,7 +2383,7 @@ impl State {
                     let previous = std::array::from_fn(|i| {
                         p.previous[i] + player.position[i] - previous_player[i]
                     });
-                    LocalizedDamage::contact(previous, p.position, &player).map(|v| v.0)
+                    LocalizedDamage::contact(previous, p.position, &player, 1.).map(|v| v.0)
                 } else {
                     segment_sphere(
                         sub(p.previous, previous_player),
@@ -2384,9 +2408,9 @@ impl State {
                         let previous = std::array::from_fn(|axis| {
                             p.previous[axis] + t.position[axis] - old_targets[i][axis]
                         });
-                        LocalizedDamage::contact(previous, p.position, t).map(|v| v.0)
+                        LocalizedDamage::contact(previous, p.position, t, hitbox).map(|v| v.0)
                     } else {
-                        let radius = t.radius + f64::from(w.damage.fuze_radius.max(0));
+                        let radius = t.radius * hitbox + f64::from(w.damage.fuze_radius.max(0));
                         segment_sphere(
                             sub(p.previous, old_targets[i]),
                             sub(p.position, t.position),
@@ -2436,6 +2460,15 @@ impl State {
                             LocalizedDamage::section_segment(previous, p.position, &player);
                         player_hits.push((amount, section, is_gun(w)));
                         impacts.push((position, EffectKind::Hit));
+                        if !is_gun(w) {
+                            events.push(Event::Jolt(Jolt {
+                                target: None,
+                                from: position,
+                                strength: f64::from(
+                                    w.damage.by_class[damage_class(self.config.target_category)],
+                                ) / 100.,
+                            }));
+                        }
                     }
                     return false;
                 }
@@ -2460,6 +2493,13 @@ impl State {
                     });
                     let section = LocalizedDamage::section_segment(previous, p.position, t);
                     let scaled = projectile_damage(p, w, nominal);
+                    if t.role == TargetRole::Aircraft && !is_gun(w) {
+                        events.push(Event::Jolt(Jolt {
+                            target: Some(t.id),
+                            from: position,
+                            strength: f64::from(nominal) / 100.,
+                        }));
+                    }
                     let critical = critical_hit(t, w, section, scaled);
                     let applied = if critical { t.hp } else { scaled.min(t.hp) };
                     t.hp -= applied;
@@ -3228,7 +3268,7 @@ mod tests {
         let old_projectile: Vector = std::array::from_fn(|i| cockpit_from[i] - movement[i]);
         let relative_previous: Vector = std::array::from_fn(|i| old_projectile[i] + movement[i]);
         assert_eq!(
-            LocalizedDamage::contact(relative_previous, cockpit_to, &target).map(|v| v.1),
+            LocalizedDamage::contact(relative_previous, cockpit_to, &target, 1.).map(|v| v.1),
             Some(DamageSection::Cockpit)
         );
         let core_from = std::array::from_fn(|i| target.position[i] - target.basis.right[i] * 5.);
@@ -3244,11 +3284,11 @@ mod tests {
         let second_to: Vector =
             std::array::from_fn(|i| cockpit_center[i] - target.basis.right[i] * 10.);
         assert_eq!(
-            LocalizedDamage::contact(first_from, first_to, &target),
+            LocalizedDamage::contact(first_from, first_to, &target, 1.),
             None
         );
         assert_eq!(
-            LocalizedDamage::contact(first_to, second_to, &target).map(|v| v.1),
+            LocalizedDamage::contact(first_to, second_to, &target, 1.).map(|v| v.1),
             Some(DamageSection::Cockpit)
         );
         target.localized_damage.record(DamageSection::Nose, 74, 100);
@@ -4064,6 +4104,62 @@ mod tests {
         assert!(s.effects.iter().any(|e| e.kind == EffectKind::Destroyed));
     }
     #[test]
+    fn easy_aiming_widens_the_hit_volume_and_blasts_jolt_the_target() {
+        let run = |easy: bool| {
+            let mut s = fixture(false);
+            s.cheats.easy_aiming = easy;
+            // Between 1 and 1.5 target radii off the line of fire.
+            s.targets.push(target(7, [25., 1000., 150.], 20, 0x80));
+            let mut events = Vec::new();
+            for _ in 0..180 {
+                events.extend(s.step(true, launcher(), |_, _| 0.));
+            }
+            (s.hits, events)
+        };
+        assert_eq!(run(false).0, 0);
+        let (hits, events) = run(true);
+        assert!(hits > 0);
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::Jolt(Jolt { target: Some(7), strength, .. }) if (*strength - 0.1).abs() < 1e-9
+        )));
+    }
+    #[test]
+    fn easy_aiming_missile_turns_faster_with_a_wider_cone() {
+        let w = fixture(true).config.stations[0].weapon.clone();
+        let eased = eased_weapon(&w);
+        assert_eq!(
+            f64::from(eased.movement.powered_turn_rate),
+            (f64::from(w.movement.powered_turn_rate) * 1.5).round()
+        );
+        assert_eq!(
+            f64::from(eased.seeker.zones[0].heading),
+            (f64::from(w.seeker.zones[0].heading) * 1.25).round()
+        );
+        assert_eq!(eased.damage.by_class, w.damage.by_class);
+    }
+    #[test]
+    fn an_incoming_missile_jolts_the_player_even_when_invulnerable() {
+        let mut s = fixture(false);
+        s.cheats.invulnerable = true;
+        let l = launcher();
+        s.command(Command::Incoming, l);
+        let p = s.projectiles.last_mut().unwrap();
+        p.position = std::array::from_fn(|i| l.position[i] + l.basis.forward[i] * 100.);
+        p.previous = p.position;
+        p.age = 1;
+        let mut events = Vec::new();
+        for _ in 0..120 {
+            events.extend(s.step(false, l, |_, _| 0.));
+        }
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::Jolt(Jolt { target: None, .. })))
+        );
+        assert!(!events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))));
+    }
+    #[test]
     fn fixed_ticks_replay_across_presentation_rates_and_pause() {
         let run = |fps: usize| {
             let mut s = fixture(false);
@@ -4822,6 +4918,21 @@ mod tests {
         assert!(snapshot.supported);
         assert_eq!(snapshot.supporting_radar_position, Some(player.position));
     }
+}
+
+/// Easy aiming's copy of a player missile: a wider seeker cone and a faster
+/// turn. The weapon data itself is unchanged.
+fn eased_weapon(w: &Weapon) -> Weapon {
+    let scale = |v: i16, k: f64| (f64::from(v) * k).round().clamp(0., f64::from(i16::MAX)) as i16;
+    let mut w = w.clone();
+    let turn = crate::cheats::EASY_AIMING_TURN;
+    w.movement.powered_turn_rate = scale(w.movement.powered_turn_rate, turn);
+    w.movement.unpowered_turn_rate = scale(w.movement.unpowered_turn_rate, turn);
+    for zone in &mut w.seeker.zones {
+        zone.heading = scale(zone.heading, crate::cheats::EASY_AIMING_CONE);
+        zone.pitch = scale(zone.pitch, crate::cheats::EASY_AIMING_CONE);
+    }
+    w
 }
 
 fn guide_owned(

@@ -2243,7 +2243,11 @@ impl ApplicationHandler for App {
                                     )
                                     .is_some()
                             {
-                                self.flight.crashed = true;
+                                if self.flight_ui.cheats.no_crashes {
+                                    self.flight.rebound(self.previous_flight.position);
+                                } else {
+                                    self.flight.crashed = true;
+                                }
                             }
                             if let Some(error) = self.flight.native_fault() {
                                 self.flight_ui.message(error.to_owned());
@@ -2387,6 +2391,14 @@ impl ApplicationHandler for App {
                                     self.input.feedback(cue);
                                 }
                                 match event {
+                                    Event::Jolt(jolt) => match jolt.target {
+                                        None => self.flight.jolt_from(jolt.from, jolt.strength),
+                                        Some(id) => {
+                                            if let Some(wings) = &mut self.ai_wings {
+                                                wings.jolt(id, jolt.from, jolt.strength);
+                                            }
+                                        }
+                                    },
                                     Event::PlayerDamaged(_) => {
                                         sounds.insert("&EXPL3.5K");
                                     }

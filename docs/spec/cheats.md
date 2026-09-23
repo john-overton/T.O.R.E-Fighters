@@ -58,7 +58,11 @@ covers leaks from damage.
 
 **No crashes.** The aircraft ricochets off the ground instead of crashing: it
 bounces and keeps flying. **Proposed:** the same applies to water and to
-buildings.
+buildings. Off the ground or water it keeps its horizontal speed and leaves
+at half its impact speed, never slower than 20 ft/s, and a nose pointing down
+kicks up to half that angle above the horizon. A safe landing on a runway is
+still a landing. Off a building it backs out, turns around and bounces away at
+half speed.
 
 **No spins.** The aircraft never departs into a spin. **Proposed:** stall buffet
 and stall lift loss still happen; only spin entry is prevented.
@@ -97,7 +101,8 @@ maneuverability, and missile seekers have a **25% wider** tracking cone.
 **Proposed:** it helps the player's weapons only; enemy fire against the player
 is unchanged. The hitbox scale covers the gun hit sections and the missile fuze
 contact size, but not the fuze's own radius. The extra maneuverability is 50%
-more G for the player's missiles.
+more turn rate for the player's missiles in flight, and the wider cone applies
+to a missile's seeker in flight, not to the lock before launch.
 
 ## Systems the cheats need
 
@@ -131,9 +136,17 @@ camera views.
 ### Missile hit jolt
 
 A missile hit knocks the aircraft around, whether or not it does damage, and
-also with Invulnerable on. It applies to AI aircraft too. **Proposed:** a sudden
-roll and pitch kick plus a push away from the blast, fading within about half a
-second, larger for larger warheads.
+also with Invulnerable on. It applies to AI aircraft too. Gun hits do not jolt.
+**Proposed numbers:**
+
+| Value | Proposed |
+| --- | --- |
+| Roll kick | 60 degrees per second, away from the side of the burst; at least 30% of that for a burst straight behind |
+| Pitch kick | 30 degrees per second, away from a burst above or below |
+| Yaw kick | 15 degrees per second, away from the side of the burst |
+| Push | 15 ft/s away from the burst |
+| Fade | the kick halves about every 0.1 s and is gone within 1.5 s |
+| Warhead scale | the warhead's damage against that aircraft over 100, between 0.5 and 2 (an AIM-9M is 1, an AIM-54C is 2) |
 
 ### Midair collisions
 

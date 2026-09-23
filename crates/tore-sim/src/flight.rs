@@ -61,6 +61,8 @@ pub struct State {
     pub ticks: u64,
     /// Player-only session cheats. The native research path ignores them.
     pub cheats: crate::cheats::Cheats,
+    /// Fading body [roll, pitch, yaw] rates from a missile blast, rad/s.
+    pub jolt: [f64; 3],
 }
 impl State {
     pub fn new(a: &Aircraft, position: [f64; 3]) -> tore_formats::Result<Self> {
@@ -174,6 +176,7 @@ impl State {
             wreck: None,
             ticks: 0,
             cheats: Default::default(),
+            jolt: [0.; 3],
         }
     }
     /// Fitted creator ground start. The caller verifies the chosen runway surface.
@@ -509,6 +512,81 @@ impl State {
     /// Authored coupling of recovered disturbance rates. Rotate the body basis
     /// without Euler singularities; velocity remains independent. Native movement
     /// and display-angle coupling/rounding are still a separate acceptance gate.
+    /// A missile blast at `blast` knocks the aircraft away from it, whether or
+    /// not it did damage. `strength` is 1 for a 100-point warhead. Fitted
+    /// kick sizes: docs/spec/cheats.md#missile-hit-jolt.
+    pub fn jolt_from(&mut self, blast: [f64; 3], strength: f64) {
+        if self.crashed || self.native.is_some() {
+            return;
+        }
+        let strength = strength.clamp(0.5, 2.);
+        let away = crate::attitude::unit(std::array::from_fn(|i| self.position[i] - blast[i]));
+        let basis = Basis::new(self.yaw, self.pitch, self.bank);
+        let side = dot(away, basis.right);
+        // A blast straight behind still rolls the aircraft a little.
+        let roll_side = if side.abs() < 0.3 {
+            0.3_f64.copysign(side + 1e-9)
+        } else {
+            side
+        };
+        let kick = [
+            JOLT_ROLL_RATE * roll_side,
+            JOLT_PITCH_RATE * dot(away, basis.up),
+            JOLT_YAW_RATE * side,
+        ];
+        for (rate, add) in self.jolt.iter_mut().zip(kick) {
+            *rate += add * strength;
+        }
+        for (v, a) in self.velocity.iter_mut().zip(away) {
+            *v += a * JOLT_PUSH_FPS * strength;
+        }
+    }
+    /// No crashes: bounce off the ground instead of crashing, keeping the
+    /// horizontal speed. The nose kicks up if it was pointing down.
+    pub(crate) fn ricochet(&mut self, floor: f64) {
+        self.position[1] = floor + 1.;
+        self.velocity[1] = (-self.velocity[1] * RICOCHET_RESTITUTION).max(RICOCHET_MIN_FPS);
+        if self.pitch < 0. {
+            self.pitch *= -0.5;
+        }
+        self.speed = dot(self.velocity, self.velocity).sqrt();
+        self.vertical_speed = self.velocity[1];
+    }
+    /// No crashes against a building: back out to `from` and bounce away at
+    /// half speed, turned around.
+    pub fn rebound(&mut self, from: [f64; 3]) {
+        self.position = from;
+        self.velocity = [
+            -self.velocity[0] * 0.5,
+            self.velocity[1].abs() * 0.5,
+            -self.velocity[2] * 0.5,
+        ];
+        self.yaw += std::f64::consts::PI;
+        self.speed = dot(self.velocity, self.velocity).sqrt();
+        self.vertical_speed = self.velocity[1];
+    }
+    fn apply_jolt(&mut self) {
+        if self.jolt == [0.; 3] {
+            return;
+        }
+        if self.crashed {
+            self.jolt = [0.; 3];
+            return;
+        }
+        let [roll, pitch, yaw] = self.jolt;
+        let basis = Basis::new(self.yaw, self.pitch, self.bank);
+        let rotation = std::array::from_fn(|i| {
+            (basis.up[i] * yaw - basis.right[i] * pitch - basis.forward[i] * roll) * DT
+        });
+        [self.yaw, self.pitch, self.bank] = basis.rotated(rotation).angles();
+        let fade = (-DT / JOLT_FADE_SECONDS).exp();
+        for rate in &mut self.jolt {
+            *rate *= fade;
+            if rate.abs() < 1e-3 {
+                *rate = 0.;
+            }
+        }
+    }
     pub fn apply_turbulence(&mut self, d: crate::turbulence::Disturbance) {
         if self.crashed || self.native.is_some() {
             return;
@@ -602,6 +680,7 @@ impl State {
         );
         self.autopilot = autopilot;
         self.step_controlled(&input, &ground);
+        self.apply_jolt();
         self.finish_ground_crash(ground(self.position[0], self.position[2]).height);
         if self.crashed
             || self.position[1]
@@ -1068,7 +1147,9 @@ impl State {
             return;
         }
         let floor = surface.height + c.equipment.ground_clearance_ft;
-        if self.position[1] <= floor {
+        if self.position[1] <= floor && self.cheats.no_crashes {
+            self.ricochet(floor);
+        } else if self.position[1] <= floor {
             self.position[1] = floor;
             self.crashed = true;
             self.speed = 0.;
@@ -1079,6 +1160,16 @@ impl State {
         }
     }
 }
+
+/// Fitted missile-blast jolt at strength 1, fading with [`JOLT_FADE_SECONDS`].
+const JOLT_ROLL_RATE: f64 = 60. * std::f64::consts::PI / 180.;
+const JOLT_PITCH_RATE: f64 = 30. * std::f64::consts::PI / 180.;
+const JOLT_YAW_RATE: f64 = 15. * std::f64::consts::PI / 180.;
+const JOLT_FADE_SECONDS: f64 = 0.15;
+const JOLT_PUSH_FPS: f64 = 15.;
+/// Fitted No crashes bounce: share of the impact speed kept, and a floor.
+const RICOCHET_RESTITUTION: f64 = 0.5;
+const RICOCHET_MIN_FPS: f64 = 20.;
 
 fn low_speed_positive_g_ceiling(
     c: &crate::models::config::Configuration,
@@ -1282,6 +1373,41 @@ mod tests {
         assert_eq!(cheat.carried_lbs(), cheat.systems.external_lbs());
         assert_eq!(normal.carried_lbs(), normal.payload_lbs);
         assert!(cheat.speed > normal.speed, "lighter and cleaner");
+    }
+    #[test]
+    fn a_blast_knocks_the_aircraft_away_and_fades() {
+        let calm = State::new(&profile(), [0., 15000., 0.]).unwrap();
+        let basis = Basis::new(calm.yaw, calm.pitch, calm.bank);
+        // Burst below and to the right of the aircraft.
+        let blast =
+            std::array::from_fn(|i| calm.position[i] + basis.right[i] * 40. - basis.up[i] * 40.);
+        let mut hit = calm.clone();
+        hit.jolt_from(blast, 1.);
+        assert!(hit.jolt[0] < 0., "rolls away from a right-side burst");
+        assert!(hit.jolt[1] > 0., "pitches away from a burst below");
+        let mut calm = calm;
+        for _ in 0..12 {
+            calm.step(&PilotInput::default(), |_, _| 0.);
+            hit.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert!(hit.bank < calm.bank - 1f64.to_radians());
+        assert!(hit.pitch > calm.pitch);
+        for _ in 0..180 {
+            hit.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert_eq!(hit.jolt, [0.; 3], "gone within 1.5 s");
+    }
+    #[test]
+    fn no_crashes_ricochets_off_the_legacy_floor() {
+        let mut s = State::new(&profile(), [0., 20., 0.]).unwrap();
+        s.cheats.no_crashes = true;
+        s.pitch = -0.2;
+        s.velocity = [0., -80., 600.];
+        for _ in 0..30 {
+            s.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert!(!s.crashed);
+        assert!(s.position[1] > 0.);
     }
     #[test]
     fn extra_g_commands_nine_g_at_full_stick() {

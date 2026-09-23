@@ -332,6 +332,12 @@ are not saved to disk. Behaviour: [cheats specification](spec/cheats.md).
 | Ignore weapon weights? | Stores add no weight and no loading drag; fuel left in external tanks still counts. |
 | No redout or blackout? | Turns off the G effects: above 6 G the view blacks out from the edges inward, fully in about 5 s at 9 G; below -2 G it reds out, fully in about 3 s at -3.5 G. Vision clears in about 3 s and the controls keep working. |
 | No screen-shaking? | Turns off the view shake that starts at 6 G and reaches about 4 pixels at 9 G in the cockpit views. |
+| No crashes? | Ground, water and unsafe landings bounce the aircraft back into the air instead of crashing it; a building turns it around. Safe runway landings still land. |
+| Easy aiming? | The player's rounds and missiles see targets 50% larger; the player's missiles turn 50% faster and their in-flight seeker cone is 25% wider. |
+
+Every missile or bomb burst on an aircraft, the player's or an AI's, now jolts
+it: a fading roll, pitch and push away from the burst, even with Invulnerable
+on. Details: [missile hit jolt](spec/cheats.md#missile-hit-jolt).
 | No turbulence?, No sun whiteout? | Described below. |
 
 Flight cheats apply to the default and legacy flight models; the native research
