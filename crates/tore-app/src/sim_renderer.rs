@@ -81,7 +81,7 @@ impl Pipelines {
         };
         let surface_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Shared world surface layout"),
-            bind_group_layouts: &[material_layout, &lighting_layout],
+            bind_group_layouts: &[material_layout, lighting_layout],
             push_constant_ranges: &[],
         });
         let mut surface_descriptor = wgpu::RenderPipelineDescriptor {
@@ -144,7 +144,7 @@ impl Pipelines {
         surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("fragment");
         let sky_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Sky layout"),
-            bind_group_layouts: &[material_layout, &lighting_layout],
+            bind_group_layouts: &[material_layout, lighting_layout],
             push_constant_ranges: &[],
         });
         surface_descriptor.label = Some("Shoreline terrain");
