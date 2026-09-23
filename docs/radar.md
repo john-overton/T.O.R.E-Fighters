@@ -806,9 +806,9 @@ screen edge, including margins outside the contact plot, and ends at the bezel.
 It remains visible with the radar off. [Screen bounds](spec/missiles.md#radar-cursor-screen-boundary). L or the upper-right
 RELEASE LOCK button clears designation. [HUD rules](spec/missiles.md#weapon-hud-delivery).
 
-With the Easy targeting cheat on, the HUD remembers the selected target for its
-square or edge chevron after the sensors drop it. Without it the cue drops with
-the selection. The display-only cue never supplies radar gun lead or missile
+With the Easy targeting cheat on, the selection itself stays set while the
+target is off the scope, for as long as it flies, without weapon support.
+Without it the selection and its cue drop together. The display-only cue never supplies radar gun lead or missile
 guidance. L/RELEASE LOCK clears both.
 [Target-cue behavior](spec/gunsight-targeting.md#target-square-and-edge-chevron).
 

@@ -818,7 +818,7 @@ arming; U and semicolon have no action. Old `master-arm` profile entries are
 accepted but do nothing. The editor offers `weapon-next` and `weapon-previous`.
 NAV INFO minus/plus select destinations; button 3 switches mission/airport mode.
 WEAPONS minus/plus select NAV/weapons; button 3 pages the store list.
-Boresight has no seeker tone without a designated contact.
+Seeker tones play only while the seeker tracks a return; in boresight a radar missile sounds its lock tone on the bore return and falls silent inside minimum range.
 [Behavior and current route limitations](spec/weapon-navigation-selection.md).
 
 ## Ownship damage report

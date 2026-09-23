@@ -1663,10 +1663,14 @@ impl State {
             && self.launch_solution(launcher) == Readiness::Ready
     }
 
+    /// The seeker tone plays only while the seeker is actively tracking:
+    /// silence with nothing in it (John, 2026-09-23).
     pub fn seeker_tone(&self, launcher: Launcher) -> Option<SeekerTone> {
         let w = &self.config.stations[self.selected].weapon;
-        if (self.launch_mode == LaunchMode::Boresight && self.designated().is_none())
-            || self.weapon_rules != Rules::Spec
+        let radar = missiles::Profile::for_weapon(w)
+            .is_some_and(|p| matches!(p.guidance, Guidance::Active | Guidance::Supported));
+        let bore = self.launch_mode == LaunchMode::Boresight;
+        if self.weapon_rules != Rules::Spec
             || !self.guidance_available(launcher)
             || !self.armed
             || !launcher.alive
@@ -1677,8 +1681,26 @@ impl State {
         {
             return None;
         }
-        let radar = missiles::Profile::for_weapon(w)
-            .is_some_and(|p| matches!(p.guidance, Guidance::Active | Guidance::Supported));
+        // An active-radar missile's boresight return is its track; every other
+        // seeker tracks through the mounted seeker.
+        let tracked = if radar && bore {
+            self.bore_observation
+        } else {
+            self.mounted.observation
+        }?;
+        // A radar missile goes quiet with its target inside minimum range.
+        let minimum = f64::from(w.seeker.zones[1].minimum_range.max(0));
+        if radar && missiles::length(sub(tracked.position, launcher.position)) < minimum {
+            return None;
+        }
+        if radar && bore {
+            return Some(SeekerTone {
+                strength: 0.4 + 0.6 * tracked.quality.clamp(0., 1.),
+                ground: false,
+                radar,
+                locked: true,
+            });
+        }
         Some(SeekerTone {
             strength: self.mounted.tone(),
             ground: w.source == "AGM65G.JT",
@@ -1893,6 +1915,7 @@ impl State {
             ground: &height,
             obscured: &obscured,
         };
+        self.sensors.keep_selection = self.cheats.easy_targeting;
         self.sensors.step(&observer, &observables, &environment);
         if let Some(id) = self.designated() {
             self.hud_selection = Some(id);
@@ -2766,6 +2789,8 @@ impl State {
                 AIRCRAFT_RADIUS_FT,
             ));
         }
+        // Invulnerable spares the player; whatever it hits is still destroyed.
+        let player_spared = self.cheats.invulnerable;
         let mut struck = std::collections::BTreeSet::new();
         let mut blasts = Vec::new();
         for (n, a) in bodies.iter().enumerate() {
@@ -2779,7 +2804,9 @@ impl State {
             }
         }
         for index in struck {
-            if index == PLAYER {
+            if index == PLAYER && player_spared {
+                continue;
+            } else if index == PLAYER {
                 self.player_hp = 0;
                 self.player_damage = self.player_damage.max(self.config.damage_capacity);
                 self.release();
@@ -3442,7 +3469,7 @@ mod tests {
         assert!(state.display_target().is_none());
     }
     #[test]
-    fn easy_targeting_keeps_the_hud_target_without_granting_weapon_support() {
+    fn easy_targeting_keeps_the_selection_off_scope_without_weapon_support() {
         let mut state = fixture(true);
         state.cheats.easy_targeting = true;
         let ownship = launcher();
@@ -3462,7 +3489,8 @@ mod tests {
         for _ in 0..120 {
             state.step(false, ownship, |_, _| 0.);
         }
-        assert_eq!(state.designated(), None);
+        assert_eq!(state.designated(), Some(id), "radar keeps it set");
+        assert!(state.sensors.contact(id).is_none());
         assert!(state.weapon_observation(ownship).is_none());
         assert_eq!(state.display_target().map(|t| t.id), Some(id));
         state.targets.iter_mut().find(|t| t.id == id).unwrap().hp = 0;
@@ -4327,10 +4355,10 @@ mod tests {
         assert_eq!((s.armed, s.selected), (true, 0));
     }
     #[test]
-    fn midair_collisions_destroy_everyone_involved_unless_ignored() {
-        let run = |ignore: bool| {
+    fn midair_collisions_destroy_everyone_but_an_invulnerable_player_unless_ignored() {
+        let run = |ignore: bool, invulnerable: bool| {
             let mut s = fixture(false);
-            s.cheats.invulnerable = true;
+            s.cheats.invulnerable = invulnerable;
             s.cheats.ignore_midair_collisions = ignore;
             // Two AI aircraft closing head-on, and one well clear.
             let mut a = target(7, [0., 5000., 1000.], 20, 0x80);
@@ -4344,14 +4372,18 @@ mod tests {
             let events = s.step(false, launcher(), |_, _| 0.);
             (s, events)
         };
-        let (s, events) = run(false);
+        let (s, events) = run(false, false);
         let hp: Vec<_> = s.targets.iter().map(|t| t.hp).collect();
         assert_eq!(hp, [0, 0, 20, 0]);
-        assert_eq!(s.player_hp, 0, "Invulnerable does not prevent it");
+        assert_eq!(s.player_hp, 0);
         assert!(events.contains(&Event::PlayerDestroyed));
         assert!(events.contains(&Event::Destroyed(7)) && events.contains(&Event::Destroyed(8)));
         assert_eq!(s.kills, 0);
-        let (s, events) = run(true);
+        // Invulnerable spares only the player.
+        let (s, events) = run(false, true);
+        assert!(s.player_hp > 0 && !events.contains(&Event::PlayerDestroyed));
+        assert_eq!(s.targets[3].hp, 0);
+        let (s, events) = run(true, false);
         assert!(s.targets.iter().all(|t| t.hp == 20) && s.player_hp > 0);
         assert!(!events.iter().any(|e| matches!(e, Event::Destroyed(_))));
     }

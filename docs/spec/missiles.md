@@ -363,9 +363,13 @@ scores 0.8, while its head-on score is 0.2 and cannot acquire at that distance.
 Afterburner raises the same head-on score to 0.3, allowing acquisition after dwell
 if the weapon's aspect eligibility permits it. A masked target scores zero.
 
-For selected, armed IR or radar missiles, play a search cue at 15% of configured
-seeker volume. While a candidate is observed, use `15% + 55% * quality`; after
-lock use `40% + 60% * quality`, with tone quality clamped to 0..1.
+For selected, armed IR or radar missiles, the cue plays only while the seeker is
+actively tracking a return; with nothing in the seeker it is silent (John,
+2026-09-23). While a candidate is observed, use `15% + 55% * quality`; after
+lock use `40% + 60% * quality`, with tone quality clamped to 0..1. A radar
+missile in boresight plays its lock cue at `40% + 60% * quality` on its bore
+return, with or without a designated target. Any radar missile falls silent
+while its tracked target is inside the weapon's minimum range.
 Selection scores remain unclamped so stronger returns stay distinguishable. Fade amplitude over
 0.1 seconds. Playback uses user-imported `&IRTRY.5K` / `&IRLOCK.5K` and
 `&RDRTRY.5K` / `&RDRLOCK.5K` for search / lock respectively. The louder lock cue
@@ -431,7 +435,7 @@ When a candidate exists, show the imported minimum and engagement-dependent esti
 Its triangular target marker blinks with the provisional diamond, clamped to
 an endpoint for targets outside the launch envelope. A cued, acquired radar
 seeker diamond still blinks when launch-ready. Inferred bore cues never grant
-launch permission, lock tone or aircraft sensor support.
+launch permission or aircraft sensor support.
 
 ### Fitted estimated hit calculator
 

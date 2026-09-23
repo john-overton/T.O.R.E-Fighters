@@ -45,7 +45,8 @@ turbulence, No sun whiteout). **Proposed:** they are not saved to preferences.
 ## Behaviour of each cheat
 
 **Damage.** Invulnerable means weapon hits do no damage: no hit-point loss, no
-system faults, no pilot kill and no breakup. Hits still physically jolt the
+system faults, no pilot kill and no breakup. It also survives a midair
+collision (John, 2026-09-23). Hits still physically jolt the
 aircraft (see [missile hit jolt](#missile-hit-jolt)). Normal is the current
 damage model. Realistic is not yet described. Invulnerable does not prevent
 ground crashes; that is the separate No crashes cheat.
@@ -87,11 +88,13 @@ aircraft has already timed keep their old timing until they come due.
 off, [midair collisions](#midair-collisions) happen.
 
 **Easy targeting.** Gives the player awareness of where the target is at all
-times. The target square stays on the target anywhere on screen, including
-outside the HUD, instead of becoming an edge arrow. The target stays selected
-after it drops off the radar scope, including in a merge when it passes behind
-the aircraft. It is awareness only: missiles still guide within their normal
-limits and behaviour, and a target the sensors have lost gives no radar support.
+times. The radar keeps the target selected while it is off the scope, for as
+long as it is flying, so swinging around after it in a merge keeps it; it is
+tracked again as soon as it is back on the scope. Outside the HUD the target
+square floats over the target instead of becoming an edge arrow, at the HUD's
+own size, line weight and brightness (John, 2026-09-23). It is awareness only:
+missiles still guide within their normal limits and behaviour, and a target
+the sensors have lost gives no radar support.
 Depends on [target selection](#target-selection).
 
 **Air combat guns only.** Every aircraft, player and AI, can fire only its gun.
@@ -115,23 +118,41 @@ These are ordinary game behaviour, present with the cheats off.
 
 ### G effects
 
-Sustained high positive G darkens the view to black (blackout); negative G turns
-it red (redout). **Proposed numbers:**
+Sustained high positive G greys the view out from the edges inward and, pulled
+harder, blacks it out; negative G turns it red. John asked on 2026-09-23 for
+the thresholds to follow real human tolerance. Published figures:
+
+- Relaxed tolerance is about 3.5 to 5 G; untrained people black out between 4
+  and 6 G.
+- A G-suit adds about 1.5 to 2 G, and the anti-G straining manoeuvre adds
+  about 3 G more; with both, a trained pilot sustains 9 G.
+- Vision goes in order: greyout, tunnel vision, blackout, then loss of
+  consciousness, which comes within about 4 to 6 s of sustained high G.
+- Redout comes at about -2 to -3 G.
+
+The game has no straining control, so the model is a pilot wearing a G-suit
+who is not straining. **Proposed numbers** from those figures:
 
 | Value | Proposed |
 | --- | --- |
-| Blackout onset | sustained above +6 G |
-| Blackout delay | 5 s just over 6 G before any darkening, shorter the harder the pull (John, 2026-09-23); proposed: 1 s less per extra G, never under 1 s, so 4 s at 7 G and 2 s at 9 G |
-| Full blackout | about 5 s after the delay at +9 G, so about 7 s in all; sooner above 9 G |
+| Greyout onset | sustained above +5 G |
+| Delay | 5 s just over 5 G before any greying, shorter the harder the pull (John, 2026-09-23): 1 s less per extra G, never under 1 s, so 4 s at 6 G and 2 s at 8 G |
+| How much vision goes | in proportion to G beyond 5 G: half at 6.25 G (tunnel vision), fully black at 7.5 G and above |
+| Closing in | once the delay has passed, at half the view per second, so full blackout about 2 s after the delay |
+| Examples | 7.5 G blacks out fully after about 4.5 s; 9 G after about 3 s; 6 G narrows the view to 40% loss after 4 s and holds there |
 | Redout onset | sustained below -2 G |
 | Redout delay | 3 s before any reddening (John, 2026-09-23) |
-| Full redout | about 3 s after the delay at -3.5 G, so about 6 s in all |
+| Full redout | at -3 G and below, about 2 s after the delay |
 | Recovery | vision returns over about 3 s once G is back inside the limits |
-| Delay after an unload | proposed: the used delay drains over the same 3 s, so a brief unload does not reset it |
-| Darkening speed | proportional to G beyond the onset; above 9 G it is faster |
-| Appearance | the edges darken first, like tunnel vision, then the whole view; redout is a deep red |
+| Delay after an unload | the used delay drains over the same 3 s, so a brief unload does not reset it |
+| Appearance | the edges darken first, then the whole view; redout is a deep red |
 | Views | every flight view; the map and menus stay readable |
-| Controls | still respond; only vision is affected (John, 2026-09-23) |
+| Controls | still respond; only vision is affected (John, 2026-09-23). There is no loss of consciousness |
+
+Sources: [G-LOC](https://en.wikipedia.org/wiki/G-LOC),
+[G-suit](https://en.wikipedia.org/wiki/G-suit),
+[Greyout](https://en.wikipedia.org/wiki/Greyout),
+[Redout](https://en.wikipedia.org/wiki/Redout).
 
 ### High-G screen shake
 
@@ -159,8 +180,9 @@ also with Invulnerable on. It applies to AI aircraft too. Gun hits do not jolt.
 ### Midair collisions
 
 Aircraft that touch collide, and a midair collision is always fatal to every
-aircraft involved, player and AI. Invulnerable does not prevent it; only Ignore
-midair collisions does. **Proposed:** aircraft touch when their paths come
+aircraft involved, player and AI, except a player with Invulnerable on, who
+survives while the other aircraft is still destroyed. Ignore midair collisions
+turns collisions off. **Proposed:** aircraft touch when their paths come
 within 56 ft of each other (two 28 ft contact spheres, the size the game
 already uses for weapon hits), only airborne live aircraft collide, and a
 collision credits no kill.

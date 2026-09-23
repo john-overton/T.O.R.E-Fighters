@@ -2791,7 +2791,12 @@ impl ApplicationHandler for App {
                         // screen, in place of the HUD's square or edge arrow.
                         let easy_square = (self.flight_ui.cheats.easy_targeting
                             && self.flight_ui.hud
-                            && matches!(self.flight_view, 0 | 3 | 4))
+                            && matches!(self.flight_view, 0 | 3 | 4)
+                            && !weapon_hud::target_in_hud(
+                                &presented,
+                                &self.combat.state,
+                                f64::from(self.flight_canvas.hud_zoom(1.)),
+                            ))
                         .then(|| self.combat.state.display_target())
                         .flatten()
                         .and_then(|target| {
@@ -2839,6 +2844,7 @@ impl ApplicationHandler for App {
                         if let Some(point) = easy_square {
                             self.flight_canvas.target_square(
                                 point,
+                                f64::from(self.flight_ui.zoom),
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                                 target_friendly,
                             );

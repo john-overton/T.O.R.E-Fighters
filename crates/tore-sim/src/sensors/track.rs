@@ -258,6 +258,9 @@ pub struct Sensors {
     plots: Vec<Plot>,
     history: Vec<Trail>,
     tick: u64,
+    /// Easy targeting: the selection stays set while its aircraft is off the
+    /// scope, for as long as it is still flying. It grants no weapon support.
+    pub keep_selection: bool,
 }
 impl Sensors {
     pub fn new(profiles: SensorProfiles) -> Self {
@@ -281,6 +284,7 @@ impl Sensors {
             plots: Vec::new(),
             history: Vec::new(),
             tick: 0,
+            keep_selection: false,
         }
     }
     pub fn map_contacts(&self) -> &[MapContact] {
@@ -592,8 +596,11 @@ impl Sensors {
         }
         // Selection survives only while the radar or infrared scope still
         // holds the contact; seeing it no longer keeps it (John, 2026-09-23).
+        let kept =
+            |id: u32| self.keep_selection && targets.iter().any(|t| t.id == id && t.airborne);
         if let Some(id) = self.selected
             && self.contact(id).is_none()
+            && !kept(id)
         {
             self.selected = None;
             self.acquisition = 0;

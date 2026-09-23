@@ -86,11 +86,10 @@ the target re-enters. No selected target produces no square or arrow.
 
 The square and arrow follow the sensor selection only. When the scope loses
 the target it drops, and so does its cue ([target selection keys](radar.md#target-selection-keys)).
-With the [Easy targeting cheat](cheats.md) on, a presentation selection
-remembers the target until the pilot clears or replaces it, it dies or
-disappears, or the mission resets, and the square is drawn wherever the target
-is on screen instead of switching to the arrow outside the HUD; the arrow
-remains for a target behind the view. It never grants radar observation, lock,
+With the [Easy targeting cheat](cheats.md) on, the selection stays set while
+the target is off the scope, and outside the HUD the square floats over the
+target at the HUD's own size and brightness instead of switching to the arrow;
+the arrow remains for a target behind the view. It never grants radar observation, lock,
 missile support or radar-gun lead. The gun solver consumes
 current observations only. A provisional boresight seeker diamond never becomes
 a selected target square by itself.

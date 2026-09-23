@@ -2,22 +2,28 @@
 //! proposed (fitted) numbers: docs/spec/cheats.md#g-effects.
 use crate::flight::DT;
 
-/// Sustained positive G above this starts to black the view out.
-pub const BLACKOUT_ONSET_G: f64 = 6.;
-/// Seconds above the onset before blackout begins: 5 just over 6 G (John,
+// Thresholds follow published human tolerance for a pilot wearing a G-suit
+// but not straining: relaxed tolerance is about 3.5 to 5 G, a G-suit adds 1.5
+// to 2 G, and redout comes at about -2 to -3 G. See docs/spec/cheats.md.
+
+/// Sustained positive G above this starts to grey the view out.
+pub const BLACKOUT_ONSET_G: f64 = 5.;
+/// At and above this sustained G the view goes fully black.
+pub const BLACKOUT_FULL_G: f64 = 7.5;
+/// Seconds above the onset before any greying: 5 just over the onset (John,
 /// 2026-09-23), one second less per extra G (proposed), never under 1.
 pub const BLACKOUT_DELAY_SECONDS: f64 = 5.;
 pub const BLACKOUT_DELAY_PER_G: f64 = 1.;
 pub const BLACKOUT_MINIMUM_DELAY_SECONDS: f64 = 1.;
-/// Seconds from the first darkening to full blackout at 9 G; higher G is
-/// proportionally faster.
-pub const BLACKOUT_SECONDS_AT_9G: f64 = 5.;
 /// Sustained negative G below this starts to red the view out.
 pub const REDOUT_ONSET_G: f64 = -2.;
-/// Seconds below the onset before redout begins (John, 2026-09-23).
+/// At and below this sustained G the view is fully red.
+pub const REDOUT_FULL_G: f64 = -3.;
+/// Seconds below the onset before any reddening (John, 2026-09-23).
 pub const REDOUT_DELAY_SECONDS: f64 = 3.;
-/// Seconds from the first reddening to full redout at -3.5 G.
-pub const REDOUT_SECONDS_AT_MINUS_3_5G: f64 = 3.;
+/// Once the delay has passed, vision closes in at this share per second
+/// toward the loss the current G causes.
+pub const VISION_LOSS_PER_SECOND: f64 = 0.5;
 /// Seconds for vision to clear from full once G is back inside the limits.
 pub const RECOVERY_SECONDS: f64 = 3.;
 /// Shake starts at this G and reaches full strength at [`SHAKE_FULL_G`].
@@ -50,43 +56,41 @@ impl GEffects {
             *self = Self::default();
             return;
         }
-        let recover = DT / RECOVERY_SECONDS;
-        let rate_per_9g = 1. / (BLACKOUT_SECONDS_AT_9G * (9. - BLACKOUT_ONSET_G));
-        if g > BLACKOUT_ONSET_G {
-            if self.blackout_strain < 1. {
-                self.blackout_strain += DT / blackout_delay(g);
-            } else {
-                self.blackout += (g - BLACKOUT_ONSET_G) * rate_per_9g * DT;
-            }
-        } else {
-            self.blackout_strain -= recover;
-            self.blackout -= recover;
-        }
-        let rate_per_negative = 1. / (REDOUT_SECONDS_AT_MINUS_3_5G * (REDOUT_ONSET_G - -3.5));
-        if g < REDOUT_ONSET_G {
-            if self.redout_strain < 1. {
-                self.redout_strain += DT / REDOUT_DELAY_SECONDS;
-            } else {
-                self.redout += (REDOUT_ONSET_G - g) * rate_per_negative * DT;
-            }
-        } else {
-            self.redout_strain -= recover;
-            self.redout -= recover;
-        }
-        for v in [
+        let blackout =
+            ((g - BLACKOUT_ONSET_G) / (BLACKOUT_FULL_G - BLACKOUT_ONSET_G)).clamp(0., 1.);
+        let redout = ((REDOUT_ONSET_G - g) / (REDOUT_ONSET_G - REDOUT_FULL_G)).clamp(0., 1.);
+        let delay = (g > BLACKOUT_ONSET_G).then(|| blackout_delay(g));
+        advance(
             &mut self.blackout,
-            &mut self.redout,
             &mut self.blackout_strain,
-            &mut self.redout_strain,
-        ] {
-            *v = v.clamp(0., 1.);
-        }
+            blackout,
+            delay,
+        );
+        let delay = (g < REDOUT_ONSET_G).then_some(REDOUT_DELAY_SECONDS);
+        advance(&mut self.redout, &mut self.redout_strain, redout, delay);
     }
     /// Darkening at a point `radius` from the view centre (0 centre, 1 corner):
     /// the edges go first, like tunnel vision, and all of it at full loss.
     pub fn coverage(level: f64, radius: f64) -> f64 {
         (level * 1.5 - 0.5 * (1. - radius.clamp(0., 1.))).clamp(0., 1.)
     }
+}
+
+/// Move one vision loss toward `target` once the onset `delay` (None inside
+/// the limits) has been used up; the used delay drains during recovery.
+fn advance(level: &mut f64, strain: &mut f64, target: f64, delay: Option<f64>) {
+    let recover = DT / RECOVERY_SECONDS;
+    match delay {
+        Some(delay) if *strain < 1. => *strain = (*strain + DT / delay).min(1.),
+        Some(_) => {}
+        None => *strain = (*strain - recover).max(0.),
+    }
+    let target = if *strain >= 1. { target } else { 0. };
+    *level = if target > *level {
+        (*level + VISION_LOSS_PER_SECOND * DT).min(target)
+    } else {
+        (*level - recover).max(target)
+    };
 }
 
 /// View shake as [yaw, pitch] radians at simulation time `seconds`. Two
@@ -141,37 +145,44 @@ mod tests {
         ticks as f64 * DT
     }
     #[test]
-    fn onset_waits_five_seconds_just_over_six_g_less_when_pulling_harder() {
-        assert!((seconds_to_first(6.01) - 5.).abs() < 0.03);
-        assert!((seconds_to_first(7.) - 4.).abs() < 0.03);
-        assert!((seconds_to_first(9.) - 2.).abs() < 0.03);
+    fn onset_waits_five_seconds_just_over_five_g_less_when_pulling_harder() {
+        assert!((seconds_to_first(5.01) - 5.).abs() < 0.03);
+        assert!((seconds_to_first(6.) - 4.).abs() < 0.03);
+        assert!((seconds_to_first(8.) - 2.).abs() < 0.03);
         assert!((seconds_to_first(12.) - 1.).abs() < 0.03);
         assert!((seconds_to_first(-2.5) - 3.).abs() < 0.03);
         assert!((seconds_to_first(-6.) - 3.).abs() < 0.03);
         // Half the delay, a second's unload, then the rest is shorter than new.
         let mut e = GEffects::default();
         for _ in 0..300 {
-            e.step(6.5, true);
+            e.step(5.5, true);
         }
         for _ in 0..120 {
             e.step(1., true);
         }
         let mut ticks = 0;
         while e.blackout == 0. {
-            e.step(6.5, true);
+            e.step(5.5, true);
             ticks += 1;
         }
         let resumed = ticks as f64 * DT;
         assert!(resumed > 2.25 && resumed < 4.5);
     }
     #[test]
-    fn blackout_and_redout_follow_the_proposed_timings() {
-        assert!((seconds_to_full(9.) - 7.).abs() < 0.03);
-        assert!(seconds_to_full(10.5) < 7.);
-        assert!((seconds_to_full(-3.5) - 6.).abs() < 0.03);
+    fn blackout_and_redout_follow_the_medical_thresholds() {
+        // Full blackout from 7.5 G: the delay, then two seconds to close in.
+        assert!((seconds_to_full(7.5) - 4.5).abs() < 0.03);
+        assert!((seconds_to_full(9.) - 3.).abs() < 0.03);
+        assert!((seconds_to_full(-3.) - 5.).abs() < 0.03);
+        // A 6.25 G pull only narrows the view to half.
+        let mut e = GEffects::default();
+        for _ in 0..120 * 20 {
+            e.step(6.25, true);
+        }
+        assert!((e.blackout - 0.5).abs() < 1e-9);
         let mut e = GEffects::default();
         for _ in 0..1200 {
-            e.step(5.9, true);
+            e.step(4.9, true);
             e.step(-1.9, true);
         }
         assert_eq!(e, GEffects::default(), "inside the limits nothing happens");

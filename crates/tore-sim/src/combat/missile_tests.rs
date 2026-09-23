@@ -536,6 +536,36 @@ fn invalid_activation_profiles_fail_explicitly() {
 }
 
 #[test]
+fn a_radar_missile_goes_quiet_inside_minimum_range() {
+    let l = Launcher {
+        position: [0., 1000., 0.],
+        basis: Basis::new(0., 0., 0.),
+        speed_fps: 600.,
+        velocity: [0., 0., 600.],
+        bay_ready: true,
+        radar_power: true,
+        radar: true,
+        jammer: false,
+        alive: true,
+        controls: Default::default(),
+    };
+    let tone_at = |distance: f64| {
+        let mut s = fixture(true);
+        s.config.stations[0].weapon = weapon("AIM120.JT");
+        s.config.stations[0].weapon.seeker.zones[0].minimum_range = 0;
+        s.config.stations[0].weapon.seeker.zones[1].minimum_range = 4000;
+        s.targets.push(target(7, [0., 1000., distance], 20, 0x80));
+        for _ in 0..DWELL + 1 {
+            s.step(false, l, |_, _| 0.);
+        }
+        assert!(s.bore_observation.is_some());
+        s.seeker_tone(l)
+    };
+    assert!(tone_at(3000.).is_none());
+    assert!(tone_at(5000.).is_some());
+}
+
+#[test]
 fn automatic_bore_release_and_radar_search_start_without_designation() {
     let l = Launcher {
         position: [0., 1000., 0.],
@@ -560,13 +590,19 @@ fn automatic_bore_release_and_radar_search_start_without_designation() {
     assert_eq!(s.mounted.status, Status::Search);
     assert_eq!(s.bore_observation.unwrap().id, 7);
     assert_eq!(s.designated(), None);
-    assert!(s.seeker_tone(l).is_none());
+    // The bore return sounds the radar lock tone (John, 2026-09-23).
+    assert!(s.seeker_tone(l).is_some_and(|t| t.radar && t.locked));
     assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
     assert!(s.projectiles[0].guidance.as_ref().unwrap().enabled);
     assert_eq!(s.projectiles[0].target, None);
     s.command(Command::DesignateTarget(7), l);
     assert_eq!(s.designated(), Some(7));
     assert_eq!(s.launch_mode, LaunchMode::Cued);
+    // Silent until the seeker is actually tracking the new selection.
+    assert!(s.seeker_tone(l).is_none());
+    for _ in 0..crate::sensors::track::ACQUISITION_STEPS + DWELL + 1 {
+        s.step(false, l, |_, _| 0.);
+    }
     assert!(s.seeker_tone(l).is_some());
     s.command(Command::ClearDesignation, l);
     assert_eq!(s.designated(), None);
@@ -586,7 +622,7 @@ fn automatic_bore_release_and_radar_search_start_without_designation() {
         s.step(false, l, |_, _| 0.);
     }
     assert_eq!(s.mounted.target, Some(8));
-    assert!(s.seeker_tone(l).is_none());
+    assert!(s.seeker_tone(l).is_some(), "tracking the hotter return");
     s.targets[1].position = [5000., 1000., 5000.];
     s.targets[0].position = [-5000., 1000., 5000.];
     s.step(false, l, |_, _| 0.);
@@ -955,7 +991,8 @@ fn armed_ir_bore_ignores_radar_power_without_designation() {
     }
     assert_eq!(s.launch_mode, LaunchMode::Boresight);
     assert_eq!(s.mounted.target, Some(7));
-    assert!(s.seeker_tone(l).is_none());
+    // Tracking in boresight sounds the tone.
+    assert!(s.seeker_tone(l).is_some());
     assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
     assert!(!s.projectiles[0].guidance.as_ref().unwrap().unguided);
     assert_eq!(s.projectiles[0].target, Some(7));

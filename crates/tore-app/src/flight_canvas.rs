@@ -86,31 +86,49 @@ impl FlightCanvas {
             p[3] = (out * 255.).round() as u8;
         }
     }
-    /// Easy targeting's target square, 14 HUD pixels across at any window size,
-    /// with the friendly X.
-    pub fn target_square(&mut self, [x, y]: [f64; 2], color: [u8; 3], friendly: bool) {
-        let scale = f64::from(self.size[1]) / 480.;
-        let half = 7. * scale;
-        let thick = scale.round().max(1.);
-        let mut rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
-            let [w, h] = self.size.map(|v| v as i64);
-            for py in (y0.floor() as i64).max(0)..(y1.ceil() as i64).min(h) {
-                for px in (x0.floor() as i64).max(0)..(x1.ceil() as i64).min(w) {
-                    let i = (py * w + px) as usize * 4;
-                    self.pixels[i..i + 4].copy_from_slice(&[color[0], color[1], color[2], 255]);
-                }
+    /// Easy targeting's square outside the HUD: the HUD's own 14-pixel square
+    /// and one-pixel line at the HUD's on-screen scale for `zoom`, smoothed
+    /// like the HUD so it is no brighter or bolder, with the friendly X.
+    pub fn target_square(&mut self, [x, y]: [f64; 2], zoom: f64, color: [u8; 3], friendly: bool) {
+        let scale =
+            (f64::from(self.size[0]) / 640.).min(f64::from(self.size[1]) / 480.) * HUD_SCALE * zoom;
+        let mut line = |a: (f64, f64), b: (f64, f64)| {
+            let steps = ((b.0 - a.0).hypot(b.1 - a.1) * scale * 2.).ceil().max(1.) as usize;
+            for step in 0..=steps {
+                let t = step as f64 / steps as f64;
+                let px = x + (a.0 + (b.0 - a.0) * t) * scale;
+                let py = y + (a.1 + (b.1 - a.1) * t) * scale;
+                self.dot(px, py, scale, color);
             }
         };
-        rect(x - half, y - half, x + half, y - half + thick);
-        rect(x - half, y + half - thick, x + half, y + half);
-        rect(x - half, y - half, x - half + thick, y + half);
-        rect(x + half - thick, y - half, x + half, y + half);
+        for (a, b) in [
+            ((-7., -7.), (7., -7.)),
+            ((7., -7.), (7., 7.)),
+            ((7., 7.), (-7., 7.)),
+            ((-7., 7.), (-7., -7.)),
+        ] {
+            line(a, b);
+        }
         if friendly {
-            let arm = (3. * scale).round() as i64;
-            for k in -arm..=arm {
-                let k = k as f64;
-                rect(x + k, y + k, x + k + thick, y + k + thick);
-                rect(x + k, y - k, x + k + thick, y - k + thick);
+            line((-3., -3.), (3., 3.));
+            line((-3., 3.), (3., -3.));
+        }
+    }
+    /// A `size`-wide square pen centred on (x, y), with partial pixels at its
+    /// edges, blended so overlapping stamps never exceed full coverage.
+    fn dot(&mut self, x: f64, y: f64, size: f64, color: [u8; 3]) {
+        let half = size / 2.;
+        let [w, h] = self.size.map(|v| v as i64);
+        for py in ((y - half).floor() as i64).max(0)..((y + half).ceil() as i64).min(h) {
+            for px in ((x - half).floor() as i64).max(0)..((x + half).ceil() as i64).min(w) {
+                let cover =
+                    |p: i64, c: f64| ((p + 1) as f64).min(c + half) - (p as f64).max(c - half);
+                let a =
+                    (cover(px, x).clamp(0., 1.) * cover(py, y).clamp(0., 1.) * 255.).round() as u8;
+                let i = (py * w + px) as usize * 4;
+                if a > self.pixels[i + 3] {
+                    self.pixels[i..i + 4].copy_from_slice(&[color[0], color[1], color[2], a]);
+                }
             }
         }
     }
@@ -249,12 +267,18 @@ mod tests {
             pixels: vec![0; 96 * 96 * 4],
             ..Default::default()
         };
-        canvas.target_square([48., 48.], [0, 255, 0], false);
-        let lit = |c: &FlightCanvas, x: usize, y: usize| c.pixels[(y * 96 + x) * 4 + 3] != 0;
-        // 96 px tall is a fifth of 480, so the 14-pixel square is 2.8 px across.
-        assert!(lit(&canvas, 47, 47));
-        assert!(!lit(&canvas, 40, 48));
-        canvas.target_square([0., 0.], [0, 255, 0], true);
+        canvas.size = [640, 480];
+        canvas.pixels = vec![0; 640 * 480 * 4];
+        canvas.target_square([320., 240.], 1., [0, 255, 0], false);
+        let alpha = |c: &FlightCanvas, x: usize, y: usize| c.pixels[(y * 640 + x) * 4 + 3];
+        // At 640 by 480 the HUD scale is 0.7225: a 10-pixel square of thin,
+        // partly covered lines, never a solid bold outline.
+        let edge = (320. + 7. * HUD_SCALE) as usize;
+        assert!(alpha(&canvas, edge, 240) > 0);
+        assert!(alpha(&canvas, edge, 240) < 255);
+        assert_eq!(alpha(&canvas, 320, 240), 0);
+        assert_eq!(alpha(&canvas, edge + 3, 240), 0);
+        canvas.target_square([0., 0.], 1., [0, 255, 0], true);
     }
     #[test]
     fn veil_darkens_the_world_and_instruments_edges_first() {

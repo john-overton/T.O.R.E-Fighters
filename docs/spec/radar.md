@@ -119,7 +119,8 @@ unavailable.
   track is lost completely, however it was selected, including by clicking it
   on the scope. Seeing the aircraft does not keep it, and the HUD does not
   remember a dropped target. Only the [Easy targeting cheat](cheats.md) keeps
-  the HUD square on it.
+  it: the selection then stays set while the aircraft is off the scope, without
+  radar support.
 
 Clicking a contact on the scope still selects it at once, including a
 search-only RWS contact, as John requested on 2026-09-16; it now drops with the

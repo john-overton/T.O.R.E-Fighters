@@ -308,6 +308,20 @@ fn target_cue(direction: Vector, basis: Basis, zoom: f64) -> Option<TargetCue> {
         direction: (dx, dy),
     })
 }
+/// Whether the HUD draws the selected target's square itself, rather than an
+/// edge arrow.
+pub fn target_in_hud(s: &flight::State, state: &live::State, zoom: f64) -> bool {
+    state.display_target().is_some_and(|target| {
+        matches!(
+            target_cue(
+                missiles::sub(target.position, s.position),
+                Basis::new(s.yaw, s.pitch, s.bank),
+                zoom,
+            ),
+            Some(TargetCue::Square(_))
+        )
+    })
+}
 fn draw_target(
     pixels: &mut [u8],
     s: &flight::State,
