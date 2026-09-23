@@ -3,7 +3,7 @@ use crate::rocker::Rocker;
 use crate::{
     AppResult,
     menu::{Action, Canvas, Sprite, text_width},
-    quick_mission::notice,
+    quick_mission::fit,
 };
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -494,6 +494,15 @@ impl Ordnance {
                 self.down();
                 self.pointer(Some((325., 190.)));
             }
+            "ordnance-message" => {
+                self.activate(13);
+            }
+            "ordnance-message-long" => {
+                self.message = Some(
+                    "This is a long ordnance message preview. It stays on one line, with a background sized to the displayed text and an ellipsis when the message reaches the available screen width."
+                        .into(),
+                );
+            }
             _ => {}
         }
     }
@@ -706,6 +715,18 @@ impl Ordnance {
         }
         animating
     }
+}
+fn notice(c: &mut Canvas, font: &Sprite, message: &str) {
+    let line = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    let line = fit(font, &line, 572);
+    if line.is_empty() {
+        return;
+    }
+    c.rect(
+        (30, 335, text_width(font, &line) + 8, font.height as i32 + 4),
+        [35, 44, 46, 255],
+    );
+    c.text(font, &line, 34, 337, Some([235, 225, 179]));
 }
 fn grouped(value: f64) -> String {
     let digits = format!("{value:.0}");

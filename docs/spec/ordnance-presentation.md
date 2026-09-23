@@ -87,6 +87,18 @@ Airbase begin at x=103 and x=178; matching hit regions do not overlap. Main-menu
 bar labels are centered within their existing interactive rectangles. The exact
 original font alignment and dial placement remain unknown; these are fitted rules.
 
+### Game messages
+
+John requested single-line ordnance messages with a background sized to the text
+on 2026-09-23. This is an opinionated presentation rule. Preserve the existing
+message content, pale text and dark background colours. Agent-selected layout:
+anchor the strip at (30,335), with four pixels of horizontal padding and two
+pixels of vertical padding around the font row. The background is only as wide
+as the displayed text plus padding and only one font row tall plus padding.
+Collapse whitespace to single spaces. Messages wider than 572 pixels end with
+`...` within that width, so the strip never exceeds 580 pixels or wraps.
+An empty message draws no strip. Other screens retain their own message layout.
+
 ## Dragging and empty stations
 
 John requested visible weapon dragging, unloading into the catalog, station

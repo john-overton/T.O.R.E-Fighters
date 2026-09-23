@@ -562,6 +562,8 @@ cargo run --locked -p tore-app -- --quick-mission --snapshot-state theaters --sn
 and `debrief-1` through `debrief-5` (the retail reference result on DEBSCV);
 they use the original 640×480 menu canvas. The empty/drag ordnance fixtures
 support CPU snapshots for inspecting card outlines and the carried thumbnail.
+`ordnance-message` previews the Cheat notice; `ordnance-message-long` previews
+the single-line notice's ellipsis and fitted background width.
 Old caches re-import when local media is present. Aircraft switching refreshes
 GPU atlas/cockpit resources, camera previews and instruments before launch.
 See [validation and remaining parity](baselines/rafale-quick-mission.md).

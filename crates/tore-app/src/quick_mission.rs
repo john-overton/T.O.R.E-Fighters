@@ -516,7 +516,7 @@ impl QuickMission {
     pub fn preview_selector(&mut self, name: &str) -> crate::AppResult<()> {
         match name {
             "normal" | "ordnance" => {}
-            "ordnance-empty" | "ordnance-drag" => {
+            "ordnance-empty" | "ordnance-drag" | "ordnance-message" | "ordnance-message-long" => {
                 if let Some(ordnance) = &mut self.ordnance {
                     ordnance.preview(name);
                 }
@@ -1237,7 +1237,7 @@ pub fn apply_ground_start(
 fn inside(p: (f64, f64), r: Rect) -> bool {
     p.0 >= r.0 as f64 && p.1 >= r.1 as f64 && p.0 < (r.0 + r.2) as f64 && p.1 < (r.1 + r.3) as f64
 }
-fn fit(font: &Sprite, text: &str, width: i32) -> String {
+pub(crate) fn fit(font: &Sprite, text: &str, width: i32) -> String {
     let mut s = text.to_string();
     if text_width(font, &s) > width {
         while !s.is_empty() && text_width(font, &format!("{s}...")) > width {

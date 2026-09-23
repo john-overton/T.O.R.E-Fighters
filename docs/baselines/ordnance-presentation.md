@@ -8,9 +8,21 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation-mode validation on Linux, 2026-09-22, against the
+Implementation-mode validation on Linux, 2026-09-22 and 2026-09-23, against the
 [presentation and drag specification](../spec/ordnance-presentation.md) and
 [mission-wide guns-only rule](../spec/quick-mission-menu.md#mission-wings).
+
+The ordnance-only message strip was checked with the `ordnance-message` and
+`ordnance-message-long` CPU snapshot fixtures. The Cheat notice has a compact
+background sized to its text. The deliberately long fixture stays on one line,
+ends in an ellipsis and stays inside the 580-pixel limit. Both captures were
+visually inspected; other screens retain their existing notice rendering.
+Images and check logs remain ignored in `.local/ordnance-messages/` in the
+ordnance-catalog worktree. Formatting, warnings-denied workspace Clippy, all
+1,397 Rust tests, the locked workspace build, 75 Python tests, source and both
+binary asset guards, documentation checks and the ordnance GPU smoke passed
+for this change. Three existing GPU tests remain explicitly ignored. No new
+automated tests were added for this layout-only edit.
 
 The screen retains the original ORD_AIR3 background, thumbnails, category dial,
 lamps and button pieces. CPU captures of the loaded, empty and dragging states were
