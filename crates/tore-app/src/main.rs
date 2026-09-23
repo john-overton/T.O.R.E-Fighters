@@ -205,7 +205,6 @@ struct App {
     /// Weapon, hit, kill and wing radio calls; see radio_calls.rs.
     radio: radio_calls::Radio,
     /// Imported phrase text for composing radio lines.
-    #[allow(dead_code)] // Removed once the radio and crew producers read it.
     phrases: comms::Phrases,
     /// The player's crew voice; see docs/spec/cockpit-voice.md.
     crew_voice: crew_voice::CrewVoice,
@@ -2694,8 +2693,27 @@ impl ApplicationHandler for App {
                                     mission,
                                 );
                                 audio.situation(&music.inputs, music.now);
+                                // Addressed to the player's flight; the label
+                                // (crew or YOU) is unresolved in retail, so this
+                                // choice is fitted. The mission result comes
+                                // about 2 seconds after it is decided (native).
+                                let label = comms::crew(&self.hornet.profile)
+                                    .map_or("YOU", comms::Crew::label);
                                 for stem in music.radio {
-                                    audio.radio(&[stem], false);
+                                    let delay = if stem == ai_wings::outcome::MISSION_ACCOMPLISHED {
+                                        2.
+                                    } else {
+                                        0.
+                                    };
+                                    self.comms.send(
+                                        self.combat.state.tick() as f64 / 120.,
+                                        comms::Call::new(
+                                            label,
+                                            comms::Phrase::stem(&self.phrases, stem),
+                                            comms::Kind::Important,
+                                        )
+                                        .after(delay),
+                                    );
                                 }
                             }
                             // Audio observes authoritative poses and consumes each emission once.

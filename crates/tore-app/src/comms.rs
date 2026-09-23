@@ -3,7 +3,6 @@
 //! docs/spec/cockpit-voice.md#when-the-crew-may-speak. Producers decide what to
 //! say; this module decides whether and when it is heard. It runs on
 //! simulation seconds and never changes flight, AI or combat state.
-#![allow(dead_code)] // Removed once the radio and crew producers use every part.
 use std::collections::BTreeMap;
 
 /// Seconds every delivered line holds the whole channel (native).
