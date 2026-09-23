@@ -561,7 +561,8 @@ on the charge's behalf.
 Mission context must identify protected aircraft, destroy objectives, escort
 relationships and any patrol region. Allegiance or proximity alone does not
 identify an escort or objective. For M1, supply these explicit assignments from
-Quick Mission presets and synthetic scenarios, independently of the M2 campaign
+Quick Mission presets and synthetic scenarios, independently of the
+[missions and campaigns](../ROADMAP.md#milestone-3-missions-and-campaigns)
 importer. Preserve the existing default Quick Mission behavior until these
 assignments and defaults are deliberately connected.
 

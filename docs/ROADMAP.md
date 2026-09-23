@@ -25,11 +25,12 @@ T.O.R.E-Fighters in the Repo - Tasteful Opinionated Reverse Engineered
   - [1f. Sensors and weapons](#1f-sensors-and-weapons)
   - [1g. Installer and first-run import](#1g-installer-and-first-run-import)
   - [1h. Cheats](#1h-cheats)
-- [Milestone 2: Missions and campaigns](#milestone-2-missions-and-campaigns)
-- [Milestone 3: Tools](#milestone-3-tools)
-- [Milestone 4: Remaster layer](#milestone-4-remaster-layer)
-- [Milestone 5: Live campaigns and multiplayer](#milestone-5-live-campaigns-and-multiplayer)
-- [Milestone 6: Custom maps and community theaters](#milestone-6-custom-maps-and-community-theaters)
+- [Milestone 2: Multiplayer](#milestone-2-multiplayer)
+- [Milestone 3: Missions and campaigns](#milestone-3-missions-and-campaigns)
+- [Milestone 4: Tools](#milestone-4-tools)
+- [Milestone 5: Remaster layer](#milestone-5-remaster-layer)
+- [Milestone 6: Persistent campaigns](#milestone-6-persistent-campaigns)
+- [Milestone 7: Custom maps and community theaters](#milestone-7-custom-maps-and-community-theaters)
 - [Importer coverage table](#importer-coverage-table)
 - [Funding](#funding)
 - [Open decisions](#open-decisions)
@@ -81,7 +82,7 @@ twelve-aircraft scope; their individual acceptance limits remain documented.
 
 ## Principles
 
-1. **Faithful first, opinionated second.**  Milestone 1 and 2 reproduce the retail game with tasteful opinions.  No feature will be left behind, and some opinionated features will have retail settings you can turn on to return back to that original experience.
+1. **Faithful first, opinionated second.**  Milestones 1 through 3 reproduce the retail game with tasteful opinions.  No feature will be left behind, and some opinionated features will have retail settings you can turn on to return back to that original experience.
 2. **Bring your own copy.**  The repo ships no retail bytes.  The importer reads the user's own Fighters Anthology media at runtime and writes to app data.  A signature scan for EALIB, PIC, and other retail markers stays a release gate.
 3. **Hand-rolled where it counts.**  External dependencies are kept to a minimum.  Formats, synth, terrain, and sim are ours.
 4. **Importer grows with the game.**  There is no "import everything" phase.  Each step decodes exactly the formats the next playable piece needs.  Breadth is tracked in a coverage table, not a milestone.
@@ -166,7 +167,7 @@ or reference-checkout terrain engine is part of this milestone.
 
 **Implementation mode. John selected retail detail for all maps on
 2026-09-23:** textures, artwork, scenery and map variants. Surface shaders and
-expanded landscapes are future work under [M4](#future-terrain-enhancements).
+expanded landscapes are future work under [M5](#future-terrain-enhancements).
 No surface AI is authorized by this visual scope.
 
 [Measured findings](baselines/retail-terrain-review.md),
@@ -215,7 +216,7 @@ records actual results and platform limits. Retail side-by-side comparison is
 unavailable and is not an acceptance blocker or an implied parity claim.
 
 The selected work is retail map detail. Shader enhancements and authored
-landscape expansion remain future M4 items; flight adapters, controls and
+landscape expansion remain future M5 items; flight adapters, controls and
 compatibility modes stay available.
 
 ### Airport and ground-object expansion
@@ -937,7 +938,38 @@ described. The fitted numbers in the specification await John's review.
 Deliverable: each cheat toggles mid-flight from the menu, shows On or Off, and
 survives Restart.
 
-## Milestone 2: Missions and campaigns
+## Milestone 2: Multiplayer
+
+**Goal:** players create and fly Quick Missions together through the existing
+Quick Mission creator.
+
+Sequencing requested by John on 2026-09-23. Multiplayer starts here, then
+expands in this order as the underlying modes are implemented:
+
+1. **Quick Mission creator, M2.** Online lobby, shared mission setup and launch,
+   and multiplayer quick fights.
+2. **Campaigns, M3.** Extend multiplayer to campaign missions, progression and
+   saves when the campaign systems are implemented.
+3. **Single missions, M3.** Extend multiplayer to standalone missions after
+   campaign multiplayer, using the implemented mission loader, objectives and
+   results.
+4. **Persistent campaigns, M6.** Carry multiplayer into the persistent campaign
+   world when that milestone is implemented.
+
+Work:
+- Connect online lobby and player joining to the Quick Mission creator.
+- Share the selected mission setup and run the resulting quick fight together.
+- Keep multiplayer compatible with deterministic headless simulation at 120 Hz.
+
+Deliverable: players can join a session, configure a Quick Mission and fly it
+together.
+
+Exit: a multiplayer Quick Mission completed across separate clients, with
+validation evidence recorded. Later mode extensions do not block M2 acceptance.
+
+---
+
+## Milestone 3: Missions and campaigns
 
 This is the base game.  Tagged as 1.0.
 
@@ -946,17 +978,22 @@ Work:
 - Mission loader, triggers, objectives, scoring, and events.
 - Briefing, map, and debrief at retail fidelity.
 - Campaign progression, pilot record, saves.
+- Extend the M2 multiplayer foundation to campaigns, then single missions, in
+  the [multiplayer rollout order](#milestone-2-multiplayer).
 - Carrier operations: launch, recovery, deck.
 - Remaining aircraft imported and validated in batches.  Coverage table shows what is flyable per title.
 - Encyclopedia and video playback where media is complete.
 
-Deliverable: every retail campaign playable start to finish.
+Deliverable: every retail campaign playable start to finish, with multiplayer
+support for campaigns and single missions.
 
-Exit: a full campaign completed per title, evidence recorded.  Importer coverage table shows no red cells for gameplay-critical formats.
+Exit: a full campaign completed per title, evidence recorded. Multiplayer
+campaign progression, save/resume and single-mission completion validated across
+separate clients. Importer coverage table shows no red cells for gameplay-critical formats.
 
 ---
 
-## Milestone 3: Tools
+## Milestone 4: Tools
 
 Work:
 - Aircraft and asset tools: import, inspect, validate, and export flight profiles, shapes, and textures.
@@ -977,7 +1014,7 @@ validated together. Actor-owned release mechanics use the same shot spacing
 without changing autonomous decisions. [Rules and known damage-rounding difference](spec/damage-smoke.md#individual-cannon-rounds);
 [validation](baselines/damage-smoke.md).
 
-## Milestone 4: Remaster layer
+## Milestone 5: Remaster layer
 
 ### Future terrain enhancements
 
@@ -1001,14 +1038,16 @@ Work:
 - Systems expansion: HARM and other rudimentary systems brought up to plausible depth, gameplay stats otherwise unchanged.
 - Lighting, shadows, particles, vegetation, and basic cities, all at a light flight-sim feel.
 
-Exit: classic mode still matches the M2 baseline with every layer off.
+Exit: classic mode still matches the M3 baseline with every layer off.
 
 ---
 
-## Milestone 5: Live campaigns and multiplayer
+## Milestone 6: Persistent campaigns
+
+Extend the multiplayer foundation from M2 and M3 to persistent campaigns, the
+final stage of the [multiplayer rollout](#milestone-2-multiplayer).
 
 Work:
-- Online lobby and quick fight multiplayer.
 - Authoritative server for a persistent combined-arms dynamic campaign with daily role selection: SAR, resupply, CAS, CAP, interdiction, strike, and escort.
 - Ground-to-ground warfare as a campaign layer.
 - Massive battle scaling, measured and recorded.
@@ -1017,12 +1056,12 @@ Entry condition: the sim has been deterministic and headless since M1.  If that 
 
 ---
 
-## Milestone 6: Custom maps and community theaters
+## Milestone 7: Custom maps and community theaters
 
 Work:
 - Terrain pipeline productized so users can build theaters from public elevation sources.
 - Theater manifests, sharing, and validation.
-- Asset expansion: community aircraft and objects through the M3 tools.
+- Asset expansion: community aircraft and objects through the M4 tools.
 
 ---
 
@@ -1048,7 +1087,7 @@ Formats: ESA, LIB, DCL, PAL, PIC, FNT, DLG, MNU, LAY, XMI, MUS, 5K, 11K, T2, PT,
 | ~~Retail AI VM reimplemented or behaviors recreated~~ | Settled 2026-09-15: behaviors recreated from a spec |
 | Working title | Whenever, before M1 tag |
 | TS repo stays runnable as reference or is archived at M0 | M0 |
-| Multiplayer in 1.0 or after | Before M2 tag |
+| Multiplayer sequencing | Settled 2026-09-23 by John: starts in M2, see [rollout](#milestone-2-multiplayer) |
 | Initial aircraft scope | Expanded to the twelve ported aircraft listed in M1c |
-| Save format and mod manifest schema | M3 |
+| Save format and mod manifest schema | M4 |
 | Installer scope: mounted disc or folder, proper installers, unsigned first builds | Settled 2026-09-21, see M1g |
