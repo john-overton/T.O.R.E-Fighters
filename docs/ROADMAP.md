@@ -24,6 +24,7 @@ T.O.R.E-Fighters in the Repo - Tasteful Opinionated Reverse Engineered
   - [1e. AI](#1e-ai)
   - [1f. Sensors and weapons](#1f-sensors-and-weapons)
   - [1g. Installer and first-run import](#1g-installer-and-first-run-import)
+  - [1h. Cheats](#1h-cheats)
 - [Milestone 2: Missions and campaigns](#milestone-2-missions-and-campaigns)
 - [Milestone 3: Tools](#milestone-3-tools)
 - [Milestone 4: Remaster layer](#milestone-4-remaster-layer)
@@ -786,6 +787,36 @@ macOS is pending.
 Deliverable: on each platform, install, choose a mounted disc 1 or an
 installed folder, and fly the README free-flight check without using a
 terminal.
+
+### 1h. Cheats
+
+Planned 2026-09-23 at John's request. Every entry in the in-flight Cheat menu
+and the loadout screen's Cheat button works as described in the
+[cheats specification](spec/cheats.md). Two already work: No turbulence and No
+sun whiteout.
+
+Slices, in order:
+
+1. **Cheat settings and the simple cheats.** One cheat settings object shared
+   by the flight menu, the simulation and restart. Unlimited fuel, Unlimited
+   ammo, No spins, Pull extra G, Ignore weapon weights, Damage Invulnerable and
+   Normal, and the loadout Cheat button.
+2. **G effects.** Blackout, redout and the high-G screen shake, plus the No
+   redout or blackout and No screen-shaking cheats.
+3. **Weapon hits.** The missile hit jolt for every aircraft, No crashes
+   ricochet, and Easy aiming.
+4. **Midair collisions.** Always fatal to every aircraft involved, plus Ignore
+   midair collisions. Touches AI files.
+5. **Targeting.** Separate Enter (visual) and T (radar) selection, and a
+   target drops when radar loses it. Then Easy targeting.
+6. **AI cheats.** Live Enemy AI skill and Air combat guns only for AI aircraft.
+   Touches AI files.
+
+Slices 4 and 6 change files another agent is working in; they wait until that
+work is merged. Damage Realistic is parked until its behaviour is described.
+
+Deliverable: each cheat toggles mid-flight from the menu, shows On or Off, and
+survives Restart.
 
 ## Milestone 2: Missions and campaigns
 

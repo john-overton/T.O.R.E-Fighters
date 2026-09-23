@@ -702,8 +702,8 @@ impl App {
 
     fn flight_command(&mut self, command: flight_ui::Command) -> Action {
         use flight_ui::Command;
-        if self.native_tables.is_some() && !self.flight_ui.no_turbulence {
-            self.flight_ui.no_turbulence = true;
+        if self.native_tables.is_some() && !self.flight_ui.cheats.no_turbulence {
+            self.flight_ui.cheats.no_turbulence = true;
             self.flight_ui
                 .message("Environmental turbulence is unavailable in native research flight");
         }
@@ -2104,7 +2104,7 @@ impl ApplicationHandler for App {
                         false
                     }
                     Screen::Flight => {
-                        self.world.no_sun_whiteout = self.flight_ui.no_sun_whiteout;
+                        self.world.no_sun_whiteout = self.flight_ui.cheats.no_sun_whiteout;
                         let now = Instant::now();
                         let elapsed = (now - self.frame_time).as_secs_f64().min(0.25);
                         let steps = self.flight_ui.steps(&mut self.flight_clock, elapsed);
@@ -2121,6 +2121,8 @@ impl ApplicationHandler for App {
                         // controls, applied as a simulation input so replay
                         // reproduces every change and the labels never lag.
                         self.flight.sensors = self.instruments.controls();
+                        self.flight.cheats = self.flight_ui.cheats;
+                        self.combat.state.cheats = self.flight_ui.cheats;
                         for _ in 0..steps {
                             for button in std::mem::take(&mut self.instruments.weapon_controls) {
                                 cycle_player_weapon(
@@ -2282,7 +2284,7 @@ impl ApplicationHandler for App {
                                 &mut self.turbulence_rng,
                                 &mut self.flight,
                                 &self.world,
-                                !self.flight_ui.no_turbulence,
+                                !self.flight_ui.cheats.no_turbulence,
                             );
                             if let Some(points) = self.hornet.streamer_points(&self.flight) {
                                 self.vapor.step(self.world.weather.ticks(), points);
@@ -5565,7 +5567,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         fullscreen_preference: window.preference,
         flight_ui: {
             let mut ui = flight_ui::FlightUi::default();
-            ui.no_turbulence = !turbulence_enabled;
+            ui.cheats.no_turbulence = !turbulence_enabled;
             ui.menu = flight_menu;
             ui.map.open = flight_map;
             ui.paused = animation_capture || combat_probe.is_some();
@@ -5651,7 +5653,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
     }
     if app.native_tables.is_some() {
-        app.flight_ui.no_turbulence = true;
+        app.flight_ui.cheats.no_turbulence = true;
     }
     app.preference_saved = preferences::Preferences::capture(
         &app.flight_ui,

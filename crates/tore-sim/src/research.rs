@@ -107,6 +107,7 @@ impl Research {
         bank: f64,
         roll_rate: f64,
         airflow_forward: f64,
+        spins_allowed: bool,
     ) {
         let ticks = self.clock.advance(false);
         self.elapsed = self.elapsed.wrapping_add(ticks as i32);
@@ -120,7 +121,16 @@ impl Research {
         }
         // Warning eligibility/direction are source-derived; torque onset is fitted.
         let drive = departure_drive(speed, stall, pitch, c.native.departure.spin_entry);
-        if self.spinning == 0
+        if !spins_allowed && self.spinning != 0 {
+            // No spins turned on mid-spin: the rotation damps out as a stall.
+            self.spinning = 0;
+            self.departure = StallState {
+                mode: DepartureMode::Stalled,
+                elapsed: 0,
+            };
+        }
+        if spins_allowed
+            && self.spinning == 0
             && drive > 0.
             && matches!(
                 self.departure.mode,
@@ -470,7 +480,7 @@ mod tests {
             for rudder in [0.001, 0.46775, 0.46875, 0.46975, 0.9365, 0.9375, 0.9385, 1.] {
                 let mut r = Research::new(1).unwrap();
                 r.departure.mode = DepartureMode::Warning;
-                r.advance(&c, 190., 200., 1., rudder, 0., -0.1, 0., 1.);
+                r.advance(&c, 190., 200., 1., rudder, 0., -0.1, 0., 1., true);
                 assert_eq!(r.spinning, 1);
                 rates.push(r.spin_rate);
             }
@@ -482,7 +492,7 @@ mod tests {
         for (speed, expected_acceleration) in [(200., 0.), (190., 25.3422), (180., 76.9824)] {
             let mut r = Research::new(1).unwrap();
             r.departure.mode = DepartureMode::Warning;
-            r.advance(&c, speed, 200., 1., 1., 0., -0.1, 0., 1.);
+            r.advance(&c, speed, 200., 1., 1., 0., -0.1, 0., 1., true);
             assert!((r.spin_rate.to_degrees() / DT - expected_acceleration).abs() < 1e-8);
         }
         assert_eq!(departure_drive(100., 200., 1., 2), 0.);
@@ -492,6 +502,19 @@ mod tests {
     }
 
     #[test]
+    fn no_spins_blocks_entry_and_ends_a_spin_as_a_stall() {
+        let mut c = config();
+        c.native.departure.spin_yaw = [120, 180];
+        let mut r = Research::new(1).unwrap();
+        r.departure.mode = DepartureMode::Warning;
+        r.advance(&c, 190., 200., 1., 1., 0., -0.1, 0., 1., false);
+        assert_eq!(r.spinning, 0);
+        let mut r = spinning(1.);
+        r.advance(&c, 180., 200., 1., 1., 0., 0., 0., 1., false);
+        assert_eq!(r.spinning, 0);
+        assert!(r.spin_rate < 1., "the rotation damps out");
+    }
+    #[test]
     fn rudder_accelerates_or_arrests_rotation_proportionally_below_stall() {
         let mut c = config();
         c.native.departure.spin_yaw = [120, 180];
@@ -500,7 +523,18 @@ mod tests {
             for rudder in [-1., -0.781, -0.780, -0.001, 0., 0.001, 0.780, 0.781, 1.] {
                 let mut r = spinning(direction);
                 for _ in 0..12 {
-                    r.advance(&c, 180., 200., 1., rudder * direction, 0., 0., 0., 0.5);
+                    r.advance(
+                        &c,
+                        180.,
+                        200.,
+                        1.,
+                        rudder * direction,
+                        0.,
+                        0.,
+                        0.,
+                        0.5,
+                        true,
+                    );
                 }
                 rates.push(r.spin_rate.abs());
             }
@@ -518,11 +552,11 @@ mod tests {
             for wrong_ticks in [5, 120] {
                 let mut r = spinning(0.01 * direction);
                 for _ in 0..wrong_ticks {
-                    r.advance(&c, 180., 200., 1., direction, 0., 0., 0., 1.);
+                    r.advance(&c, 180., 200., 1., direction, 0., 0., 0., 1., true);
                 }
                 let mut ticks = 0;
                 while r.spinning != 0 && ticks < 1200 {
-                    r.advance(&c, 180., 200., -1., -direction, 0., 0., 0., 1.);
+                    r.advance(&c, 180., 200., -1., -direction, 0., 0., 0., 1., true);
                     ticks += 1;
                 }
                 assert_eq!(r.spinning, 0);
@@ -541,13 +575,24 @@ mod tests {
             for (rate, angle, clears) in [(0.1, 25_f64, true), (0.1, 25.1, false), (0.5, 0., false)]
             {
                 let mut r = spinning(rate * direction);
-                r.advance(&c, 500., 200., 0., 0., 0., 0., 0., angle.to_radians().cos());
+                r.advance(
+                    &c,
+                    500.,
+                    200.,
+                    0.,
+                    0.,
+                    0.,
+                    0.,
+                    0.,
+                    angle.to_radians().cos(),
+                    true,
+                );
                 assert_eq!(r.spinning == 0, clears);
                 if clears {
                     assert_eq!(r.departure.mode, DepartureMode::Normal);
                     assert!(r.spin_rate.abs() > 0.);
                     let previous = r.spin_rate.abs();
-                    r.advance(&c, 500., 200., 0., 0., 0., 0., 0., 1.);
+                    r.advance(&c, 500., 200., 0., 0., 0., 0., 0., 1., true);
                     assert!(r.spin_rate.abs() < previous && r.spin_rate.abs() > 0.);
                 }
             }
@@ -576,11 +621,11 @@ mod tests {
             mode: DepartureMode::Stalled,
             elapsed: 1024,
         };
-        r.advance(&c, 100., 200., 0., 0., 0., 0.1, 0., 1.);
+        r.advance(&c, 100., 200., 0., 0., 0., 0.1, 0., 1., true);
         assert!(r.stall_active && r.severity_f8 > 0);
         assert!(r.departure.elapsed > 1024);
         r.on_ground = true;
-        r.advance(&c, 100., 200., 1., 1., 1., 0., 0., 1.);
+        r.advance(&c, 100., 200., 1., 1., 1., 0., 0., 1., true);
         assert_eq!(r.departure, StallState::default());
         assert!(!r.stall_active);
         assert_eq!(r.severity_f8, 0);

@@ -25,6 +25,8 @@ struct Drag {
 pub struct Ordnance {
     pub loadout: Loadout,
     pub visible: bool,
+    /// Every imported store; the catalog is the part this loadout accepts.
+    weapons: Vec<Weapon>,
     catalog: Vec<Weapon>,
     sprites: BTreeMap<String, Sprite>,
     category: usize,
@@ -95,17 +97,10 @@ impl Ordnance {
         ] {
             sprites.insert(name.into(), crate::menu::flat_font(color));
         }
-        let mut catalog: Vec<_> = data
+        let mut weapons: Vec<_> = data
             .iter()
             .filter(|(n, _)| n.ends_with(".JT") && !n.starts_with('~'))
             .filter_map(|(name, b)| Weapon::parse(name, b).ok())
-            .filter(|w| {
-                loadout
-                    .hardpoints
-                    .iter()
-                    .enumerate()
-                    .any(|(i, _)| loadout.capacity(i, w) > 0)
-            })
             .collect();
         let display = |w: &mut Weapon| {
             if let Some(bytes) = data.get(&w.source)
@@ -117,17 +112,18 @@ impl Ordnance {
                 w.name = long.clone();
             }
         };
-        for w in &mut catalog {
+        for w in &mut weapons {
             display(w);
         }
         for station in &mut loadout.configuration.stations {
             display(&mut station.weapon);
         }
-        catalog.sort_by(|a, b| a.name.cmp(&b.name).then(a.source.cmp(&b.source)));
-        Ok(Self {
+        weapons.sort_by(|a, b| a.name.cmp(&b.name).then(a.source.cmp(&b.source)));
+        let mut ordnance = Self {
             loadout,
             visible: true,
-            catalog,
+            weapons,
+            catalog: vec![],
             sprites,
             category: 0,
             pages: [0; 2],
@@ -141,7 +137,20 @@ impl Ordnance {
             controls: vec![],
             message: None,
             menu: false,
-        })
+        };
+        ordnance.rebuild_catalog();
+        Ok(ordnance)
+    }
+    fn rebuild_catalog(&mut self) {
+        let load = &self.loadout;
+        self.catalog = self
+            .weapons
+            .iter()
+            .filter(|w| (0..load.hardpoints.len()).any(|i| load.capacity(i, w) > 0))
+            .cloned()
+            .collect();
+        self.pages = [0; 2];
+        self.selected = None;
     }
     fn page_entries(&self) -> Vec<usize> {
         self.catalog
@@ -362,7 +371,21 @@ impl Ordnance {
                 self.loadout.quantities.fill(0);
                 self.menu = false;
             }
-            13 => self.message = Some("Cheat loading is not available yet.".into()),
+            13 => {
+                // Toggling unloads every station, then rebuilds the catalog.
+                self.loadout.quantities.fill(0);
+                self.loadout.cheat = !self.loadout.cheat;
+                self.rebuild_catalog();
+                self.menu = false;
+                self.message = Some(
+                    if self.loadout.cheat {
+                        "Cheat loading on: any store fits any station."
+                    } else {
+                        "Cheat loading off."
+                    }
+                    .into(),
+                );
+            }
             14 => {
                 self.message =
                     Some("Airbase aircraft cycling is not available in this setup.".into())
@@ -597,7 +620,11 @@ impl Ordnance {
             c.text(&self.sprites["MENUFONT.PIC"], "Unload All", 108, 64, None);
             c.text(
                 &self.sprites["MENUFONT.PIC"],
-                "Cheat (unavailable)",
+                if self.loadout.cheat {
+                    "Cheat  On"
+                } else {
+                    "Cheat  Off"
+                },
                 108,
                 89,
                 None,
@@ -1104,6 +1131,7 @@ mod tests {
             internal_capacity_lbs: 1000.,
             empty_lbs: 10000.,
             maximum_lbs: 20000.,
+            cheat: false,
             hardpoints: (0..3)
                 .map(|i| Hardpoint {
                     location: if i == 2 { 2 } else { 4 },
@@ -1173,6 +1201,7 @@ mod tests {
         let mut ui = Ordnance {
             loadout,
             visible: true,
+            weapons: catalog.clone(),
             catalog,
             sprites,
             category: 0,
@@ -1236,6 +1265,27 @@ mod tests {
         drag(&mut ui, (400., 145.), (100., 120.));
         assert_eq!(ui.loadout.quantities, [0, 0, 500]);
         assert!(ui.selected.is_none());
+    }
+    #[test]
+    fn cheat_button_unloads_and_toggles_any_store_on_any_station() {
+        let mut ui = fixture();
+        let mut bomb = ui.weapons[0].clone();
+        bomb.source = "MK82.JT".into();
+        bomb.flags = 2;
+        bomb.seeker.signature = 0;
+        ui.weapons.push(bomb.clone());
+        ui.rebuild_catalog();
+        let listed = |ui: &Ordnance| ui.catalog.iter().any(|w| w.source == "MK82.JT");
+        assert!(!listed(&ui));
+        ui.activate(13);
+        assert!(ui.loadout.cheat);
+        assert_eq!(ui.loadout.quantities, [0, 0, 0]);
+        assert!(listed(&ui));
+        assert_eq!(ui.loadout.capacity(0, &bomb), 4);
+        assert_eq!(ui.loadout.capacity(2, &bomb), 0, "the fixed gun station");
+        ui.activate(13);
+        assert!(!ui.loadout.cheat);
+        assert!(!listed(&ui));
     }
     #[test]
     fn invalid_same_station_outside_and_cancelled_drops_do_not_mutate_loads() {

@@ -1,0 +1,197 @@
+# In-flight cheats
+
+> **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
+> The thing being reverse engineered is the *experience*, not the executable. We
+> trace what a player does and what the game does back, down to the numbers they
+> would notice. How the original code achieved it is history: useful evidence,
+> never a blueprint. If a sentence below reads like an instruction to reproduce
+> the original's internals, it is out of date.
+> <!-- tore-header v2 -->
+
+Research mode, 2026-09-23. The behaviour below is **John's recollection of the
+retail game**, given in session on 2026-09-23. Retail comparison is unavailable,
+so none of it is verified against the original. Numbers John did not give are
+marked **proposed**: they are agent proposals awaiting John's review, and ship as
+`fitted` until he confirms or replaces them.
+
+## What the player sees and does
+
+Escape opens the flight menu. Its **Cheat** menu is read from the player's
+imported `FMENUD.MNU` and contains, in order:
+
+| Entry | Choices |
+| --- | --- |
+| Damage | Invulnerable / Normal / Realistic |
+| Unlimited ammo? | on / off |
+| Unlimited fuel? | on / off |
+| Easy aiming? | on / off |
+| No crashes? | on / off |
+| No spins? | on / off |
+| No turbulence? | on / off |
+| Pull extra G? | on / off |
+| Ignore weapon weights? | on / off |
+| No sun whiteout? | on / off |
+| No redout or blackout? | on / off |
+| No screen-shaking? | on / off |
+| Enemy AI? | Novice / Average / Unchanged |
+| Ignore midair collisions? | on / off |
+| Easy targeting? | on / off |
+| Air combat guns only? | on / off |
+
+Every cheat takes effect immediately, mid-flight, and all start off. They last
+for the session and survive Restart, like the two that already work (No
+turbulence, No sun whiteout). **Proposed:** they are not saved to preferences.
+
+## Behaviour of each cheat
+
+**Damage.** Invulnerable means weapon hits do no damage: no hit-point loss, no
+system faults, no pilot kill and no breakup. Hits still physically jolt the
+aircraft (see [missile hit jolt](#missile-hit-jolt)). Normal is the current
+damage model. Realistic is not yet described. Invulnerable does not prevent
+ground crashes; that is the separate No crashes cheat.
+
+**Unlimited ammo.** Gun rounds and stores never run out. **Proposed:** applies to
+the player only.
+
+**Unlimited fuel.** Fuel never decreases. **Proposed:** player only, and it also
+covers leaks from damage.
+
+**No crashes.** The aircraft ricochets off the ground instead of crashing: it
+bounces and keeps flying. **Proposed:** the same applies to water and to
+buildings.
+
+**No spins.** The aircraft never departs into a spin. **Proposed:** stall buffet
+and stall lift loss still happen; only spin entry is prevented.
+
+**Pull extra G.** Every aircraft can pull up to **9 G**, whatever its normal
+limit. **Proposed:** 9 G is available regardless of weapons and fuel load, and
+the limit becomes the higher of 9 G and the aircraft's own limit.
+
+**Ignore weapon weights.** Stores add neither weight nor drag. **Proposed:** fuel
+carried in external tanks still counts as fuel weight.
+
+**No redout or blackout.** Turns off [G effects](#g-effects).
+
+**No screen-shaking.** Turns off the [high-G screen shake](#high-g-screen-shake).
+
+**Enemy AI.** Changes the skill of every enemy aircraft at once, live. Unchanged
+restores each aircraft's mission skill. Friendly AI is unaffected.
+
+**Ignore midair collisions.** Aircraft pass through each other. With the cheat
+off, [midair collisions](#midair-collisions) happen.
+
+**Easy targeting.** Gives the player awareness of where the target is at all
+times. The target square stays on the target anywhere on screen, including
+outside the HUD, instead of becoming an edge arrow. The target stays selected
+after it drops off the radar scope, including in a merge when it passes behind
+the aircraft. It is awareness only: missiles still guide within their normal
+limits and behaviour, and a target the sensors have lost gives no radar support.
+Depends on [target selection](#target-selection).
+
+**Air combat guns only.** Every aircraft, player and AI, can fire only its gun.
+An aircraft without a gun cannot fire. **Proposed:** missiles already in flight
+continue; turning the cheat off restores the stores.
+
+**Easy aiming.** Aircraft hitboxes are **50% larger**, missiles get extra
+maneuverability, and missile seekers have a **25% wider** tracking cone.
+**Proposed:** it helps the player's weapons only; enemy fire against the player
+is unchanged. The hitbox scale covers the gun hit sections and the missile fuze
+contact size, but not the fuze's own radius. The extra maneuverability is 50%
+more G for the player's missiles.
+
+## Systems the cheats need
+
+These are ordinary game behaviour, present with the cheats off.
+
+### G effects
+
+Sustained high positive G darkens the view to black (blackout); negative G turns
+it red (redout). **Proposed numbers:**
+
+| Value | Proposed |
+| --- | --- |
+| Blackout onset | sustained above +6 G |
+| Full blackout | about 5 s at +9 G, sooner above 9 G |
+| Redout onset | sustained below -2 G |
+| Full redout | about 3 s at -3.5 G |
+| Recovery | vision returns over about 3 s once G is back inside the limits |
+| Controls | still respond; only vision is affected (John, 2026-09-23) |
+
+### High-G screen shake
+
+The view shakes naturally under stress, starting at 6 G and growing stronger
+with G. **Proposed:** none below 6 G, rising smoothly to full strength at 9 G,
+about 4 pixels at 640 by 480, at a rapid, irregular rate (about 12 to 18 Hz).
+
+### Missile hit jolt
+
+A missile hit knocks the aircraft around, whether or not it does damage, and
+also with Invulnerable on. It applies to AI aircraft too. **Proposed:** a sudden
+roll and pitch kick plus a push away from the blast, fading within about half a
+second, larger for larger warheads.
+
+### Midair collisions
+
+Aircraft that touch collide, and a midair collision is always fatal to every
+aircraft involved, player and AI. Invulnerable does not prevent it; only Ignore
+midair collisions does.
+
+### Target selection
+
+Easy targeting assumes the retail targeting controls:
+
+- **T** cycles through current radar contacts only.
+- **Enter** selects an aircraft the pilot can see, but only one that is also a
+  current sensor contact.
+- When the radar loses the contact, the target drops and the track is lost
+  completely. This applies however the target was selected, including by
+  clicking it on the radar scope. The HUD does not remember a dropped target;
+  only Easy targeting keeps it.
+
+This replaces two current behaviours: a target surviving radar loss because it
+is still inside visual range (an agent decision), and the HUD's remembered
+target after sensor loss (a fitted choice). Clicking a contact still selects it
+as John requested on 2026-09-16; it now drops with the contact.
+
+**Proposed:** T cycles nearest first, skips friendly aircraft and wrecks, and
+Shift-T cycles backwards. Enter picks the eligible aircraft closest to the
+centre of the HUD. An Enter target drops when it is no longer a sensor contact.
+When implemented, these rules move into the [radar specification](radar.md).
+
+## Loadout cheat
+
+The loadout screen has its own **Cheat** button, next to Unload All. Pressing it
+unloads every station and toggles cheat loading; pressing it again unloads and
+returns to normal loading. With cheat loading on, the airbase's stock limits no
+longer apply and any store can go on any station, up to that station's
+capacity. Normal rules still apply to fixed stations such as internal guns, to
+a store the station carries by default, and to a missile or bomb type the
+station's default rules out. The loadout still accepts only stores the rebuild
+supports in flight. Details: [ordnance menu format](../formats/ordnance-menu.md).
+
+## Edge cases
+
+- Cheats can be toggled while paused; they apply on the next simulation step.
+- Turning Pull extra G off while above the normal limit lets the aircraft
+  unload to its limit through the normal control response, not instantly.
+- Enemy AI set to Novice clears extra remembered contacts at the next target
+  choice, as the Novice memory limit already does.
+
+## Unknown
+
+- **Damage, Realistic:** how it differs from Normal.
+- Whether Unlimited ammo and Unlimited fuel covered AI aircraft.
+- Loadout cheat: what "participant count above one" means to a player, and the
+  exact projectile flag the station default checks.
+- All numbers marked proposed above.
+
+## Source notes
+
+- Menu labels and order: the player's imported `FMENUD.MNU`, read with
+  `tore_formats::ui::flight_menu`. See [menu format](../formats/menu.md).
+- Behaviour: John's recollection, 2026-09-23.
+- Loadout cheat: recovered from the original executable, see the
+  [ordnance menu format](../formats/ordnance-menu.md).
+- The native flight path carries the original cheat switches for extra G, no
+  spins and empty weight (`crates/tore-formats/src/flight_model/`). Its extra-G
+  switch adds 1 G beyond the envelope rather than allowing 9 G.

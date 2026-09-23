@@ -16,6 +16,8 @@ pub struct Loadout {
     pub empty_lbs: f64,
     pub maximum_lbs: f64,
     pub hardpoints: Vec<Hardpoint>,
+    /// Loadout screen Cheat: any store on any station, up to its capacity.
+    pub cheat: bool,
 }
 impl Loadout {
     pub fn new(a: &Aircraft, read: impl FnMut(&str) -> Result<Vec<u8>>) -> Result<Self> {
@@ -34,6 +36,7 @@ impl Loadout {
                 .filter(|h| h.store.as_deref().is_some_and(|n| n.ends_with(".JT")))
                 .cloned()
                 .collect(),
+            cheat: false,
         })
     }
     pub fn capacity(&self, slot: usize, w: &Weapon) -> i32 {
@@ -41,10 +44,13 @@ impl Loadout {
             .get(slot)
             .and_then(|h| {
                 loading::Station::from_source(h).ok().map(|s| {
-                    s.allowed_count(
-                        loading::Store::weapon(w),
-                        h.store.as_deref() == Some(&w.source),
-                    )
+                    let store = loading::Store::weapon(w);
+                    let matches_default = h.store.as_deref() == Some(&w.source);
+                    if self.cheat {
+                        s.cheat_count(store, matches_default, h.store.is_some())
+                    } else {
+                        s.allowed_count(store, matches_default)
+                    }
                 })
             })
             .unwrap_or(0)

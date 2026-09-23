@@ -141,7 +141,8 @@ impl Autopilot {
             }
         }
         let loading = 1.
-            + (s.fuel + s.payload_lbs) / c.mass.empty_lbs * c.aerodynamics.loaded_elevator_percent
+            + (s.fuel + s.carried_lbs()) / c.mass.empty_lbs
+                * c.aerodynamics.loaded_elevator_percent
                 / 100.;
         low /= loading;
         high /= loading;

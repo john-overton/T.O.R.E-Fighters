@@ -47,8 +47,8 @@ pub struct FlightUi {
     pub cockpit: bool,
     pub hud: bool,
     pub ladder: bool,
-    pub no_sun_whiteout: bool,
-    pub no_turbulence: bool,
+    /// Session-only cheats; they survive Restart but are not saved.
+    pub cheats: tore_sim::cheats::Cheats,
     pub brightness: i16,
     pub zoom: f32,
     pub look: [f32; 2],
@@ -72,8 +72,7 @@ impl Default for FlightUi {
             cockpit: true,
             hud: true,
             ladder: true,
-            no_sun_whiteout: false,
-            no_turbulence: false,
+            cheats: Default::default(),
             brightness: 0,
             zoom: 1.,
             look: [0.; 2],
@@ -90,17 +89,39 @@ impl Default for FlightUi {
         }
     }
 }
+/// The on/off Cheat menu rows that work, by their imported label.
+fn cheat_switch<'a>(cheats: &'a mut tore_sim::cheats::Cheats, label: &str) -> Option<&'a mut bool> {
+    Some(match label {
+        "Unlimited ammo?" => &mut cheats.unlimited_ammo,
+        "Unlimited fuel?" => &mut cheats.unlimited_fuel,
+        "No spins?" => &mut cheats.no_spins,
+        "No turbulence?" => &mut cheats.no_turbulence,
+        "Pull extra G?" => &mut cheats.extra_g,
+        "Ignore weapon weights?" => &mut cheats.ignore_weapon_weights,
+        "No sun whiteout?" => &mut cheats.no_sun_whiteout,
+        _ => return None,
+    })
+}
 impl FlightUi {
-    /// Reset transient flight UI while retaining the session-only cheat.
+    /// Reset transient flight UI while retaining the session-only cheats.
     /// Saved display preferences are reapplied by the caller.
     pub fn reset_for_flight(&mut self) {
         *self = Self {
-            no_sun_whiteout: self.no_sun_whiteout,
-            no_turbulence: self.no_turbulence,
+            cheats: self.cheats,
             ..Default::default()
         };
     }
 
+    /// On/Off for a working cheat row; the selected Damage choice reads On.
+    fn cheat_state(&self, label: &str) -> Option<&'static str> {
+        let mut cheats = self.cheats;
+        let on = match label {
+            "Invulnerable" => cheats.invulnerable,
+            "Normal" => !cheats.invulnerable,
+            _ => *cheat_switch(&mut cheats, label)?,
+        };
+        Some(if on { "On" } else { "Off" })
+    }
     pub fn frozen(&self) -> bool {
         self.menu || self.paused
     }
@@ -188,8 +209,8 @@ impl FlightUi {
                 Command::Click
             }
             "No turbulence?" => {
-                self.no_turbulence = !self.no_turbulence;
-                self.message(if self.no_turbulence {
+                self.cheats.no_turbulence = !self.cheats.no_turbulence;
+                self.message(if self.cheats.no_turbulence {
                     "Turbulence: off"
                 } else {
                     "Turbulence: on"
@@ -197,12 +218,26 @@ impl FlightUi {
                 Command::Click
             }
             "No sun whiteout?" => {
-                self.no_sun_whiteout = !self.no_sun_whiteout;
-                self.message(if self.no_sun_whiteout {
+                self.cheats.no_sun_whiteout = !self.cheats.no_sun_whiteout;
+                self.message(if self.cheats.no_sun_whiteout {
                     "Sun glare: off"
                 } else {
                     "Sun glare: on"
                 });
+                Command::Click
+            }
+            "Invulnerable" | "Normal" => {
+                self.cheats.invulnerable = label == "Invulnerable";
+                self.message(format!("Damage: {}", label.to_lowercase()));
+                Command::Click
+            }
+            _ if cheat_switch(&mut self.cheats, label).is_some() => {
+                let on = cheat_switch(&mut self.cheats, label).is_some_and(|on| {
+                    *on = !*on;
+                    *on
+                });
+                let name = label.trim_end_matches('?');
+                self.message(format!("{name}: {}", if on { "on" } else { "off" }));
                 Command::Click
             }
             "HUD pitch ladder?" => {
@@ -592,13 +627,7 @@ impl FlightUi {
                 (142, 50 + i as i32 * 19, 356, 19),
                 format!(
                     "{label}  {}{}",
-                    if n.label == "No sun whiteout?" {
-                        if self.no_sun_whiteout { "On" } else { "Off" }
-                    } else if n.label == "No turbulence?" {
-                        if self.no_turbulence { "On" } else { "Off" }
-                    } else {
-                        &n.shortcut
-                    },
+                    self.cheat_state(&n.label).unwrap_or(&n.shortcut),
                     if n.children.is_empty() { "" } else { " >" }
                 ),
             ));
@@ -898,11 +927,39 @@ mod tests {
     fn no_turbulence_is_a_session_toggle_preserved_by_restart() {
         let mut ui = FlightUi::default();
         assert_eq!(ui.activate("No turbulence?", ""), Command::Click);
-        assert!(ui.no_turbulence);
+        assert!(ui.cheats.no_turbulence);
         ui.reset_for_flight();
-        assert!(ui.no_turbulence);
+        assert!(ui.cheats.no_turbulence);
         ui.activate("No turbulence?", "");
-        assert!(!ui.no_turbulence);
+        assert!(!ui.cheats.no_turbulence);
+    }
+
+    #[test]
+    fn cheat_rows_toggle_show_state_and_survive_restart() {
+        let mut ui = FlightUi::default();
+        for label in [
+            "Unlimited ammo?",
+            "Unlimited fuel?",
+            "No spins?",
+            "Pull extra G?",
+            "Ignore weapon weights?",
+        ] {
+            assert_eq!(ui.cheat_state(label), Some("Off"));
+            assert_eq!(ui.activate(label, ""), Command::Click);
+            assert_eq!(ui.cheat_state(label), Some("On"));
+        }
+        assert_eq!(ui.cheat_state("Normal"), Some("On"));
+        ui.activate("Invulnerable", "");
+        assert_eq!(ui.cheat_state("Invulnerable"), Some("On"));
+        assert_eq!(ui.cheat_state("Normal"), Some("Off"));
+        ui.reset_for_flight();
+        let c = ui.cheats;
+        assert!(c.invulnerable && c.unlimited_ammo && c.unlimited_fuel);
+        assert!(c.no_spins && c.extra_g && c.ignore_weapon_weights);
+        ui.activate("Normal", "");
+        assert!(!ui.cheats.invulnerable);
+        assert_eq!(ui.cheat_state("Realistic"), None);
+        assert_eq!(ui.cheat_state("Easy aiming?"), None);
     }
 
     #[test]
@@ -912,12 +969,12 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(ui.activate("No sun whiteout?", ""), Command::Click);
-        assert!(ui.no_sun_whiteout && ui.frozen());
+        assert!(ui.cheats.no_sun_whiteout && ui.frozen());
         ui.reset_for_flight();
-        assert!(ui.no_sun_whiteout);
+        assert!(ui.cheats.no_sun_whiteout);
         assert!(!ui.frozen());
         assert_eq!(ui.activate("No sun whiteout?", ""), Command::Click);
-        assert!(!ui.no_sun_whiteout);
+        assert!(!ui.cheats.no_sun_whiteout);
     }
 
     #[test]

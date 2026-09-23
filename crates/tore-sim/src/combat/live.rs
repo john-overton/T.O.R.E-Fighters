@@ -723,6 +723,8 @@ pub struct State {
     service_remainder: u16,
     triggers: Vec<PlayerTrigger>,
     gun_cadence: Vec<GunCadence>,
+    /// Player session cheats: Invulnerable and Unlimited ammo.
+    pub cheats: crate::cheats::Cheats,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct GunCadence {
@@ -836,6 +838,7 @@ impl State {
             service_remainder: 0,
             triggers,
             gun_cadence,
+            cheats: Default::default(),
         })
     }
     pub fn release(&mut self) {
@@ -2027,9 +2030,12 @@ impl State {
         };
         if count > 0 {
             for _ in 0..count {
-                if self.projectiles.len() == MAX_PROJECTILES
-                    || !unload(&mut self.ammo[index], debit)
-                {
+                let loaded = if self.cheats.unlimited_ammo {
+                    self.rounds(index) > 0
+                } else {
+                    unload(&mut self.ammo[index], debit)
+                };
+                if self.projectiles.len() == MAX_PROJECTILES || !loaded {
                     break;
                 }
                 let position = std::array::from_fn(|i| {
@@ -2502,6 +2508,10 @@ impl State {
             }
             true
         });
+        // Invulnerable: hits still show their impact effect but do no damage.
+        if self.cheats.invulnerable {
+            player_hits.clear();
+        }
         for (amount, section, direct_gun) in player_hits {
             self.player_localized_damage
                 .record(section, amount, self.config.damage_capacity);
@@ -3607,6 +3617,7 @@ mod tests {
                 internal_capacity_lbs: 1000.,
                 empty_lbs: 10000.,
                 maximum_lbs: 20000.,
+                cheat: false,
                 hardpoints: vec![hardpoint.clone(), hardpoint],
             };
             load.transfer(0, 1).unwrap();
@@ -3662,6 +3673,7 @@ mod tests {
                 internal_capacity_lbs: 1000.,
                 empty_lbs: 10000.,
                 maximum_lbs: 20000.,
+                cheat: false,
                 hardpoints: vec![],
             };
             load.restrict_to_guns();
@@ -3687,6 +3699,7 @@ mod tests {
             internal_capacity_lbs: 1000.,
             empty_lbs: 10000.,
             maximum_lbs: 11000.,
+            cheat: false,
             hardpoints: vec![Hardpoint {
                 location: 2,
                 flags: 8,
@@ -3969,6 +3982,42 @@ mod tests {
             s.step(false, launcher(), |_, _| 0.);
         }
         assert_eq!(s.shots, 1);
+    }
+    #[test]
+    fn unlimited_ammo_fires_past_the_loaded_count_without_debit() {
+        let mut s = fixture(false);
+        s.cheats.unlimited_ammo = true;
+        let loaded = s.ammo.clone();
+        for _ in 0..300 {
+            s.step(true, launcher(), |_, _| 0.);
+        }
+        assert_eq!(s.ammo, loaded);
+        assert!(s.shots > 6);
+    }
+    #[test]
+    fn invulnerable_cockpit_hit_neither_damages_nor_kills_the_pilot() {
+        let mut s = fixture(false);
+        s.cheats.invulnerable = true;
+        s.config.stations[0].weapon.source = AircraftId::F18.gun().into();
+        let l = launcher();
+        s.command(Command::Incoming, l);
+        let p = s.projectiles.last_mut().unwrap();
+        p.position = std::array::from_fn(|i| {
+            l.position[i] + l.basis.forward[i] * 100. + l.basis.up[i] * 11.
+        });
+        p.previous = p.position;
+        p.age = 1;
+        let hp = s.player_hp;
+        let mut events = Vec::new();
+        for _ in 0..120 {
+            events.extend(s.step(false, l, |_, _| 0.));
+        }
+        assert!(s.projectiles.is_empty(), "the round still hits");
+        assert_eq!(s.player_hp, hp);
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            Event::PilotKilled | Event::PlayerDestroyed | Event::PlayerDamaged(_)
+        )));
     }
     #[test]
     fn detection_launch_and_inflight_lock_loss_are_distinct() {

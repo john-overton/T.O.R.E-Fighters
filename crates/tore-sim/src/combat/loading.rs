@@ -114,6 +114,22 @@ impl Station {
     }
 }
 
+impl Station {
+    /// Loadout cheat capacity. Fixed stations and the station's own default
+    /// keep the normal rule. Otherwise the store gets the raw station capacity,
+    /// except a projectile without flag 2 on a station with another default.
+    /// Multiplayer participants, which also keep the normal rule, do not exist.
+    pub fn cheat_count(self, store: Store, matches_default: bool, has_default: bool) -> i32 {
+        if self.flags & 8 != 0 || matches_default {
+            return self.allowed_count(store, matches_default);
+        }
+        match store.kind {
+            StoreKind::Projectile { flags, .. } if flags & 2 == 0 && has_default => 0,
+            _ => i32::from(self.capacity),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,6 +163,32 @@ mod tests {
         };
         assert_eq!(Station { flags: 0x100, ..s }.allowed_count(pod, false), 0);
         assert_eq!(Station { flags: 0x500, ..s }.allowed_count(pod, false), 3);
+    }
+    #[test]
+    fn cheat_capacity_ignores_compatibility_and_weight_except_fixed_stations() {
+        let missile = |flags| Store {
+            kind: StoreKind::Projectile {
+                flags,
+                signature: 2,
+                pod_count: 1,
+                phoenix_family: false,
+            },
+            weight: 300,
+        };
+        let bombs_only = Station {
+            flags: 0x100,
+            capacity: 4,
+            weight_class: 10,
+        };
+        assert_eq!(bombs_only.allowed_count(missile(2), false), 0);
+        assert_eq!(bombs_only.cheat_count(missile(2), false, true), 4);
+        let fixed = Station {
+            flags: 8,
+            ..bombs_only
+        };
+        assert_eq!(fixed.cheat_count(missile(2), false, true), 0);
+        assert_eq!(bombs_only.cheat_count(missile(0), false, true), 0);
+        assert_eq!(bombs_only.cheat_count(missile(0), false, false), 4);
     }
     #[test]
     fn special_radar_family_and_tanks_keep_distinct_source_rules() {

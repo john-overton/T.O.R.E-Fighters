@@ -111,7 +111,7 @@ The runtime reads **? / Control / Pref / View / Window / Cheat / Multi / Pos**, 
 
 The menu pauses flight and engine loops. Focus loss pauses and clears held controls; resume explicitly with Ctrl-P or the menu. Closing the menu preserves a pre-existing explicit/focus pause. Opening menus never advances a hidden backlog of simulation time.
 
-Working menu actions include views, instrument windows, time/pause, cockpit, pitch ladder, HUD brightness, ending flight and exiting. Sound currently toggles effects; the original volume mixer is not implemented. Other preferences, cheats, multiplayer and position commands are navigable placeholders with feedback. The bottom Resume / Restart / Keyboard Shortcuts actions are documented development additions. Menus do not silently enable unsupported cheats or alter the aircraft when an unrelated modifier shortcut is pressed.
+Working menu actions include views, instrument windows, time/pause, cockpit, pitch ladder, HUD brightness, ending flight and exiting. Sound currently toggles effects; the original volume mixer is not implemented. Working cheats are listed under [cheats](#cheats). Other preferences, cheats, multiplayer and position commands are navigable placeholders with feedback. The bottom Resume / Restart / Keyboard Shortcuts actions are documented development additions. Menus do not silently enable unsupported cheats or alter the aircraft when an unrelated modifier shortcut is pressed.
 
 ## HUD and presentation limits
 
@@ -314,6 +314,27 @@ and activity appear for mission aircraft. An underlined A means attacking you;
 plain A means another target. Objective assignments are not yet available in
 launch data, so the panel says `OBJECTIVE ?`. This does not mark every enemy as
 an objective. See [behavior and remaining limits](spec/target-window.md).
+
+## Cheats
+
+**Escape → Cheat** toggles the session cheats below. Each row shows **On** or
+**Off**; in the Damage submenu the selected choice reads On. Cheats apply on the
+next simulation step, including when chosen while paused, survive Restart and
+are not saved to disk. Behaviour: [cheats specification](spec/cheats.md).
+
+| Entry | Effect |
+| --- | --- |
+| Damage → Invulnerable / Normal | Invulnerable: weapon hits do no damage, no system faults and no pilot kill. Crashes still kill. Normal restores the damage model. |
+| Unlimited ammo? | The player's rounds and stores never run out. |
+| Unlimited fuel? | The player's fuel never drops, including from damage leaks. |
+| No spins? | No spin entry; a spin in progress damps out as a stall. |
+| Pull extra G? | The player can pull 9 G whatever the aircraft's limit and load. Near stall the low-speed ceiling still ramps up to 9 G. |
+| Ignore weapon weights? | Stores add no weight and no loading drag; fuel left in external tanks still counts. |
+| No turbulence?, No sun whiteout? | Described below. |
+
+Flight cheats apply to the default and legacy flight models; the native research
+path ignores them. Damage Realistic and the other rows still report that they
+are not implemented yet.
 
 ## Sun glare cheat
 

@@ -59,6 +59,8 @@ pub struct State {
     pub crashed: bool,
     pub wreck: Option<crate::wreck::Wreck>,
     pub ticks: u64,
+    /// Player-only session cheats. The native research path ignores them.
+    pub cheats: crate::cheats::Cheats,
 }
 impl State {
     pub fn new(a: &Aircraft, position: [f64; 3]) -> tore_formats::Result<Self> {
@@ -171,6 +173,7 @@ impl State {
             crashed: false,
             wreck: None,
             ticks: 0,
+            cheats: Default::default(),
         }
     }
     /// Fitted creator ground start. The caller verifies the chosen runway surface.
@@ -275,7 +278,7 @@ impl State {
         } else {
             c.propulsion.military_fuel_lbs_per_second * self.throttle
         } * self.systems.power_available();
-        let mass = c.mass.empty_lbs + self.fuel + self.payload_lbs;
+        let mass = c.mass.empty_lbs + self.fuel + self.carried_lbs();
         let lapse = self
             .model
             .response(Conditions {
@@ -409,8 +412,20 @@ impl State {
         };
         *target = setting.unwrap_or(!*target);
     }
+    /// Store mass the flight model carries. Ignore weapon weights leaves only
+    /// the fuel still in external tanks.
+    pub fn carried_lbs(&self) -> f64 {
+        if self.cheats.ignore_weapon_weights {
+            self.systems.external_lbs()
+        } else {
+            self.payload_lbs
+        }
+    }
     /// Runtime fuel debit, with external fuel mass removed from payload as consumed.
     pub(crate) fn consume_fuel(&mut self, pounds: f64) {
+        if self.cheats.unlimited_fuel {
+            return;
+        }
         let before = self.systems.external_lbs();
         self.systems.consume(&mut self.fuel, pounds);
         self.payload_lbs = (self.payload_lbs - before + self.systems.external_lbs()).max(0.);
@@ -422,14 +437,19 @@ impl State {
         let restarting = self.systems.engine.flameout > 0.;
         let landed =
             self.research.as_ref().is_some_and(|r| r.on_ground) && self.supported_at(ground);
+        // Unlimited fuel also covers damage leaks.
+        let mut fuel = self.fuel;
         self.systems.advance(
             self.engine,
             self.throttle,
             self.g,
             self.damage_fraction,
             landed,
-            &mut self.fuel,
+            &mut fuel,
         );
+        if !self.cheats.unlimited_fuel {
+            self.fuel = fuel;
+        }
         if restarting && self.systems.engine.flameout == 0. && self.systems.power_available() > 0. {
             self.engine = true;
         }
@@ -741,14 +761,25 @@ impl State {
                 hi = f64::max(hi, e.g as f64);
             }
         }
-        let loading = (self.fuel + self.payload_lbs) / c.mass.empty_lbs;
-        hi /= 1. + loading * c.aerodynamics.loaded_elevator_percent / 100.;
-        lo /= 1. + loading * c.aerodynamics.loaded_elevator_percent / 100.;
+        let loading = (self.fuel + self.carried_lbs()) / c.mass.empty_lbs;
+        let load_factor = 1. + loading * c.aerodynamics.loaded_elevator_percent / 100.;
+        hi /= load_factor;
+        lo /= load_factor;
+        // Pull extra G: 9 G whatever the load. Near stall the low-speed ceiling
+        // still ramps up to it.
+        let extra_g = self.cheats.extra_g;
+        if extra_g {
+            hi = hi.max(crate::cheats::EXTRA_G);
+        }
         if self.research.is_some()
             && let Some(continuous) =
-                low_speed_positive_g_ceiling(c, self.position[1], self.speed, stall)
+                low_speed_positive_g_ceiling(c, self.position[1], self.speed, stall, extra_g)
         {
-            hi = continuous / (1. + loading * c.aerodynamics.loaded_elevator_percent / 100.);
+            hi = if extra_g {
+                continuous
+            } else {
+                continuous / load_factor
+            };
         }
         let mut command =
             (1. + aero[0] * if aero[0] > 0. { hi - 1. } else { 1. - lo }).clamp(lo, hi) * authority;
@@ -787,6 +818,7 @@ impl State {
                     Basis::new(self.yaw, self.pitch, self.bank).forward,
                     unit(self.velocity),
                 ),
+                !self.cheats.no_spins,
             );
             command *= 1. - 0.85 * r.spin_blend(c);
         }
@@ -945,7 +977,7 @@ impl State {
             0.
         } * lapse
             * self.systems.power_available();
-        let weight = c.mass.empty_lbs + self.fuel + self.payload_lbs;
+        let weight = c.mass.empty_lbs + self.fuel + self.carried_lbs();
         // Drag normalized against the source 1G upper envelope. This is not the native force law.
         // Fitted symmetric slip loss, based on air-relative motion rather than
         // rudder command or the native display-slip offset. Aircraft-owned tuning.
@@ -1053,6 +1085,7 @@ fn low_speed_positive_g_ceiling(
     altitude_ft: f64,
     speed_fps: f64,
     effective_stall_fps: f64,
+    extra_g: bool,
 ) -> Option<f64> {
     let next = c
         .aerodynamics
@@ -1071,7 +1104,12 @@ fn low_speed_positive_g_ceiling(
     }
     let fraction =
         ((speed_fps - effective_stall_fps) / (next.0 - effective_stall_fps)).clamp(0., 1.);
-    Some(1. + fraction * (f64::from(next.1) - 1.))
+    let top = if extra_g {
+        f64::from(next.1).max(crate::cheats::EXTRA_G)
+    } else {
+        f64::from(next.1)
+    };
+    Some(1. + fraction * (top - 1.))
 }
 
 fn low_speed_alignment_fraction(
@@ -1222,6 +1260,47 @@ mod tests {
         assert!(!engine_only.engine);
         engine_only.command(PilotCommand::Set(Switch::Engine, true));
         assert!(!engine_only.engine);
+    }
+    #[test]
+    fn fuel_cheat_stops_burn_and_weight_cheat_keeps_only_external_fuel() {
+        let mut normal = State::new(&profile(), [0., 15000., 0.]).unwrap();
+        normal.payload_lbs = 3000.;
+        let mut cheat = normal.clone();
+        cheat.cheats.unlimited_fuel = true;
+        cheat.cheats.ignore_weapon_weights = true;
+        let fuel = cheat.fuel;
+        let input = PilotInput {
+            throttle: Some(1.),
+            ..Default::default()
+        };
+        for _ in 0..240 {
+            normal.step(&input, |_, _| 0.);
+            cheat.step(&input, |_, _| 0.);
+        }
+        assert_eq!(cheat.fuel, fuel);
+        assert!(normal.fuel < fuel);
+        assert_eq!(cheat.carried_lbs(), cheat.systems.external_lbs());
+        assert_eq!(normal.carried_lbs(), normal.payload_lbs);
+        assert!(cheat.speed > normal.speed, "lighter and cleaner");
+    }
+    #[test]
+    fn extra_g_commands_nine_g_at_full_stick() {
+        let mut normal = State::new(&profile(), [0., 15000., 0.]).unwrap();
+        normal.speed = 600. * 1.68781;
+        normal.velocity = Basis::new(normal.yaw, 0., 0.)
+            .forward
+            .map(|v| v * normal.speed);
+        normal.payload_lbs = 3000.;
+        let mut cheat = normal.clone();
+        cheat.cheats.extra_g = true;
+        let input = PilotInput {
+            pitch: 1.,
+            ..Default::default()
+        };
+        normal.step(&input, |_, _| 0.);
+        cheat.step(&input, |_, _| 0.);
+        assert!(normal.maneuver.commanded_g < 9.);
+        assert!((cheat.maneuver.commanded_g - 9.).abs() < 1e-9);
     }
     #[test]
     fn stuck_throttle_frozen_hydraulics_and_external_fuel_cannot_be_bypassed() {
@@ -1966,7 +2045,7 @@ pub(crate) mod integration_tests {
             .0;
         let effective = clean_stall * 0.75;
         assert_eq!(
-            low_speed_positive_g_ceiling(c, 1024., effective, effective),
+            low_speed_positive_g_ceiling(c, 1024., effective, effective, false),
             Some(1.)
         );
         let next = c
@@ -1978,10 +2057,10 @@ pub(crate) mod integration_tests {
             .filter(|minimum| *minimum > effective)
             .min_by(f64::total_cmp)
             .unwrap();
-        let below = low_speed_positive_g_ceiling(c, 1024., next - 1e-6, effective).unwrap();
+        let below = low_speed_positive_g_ceiling(c, 1024., next - 1e-6, effective, false).unwrap();
         assert!(below > 1. && below < 2.);
         assert_eq!(
-            low_speed_positive_g_ceiling(c, 1024., next, effective),
+            low_speed_positive_g_ceiling(c, 1024., next, effective, false),
             None
         );
         assert_eq!(

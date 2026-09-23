@@ -4,6 +4,7 @@ pub mod aircraft_systems;
 pub mod airport;
 pub mod attitude;
 pub mod autopilot;
+pub mod cheats;
 pub mod combat;
 pub mod environment;
 pub mod flight;
