@@ -130,6 +130,14 @@ the paused flight menu, Ctrl-P pauses and resumes, and F11 opens keyboard help.
 See the [complete control reference](docs/FLIGHT-CONTROLS.md) and
 [controller setup](docs/INPUT.md).
 
+<p align="center">
+  <a href="https://john-overton.github.io/T.O.R.E-Fighters/tore-keyboard-map.html"><img src="docs/images/tore-keyboard-map.png" alt="T.O.R.E keyboard map, Fly &amp; Fight sheet" width="960"></a>
+</p>
+
+The [interactive keyboard map](https://john-overton.github.io/T.O.R.E-Fighters/tore-keyboard-map.html)
+has Fly &amp; Fight, Comms and Cockpit &amp; View sheets, and exports to PNG, ZIP or PDF.
+Its source is [docs/tore-keyboard-map.html](docs/tore-keyboard-map.html).
+
 Two other flight paths exist alongside the default and are selected explicitly:
 The default flight model is the researched hybrid adapter (`--researched-flight`);
 `--legacy-flight` preserves the older compatibility model, and `--native-flight-tables DIR`
