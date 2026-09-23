@@ -19,9 +19,12 @@ so selection does not hide store status. Ground starts use NAV; airborne starts
 retain the canonical gun, now armed. Existing headless range commands and old
 recordings keep their explicit station and arm commands for compatibility.
 
-Boresight seeker audio is silent without a designated contact, including when
-an inferred bore candidate exists. Acquisition, guidance and designated-contact
-audio are otherwise unchanged. NAV continues to show selected-target cues.
+Boresight IR audio follows the eligible target actively tracked under the bore
+and its displayed percentage without requiring designation, as requested by
+John on 2026-09-23.
+The [audio guide](../audio.md#seeker-growl) defines availability and lock gain.
+Uncued radar-seeker audio still requires designation. Acquisition, guidance and
+NAV selected-target cues are unchanged.
 John also requested NAV at the HUD status position on 2026-09-21; armed guns
 show LCOS there, and missiles show ARM. [HUD placement](hud-layout.md).
 

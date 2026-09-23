@@ -611,6 +611,10 @@ pub const COMBAT_RESOURCES: &[&str] = &[
     "&FLARE.5K",
     "&IRTRY.5K",
     "&IRLOCK.5K",
+    "&IR1.11K",
+    "&AIRPASS.11K",
+    "&MPASS.5K",
+    "&SNCBOOM.11K",
     "&RDRTRY.5K",
     "&RDRLOCK.5K",
 ];

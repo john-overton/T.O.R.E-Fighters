@@ -1,4 +1,5 @@
 //! Renderer-independent aircraft simulation and deterministic validation.
+pub mod acoustics;
 pub mod ai;
 pub mod aircraft_systems;
 pub mod airport;

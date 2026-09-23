@@ -2367,7 +2367,7 @@ impl ApplicationHandler for App {
                             for message in self.flight.systems.messages.drain(..) {
                                 self.flight_ui.message(message);
                             }
-                            let mut sounds = std::collections::BTreeSet::new();
+                            let mut releases = Vec::new();
                             for event in &events {
                                 use tore_sim::combat::live::Event;
                                 if let Some(cue) =
@@ -2376,17 +2376,17 @@ impl ApplicationHandler for App {
                                     self.input.feedback(cue);
                                 }
                                 match event {
-                                    Event::PlayerDamaged(_) => {
-                                        sounds.insert("&EXPL3.5K");
-                                    }
-                                    Event::PilotKilled
+                                    Event::PlayerDamaged(_)
+                                    | Event::Hit(_)
+                                    | Event::Ground
+                                    | Event::Destroyed(_)
+                                    | Event::PilotKilled
                                     | Event::SubsystemDamaged(_)
                                     | Event::Defeated(_)
                                     | Event::TrackLost(_)
                                     | Event::SeekerActivated(_)
                                     | Event::Pitbull(_) => {}
                                     Event::PlayerDestroyed => {
-                                        sounds.insert("&EXPL12.5K");
                                         self.flight.crashed = true;
                                     }
                                     Event::Fired(i) => {
@@ -2396,31 +2396,20 @@ impl ApplicationHandler for App {
                                                 .fire_sound
                                                 .as_deref()
                                         {
-                                            sounds.insert(name);
+                                            releases.push(name.to_string());
                                         }
                                     }
-                                    Event::Hit(_) | Event::Ground => {
-                                        sounds.insert("&EXPL3.5K");
-                                    }
                                     Event::PlayerGroundImpact => {
-                                        sounds.insert("&EXPL12.5K");
                                         self.flight_ui.message("Your aircraft exploded on impact");
                                     }
                                     Event::Airburst(id) => {
-                                        sounds.insert("&EXPL12.5K");
                                         self.flight_ui.message(if *id == 0 {
                                             "Your aircraft exploded"
                                         } else {
                                             "Destroyed aircraft exploded"
                                         });
                                     }
-                                    Event::Destroyed(_) => {
-                                        sounds.insert("&EXPL12.5K");
-                                    }
                                 }
-                            }
-                            if let Some(audio) = &self.audio {
-                                audio.combat(&sounds.into_iter().collect::<Vec<_>>());
                             }
                             // One AI tick per combat tick, immediately after it,
                             // so the AI reads the damage combat just applied and
@@ -2438,6 +2427,43 @@ impl ApplicationHandler for App {
                                 if let Some(message) = message {
                                     self.flight_ui.message(message);
                                 }
+                            }
+
+                            // Audio observes authoritative poses and consumes each emission once.
+                            let emissions = self.combat.state.take_sound_events();
+                            if let Some(audio) = &self.audio {
+                                let mut listener_camera = self.hornet.camera(
+                                    &self.flight,
+                                    self.flight_view,
+                                    Default::default(),
+                                );
+                                look::apply(
+                                    &mut listener_camera,
+                                    self.flight.position.map(|v| v as f32),
+                                    look::combine(
+                                        self.flight_ui.look,
+                                        self.head_look,
+                                        matches!(self.flight_view, 1 | 2),
+                                    ),
+                                    matches!(self.flight_view, 1 | 2),
+                                );
+                                let basis = tore_sim::attitude::Basis::new(
+                                    f64::from(listener_camera.yaw),
+                                    f64::from(listener_camera.pitch),
+                                    -f64::from(listener_camera.roll),
+                                );
+                                audio.spatial_tick(
+                                    tore_sim::acoustics::Listener {
+                                        position: listener_camera.position.map(f64::from),
+                                        right: basis.right,
+                                        view: self.flight_view,
+                                        external: matches!(self.flight_view, 1 | 2),
+                                    },
+                                    &audio::spatial_sources(&self.combat.state, &self.flight),
+                                    &emissions,
+                                    &releases.iter().map(String::as_str).collect::<Vec<_>>(),
+                                    self.flight.position,
+                                );
                             }
 
                             if self.flight.crashed && !self.previous_flight.crashed {

@@ -27,9 +27,10 @@ Synthetic coverage verifies forward/backward selection wrapping through NAV,
 NAV fire inhibition, weapon arming, retired keys, pointer/hardware MFD buttons,
 page wrapping, airport allegiance and permission exclusions, destroyed runway
 exclusion, distance sorting with deterministic ties, selection retention across
-reordering, empty mission lists and supplied waypoint ordering. Missile tests
-verify no-designation bore silence without changing acquisition or release, and
-continued tone availability after designation. A synthetic HUD raster check verifies
+reordering, empty mission lists and supplied waypoint ordering. At this checkpoint, missile tests
+verified no-designation bore silence without changing acquisition or release,
+and continued tone availability after designation. The later requested IR bore
+audio is covered in [flight sound validation](flight-sound.md). A synthetic HUD raster check verifies
 that the friendly X adds only centered diagonal pixels and retains the target box.
 Combat command serialization
 roundtrips the new selection commands.
