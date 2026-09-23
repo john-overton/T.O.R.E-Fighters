@@ -21,6 +21,7 @@ objc2-game-controller = { version = "0.3.2", default-features = false, features 
 objc2-core-haptics = { version = "0.3.2", default-features = false, features = ["std", "CHHapticEngine", "CHHapticEvent", "CHHapticParameter", "CHHapticPattern", "CHHapticPatternPlayer", "block2"] }
 dispatch2 = { version = "0.3.1", default-features = false, features = ["std", "objc2"] }
 
-# Only this native boundary permits audited OS calls. All other crates forbid unsafe.
+# Native input and diagnostics boundaries permit audited OS calls.
+# Application, simulation and format crates forbid unsafe.
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

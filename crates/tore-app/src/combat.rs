@@ -130,7 +130,7 @@ fn weapon_shapes(
                 .and_then(|bytes| Shape::parse(bytes).ok())
                 .filter(|shape| !shape.faces.is_empty());
             if shape.is_none() {
-                eprintln!("Combat: {name} uses a tracer marker; line/point drawing remains open");
+                log::warn!("Combat: {name} uses a tracer marker; line/point drawing remains open");
             }
             shape.map(|shape| (name.clone(), shape))
         })
@@ -262,7 +262,7 @@ impl Combat {
             escape_art: match crate::ejection_art::Art::load(data) {
                 Ok(art) => Some(art),
                 Err(error) => {
-                    eprintln!("Optional ejection artwork unavailable: {error}");
+                    log::warn!("Optional ejection artwork unavailable: {error}");
                     None
                 }
             },

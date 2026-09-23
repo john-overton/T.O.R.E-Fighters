@@ -63,7 +63,7 @@ impl Music {
                 let score = match Score::parse(bytes) {
                     Ok(score) => score,
                     Err(error) => {
-                        eprintln!("Music {name} unavailable: {error}");
+                        log::warn!("Music {name} unavailable: {error}");
                         return None;
                     }
                 };
@@ -72,7 +72,7 @@ impl Music {
                     let filename = score.filename(*track);
                     resolved[*track as usize] = clips.get(&filename).cloned();
                     if resolved[*track as usize].is_none() {
-                        eprintln!("Music {name}: missing {filename}; no substitute");
+                        log::warn!("Music {name}: missing {filename}; no substitute");
                     }
                 }
                 Some(Prepared {
@@ -83,7 +83,7 @@ impl Music {
             .collect();
         for name in music::MAIN.iter().chain(music::BRIEF) {
             if !clips.contains_key(*name) {
-                eprintln!("Music playlist: missing {name}; no substitute");
+                log::warn!("Music playlist: missing {name}; no substitute");
             }
         }
         let mut result = Self {

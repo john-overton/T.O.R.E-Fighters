@@ -103,7 +103,7 @@ impl Input {
             _ => HeadTracker::disabled(),
         };
         if let Some(error) = &head.error {
-            eprintln!("Head tracker not listening: {error}");
+            log::warn!("Head tracker not listening: {error}");
         }
         let mut resolver = Resolver::new(profile);
         for control in FLIGHT_KEYS {
@@ -391,7 +391,7 @@ impl Input {
                         let defaults = gamepad_defaults(&d);
                         if self.resolver.profile.bindings.len() + defaults.bindings.len() <= 1024 {
                             if !defaults.bindings.is_empty() {
-                                eprintln!(
+                                log::warn!(
                                     "Input: standard Linux gamepad bindings enabled; see docs/INPUT.md"
                                 );
                             }
@@ -417,14 +417,14 @@ impl Input {
                             },
                         ));
                     }
-                    eprintln!("Input connected: {} ({})", d.name, d.id);
+                    log::info!("Input connected: {} ({})", d.name, d.id);
                     self.devices.insert(d.id.clone(), d);
                 }
                 Notification::Disconnected(id) => {
                     lost |= self.resolver.disconnect(&id);
                     self.devices.remove(&id);
                     self.feedback_targets.remove(&id);
-                    eprintln!("Input disconnected: {id}");
+                    log::info!("Input disconnected: {id}");
                 }
                 Notification::Input(event) => {
                     self.observed.push(event.clone());

@@ -1,11 +1,6 @@
-// A release build on Windows is a GUI application, so the player never sees a
-// console window behind the game. The cost is that nothing printed to stdout or
-// stderr is visible there: `--version`, `--help`, `--import-only` and import
-// errors are silent on a Windows release build. A fatal startup error is
-// written to `last-error.txt` in the data directory instead, next to
-// `import-report.txt`. Debug builds keep the console, so development output and
-// the headless probes still print. Reattaching a console needs unsafe FFI,
-// which this workspace forbids.
+// Windows release launches have no console. Diagnostics are initialized inside
+// the executable before startup and fatal interactive errors use an OS dialog.
+// CLI/probe output stays on stdout; startup diagnostics also go to session logs.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod additional_animation;
 mod ai_wings;
@@ -25,6 +20,7 @@ mod controls_editor;
 mod crew_voice;
 mod damage_art;
 mod debrief;
+mod diagnostics;
 mod ejection_art;
 mod engine_material;
 mod flight;
@@ -61,6 +57,7 @@ mod roster_animation;
 mod scope;
 mod sim_renderer;
 mod smoke_renderer;
+mod startup;
 mod static_art;
 mod surface_lighting;
 mod target_window;
@@ -551,7 +548,7 @@ impl App {
         match preferences::write(path, &text) {
             Ok(()) => self.preference_saved = text,
             Err(e) => {
-                eprintln!("Preferences: {e}");
+                log::warn!("Preferences: {e}");
                 self.flight_ui
                     .message(format!("Could not save preferences: {e}"));
             }
@@ -1195,7 +1192,9 @@ impl App {
                                 };
                             if let Some(renderer) = &mut self.renderer {
                                 renderer.set_world(&world);
+                                diagnostics::stage("aircraft graphics preparation");
                                 renderer.prepare_aircraft(&self.hornet);
+                                diagnostics::stage_done();
                             }
                             self.camera = terrain::Camera::for_world(&world);
                             self.world = world;
@@ -1682,6 +1681,7 @@ impl ApplicationHandler for App {
             return;
         }
         let result = (|| {
+            diagnostics::stage("game window creation");
             let window = Arc::new(
                 event_loop.create_window(
                     Window::default_attributes()
@@ -1706,11 +1706,14 @@ impl ApplicationHandler for App {
                         .with_fullscreen(fullscreen_attribute(self.fullscreen)),
                 )?,
             );
+            diagnostics::stage_done();
             pollster::block_on(Renderer::new(window, &self.world, self.graphics))
         })();
         match result {
             Ok(mut renderer) => {
+                diagnostics::stage("aircraft graphics preparation");
                 renderer.prepare_aircraft(&self.hornet);
+                diagnostics::stage_done();
                 renderer.window.request_redraw();
                 self.renderer = Some(renderer);
                 if std::mem::take(&mut self.launch_creator) {
@@ -2398,7 +2401,7 @@ impl ApplicationHandler for App {
                             if let Some(error) = self.flight.native_fault() {
                                 self.flight_ui.message(error.to_owned());
                                 self.flight_ui.paused = true;
-                                eprintln!("{error}");
+                                log::warn!("{error}");
                                 break;
                             }
                             // Weather shares the authoritative tick; pausing simply
@@ -3403,7 +3406,7 @@ impl ApplicationHandler for App {
                 }
             }
             for warning in warnings {
-                eprintln!("Input: {warning}");
+                log::warn!("Input: {warning}");
             }
             if lost && self.screen == Screen::Flight {
                 self.flight_ui.paused = true;
@@ -3726,9 +3729,11 @@ impl LocateShell {
         if self.worker.is_some() {
             return;
         }
+        log::info!("Import source: {}", path.display());
         let source = match media_source::MediaSource::detect(&path) {
             Ok(source) => source,
             Err(error) => {
+                log::warn!("Import source detection failed: {error}");
                 self.locate.set_phase(locate::Phase::Failed {
                     reason: error.to_string(),
                 });
@@ -3744,15 +3749,26 @@ impl LocateShell {
         let (sender, receiver) = std::sync::mpsc::channel();
         let data = self.data.clone();
         std::thread::spawn(move || {
+            log::info!("Import worker started");
             let reports = sender.clone();
             let result = Assets::import_with_progress(&source, &data, &mut |progress| {
+                // Archive changes are bounded progress checkpoints, not per-resource logging.
+                if progress.done == 0 {
+                    log::info!("Import archive: {}", progress.archive);
+                }
                 let _ = reports.send(ImportMessage::Progress(progress));
             });
             let _ = sender.send(match result {
                 // The decoded assets are dropped here; the caller reloads the
                 // pack that was just written, which proves it reads back.
-                Ok(outcome) => ImportMessage::Done(outcome.summary),
-                Err(error) => ImportMessage::Failed(error.to_string()),
+                Ok(outcome) => {
+                    log::info!("Import worker completed successfully");
+                    ImportMessage::Done(outcome.summary)
+                }
+                Err(error) => {
+                    log::error!("Import failed: {error}");
+                    ImportMessage::Failed(error.to_string())
+                }
             });
         });
         self.worker = Some(receiver);
@@ -3807,6 +3823,7 @@ impl ApplicationHandler for LocateShell {
             return;
         }
         let result = (|| {
+            diagnostics::stage("first-run window creation");
             let window = Arc::new(
                 event_loop.create_window(
                     Window::default_attributes()
@@ -3816,6 +3833,7 @@ impl ApplicationHandler for LocateShell {
                         .with_fullscreen(fullscreen_attribute(self.fullscreen)),
                 )?,
             );
+            diagnostics::stage_done();
             pollster::block_on(canvas_present::CanvasPresenter::new(window))
         })();
         match result {
@@ -4069,38 +4087,11 @@ fn saved_fullscreen() -> bool {
 /// is actually wanted, so headless runs still work without a display.
 fn shared_event_loop(slot: &mut Option<EventLoop<()>>) -> AppResult<&mut EventLoop<()>> {
     if slot.is_none() {
+        diagnostics::stage("event loop creation");
         slot.replace(EventLoop::new()?);
+        diagnostics::stage_done();
     }
     Ok(slot.as_mut().expect("the event loop was just created"))
-}
-
-/// Where a fatal startup error is left for the player. A release build on
-/// Windows has no console, so this file is the only place the message appears
-/// there; on Linux and macOS it duplicates the terminal message.
-fn last_error_path() -> Option<PathBuf> {
-    assets::data_directory()
-        .ok()
-        .map(|d| d.join("last-error.txt"))
-}
-
-/// Record a fatal error where a player without a console can find it. A
-/// failure to write is ignored: there is nowhere left to report it.
-fn record_last_error(error: &dyn Error) {
-    if let Some(path) = last_error_path() {
-        let text = format!(
-            "T.O.R.E-Fighters {} could not start.\n\n{error}\n",
-            version::version()
-        );
-        let _ = preferences::write(&path, &text);
-    }
-}
-
-/// Clear a previous failure once the game has run, so the file always
-/// describes the most recent start.
-fn clear_last_error() {
-    if let Some(path) = last_error_path() {
-        let _ = std::fs::remove_file(path);
-    }
 }
 
 fn sessions(event_loop: &mut Option<EventLoop<()>>) -> AppResult<()> {
@@ -4115,17 +4106,34 @@ fn sessions(event_loop: &mut Option<EventLoop<()>>) -> AppResult<()> {
     }
 }
 
-fn main() -> AppResult<()> {
-    let mut event_loop = None;
-    let result = sessions(&mut event_loop);
-    match &result {
-        Ok(()) => clear_last_error(),
-        Err(error) => record_last_error(error.as_ref()),
+fn main() -> std::process::ExitCode {
+    diagnostics::init();
+    let interactive = startup::interactive();
+    let result = std::panic::catch_unwind(|| {
+        if let Some(result) = startup::self_test() {
+            return result;
+        }
+        let mut event_loop = None;
+        sessions(&mut event_loop)
+    });
+    match result {
+        Ok(Ok(())) => {
+            diagnostics::finish_success();
+            std::process::ExitCode::SUCCESS
+        }
+        Ok(Err(error)) => {
+            diagnostics::report_error(error.as_ref(), interactive);
+            std::process::ExitCode::FAILURE
+        }
+        Err(_) => {
+            diagnostics::report_panic(interactive);
+            std::process::ExitCode::from(101)
+        }
     }
-    result
 }
 
 fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Outcome> {
+    diagnostics::stage("argument parsing and startup options");
     if matches!(session, Session::First) {
         println!("{}", version::label());
     }
@@ -4691,7 +4699,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display.
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, graphics. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, graphics. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -4843,7 +4851,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     } else {
         None
     };
+    diagnostics::stage_done();
+    diagnostics::stage("data directory and preferences");
     let data = assets::data_directory()?;
+    log::info!("Data directory: {}", data.display());
     if ground_start_airport.is_some() {
         let ground_capture_probe = flight_probe_ticks.is_some()
             && capture_terrain.is_some()
@@ -4909,6 +4920,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         Session::First => None,
     };
     let reimporting = reimport_background.is_some();
+    diagnostics::stage_done();
+    diagnostics::stage("asset loading or import");
     let mut assets = if let Some(chosen) = import.filter(|_| !reimporting) {
         // --import accepts an installed folder, a mounted disc folder or the
         // installer container inside one; the kind is decided by content.
@@ -4922,6 +4935,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         match loaded {
             Ok(assets) => assets,
             Err(error) => {
+                log::warn!("Imported assets unavailable: {error}");
+                diagnostics::stage("media source discovery");
                 // A remembered source is tried first, then a developer checkout.
                 let known = media_source::remembered(&data)
                     .map(|(path, _)| path)
@@ -4936,9 +4951,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 } else {
                     Vec::new()
                 };
+                diagnostics::stage_done();
                 let first = candidates.first().map(|source| source.path.clone());
                 let prefill = known.clone().or_else(|| first.clone());
                 let step = next_step(false, windowed, known, first);
+                diagnostics::stage("media availability and import");
                 match step {
                     Step::Fail => {
                         return Err(format!(
@@ -4972,12 +4989,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                         if outcome == ShellOutcome::Quit {
                             return Ok(Outcome::Done);
                         }
+                        diagnostics::stage("loading newly imported assets");
                         Assets::load(&data)?
                     }
                 }
             }
         }
     };
+    diagnostics::stage_done();
     if import_only {
         return Ok(Outcome::Done);
     }
@@ -5009,7 +5028,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         println!("Validated {} retail map layouts", catalog.len());
         return Ok(Outcome::Done);
     }
+    diagnostics::stage("aircraft loading");
     let hornet = aircraft::Airframe::load(&assets.theater_resources, aircraft_id)?;
+    diagnostics::stage_done();
     if let Some(path) = replay_combat {
         if record_combat.is_some() {
             return Err("combat record and replay are mutually exclusive".into());
@@ -5294,6 +5315,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         return Ok(Outcome::Done);
     }
+    diagnostics::stage("audio initialization");
     let audio = if no_audio
         || smoke_test
         || validate_creator
@@ -5310,17 +5332,20 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         ) {
             Ok(audio) => Some(audio),
             Err(error) => {
-                eprintln!("Continuing without audio: {error}");
+                log::warn!("Continuing without audio: {error}");
                 None
             }
         }
     };
+    diagnostics::stage_done();
     // Saved previews stay reproducible; normal launches randomly select all five.
     if snapshot.is_some() && background.is_none() {
         background = Some("CHOOSEV".into());
     }
+    diagnostics::stage("terrain construction");
     let mut world =
         terrain::World::for_mission(&assets.theater_resources, &theater_code, weather_condition)?;
+    diagnostics::stage_done();
     let ground_start = ground_object(&world)?;
     if std::env::var_os("TORE_AIRPORT_PROBE").is_some() {
         println!(
@@ -5389,7 +5414,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         );
         return Ok(Outcome::Done);
     }
+    diagnostics::stage("menu construction");
     let mut menu = Menu::new(assets, background.as_deref())?;
+    diagnostics::stage_done();
+    diagnostics::stage("menu and flight state setup");
     if let Some(path) = snapshot {
         if matches!(initial_screen, Screen::Viewer | Screen::Flight) {
             return Err(
@@ -5757,7 +5785,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     combat.clean_recording = record_input.is_some();
     if combat.clean_recording {
-        eprintln!(
+        log::warn!(
             "Pilot-only recording keeps the existing clean-aircraft load; use combat recording for weapons."
         );
     }
@@ -6086,6 +6114,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             tore_sim::airport::Command::RequestLanding,
         );
     }
+    diagnostics::stage_done();
+    diagnostics::stage("controller and input initialization");
+    let input = input::Input::new(input_profile.as_deref(), native_input)?;
+    diagnostics::stage_done();
+    diagnostics::stage("application state construction");
     let mut app = App {
         mission: None,
         ground_start,
@@ -6108,7 +6141,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         graphics_path,
         input_recording,
         recorded_ticks: 0,
-        input: input::Input::new(input_profile.as_deref(), native_input)?,
+        input,
         focused: true,
         performance: performance::Performance::from_env()?,
         combat,
@@ -6181,6 +6214,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         next_frame: None,
         error: None,
     };
+    diagnostics::stage_done();
+    diagnostics::stage("saved preferences");
     if let Some(path) = app.preference_path.clone() {
         match preferences::read(&path) {
             Ok(text) => match preferences::Preferences::parse(&text) {
@@ -6213,13 +6248,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     }
                 }
                 Err(e) => {
-                    eprintln!("Preferences not loaded: {e}; preserving original file");
+                    log::warn!("Preferences not loaded: {e}; preserving original file");
                     app.preference_path = None;
                 }
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => {
-                eprintln!("Preferences not loaded: {e}; preserving original file");
+                log::warn!("Preferences not loaded: {e}; preserving original file");
                 app.preference_path = None;
             }
         }
@@ -6249,6 +6284,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         app.screen != Screen::Flight || app.flight_ui.frozen(),
         app.focused,
     );
+    diagnostics::stage_done();
     shared_event_loop(event_loop)?.run_app_on_demand(&mut app)?;
     if let Some(error) = app.error {
         return Err(error);

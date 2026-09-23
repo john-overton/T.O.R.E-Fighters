@@ -32,6 +32,10 @@ Where the project is going is in [the roadmap](docs/ROADMAP.md). What is built
 and what comes next is on one page in [the parity plan](docs/parity-plan.md). The
 behaviour being rebuilt is described in [docs/spec/](docs/spec/).
 
+If the application fails to start, built-in logs and fatal reports help identify
+the failing stage. See [startup troubleshooting](docs/DEVELOPMENT.md#startup-logs-and-fatal-errors)
+for log locations, Windows Event Viewer and media-free diagnostic checks.
+
 ## What makes it T.O.R.E
 
 The [feature matrix](docs/features.md) groups menus, flight models, weapons,

@@ -46,7 +46,9 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
-      - name: Test asset guard
+      # Discovery includes test_build_resources.py, which executes the build.rs
+      # Windows message-resource test that cargo test does not discover.
+      - name: Test tooling and Windows resource layout
         run: python -m unittest discover -s tools -p "test_*.py"
       - name: Check source assets
         run: python tools/check_assets.py
@@ -88,22 +90,35 @@ jobs:
             python tools/check_assets.py target/release/tore-extract
           fi
 
-      # Record what each binary needs at run time, so a missing system library
-      # (the VCRUNTIME140.dll incident of 2026-09-22) shows up in the log
-      # before anyone installs a package.
-      - name: List runtime library dependencies
+      - name: Enforce runtime library dependencies
         shell: bash
         run: |
+          suffix=""
+          if [ "$RUNNER_OS" = "Windows" ]; then suffix=".exe"; fi
+          python tools/check_runtime_dependencies.py "target/release/tore-app$suffix" "target/release/tore-extract$suffix"
+      - name: Collect matching debug symbols
+        shell: bash
+        run: |
+          mkdir -p dist/symbols
           if [ "$RUNNER_OS" = "Windows" ]; then
-            vs=$(/c/Program\ Files\ \(x86\)/Microsoft\ Visual\ Studio/Installer/vswhere.exe -latest -property installationPath | tr -d '\r')
-            dumpbin=$(find "$vs/VC/Tools/MSVC" -name dumpbin.exe -path '*Hostx64/x64*' | head -1)
-            "$dumpbin" -dependents target/release/tore-app.exe
-            "$dumpbin" -dependents target/release/tore-extract.exe
+            cp target/release/tore_app.pdb target/release/tore_extract.pdb dist/symbols/
           elif [ "$RUNNER_OS" = "macOS" ]; then
-            otool -L target/release/tore-app target/release/tore-extract
+            for binary in tore-app tore-extract; do
+              dsymutil "target/release/$binary" -o "dist/symbols/$binary.dSYM"
+            done
           else
-            ldd target/release/tore-app target/release/tore-extract
+            for binary in tore-app tore-extract; do
+              objcopy --only-keep-debug "target/release/$binary" "dist/symbols/$binary.debug"
+            done
           fi
+          git rev-parse HEAD > dist/symbols/commit.txt
+          echo "$TORE_BUILD_VERSION" > dist/symbols/version.txt
+      - name: Upload matching debug symbols
+        uses: actions/upload-artifact@v7
+        with:
+          name: symbols-${{ matrix.os }}-${{ github.sha }}
+          if-no-files-found: error
+          path: dist/symbols/
 
       # Each script stages a bundle directory, scans it with check_assets.py,
       # builds the package, and scans the finished package too. The

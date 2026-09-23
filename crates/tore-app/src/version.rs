@@ -7,6 +7,16 @@ pub fn version() -> &'static str {
     option_env!("TORE_BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
+/// Source revision stamped by the build script.
+pub fn commit() -> &'static str {
+    env!("TORE_BUILD_COMMIT")
+}
+
+/// Rust target triple stamped by the build script.
+pub fn target() -> &'static str {
+    env!("TORE_BUILD_TARGET")
+}
+
 /// The label shown on the main menu and printed at startup.
 pub fn label() -> String {
     format!("T.O.R.E - v{}", version())

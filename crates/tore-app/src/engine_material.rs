@@ -50,7 +50,7 @@ impl Image {
                 Err(e) => return Err(e.into()),
             }
         }
-        eprintln!("Engine material not installed; retaining original nozzle presentation");
+        log::warn!("Engine material not installed; retaining original nozzle presentation");
         Ok(None)
     }
     pub fn upload(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::TextureView {

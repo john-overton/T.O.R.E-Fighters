@@ -121,6 +121,11 @@ Write-Host "Checking the staged directory for retail data"
 & python (Join-Path $root "tools\check_assets.py") $stage
 if ($LASTEXITCODE -ne 0) { throw "Asset check failed on the staged directory." }
 
+& python (Join-Path $root "tools\check_runtime_dependencies.py") (Join-Path $stage "tore-app.exe") (Join-Path $stage "tore-extract.exe")
+if ($LASTEXITCODE -ne 0) { throw "Runtime dependency check failed." }
+& python (Join-Path $root "tools\check_startup_diagnostics.py") (Join-Path $stage "tore-app.exe")
+if ($LASTEXITCODE -ne 0) { throw "Staged diagnostics check failed." }
+
 $candle = Find-WixTool -Name "candle.exe" -Hint $WixBin
 $light = Find-WixTool -Name "light.exe" -Hint $WixBin
 Write-Host "Using $candle"
@@ -145,5 +150,18 @@ if ($LASTEXITCODE -ne 0) { throw "light failed." }
 Write-Host "Wrote $msi"
 & python (Join-Path $root "tools\check_assets.py") $msi
 if ($LASTEXITCODE -ne 0) { throw "Asset check failed on the MSI." }
+
+# Administrative extraction checks the actual MSI payload without changing the
+# developer's installed product. Installed shortcuts/event registration remain
+# a separate Windows acceptance check.
+$unpacked = Join-Path $dist "stage\msi check with spaces"
+if (Test-Path $unpacked) { Remove-Item -Recurse -Force $unpacked }
+New-Item -ItemType Directory -Force -Path $unpacked | Out-Null
+$process = Start-Process msiexec.exe -ArgumentList @("/a", "`"$msi`"", "/qn", "TARGETDIR=`"$unpacked`"") -Wait -PassThru
+if ($process.ExitCode -ne 0) { throw "MSI administrative extraction failed: $($process.ExitCode)" }
+$apps = @(Get-ChildItem $unpacked -Recurse -Filter tore-app.exe)
+if ($apps.Count -ne 1) { throw "Expected one application in the extracted MSI." }
+& python (Join-Path $root "tools\check_startup_diagnostics.py") $apps[0].FullName
+if ($LASTEXITCODE -ne 0) { throw "Extracted MSI diagnostics check failed." }
 
 Write-Host "Windows packaging complete for version $version"

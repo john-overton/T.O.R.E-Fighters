@@ -38,6 +38,7 @@ struct VertexOutput {
 ";
 
 pub(crate) struct CanvasPresenter {
+    first_frame: crate::startup::FirstFrame,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -50,8 +51,11 @@ pub(crate) struct CanvasPresenter {
 
 impl CanvasPresenter {
     pub(crate) async fn new(window: Arc<Window>) -> AppResult<Self> {
+        crate::diagnostics::stage("first-run graphics instance and surface");
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let surface = instance.create_surface(window.clone())?;
+        crate::diagnostics::stage_done();
+        crate::diagnostics::stage("first-run graphics adapter selection");
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -59,9 +63,19 @@ impl CanvasPresenter {
                 force_fallback_adapter: false,
             })
             .await?;
+        crate::diagnostics::stage_done();
+        log::info!("first-run adapter: {:?}", adapter.get_info());
+        crate::diagnostics::stage("first-run graphics device creation");
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default())
             .await?;
+        crate::diagnostics::stage_done();
+        device.set_device_lost_callback(|reason, message| {
+            if reason != wgpu::DeviceLostReason::Destroyed {
+                log::error!("first-run graphics device lost: {reason:?}: {message}");
+            }
+        });
+        crate::diagnostics::stage("first-run graphics resources and pipelines");
         let size = window.inner_size();
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
@@ -139,7 +153,9 @@ impl CanvasPresenter {
                 },
             ],
         });
+        crate::diagnostics::stage_done();
         Ok(Self {
+            first_frame: Default::default(),
             surface,
             device,
             queue,
@@ -169,6 +185,7 @@ impl CanvasPresenter {
 
     /// Upload one 640x480 RGBA frame and show it, letterboxed.
     pub(crate) fn present(&mut self, pixels: &[u8]) -> AppResult<bool> {
+        self.first_frame.begin("first-run first frame presentation");
         if pixels.len() != WIDTH * HEIGHT * 4 {
             return Err("the locate canvas must be 640x480 RGBA".into());
         }
@@ -236,6 +253,7 @@ impl CanvasPresenter {
             self.window.pre_present_notify();
         }
         frame.present();
+        self.first_frame.complete();
         Ok(true)
     }
 }

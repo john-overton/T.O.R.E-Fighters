@@ -53,11 +53,16 @@ cargo build --workspace --locked
 cargo run --locked -p tore-app
 ```
 
-Expect native borderless fullscreen on the monitor the window would have opened on, showing Choose Activity, and a terminal message such as `Renderer: Apple M3 (Metal, IntegratedGpu)`. The original 640 × 480 canvas scales proportionally and is letterboxed, so a 16:9 screen shows black bars either side. Close the window or use `? → Exit to Desktop`; Escape dismisses menus. On macOS, Command-Q also quits.
+Expect native borderless fullscreen on the monitor the window would have opened on, showing Choose Activity, and a session-log entry such as `Renderer: Apple M3 (Metal, IntegratedGpu)`. The original 640 × 480 canvas scales proportionally and is letterboxed, so a 16:9 screen shows black bars either side. Close the window or use `? → Exit to Desktop`; Escape dismisses menus. On macOS, Command-Q also quits.
 
 Alt-Enter switches between borderless fullscreen and the previous windowed size, on every screen: the menus, the Quick Mission creator, the locate screen and flight. F11 is not used for this, because it already opens the in-flight keyboard help. The choice is saved as `fullscreen` in `preferences-v1.conf`, which is now format version 5; a version 3 file still loads and starts fullscreen. `--windowed` starts in a 960 × 720 window for one run without changing the saved choice, and `--window-size`, `--smoke-test` and the captures keep their fixed-size windows as before.
 
-On Windows a release build is a GUI application, so no console window appears behind the game. Nothing printed reaches a terminal there: `--version`, `--help`, `--import-only` output and import errors are silent on a Windows release build. Debug builds keep the console, so development output and the headless probes still print. A fatal startup error is also written to `last-error.txt` in the application data directory, next to `import-report.txt`, and that file is removed after the next successful start; on Windows release builds it is the only place the message appears.
+On Windows a release build is a GUI application with no console window.
+Debug builds keep terminal output. Every build writes startup logs; interactive
+fatal errors use native Windows/macOS UI, and the Windows installer registers
+Application events. The latest fatal summary survives successful starts. See
+[startup logs and fatal errors](#startup-logs-and-fatal-errors) for locations,
+limits and headless behavior.
 
 Startup chooses randomly among all five original backgrounds; it does not run a timed slideshow. Force a variant for comparison with `--background CHOOSEV` (also accepts CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM). The top bar moves to match each artwork's native origin. Hovering and keyboard focus are silent. An older menu-only cache requires re-import; the local default media is automatically used if available.
 
@@ -278,14 +283,14 @@ answer is a crate such as `winres`, but that is outside the dependency budget
 in [AGENTS.md](../AGENTS.md), so `crates/tore-app/build.rs` writes the resource
 object itself.
 
-The script runs on every target and does nothing unless
-`CARGO_CFG_TARGET_OS` is `windows` and `CARGO_CFG_TARGET_ENV` is `msvc`. On
-that target it reads `assets/icon/tore.ico`, writes a Win32 `.res` file into
-`OUT_DIR` holding one `RT_ICON` per image plus the `RT_GROUP_ICON` that names
-them, and emits `cargo:rustc-link-arg-bins`. `link.exe` accepts a `.res` on its
-command line exactly as if `rc.exe` had produced it. Linux and macOS builds are
-unaffected; an unreadable or malformed `.ico` is a warning and the build
-continues without an icon.
+The build script stamps source commit and target metadata on every platform.
+On `windows-msvc` it also writes a Win32 `.res` file into `OUT_DIR`, holding
+one `RT_ICON` per image, the `RT_GROUP_ICON` that names them and the Unicode
+message table for diagnostic event 1000. It emits `cargo:rustc-link-arg-bins`;
+`link.exe` accepts the file as if `rc.exe` had produced it. An unreadable icon
+produces a warning and leaves the diagnostic message resource intact. Windows
+GNU development builds retain the existing lack of embedded resources; release
+MSIs use MSVC.
 
 The byte layout was checked without a Windows host by running the same writer
 over the committed `.ico`, parsing the result with
@@ -345,21 +350,27 @@ the package layout.
 
 ### What CI validates, and what it does not
 
-The release workflow runs `cargo fmt`, Clippy, the workspace tests, the Python
-tool tests and the documentation header check on all four images, builds the
-release binaries, scans them, then runs the platform script. Each script scans
-its staged directory before building and scans the finished package after. The
-release job scans every downloaded package once more before uploading it to the
-GitHub release, which is created as a pre-release if it does not exist.
+The release workflow runs formatting, Clippy, workspace tests, Python tool
+and Windows resource-layout tests, documentation and asset checks. It builds
+release binaries with matching debug information and retains PDB, dSYM or ELF
+symbols in separate `symbols-*` workflow artifacts labelled by source commit.
+These artifacts are not added to the retail-free game packages.
 
-That proves the packages build and carry no detectable retail data. It does not
-prove they install. Installing the MSI on Windows, opening the DMG and running
-the app from `/Applications` on both macOS architectures, and running the
-AppImage on a machine that is not the build host are manual checks, and they
-stay recorded as pending until someone performs them on a tag. The same is
-true of everything the icon is for: the Windows job proves `link.exe` accepts
-the generated `.res`, but only an installed build shows whether Explorer, the
-Start menu, the desktop shortcut and the macOS Dock draw the icon.
+`tools/check_runtime_dependencies.py` rejects missing runtime libraries, dynamic
+Windows Visual C++ runtime imports and non-system macOS libraries that are not
+bundled. It checks the build host, not every supported OS installation.
+`tools/check_startup_diagnostics.py EXECUTABLE` exercises success, returned
+errors and main/worker panics without media, using isolated paths with spaces.
+Packaging runs it on staged binaries and on the actual payload recovered from
+the MSI, DMG, tar.gz and AppImage. MSI administrative extraction validates the
+payload without changing an installed product. Source and package asset scans
+remain required.
+
+These checks do not prove installed desktop launches. Windows shortcut/direct
+launches and Event Viewer messages, macOS Finder launches on both architectures,
+and Linux desktop launches must still be checked on the resulting packages.
+Graphics checks need a display and driver. The first-launch OS security prompts
+are outside application logging. See [diagnostic evidence](baselines/startup-diagnostics.md).
 
 ## Troubleshooting
 
@@ -367,6 +378,50 @@ Start menu, the desktop shortcut and the macOS Dock draw the icon.
 - Linker/SDK error: check `xcode-select -p` and complete any pending Xcode first-launch setup.
 - No graphics adapter or display: run from a logged-in desktop session with working drivers. Compilation and tests do not require a window; the smoke test does.
 - Missing reference folder: the Rust app does not need it. Missing media: an existing valid cache still runs; otherwise import your own media. See [REFERENCES.md](REFERENCES.md).
+
+### Startup logs and fatal errors
+
+Every executable launch creates a diagnostic session before loading game data.
+On an interactive failure, Windows shows a native dialog and macOS shows an
+alert with the failed stage and saved-report location. Linux writes stderr and
+files and attempts a desktop notification when `notify-send` is available.
+Headless/capture checks do not show blocking dialogs. Windows MSI installations
+also register the **T.O.R.E-Fighters** source under **Event Viewer > Windows
+Logs > Application**, event ID **1000**. Event registration is installation
+work; normal logging does not ask for administrator privileges.
+
+Default directories and retention are in the
+[diagnostics contract](spec/startup-diagnostics.md#files-and-retention).
+`TORE_LOG_DIR` selects another destination. An isolated `TORE_DATA_DIR` puts logs
+in that profile's `logs` child unless the log override is set. A failed default
+location falls back to the temporary directory; the error message names the
+actual report. `last-error.txt` in application data preserves the most recent
+fatal summary, including its time and log path, even after a successful launch.
+
+To verify reporting without game media, run:
+
+```sh
+tore-app --diagnostics-self-test
+tore-app --diagnostics-self-test=error
+tore-app --diagnostics-self-test=panic
+tore-app --diagnostics-self-test=worker-panic
+```
+
+The three deliberate failures exit nonzero. `=graphics` presents a synthetic
+canvas through the first-run renderer and exits, requiring a display/GPU.
+`=dialog` deliberately displays the platform error message for manual checks.
+Set `TORE_NO_ERROR_DIALOG=1` for unattended normal launches. On Windows, use
+`Start-Process -Wait -PassThru` when a script must wait for the release GUI exe
+and inspect its exit code; its stdout is not a visible console.
+
+If no session file appears in either the normal or fallback location, the
+process may have been blocked before its own code ran. Check installation,
+OS security messages and available system crash reports. Rust panic hooks do
+not catch native access violations or process kills. Windows Error Reporting,
+macOS Console crash reports and Linux journal/core reports provide separate
+OS evidence where enabled. Do not confuse these with a proven application
+cause. Share the timestamped fatal report and session log when reporting a
+startup problem; logs can contain local paths and device names.
 
 An editor with rust-analyzer is useful but optional. No global editor configuration is required.
 

@@ -13,9 +13,10 @@ The M0 environment supports the M1a menu slice, the M1b renderer across all 16 t
 | Component | Choice | Purpose |
 | --- | --- | --- |
 | Language | Rust 2024, compiler 1.91.1 | Reproducible native builds |
-| Workspace | `crates/tore-app`, `tore-formats`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native` | Desktop shell and entry point, plus the format, extraction, simulation and input crates |
+| Workspace | `crates/tore-app`, `tore-formats`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native`, `tore-diagnostics-native` | Desktop shell and entry point, plus the format, extraction, simulation and input crates |
 | Window/input | `winit` 0.30 | Native window lifecycle and input |
 | Graphics | `wgpu` 27 | Metal on macOS; native backends for Windows/Linux |
+| Diagnostic facade | Existing `log` 0.4 and `tracing` 0.1 | Bounded app/backend logs without a logging framework |
 | Startup bridge | `pollster` 0.4 | Wait for GPU initialization without a general async runtime |
 | Audio device | `cpal` 0.16 | Native output for the small PCM mixer; [upstream API](https://docs.rs/cpal/0.16.0/cpal/) |
 | Formats | Dependency-free `crates/tore-formats` | Bounded EALIB, raw-literal DCL, PIC/glyphs, a narrow CHOOSEAC DLG reader, BIT2, mission environment fields PL weather palettes, BRF aircraft/equipment, bounded SH projection and compiled FNT glyphs |
@@ -40,6 +41,29 @@ Menu drawing uses CPU composition for this small static canvas; it is not a comm
 validated from disk. Successful import and startup load remove older numbered
 packs from that cache directory. Cleanup is best effort and does not touch
 source media or extracted assets. [Retention contract](spec/import-cache.md).
+
+## Startup diagnostics
+
+`diagnostics.rs` installs a bounded `log` sink and panic hook at the start of
+`main`, before preferences, assets and the event loop. Existing wgpu logging
+and winit tracing feed the same sink. Startup stages and first presentations
+are explicit checkpoints; simulation behavior and adapter choice are unchanged.
+`startup.rs` owns unattended-dialog policy and media-free success, failure,
+panic and synthetic graphics checks. Main-thread unwinding produces a fatal
+report and a nonzero exit rather than resuming gameplay.
+
+`tore-diagnostics-native` is a second narrow audited OS boundary. Its safe API
+shows Windows MessageBox/AppKit errors without creating the game renderer and
+writes Windows Application events. Linux notifications use an optional bounded
+`notify-send` process. The app and simulation retain their unsafe-code ban.
+The MSI registers the source against the executable's embedded message table.
+The existing platform bindings and `log`/`tracing` dependencies are reused;
+there is no additional GUI or logging framework.
+
+File paths, retention, fallbacks and failure limits have one home in the
+[startup diagnostics contract](spec/startup-diagnostics.md). Release packages
+exercise the actual staged and extracted executable; desktop installation
+acceptance remains separate.
 
 ## Boundaries for menu work
 
@@ -145,8 +169,8 @@ routes instrument focus to the existing stock controls.
 `tore-input-native` owns a dedicated bounded device worker: Linux evdev/rumble,
 Windows raw-controller readings/Gamepad vibration, and macOS GameController/
 CoreHaptics plus generic HID queues. Apple gamepad input and haptics share the same
-retained controller; public HID support queries suppress duplicate raw endpoints. It alone
-permits unsafe platform FFI; `libc` and `windows` are thin platform bindings,
+retained controller; public HID support queries suppress duplicate raw endpoints. It and the diagnostics boundary
+permit audited unsafe platform FFI; `libc` and `windows` are thin platform bindings,
 not a third-party input policy engine. Main-loop discovery never blocks a flight
 frame. Presentation-only look resolution cannot change pilot-axis ownership.
 It also runs the head-tracker receiver: a safe `std::net` loopback UDP socket on

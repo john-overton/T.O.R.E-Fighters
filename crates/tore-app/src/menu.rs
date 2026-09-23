@@ -411,7 +411,7 @@ impl Menu {
             "CHOOSE3.PIC" => 109,
             _ => 0,
         };
-        println!("Main-menu background: {background}");
+        log::info!("Main-menu background: {background}");
         let quick_palette: [[u8; 3]; 256] = assets.pics["QUIKMIS3.PIC"]
             .palette
             .clone()

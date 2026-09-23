@@ -4,11 +4,15 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-# Embeds assets/icon/tore.ico as the executable icon on windows-msvc.
-# It is a no-op on every other target.
+# Stamps build identity on every platform; embeds the icon and event message
+# resource on windows-msvc.
 build = "build.rs"
 
 [dependencies]
+tore-diagnostics-native = { path = "../tore-diagnostics-native" }
+log = "0.4"
+# Forward winit's existing tracing events to the same small log sink.
+tracing = { version = "0.1", default-features = false, features = ["log"] }
 tore-input = { path = "../tore-input" }
 tore-input-native = { path = "../tore-input-native" }
 tore-sim = { path = "../tore-sim" }

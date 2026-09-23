@@ -67,6 +67,7 @@ impl Readback {
 }
 pub struct Renderer {
     previews: std::collections::BTreeMap<u8, Readback>,
+    first_frame: crate::startup::FirstFrame,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -208,8 +209,11 @@ impl Renderer {
         world: &crate::terrain::World,
         graphics: crate::graphics::Options,
     ) -> AppResult<Self> {
+        crate::diagnostics::stage("game graphics instance and surface");
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let surface = instance.create_surface(window.clone())?;
+        crate::diagnostics::stage_done();
+        crate::diagnostics::stage("game graphics adapter selection");
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -217,10 +221,15 @@ impl Renderer {
                 force_fallback_adapter: false,
             })
             .await?;
+        crate::diagnostics::stage_done();
+        log::info!("game adapter: {:?}", adapter.get_info());
+        crate::diagnostics::stage("game graphics device creation");
         let info = adapter.get_info();
-        println!(
+        log::info!(
             "Renderer: {} ({:?}, {:?})",
-            info.name, info.backend, info.device_type
+            info.name,
+            info.backend,
+            info.device_type
         );
         // Sample counts beyond 1 and 4 are adapter specific; opt in when
         // offered so 2x and 8x anti-aliasing can be used.
@@ -232,6 +241,13 @@ impl Renderer {
                 ..Default::default()
             })
             .await?;
+        crate::diagnostics::stage_done();
+        device.set_device_lost_callback(|reason, message| {
+            if reason != wgpu::DeviceLostReason::Destroyed {
+                log::error!("game graphics device lost: {reason:?}: {message}");
+            }
+        });
+        crate::diagnostics::stage("game graphics resources and pipelines");
         let size = window.inner_size();
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
@@ -245,9 +261,10 @@ impl Renderer {
             wgpu::PresentMode::Fifo
         };
         config.desired_maximum_frame_latency = 1;
-        println!(
+        log::info!(
             "Presentation: {:?}, maximum queued frames: {}",
-            config.present_mode, config.desired_maximum_frame_latency
+            config.present_mode,
+            config.desired_maximum_frame_latency
         );
         surface.configure(&device, &config);
         let sample_counts: Vec<u32> = [1, 2, 4, 8]
@@ -272,7 +289,7 @@ impl Renderer {
             .filter(|&n| n <= graphics.anti_aliasing.samples())
             .max()
             .unwrap_or(1);
-        println!("Anti-aliasing: {samples}x (supported {sample_counts:?})");
+        log::info!("Anti-aliasing: {samples}x (supported {sample_counts:?})");
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Retail menu canvas"),
             size: wgpu::Extent3d {
@@ -345,7 +362,9 @@ impl Renderer {
             samples,
         );
         let cockpit = crate::cockpit_renderer::CockpitRenderer::new(&device, config.format);
+        crate::diagnostics::stage_done();
         Ok(Self {
+            first_frame: Default::default(),
             mirror_camera: crate::terrain::Camera::new(),
             mirror_vertices: Vec::new(),
             mirror_frames: 0,
@@ -633,6 +652,7 @@ impl Renderer {
         scene: Option<(&crate::terrain::Camera, &crate::terrain::World)>,
         flight_size: Option<[u32; 2]>,
     ) -> AppResult<bool> {
+        self.first_frame.begin("game first frame presentation");
         let s = self.window.inner_size();
         if s.width == 0 || s.height == 0 {
             return Ok(false);
@@ -724,6 +744,7 @@ impl Renderer {
             self.window.pre_present_notify();
         }
         frame.present();
+        self.first_frame.complete();
         Ok(true)
     }
 }

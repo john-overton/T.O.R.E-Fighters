@@ -906,6 +906,16 @@ Deliverable: on each platform, install, choose a mounted disc 1 or an
 installed folder, and fly the README free-flight check without using a
 terminal.
 
+#### Startup diagnostics
+
+John requested built-in startup logging and visible failures on 2026-09-23.
+Implemented as an opinionated host feature: bounded cross-platform session and
+panic logs, native Windows/macOS failure UI, Windows MSI event registration,
+embedded event messages and media-free package validation. The
+[contract](spec/startup-diagnostics.md) owns behavior and limits; the
+[validation pass](baselines/startup-diagnostics.md) owns measured results.
+Installed Windows/macOS desktop and Event Viewer acceptance remain pending.
+
 ### 1h. Cheats
 
 Planned 2026-09-23 at John's request. Every entry in the in-flight Cheat menu

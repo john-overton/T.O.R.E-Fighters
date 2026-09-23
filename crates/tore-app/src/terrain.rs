@@ -372,7 +372,7 @@ impl World {
                         );
                         shapes.insert(placement.object_type.clone(), shape);
                     }
-                    Err(error) => eprintln!(
+                    Err(error) => log::warn!(
                         "Airport scene: {main_shape} retained without visual geometry: {error}"
                     ),
                 }

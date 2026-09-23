@@ -78,12 +78,19 @@ install -m 644 "$icons/tore-256.png" "$stage/tore-fighters.png"
 
 echo "Checking the staged directory for retail data"
 python3 "$root/tools/check_assets.py" "$stage"
+python3 "$root/tools/check_runtime_dependencies.py" "$stage/tore-app" "$stage/tore-extract"
+python3 "$root/tools/check_startup_diagnostics.py" "$stage/tore-app"
 
 tarball="$dist/$name.tar.gz"
 rm -f "$tarball"
 tar -czf "$tarball" -C "$(dirname "$stage")" "$name"
 echo "Wrote $tarball"
 python3 "$root/tools/check_assets.py" "$tarball"
+unpacked="$dist/stage/linux/package check with spaces"
+rm -rf "$unpacked"
+mkdir -p "$unpacked"
+tar -xzf "$tarball" -C "$unpacked"
+python3 "$root/tools/check_startup_diagnostics.py" "$unpacked/$name/tore-app"
 
 # The AppImage carries the game only. tore-extract is a developer tool and
 # stays in the tar.gz.
@@ -155,6 +162,11 @@ if [ -f "$appimage" ]; then
     chmod 755 "$appimage"
     echo "Wrote $appimage"
     python3 "$root/tools/check_assets.py" "$appimage"
+    recovered="$dist/stage/linux/appimage check with spaces"
+    rm -rf "$recovered"
+    mkdir -p "$recovered"
+    (cd "$recovered" && "$appimage" --appimage-extract >/dev/null)
+    python3 "$root/tools/check_startup_diagnostics.py" "$recovered/squashfs-root/AppRun"
 else
     echo "No AppImage was produced. See $dist/stage/linux/appimagetool.log if present." >&2
     if [ "${CI:-}" = "true" ]; then

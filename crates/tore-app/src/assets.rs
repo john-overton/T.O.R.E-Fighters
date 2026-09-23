@@ -130,8 +130,8 @@ fn remove_older_packs(directory: &Path, retained: &Path) -> std::io::Result<usiz
 fn cleanup_previous_imports(directory: &Path, retained: &Path) {
     match remove_older_packs(directory, retained) {
         Ok(0) => {}
-        Ok(count) => println!("Removed previous import packs: {count}"),
-        Err(error) => eprintln!(
+        Ok(count) => log::info!("Removed previous import packs: {count}"),
+        Err(error) => log::warn!(
             "Could not finish cleaning older import packs in {}: {error}",
             directory.display()
         ),
@@ -475,7 +475,7 @@ impl Assets {
                     continue;
                 }
                 Err(error) => {
-                    eprintln!("Optional recorded music unavailable: {error}");
+                    log::warn!("Optional recorded music unavailable: {error}");
                     report.push_str(&format!("Optional recorded music unavailable: {error}\n"));
                     summary.push(format!("Recorded music {filename} unreadable: {error}"));
                     continue;
@@ -587,10 +587,10 @@ impl Assets {
         // The remembered source only saves the player a second choice; failing to
         // write it does not spoil a finished import.
         if let Err(error) = media_source::remember(destination, source) {
-            eprintln!("Could not remember the media source: {error}");
+            log::warn!("Could not remember the media source: {error}");
             summary.push(format!("Media source not remembered: {error}"));
         }
-        println!(
+        log::info!(
             "Imported menu and all theater resources to {}",
             path.display()
         );
@@ -617,7 +617,7 @@ impl Assets {
                 }
                 Err(error) => {
                     last_error = format!("{}: {error}", path.display());
-                    eprintln!("Ignoring invalid menu cache: {last_error}");
+                    log::warn!("Ignoring invalid menu cache: {last_error}");
                 }
             }
         }

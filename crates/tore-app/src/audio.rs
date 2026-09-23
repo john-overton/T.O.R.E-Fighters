@@ -214,7 +214,7 @@ impl Audio {
             _ => return Err("unsupported audio device sample format".into()),
         };
         stream.play()?;
-        println!(
+        log::info!(
             "Audio: {} ({} Hz, {} channels)",
             device.name()?,
             config.sample_rate.0,
@@ -244,14 +244,14 @@ impl Audio {
         .filter(|name| !clips.contains_key(*name))
         .collect();
         if !missing_ejection.is_empty() {
-            eprintln!(
+            log::warn!(
                 "Optional ejection audio unavailable: {}. Reimport retail media; pilot simulation remains available.",
                 missing_ejection.join(", ")
             );
         }
         let missing = missing_airport_audio(&clips, &radio_phrases);
         if !missing.is_empty() {
-            eprintln!(
+            log::warn!(
                 "Optional airport radio unavailable for {}. Reimport retail media to refresh the cache; tower text remains available.",
                 missing.join(", ")
             );

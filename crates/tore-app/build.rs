@@ -1,4 +1,4 @@
-//! Give `tore-app.exe` its application icon on Windows.
+//! Stamp build identity and embed Windows icon and Event Viewer message resources.
 //!
 //! Explorer, the taskbar and the Alt-Tab switcher read an executable's icon
 //! from its embedded `RT_GROUP_ICON` resource, so the icon has to be linked
@@ -15,8 +15,8 @@
 //! `RT_ICON`, and a `GRPICONDIR` naming them becomes the single
 //! `RT_GROUP_ICON` that Windows actually looks up.
 //!
-//! The script does nothing at all on any target that is not `windows-msvc`,
-//! so Linux and macOS builds are unaffected. `tools/package/build_icons.py
+//! Resource generation applies to `windows-msvc`; build identity is stamped
+//! on every platform. `tools/package/build_icons.py
 //! --verify-res PATH` parses a generated `.res` back and prints its entries,
 //! which is how the layout below was checked without a Windows host.
 
@@ -55,6 +55,7 @@ struct IconImage {
 }
 
 fn main() {
+    stamp_build_identity();
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed={ICON_PATH}");
 
@@ -64,25 +65,23 @@ fn main() {
         return;
     }
 
-    let icon = match fs::read(ICON_PATH) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            println!(
-                "cargo:warning=Could not read {ICON_PATH}: {error}. Building without an icon."
-            );
-            return;
-        }
-    };
-    let resource = match build_resource(&icon) {
-        Ok(bytes) => bytes,
+    // A missing optional icon must never remove the event message resource.
+    let mut resource = match fs::read(ICON_PATH)
+        .map_err(|error| error.to_string())
+        .and_then(|icon| build_resource(&icon))
+    {
+        Ok(resource) => resource,
         Err(reason) => {
-            println!("cargo:warning={ICON_PATH} is unusable: {reason}. Building without an icon.");
-            return;
+            println!("cargo:warning={ICON_PATH}: {reason}. Building without an icon.");
+            let mut resource = Vec::new();
+            push_header(&mut resource, 0, 0, 0, 0, 0);
+            resource
         }
     };
+    append_event_resource(&mut resource);
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("Cargo always sets OUT_DIR"));
-    let path = out_dir.join("tore-icon.res");
+    let path = out_dir.join("tore-app.res");
     if let Err(error) = fs::write(&path, resource) {
         panic!("Could not write {}: {error}", path.display());
     }
@@ -237,4 +236,95 @@ fn read_u16(data: &[u8], at: usize) -> u16 {
 
 fn read_u32(data: &[u8], at: usize) -> u32 {
     u32::from_le_bytes([data[at], data[at + 1], data[at + 2], data[at + 3]])
+}
+
+/// Capture identity on every platform, including rebuilds after branch changes.
+fn stamp_build_identity() {
+    println!("cargo:rerun-if-env-changed=TORE_BUILD_COMMIT");
+    println!("cargo:rerun-if-env-changed=TARGET");
+    for path in [
+        "../../.git/HEAD",
+        "../../.git/refs",
+        "../../.git/packed-refs",
+    ] {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    let commit = env::var("TORE_BUILD_COMMIT")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .and_then(|output| String::from_utf8(output.stdout).ok())
+        })
+        .unwrap_or_else(|| "unknown".into());
+    // Cargo directive values must stay on one line.
+    let commit: String = commit
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(128)
+        .collect();
+    println!("cargo:rustc-env=TORE_BUILD_COMMIT={commit}");
+    println!(
+        "cargo:rustc-env=TORE_BUILD_TARGET={}",
+        env::var("TARGET").unwrap_or_else(|_| "unknown".into())
+    );
+}
+
+/// MESSAGE_RESOURCE_DATA: one Unicode message, ID 1000, one insertion string.
+/// The MSI registers this executable as EventMessageFile for T.O.R.E-Fighters.
+fn append_event_resource(out: &mut Vec<u8>) {
+    let mut table = Vec::new();
+    table.extend_from_slice(&1_u32.to_le_bytes()); // NumberOfBlocks
+    table.extend_from_slice(&1000_u32.to_le_bytes()); // LowId
+    table.extend_from_slice(&1000_u32.to_le_bytes()); // HighId
+    table.extend_from_slice(&16_u32.to_le_bytes()); // OffsetToEntries
+    let text: Vec<u8> = "%1\r\n\0"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let length = (4 + text.len()).next_multiple_of(4);
+    table.extend_from_slice(&(length as u16).to_le_bytes());
+    table.extend_from_slice(&1_u16.to_le_bytes()); // MESSAGE_RESOURCE_UNICODE
+    table.extend_from_slice(&text);
+    table.resize(16 + length, 0);
+    push_header(
+        out,
+        table.len() as u32,
+        11,
+        1,
+        MEMORY_MOVEABLE_PURE_DISCARDABLE,
+        LANGUAGE_ID,
+    );
+    push_padded(out, &table);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_message_has_id_1000_and_one_unicode_insertion() {
+        let mut resource = Vec::new();
+        append_event_resource(&mut resource);
+        assert_eq!(read_u16(&resource, 10), 11); // RT_MESSAGETABLE
+        assert_eq!(read_u16(&resource, 22), LANGUAGE_ID);
+        let table = &resource[32..];
+        assert_eq!(read_u32(table, 0), 1);
+        assert_eq!(read_u32(table, 4), 1000);
+        assert_eq!(read_u32(table, 8), 1000);
+        assert_eq!(read_u32(table, 12), 16);
+        assert_eq!(read_u16(table, 16) as usize, table.len() - 16);
+        assert_eq!(read_u16(table, 18), 1);
+        let text: Vec<u16> = table[20..]
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .take_while(|value| *value != 0)
+            .collect();
+        assert_eq!(String::from_utf16(&text).unwrap(), "%1\r\n");
+    }
 }

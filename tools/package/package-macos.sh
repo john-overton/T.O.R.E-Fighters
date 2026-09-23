@@ -109,6 +109,8 @@ rm -rf "$iconset"
 
 echo "Checking the staged bundle for retail data"
 python3 "$root/tools/check_assets.py" "$app"
+python3 "$root/tools/check_runtime_dependencies.py" "$app/Contents/MacOS/tore-app" "$app/Contents/MacOS/tore-extract"
+python3 "$root/tools/check_startup_diagnostics.py" "$app/Contents/MacOS/tore-app"
 
 dmgroot="$stage/dmg"
 rm -rf "$dmgroot"
@@ -122,5 +124,12 @@ rm -f "$dmg"
 hdiutil create -volname "T.O.R.E-Fighters" -srcfolder "$dmgroot" -ov -format UDZO "$dmg"
 echo "Wrote $dmg"
 python3 "$root/tools/check_assets.py" "$dmg"
+mountpoint="$stage/dmg check with spaces"
+mkdir -p "$mountpoint"
+hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$dmg"
+trap 'hdiutil detach "$mountpoint"' EXIT
+python3 "$root/tools/check_startup_diagnostics.py" "$mountpoint/T.O.R.E-Fighters.app/Contents/MacOS/tore-app"
+hdiutil detach "$mountpoint"
+trap - EXIT
 
 echo "macOS packaging complete for version $version"

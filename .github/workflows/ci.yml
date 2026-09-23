@@ -36,7 +36,9 @@ jobs:
         run: cargo test --workspace --locked
       - name: Build
         run: cargo build --workspace --locked
-      - name: Test asset guard
+      # Discovery includes test_build_resources.py, which executes the build.rs
+      # Windows message-resource test that cargo test does not discover.
+      - name: Test tooling and Windows resource layout
         run: python -m unittest discover -s tools -p "test_*.py"
       - name: Check source assets
         run: python tools/check_assets.py
@@ -52,3 +54,10 @@ jobs:
             python tools/check_assets.py target/debug/tore-app
             python tools/check_assets.py target/debug/tore-extract
           fi
+      - name: Check startup diagnostics and runtime libraries
+        shell: bash
+        run: |
+          suffix=""
+          if [ "$RUNNER_OS" = "Windows" ]; then suffix=".exe"; fi
+          python tools/check_startup_diagnostics.py "target/debug/tore-app$suffix"
+          python tools/check_runtime_dependencies.py "target/debug/tore-app$suffix" "target/debug/tore-extract$suffix"

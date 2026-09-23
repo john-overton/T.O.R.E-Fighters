@@ -47,6 +47,11 @@
           <Component Id="MainExecutable" Guid="*">
             <File Id="ToreApp" Name="tore-app.exe" KeyPath="yes"
                   Source="$(var.StageDir)\tore-app.exe" />
+            <!-- Embedded event message 1000 expands the fatal report text. -->
+            <RegistryKey Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\T.O.R.E-Fighters">
+              <RegistryValue Name="EventMessageFile" Type="expandable" Value="[#ToreApp]" />
+              <RegistryValue Name="TypesSupported" Type="integer" Value="1" />
+            </RegistryKey>
           </Component>
 
           <!-- Optional developer tool, installed but not shortcut. -->
