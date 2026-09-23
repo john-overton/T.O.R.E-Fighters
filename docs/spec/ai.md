@@ -789,8 +789,10 @@ attack. Whether the approach point is the target itself or displaced is open.
 The player's radio call is printed and voiced when it is sent, regardless of
 whether the wingman can comply; spacing calls say "Tighten up" below 1000 ft
 and "Combat spread" otherwise. Only target assignments get a wingman reply,
-"Engaging" (heard only with radio traffic enabled) or "Showtime!" for protect
-me, from the first wingman. Break, approach, formation, spacing and control
+an engage reply (heard only with radio traffic enabled) or "Showtime!" for
+protect me, from the first wingman. The engage reply is "Engaging" for a ground
+or sea target and one of nine lines for an aircraft target or attack on
+contact; see [engage replies](radio-chatter.md#engage-replies-correction-to-b46). Break, approach, formation, spacing and control
 orders receive no spoken reply.
 
 Disengage puts the wingman back in formation at once and stops it choosing a
@@ -902,8 +904,9 @@ An AI aircraft ignores launch warnings while taking off and during the later
 landing states. In the first two approach states it abandons the approach and
 returns to free flight. An aircraft with no countermeasure dispenser station
 does not react at all. A mission-authored hold time can suppress reactions
-until a given time of day. A launch by an aircraft on the same side sends a
-radio message but no maneuver.
+until a given time of day. A launch by an aircraft on the same side causes no
+maneuver. The "SAM launch"/"AAM launch" radio call is sent only for an
+opposite-side launcher; see [radio chatter](radio-chatter.md#sam-and-aam-launch-calls).
 
 On a warning the aircraft rolls for countermeasures at 35, 50, 75 or 90
 percent by experience level. On success it releases two or three devices a

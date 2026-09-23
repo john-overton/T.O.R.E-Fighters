@@ -17,7 +17,7 @@ all pointers within file-backed section data, limits text to 127 ASCII bytes
 and stems to eight safe characters beginning with ^. Unknown layouts fail closed.
 The caller treats import failure as optional radio unavailability.
 
-The reviewed table spans 0x4fef10..0x4ff8f0 in 1.02F and holds 329 pairs
+The reviewed table spans 0x4fef10..0x4ff9e0 in 1.02F and holds 329 pairs
 naming 299 distinct stems. `tore_formats::radio::STEMS` lists one address per
 stem; where a stem appears in several pairs, the standalone phrase is kept over
 a sentence fragment (for example `^RDYCAT` "Ready on the cat" rather than
@@ -35,6 +35,8 @@ a sentence fragment (for example `^RDYCAT` "Ready on the cat" rather than
 | 0x4ff5a8..0x4ff688 | Radar, fuel, G strain, feet wet/dry, approaching target |
 | 0x4ff690..0x4ff838 | Offensive and defensive coaching |
 | 0x4ff840..0x4ff8f0 | Takeoff, catapult, landing and wind reports |
+| 0x4ff8f8..0x4ff990 | Landing signal officer corrections, landing grades, welcome back/home |
+| 0x4ff998..0x4ff9e0 | AWACS report lines and a second weapon release group |
 
 Only `^FIRGUN` has no matching recording in the local FA_2.LIB. The archive
 also holds 703 speech recordings in all: 618 with the `^` prefix and 85 with
@@ -86,6 +88,264 @@ Ejection clips also enter the existing serial speech queue from discrete escape
 and cockpit warning transitions. Their reviewed filenames, source call sites
 and unresolved speaker assignments are in [ejection source notes](ejection.md).
 They do not require speculative phrase-to-speaker mappings.
+
+## Radio chatter source notes
+
+Research mode, 2026-09-23. FA.EXE 1.02F, SHA-256
+e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c, image base
+0x400000. Static review of `.local/weapons-research/native/fa-disassembly.txt`,
+`symbols.json` and direct llvm-objdump ranges. Nothing was executed. The
+behaviour spec is [radio chatter](../spec/radio-chatter.md). Queue layout and routing
+already recorded in `docs/formats/native-strip.md` (NE-00.1k/NE-00.1n) are not
+repeated here; link to them.
+
+### Build shift
+
+1.0 disc build (SHA-256 c7d2c1cc...ba9b): every pair table address in this note
+is the 1.02F address minus 0x4608 (`radio_shift` in
+`crates/tore-formats/src/executable.rs`). Code addresses below were reviewed in
+1.02F only; their 1.0 locations were not established.
+
+### Say record (event record as seen by the say procedures)
+
+Event record from `MSGSend` 0x4180a0 (existing layout, native-strip NE-00.1k):
++0 flags, +1 bound-100 roll, +2 sender, +4 recipient, +6 quarter-second
+deadline, +8 mask, +0xa subtype, +0xb length, +0xd payload.
+
+- Flag 1: suppress speech. Set by the caller, or by the poster for subtypes
+  0x11..0x15, 0x17, 0x1c..0x1e, 0x22, 0x24 when preference dword 0x4eb6f8 lacks
+  bit 0x100000 and the caller flags lack 2. Bit 0x100000 is the "Radio traffic
+  OK" state: FlightKey 0x4159dc XORs it and prints 0x4ee3a8 "Radio traffic OK"
+  or 0x4ee398 "Radio silence".
+- Flag 2: exempt from the radio-silence gate (all 0x24 wrapper sends use it).
+- Flag 4: forwarded/self echo (existing note).
+- Delay argument (arg 3) is quarter seconds: 0, 2, 8 and 0x14 are used.
+- Speech mask is 0x8000. `MessagesToPlayer` 0x414523 polls the player with
+  mask 0x8000. `MSGReceive` 0x4185a0 voices a record through `SAYMsg` only when
+  flag 1 is clear and the recipient is the player (sender not the player, or
+  flag 4), or the recipient is 0x8003 + local controller.
+- `MSGSend` voices a player-sent record once at send time (label YOU) when mode
+  0x520a50 == 0x10, the player object is live kind 4 and flag 1 is clear.
+
+Recipient codes expanded by `MSGSend` through `_WNGPart` 0x45e710 (returns 0 no
+wing, 1 position 0, 2 member; 10 wings x 10 slots at 0x5469a0, counts at
+0x546980), acting leader 0x45e630 (first slot with instance flag 1) and
+`_WNGWingmen` 0x45e6e0 (slots 1..n-1):
+
+| Code | Expansion |
+| --- | --- |
+| 0x8000 | No wing: sender. Else acting leader. |
+| 0x8001 | Only for part 1 (leader): slots 1..n-1 except sender. |
+| 0x8002 | No wing: sender. Else acting leader plus slots 1..n-1 except sender. |
+
+### Say dispatch
+
+`SAYMsg` 0x48d350 dispatches callback request 6 of the **sender** (plane:
+`_PLANESayProc` 0x48d780; generic objects: `_OBJSayProc` 0x48e8d0, which only
+handles subtype 0x24), or `_SAYDefaultSayProc` 0x48d3c0 for zero/special senders.
+Both buffers: text 0x552ff0, stems 0x553050 (comma separated). Output 0x48d470:
+
+- Sender nationality (object +9 & 0x7f) 20 or 21 first runs formatter 0x490480
+  (mask 0x8000 records only). Nationality names table 0x4fb2b8 indexed by that
+  byte: 20 North Vietnamese, 21 South Vietnamese.
+- Label: sender == player: receiver == player and PLANE type flags +0xba bit 4
+  (multi-crew) gives "RIO" (0x4ffbdc) unless current type byte 0x50d276 bit
+  0x40 (class word bit 0x4000, non-fighter class) gives "CO-PILOT" (0x4ffbd0);
+  otherwise "YOU" (0x4ffbcc). Other senders 0x48d6e0: instance name pointer +0xa;
+  else kind 4 in a wing: "%s %s" (0x4ebff0) with colour table 0x5023a8 (Red,
+  Blue, Green, Black, White, Orange, Purple, Yellow) and position table
+  0x502424 (one..twelve); else NextString(type names, 1).
+- Display line `label + ": '" + text + "'"` via 0x405f50.
+- Stems played by 0x48d610 (existing note), gain word 0x5718ec * 255 / 100.
+- Busy deadline 0x552fdc = clock seconds + scaled_delay(3).
+
+### PLANESayProc subtypes (jump table 0x48e0bc, subtype - 5, 32 entries)
+
+Selector 0x48e150(pair base ECX, record EDX, count): count <= 1 uses the base;
+otherwise index = record +1 roll mod count (a fresh RNG draw when EDX is null).
+Chance helper 0x48e140(record, n) = roll < n. 0x4561a0(n) = fresh draw of
+bound 100 < n.
+
+| Sub | Meaning | Pairs / rule | Producer(s) |
+| --- | --- | --- | --- |
+| 5 | Break | 0x4ff170 + 8*i by sign of heading/pitch words | FlightKey 0x4157cd, CTDo_wm_break |
+| 6 | Approach | 0x4ff198 + 8*i | FlightKey, CTDo_wm_approach |
+| 7 | Horizontal spacing | 0x4ff1c0 (<1000) / 0x4ff1c8 | GRPSetSpacingH, WNGFormationMove |
+| 8 | Vertical spacing | 0x4ff1d0 + 8*i | GRPSetSpacingV |
+| 9 | Formation | 0x4ff1e8 + 8*byte | GRPSetType |
+| 10 | Control | 0x4ff1f8 + 8*byte (1 loose, 2 medium, 3 tight) | GRPSetControl |
+| 11 | Target order | dword 0: 0x4ff218; bit 0x40000000: 0x4ff220 x2; 0x1fffffff: 0x4ff230; else 0x4ff230 + 0x4ff048 + noun 0x48e190 + 0x4ff050 + clock 0x48e350 | FlightKey, WNGSendWM, GRPSendWM |
+| 12 | Class order | "Attack" + category noun | FlightKey 0x4158d0 |
+| 13 | Evade variant | 0x4ff238 base | no producer located |
+| 14 | Waypoint | 0x48e5f0; global cooldown word 0x55304c, 5 s scaled | WPSetupCurrent 0x499412 (0x8001, delay 2) |
+| 15 | New leader | 0x4ff288 | WNGAdd 0x45e618, GRPRemove 0x45f348 (delay 0x14, flag 1 when self-sent) |
+| 16 | Bug out | 0x4ff240 | no producer located |
+| 17 | Contact | 0x48e740(target, 0, receiver, roll, 1, advise) ; advise = WNG part 2 and control byte 0x50cf7b >= 2, or 0x50cf5e bit 2 | GRPSetStateTarget 0x45fa3d, WNGFormationMove 0x45ed0d |
+| 18 | Launch | see below | PROJAdd 0x4c109f |
+| 19 | Hit | payload +0xf nonzero: 0x4ff290 x5; else cooldown 0x5530cc, 0x4ff2b8 x8, +4 s | PROJDamageProc 0x4c1a57 |
+| 20 | Kill | see below | PROJDamageProc 0x4c1a57 |
+| 21 | Engage | target non-plane: 0x4ff3d8 x1; else x9 | PLANEEventProc 0x49efb0 (0x8000, delay 8) |
+| 22 | SAM/AAM launch | launcher kind 4: 0x4ff4c8; else 0x4ff4c0 | PLANEEventProc 0x49e244 (0x8002, delay 2) |
+| 23 | I'm hit | attacker kind 4: 0x4ff420 x5; class byte +0xe bit 8 (AAA): 0x4ff448 x4; else 0x4ff468 x2 | PLANEEventProc 0x49e8ea (0x8002, delay 0) |
+| 24 | Death | type flags 0x50d322 bit 8 clear and bit 0x10 set: 0x4ff490 x6; else x3 | PLANEEventProc 0x49e73e (0x8002, delay 0) |
+| 25 | Radar missile inbound | 0x4ff478; cooldown 0x4fef0c +6 s | PLANEEventProc 0x49e181 (self, delay 2) |
+| 26 | IR missile inbound | 0x4ff480; cooldown 0x4fef08 +6 s | same |
+| 27 | Other missile inbound | 0x4ff488 | same |
+| 28 | Range | 0x48e430 miles, clock unless +0xf == 12, 0x4ff4d0 if miles <= 2 | no producer located |
+| 29 | Position, turning | 0x4ff038 + 8*i, clock, 0x4ff4d8 + 0x4ff4e0/0x4ff4e8 when angle word +0x13 in 0xe38..0x71c0 | no producer located |
+| 30 | Position, heading away | 0x4ff038 + 8*i, clock, 0x4ff4f0 | PLANECommentProc 0x48f64c |
+| 31 | Mission accomplished | sets 0x552fe0; 0x4ff4f8 unless byte 0x5528bc | PLANECommentProc 0x48ecff (0x8001, delay 8) |
+| 32 | Mission failure | sets 0x552fc8; 0x4ff500 x5 unless 0x5528bc | PLANECommentProc 0x48ed42 |
+| 33 | Almost home | sets 0x552fcc; 0x4ff528 | PLANECommentProc 0x48edaf |
+| 34 | Friendly fire | 0x4ff538 x8 | PROJDamageProc 0x4c1b2e (victim to player, delay 8) |
+| 35 | Protect me reply | 0x4ff530 | PLANEEventProc 0x49ee80 (0x8000, delay 8) |
+| 36 | Literal | payload text + stems (two C strings) | 0x48e950 wrapper, MSGSendChatter |
+
+Launch (18): payload +0xf names the weapon type (RMAccess 0x4a6ae0 mode 0x8000).
+Order: `_stricmp(name, "AIM-54")` (0x4ffbe8) == 0 gives 0x4ff258 (Fox three).
+Projectile flags +0xa6 bit 0x10, or bit 0x400 with +0x6d == 0: cooldown word
+0x552fd8, 0x4ff260, +4 s. Else bit 1 clear (unguided): cooldown 0x552fd4,
+0x4ff268 appended, +4 s. Then roll < 50 and target kind 4: seeker byte +0xb4 3
+gives 0x4ff248, 2 gives 0x4ff250. Else 0x4ff270 x3. JT census: bit 1 set on all
+guided missiles; 0x10 on MK82/FAB/CBU/RBK/MK20 families; 0x400 on GBU-10/28,
+Paveway, AS-14, AS-30, AT-12.
+
+PROJAdd sender gates: shooter owned by the local controller, shooter nonzero,
+target nonzero or current type +0xa6 (0x50d30e) bit 0x10. Flags = 1 when the
+last PROJAdd argument is zero. ServicePlayer 0x417027 passes 1 through PROJFire;
+PROJServiceWeapon 0x4c4e34 passes 1 only on its state-4 path (0x4c4e08).
+
+Kill (20): payload +0x11 victim, +0xd projectile ID. Victim kind 4: PLANE flag
+bit 8 (rotorcraft, V-22, blimp) or 0x4561a0(40) gives 0x4ff300 x12. Else buffer
+"^AC" + RMChangeType(NextString(names, 2), "") (0x4a6870); base name "F22"
+(0x4ffbe0) gives the x12 set; stem cleared when longer than 8; then pair
+0x4ff3d0 plus text NextString(names, 1) and the buffer stem. Victim not kind 4:
+cooldown word 0x552fe4 checked, 0x4ff380 x10, cooldown +4 s set only when the
+projectile's type flags have bit 0x10.
+
+Hit/kill producer 0x4c19a8..0x4c1a6e: owner +0xe2 nonzero and not the victim,
+hit record +0x21 zero (meaning unknown); kind-4 shooter, victim alive and
+unguided store: per-shooter word +0x270 cooldown, +8 s. Subtype 0x14 when
+victim word 0x50ce8e < 1 else 0x13. Flags 1 when shooter and victim share the
+nationality high bit. Friendly fire 0x4c1a75..0x4c1b3d: victim alive, owner is
+the player, victim kind 4, global word 0x58f1d4 +6 s, same side, distance
+<= 0xce4000.
+
+I'm hit producer 0x49e86a..0x49e8ea: owner on the other side or none; projectile
+flags bit 0x80 applies per-aircraft word 0x50d0ee, +8 s.
+
+Missile warning producer 0x49e0f4..0x49e181: hold word 0x50cf81; human
+(0x50ce90 bit 0x80) and PLANE flags bit 4 send 0x19/0x1a/0x1b by missile seeker
+byte +0xb4 (3, 2, other) to itself. SAM/AAM producer 0x49e199..0x49e244: gate
+0x49f7e0, kind-9 store 0x452f80, opposite nationality high bit.
+
+Contact producer 0x45f998..0x45faa8: new target differs from word 0x50cfa2,
+clock >= word 0x50cfa4, `_GRPPart` 0x45f440 position <= 1, state byte 0x1f
+(new or current 0x50cf63), target +0xe3 not in 1..0x11 or 0x16..0x1e, not human
+(0x50ce90 bit 0x80); sets 0x50cfa2 and 0x50cfa4 = clock + scaled 15. Engage
+reply path 0x49ef05 sets 0x50cfa4 = clock + scaled 20 and 0x50cfa2 = target.
+
+### Composition helpers
+
+- 0x48e190 noun(target, class word, count, named): named text = type names
+  first string (+ "s" 0x4f0a20 when count > 1) when `named` and name nonempty;
+  `_strnicmp` 6 against "mig-17"/"mig-19"/"mig-21" gives stems ^MIG17(S),
+  ^MIG19(S), ^MIG21(S). Category from class word +0xd: 0xc000 bandit, 0x2000 ship,
+  0x1000 SAM, 0x800 AAA, 0x400 tank, 0x200 vehicle, 0x100 structure, 0x80
+  missile, else target; base 0x4ff060 singular, 0x4ff0a8 plural.
+- 0x48e350 clock(your, clock, elev, flag): optional 0x4ff0f0; stem
+  "^CLCK%02dD" (0x4ffc50) when flag and elev 0, else "^CLOCK%02d" (0x4ffc44);
+  text number word + " o'clock" (0x4ffc38); elev +1/-1 appends 0x4ff048 then
+  0x4ff030 "high" / 0x4ff020 "low".
+- 0x48e430 miles(n): n < 1 becomes 1; n <= 10, 20, 30: text "%d" + " mile(s)",
+  stem "^MILE%02d" (0x4ffc5c); else digits via 0x48e4e0 then 0x4ff0f8/0x4ff100.
+- 0x48e4e0 number(n, falling): text "%d"; n <= 12 stem numberSay[n] (0x4fef10
+  + 8n + 4) plus "D" (0x4ffc68) when falling; else decimal digits from the
+  ten-thousands down, leading zeros skipped, "D" on the last digit when falling.
+- 0x48e5f0 waypoint: 0x4ff108/0x4ff110 selected by roll (first letter case set
+  by argument), 0x4ff118 (empty text, ^WAYPNT), waypointSay 0x4fef70 + 8*index,
+  0x4ff120, bearing degrees = angle / 0xb6 with falling, 0x4ff128 + 8*i
+  (i from rounded thousands difference, 0x3e800 units of 1/256 ft), 0x4ff140,
+  altitude / 0x3e800 with falling.
+- 0x48e740 contact: miles via 0x411de0 (rounded, 0x17bc00 = 1 nm in 1/256 ft);
+  group size `0x45e790` = target wing members alive within 0x271000 and heading
+  within 0x1ffe, plus one; size/noun only when arg 5 and miles <= 15; naming
+  when distance <= 0xa50000 * 0x4b4720(...) / 100; 0x4ff148, 0x4ff150/0x4ff158/
+  numberSay, 0x4ff168, 0x4ff050, clock with "your", 0x4ff050 + miles, 0x4ff160.
+
+Unlisted pair slots (empty or no stem) used by the helpers: 0x4ff028 "" (level),
+0x4ff048 " ", 0x4ff050 ", ", 0x4ff058 is the sample-handle word, 0x4ff118 ""
+with ^WAYPNT, 0x4ff4d8 ", turning " (no stem), 0x4ff578 " Plane Re-Armed and
+Re-Fueled" (no stem), 0x4ff9a8 "Bandit, visual range" (no stem),
+0x4feff8..0x4ff008 Orange/Purple/Yellow (no stem).
+
+### Other SAY entry points
+
+- `@SAYLowFuelMessage@8` 0x48eb20(crew flag CL, recipient DX): levels in
+  current instance flags +0x16f (0x50cfef): 0x40000 out, 0x20000 fumes, 0x8000
+  bingo, 0x10000 joker; announced bits 0x400000/0x200000/0x80000/0x100000;
+  announcing marks 0x780000/0x380000/0x180000/0x100000. Pairs 0x4ff5b0/0x4ff5b8,
+  0x4ff5c0/0x4ff5c8, 0x4ff5d0, 0x4ff5d8. Callers: ServicePlayer 0x4166ab (crew
+  flag 1, to self, only PLANE flag bit 4), PLANEEventProc 0x49e07a (crew 0, to
+  0x8000, AI only, skipped when 0x411910 is true). Levels from `_PLANECheckFuel`
+  0x49fb70, ORed in at 0x45259a: total fuel <= 0 out; no home base (0x4bed70)
+  none; endurance at best throttle (0..110 step 10) <= 0 out, < 240 s fumes,
+  < home time + 300 s bingo, < home time + 600 s joker.
+- `@SAYSuppRadarMessage@12` 0x48ea10: pairs 0x4ff580..0x4ff5a8 (stems &SQACK2,
+  &SQACK1, ^BEEP2), forces bit 0x100000 on during the send, player to player.
+  Callers FlightKey 0x414b57/0x414b6c/0x414de7/0x414dfc, CPComputeRCS 0x440cdc.
+- `@SAYRearmMessage@8` 0x48e920: 0x4ff578 text only. ServicePlayer 0x4175f0,
+  0x417616.
+- 0x48e950 wrapper: subtype 0x24, flags 2, mask 0x8000, delay 0; sets 0x552fdc.
+- `_SAYAwacsReport@0` 0x4901c0: no call or absolute pointer found in the image
+  (byte scan for E8/E9 rel32 and dword). Selects the nearest live kind 2/4
+  same-side object with type flags +0xa6 bit 1 whose radar (hardpoint kind 3,
+  range dword +0x17) reaches the player; none prints 0x4ffc6c. Then nearest
+  opposite-side kind-4 object passing detection 0x4c2860; none: 0x4ff998 /
+  0x4ff9a0 by fresh 50%; count of enemies within 0x271000 of it; nearest
+  < 0x3a9800 gives 0x4ff9a8 (count 1) / 0x4ff9b0; else 0x48e740 with arg 5 zero.
+  Sent from the AWACS to the player through 0x48e950.
+- `@SAYTranslate@4` 0x490f30: for current nationality 20/21 rewrites direct
+  sample names (ejection, damage, CATGUY, Kill callers) to # names.
+- `_SAYFortStatus` 0x4911f0 / `_SAYFortAircraft` 0x491130: text screens
+  ("Shift-F%d:    %d   %s", "Airbase Aircraft Inventory", "%s is %d%% destroyed.").
+- `_MSGSendChatter@24` 0x418880: multiplayer text, subtype 0x24, flags 2.
+
+### Prefixes
+
+- `^`: ordinary radio voice (618 entries in local FA_2.LIB).
+- `#`: Vietnamese-nationality voice set (85 entries). Formatter 0x490480, jump
+  table 0x490e44, first replaces every ^ with #, then for subtypes 5, 6, 11..14,
+  17..21, 23, 24, 28..30, 32, 34, 36 writes replacement stems from 0x4ffc90..
+  0x4ffdd0 (for example #BREAK, #APPR, #DISENG, #CLRMY6, #ATTACKB/#ATTACKV,
+  #BUGOUT, #PROCTO, #FOXONE/#FOXTWO/#FOXTHR, #BOMBAW1/#BOMBAW2, #BULLS1,
+  #IMPACT, #MULTHIT, #OHYEAH, #OHYES, #BEAUT1, #ENGAGE, #ISEEEM, #TALLYHO,
+  #IMHIT1, #IMDMGE1/#IMDMGE2, #IMAAA, #AARRRGH, #YAAAAAH, #EJECT, #AARRGH2,
+  #P_POS, #G_POS, #CONTACT, #MISSFAL, #WTCHOUT, ^RADIOBP). Per-branch choice
+  not fully read. Also 0x4ff9e8.. holds # stem pointers for literal messages.
+- `&`: sound effect played through the same stem list (&SQACK1, &SQACK2).
+- Composed stems outside the pair tables: ^NUM00D..^NUM12D, ^CLOCK01..12,
+  ^CLCK01D..12D, ^MILE01..10/20/30, ^MIG17(S)/^MIG19(S)/^MIG21(S), ^AC<name>
+  (78 present), ^WAYPNT. All listed composed forms are present.
+
+### Archive census (local FA_2.LIB, listed with tore-extract --list)
+
+All 330 pair stems in 0x4fef10..0x4ff9e0 plus ^WAYPNT are present as .5K
+entries except `^FIRGUN` (0x4ff268, "I'm using my gun"). Unreferenced by any
+say routine in this build: 0x4ff2f8 ^OBJDEST, 0x4ff360..0x4ff378 ^SPLMIG1/2,
+0x4ff9b8..0x4ff9e0 second Fox/bombs group (no direct reference found).
+Comment-system consumers (other pass): 0x4ff5e0 at 0x48f053, 0x4ff658 at
+0x48f193, 0x4ff688 at 0x48f23e, 0x4ff690 at 0x48f35e, 0x4ff840 at 0x48f985.
+
+### Corrections to existing docs
+
+- ai.md B46 says the target reply is "Engaging". Only non-aircraft targets get
+  that fixed line; aircraft targets and attack-on-contact pick 1 of 9.
+- ai.md B47 "A launch by an aircraft on the same side sends a radio message but
+  no maneuver": the SAM/AAM radio send at 0x49e1d9..0x49e244 requires the
+  opposite nationality high bit. Recheck that sentence.
+- ejection.md "object classes 0x14/0x15": these are nationality codes 20/21,
+  North and South Vietnamese (table 0x4fb2b8 indexed by object +9 & 0x7f).
 
 ## Cockpit voice source notes
 

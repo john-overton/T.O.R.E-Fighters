@@ -34,8 +34,9 @@ confirms Shift+E, twice, on printed page 161.
   unknown. Next research: trace these producers, not just the scheduler.
 - Player ejection selects among speech pointers at 0x4ee388 via 0x414cf9.
   Entries include `^EJECT.5K` and `^EJECTNG.5K`. The selector 0x490f30 rewrites
-  ejection clips to `#EJECT.5K` for object classes 0x14/0x15; these class
-  identities remain unknown. This is not evidence that # means RIO.
+  ejection clips to `#EJECT.5K` for nationalities 0x14/0x15, North and South
+  Vietnamese (see [cockpit voice](../spec/cockpit-voice.md#the-second-voice-set)).
+  The `#` set is a second voice for those speakers, not the RIO.
 - Reviewed phrase/sample pairs at 0x4ff4a8 and 0x4ff4b8 identify `^EJECT` and
   `^PUNCH` as ejection announcements. Pair 0x4ff5b8 identifies `^OUTFUEL` as
   a fuel-empty ejection announcement. These pairs alone do not establish speakers.

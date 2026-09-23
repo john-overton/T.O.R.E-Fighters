@@ -2,7 +2,7 @@
 use crate::{Result, invalid, slice, u16_at, u32_at};
 use std::collections::BTreeMap;
 
-/// Every reviewed phrase/recording pointer pair, 0x4fef10..0x4ff8f0, in the
+/// Every reviewed phrase/recording pointer pair, 0x4fef10..0x4ff9e0, in the
 /// 1.02F build. One address per stem: where a stem appears in several pairs,
 /// the standalone phrase is kept over a sentence fragment. For the 1.0 disc
 /// build subtract [`crate::executable::Layout::radio_shift`], which
