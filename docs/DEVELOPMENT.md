@@ -476,6 +476,10 @@ set `$env:TORE_DATA_DIR` to the absolute `.local/dev-profile` path, and run the
 same Cargo commands. Remove the environment override after the session with
 `Remove-Item Env:TORE_DATA_DIR`; on Linux/macOS use `unset TORE_DATA_DIR`.
 
+## Graphics options
+
+Pref → Graphics... sets anti-aliasing, render scale, the spotting aid and terrain filtering; see [graphics options](spec/graphics-options.md). For one run, without saving, use `--anti-aliasing off|2x|4x|8x`, `--render-scale 75|100|125|150|200`, `--spotting-aid off|subtle|strong` and `--terrain-filtering on|off`; `--original-graphics` turns every addition off at 100%. Flags apply in order. Captures and smoke tests ignore the saved `graphics-v1.conf` and use the defaults plus any flags, so compare `--original-graphics` against no flag for matched before/after images.
+
 ## Flight performance
 
 Normal `cargo run --locked -p tore-app -- --free-flight` now optimizes the app crate at level 2, retaining debug symbols/assertions. Dependencies keep their existing debug settings; Cargo may still label the overall dev profile “unoptimized.” No release build is required to benefit. Simulation remains fixed at 120 Hz; presentation interpolates its last two poses and requests uncapped Immediate presentation, then Mailbox, with FIFO only as a supported-mode fallback and one requested queued frame. There is no additional 16 ms sleep in flight/viewer mode. The display/compositor can still limit presentation frequency.

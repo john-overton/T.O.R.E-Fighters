@@ -141,4 +141,14 @@ Passing our tests is not a claim of demonstrated retail parity.
 | Animated ocean ripples and reflections | ☐ | ☑ | Completed. Original water colors and textures are retained. | [Ocean](spec/ocean.md) |
 | Temperature-aware atmosphere and speed calculations | ☐ | ☑ | Partially implemented. Air-data calculations work; calibrated airspeed and pressure-based cockpit instruments remain. | [Air-data scope](FLIGHT-MODEL.md#independent-aircraft-models-and-future-gauges) |
 
+## Graphics
+
+| Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
+| --- | :---: | :---: | --- | --- |
+| Graphics options screen | ☐ | ☑ | Implemented. Pref → Graphics... on the main menu opens a screen in the controls-screen style with Apply, Defaults and Cancel; choices are saved in `graphics-v1.conf` and take effect at once. Requested by John on 2026-09-22; layout and wording are agent choices. Not reachable from the in-flight Escape menu. | [Graphics options](spec/graphics-options.md) |
+| Anti-aliasing | ☐ | ☑ | Implemented. Multisampled 3D view, 4x by default, 2x and 8x where the card supports them. Cutout edges are not smoothed. Requested by John on 2026-09-22. | [Anti-aliasing](spec/graphics-options.md#anti-aliasing) |
+| Render scale | ☐ | ☑ | Implemented. 75% to 200% of window pixels, resampled to the window. Requested by John on 2026-09-22. | [Render scale](spec/graphics-options.md#render-scale) |
+| Spotting aid for distant aircraft | ☐ | ☑ | Implemented. A pixel-sharp contrasting outline, or a small solid mark under 3 pixels, on other aircraft, hidden by terrain, cloud and heavy haze; Off, Subtle or Strong. Requested by John on 2026-09-22; constants are fitted. The background colour is estimated, and the mark-to-outline change can pop. | [Spotting aid](spec/graphics-options.md#spotting-aid) |
+| Terrain distance filtering | ☐ | ☑ | Implemented for terrain. Far ground no longer shimmers, keeping original palette colours. Airports, aircraft, ocean and sky decks are not filtered. Requested by John on 2026-09-22; method is an agent choice. | [Terrain filtering](spec/graphics-options.md#terrain-filtering) |
+
 [manual]: https://pdfcoffee.com/famanual-pdf-free.html
