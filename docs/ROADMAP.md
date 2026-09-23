@@ -868,6 +868,7 @@ Work:
 - Menus: modern layout option while keeping retail geometry available.
 - Rebaked maps and atmosphere: real-elevation terrain pipeline returns here as an optional theater source.
 - Cockpits and instruments: higher fidelity while keeping retail cockpit art selectable.
+- Ambient cockpit and instrument lighting (John, 2026-09-23, deferred): cockpit art, instrument frames and screens follow ambient light, darkening in low light and brightening when the sun is behind the pilot and falls into the cockpit. Today the frames only follow the palette shared with the cockpit art, and no night or weather shift has been observed.
 - Systems expansion: HARM and other rudimentary systems brought up to plausible depth, gameplay stats otherwise unchanged.
 - Lighting, shadows, particles, vegetation, and basic cities, all at a light flight-sim feel.
 
