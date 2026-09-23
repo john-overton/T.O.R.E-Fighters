@@ -1,6 +1,7 @@
 //! Small independent raster instruments. Layout fitted to supplied retail captures;
 //! data is live, unsupported native sensors/camera modes are explicit.
 mod envelope;
+pub mod front_view;
 use crate::{aircraft::Airframe, flight::State, menu::Sprite, scope};
 use tore_formats::font::Font;
 pub const WIDTH: usize = 160;
@@ -288,6 +289,11 @@ pub struct Instruments {
     pub target_preview: Option<u32>,
     pub camera_target: Option<u32>,
     pub cameras: std::collections::BTreeMap<u8, Vec<u8>>,
+    /// Flight data sampled with the requested and the shown forward-view frames.
+    pub front_pending: Option<front_view::Symbology>,
+    pub front_shown: Option<front_view::Symbology>,
+    /// The HUD's primary color, shared by the forward-view symbology.
+    pub hud_color: [u8; 3],
     pub rwr_range: usize,
     pub radar_range: usize,
     pub rcs_range: usize,
@@ -316,6 +322,9 @@ impl Default for Instruments {
             layout: Layout::Large,
             other_pages: vec![7, 5, 6, 4, 9, 8],
             cameras: Default::default(),
+            front_pending: None,
+            front_shown: None,
+            hud_color: [GREEN[0], GREEN[1], GREEN[2]],
             target_preview: None,
             camera_target: None,
             rwr_range: 4,
@@ -1165,6 +1174,12 @@ impl Instruments {
                         138,
                         114,
                     );
+                    if id == 2
+                        && !s.systems.has(31)
+                        && let Some(symbology) = &self.front_shown
+                    {
+                        front_view::draw(&mut r, f, symbology, self.hud_color);
+                    }
                 } else {
                     text(&mut r, "CAMERA LOADING", 30, 73);
                 }

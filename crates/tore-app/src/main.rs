@@ -2436,6 +2436,10 @@ impl ApplicationHandler for App {
                                         }
                                         self.instruments.camera_target = requested;
                                     }
+                                    if page == 2 {
+                                        self.instruments.front_shown =
+                                            self.instruments.front_pending.take();
+                                    }
                                     self.instruments.cameras.insert(page, pixels);
                                 }
                             }
@@ -2475,6 +2479,12 @@ impl ApplicationHandler for App {
                                     } else {
                                         self.hornet.panel_camera(&presented, page)
                                     };
+                                    let front = (page == 2).then(|| {
+                                        instruments::front_view::Symbology::new(
+                                            &presented,
+                                            self.world.air_data(&presented).ok().as_ref(),
+                                        )
+                                    });
                                     renderer
                                         .dummies(self.combat.dummy_geometry(&camera, &self.world));
                                     renderer.combat(&self.combat.vertices(
@@ -2495,6 +2505,9 @@ impl ApplicationHandler for App {
                                             .scene_pixels(&camera, &self.world, 138, 114, false)
                                             .map(|p| {
                                                 self.instruments.cameras.insert(page, p);
+                                                if page == 2 {
+                                                    self.instruments.front_shown = front;
+                                                }
                                                 if page == 4 {
                                                     self.instruments.camera_target = self
                                                         .combat
@@ -2508,6 +2521,9 @@ impl ApplicationHandler for App {
                                         renderer
                                             .request_preview(page, &camera, &self.world)
                                             .inspect(|submitted| {
+                                                if page == 2 && *submitted {
+                                                    self.instruments.front_pending = front;
+                                                }
                                                 if page == 4 && *submitted {
                                                     self.instruments.target_preview = self
                                                         .combat
@@ -2579,16 +2595,18 @@ impl ApplicationHandler for App {
                                 || self.flight_ui.menu
                                 || self.flight_ui.map.open,
                         );
+                        let cockpit_palette = self.hornet.cockpit_palette(
+                            &self.world,
+                            self.camera.position[1] as f64,
+                            self.flight_ui.brightness,
+                        );
+                        self.instruments.hud_color =
+                            cockpit_palette[usize::from(self.hornet.hud.primary_color)];
                         self.flight_canvas.begin(
                             renderer.flight_size(),
                             &self.hornet,
                             &presented,
                             &self.instruments,
-                        );
-                        let cockpit_palette = self.hornet.cockpit_palette(
-                            &self.world,
-                            self.camera.position[1] as f64,
-                            self.flight_ui.brightness,
                         );
                         self.menu.pixels.fill(0);
                         if self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4) {
