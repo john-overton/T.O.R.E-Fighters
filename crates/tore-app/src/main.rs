@@ -158,6 +158,8 @@ struct App {
     vapor: tore_sim::vapor::Vapor,
     turbulence: tore_sim::turbulence::Turbulence,
     turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng,
+    /// Player blackout and redout, stepped with the simulation.
+    g_effects: tore_sim::g_effects::GEffects,
     flight_view: u8,
     flight_canvas: flight_canvas::FlightCanvas,
     window_size: [u32; 2],
@@ -1433,6 +1435,7 @@ impl App {
                 }
                 self.reset_vapor();
                 self.previous_flight = self.flight.clone();
+                self.g_effects = Default::default();
                 self.flight_clock.remainder = 0.;
                 self.flight_view = 0;
                 let saved = preferences::Preferences::capture(
@@ -2286,6 +2289,12 @@ impl ApplicationHandler for App {
                                 &self.world,
                                 !self.flight_ui.cheats.no_turbulence,
                             );
+                            self.g_effects.step(
+                                self.flight.g,
+                                !self.flight_ui.cheats.no_g_effects
+                                    && !self.flight.crashed
+                                    && self.flight.native.is_none(),
+                            );
                             if let Some(points) = self.hornet.streamer_points(&self.flight) {
                                 self.vapor.step(self.world.weather.ticks(), points);
                             }
@@ -2494,6 +2503,20 @@ impl ApplicationHandler for App {
                             ),
                             matches!(self.flight_view, 1 | 2),
                         );
+                        if !self.flight_ui.cheats.no_screen_shake
+                            && !presented.crashed
+                            && !matches!(self.flight_view, 1 | 2)
+                        {
+                            let seconds =
+                                self.flight.ticks as f64 * flight::DT + self.flight_clock.remainder;
+                            let [yaw, pitch] = tore_sim::g_effects::shake(presented.g, seconds);
+                            look::apply(
+                                &mut self.camera,
+                                presented.position.map(|v| v as f32),
+                                [yaw as f32, pitch as f32],
+                                false,
+                            );
+                        }
                         self.camera.zoom = self.flight_ui.zoom;
                         // One resolved instant per frame, shared by the main view,
                         // the mirrors and the camera panels.
@@ -2776,6 +2799,16 @@ impl ApplicationHandler for App {
                             self.flight_canvas.weapon_debug(&self.menu.pixels);
                         }
                         self.menu.pixels.fill(0);
+                        use tore_sim::g_effects::GEffects;
+                        for (color, level) in [
+                            ([150, 0, 0], self.g_effects.redout),
+                            ([0, 0, 0], self.g_effects.blackout),
+                        ] {
+                            if level > 0. {
+                                self.flight_canvas
+                                    .veil(color, |radius| GEffects::coverage(level, radius));
+                            }
+                        }
                         if self.flight_ui.map.open {
                             self.flight_ui.map.draw(
                                 &mut self.menu.pixels,
@@ -5560,6 +5593,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         vapor: probe_vapor,
         turbulence: probe_turbulence,
         turbulence_rng: probe_turbulence_rng,
+        g_effects: Default::default(),
         flight_view,
         flight_canvas: Default::default(),
         window_size,

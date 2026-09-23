@@ -8,6 +8,7 @@ pub mod cheats;
 pub mod combat;
 pub mod environment;
 pub mod flight;
+pub mod g_effects;
 pub mod models;
 pub mod research;
 pub mod runway_wind;

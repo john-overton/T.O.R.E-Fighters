@@ -115,13 +115,18 @@ it red (redout). **Proposed numbers:**
 | Redout onset | sustained below -2 G |
 | Full redout | about 3 s at -3.5 G |
 | Recovery | vision returns over about 3 s once G is back inside the limits |
+| Onset speed | proportional to G beyond the onset; above 9 G it is faster |
+| Appearance | the edges darken first, like tunnel vision, then the whole view; redout is a deep red |
+| Views | every flight view; the map and menus stay readable |
 | Controls | still respond; only vision is affected (John, 2026-09-23) |
 
 ### High-G screen shake
 
 The view shakes naturally under stress, starting at 6 G and growing stronger
 with G. **Proposed:** none below 6 G, rising smoothly to full strength at 9 G,
-about 4 pixels at 640 by 480, at a rapid, irregular rate (about 12 to 18 Hz).
+about 4 pixels at 640 by 480 in the default view, at a rapid, irregular rate
+(about 12 to 18 Hz). It shakes the cockpit and outside views, not the external
+camera views.
 
 ### Missile hit jolt
 

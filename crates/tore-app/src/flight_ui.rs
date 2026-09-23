@@ -99,6 +99,8 @@ fn cheat_switch<'a>(cheats: &'a mut tore_sim::cheats::Cheats, label: &str) -> Op
         "Pull extra G?" => &mut cheats.extra_g,
         "Ignore weapon weights?" => &mut cheats.ignore_weapon_weights,
         "No sun whiteout?" => &mut cheats.no_sun_whiteout,
+        "No redout or blackout?" => &mut cheats.no_g_effects,
+        "No screen-shaking?" => &mut cheats.no_screen_shake,
         _ => return None,
     })
 }
@@ -943,6 +945,8 @@ mod tests {
             "No spins?",
             "Pull extra G?",
             "Ignore weapon weights?",
+            "No redout or blackout?",
+            "No screen-shaking?",
         ] {
             assert_eq!(ui.cheat_state(label), Some("Off"));
             assert_eq!(ui.activate(label, ""), Command::Click);

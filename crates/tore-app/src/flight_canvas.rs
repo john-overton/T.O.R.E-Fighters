@@ -64,6 +64,28 @@ impl FlightCanvas {
             self.panels.insert(*page, cached);
         }
     }
+    /// Blend `color` over the whole flight view, `coverage(radius)` per pixel
+    /// with radius 0 at the centre and 1 at the corners.
+    pub fn veil(&mut self, color: [u8; 3], coverage: impl Fn(f64) -> f64) {
+        let [w, h] = self.size.map(f64::from);
+        let (cx, cy) = (w / 2., h / 2.);
+        let corner = cx.hypot(cy).max(1.);
+        for (i, p) in self.pixels.chunks_exact_mut(4).enumerate() {
+            let x = (i % self.size[0] as usize) as f64 + 0.5;
+            let y = (i / self.size[0] as usize) as f64 + 0.5;
+            let a = coverage((x - cx).hypot(y - cy) / corner);
+            if a <= 0. {
+                continue;
+            }
+            // Straight-alpha "over", so the result still blends onto the world.
+            let under = f64::from(p[3]) / 255. * (1. - a);
+            let out = a + under;
+            for c in 0..3 {
+                p[c] = ((f64::from(color[c]) * a + f64::from(p[c]) * under) / out).round() as u8;
+            }
+            p[3] = (out * 255.).round() as u8;
+        }
+    }
     pub fn weapon_debug(&mut self, pixels: &[u8]) {
         let mut rgba = Vec::with_capacity(250 * 96 * 4);
         for y in 0..96 {
@@ -192,6 +214,22 @@ impl FlightCanvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn veil_darkens_the_world_and_instruments_edges_first() {
+        let mut canvas = FlightCanvas {
+            size: [4, 2],
+            pixels: vec![0; 4 * 2 * 4],
+            ..Default::default()
+        };
+        // An opaque white instrument pixel in the top-left corner.
+        canvas.pixels[..4].copy_from_slice(&[255; 4]);
+        canvas.veil([0, 0, 0], |radius| if radius > 0.5 { 0.5 } else { 0. });
+        assert_eq!(&canvas.pixels[..4], &[128, 128, 128, 255]);
+        // An empty corner now darkens the world under it.
+        assert_eq!(&canvas.pixels[12..16], &[0, 0, 0, 128]);
+        // The centre is untouched.
+        assert_eq!(&canvas.pixels[4..8], &[0; 4]);
+    }
     #[test]
     fn transparent_filtering_keeps_color_without_dark_halos() {
         let mut canvas = FlightCanvas {

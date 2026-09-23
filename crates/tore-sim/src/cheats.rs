@@ -15,4 +15,6 @@ pub struct Cheats {
     pub extra_g: bool,
     pub ignore_weapon_weights: bool,
     pub no_sun_whiteout: bool,
+    pub no_g_effects: bool,
+    pub no_screen_shake: bool,
 }

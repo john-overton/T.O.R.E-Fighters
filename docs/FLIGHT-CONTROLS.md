@@ -330,6 +330,8 @@ are not saved to disk. Behaviour: [cheats specification](spec/cheats.md).
 | No spins? | No spin entry; a spin in progress damps out as a stall. |
 | Pull extra G? | The player can pull 9 G whatever the aircraft's limit and load. Near stall the low-speed ceiling still ramps up to 9 G. |
 | Ignore weapon weights? | Stores add no weight and no loading drag; fuel left in external tanks still counts. |
+| No redout or blackout? | Turns off the G effects: above 6 G the view blacks out from the edges inward, fully in about 5 s at 9 G; below -2 G it reds out, fully in about 3 s at -3.5 G. Vision clears in about 3 s and the controls keep working. |
+| No screen-shaking? | Turns off the view shake that starts at 6 G and reaches about 4 pixels at 9 G in the cockpit views. |
 | No turbulence?, No sun whiteout? | Described below. |
 
 Flight cheats apply to the default and legacy flight models; the native research
