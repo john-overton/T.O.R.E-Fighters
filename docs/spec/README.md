@@ -66,5 +66,7 @@ rules and the Quick Mission outcome. [Ejection](ejection.md) specifies player co
 fitted AI recovery assessment, including the requested safety and chance rules.
 [Flight music](flight-music.md) specifies which recorded score plays during
 flight, its rank and when a change is immediate or waits for a phrase boundary.
+[Cockpit voice](cockpit-voice.md) specifies the player's crew remarks: dogfight
+coaching, G sounds, fuel calls and missile warnings, and who is labelled speaking.
 Supporting research lives in [`../formats/`](../formats/), measured evidence in
 [`../baselines/`](../baselines/), and frozen archives in [`../research/`](../research/).
