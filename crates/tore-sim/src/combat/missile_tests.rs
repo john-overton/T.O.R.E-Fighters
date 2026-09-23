@@ -622,7 +622,9 @@ fn automatic_bore_release_and_radar_search_start_without_designation() {
         s.step(false, l, |_, _| 0.);
     }
     assert_eq!(s.mounted.target, Some(8));
-    assert!(s.seeker_tone(l).is_some(), "tracking the hotter return");
+    // This off-axis fixture acquires heat but cannot produce a launch/HUD solution.
+    assert!(s.weapon_observation(l).is_none());
+    assert!(s.seeker_tone(l).is_none());
     s.targets[1].position = [5000., 1000., 5000.];
     s.targets[0].position = [-5000., 1000., 5000.];
     s.step(false, l, |_, _| 0.);
@@ -975,6 +977,101 @@ fn passive_channel_is_not_the_radar_power_switch() {
 }
 
 #[test]
+fn ir_bore_audio_uses_candidate_percentage_and_same_target_lock_without_designation() {
+    let mut s = fixture(true);
+    s.config.stations[0].weapon = weapon("AIM9M.JT");
+    s.config.stations[0].weapon.flags |= 0x10000;
+    s.targets.push(target(7, [0., 1000., 1000.], 200, 0x80));
+    let mut l = range_launcher();
+    l.radar_power = false;
+    l.radar = false;
+    let mut empty = s.clone();
+    empty.targets.clear();
+    empty.step(false, l, |_, _| 0.);
+    assert!(empty.seeker_tone(l).is_none());
+    let mut weak = s.clone();
+    weak.targets[0].signature.infrared = 10.;
+    weak.step(false, l, |_, _| 0.);
+    assert!(weak.bore_observation.is_some());
+    assert!(weak.mounted.observation.is_none());
+    assert!(weak.seeker_tone(l).is_none());
+    s.step(false, l, |_, _| 0.);
+    assert_eq!(s.launch_mode, LaunchMode::Boresight);
+    assert_eq!(s.designated(), None);
+    assert_eq!(s.weapon_observation(l).unwrap().id, 7);
+    let percent = s.estimated_hit_percent(l);
+    assert!(percent > 0);
+    let tracking = s.seeker_tone(l).unwrap();
+    assert!(!tracking.locked && !tracking.radar && !tracking.ground);
+    assert_eq!(tracking.strength, SeekerTone::ir_strength(percent, false));
+    for _ in 1..DWELL {
+        s.step(false, l, |_, _| 0.);
+    }
+    let locked = s.seeker_tone(l).unwrap();
+    assert!(locked.locked);
+    assert_eq!(s.estimated_hit_percent(l), percent);
+    assert_eq!(locked.strength, 2. * tracking.strength);
+
+    // A changed percentage on the same target changes volume immediately.
+    s.targets[0].signature.infrared = 35.;
+    s.step(false, l, |_, _| 0.);
+    let lower = s.seeker_tone(l).unwrap();
+    assert!(lower.locked);
+    assert!(s.estimated_hit_percent(l) < percent);
+    assert_eq!(
+        lower.strength,
+        SeekerTone::ir_strength(s.estimated_hit_percent(l), true)
+    );
+    assert!(lower.strength < locked.strength);
+
+    let mut hot = target(8, [0., 1000., 1500.], 200, 0x80);
+    hot.signature.infrared = 200.;
+    s.targets.push(hot);
+    s.step(false, l, |_, _| 0.);
+    assert_eq!(s.weapon_observation(l).unwrap().id, 8);
+    let switched = s.seeker_tone(l).unwrap();
+    assert!(!switched.locked);
+    assert_eq!(
+        switched.strength,
+        SeekerTone::ir_strength(s.estimated_hit_percent(l), false)
+    );
+    // Even a stale lock on the other identity cannot elevate this candidate.
+    s.mounted.target = Some(7);
+    s.mounted.status = Status::Locked;
+    assert!(!s.seeker_tone(l).unwrap().locked);
+    for _ in 0..DWELL {
+        s.step(false, l, |_, _| 0.);
+    }
+    assert!(s.seeker_tone(l).unwrap().locked);
+    assert_eq!(s.designated(), None);
+
+    for gate in 0..5 {
+        let mut gated = s.clone();
+        let mut launcher = l;
+        match gate {
+            0 => gated.armed = false,
+            1 => gated.ammo[0] = 0,
+            2 => gated.ammo[0] |= 0x8000,
+            3 => gated.player_hp = 0,
+            _ => launcher.alive = false,
+        }
+        assert!(gated.seeker_tone(launcher).is_none());
+    }
+    let mut released = s.clone();
+    assert!(released.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
+    assert!(released.seeker_tone(l).is_none());
+    let mut masked = s.clone();
+    masked.step(false, l, |_, _| 2000.);
+    assert!(masked.seeker_tone(l).is_none());
+    for target in &mut s.targets {
+        target.position[0] = 5000.;
+    }
+    s.step(false, l, |_, _| 0.);
+    assert!(s.weapon_observation(l).is_none());
+    assert!(s.seeker_tone(l).is_none());
+}
+
+#[test]
 fn armed_ir_bore_ignores_radar_power_without_designation() {
     let mut s = fixture(true);
     s.config.stations[0].weapon = weapon("AIM9M.JT");
@@ -991,8 +1088,10 @@ fn armed_ir_bore_ignores_radar_power_without_designation() {
     }
     assert_eq!(s.launch_mode, LaunchMode::Boresight);
     assert_eq!(s.mounted.target, Some(7));
-    // Tracking in boresight sounds the tone.
-    assert!(s.seeker_tone(l).is_some());
+    assert!(
+        s.seeker_tone(l)
+            .is_some_and(|tone| tone.locked && !tone.radar)
+    );
     assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
     assert!(!s.projectiles[0].guidance.as_ref().unwrap().unguided);
     assert_eq!(s.projectiles[0].target, Some(7));

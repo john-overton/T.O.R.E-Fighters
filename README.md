@@ -181,6 +181,7 @@ Generated retail-derived files stay local; only tools and specifications ship he
 
 ## Project guide
 
+- [Contributions](CONTRIBUTIONS.md): how to help through GitHub Issues and Discussions, and the current pull request policy.
 - [Roadmap](docs/ROADMAP.md): milestones and what 1:1 means.
 - [Parity plan](docs/parity-plan.md): what is built, what is specified, what is next.
 - [Feature matrix](docs/features.md): grouped features, manual/addition checkboxes and implementation status.

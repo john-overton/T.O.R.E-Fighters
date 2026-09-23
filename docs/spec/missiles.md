@@ -363,23 +363,21 @@ scores 0.8, while its head-on score is 0.2 and cannot acquire at that distance.
 Afterburner raises the same head-on score to 0.3, allowing acquisition after dwell
 if the weapon's aspect eligibility permits it. A masked target scores zero.
 
-For selected, armed IR or radar missiles, the cue plays only while the seeker is
-actively tracking a return; with nothing in the seeker it is silent (John,
-2026-09-23). While a candidate is observed, use `15% + 55% * quality`; after
-lock use `40% + 60% * quality`, with tone quality clamped to 0..1. A radar
-missile in boresight plays its lock cue at `40% + 60% * quality` on its bore
-return, with or without a designated target. Any radar missile falls silent
-while its tracked target is inside the weapon's minimum range.
-Selection scores remain unclamped so stronger returns stay distinguishable. Fade amplitude over
-0.1 seconds. Playback uses user-imported `&IRTRY.5K` / `&IRLOCK.5K` and
-`&RDRTRY.5K` / `&RDRLOCK.5K` for search / lock respectively. The louder lock cue
-replaces the search cue. This sample assignment and looping are **agent-fitted**:
-resource existence and manual tone descriptions do not establish original
-playback rules. A2G IR currently shares the IR pair; its original distinct tone
-is unresolved. If samples are unavailable, the existing fitted oscillator is
-retained as a fallback. Safe, empty, failed stations, death, effects mute and
-pause suppress the cue. Default seeker volume is 0.30, doubled for radar and IR search/lock cues at John's request on 2026-09-17.
-[Sample evidence and validation](../baselines/hud-cleanup.md).
+Selected armed missiles produce local seeker audio. IR growl now follows the
+same fitted percentage displayed on the HUD, with quieter tracking and louder
+lock. The recovered original air-to-air recording is `&IR1.11K` for both
+states. Surface IR uses the original radar-named search/lock pair without a
+radar power requirement. Radar gain retains the original implementation's
+quality curve. The [sound specification](sound.md) owns the recording evidence;
+the [audio guide](../audio.md#seeker-growl) owns gain, fade and mute rules.
+Default maximum remains 0.30. The earlier IRTRY/IRLOCK assignment was fitted
+and is superseded by the reviewed executable mapping.
+
+Every seeker cue plays only while the seeker is actively tracking a return;
+with nothing in the seeker it is silent. A radar missile in boresight plays
+its lock cue at `40% + 60% * quality` on its bore return, with or without a
+designated target. Any radar missile falls silent while its tracked target is
+inside the weapon's minimum range. John, 2026-09-23.
 
 
 Only the selected mounted seeker produces this tone. Silence it on safe, empty,
@@ -758,7 +756,7 @@ and lower bounds of that interval, with no connecting outline. Keep the target t
 observation, SAFE, radar-off radar release or impossible prediction produces no
 band. The band does not change missile physics or firing permission.
 
-[Weapon/NAV selection and no-designation bore silence](weapon-navigation-selection.md)
+[Weapon/NAV selection and bore-audio availability](weapon-navigation-selection.md)
 apply to the player controls and mounted seeker audio.
 
 ## Actor-owned launch integration

@@ -1,7 +1,8 @@
-//! Small PCM mixer: original samples, linear resampling and a fitted seeker cue.
+//! Original PCM, local avionics and physically delayed spatial effects.
 use crate::{AppResult, menu::Action};
 pub mod music;
 mod seeker;
+mod spatial;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -26,6 +27,7 @@ struct RadioVoice {
     voice: Voice,
 }
 struct Mixer {
+    spatial: spatial::Scene,
     seeker: seeker::Tone,
     seeker_voice: Option<Voice>,
     seeker_cue: Option<&'static str>,
@@ -51,6 +53,44 @@ pub struct Audio {
     mixer: Arc<Mutex<Mixer>>,
     clips: BTreeMap<String, Arc<Clip>>,
     radio_phrases: BTreeMap<String, String>,
+}
+/// Presentation-only observations. No aircraft or missile control is changed.
+pub fn spatial_sources(
+    combat: &tore_sim::combat::live::State,
+    player: &crate::flight::State,
+) -> Vec<tore_sim::acoustics::Source> {
+    use tore_sim::acoustics::{Source, SourceId};
+    let mut sources = vec![Source {
+        id: SourceId::Aircraft(0),
+        position: player.position,
+        velocity: player.velocity,
+    }];
+    sources.extend(
+        combat
+            .targets
+            .iter()
+            .filter(|t| t.airborne)
+            .map(|t| Source {
+                id: SourceId::Aircraft(t.id),
+                position: t.position,
+                velocity: t.velocity,
+            }),
+    );
+    sources.extend(
+        combat
+            .projectiles
+            .iter()
+            .filter(|p| {
+                tore_sim::combat::missiles::Profile::for_weapon(p.weapon(combat.configuration()))
+                    .is_some()
+            })
+            .map(|p| Source {
+                id: SourceId::Missile(p.id),
+                position: p.position,
+                velocity: std::array::from_fn(|i| (p.position[i] - p.previous[i]) * 120.),
+            }),
+    );
+    sources
 }
 fn cue(action: Action) -> Option<&'static str> {
     match action {
@@ -129,6 +169,7 @@ impl Audio {
             return Err("TORE_SEEKER_VOLUME requires 0..1".into());
         }
         let mixer = Arc::new(Mutex::new(Mixer {
+            spatial: spatial::Scene::default(),
             seeker: seeker::Tone::default(),
             seeker_voice: None,
             seeker_cue: None,
@@ -228,43 +269,43 @@ impl Audio {
     }
 
     pub fn seeker(&self, state: Option<tore_sim::combat::live::SeekerTone>) {
-        if let Ok(mut m) = self.mixer.lock() {
-            m.seeker.target = state.map_or(0., |cue| cue.strength.clamp(0., 1.)) * m.seeker_volume;
-            m.seeker.ground = state.is_some_and(|cue| cue.ground);
-            m.seeker.radar = state.is_some_and(|cue| cue.radar);
-            m.seeker.locked = state.is_some_and(|cue| cue.locked);
-            if let Some(state) = state {
-                let cue = match (state.radar, state.locked) {
-                    (false, false) => "&IRTRY.5K",
-                    (false, true) => "&IRLOCK.5K",
-                    (true, false) => "&RDRTRY.5K",
-                    (true, true) => "&RDRLOCK.5K",
-                };
-                if m.seeker_cue != Some(cue) {
-                    m.seeker_cue = Some(cue);
-                    m.seeker_voice = self.clips.get(cue).map(|clip| Voice {
-                        clip: clip.clone(),
-                        position: 0.,
-                    });
-                }
-            }
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.set_seeker(&self.clips, state);
         }
     }
-    pub fn combat(&self, names: &[&str]) {
-        if let Ok(mut mixer) = self.mixer.lock()
-            && mixer.effects_on
-            && !mixer.flight_paused
-        {
-            for name in names {
-                if mixer.voices.len() < 8
-                    && let Some(clip) = self.clips.get(*name)
-                {
-                    mixer.voices.push(Voice {
-                        clip: clip.clone(),
-                        position: 0.,
-                    });
+    /// Exactly one simulation tick, independent of rendering and the device clock.
+    pub fn spatial_tick(
+        &self,
+        listener: tore_sim::acoustics::Listener,
+        sources: &[tore_sim::acoustics::Source],
+        emissions: &[tore_sim::acoustics::Emission],
+        releases: &[&str],
+        player_position: [f64; 3],
+    ) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            if mixer.flight_paused {
+                return;
+            }
+            let enabled = mixer.effects_on;
+            if enabled {
+                for name in releases {
+                    if let Some(clip) = self.clips.get(*name) {
+                        if listener.external {
+                            mixer
+                                .spatial
+                                .weapon(clip.clone(), player_position, listener);
+                        } else if mixer.voices.len() < 8 {
+                            mixer.voices.push(Voice {
+                                clip: clip.clone(),
+                                position: 0.,
+                            });
+                        }
+                    }
                 }
             }
+            mixer
+                .spatial
+                .tick(&self.clips, listener, sources, emissions, enabled);
         }
     }
     pub fn controls(&self, before: &crate::flight::State, after: &crate::flight::State) {
@@ -293,6 +334,10 @@ impl Audio {
         if let Ok(mut m) = self.mixer.lock() {
             m.music.scene(music::Scene::Score(0));
             m.music.restart();
+            m.spatial.clear();
+            m.seeker = seeker::Tone::default();
+            m.seeker_voice = None;
+            m.seeker_cue = None;
             m.stall = None;
             m.stall_cue = None;
             m.engine = None;
@@ -319,6 +364,7 @@ impl Audio {
     ) {
         if let Ok(mut m) = self.mixer.lock() {
             if state.is_none() && m.flight_on {
+                m.spatial.clear();
                 m.seeker = seeker::Tone::default();
                 m.seeker_voice = None;
                 m.seeker_cue = None;
@@ -408,6 +454,7 @@ impl Audio {
             mixer.music_on = music;
             mixer.effects_on = effects;
             if !effects {
+                mixer.spatial.clear();
                 mixer.voices.clear();
                 mixer.radio.clear();
                 mixer.ui_voices.clear();
@@ -425,6 +472,7 @@ impl Audio {
             Action::Effects(enabled) => {
                 mixer.effects_on = enabled;
                 if !enabled {
+                    mixer.spatial.clear();
                     mixer.ui_voices.clear();
                     mixer.voices.clear();
                     mixer.radio.clear();
@@ -435,6 +483,33 @@ impl Audio {
         let name = cue(action);
         if let Some(clip) = name.and_then(|n| self.clips.get(n)) {
             mixer.play_ui(clip, action == Action::OrdnanceFuel);
+        }
+    }
+}
+impl Mixer {
+    fn set_seeker(
+        &mut self,
+        clips: &BTreeMap<String, Arc<Clip>>,
+        state: Option<tore_sim::combat::live::SeekerTone>,
+    ) {
+        self.seeker.target =
+            state.map_or(0., |cue| cue.strength.clamp(0., 1.)) * self.seeker_volume;
+        self.seeker.ground = state.is_some_and(|cue| cue.ground);
+        self.seeker.radar = state.is_some_and(|cue| cue.radar);
+        self.seeker.locked = state.is_some_and(|cue| cue.locked);
+        if let Some(state) = state {
+            let cue = match (state.radar || state.ground, state.locked) {
+                (false, _) => "&IR1.11K",
+                (true, false) => "&RDRTRY.5K",
+                (true, true) => "&RDRLOCK.5K",
+            };
+            if self.seeker_cue != Some(cue) {
+                self.seeker_cue = Some(cue);
+                self.seeker_voice = clips.get(cue).map(|clip| Voice {
+                    clip: clip.clone(),
+                    position: 0.,
+                });
+            }
         }
     }
 }
@@ -543,6 +618,15 @@ impl Mixer {
     fn cancel_radio(&mut self, source: RadioSource) {
         self.radio.retain(|voice| voice.source != source);
     }
+    fn frame(&mut self, rate: f64) -> [f32; 2] {
+        let local = self.sample(rate);
+        let spatial = if self.effects_on && self.flight_on && !self.flight_paused {
+            self.spatial.sample(rate)
+        } else {
+            [0.; 2]
+        };
+        spatial.map(|v| (local + v).clamp(-1., 1.))
+    }
     fn sample(&mut self, rate: f64) -> f32 {
         let mut value = self.seeker.sample(
             rate,
@@ -602,7 +686,12 @@ fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
                 return;
             };
             for frame in output.chunks_mut(channels) {
-                frame.fill(T::from_sample(mixer.sample(rate)));
+                let stereo = mixer.frame(rate);
+                frame.fill(T::from_sample((stereo[0] + stereo[1]) * 0.5));
+                if frame.len() >= 2 {
+                    frame[0] = T::from_sample(stereo[0]);
+                    frame[1] = T::from_sample(stereo[1]);
+                }
             }
             mixer.voices.retain(|v| !v.finished());
             mixer.ui_voices.retain(|v| !v.finished());
@@ -614,8 +703,114 @@ fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn spatial_mixer_pause_preserves_pcm_without_catch_up() {
+        use tore_sim::acoustics::{Emission, Kind, Listener};
+        let clips = BTreeMap::from([(
+            "&EXPL12.5K".into(),
+            Arc::new(Clip {
+                samples: vec![192; 8000],
+                rate: 8000.,
+            }),
+        )]);
+        let mut paused = test_mixer();
+        let mut reference = test_mixer();
+        for m in [&mut paused, &mut reference] {
+            m.stall = None;
+            m.spatial.tick(
+                &clips,
+                Listener {
+                    position: [0.; 3],
+                    right: [1., 0., 0.],
+                    view: 0,
+                    external: false,
+                },
+                &[],
+                &[Emission {
+                    kind: Kind::Explosion,
+                    position: [1., 0., 0.],
+                    arrived: false,
+                }],
+                true,
+            );
+        }
+        for _ in 0..80 {
+            assert_eq!(paused.frame(8000.), reference.frame(8000.));
+        }
+        paused.flight_paused = true;
+        for _ in 0..8000 {
+            assert_eq!(paused.frame(8000.), [0.; 2]);
+        }
+        paused.flight_paused = false;
+        for _ in 0..80 {
+            assert_eq!(paused.frame(8000.), reference.frame(8000.));
+        }
+    }
+    #[test]
+    fn ir_recording_keeps_playhead_on_lock_and_volume_tracks_hud_percent() {
+        use tore_sim::combat::live::SeekerTone;
+        let clips = ["&IR1.11K", "&RDRTRY.5K", "&RDRLOCK.5K"]
+            .into_iter()
+            .map(|name| {
+                (
+                    name.to_string(),
+                    Arc::new(Clip {
+                        samples: vec![192; 8000],
+                        rate: 8000.,
+                    }),
+                )
+            })
+            .collect();
+        let mut m = test_mixer();
+        m.stall = None;
+        for (percent, expected) in [(0, 0.075), (50, 0.2875), (100, 0.5)] {
+            let state = SeekerTone {
+                strength: SeekerTone::ir_strength(percent, false),
+                ground: false,
+                radar: false,
+                locked: false,
+            };
+            assert!((state.strength - expected).abs() < 1e-9);
+            m.set_seeker(&clips, Some(state));
+            assert_eq!(m.seeker_cue, Some("&IR1.11K"));
+            for _ in 0..800 {
+                m.sample(8000.);
+            }
+            assert!((m.seeker.gain - expected * 0.30).abs() < 1e-9);
+            let position = m.seeker_voice.as_ref().unwrap().position;
+            m.set_seeker(
+                &clips,
+                Some(SeekerTone {
+                    strength: SeekerTone::ir_strength(percent, true),
+                    locked: true,
+                    ..state
+                }),
+            );
+            assert_eq!(m.seeker_voice.as_ref().unwrap().position, position);
+            for _ in 0..800 {
+                m.sample(8000.);
+            }
+            assert!((m.seeker.gain - expected * 2. * 0.30).abs() < 1e-9);
+        }
+        m.set_seeker(
+            &clips,
+            Some(SeekerTone {
+                strength: 1.,
+                ground: true,
+                radar: false,
+                locked: true,
+            }),
+        );
+        assert_eq!(m.seeker_cue, Some("&RDRLOCK.5K"));
+        m.set_seeker(&clips, None);
+        for _ in 0..800 {
+            m.sample(8000.);
+        }
+        assert_eq!(m.seeker.gain, 0.);
+    }
     fn test_mixer() -> Mixer {
         Mixer {
+            spatial: spatial::Scene::default(),
             seeker: seeker::Tone::default(),
             seeker_voice: None,
             seeker_cue: None,

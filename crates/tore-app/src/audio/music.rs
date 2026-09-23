@@ -221,6 +221,7 @@ mod tests {
     #[test]
     fn mixer_pause_mute_and_effects_are_independent() {
         let mut mixer = super::super::Mixer {
+            spatial: Default::default(),
             seeker: Default::default(),
             seeker_voice: None,
             seeker_cue: None,

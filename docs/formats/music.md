@@ -136,7 +136,8 @@ audio samples and is not sped up by flight time scaling.
 
 Mute and flight pause retain playheads, with no hidden catch-up. UI clicks have a
 separate bounded voice pool and remain audible while the flight menu is paused.
-Each effects pool permits eight voices. Ordinary playback resolves clips before
+Local effects pools permit eight voices each; [spatial effects](../audio.md) have
+a separate sixteen-voice limit. Ordinary playback resolves clips before
 opening the audio device and does not allocate clips, read files or run a synth
 in its callback. Missing selected phrases and exhausted score budgets stop that
 music context; diagnostics are emitted outside the callback.

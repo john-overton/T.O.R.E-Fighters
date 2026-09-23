@@ -679,6 +679,12 @@ pub struct SeekerTone {
     pub radar: bool,
     pub locked: bool,
 }
+impl SeekerTone {
+    /// Fitted HUD-percentage curve with the recovered half-volume search rule.
+    pub fn ir_strength(percent: u8, locked: bool) -> f64 {
+        (0.15 + 0.85 * f64::from(percent.min(100)) / 100.) * if locked { 1. } else { 0.5 }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 struct RangeEstimate {
@@ -717,6 +723,9 @@ pub struct State {
     /// Ground contact volumes keyed by stable target ID. Aircraft remain spheres.
     ground_bounds: BTreeMap<u32, crate::airport::OrientedBox>,
     pub effects: Vec<Effect>,
+    /// Presentation events retain emission positions independently of visual life.
+    /// Bounded even when a headless host never drains them.
+    sound_events: Vec<crate::acoustics::Emission>,
     pub smoke: super::smoke::Smoke,
     pub debris: Vec<super::debris::Piece>,
     player_fragment_released: bool,
@@ -853,6 +862,7 @@ impl State {
             missile_threats: super::threats::ThreatService::new(PLAYER_OWNER),
             ground_bounds: BTreeMap::new(),
             effects: vec![],
+            sound_events: vec![],
             smoke: super::smoke::Smoke::default(),
             debris: Vec::new(),
             player_fragment_released: false,
@@ -1667,9 +1677,7 @@ impl State {
     /// silence with nothing in it (John, 2026-09-23).
     pub fn seeker_tone(&self, launcher: Launcher) -> Option<SeekerTone> {
         let w = &self.config.stations[self.selected].weapon;
-        let radar = missiles::Profile::for_weapon(w)
-            .is_some_and(|p| matches!(p.guidance, Guidance::Active | Guidance::Supported));
-        let bore = self.launch_mode == LaunchMode::Boresight;
+        let profile = missiles::Profile::for_weapon(w)?;
         if self.weapon_rules != Rules::Spec
             || !self.guidance_available(launcher)
             || !self.armed
@@ -1677,35 +1685,53 @@ impl State {
             || self.player_hp <= 0
             || self.rounds(self.selected) == 0
             || self.ammo[self.selected] & 0x8000 != 0
-            || missiles::Profile::for_weapon(w).is_none_or(|p| p.guidance == Guidance::Emitter)
+            || profile.guidance == Guidance::Emitter
         {
             return None;
         }
-        // An active-radar missile's boresight return is its track; every other
-        // seeker tracks through the mounted seeker.
-        let tracked = if radar && bore {
-            self.bore_observation
-        } else {
-            self.mounted.observation
-        }?;
+        let radar = matches!(profile.guidance, Guidance::Active | Guidance::Supported);
         // A radar missile goes quiet with its target inside minimum range.
         let minimum = f64::from(w.seeker.zones[1].minimum_range.max(0));
-        if radar && missiles::length(sub(tracked.position, launcher.position)) < minimum {
-            return None;
-        }
-        if radar && bore {
+        let too_close = |o: seeker::Observation| {
+            radar && missiles::length(sub(o.position, launcher.position)) < minimum
+        };
+        // A radar missile in boresight sounds its lock tone on the bore return,
+        // with or without a designated target (John, 2026-09-23).
+        if radar && self.launch_mode == LaunchMode::Boresight {
+            let o = self.bore_observation.filter(|o| !too_close(*o))?;
             return Some(SeekerTone {
-                strength: 0.4 + 0.6 * tracked.quality.clamp(0., 1.),
+                strength: 0.4 + 0.6 * o.quality.clamp(0., 1.),
                 ground: false,
                 radar,
                 locked: true,
             });
         }
+        let bore_ir = if self.launch_mode == LaunchMode::Boresight {
+            // Use the HUD's eligible return, never a stale or hidden target.
+            let observed = self.weapon_observation(launcher)?;
+            let tracked = self.mounted.observation?;
+            if tracked.id != observed.id {
+                return None;
+            }
+            Some(observed)
+        } else {
+            None
+        };
+        // Otherwise sound only while the mounted seeker is tracking.
+        if self.mounted.observation.is_none_or(too_close) {
+            return None;
+        }
+        let locked = matches!(self.mounted.status, Status::Locked | Status::Pitbull)
+            && bore_ir.is_none_or(|o| self.mounted.target == Some(o.id));
         Some(SeekerTone {
-            strength: self.mounted.tone(),
-            ground: w.source == "AGM65G.JT",
+            strength: if radar {
+                self.mounted.tone()
+            } else {
+                SeekerTone::ir_strength(self.estimated_hit_percent(launcher), locked)
+            },
+            ground: !radar && w.flags & 0x10000 == 0,
             radar,
-            locked: matches!(self.mounted.status, Status::Locked | Status::Pitbull),
+            locked,
         })
     }
     /// Current observation used by the display, separate from launch authority.
@@ -1830,7 +1856,30 @@ impl State {
         )
     }
 
+    pub fn take_sound_events(&mut self) -> Vec<crate::acoustics::Emission> {
+        std::mem::take(&mut self.sound_events)
+    }
+
+    fn emit_sound(&mut self, position: Vector, kind: crate::acoustics::Kind) {
+        if self.sound_events.len() == 256 {
+            self.sound_events.remove(0);
+        }
+        self.sound_events.push(crate::acoustics::Emission {
+            kind,
+            position,
+            arrived: false,
+        });
+    }
+
     fn effect(&mut self, position: Vector, kind: EffectKind) {
+        let sound = match kind {
+            EffectKind::Hit | EffectKind::Ground => Some(crate::acoustics::Kind::Impact),
+            EffectKind::Destroyed => Some(crate::acoustics::Kind::Explosion),
+            _ => None,
+        };
+        if let Some(kind) = sound {
+            self.emit_sound(position, kind);
+        }
         if self.effects.len() == MAX_EFFECTS {
             self.effects.remove(0);
         }
@@ -1871,6 +1920,7 @@ impl State {
                 self.config.damage_capacity,
             );
             self.apply_player_damage(amount, &mut events);
+            self.emit_sound(launcher.position, crate::acoustics::Kind::Impact);
         }
         let now = (self.tick / 30) as u16;
         self.tick += 1;
@@ -3182,6 +3232,29 @@ mod tests {
             grounded.step(false, l, |_, _| 0.);
         }
         assert!(grounded.smoke.puffs.is_empty());
+    }
+
+    #[test]
+    fn sound_emissions_retain_exact_impact_positions_and_are_consumed_once() {
+        use crate::acoustics::Kind;
+        let mut s = fixture(false);
+        s.effect([100., 200., 300.], EffectKind::Ground);
+        s.effect([-100., 400., 900.], EffectKind::Destroyed);
+        s.effect([100., 200., 300.], EffectKind::Ground);
+        let sounds = s.take_sound_events();
+        assert_eq!(sounds.len(), 3);
+        assert_eq!(sounds[0].position, [100., 200., 300.]);
+        assert_eq!(sounds[0].kind, Kind::Impact);
+        assert_eq!(sounds[1].position, [-100., 400., 900.]);
+        assert_eq!(sounds[1].kind, Kind::Explosion);
+        assert!(s.take_sound_events().is_empty());
+        // Clearing short-lived visuals cannot erase an already emitted wave.
+        s.effects.clear();
+        assert_eq!(sounds.len(), 3);
+        for _ in 0..1000 {
+            s.effect([0.; 3], EffectKind::Hit);
+        }
+        assert_eq!(s.take_sound_events().len(), 256);
     }
     #[test]
     fn incoming_cockpit_hit_reports_pilot_death_without_needing_nose_breakup() {
