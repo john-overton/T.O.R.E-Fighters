@@ -481,6 +481,8 @@ pub struct Sequence {
     order: u8,
     /// Sub-step within the phase: taxi leg, approach gate.
     leg: usize,
+    /// A taxiway queue starts on this leg instead of returning to parking.
+    queue_leg: Option<usize>,
     leg_origin: [f64; 3],
     /// Braking to a stop before the next leg.
     stopping: bool,
@@ -510,6 +512,13 @@ impl Sequence {
         let mut sequence = Self::new(Kind::Departure, Phase::Waiting, start.runway, start.end);
         sequence.order = start.order;
         sequence.slot = slot;
+        if slot.is_none()
+            && let Some(anchors) = start.runway.anchors
+        {
+            sequence.queue_leg = (1..4).rev().find(|&leg| {
+                segment_distance(position, anchors.taxi_out[leg - 1], anchors.taxi_out[leg]) <= 1.0
+            });
+        }
         sequence.spot = match start.runway.anchors {
             Some(anchors) => anchors.takeoff_spot,
             None => {
@@ -557,6 +566,7 @@ impl Sequence {
             end,
             order: 0,
             leg: 0,
+            queue_leg: None,
             leg_origin: [0.0; 3],
             stopping: false,
             spot: runway.center,
@@ -657,7 +667,7 @@ impl Sequence {
     pub fn holds_followers(&self) -> bool {
         match self.phase {
             Phase::Waiting => true,
-            Phase::Taxi => self.leg <= 1,
+            Phase::Taxi => self.queue_leg.is_some() || self.leg <= 1,
             _ => false,
         }
     }
@@ -666,7 +676,7 @@ impl Sequence {
     /// keep the runway busy. Taxiing clear counts as free at once.
     pub fn blocks_runway(&self) -> bool {
         match self.phase {
-            Phase::Taxi => self.leg <= 1,
+            Phase::Taxi => self.queue_leg.is_some() || self.leg <= 1,
             Phase::LineUp
             | Phase::TakeoffRoll
             | Phase::Approach
@@ -794,7 +804,7 @@ impl Sequence {
             Phase::Waiting => {
                 let anchored = self.runway.anchors.is_some();
                 let near = anchored && to_spot <= SPOT_SHORTCUT_FT;
-                if due && s.turn_clear && (near || s.runway_free) {
+                if due && s.turn_clear && ((near && self.queue_leg.is_none()) || s.runway_free) {
                     self.enter(
                         if anchored && !near {
                             Phase::Taxi
@@ -803,6 +813,11 @@ impl Sequence {
                         },
                         s,
                     );
+                    if self.phase == Phase::Taxi
+                        && let Some(leg) = self.queue_leg
+                    {
+                        self.leg = leg;
+                    }
                 }
             }
             Phase::Taxi => {

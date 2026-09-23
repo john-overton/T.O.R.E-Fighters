@@ -814,8 +814,10 @@ tower replies remain text only.
 In the creator, set **Start** to **Ground**, then choose **Airport**. Continue
 through the normal loadout screen. The player starts on that runway with engine
 idling, gear/flaps down and brakes applied. **B** releases brakes; use the normal
-throttle and flight controls to take off. The player's AI wingmen start parked
-and wait until the player is airborne before taxiing out and taking off. Other
+throttle and flight controls to take off. The player's AI wingmen queue on the taxiway
+and wait until the player is airborne before entering the runway. Startup
+takeoff clearance and wing departure/landing reports are automatic; Alt-S
+suppresses routine wing reports but keeps player clearance. Other
 wings start airborne at the displayed wing altitude. Restart restores the accepted airport/start.
 Airborne remains the default. Ground start requires the researched flight model;
 legacy and restricted native modes remain available for airborne starts.

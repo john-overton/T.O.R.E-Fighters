@@ -962,7 +962,9 @@ reports sensor fit, stores, launches and dropped launches. This is separate
 from synthetic tests and is not a retail comparison or visual acceptance.
 The shorter `--ai-probe-ticks N` retains the Quick Mission bridge probe.
 For ground operations, combine it with `--ground-start AIRPORT`,
-`--probe-wing-size 1..5` and `--maneuver takeoff`. Schedule an order with
+`--probe-wing-size 1..5` and `--maneuver takeoff`. Add `--probe-wing-only`
+to omit the other wings. Those two wing options also apply to
+`--launch-quick-mission` for matching creator captures. Schedule an order with
 `--probe-wing-order TICK:land-selected` or `TICK:bug-out`; `--probe-trace SECONDS`
 prints each wingman's airfield phase and position. `--probe-player-home FROM:UNTIL`
 flies the scripted leader gear down toward the field during that tick range.
@@ -989,6 +991,16 @@ precede that tick's physics; achieved quantities follow it. A write failure
 reports to stderr and disables logging without stopping flight. With the
 variable unset, no file is opened. The simulation inspection hook is
 `Controller::formation_trace`; it never changes aircraft movement.
+
+For airport visibility and distance precision, run the production-pipeline
+checks on a GPU-capable host:
+
+```sh
+cargo test --locked -p tore-app gpu_airport_ -- --ignored --nocapture --test-threads=1
+```
+
+These check aircraft above pavement and moving distant views with 1x/4x samples.
+[Measured failures and results](baselines/airfield-radio.md#ground-visibility).
 
 `cargo test --locked -p tore-sim formation_diving_reversal -- --nocapture`
 runs the synthetic four-wingman diving-reversal regression. This is a safety

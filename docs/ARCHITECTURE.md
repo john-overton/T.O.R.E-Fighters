@@ -110,7 +110,19 @@ flight adapter runs. The HUD reads this state. See the
 
 ### Flight presentation and measurement
 
-`flight::State` remains authoritative at 120 Hz. `main` retains the preceding tick for render-only pose interpolation (shortest-path wrapped angles); pause/crash show authoritative state and restart resets history. Camera, exterior geometry and HUD consume the same presented pose. Nearby aircraft retain their own preceding tick poses and use the same blend fraction in the main view, mirrors and camera panels. Combat snapshots them before simulation advances; reset clears that history. Audio consumes authoritative state. No renderer smoothing feeds back into physics.
+`flight::State` remains authoritative at 120 Hz. `main` retains the preceding tick for render-only pose interpolation (shortest-path wrapped angles); pause/crash show authoritative state and restart resets history. Camera, exterior geometry and HUD consume the same presented pose. Nearby aircraft retain their own preceding tick poses and use the same blend fraction in the main view, mirrors and camera panels. Combat snapshots them before simulation advances; reset clears that history. AI gear, flap, hook, brake, bay, exhaust and control-surface samples use that
+same render fraction; fixtures retain their fixed devices. Audio consumes
+authoritative state. No renderer smoothing feeds back into physics.
+
+World camera depth uses `Depth32Float`, storing the near plane at depth 1 and
+the far plane at depth 0. Using the near and far distances, the vertex shader computes clip Z as
+`near * (far - view_z) / (far - near)`, then perspective division yields depth.
+Depth clears to zero and nearer fragments compare greater. The existing near
+plane and 2,200,000-foot far limit remain. Aircraft, terrain, static objects,
+clouds, smoke, vapor and the spotting aid use this same mapping. The separate
+orthographic shadow maps keep their existing depth convention. This is an
+agent-selected host correction for distant surface flicker; see
+[NVIDIA's depth-precision analysis](https://developer.nvidia.com/blog/visualizing-depth-precision/).
 
 Active simulation views request the next redraw without a post-render timer; AutoVsync and a requested maximum frame latency of one provide presentation backpressure. Idle menu behavior is unchanged. Failed/zero-size presentation does not continually schedule simulation redraws. `performance.rs` provides opt-in bounded CPU wall-time sampling via environment variables, with warmup exclusion and view cycling.
 
@@ -413,14 +425,20 @@ STRIP anchors and home runways, then passes terrain and landable surfaces to
 `AiMission::step_with_surface`. Aircraft motion remains driven by pilot inputs;
 the renderer has no role in traffic gates or landing decisions.
 [Behavior and fitted safety rules](spec/ai-airfield.md).
+`airfield_radio` observes those states and player runway context without changing
+flight. It coalesces status by actor and uses the shared `comms` channel, with
+separate airport audio ownership for cancellation. Quick Mission resolves a
+validated queue along the final taxiway legs before any actor is created.
 
 The creator stores its accepted ground-start runway identity separately from the
 editable draft. It constructs the existing airborne wing launch reference first,
 then initializes the player's whole wing on the shared runway surface. Restart
 reuses the accepted launch layout, airport, fuel and stores. Building height
 inside a composite runway shape never supplies the support-plane elevation.
-Static solid and textured detail passes use separate depth bias, keeping the
-visible pavement at the shared contact height. A per-shape vertical normalization
+Terrain render triangles are split at airport footprint edges and recessed
+below the fixed support plane, with perimeter walls. Source terrain and physics
+queries are unchanged. Static solid and texture passes use ordered equal-depth
+tests without depth bias, so they cannot pull pavement in front of aircraft. A per-shape vertical normalization
 aligns the dominant horizontal paving layer with the placement's runway plane;
 building height does not move that plane.
 

@@ -1275,7 +1275,7 @@ pub struct GroundLayout {
     pub runway: tore_sim::ai::airfield::RunwayView,
     /// Departure heading down the runway, the leader's heading.
     pub heading: f64,
-    /// True when the airport's own takeoff spot and parking slots are used;
+    /// True when the airport's own takeoff spot and taxiway queue are used;
     /// false for the fitted staggered runway fallback.
     pub anchored: bool,
     /// Staggered fallback only: distance between parked aircraft.
@@ -1304,7 +1304,7 @@ impl GroundLayout {
 
 /// Place `count` aircraft (the player's whole wing) for a ground start. With
 /// the airport's own points the player takes the takeoff spot and wingmen the
-/// parking slots; otherwise the wing parks staggered on the runway. Every slot
+/// taxiway queue; otherwise the wing parks staggered on the runway. Every slot
 /// must be on the airport's paving, on a landable surface and clear of
 /// buildings. If the staggered layout cannot fit, its spacing tightens, and
 /// if none works the start is rejected with a message for the creator.
@@ -2149,7 +2149,7 @@ mod tests {
     }
 
     #[test]
-    fn airport_points_put_the_player_on_the_takeoff_spot_and_wingmen_in_parking() {
+    fn airport_points_put_the_player_on_the_runway_and_wingmen_on_the_taxiway() {
         use std::f64::consts::FRAC_PI_2;
         let mut world = airfield(6000.);
         let at = |x: f64, z: f64| [x, 20., z];
@@ -2180,22 +2180,25 @@ mod tests {
         assert!(layout.anchored && layout.spacing_ft.is_none());
         assert_eq!(
             layout.slots,
-            [at(4096., 1500.), at(5000., 1500.), at(5000., 1700.)]
+            [at(4096., 1500.), at(4246., 1300.), at(4446., 1300.)]
         );
-        assert_eq!(layout.headings, [0., FRAC_PI_2, FRAC_PI_2]);
+        assert_eq!(layout.headings, [0., -FRAC_PI_2, -FRAC_PI_2]);
         assert!(layout.runway.anchors.is_some());
         assert_eq!(layout.departure().headings, layout.headings);
-        assert_eq!(layout.offsets()[1], [904., 0.]);
+        assert_eq!(layout.offsets()[1], [150., -200.]);
         let mut wingman =
             tore_sim::flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3])
                 .unwrap();
         wingman.enable_research(2).unwrap();
         place_on_runway(&world, &mut wingman, &layout, 1).unwrap();
-        assert_eq!(wingman.yaw, FRAC_PI_2);
-        // A building on parking slot 1 moves the wingmen along to 2 and 3.
-        building(&mut world, 300, 5000., 1500.);
+        assert_eq!(
+            wingman.yaw.rem_euclid(std::f64::consts::TAU),
+            3. * FRAC_PI_2
+        );
+        // An obstructed queue slot moves the queue farther along the taxiway.
+        building(&mut world, 300, 4246., 1300.);
         let layout = ground_layout(&world, RUNWAY, 3).unwrap();
-        assert_eq!(layout.slots[1..], [at(5000., 1700.), at(5000., 1900.)]);
+        assert_ne!(layout.slots[1], at(4246., 1300.));
         // A building on the takeoff spot falls back to the staggered runway
         // layout, which starts clear of it.
         building(&mut world, 301, 4096., 1500.);

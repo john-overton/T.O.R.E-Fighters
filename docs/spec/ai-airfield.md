@@ -31,6 +31,15 @@ anchors the AI uses them exactly as below. Without anchors (a runway known only
 by its centre, heading and length) the AI uses the fitted runway-only fallback
 described in each section.
 
+## Quick Mission taxiway queue
+
+John requested on 2026-09-23 that Quick Mission wingmen begin queued near the
+runway. [Placement and distances](quick-mission-menu.md#player-ground-start)
+use the taxi-out anchors. Queued aircraft resume their current taxi leg,
+never drive back through the parking route, and always require a clear runway,
+including within 475 ft of the takeoff spot. Their taxi and line-up occupy the
+runway gate until liftoff. Parking starts retain the recovered sequence below.
+
 ## Takeoff from the ground
 
 - **Hold** (spec-derived, retail state 1): stopped, brakes set, gear down,

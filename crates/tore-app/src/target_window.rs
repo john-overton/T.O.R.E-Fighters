@@ -231,11 +231,11 @@ mod tests {
         assert_eq!(camera.near_clip, 3013.);
         let depth = |near: f32, z: f32| {
             let far = 2200000_f32;
-            (far / (far - near) * z - near * far / (far - near)) / z
+            near * ((far - z) / (far - near)) / z
         };
-        // The old one-foot near plane cannot resolve surfaces 1.5 inches apart.
-        assert_eq!(depth(1., 60000.), depth(1., 60000.125));
-        assert!(depth(camera.near_clip, 6076.) < depth(camera.near_clip, 6076.125));
+        // Reversed depth also resolves the separation with the one-foot near plane.
+        assert!(depth(1., 60000.) > depth(1., 60000.125));
+        assert!(depth(camera.near_clip, 6076.) > depth(camera.near_clip, 6076.125));
         assert!(camera.near_clip < 6026.);
         assert_eq!(crate::terrain::Camera::new().near_clip, 1.);
     }

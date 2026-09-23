@@ -31,32 +31,14 @@ fn airfield(activity: Activity) -> bool {
     )
 }
 impl Reports {
-    /// `opinionated` (agent decision, 2026-09-23): a wingman that has left to
-    /// land reports holding, landing and landed once each, using the target
-    /// window's activity labels. Takeoff steps stay silent, since a whole
-    /// wing starting on the ground would otherwise fill the message bar.
-    /// Returns whether the aircraft is in an airfield sequence.
-    fn observe_airfield(&mut self, id: u32, label: &str, activity: Activity) -> bool {
-        let state = self.states.entry(id).or_default();
-        if !airfield(activity) {
-            state.airfield = None;
-            return false;
-        }
-        let changed = state.airfield.replace(activity) != Some(activity);
-        if changed
-            && matches!(
-                activity,
-                Activity::HoldingMarshal | Activity::Landing | Activity::Landed
-            )
-        {
+    /// Airfield actors are excluded from formation chatter. Their status
+    /// and recorded airport calls are owned by `airfield_radio`.
+    fn observe_airfield(&mut self, id: u32, _label: &str, activity: Activity) -> bool {
+        self.states.entry(id).or_default().airfield = airfield(activity).then_some(activity);
+        if airfield(activity) {
             self.pending.retain(|(actor, _)| *actor != id);
-            if self.pending.len() == 16 {
-                self.pending.pop_front();
-            }
-            self.pending
-                .push_back((id, format!("{label}: {}", activity.label())));
         }
-        true
+        airfield(activity)
     }
     fn observe(&mut self, id: u32, label: &str, tick: u64, trace: &Trace) {
         let state = self.states.entry(id).or_default();
@@ -180,36 +162,22 @@ mod tests {
     }
 
     #[test]
-    fn airfield_reports_announce_landing_steps_once_and_skip_takeoff() {
+    fn airfield_reports_are_owned_by_the_radio_producer() {
         let mut reports = Reports::default();
-        for activity in [Activity::Waiting, Activity::Taxiing, Activity::TakingOff] {
-            assert!(reports.observe_airfield(1, "Friendly 1-1", activity));
-        }
-        assert!(reports.take().is_none(), "takeoff steps are silent");
-        assert!(!reports.observe_airfield(1, "Friendly 1-1", Activity::Formation));
-        let mut lines = Vec::new();
+        reports
+            .pending
+            .push_back((1, "Stale formation report".into()));
         for activity in [
-            Activity::HoldingMarshal,
+            Activity::Waiting,
+            Activity::Taxiing,
+            Activity::TakingOff,
             Activity::HoldingMarshal,
             Activity::Landing,
             Activity::Landed,
-            Activity::Landed,
         ] {
-            assert!(reports.observe_airfield(1, "Friendly 1-1", activity));
-            lines.extend(reports.take());
+            assert!(reports.observe_airfield(1, "Wingman", activity));
+            assert!(reports.take().is_none());
         }
-        assert_eq!(
-            lines,
-            [
-                "Friendly 1-1: Holding at marshal",
-                "Friendly 1-1: Landing",
-                "Friendly 1-1: Landed",
-            ]
-        );
-        // A newer step replaces an unread older one for the same aircraft.
-        reports.observe_airfield(2, "Friendly 1-2", Activity::Landing);
-        reports.observe_airfield(2, "Friendly 1-2", Activity::Landed);
-        assert_eq!(reports.take().as_deref(), Some("Friendly 1-2: Landed"));
-        assert!(reports.take().is_none());
+        assert!(!reports.observe_airfield(1, "Wingman", Activity::Formation));
     }
 }

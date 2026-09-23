@@ -35,6 +35,10 @@ pub const GROUND_SPACING_FT: [f64; 4] = [250., 200., 150., 100.];
 /// within 72 ft of the centerline, and alternate sides keep neighbours 80 ft
 /// apart laterally as well as a full spacing apart along the runway.
 pub const GROUND_LATERAL_FT: f64 = 40.;
+/// Requested taxiway queue; fitted spacing and hold distance, in feet.
+pub const TAXI_QUEUE_SPACING_FT: f64 = 200.;
+pub const TAXI_QUEUE_STEP_FT: f64 = 50.;
+pub const TAXI_QUEUE_HOLD_FT: f64 = 250.;
 
 /// The part of the map an aircraft may start over, feet. X runs east and Z
 /// north, as in the world.
@@ -243,24 +247,60 @@ pub fn departure_heading(runway: &Runway) -> f64 {
     runway.approach_heading(ApproachEnd::Near)
 }
 
-/// Spec-derived placement from the airport's own points
-/// (`docs/formats/native-strip.md`; the reviewed TRAIN01.M puts a grounded
-/// player exactly on the takeoff spot and other grounded aircraft in parking
-/// slots): the leader stands on the takeoff spot facing down the runway and
-/// wingman *k* in the first free parking slot from slot *k*, facing the
-/// parking heading. A slot `check` rejects is skipped for the next one.
-/// None when the takeoff spot is unusable or the free slots run out; the
-/// caller then falls back to [`fit_runway_slots`].
+/// Player on the reviewed takeoff spot; wingmen queued on the taxi-out path
+/// (John, 2026-09-23). Positions are measured backwards from the last taxi
+/// anchor, facing along that segment toward the runway. Blocked slots are
+/// skipped and a queue that cannot fit falls back to the runway layout.
 pub fn anchored_slots(
     anchors: &AirfieldAnchors,
     count: usize,
     mut check: impl FnMut([f64; 3]) -> Result<[f64; 3], String>,
 ) -> Option<Vec<([f64; 3], f64)>> {
     let mut slots = vec![(check(anchors.takeoff_spot).ok()?, anchors.takeoff_heading)];
-    let mut parking = anchors.parking.iter();
+    let segments: Vec<_> = (1..4)
+        .rev()
+        .map(|leg| {
+            let end = anchors.taxi_out[leg];
+            let start = anchors.taxi_out[leg - 1];
+            let dx = end[0] - start[0];
+            let dz = end[2] - start[2];
+            (end, dx, dz, dx.hypot(dz))
+        })
+        .collect();
+    let length: f64 = segments.iter().map(|s| s.3).sum();
+    let mut offset = 0.;
     while slots.len() < count {
-        let free = parking.find_map(|p| check(*p).ok())?;
-        slots.push((free, anchors.parking_heading));
+        let mut found = None;
+        while offset <= length {
+            let mut remaining = offset;
+            for &(end, dx, dz, len) in &segments {
+                if len > 0. && remaining <= len {
+                    let p = [
+                        end[0] - dx * remaining / len,
+                        end[1],
+                        end[2] - dz * remaining / len,
+                    ];
+                    let from_player =
+                        (p[0] - anchors.takeoff_spot[0]).hypot(p[2] - anchors.takeoff_spot[2]);
+                    if from_player >= TAXI_QUEUE_HOLD_FT
+                        && slots.iter().all(|(other, _)| {
+                            (other[0] - p[0]).hypot(other[2] - p[2]) >= TAXI_QUEUE_SPACING_FT
+                        })
+                        && let Ok(p) = check(p)
+                    {
+                        found = Some((p, dx.atan2(dz)));
+                    }
+                    break;
+                }
+                remaining -= len;
+            }
+            if found.is_some() {
+                break;
+            }
+            offset += TAXI_QUEUE_STEP_FT;
+        }
+        slots.push(found?);
+        offset += TAXI_QUEUE_SPACING_FT;
     }
     Some(slots)
 }
@@ -479,55 +519,36 @@ mod tests {
     }
 
     #[test]
-    fn anchored_slots_use_the_takeoff_spot_then_the_free_parking_slots() {
+    fn anchored_queue_faces_the_runway_and_skips_obstacles() {
         let a = anchors();
         let open = |p: [f64; 3]| Ok([p[0], 49., p[2]]);
-        let slots = anchored_slots(&a, 3, open).unwrap();
+        let slots = anchored_slots(&a, 5, open).unwrap();
         assert_eq!(slots[0], ([0., 49., 0.], 0.));
-        assert_eq!(slots[1], ([1000., 49., 0.], std::f64::consts::FRAC_PI_2));
-        assert_eq!(slots[2].0, [1000., 49., 200.]);
-        // An obstructed parking slot is skipped for the next free one.
+        assert_eq!(slots[1].0, [250., 49., 100.]);
+        for pair in slots[1..].windows(2) {
+            assert!(
+                (pair[0].0[0] - pair[1].0[0]).hypot(pair[0].0[2] - pair[1].0[2])
+                    >= TAXI_QUEUE_SPACING_FT
+            );
+        }
+        assert_eq!(slots[1].1, -std::f64::consts::FRAC_PI_2);
         let blocked = |p: [f64; 3]| {
-            if p[2] == 200. && p[0] == 1000. {
-                Err("obstructed".to_string())
+            if (200. ..=300.).contains(&p[0]) {
+                Err("blocked".into())
             } else {
                 Ok(p)
             }
         };
-        let slots = anchored_slots(&a, 4, blocked).unwrap();
-        let parked: Vec<_> = slots[1..].iter().map(|(p, _)| p[2]).collect();
-        assert_eq!(parked, [0., 400., 600.]);
-        // A blocked takeoff spot, or too few free slots, gives up so the
-        // caller can fall back to the staggered runway layout.
-        assert!(
-            anchored_slots(&a, 2, |p: [f64; 3]| if p[0] == 0. {
-                Err("x".to_string())
-            } else {
-                Ok(p)
-            })
-            .is_none()
+        assert_eq!(
+            anchored_slots(&a, 3, blocked).unwrap()[1].0,
+            [350., 50., 100.]
         );
-        assert!(
-            anchored_slots(&a, 3, |p: [f64; 3]| if p[0] == 1000. && p[2] > 0. {
-                Err("x".to_string())
-            } else {
-                Ok(p)
-            })
-            .is_none()
+        assert!(anchored_slots(&a, 2, |_| Err("blocked".into())).is_none());
+        assert!(anchored_slots(&a, 20, open).is_none());
+        assert_eq!(
+            relative_offsets(&slots.iter().map(|s| s.0).collect::<Vec<_>>(), 0.)[1],
+            [250., 100.]
         );
-        // Offsets in the leader's frame: the first parking slot is 1000 ft
-        // to the right of a north-facing leader.
-        let points: Vec<_> = anchored_slots(&a, 2, open)
-            .unwrap()
-            .iter()
-            .map(|s| s.0)
-            .collect();
-        assert_eq!(relative_offsets(&points, 0.), [[0., 0.], [1000., 0.]]);
-        let east = relative_offsets(
-            &[[0., 0., 0.], [0., 0., -1000.]],
-            std::f64::consts::FRAC_PI_2,
-        );
-        assert!((east[1][0] - 1000.).abs() < 1e-9 && east[1][1].abs() < 1e-9);
     }
 
     #[test]

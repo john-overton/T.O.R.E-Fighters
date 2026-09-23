@@ -163,7 +163,7 @@ reverse engineering. Later measured evidence can replace a fitted rule locally.
 | Tower availability | The current base-layout free-flight host assigns airports neutral status with explicit landing permission because it has no mission player-side assignment. The service can also reject hostile, unknown or unpermitted neutral airports when a mission supplies those states. Disabled runways decline. | Opinionated base-layout policy, agent choice 2026-09-20; fitted mission service policy |
 | Clearance lifetime | Stays with the selected runway until cancellation, airport selection change, runway disablement, flight reset or landing completion. Repeating a request repeats status rather than allocating another clearance. | Opinionated |
 | Landing completion | Existing flight state reports supported, alive, on-runway contact and speed below 30 knots for 240 consecutive 120 Hz ticks. Taxi remains manual. | Fitted service completion, not flight damage criteria |
-| Radio output | Typed response and subtitle immediately at a simulation tick. A successful landing request and repeat use reviewed `^CLRLAND`. Deterministic landing completion and repeating its latest reply use reviewed `^WELHOME`. These event bindings are fitted because retail player-menu producers remain unresolved. Selection, cancellation, rejection and invalidation stay text only. Missing or old caches preserve text operation and report that a retail reimport is needed for optional airport audio. | Reviewed phrase/sample identity with fitted event binding |
+| Radio output | Manual landing replies retain their recordings. Automatic player takeoff/landing cues and named wingman status reports share a paced, cancellable channel. Startup takeoff clearance, airborne, farewell, wind, touchdown grade and welcome use reviewed recordings. Taxi and marshal status remain text-only. Carrier-only cues require carrier operations. | [Airfield radio specification](airfield-radio.md), reviewed phrase identities with fitted host event binding |
 | Runway damage | At zero imported hit points disable new clearance and ILS; preserve its surface for physical contact. Individual tower/building loss does not disable other runway services in this first host policy. | Fitted service consequence |
 | Missing destruction artwork | Remove the intact mesh when combat HP reaches zero, retain target/mission identity, and use the existing impact effect. Do not infer an A-suffix replacement. | Fitted visual fallback |
 
@@ -173,9 +173,17 @@ longitudinal span near -2748 through 3252 feet. That agrees with reviewed STRIP
 anchors near -2512 through 3090 feet and avoids an invisible support footprint.
 
 Runway support and the ILS datum use the authored airport ground elevation.
-A dedicated static-surface rendering depth bias avoids terrain overlap without
-changing that elevation. Textured coplanar detail faces use a separate depth-biased
-render pass, without a separate physical face lift. For composite runway shapes,
+Airport surfaces use no slope or constant depth bias. Either offset can pull
+pavement over an aircraft, at a grazing view or from a high overhead view.
+Solid surfaces draw before textured detail, with equal-depth samples allowed
+so later coplanar art remains visible. Geometry still obeys ordinary depth
+occlusion. Distant, moving views must keep pavement above terrain separated
+by one foot, with no camera-dependent surface lift. The shared world renderer
+uses reversed floating-point depth to retain that separation across its
+existing camera near planes and 2,200,000-foot far limit. This is a fitted
+host precision correction (agent, 2026-09-23), with airport placement and
+flight contact unchanged.
+For composite runway shapes,
 the horizontal layer with the greatest aggregate polygon area defines pavement.
 The mesh is translated vertically so that layer meets the runway surface, with
 all relative geometry retained. For example, RNWY1's source paving at -4 feet
@@ -205,9 +213,14 @@ into a 256-square GPU layer, with UVs adjusted to retain the entire artwork.
 This is a fitted resolution reduction for the current shared texture-array path;
 small sheets retain original texels, and extracted media remains unchanged.
 
-The runway-plane rule requires visual inspection for burial or terrain protrusion.
-If a site fails, record a per-shape/per-site fitted correction or implement a
-bounded runway-footprint terrain cutout; do not silently move the airport.
+The rendered terrain is split exactly at each oriented airport footprint and
+recessed to at most one foot below its existing support plane. Boundary walls
+join higher terrain outside the footprint. Intersections interpolate the
+original texture coordinates and colors. Terrain outside the footprint, the
+source height grid, the airport transform and flight contact remain unchanged.
+This fitted rendering-only correction (agent, 2026-09-23) prevents low cockpit
+views from exposing overlapping terrain through pavement. Ordered equal-depth passes separate coplanar airport details without
+changing their depth.
 Mesh scale comes from reviewed SH transform/header consumers, not the aircraft
 renderer’s one-third-foot convention. If unresolved, record a measured per-type
 scale before accepting that type. No universal guessed scale is approved here.

@@ -1,4 +1,6 @@
 //! Renderer-independent world data and free-camera controls (feet, X east/Y up/Z north).
+mod runway_cutout;
+
 use crate::AppResult;
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::{
@@ -375,6 +377,7 @@ impl World {
         out.resolve_palette(0.);
         out.build_mesh();
         out.build_airport_scene(resources, code.trim_end_matches(".MM"))?;
+        out.recess_airport_terrain();
         Ok(out)
     }
 
@@ -776,6 +779,12 @@ impl World {
             }
         }
     }
+    /// Split at footprint edges before lowering the rendered ground, so
+    /// neighboring terrain and all physics queries retain their original data.
+    pub(crate) fn recess_airport_terrain(&mut self) {
+        self.vertices = runway_cutout::terrain(&self.vertices, &self.airport_scene.runways);
+    }
+
     /// The mission's steady wind in world feet per second.
     pub fn wind(&self) -> [f64; 3] {
         self.weather.configuration().wind_world_fps()

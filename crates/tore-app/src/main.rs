@@ -11,6 +11,7 @@ mod additional_animation;
 mod ai_wings;
 mod aircraft;
 mod aircraft_animation;
+mod airfield_radio;
 mod assets;
 mod attitude;
 mod audio;
@@ -203,6 +204,7 @@ struct App {
     ai_mission: ai_wings::Preset,
     /// Radio and crew voice delivery; see docs/spec/radio-chatter.md.
     comms: comms::Comms,
+    airfield_radio: airfield_radio::AirfieldRadio,
     /// Weapon, hit, kill and wing radio calls; see radio_calls.rs.
     radio: radio_calls::Radio,
     /// Imported phrase text for composing radio lines.
@@ -252,10 +254,14 @@ fn deliver_radio(
 ) {
     for call in comms.due(now) {
         match call.route {
-            comms::Route::Radio => {
+            comms::Route::Radio | comms::Route::Airport => {
                 flight_ui.message(call.line());
                 if let Some(audio) = audio {
-                    audio.speech(&call.stems);
+                    if call.route == comms::Route::Airport {
+                        audio.airport_speech(&call.stems);
+                    } else {
+                        audio.speech(&call.stems);
+                    }
                 }
             }
             comms::Route::Direct => {
@@ -1489,6 +1495,7 @@ impl App {
                     .and(self.combat.mission_layout.clone())
                     .filter(|layout| layout.ground.is_some() == self.ground_start.is_some());
                 let parked = layout.as_ref().and_then(|layout| layout.ground.clone());
+                self.airfield_radio.reset(parked.as_ref().map(|g| g.runway));
                 if let Some(layout) = layout.as_ref().filter(|l| l.player_turn != 0.) {
                     // Airborne: the whole scene turns so the enemy ahead stays
                     // on the map.
@@ -1623,6 +1630,7 @@ impl App {
                             );
                             bridge.apply_group_survival(&self.quick.group_must_survive);
                             bridge.mirror_pose_out(&mut self.combat.state.targets);
+                            self.combat.sync_ai_devices(&bridge);
                             self.combat.ai_poses = !bridge.is_empty();
                             if bridge.is_empty() {
                                 self.flight_ui
@@ -1804,6 +1812,8 @@ impl ApplicationHandler for App {
                 if std::mem::take(&mut self.launch_creator) {
                     let view = self.flight_view;
                     let reference = self.view_rig.reference;
+                    let look = self.flight_ui.look;
+                    let zoom = self.flight_ui.zoom;
                     self.action(event_loop, Action::Mission);
                     if self.smoke_test && self.mission.is_some() && self.error.is_none() {
                         let initial = (
@@ -1850,6 +1860,8 @@ impl ApplicationHandler for App {
                     }
                     self.flight_view = view;
                     self.view_rig.select(reference);
+                    self.flight_ui.look = look;
+                    self.flight_ui.zoom = zoom;
                     if self.mission.is_none() && self.error.is_none() {
                         self.error =
                             Some("Quick Mission could not launch the selected setup".into());
@@ -2439,6 +2451,10 @@ impl ApplicationHandler for App {
                                             command,
                                         ) {
                                             if let tore_sim::airport::Event::Reply(reply) = event {
+                                                self.airfield_radio.reply(&reply);
+                                                self.comms.cancel_airport();
+                                                self.comms
+                                                    .spoken(self.combat.state.tick() as f64 / 120.);
                                                 self.flight_ui
                                                     .message(airport_reply(&self.world, &reply));
                                                 if let Some(audio) = &self.audio {
@@ -2644,11 +2660,6 @@ impl ApplicationHandler for App {
                                 if matches!(event, tore_sim::airport::Event::LandingComplete { .. })
                                 {
                                     self.flight_ui.message("Landing complete");
-                                    if let Some(audio) = &self.audio {
-                                        audio.airport_radio(&[
-                                            tore_formats::radio::AIRPORT_WELCOME_HOME,
-                                        ]);
-                                    }
                                 }
                             }
                             // Manual p.65: the player always lands first and
@@ -2732,6 +2743,7 @@ impl ApplicationHandler for App {
                                         audio.wingman_ejected();
                                     }
                                 }
+                                self.combat.sync_ai_devices(&bridge);
                                 let message = bridge.take_message();
                                 self.ai_wings = Some(bridge);
                                 if let Err(error) = stepped {
@@ -2744,6 +2756,22 @@ impl ApplicationHandler for App {
                                 }
                             }
 
+                            if (self.flight.crashed
+                                || self.flight.escape.is_some()
+                                || self.flight.systems.pilot.dead)
+                                && let Some(audio) = &self.audio
+                            {
+                                audio.cancel_airport_radio();
+                            }
+                            self.airfield_radio.step(
+                                self.combat.state.tick() as f64 / 120.,
+                                &self.phrases,
+                                &mut self.comms,
+                                &self.flight,
+                                &self.world,
+                                &self.airport_service,
+                                self.ai_wings.as_ref(),
+                            );
                             self.crew_voice.step_host(
                                 &mut self.comms,
                                 &self.phrases,
@@ -3589,6 +3617,8 @@ struct ProbeScript {
     takeoff: bool,
     /// Aircraft in the player's wing, the player included.
     wing_size: Option<usize>,
+    /// Reproduce an isolated player wing without the usual probe opponents.
+    wing_only: bool,
     /// Wing orders to all wingmen at a tick.
     orders: Vec<(u64, tore_sim::ai::wing::PlayerOrder)>,
     /// From the first tick to the second the player flies gear down over the
@@ -3749,10 +3779,11 @@ impl ProbeWatch {
         let line = |f: &flight::State| {
             let [x, y, z] = f.position;
             format!(
-                "agl={:.0} kt={:.0} x={x:.0} z={z:.0} hdg={:.0}",
+                "agl={:.0} kt={:.0} x={x:.0} z={z:.0} hdg={:.0} terrain_agl={:.0}",
                 y - world.surface(x, z).height,
                 f.speed / 1.68781,
-                f.yaw.to_degrees().rem_euclid(360.)
+                f.yaw.to_degrees().rem_euclid(360.),
+                y - f64::from(world.height(x as f32, z as f32))
             )
         };
         let [px, py, pz] = player.position;
@@ -3955,9 +3986,9 @@ fn ai_probe_run(
     ai_mission: ai_wings::Preset,
     script: &ProbeScript,
 ) -> AppResult<()> {
-    quick.draft.values[7] = 2;
+    quick.draft.values[7] = if script.wing_only { 0 } else { 2 };
     quick.draft.values[8] = 1;
-    quick.draft.values[21] = 2;
+    quick.draft.values[21] = if script.wing_only { 0 } else { 2 };
     if quick.ground_runway().is_some() {
         quick.draft.values[4] = 3;
     }
@@ -4033,6 +4064,8 @@ fn ai_probe_run(
     // Radio calls are observed, never fed back, so the probe is unchanged.
     let mut comms = comms::Comms::new(1);
     let mut radio = radio_calls::Radio::default();
+    let mut airfield_radio = airfield_radio::AirfieldRadio::default();
+    airfield_radio.reset(parked.as_ref().map(|g| g.runway));
     let phrases = comms::phrases(resources);
     let mut heard = Vec::new();
     println!(
@@ -4154,6 +4187,16 @@ fn ai_probe_run(
             println!("t={tick} order={order:?} reply={:?}", report.message);
         }
         bridge.step(&mut combat.state, &flight, world)?;
+        let now = combat.state.tick() as f64 / 120.;
+        airfield_radio.step(
+            now,
+            &phrases,
+            &mut comms,
+            &flight,
+            world,
+            &service,
+            Some(&bridge),
+        );
         let crew = comms::crew(&hornet.profile);
         let state = &mut combat.state;
         radio_calls::step(
@@ -4166,12 +4209,11 @@ fn ai_probe_run(
             Some(&mut bridge),
             &flight,
         );
-        let now = state.tick() as f64 / 120.;
         heard.extend(
             comms
                 .due(now)
                 .iter()
-                .map(|c| format!("{now:.1}s {}", c.line())),
+                .map(|c| format!("{now:.1}s {} {:?}", c.line(), c.stems)),
         );
         watch.observe(tick, &bridge, &flight, world);
     }
@@ -4867,6 +4909,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 }
                 separation_nm = Some(nm);
             }
+            "--probe-wing-only" => probe_script.wing_only = true,
             "--probe-wing-size" => {
                 let size: usize = args.next().ok_or("--probe-wing-size needs 1..5")?.parse()?;
                 if !(1..=5).contains(&size) {
@@ -5358,7 +5401,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. K jettison selected external group; L clears designation; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-wing-order TICK:bug-out|land-selected orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field. --separation 1|2|5|10|20|50|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. K jettison selected external group; L clears designation; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field. --separation 1|2|5|10|20|50|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -6217,6 +6260,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             .position(|choice| *choice == nm)
             .unwrap_or(quick.draft.values[17]);
     }
+    if let Some(size) = probe_script.wing_size {
+        quick.draft.values[4] = size;
+    }
+    if probe_script.wing_only {
+        for field in [7, 10, 21, 24, 27] {
+            quick.draft.values[field] = 0;
+        }
+    }
     probe_script.takeoff = maneuver == "takeoff";
     if let Some(ticks) = ai_probe {
         if ai_roster_probe {
@@ -6768,6 +6819,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             tore_sim::airport::Command::RequestLanding,
         );
     }
+    let mut airfield_radio = airfield_radio::AirfieldRadio::default();
+    airfield_radio.reset(ground_start.and_then(|id| world.runway_view(id)));
     let mut app = App {
         mission: None,
         ground_start,
@@ -6777,6 +6830,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         ai_wings: None,
         ai_mission,
         comms: comms::Comms::new(1),
+        airfield_radio,
         radio: Default::default(),
         phrases: comms::phrases(&theater_resources),
         crew_voice: crew_voice::CrewVoice::new(&hornet.profile),

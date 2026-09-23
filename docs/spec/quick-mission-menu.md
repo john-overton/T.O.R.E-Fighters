@@ -221,6 +221,17 @@ Weapon compatibility, custom loads and the guns-only creator choice still apply.
 
 ## Player ground start
 
+John requested on 2026-09-23 that wingmen start queued on the taxiway near the
+runway. With valid airport anchors, place them backwards along the taxi-out
+polyline from its last point, facing toward the runway. Fitted spacing is
+200 ft, with candidate positions checked every 50 ft and at least 250 ft from
+the player's takeoff spot. Every slot must pass the existing pavement and
+building checks. If the full queue cannot fit, retain the documented staggered
+runway fallback. Only one queued aircraft enters the runway at a time; the
+player goes first. This requested placement supersedes parking-slot starts
+for Quick Mission. Ordinary parking-start sequences remain supported.
+
+
 John requested a ground-start choice in the Quick Mission creator on 2026-09-20.
 The creator adds Start (Airborne/Ground) and a named airport/runway selector.
 Airborne remains the default. Airport choices belong to the selected theater;
@@ -230,26 +241,21 @@ The accepted start is retained through ordnance setup and mission restart.
 Ground start parks the player's whole wing, friendly wing 1, at the selected
 airport. The other wings, friendly and enemy, keep the airborne launch.
 
-**Where each aircraft stands (spec-derived).** Each airport's STRIP shape
-carries its own takeoff spot, taxi route and nine parking slots
+**Source anchors and player placement (spec-derived).** Each airport's STRIP
+shape carries a takeoff spot, taxi route and nine parking slots
 ([recovered roles](../formats/native-strip.md#remaining-template-callback-boundaries)).
-The player starts exactly on the takeoff spot, facing down the runway.
-Wingman 1 starts in parking slot 1, wingman 2 in slot 2 and so on, facing the
-parking heading, which is the airport heading plus 90 degrees. This follows the
-reviewed training mission TRAIN01.M, where a grounded player sits exactly on
-the takeoff spot and another grounded aircraft sits on parking slot 1 at the
-parking heading; the mission builder's own placement rule is not traced. A
-parking slot blocked by a building is skipped for the next free one (fitted).
-The takeoff spot is the near end of the host's runway line, so the player
-starts 100 ft farther back than the fitted single-aircraft start used before
-2026-09-23 (5% of the runway length in from the threshold, at most 100 ft).
-On the 16 base theaters every STRIP, STRIP1 to STRIP7 and STRIP3A field
-supplies these points: 231 of the 311 airport entries.
+The player starts exactly on the takeoff spot, facing down the runway. Wingmen
+use the requested taxiway queue described above. Reviewed TRAIN01.M places
+another grounded aircraft in parking; it does not establish Quick Mission's
+new queue placement. The takeoff spot is the near end of the host's runway
+line, 100 ft behind the earlier fitted single-aircraft start. The anchor
+coverage and placement evidence are in the
+[ground-start baseline](../baselines/ground-start.md#airport-data).
 
 **Fallback (fitted, agent decision, 2026-09-23).** Vertical-landing pads
 (DTSTRP) and the STRIP5A, STRIP6A and STRIP7A fields have no usable points,
 because theirs fall off their own paving. So does an airport whose takeoff spot
-is blocked or whose free parking slots run out. There the wing parks
+is blocked or whose taxiway queue cannot fit. There the wing parks
 staggered on the runway:
 
 - The player is farthest down the runway, on the centerline. Wingmen stand

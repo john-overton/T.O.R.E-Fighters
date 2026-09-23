@@ -54,12 +54,11 @@ struct RimOut {
 }
 fn spot_clip(p:vec3<f32>)->vec4<f32> {
  let z=dot(p,scene.forward.xyz);
- let near=max(scene.view.x,1.0);let far=2200000.0;let f=1.7320508*scene.up.w;
- return vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,far/(far-near)*z-near*far/(far-near),z);
+ let f=1.7320508*scene.up.w;
+ return vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,world_depth_clip(z),z);
 }
 fn spot_depth_at(z:f32)->f32 {
- let near=max(scene.view.x,1.0);let far=2200000.0;
- return far/(far-near)-near*far/((far-near)*z);
+ return world_depth_clip(z)/z;
 }
 // Behind the near plane: whole triangles of collapsed vertices have no area.
 fn spot_collapsed()->vec4<f32> {return vec4<f32>(0.0,0.0,-1.0,1.0);}
@@ -150,7 +149,7 @@ fn spot_world_pixel(clip:vec4<f32>,size:vec2<u32>)->vec2<i32> {
  return clamp(at,vec2<i32>(0),vec2<i32>(size)-vec2<i32>(1));
 }
 fn rim_color(in:RimOut,scene_depth:f32,light:bool)->vec4<f32> {
- if (in.light>=0.5)!=light || in.depth>=scene_depth {discard;}
+ if (in.light>=0.5)!=light || in.depth<=scene_depth {discard;}
  return vec4<f32>(in.color,1.0);
 }
 // Min and max blending make overlapping copies idempotent, and a background

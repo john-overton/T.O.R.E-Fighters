@@ -131,3 +131,16 @@ each line prints `Speaker: 'text'` and queues its recordings after anything
 already playing. The player's death scream plays directly, without text. What
 is said and when is in [cockpit voice](spec/cockpit-voice.md#implementation-in-tore);
 missing recordings are skipped and the text still shows.
+
+
+## Airport and wing departure reports
+
+The [airfield radio producer](spec/airfield-radio.md) observes player and
+wingman airfield states. Runway starts receive a recorded takeoff clearance;
+airborne/farewell, landing clearance/wind, landing grade and welcome use original
+recordings. Taxi, hold, final and taxi-clear status fill gaps with text. Wing
+reports identify the aircraft and share the radio channel at readable intervals.
+Routine wing calls obey radio silence. Airport recordings have their own queue
+ownership so a cancelled airport message cannot remove wing or crew speech.
+[Static evidence](formats/radio.md#airport-speech-review),
+[validation and carrier limits](baselines/airfield-radio.md).

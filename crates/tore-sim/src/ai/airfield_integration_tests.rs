@@ -961,3 +961,73 @@ fn the_approach_climbs_over_a_ridge_under_the_gates() {
     );
     assert_parked_on_runway(mission.actor(1).unwrap());
 }
+
+#[test]
+fn queued_wingmen_hold_short_then_depart_without_retracing_the_parking_route() {
+    let runway = anchored_runway();
+    let anchors = runway.anchors.unwrap();
+    let mut mission = AiMission::new();
+    for (id, order, offset) in [(1, 1, 0.), (2, 2, 200.)] {
+        let end = anchors.taxi_out[3];
+        let start = anchors.taxi_out[2];
+        let dx = end[0] - start[0];
+        let dz = end[2] - start[2];
+        let length = dx.hypot(dz);
+        let slot = [
+            end[0] - dx * offset / length,
+            0.,
+            end[2] - dz * offset / length,
+        ];
+        let heading = dx.atan2(dz);
+        let mut actor = hornet(id, order, slot, heading);
+        actor.flight_mut().enable_research(id as i32).unwrap();
+        actor.flight_mut().start_on_runway(slot, heading).unwrap();
+        actor.start_on_ground(GroundStart {
+            runway,
+            end: ApproachEnd::Near,
+            order,
+        });
+        mission.push(actor);
+    }
+    mission.set_external_leader(Side(1), 0, HUMAN);
+    let template = hornet(99, 0, [0.; 3], 0.);
+    let mut lifted = [None, None];
+    for tick in 0..300 * 120 {
+        let mut leader = human(&template, tick as f64 / 120., 30.);
+        leader.position[2] -= 700.;
+        let grounded = leader.on_ground;
+        step(&mut mission, Some(leader));
+        assert!(!crashed(&mission));
+        for (i, actor) in mission.actors().iter().enumerate() {
+            if grounded {
+                assert_eq!(actor.airfield_phase(), Some(Phase::Waiting));
+            }
+            if actor.airfield_phase() == Some(Phase::Taxi) {
+                assert_eq!(actor.airfield().unwrap().leg(), 3);
+            }
+            if !on_ground(actor) {
+                lifted[i].get_or_insert(tick);
+            }
+        }
+        if lifted[0].is_none() {
+            assert_eq!(
+                mission.actor(2).unwrap().airfield_phase(),
+                Some(Phase::Waiting)
+            );
+        }
+        if mission
+            .actors()
+            .iter()
+            .all(|a| a.airfield_phase().is_none())
+        {
+            break;
+        }
+    }
+    assert!(lifted[0].is_some() && lifted[1] > lifted[0]);
+    assert!(
+        mission
+            .actors()
+            .iter()
+            .all(|a| a.airfield_phase().is_none())
+    );
+}

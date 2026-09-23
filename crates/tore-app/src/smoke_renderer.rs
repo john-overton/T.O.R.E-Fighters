@@ -92,7 +92,7 @@ impl SmokeRenderer {
             }] },
             fragment: Some(wgpu::FragmentState {module:shader,entry_point:Some("smoke_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState{format,blend:Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})]}),
             primitive:wgpu::PrimitiveState { cull_mode:None,..Default::default() },
-            depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:false,depth_compare:wgpu::CompareFunction::Less,stencil:Default::default(),bias:Default::default()}),
+            depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:false,depth_compare:wgpu::CompareFunction::Greater,stencil:Default::default(),bias:Default::default()}),
             multisample:wgpu::MultisampleState {count:samples,..Default::default()},multiview:None,cache:None,
         })
     }
@@ -418,7 +418,7 @@ mod tests {
                                 wgpu::RenderPassDepthStencilAttachment {
                                     view: &depth_view,
                                     depth_ops: Some(wgpu::Operations {
-                                        load: wgpu::LoadOp::Clear(1.),
+                                        load: wgpu::LoadOp::Clear(0.),
                                         store: wgpu::StoreOp::Store,
                                     }),
                                     stencil_ops: None,
