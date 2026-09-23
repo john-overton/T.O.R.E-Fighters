@@ -961,6 +961,15 @@ heading/bank rates, and
 reports sensor fit, stores, launches and dropped launches. This is separate
 from synthetic tests and is not a retail comparison or visual acceptance.
 The shorter `--ai-probe-ticks N` retains the Quick Mission bridge probe.
+For ground operations, combine it with `--ground-start AIRPORT`,
+`--probe-wing-size 1..5` and `--maneuver takeoff`. Schedule an order with
+`--probe-wing-order TICK:land-selected` or `TICK:bug-out`; `--probe-trace SECONDS`
+prints each wingman's airfield phase and position. `--probe-player-home FROM:UNTIL`
+flies the scripted leader gear down toward the field during that tick range.
+`--separation 200` or `300` also exercises the expanded enemy-distance choices.
+The scripted leader is only a test harness and can hit terrain on a long cruise.
+[Reproduction and limits](baselines/ground-start.md#whole-wing-ground-start-2026-09-23).
+
 
 ## Formation flight traces
 

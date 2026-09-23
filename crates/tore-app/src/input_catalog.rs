@@ -493,6 +493,13 @@ pub const ENTRIES: &[Entry] = &[
     cmd("key:Alt-8", "Wing: spacing", Communication, &["Alt-8"]),
     cmd("key:Alt-k", "Wing: stacking", Communication, &["Alt-k"]),
     cmd("key:Alt-s", "Radio silence", Communication, &["Alt-s"]),
+    cmd("key:Alt-u", "Wing: bug out", Communication, &["Alt-u"]),
+    cmd(
+        "key:Alt-l",
+        "Wing: land at selected airport",
+        Communication,
+        &["Alt-l"],
+    ),
     cmd(
         "key:Alt-c",
         "Wing: loose/medium control",

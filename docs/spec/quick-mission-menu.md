@@ -115,11 +115,74 @@ the generator's relative wing placements and situation offsets. Pending that,
 the **fitted**, agent-selected placement puts friendly wings 2 and 3 at 4096 ft
 left/right and 4096 ft behind the player. Enemy wing 1 starts at the selected
 separation, with enemy wings 2 and 3 offset 4096 ft left/right. Enemy aircraft
-face the friendly group; all start at the chosen altitude. Slots rotate with
-each wing leader. Close tracking projects the slot along the leader velocity;
-separated aircraft use the linked rejoin procedure, with neighborhood clearance
-and approach coordination.
-Restart restores all six groups.
+face the friendly group. Airborne aircraft start at the chosen altitude; a
+ground start parks the player's wing instead (see
+[Player ground start](#player-ground-start)). Slots rotate with each wing
+leader. Close tracking projects the slot along the leader velocity; separated
+aircraft use the linked rejoin procedure, with neighborhood clearance and
+approach coordination.
+Restart restores all six groups exactly as launched.
+
+### Separation
+
+Separation is in nautical miles (6,076.12 ft), as the manual states (p.19:
+"between 1 and 50 nautical miles"). John chose nautical miles for every entry
+on 2026-09-23. The retail list offers 1, 2, 5, 10, 20 and 50 miles; John
+requested 200 and 300 miles on 2026-09-23, and the host appends them in the
+retail label style ("200 miles", "300 miles"). Every label means nautical
+miles. An out-of-range choice falls back to the 5 mile default instead of
+failing.
+
+### Keeping the enemy on the map
+
+John requested on 2026-09-23 that the enemy group is aimed into the map when
+the selected separation would put it off the edge. Rule (the numbers are
+**fitted** agent choices):
+
+- Every enemy aircraft, including the side wings 4096 ft left and right and
+  the formation slots behind them, must start at least one terrain cell
+  (8,192 ft) inside the map edge.
+- Straight ahead is kept when the whole group fits there. Otherwise bearings
+  are tried one degree at a time, nearest to straight ahead first, clockwise
+  before counter-clockwise at equal angles. The first bearing that fits at the
+  full distance is used.
+- In an airborne start the whole airborne scene turns: the player's starting
+  heading and the friendly wings turn with the enemy, so the enemy is still
+  straight ahead. In a ground start the parked wing cannot turn, so only the
+  enemy group moves around the airport and still faces it.
+- If no bearing fits at the full distance, the bearing that allows the longest
+  distance is used at that distance, and the flight opens with a message such
+  as "Enemy forces start 142 miles away: 300 miles does not fit this theater."
+  Restart keeps the same placement.
+
+From the default airborne start near the middle of a 208 by 200 cell theater,
+200 and 300 miles never fit at full distance; in the 256 by 256 cell Baltic and
+Kurile theaters 200 miles fits only toward a corner.
+
+### Home airfields
+
+Every AI aircraft has a home runway for returning to base. The player's
+wingmen in a ground start call the departure runway home. Every other aircraft
+takes the nearest runway, measured from where it starts, that its side may
+use: a friendly field or a neutral one that grants permission, the same test
+the player's tower service applies. Allegiance is recorded from the player's
+side, so an enemy aircraft's own fields are the ones marked hostile, and the
+single neutral-permission flag serves both sides. Ties go to the lower runway
+number. An aircraft with no usable runway keeps its start point as home. Every
+imported airport is currently neutral with permission, so in practice each
+aircraft takes its nearest runway. This choice is **fitted** (agent decision,
+2026-09-23).
+
+### Radar and aircraft on the ground
+
+Manual p.208: "Grounded aircraft do not appear on enemy radar until they take
+to the air." An aircraft on the ground, parked or rolling, gives no radar
+return to anyone: it cannot become a radar contact, be locked, or be picked
+through the radar, for the player or for AI. It becomes an ordinary radar
+contact on the first moment its wheels leave the ground. Visual and infrared
+sighting are unchanged, and its own radar and jammer are still received. The
+rule is applied as a zero radar signature while the aircraft is on the ground
+(fitted implementation detail).
 
 The existing combat AI remains partial. Scoped [player wing commands and radio](ai.md#live-wing-command-and-radio-integration)
 are connected, including recipient outcomes and cancellation. Broader mission
@@ -140,8 +203,10 @@ Nationality, skill and advantage do not control behavior or protect a dummy from
 selection. These are practice fixtures, not friendly/enemy combat AI.
 
 Agent-selected fitted placement: all dummies start at the player's altitude and
-heading, forward at the selected separation interpreted as statute miles
-(5,280 feet). The first is directly ahead. Successive pairs are 500 feet farther
+heading, forward at the selected separation in nautical miles (see
+[Separation](#separation)), shortened if it does not fit the map. In an
+airborne start they turn with the player; in a ground start only the player is
+parked and the dummies keep the runway heading. The first is directly ahead. Successive pairs are 500 feet farther
 forward and 500 feet farther to either side per pair. Speed is 300 feet/second;
 engine heat uses 70% throttle without afterburner. Radius is 28 feet. Aircraft
 identity supplies original geometry, texture, radar signature and hit points.
@@ -162,26 +227,79 @@ Airborne remains the default. Airport choices belong to the selected theater;
 changing theater resets the airport choice. Popup cancel preserves the draft.
 The accepted start is retained through ordnance setup and mission restart.
 
-Ground start places only the player on the selected runway, facing its primary
-approach heading. The fitted starting point is 5% of runway length inward from
-its primary threshold, capped at 100 feet. Aircraft height includes its own
-wheel/CG clearance above the runway. Initial speed and velocity are zero, engine
-is running at idle, gear and flaps are fully down, brakes are applied, afterburner
-and autopilot are off. Existing B releases brakes and throttle controls begin
-the takeoff roll. No cold-start sequence or autonomous ground traffic is added.
-These initial settings and the new UI layout are agent-selected host behavior,
-not recovered retail Quick Mission rules.
+Ground start parks the player's whole wing, friendly wing 1, at the selected
+airport. The other wings, friendly and enemy, keep the airborne launch.
 
-Other selected aircraft retain the existing airborne wing launch path at the
-chosen altitude, positioned relative to the airport. No AI takeoff/taxi behavior
-is added. Their starting altitude must clear the airport ground by at least
-100 feet; unsupported choices produce a creator notice instead of a crash.
-Ground mode ignores the altitude setting for the player. Airborne mode retains
-its existing behavior. Only the default researched flight model supports ground
-start; legacy and restricted native research modes report that incompatibility
-without silently changing adapters. Missing or obstructed runway starts are
-rejected. Choosing ground start selects the airport for tower commands but does
-not grant landing clearance or announce that a landing has completed.
+**Where each aircraft stands (spec-derived).** Each airport's STRIP shape
+carries its own takeoff spot, taxi route and nine parking slots
+([recovered roles](../formats/native-strip.md#remaining-template-callback-boundaries)).
+The player starts exactly on the takeoff spot, facing down the runway.
+Wingman 1 starts in parking slot 1, wingman 2 in slot 2 and so on, facing the
+parking heading, which is the airport heading plus 90 degrees. This follows the
+reviewed training mission TRAIN01.M, where a grounded player sits exactly on
+the takeoff spot and another grounded aircraft sits on parking slot 1 at the
+parking heading; the mission builder's own placement rule is not traced. A
+parking slot blocked by a building is skipped for the next free one (fitted).
+The takeoff spot is the near end of the host's runway line, so the player
+starts 100 ft farther back than the fitted single-aircraft start used before
+2026-09-23 (5% of the runway length in from the threshold, at most 100 ft).
+On the 16 base theaters every STRIP, STRIP1 to STRIP7 and STRIP3A field
+supplies these points: 231 of the 311 airport entries.
+
+**Fallback (fitted, agent decision, 2026-09-23).** Vertical-landing pads
+(DTSTRP) and the STRIP5A, STRIP6A and STRIP7A fields have no usable points,
+because theirs fall off their own paving. So does an airport whose takeoff spot
+is blocked or whose free parking slots run out. There the wing parks
+staggered on the runway:
+
+- The player is farthest down the runway, on the centerline. Wingmen stand
+  behind, wingman 1 right of the centerline, 2 left, 3 right, 4 left, each
+  250 ft farther back than the one before and 40 ft off the centerline.
+- The last aircraft stands at the old single-aircraft start point, so the
+  player is (wing size - 1) x 250 ft farther down the runway than before.
+- Every slot must be on the airport's paving, on a landable surface, and clear
+  of buildings (checked 6 ft above the surface). If one fails, the spacing
+  tightens to 200, 150 and then 100 ft. If none works, the creator shows a
+  notice and nothing launches.
+- The 40 ft offset keeps the widest selectable wingspan, the F-14's 64 ft
+  spread, within 72 ft of the centerline, inside a 150 ft wide runway.
+  Neighbours stand on opposite sides, 80 ft apart across the runway and a full
+  spacing apart along it; even 100 ft is more than an F-14's length, so no two
+  aircraft overlap.
+
+A player alone (wing size 1) uses the same placement: the takeoff spot, or the
+old start point on a fallback field.
+
+Every parked aircraft is stationary with the engine idling, gear and flaps
+fully down, brakes applied, afterburner and autopilot off. Aircraft height
+includes each aircraft's own wheel/CG clearance above the surface. The
+wingmen fly the researched flight model, each with its own fixed seed (the
+player 1, wingman *n* 1 + *n*), so a run repeats exactly. Nobody is dropped
+from altitude, and restart restores the same layout. Existing B releases the
+player's brakes and throttle controls begin the takeoff roll. How the AI
+wingmen wait, taxi, take off, return and land is in the
+[AI airfield rules](ai-airfield.md). No cold-start sequence is added. These
+initial settings and the new UI layout are agent-selected host behavior, not
+recovered retail Quick Mission rules.
+
+Other selected wings keep the airborne launch path at the chosen altitude,
+positioned relative to the player's slot, with the enemy aimed as described in
+[Keeping the enemy on the map](#keeping-the-enemy-on-the-map). If any aircraft
+starts in the air, the altitude must clear the airport ground by at least
+100 feet; otherwise the creator shows a notice instead of launching. Parked
+wingmen do not need that clearance. Ground mode ignores the altitude setting
+for the parked wing. Airborne mode retains its existing behavior. Only the
+default researched flight model supports ground start; legacy and restricted
+native research modes report that incompatibility without silently changing
+adapters. Missing or obstructed starts are rejected. Choosing ground start
+selects the airport for tower commands but does not grant landing clearance or
+announce that a landing has completed. The straight-flight fixtures
+(`--fixture-wings`) park only the player.
+
+Parked aircraft do not show on radar until they fly; see
+[Radar and aircraft on the ground](#radar-and-aircraft-on-the-ground). The
+headless `--ai-probe-ticks N --ground-start AIRPORT` probe gives the player two
+wingmen so the parked-wing path is exercised.
 
 [Ground-start validation](../baselines/ground-start.md) records creator launch,
 restart, real runway support, takeoff probes and rendering checks.

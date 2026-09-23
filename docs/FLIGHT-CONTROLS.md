@@ -546,8 +546,10 @@ Quick Mission's **Start: Ground** choice exposes an airport selector for the
 current theater. The player starts stationary, engine idling, gear and flaps down,
 with brakes applied. Press **B** to release brakes, then increase throttle and
 use the normal pitch controls for takeoff. Ground start uses the researched model;
-no flight adapter is switched automatically. Wing aircraft retain their airborne
-start. [Start behavior and fitted settings](spec/quick-mission-menu.md#player-ground-start).
+the player's adapter is never switched automatically. The player's AI wingmen
+start parked too and wait for the player to become airborne before taxiing and
+taking off. Other wings remain airborne. Alt-U orders bug out; Alt-L orders
+landing at the airport selected with Shift-A. [Start behavior and fitted settings](spec/quick-mission-menu.md#player-ground-start).
 
 While on a runway or using ILS, `XW` shows signed crosswind and the aircraft's
 MTOW-class limit in knots. `NOTICE`, `ROUGH` and `LIMIT` identify increasing

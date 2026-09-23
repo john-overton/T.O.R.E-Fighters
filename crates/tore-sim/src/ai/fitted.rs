@@ -142,7 +142,8 @@ impl Fallback {
             }
             Self::LeaderReturnToBase => {
                 "a leader or singleton on bingo flies the same private landing route a wingman \
-                 flies"
+                 flies and lands at its home runway (docs/spec/ai-airfield.md); without a home \
+                 runway it turns for its home airport at cruise speed"
             }
         }
     }

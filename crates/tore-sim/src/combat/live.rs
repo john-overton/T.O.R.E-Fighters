@@ -465,6 +465,9 @@ pub struct Target {
     pub jammer_active: bool,
     /// Physical airborne presence. Hit points reaching zero does not clear it.
     pub airborne: bool,
+    /// Parked or rolling on a runway. Radar cannot see it (manual p.208);
+    /// other sensors are unchanged. See [`sensors::Observable::on_ground`].
+    pub on_ground: bool,
     pub wreck: Option<crate::wreck::Wreck>,
     pub wreck_power: crate::wreck::Power,
     pub radius: f64,
@@ -1546,6 +1549,7 @@ impl State {
             jammer: config.sensors.jammer.clone(),
             jammer_active: false,
             airborne: true,
+            on_ground: false,
             radius: AIRCRAFT_RADIUS_FT,
             hp: config.hit_points,
             initial_hp: config.hit_points,
@@ -1604,6 +1608,7 @@ impl State {
             jammer: None,
             jammer_active: false,
             airborne: false,
+            on_ground: false,
             radius: bounds.half[0].max(bounds.half[1]).max(bounds.half[2]),
             hp: hit_points,
             initial_hp: hit_points,
@@ -1658,6 +1663,7 @@ impl State {
             jammer: self.config.sensors.jammer.clone(),
             jammer_active: self.target_jammer,
             airborne: true,
+            on_ground: false,
             radius: AIRCRAFT_RADIUS_FT,
             hp: self.config.hit_points,
             initial_hp: self.config.hit_points,
@@ -1969,18 +1975,21 @@ impl State {
         let observables: Vec<Observable> = self
             .targets
             .iter()
-            .map(|t| Observable {
-                id: t.id,
-                position: t.position,
-                velocity: t.velocity,
-                basis: t.basis,
-                configuration: t.configuration,
-                signature: t.signature,
-                jammer: t.jammer.clone(),
-                jammer_active: t.jammer_active,
-                radar_emitting: t.radar_emitting,
-                airborne: t.airborne,
-                destroyed: t.hp <= 0,
+            .map(|t| {
+                Observable {
+                    id: t.id,
+                    position: t.position,
+                    velocity: t.velocity,
+                    basis: t.basis,
+                    configuration: t.configuration,
+                    signature: t.signature,
+                    jammer: t.jammer.clone(),
+                    jammer_active: t.jammer_active,
+                    radar_emitting: t.radar_emitting,
+                    airborne: t.airborne,
+                    destroyed: t.hp <= 0,
+                }
+                .on_ground(t.on_ground)
             })
             .collect();
         let observer = Observer {
@@ -2363,6 +2372,7 @@ impl State {
             jammer: None,
             jammer_active: false,
             airborne: launcher.alive,
+            on_ground: false,
             radius: AIRCRAFT_RADIUS_FT,
             hp: if launcher.alive { self.player_hp } else { 0 },
             initial_hp: self.config.damage_capacity,
@@ -4259,6 +4269,7 @@ mod tests {
             jammer: None,
             jammer_active: false,
             airborne: true,
+            on_ground: false,
             radius: 20.,
             hp,
             initial_hp: hp,
@@ -5030,6 +5041,21 @@ mod tests {
         // Designating another contact is never illumination of the first.
         assert!(s.step(false, l, |_, _| 0.).contains(&Event::TrackLost(1)));
         assert_eq!(s.projectiles[0].target, None);
+    }
+    #[test]
+    fn a_parked_aircraft_is_not_a_player_radar_contact_until_it_flies() {
+        // Manual p.208: grounded aircraft do not appear on enemy radar.
+        let mut s = fixture(true);
+        let l = launcher();
+        s.targets.push(target(1, [0., 1000., 3000.], 20, 0x80));
+        s.targets[0].on_ground = true;
+        observe(&mut s, l, 1);
+        assert!(s.sensors.contact(1).is_none());
+        s.command(Command::DesignateTarget(1), l);
+        assert_eq!(s.designated(), None);
+        s.targets[0].on_ground = false;
+        observe(&mut s, l, 1);
+        assert!(s.sensors.contact(1).is_some());
     }
     #[test]
     fn a_destroyed_aircraft_stays_a_contact_until_its_wreck_reaches_the_ground() {

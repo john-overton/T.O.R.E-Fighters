@@ -793,10 +793,27 @@ impl App {
                     return Action::None;
                 }
                 let selected = self.combat.state.designated();
-                let result = self
-                    .ai_wings
-                    .as_mut()
-                    .map(|bridge| bridge.command(order, selected, self.wing_recipient));
+                // Land at selected airport uses the airport Shift-A selected
+                // for the tower.
+                let site = if order == tore_sim::ai::wing::PlayerOrder::LandAtSelected {
+                    match ai_wings::AiWings::landing_site(
+                        &self.world.airport_scene,
+                        &self.world.airfield_anchors,
+                        &self.airport_service,
+                    ) {
+                        Ok(site) => Some(site),
+                        Err(message) if self.ai_wings.is_some() => {
+                            self.flight_ui.message(message);
+                            return Action::None;
+                        }
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                };
+                let result = self.ai_wings.as_mut().map(|bridge| {
+                    bridge.command_at(order, selected, self.wing_recipient, site.as_ref())
+                });
                 match result {
                     Some(Ok(report)) => {
                         if let Some(audio) = &self.audio {
@@ -1341,25 +1358,67 @@ impl App {
                     self.quick.ordnance.as_mut().unwrap().message=Some("Ground start requires the researched flight model. Choose Airborne for this adapter.".into());
                     return;
                 }
-                let mut start = self.hornet.start(&self.world);
-                if let Some(object) = selected_ground {
-                    let result = start
-                        .enable_research(1)
-                        .map_err(|e| -> Box<dyn Error> { e.into() })
-                        .and_then(|()| {
-                            quick_mission::apply_ground_start(&self.world, &mut start, object)
-                                .map(|_| ())
-                        });
-                    if let Err(error) = result {
+                let wings = match self.quick.wing_launches(self.enemy_skill) {
+                    Ok(wings) => wings,
+                    Err(error) => {
                         self.quick.ordnance.as_mut().unwrap().message = Some(error.to_string());
                         return;
                     }
-                }
+                };
+                // A ground start parks the player's whole wing on the runway;
+                // the straight-flight fixtures keep only the player there.
+                let parked = if self.ai_wings_enabled {
+                    self.quick.player_wing_size()
+                } else {
+                    1
+                };
+                let mut start = self.hornet.start(&self.world);
+                let ground_layout = match selected_ground {
+                    Some(object) => {
+                        let result = start
+                            .enable_research(1)
+                            .map_err(|e| -> Box<dyn Error> { e.into() })
+                            .and_then(|()| {
+                                quick_mission::ground_layout(&self.world, object, parked)
+                            })
+                            .and_then(|layout| {
+                                quick_mission::place_on_runway(&self.world, &mut start, &layout, 0)
+                                    .map(|()| layout)
+                            });
+                        match result {
+                            Ok(layout) => Some(layout),
+                            Err(error) => {
+                                self.quick.ordnance.as_mut().unwrap().message =
+                                    Some(error.to_string());
+                                return;
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                let layout = quick_mission::MissionLayout::plan(
+                    &self.world,
+                    &start,
+                    ground_layout,
+                    &ai_wings::enemy_group_offsets(&wings),
+                    self.quick.separation_feet(),
+                );
                 let ground = f64::from(
                     self.world
                         .height(start.position[0] as f32, start.position[2] as f32),
                 );
-                let airborne_wings = self.quick.dummy_wings().iter().any(|(_, count)| *count > 0);
+                // Only aircraft that start in the air need the altitude to
+                // clear the ground; parked wingmen do not.
+                let airborne_wings = if self.ai_wings_enabled {
+                    wings.iter().any(|wing| {
+                        !wing.is_empty()
+                            && (layout.ground.is_none()
+                                || wing.wing.side.is_enemy()
+                                || wing.wing.index != 0)
+                    })
+                } else {
+                    self.quick.dummy_wings().iter().any(|(_, count)| *count > 0)
+                };
                 if (selected_ground.is_none() || airborne_wings) && altitude < ground + 100. {
                     self.quick.ordnance.as_mut().unwrap().message = Some(format!(
                         "Airborne altitude must exceed {:.0} feet here. Choose a higher altitude.",
@@ -1376,20 +1435,12 @@ impl App {
                             return;
                         }
                         let populated = if self.ai_wings_enabled {
-                            self.quick
-                                .wing_launches(self.enemy_skill)
-                                .map_err(|e| -> Box<dyn Error> { e.to_string().into() })
-                                .and_then(|wings| {
-                                    c.mission_aircraft(
-                                        &wings,
-                                        self.quick.separation_feet(),
-                                        &self.theater_resources,
-                                    )
-                                })
+                            c.mission_aircraft(&wings, &layout, &self.theater_resources)
                         } else {
+                            c.mission_layout = Some(layout.clone());
                             c.mission_dummies(
                                 &self.quick.dummy_wings(),
-                                self.quick.separation_feet(),
+                                layout.enemy.distance_ft,
                                 &self.theater_resources,
                             )
                         };
@@ -1432,9 +1483,27 @@ impl App {
                     self.flight.position[1] = altitude;
                     self.flight.fuel = fuel;
                 }
+                // The accepted creator layout, reused unchanged on restart.
+                let layout = self
+                    .mission
+                    .and(self.combat.mission_layout.clone())
+                    .filter(|layout| layout.ground.is_some() == self.ground_start.is_some());
+                let parked = layout.as_ref().and_then(|layout| layout.ground.clone());
+                if let Some(layout) = layout.as_ref().filter(|l| l.player_turn != 0.) {
+                    // Airborne: the whole scene turns so the enemy ahead stays
+                    // on the map.
+                    self.flight.yaw += layout.player_turn;
+                    let basis = attitude::Basis::new(self.flight.yaw, 0., 0.);
+                    self.flight.velocity = std::array::from_fn(|i| {
+                        basis.forward[i] * self.flight.speed + self.world.wind()[i]
+                    });
+                }
                 if let Some(object) = self.ground_start {
-                    let (position, heading) = match quick_mission::runway_pose(&self.world, object)
-                    {
+                    let pose = match &parked {
+                        Some(ground) => Ok((ground.slots[0], ground.heading)),
+                        None => quick_mission::runway_pose(&self.world, object),
+                    };
+                    let (position, heading) = match pose {
                         Ok(pose) => pose,
                         Err(error) => {
                             self.error = Some(error);
@@ -1483,7 +1552,16 @@ impl App {
                     self.combat.apply_startup_weapons();
                 }
                 let ground_airport = if let Some(object) = self.ground_start {
-                    match quick_mission::apply_ground_start(&self.world, &mut self.flight, object) {
+                    let placed = match &parked {
+                        Some(ground) => {
+                            quick_mission::place_on_runway(&self.world, &mut self.flight, ground, 0)
+                                .map(|()| ground.airport)
+                        }
+                        None => {
+                            quick_mission::apply_ground_start(&self.world, &mut self.flight, object)
+                        }
+                    };
+                    match placed {
                         Ok(airport) => Some(airport),
                         Err(error) => {
                             self.error = Some(error);
@@ -1522,11 +1600,18 @@ impl App {
                         .wing_launches(self.enemy_skill)
                         .map_err(|e| -> Box<dyn Error> { e.to_string().into() })
                         .and_then(|wings| {
-                            ai_wings::AiWings::build(
+                            // Home runways for every aircraft; a ground start
+                            // parks the player's wingmen behind the player.
+                            let airfields = ai_wings::Airfields::from_world(
+                                &self.world,
+                                parked.as_ref().map(quick_mission::GroundLayout::departure),
+                            );
+                            ai_wings::AiWings::build_mission(
                                 &wings,
                                 &self.combat.state.targets,
                                 self.quick.guns_only(),
                                 &self.theater_resources,
+                                &airfields,
                             )
                         });
                     match built {
@@ -1581,6 +1666,9 @@ impl App {
                 if self.ground_start.is_some() {
                     self.flight_ui
                         .message("Ground start: B releases brakes; PageUp adds throttle.");
+                }
+                if let Some(notice) = layout.as_ref().and_then(|l| l.notice()) {
+                    self.flight_ui.message(notice);
                 }
                 self.screen = Screen::Flight;
                 self.camera.keys.clear();
@@ -1768,7 +1856,7 @@ impl ApplicationHandler for App {
                         event_loop.exit();
                     } else if self.error.is_none() {
                         println!(
-                            "Quick Mission launch: ground={:?} player_position={:?} supported={} airborne_targets={}",
+                            "Quick Mission launch: ground={:?} player_position={:?} supported={} airborne_targets={} parked_targets={} enemy_nm={:.1}",
                             self.ground_start,
                             self.flight.position,
                             self.flight.supported_at(
@@ -1780,8 +1868,18 @@ impl ApplicationHandler for App {
                                 .state
                                 .targets
                                 .iter()
-                                .filter(|t| t.airborne)
-                                .count()
+                                .filter(|t| t.airborne && !t.on_ground)
+                                .count(),
+                            self.combat
+                                .state
+                                .targets
+                                .iter()
+                                .filter(|t| t.on_ground)
+                                .count(),
+                            self.combat
+                                .mission_layout
+                                .as_ref()
+                                .map_or(0., |l| l.enemy.distance_ft / quick_mission::FEET_PER_NM)
                         );
                     }
                 }
@@ -2552,6 +2650,20 @@ impl ApplicationHandler for App {
                                         ]);
                                     }
                                 }
+                            }
+                            // Manual p.65: the player always lands first and
+                            // other aircraft hold at marshal. The retail
+                            // condition (gear, height, speed and range) is
+                            // re-evaluated every tick, so climbing away,
+                            // raising the gear, a crash or restart release it.
+                            if let Some(wings) = &mut self.ai_wings {
+                                let [x, _, z] = self.flight.position;
+                                wings.update_player_landing(
+                                    &self.world.airport_scene,
+                                    &self.airport_service,
+                                    &self.flight,
+                                    self.world.surface(x, z).height,
+                                );
                             }
                             for message in self.flight.systems.messages.drain(..) {
                                 self.flight_ui.message(message);
@@ -3468,6 +3580,356 @@ impl ApplicationHandler for App {
         event_loop.set_control_flow(ControlFlow::WaitUntil(next));
     }
 }
+/// What the headless AI probe scripts for the human leader
+/// (`--maneuver takeoff`, `--probe-wing-size`, `--probe-wing-order`,
+/// `--probe-player-home`). Development harness only.
+#[derive(Clone, Debug, Default)]
+struct ProbeScript {
+    /// Take off from the ground start, climb and cruise on the autopilot.
+    takeoff: bool,
+    /// Aircraft in the player's wing, the player included.
+    wing_size: Option<usize>,
+    /// Wing orders to all wingmen at a tick.
+    orders: Vec<(u64, tore_sim::ai::wing::PlayerOrder)>,
+    /// From the first tick to the second the player flies gear down over the
+    /// departure airfield, the configuration that gives it landing priority.
+    home: Option<(u64, u64)>,
+    /// Ticks between trace lines for the player's wing, 0 for none.
+    trace_ticks: u64,
+}
+
+impl ProbeScript {
+    /// `TICK:bug-out` or `TICK:land-selected`.
+    fn parse_order(text: &str) -> AppResult<(u64, tore_sim::ai::wing::PlayerOrder)> {
+        use tore_sim::ai::wing::PlayerOrder;
+        let usage = "--probe-wing-order needs TICK:bug-out or TICK:land-selected";
+        let (tick, order) = text.split_once(':').ok_or(usage)?;
+        let order = match order {
+            "bug-out" => PlayerOrder::BugOut,
+            "land-selected" => PlayerOrder::LandAtSelected,
+            _ => return Err(usage.into()),
+        };
+        Ok((tick.parse()?, order))
+    }
+}
+
+/// The scripted human leader of the AI probe. `fitted` test harness (agent
+/// decision, 2026-09-23), not game behaviour: the same full-power, 0.35
+/// pitch rotation as `--maneuver takeoff` until 50 ft above the ground, then
+/// gear and flaps up and a 10 degree nose-up hold to 3,000 ft above the
+/// ground, where the player's own heading-and-altitude autopilot takes over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProbePilot {
+    Roll,
+    Climb,
+    Cruise,
+    Home,
+    Away,
+}
+
+/// Height above the ground at which the scripted leader cleans up.
+const PROBE_CLEAN_AGL_FT: f64 = 50.;
+/// Nose-up attitude the scripted leader holds in the climb.
+const PROBE_CLIMB_PITCH_DEG: f64 = 10.;
+/// Height above the ground at which the scripted leader levels off.
+const PROBE_CRUISE_AGL_FT: f64 = 3_000.;
+
+impl ProbePilot {
+    fn fly(
+        &mut self,
+        tick: u64,
+        flight: &mut flight::State,
+        keys: &mut flight::PilotInput,
+        world: &terrain::World,
+        ground: Option<&quick_mission::GroundLayout>,
+        script: &ProbeScript,
+    ) {
+        use flight::{PilotCommand::*, Switch};
+        let [x, y, z] = flight.position;
+        let agl = y - world.surface(x, z).height;
+        match *self {
+            Self::Roll => {
+                keys.pitch = 0.35;
+                if agl > PROBE_CLEAN_AGL_FT {
+                    keys.commands = vec![Set(Switch::Gear, false), Set(Switch::Flaps, false)];
+                    *self = Self::Climb;
+                    println!("t={tick} player: airborne, gear and flaps up");
+                }
+            }
+            Self::Climb => {
+                let error = PROBE_CLIMB_PITCH_DEG - flight.pitch.to_degrees();
+                keys.pitch =
+                    (0.08 * error - 0.3 * flight.pitch_rate.to_degrees() / 10.).clamp(-1., 1.);
+                keys.roll = (-flight.bank.to_degrees() / 30.).clamp(-1., 1.);
+                if agl > PROBE_CRUISE_AGL_FT {
+                    keys.pitch = 0.;
+                    keys.roll = 0.;
+                    keys.commands = vec![
+                        Set(Switch::Burner, false),
+                        Throttle(0.85),
+                        Set(Switch::Autopilot, true),
+                    ];
+                    *self = Self::Cruise;
+                    println!("t={tick} player: levelling off at {agl:.0} ft AGL, autopilot on");
+                }
+            }
+            Self::Cruise => {
+                if let (Some((from, _)), Some(ground)) = (script.home, ground)
+                    && tick >= from
+                {
+                    let centre = ground.runway.center;
+                    flight.autopilot.set_navigation_target(Some(
+                        tore_sim::autopilot::NavigationTarget {
+                            number: 1,
+                            position: [centre[0], centre[2]],
+                        },
+                    ));
+                    keys.commands = vec![
+                        Set(Switch::Gear, true),
+                        Throttle(0.6),
+                        Set(Switch::WaypointAutopilot, true),
+                    ];
+                    *self = Self::Home;
+                    println!("t={tick} player: gear down, flying over the departure airfield");
+                }
+            }
+            Self::Home => {
+                if script.home.is_some_and(|(_, until)| tick >= until) {
+                    keys.commands = vec![
+                        Set(Switch::Gear, false),
+                        Throttle(0.85),
+                        Set(Switch::Autopilot, true),
+                    ];
+                    *self = Self::Away;
+                    println!("t={tick} player: gear up, leaving the airfield");
+                }
+            }
+            Self::Away => {}
+        }
+    }
+}
+
+/// Per-actor transitions for the AI probe: airfield phase and activity for
+/// the player's wing, deaths for everyone, and ground hazards (off the
+/// landable surface, inside a building, two aircraft within
+/// [`PROBE_CLOSE_FT`], or stopped mid-taxi for [`PROBE_STUCK_S`]).
+#[derive(Default)]
+struct ProbeWatch {
+    last: std::collections::BTreeMap<u32, String>,
+    player: Option<String>,
+    priority: Option<u32>,
+    hazards: std::collections::BTreeSet<(u32, u32, &'static str)>,
+    stopped_since: std::collections::BTreeMap<u32, u64>,
+    firsts: std::collections::BTreeMap<u32, (String, Vec<(String, u64)>)>,
+    events: usize,
+    /// Ticks between trace lines for the player's wing, 0 for none.
+    trace: u64,
+    go_arounds: std::collections::BTreeMap<u32, u32>,
+}
+
+/// Aircraft on the ground closer than this are reported as touching.
+const PROBE_CLOSE_FT: f64 = 30.;
+/// A taxiing aircraft stopped this long is reported as possibly stuck.
+const PROBE_STUCK_S: f64 = 60.;
+/// Height above the surface below which an aircraft counts as on the ground.
+const PROBE_GROUND_AGL_FT: f64 = 15.;
+/// Id used for the player in hazard pairs.
+const PROBE_PLAYER: u32 = 0;
+
+impl ProbeWatch {
+    fn observe(
+        &mut self,
+        tick: u64,
+        bridge: &ai_wings::AiWings,
+        player: &flight::State,
+        world: &terrain::World,
+    ) {
+        use tore_sim::ai::airfield::Phase;
+        let seconds = tick as f64 / 120.;
+        let line = |f: &flight::State| {
+            let [x, y, z] = f.position;
+            format!(
+                "agl={:.0} kt={:.0} x={x:.0} z={z:.0} hdg={:.0}",
+                y - world.surface(x, z).height,
+                f.speed / 1.68781,
+                f.yaw.to_degrees().rem_euclid(360.)
+            )
+        };
+        let [px, py, pz] = player.position;
+        let player_ground = world.surface(px, pz);
+        let player_on_ground = player.research.as_ref().is_some_and(|r| r.on_ground);
+        let key = format!(
+            "on_ground={player_on_ground} gear={} crashed={}",
+            player.gear_down, player.crashed
+        );
+        if self.player.as_ref() != Some(&key) {
+            println!("t={tick} ({seconds:.1}s) player: {key} {}", line(player));
+            self.player = Some(key);
+        }
+        let priority = bridge.mission().priority_landing();
+        if priority != self.priority {
+            println!("t={tick} ({seconds:.1}s) player landing priority: {priority:?}");
+            self.priority = priority;
+        }
+        let mut grounded = Vec::new();
+        if !player.crashed && py - player_ground.height < PROBE_GROUND_AGL_FT {
+            grounded.push((PROBE_PLAYER, player.position));
+        }
+        for slot in bridge.slots() {
+            let Some(actor) = bridge.mission().actor(slot.id) else {
+                continue;
+            };
+            let f = actor.flight();
+            let phase = actor.airfield_phase();
+            let own_wing =
+                slot.side == tore_sim::ai::launch::Side::Friendly && slot.wing_number == 1;
+            if own_wing && self.trace > 0 && tick.is_multiple_of(self.trace) {
+                println!(
+                    "t={tick} ({seconds:.1}s) trace {}: {:?} leg={:?} {} thr={:.2} brake={}",
+                    slot.label(),
+                    phase,
+                    actor.airfield().map(|s| s.leg()),
+                    line(f),
+                    f.throttle,
+                    f.brake_out
+                );
+            }
+            let key = if own_wing {
+                format!(
+                    "phase={} activity=\"{}\" alive={}",
+                    phase.map_or("-".into(), |p| format!("{p:?}")),
+                    actor.activity().label(),
+                    actor.alive()
+                )
+            } else {
+                format!("alive={}", actor.alive())
+            };
+            if self.last.get(&slot.id) != Some(&key) {
+                println!(
+                    "t={tick} ({seconds:.1}s) {} {:?}: {key} {}",
+                    slot.label(),
+                    slot.aircraft,
+                    line(f)
+                );
+                self.last.insert(slot.id, key);
+                self.events += 1;
+                if own_wing {
+                    let entry = self
+                        .firsts
+                        .entry(slot.id)
+                        .or_insert_with(|| (slot.label(), Vec::new()));
+                    let name = phase.map_or("Airborne".into(), |p| format!("{p:?}"));
+                    if !entry.1.iter().any(|(n, _)| *n == name) {
+                        entry.1.push((name, tick));
+                    }
+                }
+            }
+            if let Some(sequence) = actor.airfield() {
+                let count = sequence.go_arounds();
+                if count > *self.go_arounds.get(&slot.id).unwrap_or(&0) {
+                    let point = sequence.landing_point();
+                    let [x, _, z] = f.position;
+                    let [vx, _, vz] = f.velocity;
+                    // Signed distance past the landing point along the track.
+                    let past = ((x - point[0]) * vx + (z - point[2]) * vz) / vx.hypot(vz).max(1.);
+                    println!(
+                        "t={tick} ({seconds:.1}s) GO-AROUND {} #{count}: {} vs={:.0} {:.0} ft past the landing point, {:.0} ft above it, landable below={}",
+                        slot.label(),
+                        line(f),
+                        f.velocity[1],
+                        past,
+                        f.position[1] - point[1],
+                        world.surface(x, z).landable
+                    );
+                }
+                self.go_arounds.insert(slot.id, count);
+            }
+            if !actor.alive() || f.crashed {
+                continue;
+            }
+            let [x, y, z] = f.position;
+            let surface = world.surface(x, z);
+            if y - surface.height >= PROBE_GROUND_AGL_FT {
+                self.stopped_since.remove(&slot.id);
+                continue;
+            }
+            grounded.push((slot.id, f.position));
+            let hazard = |this: &mut Self, what: &'static str, on: bool| {
+                let entry = (slot.id, slot.id, what);
+                if on && this.hazards.insert(entry) {
+                    println!(
+                        "t={tick} ({seconds:.1}s) HAZARD {what}: {} {}",
+                        slot.label(),
+                        line(f)
+                    );
+                } else if !on && this.hazards.remove(&entry) {
+                    println!("t={tick} ({seconds:.1}s) clear {what}: {}", slot.label());
+                }
+            };
+            hazard(self, "off landable surface", !surface.landable);
+            let probe = [x, surface.height + 6., z];
+            let inside = world
+                .solid_contact(
+                    probe,
+                    probe,
+                    world.airport_scene.objects.iter().map(|o| o.id),
+                )
+                .is_some();
+            hazard(self, "inside building", inside);
+            let taxiing = matches!(phase, Some(Phase::Taxi | Phase::LineUp | Phase::TaxiClear));
+            if taxiing && f.speed < 1. {
+                let since = *self.stopped_since.entry(slot.id).or_insert(tick);
+                hazard(
+                    self,
+                    "stopped while taxiing",
+                    (tick - since) as f64 / 120. >= PROBE_STUCK_S,
+                );
+            } else {
+                self.stopped_since.remove(&slot.id);
+                hazard(self, "stopped while taxiing", false);
+            }
+        }
+        for (i, (a, pa)) in grounded.iter().enumerate() {
+            for (b, pb) in &grounded[i + 1..] {
+                let close = (pa[0] - pb[0]).hypot(pa[2] - pb[2]) < PROBE_CLOSE_FT;
+                let entry = (*a, *b, "aircraft within 30 ft");
+                if close && self.hazards.insert(entry) {
+                    println!(
+                        "t={tick} ({seconds:.1}s) HAZARD aircraft within 30 ft: ids {a} and {b}"
+                    );
+                } else if !close {
+                    self.hazards.remove(&entry);
+                }
+            }
+        }
+    }
+
+    fn summary(&self) {
+        let mut climbs = Vec::new();
+        for (label, phases) in self.firsts.values() {
+            let text: Vec<_> = phases
+                .iter()
+                .map(|(name, tick)| format!("{name}@{:.1}s", *tick as f64 / 120.))
+                .collect();
+            println!("AI probe phases: {label}: {}", text.join(" "));
+            if let Some((_, tick)) = phases.iter().find(|(n, _)| n == "ClimbOut") {
+                climbs.push(*tick);
+            }
+        }
+        climbs.sort_unstable();
+        let gaps: Vec<_> = climbs
+            .windows(2)
+            .map(|w| format!("{:.1}s", (w[1] - w[0]) as f64 / 120.))
+            .collect();
+        println!(
+            "AI probe liftoff gaps: [{}] hazards_open={} transitions={}",
+            gaps.join(", "),
+            self.hazards.len(),
+            self.events
+        );
+    }
+}
+
 /// Deterministic headless AI probe (`--ai-probe-ticks`).
 ///
 /// It builds the same chain a flown Quick Mission builds: the existing spawner
@@ -3480,6 +3942,9 @@ impl ApplicationHandler for App {
 /// fields so both sides always have aircraft. Rule: the default draft populates
 /// only enemy wing 1, which would leave the friendly-side and wingman paths
 /// untested, and a probe that exercises one side is not evidence for two.
+/// With `--ground-start` it also gives the player two wingmen (agent
+/// decision, 2026-09-23), so the parked-wing path is exercised too.
+#[allow(clippy::too_many_arguments)]
 fn ai_probe_run(
     ticks: usize,
     quick: &mut quick_mission::QuickMission,
@@ -3488,21 +3953,74 @@ fn ai_probe_run(
     world: &terrain::World,
     enemy_skill: Option<tore_sim::ai::experience::EnemySkillOverride>,
     ai_mission: ai_wings::Preset,
+    script: &ProbeScript,
 ) -> AppResult<()> {
     quick.draft.values[7] = 2;
     quick.draft.values[8] = 1;
     quick.draft.values[21] = 2;
+    if quick.ground_runway().is_some() {
+        quick.draft.values[4] = 3;
+    }
+    if let Some(size) = script.wing_size {
+        quick.draft.values[4] = size;
+    }
     quick.draft.values[22] = 2;
     let wings = quick
         .wing_launches(enemy_skill)
         .map_err(|e| e.to_string())?;
     let mut combat = combat::Combat::new(hornet, resources, false)?;
     combat.add_airport_targets(&world.airport_scene)?;
-    combat.mission_aircraft(&wings, quick.separation_feet(), resources)?;
+    // The same launch layout a flown mission uses, including a ground start
+    // when `--ground-start` chose a runway.
     let mut flight = hornet.start(world);
+    let parked = match quick.ground_runway() {
+        Some(object) => {
+            flight.enable_research(1)?;
+            Some(quick_mission::ground_layout(
+                world,
+                object,
+                quick.player_wing_size(),
+            )?)
+        }
+        None => None,
+    };
+    let layout = quick_mission::MissionLayout::plan(
+        world,
+        &flight,
+        parked.clone(),
+        &ai_wings::enemy_group_offsets(&wings),
+        quick.separation_feet(),
+    );
+    combat.mission_aircraft(&wings, &layout, resources)?;
+    let heading = match &parked {
+        Some(ground) => {
+            flight.position[0] = ground.slots[0][0];
+            flight.position[2] = ground.slots[0][2];
+            ground.heading
+        }
+        None => flight.yaw + layout.player_turn,
+    };
+    if heading != flight.yaw {
+        flight.yaw = heading;
+        let basis = attitude::Basis::new(heading, 0., 0.);
+        flight.velocity =
+            std::array::from_fn(|i| basis.forward[i] * flight.speed + world.wind()[i]);
+    }
     combat.reset(&mut flight)?;
-    let mut bridge =
-        ai_wings::AiWings::build(&wings, &combat.state.targets, quick.guns_only(), resources)?;
+    if let Some(ground) = &parked {
+        quick_mission::place_on_runway(world, &mut flight, ground, 0)?;
+    }
+    let airfields = ai_wings::Airfields::from_world(
+        world,
+        parked.as_ref().map(quick_mission::GroundLayout::departure),
+    );
+    let mut bridge = ai_wings::AiWings::build_mission(
+        &wings,
+        &combat.state.targets,
+        quick.guns_only(),
+        resources,
+        &airfields,
+    )?;
     bridge.apply_mission_preset(ai_mission, flight.position);
     bridge.apply_group_objectives(&quick.group_objectives, flight.position);
     bridge.apply_group_survival(&quick.group_must_survive);
@@ -3517,11 +4035,124 @@ fn ai_probe_run(
     let mut radio = radio_calls::Radio::default();
     let phrases = comms::phrases(resources);
     let mut heard = Vec::new();
-    for _ in 0..ticks {
-        flight.step(&flight::PilotInput::default(), |x, z| {
-            f64::from(world.height(x as f32, z as f32))
-        });
+    println!(
+        "AI probe layout: airport={:?} ground={:?} runway_ft={:?} anchored={:?} spacing_ft={:?} enemy_nm={:.1} requested_nm={:.1} enemy_turn_deg={:.0}",
+        parked.as_ref().and_then(|g| world
+            .airport_scene
+            .airports
+            .iter()
+            .find(|a| a.id == g.airport)
+            .map(|a| a.name.as_str())),
+        parked.as_ref().map(|g| g.object),
+        parked.as_ref().map(|g| g.runway.length_ft.round()),
+        parked.as_ref().map(|g| g.anchored),
+        parked.as_ref().and_then(|g| g.spacing_ft),
+        layout.enemy.distance_ft / quick_mission::FEET_PER_NM,
+        layout.enemy.requested_ft / quick_mission::FEET_PER_NM,
+        layout.enemy.turn.to_degrees()
+    );
+    if let Some(notice) = layout.notice() {
+        println!("AI probe notice: {notice}");
+    }
+    let bounds = quick_mission::map_bounds(world);
+    for slot in bridge.slots() {
+        let Some(actor) = bridge.mission().actor(slot.id) else {
+            continue;
+        };
+        if let Some(home) = actor.home_runway()
+            && slot.side == tore_sim::ai::launch::Side::Friendly
+            && slot.wing_number == 1
+        {
+            println!(
+                "AI probe home: {} runway={} airport={:?} length_ft={:.0} vertical_pad={}",
+                slot.label(),
+                home.object,
+                world
+                    .airport_scene
+                    .airports
+                    .iter()
+                    .find(|a| a.id == home.airport)
+                    .map(|a| a.name.as_str()),
+                home.length_ft,
+                world.airport_scene.vertical_pad(home.object)
+            );
+        }
+        let [x, _, z] = actor.flight().position;
+        if !(bounds.min[0]..=bounds.max[0]).contains(&x)
+            || !(bounds.min[1]..=bounds.max[1]).contains(&z)
+        {
+            println!("AI probe OFF-MAP start: {} x={x:.0} z={z:.0}", slot.label());
+        }
+    }
+    // The tower service the player's Shift-A would use, with the departure
+    // airport selected, so "land at selected airport" and the landing
+    // priority go through the same rules as a flown mission.
+    let mut service =
+        tore_sim::airport::Service::new(&world.airport_scene).map_err(std::io::Error::other)?;
+    if let Some(ground) = &parked {
+        service.command(
+            &world.airport_scene,
+            airport_aircraft(world, &flight, false),
+            tore_sim::airport::Command::SelectAirport(ground.airport),
+        );
+    }
+    let scripted = script.takeoff && parked.is_some();
+    if scripted {
+        flight.brake_out = false;
+        flight.throttle = 1.;
+        flight.burner = flight
+            .model()
+            .configuration()
+            .propulsion
+            .afterburner_thrust_lbf
+            > 0.;
+    }
+    let mut pilot = ProbePilot::Roll;
+    let mut watch = ProbeWatch {
+        trace: script.trace_ticks,
+        ..Default::default()
+    };
+    for tick in 0..ticks as u64 {
+        let mut keys = flight::PilotInput::default();
+        if scripted {
+            pilot.fly(tick, &mut flight, &mut keys, world, parked.as_ref(), script);
+        }
+        if parked.is_some() {
+            flight.step_surface(&keys, |x, z| world.surface(x, z));
+        } else {
+            flight.step(&keys, |x, z| f64::from(world.height(x as f32, z as f32)));
+        }
         let events = combat.step(&mut flight, world)?;
+        let [x, _, z] = flight.position;
+        bridge.update_player_landing(
+            &world.airport_scene,
+            &service,
+            &flight,
+            world.surface(x, z).height,
+        );
+        for (at, order) in &script.orders {
+            if *at != tick {
+                continue;
+            }
+            let site = if *order == tore_sim::ai::wing::PlayerOrder::LandAtSelected {
+                match ai_wings::AiWings::landing_site(
+                    &world.airport_scene,
+                    &world.airfield_anchors,
+                    &service,
+                ) {
+                    Ok(site) => Some(site),
+                    Err(message) => {
+                        println!("t={tick} order={order:?} refused: {message}");
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
+            let report =
+                bridge.command_at(*order, combat.state.designated(), None, site.as_ref())?;
+            println!("t={tick} order={order:?} reply={:?}", report.message);
+        }
         bridge.step(&mut combat.state, &flight, world)?;
         let crew = comms::crew(&hornet.profile);
         let state = &mut combat.state;
@@ -3542,7 +4173,18 @@ fn ai_probe_run(
                 .iter()
                 .map(|c| format!("{now:.1}s {}", c.line())),
         );
+        watch.observe(tick, &bridge, &flight, world);
     }
+    watch.summary();
+    println!(
+        "player crashed={} gear={} x={:.1} y={:.1} z={:.1} hdg={:.1}",
+        flight.crashed,
+        flight.gear_down,
+        flight.position[0],
+        flight.position[1],
+        flight.position[2],
+        flight.yaw.to_degrees()
+    );
     for line in bridge.probe_lines() {
         println!("{line}");
     }
@@ -4202,6 +4844,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut weather_condition: Option<usize> = None;
     let mut airport_probe: Option<(u32, tore_sim::airport::Aircraft, Option<[f64; 2]>)> = None;
     let mut ground_start_airport: Option<u32> = None;
+    let mut probe_script = ProbeScript::default();
+    let mut separation_nm: Option<f64> = None;
     let mut launch_creator = false;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
     // `--windowed`, and any flag that fixes the window size, opt out of the
@@ -4215,6 +4859,36 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--launch-quick-mission" => { launch_creator=true; initial_screen=Screen::Flight; },
             "--ground-start" => {
                 ground_start_airport=Some(args.next().ok_or("--ground-start needs an airport number")?.parse()?);
+            }
+            "--separation" => {
+                let nm: f64 = args.next().ok_or("--separation needs a distance in nautical miles")?.parse()?;
+                if !quick_mission::SEPARATION_NM.contains(&nm) {
+                    return Err(format!("--separation needs one of {:?} nautical miles", quick_mission::SEPARATION_NM).into());
+                }
+                separation_nm = Some(nm);
+            }
+            "--probe-wing-size" => {
+                let size: usize = args.next().ok_or("--probe-wing-size needs 1..5")?.parse()?;
+                if !(1..=5).contains(&size) {
+                    return Err("--probe-wing-size needs 1..5".into());
+                }
+                probe_script.wing_size = Some(size);
+            }
+            "--probe-wing-order" => probe_script.orders.push(ProbeScript::parse_order(
+                &args.next().ok_or("--probe-wing-order needs TICK:bug-out or TICK:land-selected")?,
+            )?),
+            "--probe-trace" => {
+                let seconds: f64 = args.next().ok_or("--probe-trace needs seconds")?.parse()?;
+                if !(seconds > 0. && seconds <= 3600.) {
+                    return Err("--probe-trace needs 0..3600 seconds".into());
+                }
+                probe_script.trace_ticks = (seconds * 120.).round().max(1.) as u64;
+            }
+            "--probe-player-home" => {
+                let usage = "--probe-player-home needs FROM:UNTIL ticks";
+                let text = args.next().ok_or(usage)?;
+                let (from, until) = text.split_once(':').ok_or(usage)?;
+                probe_script.home = Some((from.parse()?, until.parse()?));
             }
             "--airport-probe" => {
                 let value = args.next().ok_or("--airport-probe needs ID,X,Y,Z,NAV,GEAR[,HEADING,PITCH]")?;
@@ -4350,9 +5024,9 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 ai_roster_probe = arg == "--ai-roster-probe-ticks";
                 let ticks: usize = args
                     .next()
-                    .ok_or("--ai-probe-ticks requires 1..72000")?
+                    .ok_or("--ai-probe-ticks requires 1..216000")?
                     .parse()?;
-                if !(1..=72000).contains(&ticks) {
+                if !(1..=216_000).contains(&ticks) {
                     return Err("AI probe tick limit exceeded".into());
                 }
                 ai_probe = Some(ticks);
@@ -4684,7 +5358,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. K jettison selected external group; L clears designation; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..72000 runs a headless AI mission and prints a deterministic per-actor summary.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. K jettison selected external group; L clears designation; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-wing-order TICK:bug-out|land-selected orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field. --separation 1|2|5|10|20|50|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M or O cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -5537,6 +6211,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     if let Some(object) = ground_start {
         quick.choose_ground_runway(object)?;
     }
+    if let Some(nm) = separation_nm {
+        quick.draft.values[17] = quick_mission::SEPARATION_NM
+            .iter()
+            .position(|choice| *choice == nm)
+            .unwrap_or(quick.draft.values[17]);
+    }
+    probe_script.takeoff = maneuver == "takeoff";
     if let Some(ticks) = ai_probe {
         if ai_roster_probe {
             ai_wings::roster_probe(ticks, &theater_resources, &world)?;
@@ -5550,6 +6231,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             &world,
             enemy_skill,
             ai_mission,
+            &probe_script,
         )?;
         return Ok(Outcome::Done);
     }

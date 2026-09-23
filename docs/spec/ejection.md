@@ -94,6 +94,13 @@ succeed. Manual ejection has no chance roll. Healthy level flight, intentional
 recoverable dives, ground operations and dummy targets must not eject. These estimates do not assert a
 perfect aerodynamic reachability solver or retail AI parity.
 
+During AI takeoff roll, climb-out and landing from marshal through rollout,
+apply the [airfield catastrophe guard](ai-airfield.md#ejection-during-an-airfield-sequence)
+after this assessment. John requested go-arounds instead of non-catastrophic
+landing ejections on 2026-09-23. Thresholds and the extension to takeoff are
+agent decisions. Player ejection and other airborne AI decisions keep the
+rules above.
+
 ## Audio and art
 
 Load retail resources at runtime. Play pilot ejection speech on launch, friendly

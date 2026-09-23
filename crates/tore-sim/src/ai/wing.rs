@@ -237,8 +237,9 @@ pub fn after_approach(has_attack_assignment: bool) -> AfterApproach {
     }
 }
 
-/// The player's wing orders with a recovered effect (B43, B46). Bug out is
-/// not listed: its return-to-base helpers are open.
+/// The player's wing orders (B43, B46). Bug out is the manual's Alt-B order;
+/// land at the selected airport is an opinionated addition requested by John
+/// on 2026-09-23.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PlayerOrder {
     EngageMyTarget,
@@ -252,6 +253,10 @@ pub enum PlayerOrder {
     Spacing,
     Stacking,
     ControlToggle,
+    /// Return to base and stop answering orders (manual p.160).
+    BugOut,
+    /// Land at the airport the player has selected for the tower.
+    LandAtSelected,
 }
 
 /// B43: the player's horizontal spacing order toggles 512 and 2048 ft. Any
@@ -321,7 +326,7 @@ pub fn apply_control_side_effect(order: PlayerOrder, control: WingControl) -> Re
                 ));
             }
         },
-        PlayerOrder::Break(_) => control,
+        PlayerOrder::Break(_) | PlayerOrder::BugOut | PlayerOrder::LandAtSelected => control,
     })
 }
 
@@ -382,6 +387,9 @@ pub enum TargetOrder {
 }
 
 /// A wing request delivered through wing events (B43, B46).
+// A landing order carries the airport's anchor points by value so orders stay
+// `Copy`; orders are rare, so the larger variant costs nothing that matters.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WingRequest {
     /// Heading offset relative to the recipient's own body heading, and pitch.
@@ -403,6 +411,8 @@ pub enum WingRequest {
     FormationSelection(Formation),
     WingControl(WingControl),
     TargetAssignment(TargetOrder),
+    /// Leave the wing to land (bug out, ordered landing).
+    Land(super::airfield::LandingOrder),
 }
 
 // ---------------------------------------------------------------------------
@@ -507,7 +517,9 @@ pub fn sender_phrase(
         | PlayerOrder::Disengage
         | PlayerOrder::Break(_)
         | PlayerOrder::Approach(_)
-        | PlayerOrder::Stacking => Err(AiError::UnspecifiedRule(
+        | PlayerOrder::Stacking
+        | PlayerOrder::BugOut
+        | PlayerOrder::LandAtSelected => Err(AiError::UnspecifiedRule(
             "B46 sender phrase text for this order is not recorded",
         )),
     }
@@ -782,6 +794,12 @@ pub enum RejectReason {
     Dummy,
     /// The maneuver eligibility gate rejected the recipient's state.
     IneligibleState(u32),
+    /// The wingman bugged out and no longer answers (manual p.160).
+    BuggedOut,
+    /// The aircraft has landed and parked.
+    Landed,
+    /// Bug out is ignored while taking off, landing or on the ground.
+    OnAirfield,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -826,6 +844,8 @@ pub fn receive(
     tick: u64,
 ) -> Result<ReceiverOutcome> {
     Ok(match request {
+        // The actor starts the airfield sequence; no maneuver is installed.
+        WingRequest::Land(_) => ReceiverOutcome::AppliedNoMotion,
         WingRequest::Break {
             heading_offset_deg,
             pitch_deg,

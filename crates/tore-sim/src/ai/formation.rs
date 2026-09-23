@@ -578,6 +578,7 @@ mod tests {
             speed: ScalarSpeed(800.),
             target: None,
             recovering: false,
+            on_ground: false,
         }
     }
 

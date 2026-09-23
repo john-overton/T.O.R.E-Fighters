@@ -53,6 +53,10 @@ on 2026-09-21, an opinionated timing choice.
 - Activity, tactical goal and skill keep their existing independent meanings.
 - Goal A means attack, E evade, N neutral, T takeoff, C crash, L land.
   Underline A/E only when directed at the player. Skill has 0..3 dots.
+  T covers waiting on the runway, taxiing and the takeoff itself. L covers
+  holding at marshal, the landing and the landed aircraft. Keeping L after the
+  aircraft stops is an agent decision (2026-09-23): rollout and parking end the
+  same landing sequence, and the manual lists no separate code for it.
 
 ## Fitted presentation and unresolved evidence
 

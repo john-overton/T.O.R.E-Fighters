@@ -109,6 +109,8 @@ pub struct WorldObject {
     pub human_controlled: bool,
     pub alive: bool,
     pub destroyed: bool,
+    /// Supported by the ground (wheels on a runway), not flying.
+    pub on_ground: bool,
     /// Sensor input for the actors that can see it. `None` means the object is
     /// not presented to the sensor component at all.
     pub observable: Option<Observable>,
@@ -151,6 +153,16 @@ pub struct MissionOutput {
     /// Accepted opposite-side launch warnings as (actor, launcher), for the
     /// radio's "SAM launch" and "AAM launch" calls.
     pub launch_calls: Vec<(u32, u32)>,
+}
+
+/// The mission's airfield decisions for one actor this tick.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct AirfieldClearance {
+    turn: bool,
+    runway_free: bool,
+    wing_landed: bool,
+    free_slot: Option<u32>,
+    leader_landing: bool,
 }
 
 /// Everything needed to build one AI aircraft.
@@ -203,6 +215,21 @@ pub struct AiActor {
     dispensers: Vec<DispenserStore>,
     wing_slot: u8,
     home_airport: Option<super::route::Position>,
+    /// The runway this aircraft returns to, when the host knows one.
+    home_runway: Option<super::airfield::RunwayView>,
+    /// Set when the aircraft begins the mission parked on a runway.
+    ground_start: Option<super::airfield::GroundStart>,
+    /// The landing this aircraft is flying or will resume, if any.
+    landing_order: Option<super::airfield::LandingOrder>,
+    /// Set once a bug-out order is accepted; the aircraft then ignores orders.
+    bugged_out: bool,
+    /// A join-the-leader landing was cancelled by order; it is not re-joined
+    /// until the leader is no longer recovering (fitted, 2026-09-23).
+    join_cancelled: bool,
+    /// The running takeoff or landing sequence, if any.
+    airfield: Option<super::airfield::Sequence>,
+    /// Draws for the private return route, separate from decision draws.
+    route_random: super::DecisionRandom,
     pending_threats: Vec<ThreatReport>,
     pending_events: Vec<FrameEvent>,
     device_schedule: Vec<(u64, SeekerClass, u8)>,
@@ -241,6 +268,13 @@ impl AiActor {
             dispensers: setup.dispensers,
             wing_slot: setup.wing_slot,
             home_airport: setup.home_airport,
+            home_runway: None,
+            ground_start: None,
+            landing_order: None,
+            bugged_out: false,
+            join_cancelled: false,
+            airfield: None,
+            route_random: super::DecisionRandom::seeded(setup.seed ^ 0x6c61_6e64_696e_6721),
             pending_threats: Vec::new(),
             pending_events: Vec::new(),
             device_schedule: Vec::new(),
@@ -252,6 +286,59 @@ impl AiActor {
             alive: true,
             dummy: false,
         })
+    }
+
+    /// Begin the mission parked on `start.runway`. The flight model must
+    /// already be on the researched adapter and placed with
+    /// `flight::State::start_on_runway`: the position read here picks the
+    /// parking slot (with airport anchors) or the line-up spot (without).
+    pub fn start_on_ground(&mut self, start: super::airfield::GroundStart) {
+        self.home_runway = Some(start.runway);
+        self.ground_start = Some(start);
+        let position = self.flight.position;
+        // With airport anchors a ground start sitting on a parking slot holds it.
+        let slot = start.runway.anchors.and_then(|anchors| {
+            (0..super::airfield::PARKING_SLOTS).find(|&k| {
+                let p = anchors.parking[k as usize];
+                (p[0] - position[0]).hypot(p[2] - position[2]) <= 100.0
+            })
+        });
+        self.airfield = Some(super::airfield::Sequence::departure(start, position, slot));
+    }
+
+    pub fn ground_start(&self) -> Option<&super::airfield::GroundStart> {
+        self.ground_start.as_ref()
+    }
+
+    /// The runway used for return to base and bingo fuel.
+    pub fn set_home_runway(&mut self, runway: Option<super::airfield::RunwayView>) {
+        self.home_runway = runway;
+    }
+
+    pub fn home_runway(&self) -> Option<&super::airfield::RunwayView> {
+        self.home_runway.as_ref()
+    }
+
+    /// The landing this aircraft is flying, or will resume after a missile
+    /// defense interrupts its early approach.
+    pub fn landing_order(&self) -> Option<&super::airfield::LandingOrder> {
+        self.landing_order.as_ref()
+    }
+
+    /// True once a bug-out order was accepted. It stays true: the aircraft
+    /// returns to base and no longer answers wing orders (manual p.160).
+    pub fn bugged_out(&self) -> bool {
+        self.bugged_out
+    }
+
+    /// The current airfield phase, `None` in free flight.
+    pub fn airfield_phase(&self) -> Option<super::airfield::Phase> {
+        self.airfield.as_ref().map(|s| s.phase())
+    }
+
+    /// The running takeoff or landing sequence, for diagnostics.
+    pub fn airfield(&self) -> Option<&super::airfield::Sequence> {
+        self.airfield.as_ref()
     }
 
     /// Opinionated training target requested on 2026-09-21.
@@ -463,10 +550,55 @@ impl AiActor {
         request: super::wing::WingRequest,
         tick: u64,
     ) -> Result<super::wing::ReceiverOutcome> {
+        use super::wing::{ReceiverOutcome, RejectReason, TargetOrder, WingRequest};
         if self.dummy {
-            return Ok(super::wing::ReceiverOutcome::Rejected(
-                super::wing::RejectReason::Dummy,
-            ));
+            return Ok(ReceiverOutcome::Rejected(RejectReason::Dummy));
+        }
+        // Manual p.160: a wingman that bugged out no longer answers.
+        if self.bugged_out {
+            return Ok(ReceiverOutcome::Rejected(RejectReason::BuggedOut));
+        }
+        let phase = self.airfield_phase();
+        if phase == Some(super::airfield::Phase::Parked) {
+            return Ok(ReceiverOutcome::Rejected(RejectReason::Landed));
+        }
+        if let WingRequest::Land(order) = request {
+            // Retail bug out is ignored in any airport state or on the ground;
+            // the private route home is free flight and does not count.
+            if order.reason == super::airfield::LandingReason::BugOut
+                && (phase.is_some_and(|p| p != super::airfield::Phase::Inbound)
+                    || self.flight.research.as_ref().is_some_and(|r| r.on_ground))
+            {
+                return Ok(ReceiverOutcome::Rejected(RejectReason::OnAirfield));
+            }
+            self.accept_landing(order, tick);
+        } else if matches!(
+            request,
+            WingRequest::FormationSelection(_)
+                | WingRequest::TargetAssignment(TargetOrder::HoldFire)
+        ) && self.landing_order.is_some_and(|o| o.reason.cancellable())
+            && phase.is_none_or(|p| {
+                matches!(
+                    p,
+                    super::airfield::Phase::Inbound
+                        | super::airfield::Phase::Marshal
+                        | super::airfield::Phase::Approach
+                )
+            })
+        {
+            // Fitted: disengage and formation orders cancel an ordered
+            // landing that has not yet reached final. A cancelled join
+            // stays cancelled until the leader is next airborne.
+            if self
+                .landing_order
+                .is_some_and(|o| o.reason == super::airfield::LandingReason::JoinLeader)
+            {
+                self.join_cancelled = true;
+            }
+            self.landing_order = None;
+            if self.airfield.as_ref().is_some_and(|s| !s.is_departure()) {
+                self.leave_airfield();
+            }
         }
         self.controller
             .prepare_order(self.flight.yaw.to_degrees(), self.speed_limits());
@@ -503,6 +635,270 @@ impl AiActor {
         Ok(outcome)
     }
 
+    /// Take a landing order. A bug out also leaves the wing for good.
+    fn accept_landing(&mut self, order: super::airfield::LandingOrder, tick: u64) {
+        use super::airfield::Phase;
+        if order.reason == super::airfield::LandingReason::BugOut {
+            self.bugged_out = true;
+            self.neutral = true;
+            self.formation_order_tick = Some(tick);
+            self.controller.return_to_formation();
+            self.search_target = None;
+        }
+        self.landing_order = Some(order);
+        // A landing already committed to final at the same runway continues;
+        // any other landing restarts toward the new runway. A departure in
+        // progress finishes its climb-out first.
+        if let Some(sequence) = &self.airfield
+            && !sequence.is_departure()
+        {
+            let committed = sequence.runway().object == order.runway.object
+                && !matches!(
+                    sequence.phase(),
+                    Phase::Inbound | Phase::Marshal | Phase::Approach
+                );
+            if !committed {
+                self.leave_airfield();
+            }
+        }
+    }
+
+    /// Back to free flight from a landing sequence: the takeoff-finish tail
+    /// (retail `0x4bbfe0`) raises the gear and flaps and closes the
+    /// speedbrake, so nothing is left hanging in combat.
+    fn leave_airfield(&mut self) {
+        use tore_input::{PilotCommand, Switch};
+        self.airfield = None;
+        self.flight.command(PilotCommand::Set(Switch::Gear, false));
+        self.flight.command(PilotCommand::Set(Switch::Flaps, false));
+        self.flight
+            .command(PilotCommand::Set(Switch::Airbrake, false));
+    }
+
+    /// Start the landing sequence for the stored order. Legacy-model aircraft
+    /// switch to the researched model here so runway contact is modelled.
+    fn begin_landing(
+        &mut self,
+        order: super::airfield::LandingOrder,
+        own: &OwnState,
+        surface: &dyn Fn(f64, f64) -> Surface,
+    ) {
+        if self.flight.research.is_none() {
+            let seed = (self.identity.actor.0 as i32).wrapping_mul(7919) | 1;
+            if self.flight.enable_research(seed).is_err() {
+                // The restricted native adapter cannot land: keep the
+                // ordinary return-to-base heading instead.
+                self.landing_order = None;
+                return;
+            }
+        }
+        // B48 join-landing enters the marshal directly; every other landing
+        // first flies the private route home.
+        let joining = order.reason == super::airfield::LandingReason::JoinLeader;
+        let route = super::route::bingo_route(
+            super::route::WingCrew {
+                wingman_ai: true,
+                leader_ai: true,
+            },
+            super::route::Position {
+                x: order.runway.center[0],
+                z: order.runway.center[2],
+            },
+            &own.limits,
+            &mut self.route_random,
+        )
+        .map(|r| (f64::from(r.altitude_ft), r.speed.0))
+        .filter(|_| !joining);
+        let wind = surface(order.runway.center[0], order.runway.center[2]).wind;
+        self.airfield = Some(super::airfield::Sequence::landing(
+            order,
+            self.flight.position,
+            wind,
+            self.flight.model().configuration().mass.max_takeoff_lbs,
+            route,
+        ));
+    }
+
+    /// One tick of a takeoff or landing sequence. Returns `false` when the
+    /// aircraft is in free flight and the ordinary controller should run.
+    #[allow(clippy::too_many_arguments)]
+    fn airfield_tick(
+        &mut self,
+        clearance: &AirfieldClearance,
+        own: &OwnState,
+        tick: u64,
+        ground: &dyn Fn(f64, f64) -> f64,
+        surface: &dyn Fn(f64, f64) -> Surface,
+        output: &mut MissionOutput,
+    ) -> Result<bool> {
+        use super::airfield::{Control, LandingReason, Phase, Situation};
+        let defending = self.last_defense.is_some_and(|d| d.motion.is_some());
+        let warned = self.pending_threats.iter().any(|r| !r.launcher_same_side);
+        if self.airfield.is_none()
+            && let Some(order) = self.landing_order
+            && !defending
+            && !warned
+        {
+            self.begin_landing(order, own, surface);
+        }
+        let Some(phase) = self.airfield.as_ref().map(|s| s.phase()) else {
+            return Ok(false);
+        };
+        if !clearance.leader_landing
+            && matches!(phase, Phase::Inbound | Phase::Marshal | Phase::Approach)
+            && self
+                .landing_order
+                .is_some_and(|o| o.reason == LandingReason::JoinLeader)
+        {
+            // Retail wing abort: gear and flaps up, free flight.
+            self.landing_order = None;
+            self.leave_airfield();
+            return Ok(false);
+        }
+        match phase.flight_state() {
+            // B47: a warning in the first approach states abandons the
+            // approach; the landing resumes once the threat has gone.
+            // Free flight on the inbound route reacts like any other flight.
+            FlightState::EarlyApproach | FlightState::Free if defending || warned => {
+                self.leave_airfield();
+                return Ok(false);
+            }
+            // B47: warnings are ignored while taking off and landing.
+            _ => {
+                self.pending_threats.clear();
+                self.pending_events.clear();
+            }
+        }
+        let config = self.flight.model().configuration();
+        let situation = Situation {
+            tick,
+            position: self.flight.position,
+            velocity: self.flight.velocity,
+            heading_deg: self.flight.yaw.to_degrees(),
+            body_pitch_deg: self.flight.pitch.to_degrees(),
+            speed_fps: self.flight.speed,
+            on_ground: self.flight.research.as_ref().is_some_and(|r| r.on_ground),
+            ground_clearance_ft: config.equipment.ground_clearance_ft,
+            agl_ft: own.agl_ft,
+            terrain_ahead_ft: {
+                let [x, _, z] = self.flight.position;
+                let [vx, _, vz] = self.flight.velocity;
+                let speed = vx.hypot(vz).max(1.0);
+                (0..=6)
+                    .map(|i| {
+                        let d = super::airfield::TERRAIN_LOOKAHEAD_FT * f64::from(i) / 6.0;
+                        ground(x + vx / speed * d, z + vz / speed * d)
+                    })
+                    .fold(f64::MIN, f64::max)
+            },
+            minimum_speed_fps: own.limits.minimum.0,
+            maximum_speed_fps: own.limits.maximum.0,
+            corner_speed_fps: own.limits.corner.0,
+            cruise_speed_fps: super::route::cruise_speed(&own.limits).0,
+            has_afterburner: config.propulsion.afterburner_thrust_lbf > 0.0,
+            wind: surface(self.flight.position[0], self.flight.position[2]).wind,
+            wing_position: self.identity.member,
+            turn_clear: clearance.turn,
+            runway_free: clearance.runway_free,
+            wing_landed: clearance.wing_landed,
+            free_slot: clearance.free_slot,
+        };
+        let sequence = self.airfield.as_mut().expect("phase read above");
+        let step = sequence.step(&situation);
+        if step.complete {
+            self.airfield = None;
+        }
+        let command = step.command;
+        self.activity = command.activity;
+        output.activities.push((self.id(), command.activity));
+        let mut input = match command.control {
+            Control::Ground {
+                throttle,
+                pitch,
+                yaw,
+            } => PilotInput {
+                pitch,
+                roll: 0.0,
+                yaw,
+                throttle: Some(throttle),
+                ..PilotInput::default()
+            },
+            Control::Air(guidance) => {
+                let clock = super::motion::CommandClock::at_tick(tick);
+                let bank = if guidance.wings_level {
+                    super::motion::Bank::Explicit(0)
+                } else {
+                    super::motion::Bank::Unconstrained
+                };
+                let duration = super::motion::Duration::Timed(1);
+                let intent = MotionIntent {
+                    id: 0,
+                    request: super::motion::MotionRequest::new(
+                        guidance.heading_deg.round() as i32,
+                        super::motion::PitchRequest::Explicit(
+                            guidance.flight_path_pitch_deg.round() as i32,
+                        ),
+                        bank,
+                        super::motion::SpeedRequest::Explicit(ScalarSpeed(guidance.speed_fps)),
+                        duration,
+                    ),
+                    heading_deg: guidance.heading_deg,
+                    flight_path_pitch_deg: guidance.flight_path_pitch_deg,
+                    speed: ScalarSpeed(guidance.speed_fps),
+                    bank,
+                    completion: super::controller::Completion::Deadline(
+                        super::motion::deadline_for(duration, clock).expect("timed guidance"),
+                    ),
+                    steering_point: None,
+                    mode: super::steering::CommandMode::OtherState,
+                    formation_flight: false,
+                    afterburner: command.afterburner,
+                };
+                let floor = if guidance.terrain_floor {
+                    self.controller.terrain_floor(&dummy_frame(own))?
+                } else {
+                    None
+                };
+                let mut input = self
+                    .adapter
+                    .controls(
+                        &self.flight,
+                        &intent,
+                        &own.limits,
+                        own.g_limit,
+                        own.roll_limit_deg_per_s,
+                        own.maximum_bank_deg,
+                        floor,
+                        flight::DT,
+                    )?
+                    .input;
+                if guidance.full_power {
+                    input.throttle = Some(1.0);
+                }
+                input
+            }
+        };
+        input.commands = vec![
+            tore_input::PilotCommand::Set(tore_input::Switch::Burner, command.afterburner),
+            tore_input::PilotCommand::Set(tore_input::Switch::Gear, command.gear_down),
+            tore_input::PilotCommand::Set(tore_input::Switch::Flaps, command.flaps_down),
+            tore_input::PilotCommand::Set(tore_input::Switch::Airbrake, command.brakes),
+        ];
+        self.fly_input(input, ground, surface);
+        Ok(true)
+    }
+
+    /// The home position for fuel planning: the home airport, or the home
+    /// runway's centre when only the runway is known.
+    fn home(&self) -> Option<super::route::Position> {
+        self.home_airport.or_else(|| {
+            self.home_runway.map(|r| super::route::Position {
+                x: r.center[0],
+                z: r.center[2],
+            })
+        })
+    }
+
     /// Set this actor's remaining internal fuel, in pounds.
     ///
     /// Used by the host when fuel is tracked outside the flight model, and by
@@ -528,6 +924,10 @@ pub struct AiMission {
     player_assignment: engagement::Assignment,
     must_survive: Vec<u32>,
     pending_attack_reports: Vec<(u32, ObservedAttack)>,
+    /// Airport where the human player holds landing clearance.
+    priority_landing: Option<u32>,
+    /// External leaders seen airborne, so a later touchdown reads as landing.
+    airborne_seen: Vec<u32>,
 }
 
 impl Default for AiMission {
@@ -550,7 +950,23 @@ impl AiMission {
             player_assignment: engagement::Assignment::default(),
             must_survive: Vec::new(),
             pending_attack_reports: Vec::new(),
+            priority_landing: None,
+            airborne_seen: Vec::new(),
         }
+    }
+
+    /// The human player is landing at this airport (retail: gear down, below
+    /// 4000 ft above ground, at most 953 ft/s, within 25000 ft of a friendly
+    /// airport). It keeps that runway busy: AI aircraft landing there hold at
+    /// marshal and none start a takeoff until it is cleared with `None`
+    /// (manual p.65: "your aircraft always receives first landing
+    /// clearance"). A plain store, cheap and idempotent to call every tick.
+    pub fn set_priority_landing(&mut self, airport: Option<u32>) {
+        self.priority_landing = airport;
+    }
+
+    pub fn priority_landing(&self) -> Option<u32> {
+        self.priority_landing
     }
 
     pub fn must_survive(&self) -> &[u32] {
@@ -697,6 +1113,20 @@ impl AiMission {
         ground: &dyn Fn(f64, f64) -> f64,
         now: TimeOfDay,
     ) -> Result<MissionOutput> {
+        self.step_with_surface(world, ground, &|x, z| Surface::terrain(ground(x, z)), now)
+    }
+
+    /// [`Self::step`] with the host's full surface query, so runways are
+    /// landable for aircraft on the researched flight model. `terrain` is the
+    /// plain terrain height: aircraft on the legacy adapter keep using it for
+    /// their height above the ground, terrain floor and escape, as before.
+    pub fn step_with_surface(
+        &mut self,
+        world: &[WorldObject],
+        terrain: &dyn Fn(f64, f64) -> f64,
+        surface: &dyn Fn(f64, f64) -> Surface,
+        now: TimeOfDay,
+    ) -> Result<MissionOutput> {
         let mut output = MissionOutput::default();
         for (receiver, report) in std::mem::take(&mut self.pending_attack_reports) {
             if let Some(actor) = self.actor_mut(receiver) {
@@ -704,6 +1134,7 @@ impl AiMission {
             }
         }
         let tick = self.tick;
+        self.track_airborne(world);
 
         let traffic: Vec<_> = world
             .iter()
@@ -727,7 +1158,16 @@ impl AiMission {
             })
             .collect();
         for index in 0..self.actors.len() {
-            self.step_actor(index, world, &traffic, ground, now, tick, &mut output)?;
+            self.step_actor(
+                index,
+                world,
+                &traffic,
+                terrain,
+                surface,
+                now,
+                tick,
+                &mut output,
+            )?;
         }
 
         // Share only evidence produced this tick, after all controllers have
@@ -807,13 +1247,32 @@ impl AiMission {
         index: usize,
         world: &[WorldObject],
         traffic: &[super::formation::Traffic],
-        ground: &dyn Fn(f64, f64) -> f64,
+        terrain: &dyn Fn(f64, f64) -> f64,
+        surface: &dyn Fn(f64, f64) -> Surface,
         now: TimeOfDay,
         tick: u64,
         output: &mut MissionOutput,
     ) -> Result<()> {
+        // Researched aircraft stand on runways, so their ground is the full
+        // surface; legacy aircraft keep the terrain-only height.
+        let runway_height = |x, z| surface(x, z).height;
+        let ground: &dyn Fn(f64, f64) -> f64 = if self.actors[index].flight.research.is_some() {
+            &runway_height
+        } else {
+            terrain
+        };
         let actor_id = self.actors[index].id();
-        let leader = self.leader_view(index, world);
+        let mut leader = self.leader_view(index, world);
+        let clearance = self.airfield_clearance(index, world);
+        if leader.as_ref().is_none_or(|l| !l.recovering) {
+            self.actors[index].join_cancelled = false;
+        }
+        let join = self.join_landing(index, leader.as_ref());
+        // Fitted: a wingman does not formate on a human leader parked on the
+        // ground; it flies free until the leader is airborne again.
+        if leader.is_some_and(|l| l.on_ground) {
+            leader = None;
+        }
 
         let identity = self.actors[index].identity;
         let assignments: Vec<u32> = self
@@ -832,12 +1291,55 @@ impl AiMission {
         if !actor.dummy {
             if actor.flight.escape.is_some() {
                 actor.flight.step_escape(ground);
-            } else if actor
-                .escape_monitor
-                .step(crate::ejection::assess(&actor.flight, ground))
-                .is_some()
-            {
-                actor.flight.eject();
+            } else {
+                let mut assessment = crate::ejection::assess(&actor.flight, ground);
+                // Opinionated (John, 2026-09-23): taking off or landing, only
+                // a catastrophe ejects; any other hazard aborts the landing.
+                if let (Some(found), Some(sequence)) = (assessment, actor.airfield.as_mut())
+                    && sequence.guards_ejection()
+                {
+                    let [x, y, z] = actor.flight.position;
+                    let below = surface(x, z);
+                    let landing = sequence.landing_point();
+                    let field = crate::ejection::AirfieldContext {
+                        agl_ft: y - below.height,
+                        landable_below: below.landable,
+                        landing_distance_ft: (landing[0] - x).hypot(landing[2] - z),
+                    };
+                    if !crate::ejection::catastrophic(&actor.flight, found, field) {
+                        // Normal landing geometry (a low, sinking final over
+                        // the runway) needs nothing; a final that would touch
+                        // down off the runway or gear up goes around; any
+                        // hazard on the gates or at marshal aborts too. The
+                        // takeoff carries on at full power.
+                        let reach = found.impact_seconds.min(10.);
+                        let touchdown = surface(
+                            x + actor.flight.velocity[0] * reach,
+                            z + actor.flight.velocity[2] * reach,
+                        );
+                        let abort = match sequence.phase() {
+                            super::airfield::Phase::Marshal | super::airfield::Phase::Approach => {
+                                true
+                            }
+                            super::airfield::Phase::Final => {
+                                let descent = (-actor.flight.velocity[1])
+                                    .atan2(actor.flight.velocity[0].hypot(actor.flight.velocity[2]))
+                                    .to_degrees();
+                                !touchdown.landable
+                                    || actor.flight.gear < 0.99
+                                    || descent > super::airfield::GO_AROUND_DESCENT_DEG
+                            }
+                            _ => false,
+                        };
+                        if abort {
+                            sequence.request_go_around();
+                        }
+                        assessment = None;
+                    }
+                }
+                if actor.escape_monitor.step(assessment).is_some() {
+                    actor.flight.eject();
+                }
             }
         }
 
@@ -868,6 +1370,16 @@ impl AiMission {
         // 2. Own state from the actor's own flight model.
         let own = actor.own_state(ground);
         actor.update_missile_defense(tick, &self.missiles, &own, ground);
+
+        // Takeoff and landing sequences replace combat and formation flying.
+        if actor.landing_order.is_none()
+            && let Some(order) = join
+        {
+            actor.landing_order = Some(order);
+        }
+        if actor.airfield_tick(&clearance, &own, tick, ground, surface, output)? {
+            return Ok(());
+        }
 
         // 3. The frame.
         let events = actor.drain_events(tick);
@@ -1038,7 +1550,7 @@ impl AiMission {
             wing_approach_value_ft: None,
         };
         let route = RouteView {
-            home_airport: actor.home_airport,
+            home_airport: actor.home(),
             leader_is_ai: true,
         };
         let batch = {
@@ -1052,14 +1564,32 @@ impl AiMission {
                 wing,
                 route,
                 now,
-                flight_state: if own.on_ground {
-                    FlightState::TakingOff
-                } else {
-                    FlightState::Free
-                },
+                flight_state: actor
+                    .airfield
+                    .as_ref()
+                    .map(|s| s.phase().flight_state())
+                    .unwrap_or(if own.on_ground {
+                        FlightState::TakingOff
+                    } else {
+                        FlightState::Free
+                    }),
             };
             actor.controller.step(&frame)?
         };
+
+        // B48 bingo: with a known home runway the aircraft now lands there.
+        // Leaders and singletons use the same fitted rule.
+        if matches!(
+            batch.fuel_state,
+            Some(super::route::FuelState::Bingo | super::route::FuelState::Critical)
+        ) && actor.landing_order.is_none()
+            && let Some(runway) = actor.home_runway
+        {
+            actor.landing_order = Some(super::airfield::LandingOrder {
+                runway,
+                reason: super::airfield::LandingReason::Fuel,
+            });
+        }
 
         // Choosing a currently visible target is the only way to fill or
         // replace the Novice's one remembered hostile. Losing contact leaves
@@ -1153,7 +1683,7 @@ impl AiMission {
         }
 
         // 6. Motion through the adapter and this actor's own flight model.
-        actor.fly(batch.motion.as_ref(), &own, ground)?;
+        actor.fly(batch.motion.as_ref(), &own, ground, surface)?;
         Ok(())
     }
 
@@ -1188,6 +1718,7 @@ impl AiMission {
                         speed: leader.speed,
                         target: None,
                         recovering: false,
+                        on_ground: false,
                     });
             }
         }
@@ -1202,13 +1733,15 @@ impl AiMission {
             let leader = world
                 .iter()
                 .find(|o| o.id == *id && o.alive && !o.destroyed)?;
+            // A human leader that touches down after flying is landing.
             return Some(LeaderView {
                 position: leader.position,
                 velocity: leader.velocity,
                 heading_deg: leader.heading_deg,
                 speed: leader.speed,
                 target: None,
-                recovering: false,
+                recovering: leader.on_ground && self.airborne_seen.contains(&leader.id),
+                on_ground: leader.on_ground,
             });
         }
         let leader = self.actors.iter().find(|a| {
@@ -1226,7 +1759,193 @@ impl AiMission {
             heading_deg: pose.heading_deg,
             speed: pose.speed,
             target: leader.controller.target(),
-            recovering: matches!(leader.activity, Activity::ReturningToBase),
+            recovering: matches!(leader.activity, Activity::ReturningToBase)
+                || leader.airfield.as_ref().is_some_and(|s| !s.is_departure()),
+            on_ground: false,
+        })
+    }
+
+    /// Record which aircraft have been airborne, so a human leader's later
+    /// touchdown reads as a landing.
+    fn track_airborne(&mut self, world: &[WorldObject]) {
+        for object in world.iter().filter(|o| o.alive && !o.destroyed) {
+            let on_ground = match self.actor(object.id) {
+                Some(actor) => actor.flight.research.as_ref().is_some_and(|r| r.on_ground),
+                None => object.on_ground,
+            };
+            if !on_ground && !self.airborne_seen.contains(&object.id) {
+                self.airborne_seen.push(object.id);
+            }
+        }
+    }
+
+    /// The retail takeoff and landing gates for one actor (spec in
+    /// docs/spec/ai-airfield.md): turn order, runway free, earlier wing
+    /// members down, and a parking slot.
+    fn airfield_clearance(&self, index: usize, world: &[WorldObject]) -> AirfieldClearance {
+        use super::airfield::{PARKING_SLOTS, PLAYER_ROLLING_FPS, SPOT_OCCUPIED_FT};
+        let actor = &self.actors[index];
+        let (side, wing, member) = (
+            actor.identity.side,
+            actor.identity.wing,
+            actor.identity.member,
+        );
+        let wingmates = || {
+            self.actors.iter().filter(move |a| {
+                a.id() != actor.id()
+                    && a.alive()
+                    && a.identity.side == side
+                    && a.identity.wing == wing
+            })
+        };
+        let external_leader = self
+            .external_leaders
+            .iter()
+            .find(|(s, w, _)| *s == side && *w == wing)
+            .and_then(|(_, _, id)| {
+                world
+                    .iter()
+                    .find(|o| o.id == *id && o.alive && !o.destroyed)
+            });
+        // Wing abort (retail 0x4bc2a4): a joining wingman whose leader is
+        // neither landing nor on the ground stops landing.
+        let leader_landing = if member == 0 {
+            true
+        } else if let Some(leader) = external_leader {
+            leader.on_ground || self.priority_landing.is_some()
+        } else {
+            wingmates()
+                .find(|a| a.identity.is_leader())
+                .is_none_or(|leader| {
+                    leader.airfield.as_ref().is_some_and(|s| !s.is_departure())
+                        || leader.landing_order.is_some()
+                        || leader.flight.research.as_ref().is_some_and(|r| r.on_ground)
+                })
+        };
+        let Some(sequence) = actor.airfield.as_ref() else {
+            return AirfieldClearance {
+                leader_landing,
+                ..AirfieldClearance::default()
+            };
+        };
+        let airport = sequence.runway().airport;
+        let at_airport = || {
+            self.actors
+                .iter()
+                .filter(move |a| a.id() != actor.id() && a.alive())
+                .filter_map(move |a| {
+                    a.airfield
+                        .as_ref()
+                        .filter(|s| s.runway().airport == airport)
+                        .map(|s| (a, s))
+                })
+        };
+
+        // Turn gate: every earlier wing member past its first taxiway leg;
+        // a human leader must be airborne.
+        let turn = wingmates().all(|a| {
+            a.identity.member >= member || a.airfield.as_ref().is_none_or(|s| !s.holds_followers())
+        }) && external_leader.is_none_or(|leader| member == 0 || !leader.on_ground);
+
+        // Runway-free gate.
+        let spot = sequence.takeoff_spot();
+        let near_spot = |position: [f64; 3]| {
+            spot.is_some_and(|spot| {
+                (position[0] - spot[0]).hypot(position[2] - spot[2]) <= SPOT_OCCUPIED_FT
+            })
+        };
+        let runway = sequence.runway();
+        let busy_actor = at_airport().any(|(a, s)| {
+            s.blocks_runway()
+                || (a.flight.research.as_ref().is_some_and(|r| r.on_ground)
+                    && s.phase() != super::airfield::Phase::Parked
+                    && near_spot(a.flight.position))
+        });
+        let busy_human = world.iter().any(|o| {
+            o.alive
+                && !o.destroyed
+                && o.human_controlled
+                && self.actor(o.id).is_none()
+                && o.on_ground
+                && (near_spot(o.position)
+                    || (o.velocity[0].hypot(o.velocity[2]) >= PLAYER_ROLLING_FPS
+                        && (o.position[0] - runway.center[0])
+                            .hypot(o.position[2] - runway.center[2])
+                            <= super::airfield::LINEUP_RESET_FT))
+        });
+        let runway_free = !busy_actor && !busy_human && self.priority_landing != Some(airport);
+
+        // Earlier wing members landing here must be down first.
+        let wing_landed = wingmates().all(|a| {
+            a.identity.member >= member
+                || !a.airfield.as_ref().is_some_and(|s| {
+                    !s.is_departure()
+                        && s.runway().airport == airport
+                        && !a.flight.research.as_ref().is_some_and(|r| r.on_ground)
+                })
+        });
+
+        // Parking slot: keep one already held, else the lowest free one.
+        let free_slot = sequence.slot().or_else(|| {
+            (0..PARKING_SLOTS).find(|slot| !at_airport().any(|(_, s)| s.slot() == Some(*slot)))
+        });
+
+        AirfieldClearance {
+            turn,
+            runway_free,
+            wing_landed,
+            free_slot,
+            leader_landing,
+        }
+    }
+
+    /// B48 join-landing: an AI wingman within 10000 ft of a landing leader
+    /// and 40000 ft of its airport lands there too. A human leader's airport
+    /// is taken to be the wingman's home runway (fitted).
+    fn join_landing(
+        &self,
+        index: usize,
+        leader: Option<&LeaderView>,
+    ) -> Option<super::airfield::LandingOrder> {
+        let actor = &self.actors[index];
+        let leader = leader.filter(|l| l.recovering)?;
+        if actor.identity.is_leader()
+            || actor.landing_order.is_some()
+            || actor.airfield.is_some()
+            || actor.bugged_out
+            || actor.join_cancelled
+        {
+            return None;
+        }
+        let runway = self
+            .actors
+            .iter()
+            .find(|a| {
+                a.identity.is_leader()
+                    && a.identity.side == actor.identity.side
+                    && a.identity.wing == actor.identity.wing
+                    && a.alive()
+            })
+            .and_then(|a| {
+                a.airfield
+                    .as_ref()
+                    .filter(|s| !s.is_departure())
+                    .map(|s| *s.runway())
+                    .or(a.landing_order.map(|o| o.runway))
+                    .or(a.home_runway)
+            })
+            .or(actor.home_runway)?;
+        let position = actor.flight.position;
+        let join = super::route::join_leader_landing(&super::route::JoinLandingInputs {
+            leader_recovering: true,
+            distance_to_leader_ft: distance(position, leader.position),
+            distance_to_leader_airport_ft: Some(
+                (position[0] - runway.center[0]).hypot(position[2] - runway.center[2]),
+            ),
+        });
+        join.then_some(super::airfield::LandingOrder {
+            runway,
+            reason: super::airfield::LandingReason::JoinLeader,
         })
     }
 
@@ -1394,10 +2113,14 @@ impl AiActor {
             None
         };
         let mut observations = Vec::new();
-        for object in world
-            .iter()
-            .filter(|o| o.id != self.identity.actor.0 && o.alive && !o.destroyed && o.is_aircraft)
-        {
+        // Aircraft on the ground are not air targets.
+        for object in world.iter().filter(|o| {
+            o.id != self.identity.actor.0
+                && o.alive
+                && !o.destroyed
+                && o.is_aircraft
+                && !o.on_ground
+        }) {
             if let Some(contacts) = &contacts {
                 for contact in contacts
                     .iter()
@@ -1727,7 +2450,7 @@ impl AiActor {
     }
 
     fn time_home_s(&self) -> Option<f64> {
-        let home = self.home_airport?;
+        let home = self.home()?;
         let dx = home.x - self.flight.position[0];
         let dz = home.z - self.flight.position[2];
         let distance = (dx * dx + dz * dz).sqrt();
@@ -1904,6 +2627,7 @@ impl AiActor {
         intent: Option<&MotionIntent>,
         own: &OwnState,
         ground: &dyn Fn(f64, f64) -> f64,
+        surface: &dyn Fn(f64, f64) -> Surface,
     ) -> Result<()> {
         let input = match intent {
             Some(intent) => {
@@ -1922,10 +2646,25 @@ impl AiActor {
             }
             None => PilotInput::default(),
         };
-        self.flight
-            .step_surface(&input, |x, z| Surface::terrain(ground(x, z)));
-        self.last_input = input;
+        self.fly_input(input, ground, surface);
         Ok(())
+    }
+
+    fn fly_input(
+        &mut self,
+        input: PilotInput,
+        ground: &dyn Fn(f64, f64) -> f64,
+        surface: &dyn Fn(f64, f64) -> Surface,
+    ) {
+        // Airborne actors on the legacy adapter keep the terrain-only surface
+        // they have always used; researched actors see runways and wind.
+        if self.flight.research.is_some() {
+            self.flight.step_surface(&input, surface);
+        } else {
+            self.flight
+                .step_surface(&input, |x, z| Surface::terrain(ground(x, z)));
+        }
+        self.last_input = input;
     }
 }
 
@@ -2116,7 +2855,7 @@ mod tests {
     }
 
     // Distinct synthetic capabilities, never presented as measured retail data.
-    fn synthetic_profile(id: AircraftId) -> tore_formats::aircraft::Aircraft {
+    pub(super) fn synthetic_profile(id: AircraftId) -> tore_formats::aircraft::Aircraft {
         let mut profile = crate::flight::integration_tests::profile();
         let index = aircraft_index(id);
         profile.id = id;
@@ -2216,6 +2955,7 @@ mod tests {
             human_controlled: false,
             alive: actor.alive(),
             destroyed: false,
+            on_ground: false,
             observable: None,
         }
     }
@@ -3798,7 +4538,11 @@ mod tests {
                         steering_point: None,
                         mode: CommandMode::OtherState,
                     };
-                    actor.fly(Some(&intent), &own, &flat).unwrap();
+                    actor
+                        .fly(Some(&intent), &own, &flat, &|x, z| {
+                            Surface::terrain(flat(x, z))
+                        })
+                        .unwrap();
                     let mut replay = before;
                     replay.step_surface(actor.last_input(), |x, z| Surface::terrain(flat(x, z)));
                     assert_eq!(
@@ -4088,3 +4832,7 @@ mod tests {
 #[cfg(test)]
 #[path = "engagement_integration_tests.rs"]
 mod engagement_integration_tests;
+
+#[cfg(test)]
+#[path = "airfield_integration_tests.rs"]
+mod airfield_integration_tests;

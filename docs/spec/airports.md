@@ -48,8 +48,8 @@ runway. The horizontal indicator corrects height and the vertical indicator corr
 lateral alignment. Above-path guidance moves down; right-of-path guidance moves
 left. Centered indications show alignment. Airspeed brackets show the advised
 landing range. Manual page 65 gives the player first landing clearance while other
-aircraft hold at marshal. That is evidence to preserve for a later traffic feature,
-not authorization here to implement autonomous traffic.
+aircraft hold at marshal; AI traffic follows that rule as described in
+[wing landing orders and player priority](#wing-landing-orders-and-player-priority).
 
 Both pages 67 and 87 give a 5 nautical mile activation distance. Page 67 gives an
 altitude below 2,000 feet; page 87 gives below 4,000 feet and requires gear down
@@ -104,6 +104,32 @@ callback names alone do not establish a player command menu.
 Next step: identify player input/menu producers and their visible responses.
 Capture or transfer of airport ownership is not established by nationality fields.
 Mission orders and ownership changes are outside this requested command scope.
+
+### Wing landing orders and player priority
+
+Manual p.65: "your aircraft always receives first landing clearance; all other
+aircraft will hold marshal while you land." The recovered retail condition
+([AI format notes](../formats/ai.md#airfield-takeoff-and-landing-sequences)) is
+spec-derived: the player counts as landing, and AI aircraft landing at that
+airport hold at marshal, while the gear is down, the aircraft is below 4,000 ft
+above the ground, no faster than 953 ft/s and within 25,000 ft of the nearest
+friendly airport. Friendly uses the tower's rule: a friendly airport or a
+neutral one that grants permission. No tower request is needed. The player must be airborne. Rollout and
+taxi do not claim landing priority; runway occupancy is checked separately.
+A departing player is excluded until leaving the condition or approaching a
+usable runway within 30 degrees of its heading with its near end ahead
+(fitted, agent decision 2026-09-23). It is re-evaluated every tick,
+so raising the gear, climbing or flying away, a crash, ejection or restart
+releases it. Agent decision (2026-09-23, fitted): an airport's distance is
+measured to its nearest usable runway centre, since the scene has no single
+airport position, and an airport with no usable runway is ignored. The
+player's Shift-A selection also chooses where Alt-L (land at selected airport,
+an opinionated addition John requested on 2026-09-23) sends the wing. The
+wingmen use the player's cleared runway at that airport, otherwise its longest
+usable runway, and share the tower's refusal of hostile, unknown and
+unpermitted neutral airports (agent decisions, 2026-09-23). The AI approach,
+marshal and landing rules are in [AI airfield sequences](ai-airfield.md); the
+keys are in [input](../INPUT.md#player-wing-orders).
 
 ## Integration choices
 

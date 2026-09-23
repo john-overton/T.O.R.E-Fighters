@@ -146,6 +146,11 @@ fn activity_goal(
         Activity::Pursuing | Activity::Attacking => "A",
         Activity::Defending | Activity::Evading | Activity::Breaking => "E",
         Activity::Destroyed => "C",
+        // Manual p.101: T takeoff, L land. The ground wait and taxi belong to
+        // the takeoff sequence. Agent decision (2026-09-23): a landed aircraft
+        // keeps L, because rollout and parking end the same landing sequence.
+        Activity::Waiting | Activity::Taxiing | Activity::TakingOff => "T",
+        Activity::HoldingMarshal | Activity::Landing | Activity::Landed => "L",
         Activity::Idle
         | Activity::Formation
         | Activity::Searching
@@ -349,6 +354,22 @@ mod tests {
         assert_eq!(activity_goal(Activity::Rejoining, Some(0)), ("N", false));
         assert_eq!(activity_goal(Activity::ReturningToBase, None), ("N", false));
         assert_eq!(activity_goal(Activity::Destroyed, None), ("C", false));
+    }
+    #[test]
+    fn airfield_activities_use_the_manual_takeoff_and_land_codes() {
+        use tore_sim::ai::controller::Activity;
+        for activity in [Activity::Waiting, Activity::Taxiing, Activity::TakingOff] {
+            assert_eq!(activity_goal(activity, Some(0)), ("T", false));
+        }
+        for activity in [
+            Activity::HoldingMarshal,
+            Activity::Landing,
+            Activity::Landed,
+        ] {
+            assert_eq!(activity_goal(activity, Some(0)), ("L", false));
+        }
+        // Returning to base is a withdrawal, not yet a landing phase.
+        assert_eq!(activity_goal(Activity::ReturningToBase, None), ("N", false));
     }
     #[test]
     fn clock_wrap_and_cardinal_bearings() {

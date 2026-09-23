@@ -408,10 +408,16 @@ owns player selection, clearance, landing progress, and typed replies.
 Weather-only reconstruction preserves service and combat state. Theater changes
 and flight restart rebuild both from the imported scene.
 
+`tore-sim::ai::airfield` owns AI takeoff and landing sequences. The app resolves
+STRIP anchors and home runways, then passes terrain and landable surfaces to
+`AiMission::step_with_surface`. Aircraft motion remains driven by pilot inputs;
+the renderer has no role in traffic gates or landing decisions.
+[Behavior and fitted safety rules](spec/ai-airfield.md).
+
 The creator stores its accepted ground-start runway identity separately from the
 editable draft. It constructs the existing airborne wing launch reference first,
-then initializes the player on the shared runway surface. Restart repeats that
-sequence while preserving the accepted airport, fuel and stores. Building height
+then initializes the player's whole wing on the shared runway surface. Restart
+reuses the accepted launch layout, airport, fuel and stores. Building height
 inside a composite runway shape never supplies the support-plane elevation.
 Static solid and textured detail passes use separate depth bias, keeping the
 visible pavement at the shared contact height. A per-shape vertical normalization

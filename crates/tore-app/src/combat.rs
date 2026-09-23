@@ -105,6 +105,8 @@ pub struct Combat {
     presentation: TargetPresentation,
     dummies: Vec<(usize, Vector)>,
     mission_spawns: Option<Vec<crate::ai_wings::MissionSpawn>>,
+    /// The accepted Quick Mission layout, kept so restart rebuilds it exactly.
+    pub mission_layout: Option<crate::quick_mission::MissionLayout>,
     dummy_models: Vec<Airframe>,
     dummy_configs: Vec<live::Configuration>,
     dummy_contrail_offsets: Vec<Vec<Vector>>,
@@ -246,6 +248,7 @@ impl Combat {
             state: live::State::new(config, true)?,
             dummies: Vec::new(),
             mission_spawns: None,
+            mission_layout: None,
             dummy_models: Vec::new(),
             dummy_configs: Vec::new(),
             dummy_contrail_offsets: Vec::new(),
@@ -352,11 +355,16 @@ impl Combat {
     pub fn mission_aircraft(
         &mut self,
         wings: &[tore_sim::ai::launch::WingLaunch],
-        separation: f64,
+        layout: &crate::quick_mission::MissionLayout,
         data: &BTreeMap<String, Vec<u8>>,
     ) -> AppResult<()> {
-        self.mission_dummies(&tore_sim::ai::launch::legacy_pairs(wings), separation, data)?;
-        self.mission_spawns = Some(crate::ai_wings::mission_spawns(wings, separation));
+        self.mission_dummies(
+            &tore_sim::ai::launch::legacy_pairs(wings),
+            layout.enemy.distance_ft,
+            data,
+        )?;
+        self.mission_spawns = Some(crate::ai_wings::mission_spawns(wings, &layout.spawn_plan()));
+        self.mission_layout = Some(layout.clone());
         Ok(())
     }
 
@@ -1996,6 +2004,7 @@ mod ai_pose_tests {
             jammer: None,
             jammer_active: false,
             airborne: true,
+            on_ground: false,
             radius: 28.,
             hp: 100,
             initial_hp: 100,

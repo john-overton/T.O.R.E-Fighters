@@ -147,7 +147,7 @@ state guards. It skips drawing opcodes/branches; this is **not** proof of comple
 LOD, shadow, palette or resource closure. The named PIC is now extracted with
 archive/hash provenance. Full drawing traversal and visual inspection remain E004.
 
-Next: finish template field consumers, full type-load and scheduling closure;
+Next: carrier template values, full type-load and scheduling closure;
 validate all placement fields and collision-channel consumers.
 Resolve E004 drawing/texture/palette dependencies independently. Then implement
 transactional world construction and ordered queries, including failures after
@@ -189,7 +189,8 @@ The static template at **0x50ccc8 is 0x134 bytes**, and is not zero-filled.
 The hash-gated static pass exports it as `tables/strip-template.bin`; it remains
 inert external diagnostic data. Its first five dwords are callback addresses,
 not host function pointers. NE-00.1h below reviews three predicate consumers;
-the first two callbacks and complete downstream ownership remain open.
+the [callback section](#remaining-template-callback-boundaries) records the
+takeoff/landing bodies' use of the points and tail fields.
 STRIPAddProc overwrites its local position/orientation inputs, type-derived flag
 bytes and current object ID, then transforms and copies the full record.
 Uninterpreted defaults must be preserved or explicitly unsupported; they cannot
@@ -477,7 +478,8 @@ Distances use the already reviewed 0x4c66cc approximation (largest absolute
 component plus quarters of the others), not Euclidean length. Preserve each
 caller's word/dword comparison widths. These are predicate contracts, not
 permission to call inert template pointer words or activate approach behavior.
-The first two template callbacks and other nonzero defaults remain unaccepted.
+The first two callbacks' bodies are reviewed below (2026-09-23); as elsewhere,
+that is a behaviour source, not native acceptance or permission to activate it.
 
 ### Comment callback selection and observable early exit
 
@@ -599,20 +601,65 @@ and calls `0x4a04f0` for kind 4. It is not merely an assignment to +0xe3.
 ### Remaining template callback boundaries
 
 SMS names the first two pointer targets **APTakeoff** (`0x4badb0`) and
-**APLanding** (`0x4bc270`). Only their entry gates are reviewed here. Both clear
-instance byte +0x215 before examining later conditions. Takeoff resolves the
-attached airport's object ID, requires a nonnull object with flag 1 and a true
-`0x4747c0` preference result; failing that validation while +0xe3 is 1..8 writes
-state 0x1f directly, calls `0x473c10`, zeroes speed +0x34 and returns AL=1.
-Other cases continue to the unaccepted body at `0x4bae24`.
+**APLanding** (`0x4bc270`). Both clear instance byte +0x215 first. Takeoff
+resolves the attached airport's object ID, requires a nonnull object with flag 1
+and a true `0x4747c0` (`@Alive@4`) result; failing that while +0xe3 is 1..8 writes
+state 0x1f directly, calls `0x473c10` (`_Kill@0`), zeroes speed +0x34 and returns
+AL=1. Landing first calls `0x463d00` and group lookup `0x45e710`; a wing member
+in 0x13/0x14 whose leader is not landing or grounded (`0x45e8f0`) leaves through
+`0x4bbfe0`. A dead airport object leads to `0x4bd170`: states below 0x16 leave
+through `0x4bbfe0`, later ones are killed.
 
-Landing first calls `0x463d00` and group lookup `0x45e710`. Group result 2,
-false `0x45e8f0`, and state 0x13 or 0x14 call `0x4bbfe0` then return AL=0.
-Otherwise it resolves the attachment's airport object and tests flag 1 and
-`0x4747c0`, branching to unaccepted exit `0x4bd170` on failure or body `0x4bc310`
-on success. These gates do not establish effect-free suppression. Complete
-callback selection/callers, bodies, device effects and attachment lifetimes remain
-unknown; no autonomous behavior is translated or enabled.
+The bodies were traced statically on 2026-09-23 against the same EXE/SMS; the
+player-visible sequence, gates and numbers are recorded once in
+[AI source notes](ai.md#airfield-takeoff-and-landing-sequences). This section
+records what they read from the airport record. A point record is six local
+words then three world dwords, so point *i* (boxes 0x25..0x2c, then 0x11) has
+world position +0x1a+0x12*i; orientation 0x17 has world angles +0xbc/+0xbe/+0xc0;
+point 0x12 world +0xc8; orientation 0x18 world +0xda/+0xdc/+0xde.
+
+| Anchor | Record | Consumer and role |
+| --- | --- | --- |
+| Box 0x25 (anchor 0) | +0x1a | First taxi target from the parking area, takeoff state 2 |
+| Boxes 0x26, 0x27, 0x28 (anchors 1..3) | +0x2c, +0x3e, +0x50 | Taxiway legs, takeoff states 3..5; each leg ends within 50 ft of the line through the anchor along the reversed runway heading. Anchor 3 sits on the extended centerline behind the takeoff spot |
+| Box 0x11 | +0xaa (local +0xa4) | Takeoff spot: line-up target, 475 ft shortcut radius, 125 ft occupancy (callback +8), 26400 ft line-up reset |
+| Box 0x17 | +0xbc heading, +0xbe pitch | Runway heading for line-up, roll and climb; reversed heading defines the taxi and centerline lines |
+| Box 0x12 | +0xc8 (local +0xc2) | Landing aim point and touchdown test; marshal square centre; approach gates are built back from it |
+| Box 0x18 | +0xd4 local heading; +0xda/+0xdc/+0xde world | Approach gates use the local heading reversed; rollout uses the world heading; callbacks +0xc/+0x10 compare against it |
+| Boxes 0x29, 0x2a, 0x2b, 0x2c (anchors 4..7) | +0x62, +0x74, +0x86, +0x98 | Landing taxi-back legs, states 0x1b..0x1e: rollout end, runway exit, return taxiway, parking-area entry |
+| Boxes 0x19..0x21 | via +0xe2 (`0x4be200`) | Parking slot *k* is box 0x19+*k* (nine slots, +0xe0), heading airport heading plus 90 degrees (`_Slew` `0x417f00`) |
+
+Tail fields read by the bodies, with the reviewed STRIP template defaults: +0xe8
+carrier byte (0; selects 175/125 ft radii and carrier branches); +0xe9..+0xec
+catapult, wire, vertical pad and runway flags; dword +0xed marshal distance
+`0xce4000` (52800 ft); dword +0xf1 marshal altitude `0x177000` (6000 ft); dword
++0xf5 per-wing-position step `0x3e800` (1000 ft); word +0xf9 taxi speed 50 ft/s;
+dwords +0xfb/+0xff/+0x103 catapult speed floor, rate and ceiling (`0x3200`,
+`0x9600`, `0xfa00`, read by `0x49f876..0x49f8c4` in state 9); dword +0x107 arrest
+deceleration (`0x4b00`, `0x49f940` in state 0x16); word +0x10b 728 (4 degree
+climb cap); word +0x10d -1092 (-6 degree approach path, also drawn by the HUD at
+`0x409d75`); word +0x10f 3094 (17 degree final nose offset). Of the thirteen
+FA_2.LIB STRIP types, STRIP and STRIP1..7 carry type flags `$208021` (airport bit
+0x8000 tested by `_APNearest`, runway flag); DTSTRP carries `$108021` (vertical
+pad only), so `@APTakeoffType@8`/`@APLandingType@8` return -1 there for
+conventional aircraft; the four A variants carry `$1` and are never chosen as an
+aircraft's airport. PT flags +0xba used here: 8 helicopter, 0x20 vertical/STOVL,
+0x40 carrier capable, 2 hook.
+
+Example, local only: RNWY4.SH (STRIP4.OT) has the takeoff spot about 1720 ft to the
+-X side of the object origin, the landing aim point 160 ft short of it on the same
+centerline, anchor 3 about 370 ft behind the spot, a taxiway from anchor 1 across
+to it, anchor 4 about 2860 ft down the runway, anchors 5..7 returning on a
+parallel taxiway, and nine slots in a parking area 1600..2700 ft to the +X
+side. RUNWAY.SH (STRIP.OT) instead separates a takeoff centerline and a landing
+centerline about 1070 ft apart. In the reviewed TRAIN01.M, a grounded player
+sits exactly on the RNWY4 takeoff spot and a grounded C5 on slot 1 at the parking
+heading, so the mission builder appears to snap to these anchors; the builder
+rule itself is not traced. No derived coordinates are committed.
+
+Complete callback selection/callers, carrier records (`@APAddToCarrier@4`), device
+consumer contracts and attachment lifetimes remain open; no autonomous behavior
+is translated or enabled by this section.
 
 ## Current-object switches and speech timing, NE-00.1j
 

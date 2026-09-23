@@ -38,7 +38,7 @@ constant-pointer grammar for static branches; it never executes code.
 | 14 | Altitude | 5,000 / 10,000 / 20,000 / 40,000 feet |
 | 15 | Conditions | Dawn, clear, cloudy, overcast, foggy, sunset, night |
 | 16 | Situation | Advantage, neutral, disadvantage |
-| 17 | Separation | 1 / 2 / 5 / 10 / 20 / 50 miles |
+| 17 | Separation | 1 / 2 / 5 / 10 / 20 / 50 miles. The manual (p.19) gives these as nautical miles. The host appends 200 and 300 miles; see [Separation](../spec/quick-mission-menu.md#separation). |
 | 18 | Load | Standard or custom |
 | 19 | Air combat | Guns only or guns and missiles |
 | 30 | Ground target | Theater-specific list, including none |
