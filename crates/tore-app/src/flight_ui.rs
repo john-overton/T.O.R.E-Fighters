@@ -12,7 +12,12 @@ pub enum Command {
     None,
     NextWeapon,
     PreviousWeapon,
+    /// T: next radar target.
     Target,
+    /// Shift-T: previous radar target.
+    TargetPrevious,
+    /// Enter: the visible sensor contact nearest the nose.
+    TargetVisual,
     RangeReset,
     DamageReport,
     Combat(tore_sim::combat::live::Command),
@@ -103,6 +108,7 @@ fn cheat_switch<'a>(cheats: &'a mut tore_sim::cheats::Cheats, label: &str) -> Op
         "No crashes?" => &mut cheats.no_crashes,
         "Easy aiming?" => &mut cheats.easy_aiming,
         "Ignore midair collisions?" => &mut cheats.ignore_midair_collisions,
+        "Easy targeting?" => &mut cheats.easy_targeting,
         "No screen-shaking?" => &mut cheats.no_screen_shake,
         _ => return None,
     })
@@ -546,7 +552,7 @@ impl FlightUi {
                 // The development fixtures moved aside for the sensor keys.
                 "y" => Command::Combat(tore_sim::combat::live::Command::ToggleTargetJammer),
                 "i" => Command::Combat(tore_sim::combat::live::Command::Incoming),
-                "t" => self.unavailable("Previous target"),
+                "t" => Command::TargetPrevious,
                 "w" => self.unavailable("Previous waypoint"),
                 _ => Command::None,
             };
@@ -593,7 +599,7 @@ impl FlightUi {
             "i" => Command::SensorInfrared,
             "m" => Command::Mode,
 
-            "Enter" | "'" => Command::Target,
+            "Enter" | "'" => Command::TargetVisual,
             "Space" => Command::None,
             "v" => self.unavailable("Store Other View camera"),
             _ => Command::None,
@@ -715,7 +721,8 @@ impl FlightUi {
                     "Shift-M: map | M/O: sensor channel | Shift-U: HUD".into(),
                     "Ctrl-Tab/Ctrl-Shift-Tab: instrument | Ctrl-1..6: slot".into(),
                     "Ctrl-Shift-1..4: stock instrument buttons (T.O.R.E)".into(),
-                    "T/Shift-T: target | Enter/apostrophe: designate | Space: fire".into(),
+                    "T/Shift-T: radar target | Enter/apostrophe: visual target | Space: fire"
+                        .into(),
                     "A: heading/altitude | Ctrl-A: waypoint autopilot".into(),
                     "I: infrared | R: radar | Y: contact history | J: own ECM".into(),
                     "Click a contact to designate it; L clears the designation".into(),
@@ -940,6 +947,23 @@ mod tests {
     }
 
     #[test]
+    fn t_enter_and_shift_t_are_separate_targeting_commands() {
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.key("t", false, false, false, &tree()), Command::Target);
+        assert_eq!(
+            ui.key("t", true, false, false, &tree()),
+            Command::TargetPrevious
+        );
+        assert_eq!(
+            ui.key("Enter", false, false, false, &tree()),
+            Command::TargetVisual
+        );
+        assert_eq!(
+            ui.key("'", false, false, false, &tree()),
+            Command::TargetVisual
+        );
+    }
+    #[test]
     fn cheat_rows_toggle_show_state_and_survive_restart() {
         let mut ui = FlightUi::default();
         for label in [
@@ -953,6 +977,7 @@ mod tests {
             "No crashes?",
             "Easy aiming?",
             "Ignore midair collisions?",
+            "Easy targeting?",
         ] {
             assert_eq!(ui.cheat_state(label), Some("Off"));
             assert_eq!(ui.activate(label, ""), Command::Click);
@@ -969,7 +994,7 @@ mod tests {
         ui.activate("Normal", "");
         assert!(!ui.cheats.invulnerable);
         assert_eq!(ui.cheat_state("Realistic"), None);
-        assert_eq!(ui.cheat_state("Easy targeting?"), None);
+        assert_eq!(ui.cheat_state("Enemy AI?"), None);
     }
 
     #[test]

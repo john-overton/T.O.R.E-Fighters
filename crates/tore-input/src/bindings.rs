@@ -99,6 +99,8 @@ impl Action {
                 | "weapon-next"
                 | "weapon-previous"
                 | "designate"
+                | "designate-previous"
+                | "designate-visual"
                 | "clear-designation"
                 | "master-arm"
                 | "jettison"

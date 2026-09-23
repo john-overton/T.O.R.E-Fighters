@@ -105,7 +105,12 @@ pub enum Command {
     TargetDistance(u32),
     ClearRange,
     ToggleTargetRadar,
+    /// T: the next radar contact, nearest first.
     Designate,
+    /// Shift-T: the previous radar contact.
+    DesignatePrevious,
+    /// Enter: the visible sensor contact nearest the nose.
+    DesignateVisual,
     /// Persistent selection of one current contact by its stable identity.
     DesignateTarget(u32),
     ClearDesignation,
@@ -698,8 +703,11 @@ pub struct State {
     pub ammo: Vec<u16>,
     pub selected: usize,
     pub sensors: Sensors,
-    /// Presentation-only selection survives sensor loss; never grants weapon support.
+    /// Easy targeting's memory of the last selection, kept after sensor
+    /// loss for the HUD square only; never grants weapon support.
     hud_selection: Option<u32>,
+    /// Friendly aircraft identities, which T and Enter skip. Set by the host.
+    pub friendlies: std::collections::BTreeSet<u32>,
     /// Passive emitters received this step, for the exposure instrument.
     pub emitters: Vec<passive::Emitter>,
     pub projectiles: Vec<Projectile>,
@@ -811,6 +819,7 @@ impl State {
             bore_observation: None,
             mounted_key: None,
             hud_selection: None,
+            friendlies: Default::default(),
             weapon_rules: Rules::Spec,
             chaff: config.ecm.chaff[0],
             flares: config.ecm.flare[0],
@@ -988,10 +997,23 @@ impl State {
             self.launch_mode = LaunchMode::Cued;
         }
     }
-    /// Keyboard cycling and mouse clicks share the same current-observation
-    /// eligibility, including selectable RWS contacts.
-    pub fn designate_next(&mut self) {
-        self.sensors.cycle(true);
+    /// T (forward) and Shift-T cycle radar contacts; friendly aircraft and
+    /// wrecks are skipped.
+    pub fn designate_next(&mut self, forward: bool) {
+        let friendlies = &self.friendlies;
+        self.sensors.cycle(forward, |id| friendlies.contains(&id));
+        self.selection_changed();
+    }
+    /// Enter selects the visible sensor contact nearest the nose.
+    pub fn designate_visual(&mut self, launcher: Launcher) {
+        let friendlies = &self.friendlies;
+        self.sensors
+            .select_visual(launcher.position, launcher.basis, |id| {
+                friendlies.contains(&id)
+            });
+        self.selection_changed();
+    }
+    fn selection_changed(&mut self) {
         self.hud_selection = self.designated();
         if self.designated().is_some() {
             self.launch_mode = LaunchMode::Cued;
@@ -1000,8 +1022,14 @@ impl State {
     pub fn designated(&self) -> Option<u32> {
         self.sensors.selected()
     }
+    /// The target the HUD square and target camera follow: the selection, or
+    /// with Easy targeting the last selection after the sensors lose it.
     pub fn display_target(&self) -> Option<&Target> {
-        let id = self.designated().or(self.hud_selection)?;
+        let id = if self.cheats.easy_targeting {
+            self.designated().or(self.hud_selection)
+        } else {
+            self.designated()
+        }?;
         self.targets
             .iter()
             .find(|target| target.id == id && target.hp > 0)
@@ -1156,7 +1184,9 @@ impl State {
                 self.mounted_key = None;
                 self.launch_mode = LaunchMode::Cued;
             }
-            Command::Designate => self.designate_next(),
+            Command::Designate => self.designate_next(true),
+            Command::DesignatePrevious => self.designate_next(false),
+            Command::DesignateVisual => self.designate_visual(launcher),
             Command::DesignateTarget(id) => {
                 if self.sensors.designate(id) {
                     self.hud_selection = Some(id);
@@ -1839,6 +1869,9 @@ impl State {
         self.sensors.step(&observer, &observables, &environment);
         if let Some(id) = self.designated() {
             self.hud_selection = Some(id);
+        } else if !self.cheats.easy_targeting {
+            // A dropped target is gone; nothing is remembered for later.
+            self.hud_selection = None;
         }
         self.emitters = passive::emitters(
             &observer,
@@ -3356,14 +3389,41 @@ mod tests {
     }
 
     #[test]
-    fn hud_selection_survives_sensor_loss_without_granting_weapon_support() {
+    fn a_dropped_target_leaves_the_hud_unless_easy_targeting_keeps_it() {
         let mut state = fixture(true);
         let ownship = launcher();
         state.range_target(ownship);
         for _ in 0..120 {
             state.step(false, ownship, |_, _| 0.);
         }
-        state.designate_next();
+        state.designate_next(true);
+        let id = state.designated().expect("fixture contact");
+        state
+            .targets
+            .iter_mut()
+            .find(|t| t.id == id)
+            .unwrap()
+            .position = [0., 1000., -5000.];
+        for _ in 0..120 {
+            state.step(false, ownship, |_, _| 0.);
+        }
+        assert_eq!(state.designated(), None);
+        assert!(state.display_target().is_none());
+        // Turning Easy targeting on later does not bring it back.
+        state.cheats.easy_targeting = true;
+        state.step(false, ownship, |_, _| 0.);
+        assert!(state.display_target().is_none());
+    }
+    #[test]
+    fn easy_targeting_keeps_the_hud_target_without_granting_weapon_support() {
+        let mut state = fixture(true);
+        state.cheats.easy_targeting = true;
+        let ownship = launcher();
+        state.range_target(ownship);
+        for _ in 0..120 {
+            state.step(false, ownship, |_, _| 0.);
+        }
+        state.designate_next(true);
         let id = state.designated().expect("fixture contact");
         assert_eq!(state.display_target().map(|t| t.id), Some(id));
         state
@@ -4118,7 +4178,7 @@ mod tests {
         let mut l = launcher();
         s.range_target(l);
         observe(&mut s, l, 1);
-        s.designate_next();
+        s.designate_next(true);
         assert_eq!(s.designated(), Some(1));
         // Selection is immediate; the fire-control track is not.
         assert_eq!(s.readiness(l), Readiness::RadarAcquiring);
@@ -4130,7 +4190,11 @@ mod tests {
         assert!(!s.can_lock(l));
         s.step(true, l, |_, _| 0.);
         assert_eq!(s.ammo, [11]);
+        // Radar off drops the target completely; it has to be selected again.
+        assert_eq!(s.designated(), None);
         l.radar = true;
+        observe(&mut s, l, 1);
+        s.designate_next(true);
         observe(&mut s, l, 60);
         assert!(s.can_lock(l));
         s.step(true, l, |_, _| 0.);
@@ -4476,7 +4540,7 @@ mod tests {
         s.command(Command::ToggleArm, l);
         s.range_target(l);
         observe(&mut s, l, 1);
-        s.designate_next();
+        s.designate_next(true);
         observe(&mut s, l, ACQUISITION);
         assert_eq!(s.readiness(l), Readiness::Ready);
         let z = &mut s.config.stations[0].weapon.seeker.zones[1];
@@ -4491,7 +4555,7 @@ mod tests {
         let mut s = fixture(true);
         s.range_target(launcher());
         observe(&mut s, launcher(), 1);
-        s.designate_next();
+        s.designate_next(true);
         observe(&mut s, launcher(), ACQUISITION);
         s.step(true, launcher(), |_, _| 0.);
         let ammo = s.ammo.clone();
@@ -4507,7 +4571,7 @@ mod tests {
         s.config.stations[0].weapon.flags &= !0x200;
         s.range_target(launcher());
         observe(&mut s, launcher(), 1);
-        s.designate_next();
+        s.designate_next(true);
         observe(&mut s, launcher(), ACQUISITION);
         s.step(true, launcher(), |_, _| 0.);
         let mut l = launcher();
@@ -4526,7 +4590,7 @@ mod tests {
         let l = launcher();
         s.range_target(l);
         observe(&mut s, l, 1);
-        s.designate_next();
+        s.designate_next(true);
         observe(&mut s, l, ACQUISITION);
         let wall = |_: f64, z: f64| {
             if (1000. ..2000.).contains(&z) {
@@ -4542,10 +4606,10 @@ mod tests {
         assert_eq!(s.designated(), None);
         assert_eq!(s.readiness(l), Readiness::NoTarget);
         assert_eq!(s.rounds(0), 11);
-        s.designate_next();
+        s.designate_next(true);
         assert_eq!(s.designated(), None);
         observe(&mut s, l, ACQUISITION + 1);
-        s.designate_next();
+        s.designate_next(true);
         observe(&mut s, l, ACQUISITION);
         s.step(true, l, |_, _| 0.);
         assert_eq!(s.projectiles[0].target, Some(1));
@@ -4732,7 +4796,7 @@ mod tests {
         let l = launcher();
         s.range_target(l);
         observe(&mut s, l, 1);
-        s.designate_next();
+        s.designate_next(true);
         observe(&mut s, l, ACQUISITION);
         let id = s.designated().expect("selected fixture target");
         assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
@@ -4977,7 +5041,7 @@ mod tests {
         let player = launcher();
         state.range_target(player);
         observe(&mut state, player, 1);
-        state.designate_next();
+        state.designate_next(true);
         observe(&mut state, player, ACQUISITION);
         let id = state.designated().unwrap();
         let contact = state.sensors.observation(id).unwrap();

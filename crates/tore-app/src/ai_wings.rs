@@ -547,6 +547,15 @@ impl AiWings {
         self.slots.iter().find(|s| s.id == id)
     }
 
+    /// Friendly aircraft identities, which the player's T and Enter skip.
+    pub fn friendly_ids(&self) -> std::collections::BTreeSet<u32> {
+        self.slots
+            .iter()
+            .filter(|s| s.side == tore_sim::ai::launch::Side::Friendly)
+            .map(|s| s.id)
+            .collect()
+    }
+
     /// Take the pending activity line, if the rate limiter released one.
     pub fn take_message(&mut self) -> Option<String> {
         self.reports.take().or_else(|| self.pending_message.take())

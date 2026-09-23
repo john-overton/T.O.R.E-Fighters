@@ -106,6 +106,40 @@ Exact retail M/Y handlers, mouse selection and track-history durations remain
 unknown. The older USNF manual describes sensor switching and history, but is a
 lead, not authority for FA-specific controls or numbers.
 
+## Target selection keys
+
+John's recollection of retail, given on 2026-09-23. Retail comparison is
+unavailable.
+
+- **T** cycles through current radar contacts only. **Shift-T** cycles
+  backwards.
+- **Enter** selects an aircraft the pilot can see, but only one that is also a
+  current radar or infrared contact.
+- When the radar or infrared scope loses the contact, the target drops and the
+  track is lost completely, however it was selected, including by clicking it
+  on the scope. Seeing the aircraft does not keep it, and the HUD does not
+  remember a dropped target. Only the [Easy targeting cheat](cheats.md) keeps
+  the HUD square on it.
+
+Clicking a contact on the scope still selects it at once, including a
+search-only RWS contact, as John requested on 2026-09-16; it now drops with the
+contact.
+
+**Proposed**, as agent decisions awaiting John's review:
+
+| Rule | Proposed |
+| --- | --- |
+| T order | nearest first; the order is taken again at each press |
+| Skipped by T and Enter | friendly aircraft and wrecks |
+| T with the infrared channel selected | selects nothing; infrared contacts are for Enter |
+| Enter's view | the forward view at 1x zoom around the nose: 60 degrees tall and 4:3 wide |
+| Enter's choice | the eligible aircraft nearest the nose |
+| Gamepad | South (A) is T; Enter and Shift-T have no default button |
+
+These replace an agent decision under which a selection survived radar loss
+while the aircraft stayed inside the roughly 10-nmi visual envelope, and the
+fitted HUD memory of a target after sensor loss.
+
 ## Look-down and detection
 
 The normal look-down branch applies only when the sensor is above the target

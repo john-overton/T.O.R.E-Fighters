@@ -159,25 +159,10 @@ collision credits no kill.
 
 ### Target selection
 
-Easy targeting assumes the retail targeting controls:
-
-- **T** cycles through current radar contacts only.
-- **Enter** selects an aircraft the pilot can see, but only one that is also a
-  current sensor contact.
-- When the radar loses the contact, the target drops and the track is lost
-  completely. This applies however the target was selected, including by
-  clicking it on the radar scope. The HUD does not remember a dropped target;
-  only Easy targeting keeps it.
-
-This replaces two current behaviours: a target surviving radar loss because it
-is still inside visual range (an agent decision), and the HUD's remembered
-target after sensor loss (a fitted choice). Clicking a contact still selects it
-as John requested on 2026-09-16; it now drops with the contact.
-
-**Proposed:** T cycles nearest first, skips friendly aircraft and wrecks, and
-Shift-T cycles backwards. Enter picks the eligible aircraft closest to the
-centre of the HUD. An Enter target drops when it is no longer a sensor contact.
-When implemented, these rules move into the [radar specification](radar.md).
+Easy targeting builds on the retail targeting controls: T cycles radar
+contacts, Enter selects a visible sensor contact, and a target the radar loses
+drops completely. The rules and numbers are in the
+[radar specification](radar.md#target-selection-keys).
 
 ## Loadout cheat
 

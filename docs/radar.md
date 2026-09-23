@@ -380,19 +380,14 @@ clear a still-observed search contact. A missile-envelope failure also does not
 clear selection. Reappearance creates an unselected contact; there is no hidden
 sticky ID or automatic reacquisition of a lost selection.
 
-A close target stays selectable through the visual channel with the radar off.
 The visual sensor is collected in parallel with the selected scope channel, keeps
 the existing geometric contract with no signature scaling or interference, is not
 part of the channel cycle, and never supplies radar weapon support. It does
 honour its own damage state: a destroyed visual sensor removes visual contacts.
-
-This resolves an apparent contradiction in the two rules above. "Selection clears
-when the active sensor no longer has a current observation" and "a visual target
-can remain designated while radar support is absent" pull in opposite directions
-once the radar loses a contact that is still inside the roughly 10-nmi visual
-envelope. The implementation follows the second: selection survives on the visual
-observation, and the radar answer separately reports its own inhibit reason. That
-choice is an agent decision, not a requested one.
+Seeing a target does not keep it selected: since 2026-09-23 a selection clears
+as soon as the scope channel loses it, and a visual-only aircraft cannot be
+selected. Enter selects a visible aircraft only when it is also a scope contact.
+[Target selection keys](spec/radar.md#target-selection-keys).
 
 A display zoom that moves a still-observed contact outside the plotted range does
 not itself lose the sensor observation or selection. RWS/TWS changes preserve
@@ -811,10 +806,10 @@ screen edge, including margins outside the contact plot, and ends at the bezel.
 It remains visible with the radar off. [Screen bounds](spec/missiles.md#radar-cursor-screen-boundary). L or the upper-right
 RELEASE LOCK button clears designation. [HUD rules](spec/missiles.md#weapon-hud-delivery).
 
-The HUD additionally remembers the explicitly selected target for its square or
-edge chevron, independent of sensor selection and weapon support. Loss of
-observation still expires sensor selection normally. The display-only cue
-never supplies radar gun lead or missile guidance. L/RELEASE LOCK clears both.
+With the Easy targeting cheat on, the HUD remembers the selected target for its
+square or edge chevron after the sensors drop it. Without it the cue drops with
+the selection. The display-only cue never supplies radar gun lead or missile
+guidance. L/RELEASE LOCK clears both.
 [Target-cue behavior](spec/gunsight-targeting.md#target-square-and-edge-chevron).
 
 The map also observes surface entities with the existing active-channel search

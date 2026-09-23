@@ -477,7 +477,7 @@ fn supported_update_freezes_on_radar_shutdown_and_cockpit_switch() {
     s.targets[0].position = [0., 1000., 40000.];
     s.targets[0].velocity = [0., 0., 300.];
     s.step(false, l, |_, _| 0.);
-    s.designate_next();
+    s.designate_next(true);
     for _ in 0..90 {
         s.step(false, l, |_, _| 0.);
     }

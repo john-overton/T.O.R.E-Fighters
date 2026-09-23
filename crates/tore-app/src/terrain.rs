@@ -958,6 +958,27 @@ impl Camera {
             400_000.0,
         );
     }
+    /// Where the renderer draws a world point in a `size` pixel view, if it is
+    /// in front of the camera and on screen.
+    pub fn project(&self, size: [u32; 2], point: [f64; 3]) -> Option<[f64; 2]> {
+        let (sy, cy) = f64::from(self.yaw).sin_cos();
+        let (sp, cp) = f64::from(self.pitch).sin_cos();
+        let (sr, cr) = f64::from(self.roll).sin_cos();
+        let right = [cy * cr - sy * sp * sr, cp * sr, -sy * cr - cy * sp * sr];
+        let up = [-cy * sr - sy * sp * cr, cp * cr, sy * sr - cy * sp * cr];
+        let forward = [sy * cp, sp, cy * cp];
+        let d: [f64; 3] = std::array::from_fn(|i| point[i] - f64::from(self.position[i]));
+        let dot = |a: [f64; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+        let z = dot(forward);
+        if z <= 1. {
+            return None;
+        }
+        let [w, h] = size.map(f64::from);
+        let focal = h / 2. * 3f64.sqrt() * f64::from(self.zoom);
+        let x = w / 2. + focal * dot(right) / z;
+        let y = h / 2. - focal * dot(up) / z;
+        ((0. ..w).contains(&x) && (0. ..h).contains(&y)).then_some([x, y])
+    }
     pub fn uniform(&self, aspect: f32, fog: [f32; 4], sky: [u8; 3]) -> Vec<f32> {
         let (sy, cy) = self.yaw.sin_cos();
         let (sp, cp) = self.pitch.sin_cos();
@@ -985,6 +1006,27 @@ impl Camera {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[test]
+    fn projection_matches_the_renderer_view() {
+        let mut camera = Camera::new();
+        camera.position = [0., 1000., 0.];
+        camera.yaw = 0.;
+        camera.pitch = 0.;
+        camera.roll = 0.;
+        camera.zoom = 1.;
+        let size = [800, 600];
+        // Straight ahead is the centre.
+        assert_eq!(camera.project(size, [0., 1000., 5000.]), Some([400., 300.]));
+        // 30 degrees up is the top edge of the 60 degree tall view.
+        let up = camera.project(
+            size,
+            [0., 1000. + 5000. * (30f64).to_radians().tan() * 0.99, 5000.],
+        );
+        assert!(up.is_some_and(|[_, y]| (2. ..4.).contains(&y)));
+        // Behind the camera or off the side is not on screen.
+        assert_eq!(camera.project(size, [0., 1000., -5000.]), None);
+        assert_eq!(camera.project(size, [9000., 1000., 5000.]), None);
+    }
     pub(crate) fn world() -> World {
         use tore_formats::theater::TerrainCell;
         let cells = [0, 4, 8, 12]

@@ -79,7 +79,9 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Fire / release weapon | Space | - | View + RB |
 | Next weapon / NAV | ] | - | View + LB |
 | Previous weapon / NAV | [ | - | View + X |
-| Designate / next target | T or Enter or Apostrophe | - | View + A |
+| Next radar target | T | - | View + A |
+| Previous radar target | Shift+T | - | - |
+| Select visual target | Enter or Apostrophe | - | - |
 | Clear designation | L | - | View + B |
 | Seeker mode (bore/cued) | - | - | - |
 | Jettison selected stores | K | - | View + Right stick press |

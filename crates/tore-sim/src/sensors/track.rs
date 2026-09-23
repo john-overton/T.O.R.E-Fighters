@@ -230,6 +230,11 @@ pub struct MapContact {
     pub airborne: bool,
 }
 
+/// The forward view at 1x zoom: 60 degrees tall, 4:3 wide. Enter picks
+/// only aircraft inside it.
+const FORWARD_VIEW_HALF_HEIGHT: f64 = std::f64::consts::FRAC_PI_6;
+const FORWARD_VIEW_HALF_WIDTH: f64 = 0.656_053; // atan(4/3 * tan 30 degrees)
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sensors {
     pub profiles: SensorProfiles,
@@ -384,13 +389,13 @@ impl Sensors {
                 Channel::Visual => !self.visual_failed,
             }
     }
-    /// Immediate persistent selection of a current contact's stable identity.
-    /// Re-selecting the same target does not restart acquisition.
+    /// Immediate persistent selection of a current radar or infrared contact's
+    /// stable identity. Re-selecting the same target does not restart acquisition.
     pub fn designate(&mut self, id: u32) -> bool {
         if self.selected == Some(id) {
             return true;
         }
-        if self.observation(id).is_none() {
+        if self.contact(id).is_none() {
             return false;
         }
         self.selected = Some(id);
@@ -403,17 +408,18 @@ impl Sensors {
         self.acquired = None;
         self.acquisition = 0;
     }
-    /// Keyboard cycling uses the same current-observation eligibility as the
-    /// mouse, including selectable RWS contacts.
-    pub fn cycle(&mut self, forward: bool) -> bool {
-        let mut ids: Vec<u32> = self
+    /// T and Shift-T: step through current radar contacts, nearest first,
+    /// skipping wrecks and any identity `skip` rejects (friendly aircraft).
+    /// Search-only RWS contacts stay selectable, as John requested.
+    pub fn cycle(&mut self, forward: bool, skip: impl Fn(u32) -> bool) -> bool {
+        let mut ranked: Vec<(f64, u32)> = self
             .contacts
             .iter()
-            .chain(&self.visual)
-            .map(|c| c.id)
+            .filter(|c| c.channel == Channel::Radar && !c.destroyed && !skip(c.id))
+            .map(|c| (c.distance_ft, c.id))
             .collect();
-        ids.sort_unstable();
-        ids.dedup();
+        ranked.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let ids: Vec<u32> = ranked.into_iter().map(|(_, id)| id).collect();
         if ids.is_empty() {
             return false;
         }
@@ -427,6 +433,29 @@ impl Sensors {
             None => ids[ids.len() - 1],
         };
         self.designate(next)
+    }
+    /// Enter: the aircraft the pilot can see that is also a current radar or
+    /// infrared contact, nearest the nose, inside the forward view.
+    pub fn select_visual(
+        &mut self,
+        position: Vector,
+        basis: Basis,
+        skip: impl Fn(u32) -> bool,
+    ) -> bool {
+        let best = self
+            .visual
+            .iter()
+            .filter(|c| !c.destroyed && !skip(c.id) && self.contact(c.id).is_some())
+            .filter_map(|c| {
+                let d = std::array::from_fn(|i| c.position[i] - position[i]);
+                let z = dot(d, basis.forward);
+                (z > 0.
+                    && (dot(d, basis.right) / z).abs() <= FORWARD_VIEW_HALF_WIDTH.tan()
+                    && (dot(d, basis.up) / z).abs() <= FORWARD_VIEW_HALF_HEIGHT.tan())
+                .then(|| ((z / dot(d, d).sqrt()).clamp(-1., 1.).acos(), c.id))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        best.is_some_and(|(_, id)| self.designate(id))
     }
     /// Whether current radar data supports a weapon aimed at this specific
     /// target. Infrared selection never confers radar illumination.
@@ -561,9 +590,10 @@ impl Sensors {
                 self.visual.extend(seen);
             }
         }
-        // Selection survives only while the active sensor still observes it.
+        // Selection survives only while the radar or infrared scope still
+        // holds the contact; seeing it no longer keeps it (John, 2026-09-23).
         if let Some(id) = self.selected
-            && self.observation(id).is_none()
+            && self.contact(id).is_none()
         {
             self.selected = None;
             self.acquisition = 0;

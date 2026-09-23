@@ -89,7 +89,6 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized. This is
 | F5 / F6 / F7 / F8 | Player-to-missile / wingman / target; target-to-player cameras |
 | F9 / F12 | Fly-by / missile camera |
 | Ctrl + view key / Alt + view key | Missile-relative / target-relative camera |
-| Shift-T | Reverse target cycling (T / Enter now designate in live range) |
 | W / Shift-W, N | Waypoint selection, navigation/weapons mode |
 | M | HARM seeker was the reserved action on this key. M now cycles sensor channels, so HARM has no binding until air-to-ground exists |
 | V | Set Other View camera |
@@ -98,7 +97,7 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized. This is
 | Alt-1…9 | Wingman straight/level, break and approach directions |
 | Alt-B/C/T/H/V/E/W/R/P/D | Wingman return, scope/formation/spacing, engagement, protection and disengagement |
 
-Space now holds the selected player trigger. Bracket keys select the previous/next weapon or NAV; T or Enter designates an actual range target. `--live-fire` enables the
+Space now holds the selected player trigger. Bracket keys select the previous/next weapon or NAV; T cycles radar targets, Shift-T cycles back and Enter selects a visible one. `--live-fire` enables the
 explicit PT-default test range; backslash resets its target at a suitable range
 for the selected weapon. Ordinary free flight loads the aircraft's supported default weapons. Airborne
 starts select and arm the canonical gun; ground starts enter NAV with weapons disarmed. [Startup rules](spec/hud-layout.md). The restricted native research adapter stays clean.
@@ -243,9 +242,11 @@ There is no separate master-arm control. **L** clears designation and **K**
 jettisons the selected external group in the live range. Class and station-fault
 fixtures remain available through the controls editor and command-line setup.
 Restart repairs/reloads. Selection releases the trigger before another press.
-T/Enter cycles the contacts the selected channel currently observes, on the same
-eligibility a mouse click uses, and a mouse click on the scope designates one
-directly. SAFE/EMPTY/STATION FAILED and the sensor and range inhibits are shown
+T cycles current radar contacts nearest first and Shift-T backwards, skipping
+friendly aircraft and wrecks. Enter selects the visible radar or infrared
+contact nearest the nose. A mouse click on the scope designates a contact
+directly. A target the scope loses drops completely
+([rules](spec/radar.md#target-selection-keys)). SAFE/EMPTY/STATION FAILED and the sensor and range inhibits are shown
 separately from lock; a terrain-masked target now reports NO TARGET, because
 masking clears the contact rather than inhibiting the launch. The systems continuation below adds automatic source-weighted failures
 for supported equipment. Quick Mission AI integration is described in the [AI spec](spec/ai.md).
@@ -265,7 +266,7 @@ target ECM. Those two fixtures moved off I and Y when those keys took over
 infrared selection and contact history.
 **J** controls own ECM and **R** radar. The incoming fixture does
 not command AI or spend player ammunition. K selected-group jettison, L clear designation, bracket NAV/weapon cycling,
-T/Enter designate, Space hold fire and backslash target replacement remain available.
+T/Shift-T/Enter targeting, Space hold fire and backslash target replacement remain available.
 
 Standard Linux pads use **held Select** as the combat layer: RB fire, LB weapon,
 A designate, B clear, X previous NAV/weapon, Y own ECM, L3 radar, R3 jettison. D-pad up replaces
@@ -334,6 +335,7 @@ are not saved to disk. Behaviour: [cheats specification](spec/cheats.md).
 | No screen-shaking? | Turns off the view shake that starts at 6 G and reaches about 4 pixels at 9 G in the cockpit views. |
 | No crashes? | Ground, water and unsafe landings bounce the aircraft back into the air instead of crashing it; a building turns it around. Safe runway landings still land. |
 | Easy aiming? | The player's rounds and missiles see targets 50% larger; the player's missiles turn 50% faster and their in-flight seeker cone is 25% wider. |
+| Easy targeting? | The target square stays on the target anywhere on screen, and the HUD keeps showing a target the sensors have dropped, including behind you in a merge. Awareness only: no lock, radar lead or missile support is kept. |
 | Ignore midair collisions? | Aircraft pass through each other. With it off, two aircraft whose 28 ft contact spheres touch are both destroyed, the player included, even with Invulnerable on, and nobody is credited with a kill. |
 
 Every missile or bomb burst on an aircraft, the player's or an AI's, now jolts
@@ -422,8 +424,9 @@ grows as the target closes; numeric range is in nautical miles. SAFE, empty and
 failed guns hide the firing pipper.
 
 The selected target has a square inside the HUD and a directional chevron at the
-HUD edge when outside, including behind the aircraft. The display selection
-survives sensor loss, but radar lead and weapon support do not. **L** or
+HUD edge when outside, including behind the aircraft. The cue drops with the
+selection; the Easy targeting cheat keeps it and draws the square anywhere on
+screen, without radar lead or weapon support. **L** or
 **RELEASE LOCK** clears both selections. Destroying/removing the target or
 resetting the mission also removes its cue. The marker works with guns,
 missiles and NAV selected. The [specification](spec/gunsight-targeting.md)

@@ -618,6 +618,8 @@ impl App {
                 Command::Combat(tore_sim::combat::live::Command::ToggleSeekerMode)
             }
             "designate" => Command::Target,
+            "designate-previous" => Command::TargetPrevious,
+            "designate-visual" => Command::TargetVisual,
             "clear-designation" => {
                 Command::Combat(tore_sim::combat::live::Command::ClearDesignation)
             }
@@ -805,9 +807,14 @@ impl App {
                 );
                 Action::None
             }
-            Command::Target => {
+            Command::Target | Command::TargetPrevious | Command::TargetVisual => {
+                use tore_sim::combat::live::Command as Live;
                 self.combat.command(
-                    tore_sim::combat::live::Command::Designate,
+                    match command {
+                        Command::Target => Live::Designate,
+                        Command::TargetPrevious => Live::DesignatePrevious,
+                        _ => Live::DesignateVisual,
+                    },
                     combat::launcher(&self.flight),
                 );
                 Action::None
@@ -2126,6 +2133,9 @@ impl ApplicationHandler for App {
                         self.flight.sensors = self.instruments.controls();
                         self.flight.cheats = self.flight_ui.cheats;
                         self.combat.state.cheats = self.flight_ui.cheats;
+                        if let Some(wings) = &self.ai_wings {
+                            self.combat.state.friendlies = wings.friendly_ids();
+                        }
                         for _ in 0..steps {
                             for button in std::mem::take(&mut self.instruments.weapon_controls) {
                                 cycle_player_weapon(
@@ -2765,6 +2775,27 @@ impl ApplicationHandler for App {
                                 airport_wind(&self.world, &presented, guidance.as_ref()).as_ref(),
                             );
                         }
+                        let target_friendly = self.combat.state.display_target().is_some_and(|target| {
+                            self.ai_wings.as_ref().and_then(|wings| wings.slot(target.id))
+                                .is_some_and(|slot| slot.side == tore_sim::ai::launch::Side::Friendly)
+                                || self.world.airport_scene.runway(target.id).is_some_and(|runway| {
+                                    self.world.airport_scene.airports.iter().any(|airport| {
+                                        airport.id == runway.airport
+                                            && airport.allegiance == tore_sim::airport::Allegiance::Friendly
+                                    })
+                                })
+                        });
+                        // Easy targeting draws the square wherever the target is on
+                        // screen, in place of the HUD's square or edge arrow.
+                        let easy_square = (self.flight_ui.cheats.easy_targeting
+                            && self.flight_ui.hud
+                            && matches!(self.flight_view, 0 | 3 | 4))
+                        .then(|| self.combat.state.display_target())
+                        .flatten()
+                        .and_then(|target| {
+                            self.camera
+                                .project(self.flight_canvas.size, target.position)
+                        });
                         if self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4) {
                             weapon_hud::draw(
                                 &mut self.menu.pixels,
@@ -2774,16 +2805,8 @@ impl ApplicationHandler for App {
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                                 f64::from(self.flight_canvas.hud_zoom(1.)),
                                 self.airport_nav_mode,
-                                self.combat.state.display_target().is_some_and(|target| {
-                                    self.ai_wings.as_ref().and_then(|wings| wings.slot(target.id))
-                                        .is_some_and(|slot| slot.side == tore_sim::ai::launch::Side::Friendly)
-                                        || self.world.airport_scene.runway(target.id).is_some_and(|runway| {
-                                            self.world.airport_scene.airports.iter().any(|airport| {
-                                                airport.id == runway.airport
-                                                    && airport.allegiance == tore_sim::airport::Allegiance::Friendly
-                                            })
-                                        })
-                                }),
+                                target_friendly,
+                                easy_square.is_none(),
                             );
                         }
                         renderer.cockpit(
@@ -2811,6 +2834,13 @@ impl ApplicationHandler for App {
                             self.flight_canvas.weapon_debug(&self.menu.pixels);
                         }
                         self.menu.pixels.fill(0);
+                        if let Some(point) = easy_square {
+                            self.flight_canvas.target_square(
+                                point,
+                                cockpit_palette[usize::from(self.hornet.hud.primary_color)],
+                                target_friendly,
+                            );
+                        }
                         use tore_sim::g_effects::GEffects;
                         for (color, level) in [
                             ([150, 0, 0], self.g_effects.redout),

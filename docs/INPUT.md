@@ -543,7 +543,7 @@ new bindings or regenerate a profile deliberately. No saved file is overwritten.
 | --- | --- |
 | Right shoulder | Space: hold fire/release |
 | Left shoulder | ] next NAV/weapon |
-| South (A) | T/Enter: designate |
+| South (A) | T: next radar target |
 | East (B) | L: clear designation |
 | West (X) | [ previous NAV/weapon |
 | North (Y) | J: own jammer toggle |
@@ -650,8 +650,8 @@ stronger bore return exists. Clear the track to return to BORESIGHT; airborne
 missiles keep their own targets. Select a target to return to CUED. Press **L**, the existing
 `clear-designation` action, or click **RELEASE LOCK** at the upper right to clear
 both sensor and HUD display selection. A selected target outside the HUD has a
-direction chevron even after sensor coverage is lost; this grants no weapon
-lock. [HUD target rules](spec/gunsight-targeting.md). The manual's targeting list
+direction chevron; the Easy targeting cheat keeps it after sensor coverage is
+lost, which grants no weapon lock. [HUD target rules](spec/gunsight-targeting.md). The manual's targeting list
 does not establish a retail release key.
 `weapon-seeker-mode` remains rebindable, and the upper-right mode label remains
 clickable. Supported radar weapons still need aircraft lock.

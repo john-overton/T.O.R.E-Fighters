@@ -84,12 +84,14 @@ elevation, including targets behind the aircraft. An exactly rearward target
 uses the right edge as a deterministic tie-break. Return to a square as soon as
 the target re-enters. No selected target produces no square or arrow.
 
-A separate presentation selection remembers the explicitly designated identity
-until the pilot clears/replaces it, the target dies/disappears, or the mission
-resets. This fitted UI selection can follow the target's world position outside
-sensor coverage so the off-HUD direction cue remains useful. It does not grant
-radar observation, lock, missile support or radar-gun lead through lost coverage.
-The existing sensor selection still expires normally. The gun solver consumes
+The square and arrow follow the sensor selection only. When the scope loses
+the target it drops, and so does its cue ([target selection keys](radar.md#target-selection-keys)).
+With the [Easy targeting cheat](cheats.md) on, a presentation selection
+remembers the target until the pilot clears or replaces it, it dies or
+disappears, or the mission resets, and the square is drawn wherever the target
+is on screen instead of switching to the arrow outside the HUD; the arrow
+remains for a target behind the view. It never grants radar observation, lock,
+missile support or radar-gun lead. The gun solver consumes
 current observations only. A provisional boresight seeker diamond never becomes
 a selected target square by itself.
 

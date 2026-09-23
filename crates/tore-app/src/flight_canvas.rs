@@ -86,6 +86,34 @@ impl FlightCanvas {
             p[3] = (out * 255.).round() as u8;
         }
     }
+    /// Easy targeting's target square, 14 HUD pixels across at any window size,
+    /// with the friendly X.
+    pub fn target_square(&mut self, [x, y]: [f64; 2], color: [u8; 3], friendly: bool) {
+        let scale = f64::from(self.size[1]) / 480.;
+        let half = 7. * scale;
+        let thick = scale.round().max(1.);
+        let mut rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
+            let [w, h] = self.size.map(|v| v as i64);
+            for py in (y0.floor() as i64).max(0)..(y1.ceil() as i64).min(h) {
+                for px in (x0.floor() as i64).max(0)..(x1.ceil() as i64).min(w) {
+                    let i = (py * w + px) as usize * 4;
+                    self.pixels[i..i + 4].copy_from_slice(&[color[0], color[1], color[2], 255]);
+                }
+            }
+        };
+        rect(x - half, y - half, x + half, y - half + thick);
+        rect(x - half, y + half - thick, x + half, y + half);
+        rect(x - half, y - half, x - half + thick, y + half);
+        rect(x + half - thick, y - half, x + half, y + half);
+        if friendly {
+            let arm = (3. * scale).round() as i64;
+            for k in -arm..=arm {
+                let k = k as f64;
+                rect(x + k, y + k, x + k + thick, y + k + thick);
+                rect(x + k, y - k, x + k + thick, y - k + thick);
+            }
+        }
+    }
     pub fn weapon_debug(&mut self, pixels: &[u8]) {
         let mut rgba = Vec::with_capacity(250 * 96 * 4);
         for y in 0..96 {
@@ -214,6 +242,20 @@ impl FlightCanvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn target_square_scales_with_the_window_and_clips_at_its_edge() {
+        let mut canvas = FlightCanvas {
+            size: [96, 96],
+            pixels: vec![0; 96 * 96 * 4],
+            ..Default::default()
+        };
+        canvas.target_square([48., 48.], [0, 255, 0], false);
+        let lit = |c: &FlightCanvas, x: usize, y: usize| c.pixels[(y * 96 + x) * 4 + 3] != 0;
+        // 96 px tall is a fifth of 480, so the 14-pixel square is 2.8 px across.
+        assert!(lit(&canvas, 47, 47));
+        assert!(!lit(&canvas, 40, 48));
+        canvas.target_square([0., 0.], [0, 255, 0], true);
+    }
     #[test]
     fn veil_darkens_the_world_and_instruments_edges_first() {
         let mut canvas = FlightCanvas {

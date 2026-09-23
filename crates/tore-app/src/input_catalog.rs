@@ -226,11 +226,18 @@ pub const ENTRIES: &[Entry] = &[
     e("fire", "Fire / release weapon", Weapons, Hold, &["Space"]),
     cmd("weapon-next", "Next weapon / NAV", Weapons, &["]"]),
     cmd("weapon-previous", "Previous weapon / NAV", Weapons, &["["]),
+    cmd("designate", "Next radar target", Weapons, &["t"]),
     cmd(
-        "designate",
-        "Designate / next target",
+        "designate-previous",
+        "Previous radar target",
         Weapons,
-        &["t", "Enter", "'"],
+        &["Shift-t"],
+    ),
+    cmd(
+        "designate-visual",
+        "Select visual target",
+        Weapons,
+        &["Enter", "'"],
     ),
     cmd("clear-designation", "Clear designation", Weapons, &["l"]),
     cmd(

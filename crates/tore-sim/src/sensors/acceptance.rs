@@ -870,7 +870,44 @@ fn the_same_scripted_scenario_produces_the_same_trace_every_time() {
 }
 
 #[test]
-fn a_visual_contact_keeps_a_close_target_selected_when_the_radar_is_off() {
+fn t_cycles_radar_contacts_nearest_first_and_skips_friendlies() {
+    let air = clear_air();
+    let o = observer();
+    let targets = [ahead(1, 8.), ahead(2, 3.), ahead(3, 5.), ahead(4, 4.)];
+    let mut s = Sensors::new(profiles(Some(radar(90., 50.)), None));
+    s.step(&o, &targets, &air);
+    let friendly = |id| id == 4;
+    let mut order = Vec::new();
+    for _ in 0..4 {
+        assert!(s.cycle(true, friendly));
+        order.push(s.selected().unwrap());
+    }
+    assert_eq!(order, [2, 3, 1, 2]);
+    assert!(s.cycle(false, friendly));
+    assert_eq!(s.selected(), Some(1));
+}
+
+#[test]
+fn enter_selects_the_visible_sensor_contact_nearest_the_nose() {
+    let air = clear_air();
+    let o = observer();
+    let targets = [
+        bearing(1, 20., 2.),
+        bearing(2, -8., 3.),
+        bearing(3, 60., 1.),
+        bearing(4, 2., 2.5),
+    ];
+    let mut s = Sensors::new(with_visual(profiles(Some(radar(90., 50.)), None), 5.));
+    s.step(&o, &targets, &air);
+    assert_eq!(s.visual().len(), 4);
+    // Nearest the nose, but friendly; then the next nearest the nose. The one
+    // 60 degrees off is outside the forward view even though it is closest.
+    assert!(s.select_visual(o.position, o.basis, |id| id == 4));
+    assert_eq!(s.selected(), Some(2));
+}
+
+#[test]
+fn radar_off_drops_a_close_target_even_while_it_is_visible() {
     let air = clear_air();
     let o = observer();
     let mut off = observer();
@@ -884,22 +921,19 @@ fn a_visual_contact_keeps_a_close_target_selected_when_the_radar_is_off() {
     assert_eq!(s.acquired(), Some(1));
 
     let events = s.step(&off, &targets, &air);
-    assert_eq!(s.selected(), Some(1));
     assert!(s.contacts().is_empty());
     assert_eq!(s.visual().len(), 1);
     assert_eq!(s.visual()[0].channel, Channel::Visual);
+    assert_eq!(s.selected(), None);
     assert_eq!(s.acquired(), None);
-    assert_eq!(s.support(1), Support::RadarOff);
     assert!(events.contains(&Event::TrackReleased(1)));
-    assert!(!selection_cleared(&events));
-
-    run(&mut s, &off, &targets, 240);
-    assert_eq!(s.selected(), Some(1));
-    assert_eq!(s.acquired(), None);
+    assert!(selection_cleared(&events));
+    // Seeing it is not enough to select it again.
+    assert!(!s.designate(1));
 }
 
 #[test]
-fn visual_contacts_stay_out_of_the_scope_channel_history_and_weapon_tracks() {
+fn visual_only_contacts_cannot_be_selected_and_stay_out_of_the_scope() {
     let air = clear_air();
     let o = observer();
     // No ordinary radar return at any distance, so only the eye sees it.
@@ -914,18 +948,17 @@ fn visual_contacts_stay_out_of_the_scope_channel_history_and_weapon_tracks() {
     assert_eq!(s.visual().len(), 1);
     assert!(s.observation(1).is_some());
 
-    assert!(s.designate(1));
+    assert!(!s.designate(1));
+    assert!(!s.select_visual(o.position, o.basis, |_| false));
     run(&mut s, &o, &targets, ACQUIRE * 5);
-    assert_eq!(s.selected(), Some(1));
+    assert_eq!(s.selected(), None);
     assert_eq!(s.acquired(), None);
-    assert_eq!(s.support(1), Support::NoObservation);
     assert!(s.contacts().is_empty());
     assert!(s.trail(1).is_empty());
     assert!(s.plots().is_empty());
 
     // Losing a visual-only observation leaves no stale scope plot behind.
     s.step(&o, &empty, &air);
-    assert_eq!(s.selected(), None);
     assert!(s.visual().is_empty());
     assert!(s.plots().is_empty());
 }

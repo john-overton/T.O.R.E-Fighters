@@ -72,8 +72,11 @@ pub fn draw(
     zoom: f64,
     nav_mode: bool,
     target_friendly: bool,
+    target_cue: bool,
 ) {
-    draw_target(pixels, s, state, color, zoom, target_friendly);
+    if target_cue {
+        draw_target(pixels, s, state, color, zoom, target_friendly);
+    }
     if nav_mode {
         Paint {
             pixels,
