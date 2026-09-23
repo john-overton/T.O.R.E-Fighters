@@ -66,9 +66,11 @@ confirmed retail guidance contract or a real-world missile identification.
 Hold rows remain inventoried and outside implementation until their role is
 specified. Do not force laser/designator or command-guided cases into these four.
 
-**Live** means included in the current twelve-aircraft default-store allowlists,
+**Live** means included in the current aircraft default-store allowlists,
 not that all guidance behavior has passed acceptance. **Catalog** means inventory
-only. Missile presence does not authorize SAM, ship, ground-target or AI work.
+only, hidden from Load Ordnance until flight support is connected under the
+[catalog availability rule](ordnance-presentation.md#catalog-availability).
+Missile presence does not authorize SAM, ship, ground-target or AI work.
 
 Ranges are the source launch envelope converted using **6,076 feet per nmi**,
 rounded to two decimals. They are not a guaranteed intercept range. Times use

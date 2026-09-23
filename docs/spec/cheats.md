@@ -203,7 +203,10 @@ longer apply and any store can go on any station, up to that station's
 capacity. Normal rules still apply to fixed stations such as internal guns, to
 a store the station carries by default, and to a missile or bomb type the
 station's default rules out. The loadout still accepts only stores the rebuild
-supports in flight. Details: [ordnance menu format](../formats/ordnance-menu.md).
+supports in flight. Its catalog hides unsupported weapons in both modes and
+shows all imported supported weapons with Cheat on, following the
+[catalog availability rule](ordnance-presentation.md#catalog-availability).
+Details: [ordnance menu format](../formats/ordnance-menu.md).
 
 ## Edge cases
 

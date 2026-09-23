@@ -11,8 +11,32 @@
 Implementation specification, 2026-09-16. The supplied retail screenshot guides
 presentation; its executable identity is unknown. Recovered card positions and
 loadout interactions remain documented in the [ordnance contract](../formats/ordnance-menu.md).
-Store compatibility, fuel steps, launch validation, flight adapters and combat
-behaviour retain their existing contracts.
+Store placement, fuel steps, launch validation, flight adapters and combat
+behaviour retain their existing contracts. Catalog visibility is specified below.
+
+## Catalog availability
+
+John requested this opinionated visibility rule on 2026-09-23: hide weapons
+whose flight behaviour is not hooked up yet, including when Cheat is enabled.
+An imported definition alone does not make a weapon available. The catalog uses
+the same supported-weapon list as flight launch validation.
+
+With Cheat off, show a supported weapon only when at least one station on the
+selected aircraft can load it, with an editable capacity of 1 through 32,766.
+With Cheat on, show every imported supported weapon, regardless of aircraft
+compatibility. Station placement still follows the existing Cheat rules,
+including fixed-station restrictions. Visibility does not bypass launch weight
+checks, sensor requirements or weapon firing limits.
+
+Toggling Cheat still unloads every station. Rebuild both catalog categories,
+reset their pages to the first page and clear the catalog selection. Keep the
+existing display-name ordering and eight cards per page; an empty category has
+no selectable cards and its page rocker stays on the first page. Unsupported
+weapons return only after their flight behaviour is implemented and validated,
+following the [weapon update passes](../ROADMAP.md#weapon-catalog-update-passes).
+Validation is recorded in the [catalog baseline](../baselines/ordnance-catalog.md).
+
+## Presentation
 
 The original ORD_AIR3 background, thumbnail images, dial, rocker and button
 pieces remain runtime imports. Catalog cards use two columns at x=68/187,

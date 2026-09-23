@@ -685,12 +685,45 @@ implementation: four guidance types, pitbull activation, launch velocity and ran
 motor burn, guidance lifetime, uncued seeker search and HUD/tone feedback, with
 delivery stages, [measured acceptance and remaining limits](baselines/missiles.md).
 
+#### Weapon catalog update passes
+
+Requested by John on 2026-09-23: Load Ordnance hides weapons without connected
+flight behaviour. Normal loading shows supported weapons that fit the selected
+aircraft; Cheat shows all imported supported weapons. The
+[catalog specification](spec/ordnance-presentation.md#catalog-availability)
+defines visibility. The current flight support list contains 25 weapons;
+importing the wider [JT inventory](formats/fa-weapons.csv) does not enable them.
+
+The agent-selected passes below plan the remaining weapons. Each starts with a
+player-facing behaviour spec and records unknowns with a next research step.
+Existing [missile inventory classifications](spec/missiles.md#first-pass-inventory-matrix)
+are provisional where marked; a filename or a shared guidance type is not enough
+to accept a new weapon. These are future implementation passes, not weapons
+enabled by the catalog fix.
+
+| Pass | Remaining scope and examples | Acceptance before catalog exposure |
+| --- | --- | --- |
+| W1: Conventional guns, rockets and bombs | Remaining aircraft cannon and pods such as ADEN, BK27 and GAU8; LAU10 rockets; MK84 and FAB-series bombs | Specify ammunition/pod counts, release cadence, trajectories, impact/fuze behaviour and damage. Exercise manual release, depletion, mass, compatible stations and accepted-load restart. |
+| W2: Remaining air-to-air missiles | AIM7/AIM7E, AIM9B, AA10/AA6/AA9, PL7/PL10 | Resolve each guidance profile, launch limits, support loss, seeker acquisition, motor/lifetime and HUD/audio feedback. Validate against spec numbers and deterministic manual target fixtures. |
+| W3: Surface and anti-ship missiles | AGM65A, AGM84A/AGM84E, AM39, AS15/AS16; AGM45/AGM88 passive-emitter weapons | Connect the required ground/ship targets, designation and emission state first. Validate valid and invalid targets, lost emissions/support, flight, impact and damage without granting hidden target knowledge. |
+| W4: Designator and unresolved guidance | GBU10/GBU10A, GBU28, PAVEWAY/PAVEWA3; AS14, AS30, AT12 and AT2 | Specify the actual guidance and designation requirements before selecting a model. Connect acquisition, release, loss of designation and terminal impact; do not substitute a radar or heat seeker for an unresolved contract. |
+| W5: Special payloads and delivery variants | CBU87/CBU89, MK20, RBK250/RBK500, MK82 variants, GBU29/GBU29P/GBU30 and AEMP1 | Resolve each record's payload and release behaviour. Implement the applicable submunition, retarding, penetration or special damage effect with numerical tests; keep unresolved and internal novelty records hidden. |
+| W6: Ground and naval weapons | Remaining surface gun rounds, SAM/ship missiles, ASROC and other held surface roles in the inventory | Depends on separately scoped ground/ship systems. Specify launcher, sensor, target and damage contracts; validate through manual fixtures before exposing a working weapon. Autonomous firing or AI requires John's separate authorization. |
+
+Every pass updates the shared flight support list only for weapons that have
+working behaviour, plus the feature matrix and one feature baseline. Check both
+catalog modes, normal compatibility, Cheat transitions, launch/restart and
+deterministic headless execution. Record fitted or opinionated rules explicitly;
+retail comparison remains unavailable. Auxiliary tanks and equipment need their
+own loadout/fuel work and are not enabled by these weapon passes.
+
 Work:
 - Radar modes, RWR, IFF, and the retail sensor model.
 - Missiles, bombs, and gun stats from retail data.  Stores affect weight and flight.
 - Per-system damage.
 - SAM sites and ships as targets and threats.
-- Loadout compatibility mask decoded so stations offer real options.
+- Extend the decoded station compatibility to auxiliary stores and remaining
+  stock/year/airbase rules; supported weapon catalogs already apply it.
 
 Deliverable: full quick fight with retail weapons against air and ground threats.
 

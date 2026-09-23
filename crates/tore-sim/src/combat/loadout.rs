@@ -168,6 +168,8 @@ fn quantity_step(capacity: i32) -> i32 {
         1
     }
 }
+/// Weapons connected to flight. Shared by launch validation and the ordnance
+/// catalog, including Cheat loading; importing a definition does not enable it.
 pub fn supported(name: &str) -> bool {
     [
         "AA11.JT",
