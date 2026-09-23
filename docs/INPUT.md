@@ -204,13 +204,17 @@ Existing profiles without these lines keep the defaults. Older builds cannot rea
 a profile saved with them.
 
 Normal sessions also save `preferences-v1.conf`: large/small instrument page sets,
-active layout/selection, scope settings, cockpit/HUD/ladder visibility, HUD
-brightness, zoom and music/effects. The file format is now **version 3**. The
-retired `radar-mode` key is gone, and `rcs-range`, `radar-channel` and
-`radar-history` are added, so the exposure page's scale, the selected sensor
-channel and the history toggle persist along with the radar scope setting.
-Version 1 and version 2 files still load: their retired scope mode is validated
-and dropped, and a saved scope range migrates by its old nautical-mile value to
+active layout/selection, scope settings, cockpit/HUD/ladder visibility, the
+weapon diagnostic panel (`weapon-diagnostics`, off by default), HUD
+brightness, zoom and music/effects. The file format is now **version 5**. The
+retired `radar-mode` and `rwr-range` keys are gone (the RWR follows the shared
+radar range), `rcs-range`, `radar-channel` and `radar-history` are present, and
+`fullscreen` stores the window mode, so the exposure page's scale, the selected
+sensor channel and the history toggle persist along with the shared scope range.
+Version 1 to 4 files still load and drop a saved `rwr-range` after validating
+it; they, and a version 5 file written before `weapon-diagnostics` existed, load
+with the diagnostic panel hidden. Version 1 and 2 files also have their retired scope mode validated and
+dropped, and their saved scope range migrates by its old nautical-mile value to
 the nearest current setting, with equal distances choosing the lower one. That
 maps 10 to 10, 20 to 25, 40 to 50, 80 to 100 and 160 to 150 nautical miles. An
 old index is never reinterpreted as a different range. These persist across
@@ -384,9 +388,10 @@ existing-style notice identifies focus; there is no raster alteration, window
 movement or new screen content. Layout/page changes reset focus to the first
 slot. Absent slots and unimplemented controls report unavailable. Scope
 buttons are instantaneous commands, so there is no invented held sensor action.
-RWR and RCS buttons 1/2 change their range. Radar buttons 1/2 change the scope
-setting, button 3 cycles the available sensor channels and button 4 toggles
-contact history. Buttons with no action on a page, and unsupported pages, remain
+RCS buttons 1/2 change its scale. RWR and radar buttons 1/2 change the shared
+scope range (the RWR shows it capped at 50 miles, see the
+[RWR specification](spec/rwr.md#range)). Radar button 3 cycles the available
+sensor channels and button 4 toggles contact history. Buttons with no action on a page, and unsupported pages, remain
 unavailable.
 
 ## Fixed ticks and input tapes
@@ -648,13 +653,15 @@ selected. IR also supports bore with radar power off. A selected track takes
 priority for IR and forces CUED acquisition against that identity, even when a
 stronger bore return exists. Clear the track to return to BORESIGHT; airborne
 missiles keep their own targets. Select a target to return to CUED. Press **L**, the existing
-`clear-designation` action, or click **RELEASE LOCK** at the upper right to clear
+`clear-designation` action, or click **RELEASE LOCK** in the upper-right weapon
+diagnostic panel when it is shown, to clear
 both sensor and HUD display selection. A selected target outside the HUD has a
 direction chevron; the Easy targeting cheat keeps it after sensor coverage is
 lost, which grants no weapon lock. [HUD target rules](spec/gunsight-targeting.md). The manual's targeting list
 does not establish a retail release key.
-`weapon-seeker-mode` remains rebindable, and the upper-right mode label remains
-clickable. Supported radar weapons still need aircraft lock.
+`weapon-seeker-mode` remains rebindable but has no default key; the diagnostic
+panel's mode label is clickable only while the panel is shown (**Escape → Pref →
+Weapon diagnostics?**). Supported radar weapons still need aircraft lock.
 
 BORE uses a five-degree circular half-angle. Its blinking diamond marks a
 provisional contact, not a guaranteed lock; the blinking triangle on the range
@@ -663,7 +670,7 @@ signal-strength weighting. IR can acquire on the rail; active radar acquires onl
 after release. The bare percentage is a fitted estimate, not a calibrated retail percentage.
 Short retail weapon labels, bore circle, estimate and readiness all move with
 the forward HUD when looking around. Range, closure and estimated flight time
-and target aspect angle are in the upper-right debug window. The HUD layout
+and target aspect angle are in the upper-right weapon diagnostic panel, hidden by default. The HUD layout
 is 15 percent smaller; ARM, count/weapon and percentage with blinking IN RNG
 align below speed. The range scale sits inside altitude; radar R/C/A sits below it. BORE READY is omitted. Neither clearing selection nor changing mode redirects an airborne shot.
 An internal bay opens for BORESIGHT and release waits until 95 percent open.

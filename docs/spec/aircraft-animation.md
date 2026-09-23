@@ -69,6 +69,26 @@ by (1 - flap fraction). Rotate the wing panels, their flaps and wingtip vapor
 attachments together. This is an agent-authored visual schedule, not a new
 sweep-dependent flight law.
 
+## Double-sided panels
+
+Fix dated 2026-09-23, for John's report that the F/A-18 speed brake showed its
+underside art on top when deployed. Thin SH panels such as that brake, fins,
+tails, doors and gear legs are two faces over the same vertices with opposite
+stored normals. On the F/A-18 brake the textured face is the underside and the
+top skin is a flat color. Original rendering culls by stored normal, so only
+one side shows. Smooth rendering keeps every face so shadows do not depend on
+the camera, and both sides then competed at equal depth: the underside, drawn
+first, won from above and flickered in from below.
+
+Agent decision: with smooth rendering, draw only the member of each such pair
+whose stored normal faces the camera more; always keep exactly one, including
+edge-on. Shadows are unchanged, because both members cover the same area.
+Pairs are matched on the final animated faces, with vertices rounded to 1/64
+source unit so clipped rudder pieces still pair. This applies to every
+aircraft drawn through the shared exterior model path. Stepped rendering keeps
+its full normal culling. Single-sided faces seen from behind still draw with
+smooth rendering; that difference from the original's culling is unchanged.
+
 ## F-22 main weapon bays
 
 Add a manually controlled main-bay presentation with 1-second travel and

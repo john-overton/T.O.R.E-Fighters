@@ -37,7 +37,7 @@ ordinary free flight stays externally clean while the explicit range loads PT de
 
 ## Import contract
 
-`tools/extract_assets.py --aircraft f18` invokes the native extractor and shared dependency resolver. It starts from PT/HUD/shape and cockpit variants, includes instrument artwork/fonts, then follows available resource references through PT, JT, SEE, ECM, GAS, SH and HUD. PT's default weapon/sensor/tank references and their shape/texture/audio dependencies are included automatically. `--weapons` additionally starts from every available JT. Combining a theater with aircraft/weapons selects their **union**; `--include` subsequently narrows it. Directory discovery skips non-EALIB installer libraries; exclude the unrelated LHX archives as documented in EXTRACTION.
+`tools/extract_assets.py --aircraft f18` invokes the native extractor and shared dependency resolver. It starts from PT/HUD/shape and cockpit variants, includes the cockpit family's instrument window frame and fonts, then follows available resource references through PT, JT, SEE, ECM, GAS, SH and HUD. PT's default weapon/sensor/tank references and their shape/texture/audio dependencies are included automatically. `--weapons` additionally starts from every available JT. Combining a theater with aircraft/weapons selects their **union**; `--include` subsequently narrows it. Directory discovery skips non-EALIB installer libraries; exclude the unrelated LHX archives as documented in EXTRACTION.
 
 Source hierarchy and archive boundaries are retained. The script's report includes archive/output hashes, offsets, decoded sizes, named PT/object/flight fields, all G polygon points, hardpoints with unresolved fields explicitly raw, and named JT/SEE/ECM fields. GAS and remaining dependencies are preserved as original decompressed files. A complete extraction report establishes extraction success, not runtime or 1:1 acceptance. Dependency discovery decompresses selected metadata even for `--list`/`--dry-run`, without writing output. Missing referenced BRF shapes/stores/samples fail instead of disappearing silently.
 
@@ -93,7 +93,7 @@ The bare HUDSYM name resolves to mode-specific `HUDSYM00/01/11.FNT` resources, n
 
 FNT glyph routines are decoded as a strictly bounded bitmap-writing grammar (stores, row advance, cursor advance, return). Unknown instructions and out-of-cell writes fail; this is not a general x86 emulator. WIN11 is used for instrument text after comparing mode fonts. WIN01's narrow double-height appearance was rejected in visual review; WIN00 was too small for the supplied references.
 
-The supplied `rwr-50nm.png`, `systems.png` and `target-view.png` are the current visual references. Each window has a **160×156 raster**, with a **138×114 content surface**, blue-gray chrome and four pale square buttons. These outer coordinates/buttons are fitted to the supplied screenshots, not claimed native geometry. FA.EXE's RWR code around 0x43ed2f/0x43ee0f uses base extents 0x39/0x45 shifted by video-mode globals; 114/138 corresponds to doubling those extents. Full caller/video-mode validation remains open. This supersedes reusing the reference app's authored 200×230/176×170 window.
+Each window is a **162×160 raster**: the aircraft's `~<cockpit>_P.PIC` frame at double size, with a **138×114 screen** at (12, 20). The frame, text colours and geometry come from the [instrument bezel spec](../spec/instrument-bezel.md); this replaced the earlier blue-gray procedural chrome fitted to `rwr-50nm.png`, `systems.png` and `target-view.png`. FA.EXE's RWR code around 0x43ed2f/0x43ee0f uses base extents 0x39/0x45 shifted by video-mode globals; 114/138 corresponds to doubling those extents. Full caller/video-mode validation remains open. This supersedes reusing the reference app's authored 200×230/176×170 window.
 
 | Page | Current input/behavior | Remaining parity |
 | --- | --- | --- |
@@ -186,6 +186,13 @@ Mirror source seeds, safeguards, optics and acceptance evidence are recorded in 
 
 The bounded HUD reader consumes CODE+0x72 after requiring the native 0x2b2-byte
 copied root. F18.HUD and RAFALE.HUD both select private cockpit palette index 40.
+It also reads the instrument window frame name, a NUL-terminated string in the
+13 bytes at +0x275 (`~f4_p` in F4.HUD; empty is allowed, an unterminated or
+non-printable name is rejected), and three cockpit palette indices: +0x2a8 for
+the window title and number, +0x2a9 for button letters and +0x2aa for the button
+press square. For every flyable aircraft the frame is `~<cockpit stem>_P.PIC`;
+loading checks that the HUD names exactly that picture. Per-aircraft values are
+in the [instrument bezel spec](../spec/instrument-bezel.md).
 The app shares weather/sunlight/brightness palette resolution with cockpit art;
 HUD geometry remains authored. Source brightness and palette ordering are in
 [weather.md](weather.md#hud-palette-consumer-continuation-2026-09-15).

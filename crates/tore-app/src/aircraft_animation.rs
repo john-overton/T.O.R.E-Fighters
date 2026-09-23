@@ -115,6 +115,55 @@ pub fn animate(face: &Face, s: &State) -> Option<Face> {
     Some(result)
 }
 
+/// Marks the rear member of each double-sided panel for the smooth renderer.
+///
+/// SH models close thin panels (the F/A-18 speed brake, fins, doors) with two
+/// faces over the same vertices and opposite stored normals, relying on normal
+/// culling to show one side. Smooth mode keeps every face for shadows and uses
+/// the depth buffer instead, so equal-depth twins fight and the first drawn,
+/// often the underside, wins. Hiding the twin that faces the viewer less
+/// restores the culled appearance without changing any cast shadow, because
+/// both twins cover the same area. `facing` is positive towards the viewer and
+/// is only called for faces with a stored normal.
+pub fn hidden_twins(faces: &[Face], facing: impl Fn(&Face) -> f32) -> Vec<bool> {
+    // Quantize so split panels still pair after float clipping.
+    let key = |f: &Face| {
+        let mut k: Vec<[i32; 3]> = f
+            .positions
+            .iter()
+            .map(|p| p.map(|v| (v * 64.).round() as i32))
+            .collect();
+        k.sort_unstable();
+        k
+    };
+    let mut groups = std::collections::HashMap::<_, Vec<usize>>::new();
+    for (i, f) in faces.iter().enumerate() {
+        if f.normal.is_some() {
+            groups.entry(key(f)).or_default().push(i);
+        }
+    }
+    let mut hidden = vec![false; faces.len()];
+    for members in groups.values() {
+        for (n, &i) in members.iter().enumerate() {
+            for &j in &members[n + 1..] {
+                let (Some(a), Some(b)) = (faces[i].normal, faces[j].normal) else {
+                    continue;
+                };
+                if dot(a.map(f64::from), b.map(f64::from)) >= 0. {
+                    continue;
+                }
+                // Exactly one twin survives, even edge-on, so shadows stay whole.
+                if facing(&faces[j]) > facing(&faces[i]) {
+                    hidden[i] = true;
+                } else {
+                    hidden[j] = true;
+                }
+            }
+        }
+    }
+    hidden
+}
+
 /// Split the original fin at a fitted trailing-rudder hinge, retaining UVs.
 /// Native partition and deflection schedule remain unverified.
 pub fn rudder_faces(face: &Face, s: &State) -> Vec<Face> {
@@ -190,6 +239,90 @@ pub(crate) fn split_surface(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Synthetic double-sided panel behind the brake hinge: a textured
+    /// underside and a flat top skin over the same vertices, as SH models do.
+    fn brake_twins() -> [Face; 2] {
+        let face = |address, positions: Vec<[f32; 3]>, textured: bool, normal| Face {
+            fog: tore_formats::shape::FogMode::Enabled,
+            address,
+            colors: vec![20; positions.len()],
+            uv: if textured {
+                vec![[0., 0.], [1., 0.], [1., 1.], [0., 1.]]
+            } else {
+                Vec::new()
+            },
+            positions,
+            texture: "SYNTHETIC".into(),
+            subtype: if textured { 0xed } else { 0x63 },
+            // Stored normals are X/up/forward.
+            normal: Some(normal),
+        };
+        let quad = vec![
+            [2., -28., 5.],
+            [-2., -28., 5.],
+            [-2., -40., 12.],
+            [2., -40., 12.],
+        ];
+        let reversed = quad.iter().rev().copied().collect();
+        [
+            face(0x5059, quad, true, [0., -12., -7.]),
+            face(0x5080, reversed, false, [0., 12., 7.]),
+        ]
+    }
+
+    fn facing_from(camera: [f32; 3]) -> impl Fn(&Face) -> f32 {
+        move |f| {
+            let n = f.normal.unwrap();
+            let p = f.positions[0];
+            [n[0], n[2], n[1]]
+                .iter()
+                .zip(0..3)
+                .map(|(n, i)| n * (camera[i] - p[i]))
+                .sum()
+        }
+    }
+
+    #[test]
+    fn deployed_brake_shows_top_skin_above_and_underside_below() {
+        let mut s =
+            crate::flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        for brake in [1., 0.5, 0.1] {
+            s.brake = brake;
+            let faces: Vec<_> = brake_twins()
+                .iter()
+                .map(|f| animate(f, &s).unwrap())
+                .collect();
+            let above = hidden_twins(&faces, facing_from([0., -34., 40.]));
+            let below = hidden_twins(&faces, facing_from([0., -80., -10.]));
+            for (hidden, top_visible) in [(above, true), (below, false)] {
+                assert_eq!(hidden.iter().filter(|h| **h).count(), 1, "brake {brake}");
+                let shown = &faces[hidden.iter().position(|h| !h).unwrap()];
+                assert_eq!(shown.uv.is_empty(), top_visible, "brake {brake}");
+                assert_eq!(shown.normal.unwrap()[1] > 0., top_visible, "brake {brake}");
+            }
+        }
+    }
+
+    #[test]
+    fn twin_hiding_keeps_one_side_and_leaves_single_faces() {
+        let [under, top] = brake_twins();
+        // Edge-on still keeps exactly one side, so its shadow survives.
+        assert_eq!(
+            hidden_twins(&[under.clone(), top.clone()], |_| 0.),
+            [false, true]
+        );
+        // A lone rear face and same-facing duplicates are not twins.
+        assert_eq!(hidden_twins(std::slice::from_ref(&under), |_| -1.), [false]);
+        assert_eq!(
+            hidden_twins(&[top.clone(), top.clone()], |_| -1.),
+            [false, false]
+        );
+        let mut moved = top;
+        moved.positions[0][2] += 1.;
+        assert_eq!(hidden_twins(&[under, moved], |_| -1.), [false, false]);
+    }
+
     #[test]
     fn rotations_keep_hinges_fixed_and_normals_unit() {
         for angle in [-1.57, -0.5, 0., 0.5, 1.57] {

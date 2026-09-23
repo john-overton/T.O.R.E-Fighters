@@ -204,6 +204,7 @@ impl Assets {
             for name in [
                 id.hud().to_string(),
                 id.cockpit().to_string(),
+                id.instrument_panel(),
                 format!("{}.SH", id.stem()),
                 format!("_{}.PIC", id.stem()),
             ] {

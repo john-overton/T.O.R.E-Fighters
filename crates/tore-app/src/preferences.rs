@@ -65,7 +65,6 @@ fn nearest_range(nmi: f64) -> usize {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub zoom: f32,
-    pub rwr_range: usize,
     pub radar_range: usize,
     pub rcs_range: usize,
     pub radar_channel: usize,
@@ -77,6 +76,8 @@ pub struct Preferences {
     pub cockpit: bool,
     pub hud: bool,
     pub ladder: bool,
+    /// The upper-right weapon diagnostic panel, off by default.
+    pub weapon_diagnostics: bool,
     pub brightness: i16,
     pub music: bool,
     pub effects: bool,
@@ -95,7 +96,6 @@ impl Preferences {
         };
         Self {
             zoom: ui.zoom,
-            rwr_range: i.rwr_range,
             radar_range: i.radar_range,
             rcs_range: i.rcs_range,
             radar_channel: i.channel,
@@ -107,6 +107,7 @@ impl Preferences {
             cockpit: ui.cockpit,
             hud: ui.hud,
             ladder: ui.ladder,
+            weapon_diagnostics: ui.weapon_diagnostics,
             brightness: ui.brightness,
             music: m.music,
             effects: m.effects,
@@ -125,7 +126,6 @@ impl Preferences {
             (self.large_pages.clone(), self.small_pages.clone())
         };
         ui.zoom = self.zoom;
-        i.rwr_range = self.rwr_range;
         i.radar_range = self.radar_range;
         i.rcs_range = self.rcs_range;
         i.channel = self.radar_channel;
@@ -136,6 +136,7 @@ impl Preferences {
         ui.cockpit = self.cockpit;
         ui.hud = self.hud;
         ui.ladder = self.ladder;
+        ui.weapon_diagnostics = self.weapon_diagnostics;
         ui.brightness = self.brightness;
         ui.effects = self.effects;
         m.music = self.music;
@@ -150,9 +151,8 @@ impl Preferences {
             }
         }
         format!(
-            "tore-preferences 4\nzoom {}\nrwr-range {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nbrightness {}\nmusic {}\neffects {}\nfullscreen {}\n",
+            "tore-preferences 5\nzoom {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nweapon-diagnostics {}\nbrightness {}\nmusic {}\neffects {}\nfullscreen {}\n",
             self.zoom,
-            self.rwr_range,
             self.radar_range,
             self.rcs_range,
             self.radar_channel,
@@ -164,6 +164,7 @@ impl Preferences {
             self.cockpit,
             self.hud,
             self.ladder,
+            self.weapon_diagnostics,
             self.brightness,
             self.music,
             self.effects,
@@ -181,6 +182,7 @@ impl Preferences {
             Some("tore-preferences 2") => 2,
             Some("tore-preferences 3") => 3,
             Some("tore-preferences 4") => 4,
+            Some("tore-preferences 5") => 5,
             _ => return Err("unsupported preferences version".into()),
         };
         for line in lines {
@@ -212,10 +214,14 @@ impl Preferences {
             }
             Ok(p)
         };
+        // Version 5 is unreleased; a file written before the diagnostics
+        // field was added still loads, with the panel hidden.
+        let diagnostics_saved = version >= 5 && values.contains_key("weapon-diagnostics");
         let expected = match version {
             1 | 2 => 14,
             3 => 16,
-            _ => 17,
+            4 => 17,
+            _ => 16 + usize::from(diagnostics_saved),
         };
         if values.len() != expected {
             return Err("unknown preference".into());
@@ -253,6 +259,11 @@ impl Preferences {
             // and in bounds, so an older file is validated rather than guessed.
             integer("radar-mode", 2)?;
         }
+        if version < 5 {
+            // The retired separate RWR range is validated and dropped: the RWR
+            // now follows the shared radar range, capped at 50 miles.
+            integer("rwr-range", 4)?;
+        }
         // Saved scope ranges migrate by their old nautical-mile value to the
         // nearest new setting, with equal distances choosing the lower one.
         let radar_range = if version < 3 {
@@ -262,7 +273,6 @@ impl Preferences {
         };
         Ok(Self {
             zoom,
-            rwr_range: integer("rwr-range", 4)?,
             radar_range,
             rcs_range: if version < 3 {
                 tore_sim::sensors::passive::DEFAULT_SCALE_INDEX
@@ -289,6 +299,7 @@ impl Preferences {
             cockpit: boolean("cockpit")?,
             hud: boolean("hud")?,
             ladder: boolean("ladder")?,
+            weapon_diagnostics: diagnostics_saved && boolean("weapon-diagnostics")?,
             brightness,
             music: boolean("music")?,
             effects: boolean("effects")?,
@@ -311,6 +322,7 @@ mod tests {
         let mut i = Instruments::default();
         let mut menu = State::new(vec![], true);
         ui.cockpit = false;
+        ui.weapon_diagnostics = true;
         ui.zoom = 1.7;
         menu.effects = false;
         i.pages = vec![9, 5];
@@ -329,8 +341,10 @@ mod tests {
         let loaded = Preferences::parse(&read(&path).unwrap()).unwrap();
         std::fs::remove_file(path).unwrap();
         ui = FlightUi::default();
+        assert!(!ui.weapon_diagnostics);
         i = Instruments::default();
         loaded.apply(&mut ui, &mut i, &mut menu);
+        assert!(ui.weapon_diagnostics);
         assert_eq!(i.pages, vec![9, 5]);
         i.toggle_layout();
         assert_eq!(i.pages, vec![7, 8, 4]);
@@ -343,7 +357,6 @@ mod tests {
     fn roundtrip_layouts_and_reject_malformed() {
         let p = Preferences {
             zoom: 1.2,
-            rwr_range: 3,
             radar_range: 2,
             rcs_range: 4,
             radar_channel: 1,
@@ -355,13 +368,44 @@ mod tests {
             cockpit: false,
             hud: true,
             ladder: false,
+            weapon_diagnostics: true,
             brightness: 3,
             music: false,
             effects: true,
             fullscreen: false,
         };
         assert_eq!(Preferences::parse(&p.text()).unwrap(), p);
-        assert!(p.text().starts_with("tore-preferences 4\n"));
+        assert!(p.text().starts_with("tore-preferences 5\n"));
+        assert!(!p.text().contains("rwr-range"));
+        assert!(p.text().contains("\nweapon-diagnostics true\n"));
+        let hidden = Preferences {
+            weapon_diagnostics: false,
+            ..p.clone()
+        };
+        assert_eq!(Preferences::parse(&hidden.text()).unwrap(), hidden);
+        assert!(
+            Preferences::parse(
+                &p.text()
+                    .replace("weapon-diagnostics true", "weapon-diagnostics 1")
+            )
+            .is_err()
+        );
+        // An unreleased version 5 file written before the field existed loads
+        // with the panel hidden.
+        let early = p.text().replace("weapon-diagnostics true\n", "");
+        assert_eq!(Preferences::parse(&early).unwrap(), hidden);
+        // A version 4 file still carries the retired RWR range, which is
+        // validated and dropped, and predates the diagnostics field.
+        let four = early
+            .replace("tore-preferences 5", "tore-preferences 4")
+            .replace("zoom 1.2\n", "zoom 1.2\nrwr-range 3\n");
+        assert_eq!(Preferences::parse(&four).unwrap(), hidden);
+        assert!(Preferences::parse(&(four.clone() + "weapon-diagnostics true\n")).is_err());
+        let p = hidden;
+        assert!(Preferences::parse(&four.replace("rwr-range 3", "rwr-range 5")).is_err());
+        assert!(
+            Preferences::parse(&p.text().replace("zoom 1.2\n", "zoom 1.2\nrwr-range 3\n")).is_err()
+        );
         let on = Preferences {
             fullscreen: true,
             ..p.clone()
@@ -369,8 +413,7 @@ mod tests {
         assert!(Preferences::parse(&on.text()).unwrap().fullscreen);
         // A version 3 file has no window mode, and borderless fullscreen is
         // the default, so it loads as fullscreen.
-        let three = p
-            .text()
+        let three = four
             .replace("tore-preferences 4", "tore-preferences 3")
             .replace("fullscreen false\n", "");
         let migrated3 = Preferences::parse(&three).unwrap();

@@ -59,6 +59,7 @@ terrain and menus. See [`../parity-plan.md`](../parity-plan.md) for status and t
 next feature. The [radar specification](radar.md) records the twelve-plane
 capability survey, the installed visual and ECM records and the recovered range
 and mode rules; the shared component built against it has its own
-[guide](../radar.md).
+[guide](../radar.md). [Instrument window bezels](instrument-bezel.md) records
+each aircraft's instrument window frame, its colours and its geometry.
 Supporting research lives in [`../formats/`](../formats/), measured evidence in
 [`../baselines/`](../baselines/), and frozen archives in [`../research/`](../research/).

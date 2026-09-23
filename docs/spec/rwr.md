@@ -17,10 +17,27 @@ knowledge.
 
 The RWR retains its original frame, crosshair, two range rings, own-aircraft
 center mark and `JAM` label. The top of the scope is directly ahead, the bottom
-is behind, the right is 90 degrees and the left is 270 degrees. The selectable
-ranges are 5, 10, 20, 30 and 50 nautical miles. The selected range appears in
-the upper-right corner. Maximum reception remains subject to installed
-equipment and simulation rules.
+is behind, the right is 90 degrees and the left is 270 degrees. Maximum
+reception remains subject to installed equipment and simulation rules.
+
+## Range
+
+The RWR and the radar scope share one range setting, stepped along the radar
+ladder of 5, 10, 25, 50, 100 and 150 nautical miles described in the
+[radar specification](radar.md#scope-range-and-targeting-modes). The RWR scale
+is that setting capped at 50 nautical miles: it reads 5, 10, 25 or 50 in step
+with the radar, and stays at 50 while the radar is at 100 or 150. The
+upper-right label, the plotting scale and the out-of-scale markers all use this
+capped value. The default setting is 10, so with no saved preference both
+instruments read 10 at flight start. Normal sessions save and restore the
+shared setting with the other display preferences.
+
+The RWR window's `-` and `+` buttons, the radar window's range buttons and the
+keyboard scope range keys (unless the RCS page is the most recently opened
+instrument) all step the shared setting one radar ladder position, stopping at
+5 and 150. The RWR buttons therefore also change the radar range. Above 50 a
+press moves only the radar: `+` at 50 selects 100 with the RWR still at 50, and
+`-` at 150 selects 100 with no visible RWR change.
 
 ## Symbols and warnings
 
@@ -83,6 +100,13 @@ distinguishes seeker tracking from an inbound missile and repeats that an
 incoming radar missile flashes `R` and its dot, while an incoming infrared
 missile flashes `I`.
 
+The shared range with its 50-mile RWR cap is opinionated, requested by John on
+2026-09-23, and matches retail screenshots he supplied in which both the RWR
+and the radar read 10 at flight start. Stepping the full radar ladder from the
+RWR buttons, so that presses above 50 change only the radar, is an agent
+decision: it keeps one control rule for both windows instead of a separate RWR
+step list.
+
 The exact 60-tick visible and 60-tick hidden cadence, actor-owned threat feed,
 bearing-only tick, forked out-of-scale marker, stale appearance and treatment of
 unknown guidance are opinionated development rules shared with the
@@ -92,8 +116,10 @@ these missing-data presentations.
 
 ## Acceptance
 
-Synthetic presentation tests cover all five scales, cardinal bearings, ranged,
-bearing-only and out-of-scale plots, manual emitter shapes, steady and flashing
+Synthetic presentation tests cover the RWR scale at every radar setting,
+including the 50-mile cap at 100 and 150, the RWR buttons stepping the shared
+range, the 10-mile start, cardinal bearings, ranged, bearing-only and
+out-of-scale plots, manual emitter shapes, steady and flashing
 missiles, both phases at their exact tick boundaries, stale contacts, `R` and
 `I` states, jammer state and receiver failure. A display smoke test must also
 confirm the assembled instrument with original runtime art and font assets.

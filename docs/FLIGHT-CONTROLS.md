@@ -65,13 +65,13 @@ Heading hold shows `AUTO` above `HDG ALT`, beside the heading tape.
 
 ## Instruments
 
-**Escape → Pref → Large windows?** toggles the layout. Large is the default: four corner windows, with size and margins based on 160×156 and eight pixels at the 640×480 reference size. They anchor to the actual screen edges, including on wider displays. The initial arrangement is Systems top-left, RWR bottom-left, Radar bottom-right and Radar/Visual top-right, following the supplied large-style reference.
+**Escape → Pref → Large windows?** toggles the layout. Large is the default: four corner windows, with size and margins based on the 162×160 window and eight pixels at the 640×480 reference size. They anchor to the actual screen edges, including on wider displays. The initial arrangement is Systems top-left, RWR bottom-left, Radar bottom-right and Radar/Visual top-right, following the supplied large-style reference.
 
-Small places six windows across the bottom in two groups of three. Their reference size is 96×94, with six-pixel gaps and eight-pixel outer margins. Each group anchors to its screen edge; the center gutter grows on wider displays. Its initial pages are Systems/RWR/Nav on the left and Radar/Visual/Radar/Weapons on the right. Each layout remembers its own selected pages for the session. Shift-0…9 toggles pages; opening beyond a layout's capacity replaces its oldest page. Switching layouts cancels any pending instrument click. Button hit testing uses the same scaling and rectangles as rendering.
+Small places six windows across the bottom in two groups of three. Their reference size is 96×95, with six-pixel gaps and eight-pixel outer margins. Each group anchors to its screen edge; the center gutter grows on wider displays. Its initial pages are Systems/RWR/Nav on the left and Radar/Visual/Radar/Weapons on the right. Each layout remembers its own selected pages for the session. Shift-0…9 toggles pages; opening beyond a layout's capacity replaces its oldest page. Switching layouts cancels any pending instrument click. Button hit testing uses the same scaling and rectangles as rendering.
 
 The Envelope window (Shift-1) uses U for the current G curve, A for all positive-G curves, and C for locked-target comparison. Red marks the target's advantage. It shows clean-aircraft capability, with live altitude, G and speed readouts and a color-cycling square. Each aircraft sets its own chart scale. Missing comparison data is labeled explicitly. See the [envelope spec](spec/envelope.md) for fitted colors, scale and marker timing.
 
-The instrument contents retain their original 160×156 raster and are resampled directly to the flight overlay resolution. There is no intermediate 96×94 reduction, so small-window text retains source strokes on larger displays. These are fitted layouts, not recovered native placement rules. Sizes and margins scale by the smaller of width/640 and height/480. Use `--instrument-layout large` or `--instrument-layout small` for startup or repeatable GPU captures.
+Each window is a 162×160 raster: the flying aircraft's own original frame at double size, with its title, number and button letters in the aircraft's HUD colours ([bezel spec](spec/instrument-bezel.md)). It is resampled directly to the flight overlay resolution. There is no intermediate 96×95 reduction, so small-window text retains source strokes on larger displays. These are fitted layouts, not the original placement, which uses 10- and 14-pixel margins and an 81×80 small window ([window placement](spec/instrument-bezel.md#window-placement)). Sizes and margins scale by the smaller of width/640 and height/480. Use `--instrument-layout large` or `--instrument-layout small` for startup or repeatable GPU captures.
 
 
 Shift-1 Envelope; Shift-2 Forward View; Shift-3 Other View; Shift-4 Radar/Visual; Shift-5 RWR; Shift-6 Navigation; Shift-7 Systems; Shift-8 Weapons; Shift-9 Radar; Shift-0 Radar Cross Section. Forward View draws a short horizon bar centered on the nose, the flight path marker and plain TAS and MSL readouts over the picture in the HUD's primary color, with no pitch ladder; this is an opinionated addition requested by John on 2026-09-22. The marks use the same camera angles as the picture and refresh with it, about ten times a second. Page 0 now draws the exposure contour, received emitter symbols and its view scale; its buttons are `-` and `+`. Page 9 buttons are `-`, `+`, `M` for the channel cycle and `Y` for history. Hovering a contact on page 9 marks it with the selector corners, a click on it designates it, and an empty click leaves the current designation alone. Empty scopes and NO TARGET are intentional in target-free flight. Systems now shows live damage-driven TEMP/OIL/HYD, internal FUEL and external tank fuel. D reports damage in the bottom-center sim log. [System failures and fitted rates](spec/systems-damage.md).
@@ -110,7 +110,9 @@ The runtime reads **? / Control / Pref / View / Window / Cheat / Multi / Pos**, 
 
 The menu pauses flight and engine loops. Focus loss pauses and clears held controls; resume explicitly with Ctrl-P or the menu. Closing the menu preserves a pre-existing explicit/focus pause. Opening menus never advances a hidden backlog of simulation time.
 
-Working menu actions include views, instrument windows, time/pause, cockpit, pitch ladder, HUD brightness, ending flight and exiting. Sound currently toggles effects; the original volume mixer is not implemented. Working cheats are listed under [cheats](#cheats). Other preferences, cheats, multiplayer and position commands are navigable placeholders with feedback. The bottom Resume / Restart / Keyboard Shortcuts actions are documented development additions. Menus do not silently enable unsupported cheats or alter the aircraft when an unrelated modifier shortcut is pressed.
+**Escape → Pref → Weapon diagnostics?** shows or hides the upper-right weapon diagnostic panel: launch mode, seeker status, RELEASE LOCK, range, closure, estimated flight time, target aspect and the three most recent guided shots. It is off by default, reads On or Off beside the row, shows a short "Weapon diagnostics: on/off" message and is saved with the other flight preferences. With it off, the large layout's top-right instrument sits in its normal corner and the panel's click areas do nothing. The row is an authored addition after the retail Pref rows, not part of `FMENUD.MNU`; opinionated, requested by John on 2026-09-23 (the label and On/Off readout are agent choices). `--weapon-diagnostics` starts a launch with it shown, including captures.
+
+Working menu actions include views, instrument windows, time/pause, cockpit, pitch ladder, weapon diagnostics, HUD brightness, ending flight and exiting. Sound currently toggles effects; the original volume mixer is not implemented. Working cheats are listed under [cheats](#cheats). Other preferences, cheats, multiplayer and position commands are navigable placeholders with feedback. The bottom Resume / Restart / Keyboard Shortcuts actions are documented development additions. Menus do not silently enable unsupported cheats or alter the aircraft when an unrelated modifier shortcut is pressed.
 
 ## HUD and presentation limits
 
@@ -428,8 +430,8 @@ failed guns hide the firing pipper.
 The selected target has a square inside the HUD and a directional chevron at the
 HUD edge when outside, including behind the aircraft. The cue drops with the
 selection; the Easy targeting cheat keeps it and draws the square anywhere on
-screen, without radar lead or weapon support. **L** or
-**RELEASE LOCK** clears both selections. Destroying/removing the target or
+screen, without radar lead or weapon support. **L**, or
+**RELEASE LOCK** in the weapon diagnostic panel when it is shown, clears both selections. Destroying/removing the target or
 resetting the mission also removes its cue. The marker works with guns,
 missiles and NAV selected. The [specification](spec/gunsight-targeting.md)
 separates manual behavior from fitted projection and targeting rules.
@@ -464,10 +466,11 @@ selected. IR also supports bore with radar power off. A selected track takes
 priority for IR and forces CUED acquisition against that identity, even when a
 stronger bore return exists. Clear the track to return to BORESIGHT; airborne
 missiles keep their own targets. Select a target to return to CUED. Press **L**, the existing
-`clear-designation` action, or click **RELEASE LOCK** at the upper right to clear
+`clear-designation` action, or click **RELEASE LOCK** in the upper-right weapon
+diagnostic panel when it is shown, to clear
 selection. The manual's targeting list does not establish a retail release key.
-`weapon-seeker-mode` remains rebindable, and the upper-right mode label remains
-clickable. With radar power off, radar-missile bore, tones and target cues
+`weapon-seeker-mode` remains rebindable but has no default key; the panel's mode
+label is clickable only while the panel is shown (**Pref → Weapon diagnostics?**). With radar power off, radar-missile bore, tones and target cues
 turn off; armed A2A IR missiles retain bore search and guidance; weapon selection still permits an unguided release. That missile stays unguided
 after radar power returns. Selecting the passive IR channel alone does not turn
 off the power switch. Supported radar weapons need aircraft lock for guided shots.
@@ -483,7 +486,7 @@ signal-strength weighting. IR can acquire on the rail; active radar acquires onl
 after release. The bare percentage is a fitted estimate, not a calibrated retail percentage.
 Short retail weapon labels, bore circle, estimate and readiness all move with
 the forward HUD when looking around. Range, closure and estimated flight time
-and target aspect angle are in the upper-right debug window. The HUD layout
+and target aspect angle are in the upper-right weapon diagnostic panel, hidden by default. The HUD layout
 is 15 percent smaller; ARM, count/weapon and percentage with blinking IN RNG
 align below speed. The range scale sits inside altitude; radar R/C/A sits below it. BORE READY is omitted. Neither clearing selection nor changing mode redirects an airborne shot.
 An internal bay opens for BORESIGHT and release waits until 95 percent open.

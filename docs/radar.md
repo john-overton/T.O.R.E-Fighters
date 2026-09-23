@@ -554,7 +554,7 @@ increases improve interference margin rather than exceeding that cap.
 It is an estimate of directional vulnerability to a reference set,
 not an assertion of any particular emitter's knowledge, range, power or lock.
 The view scales are 5/10/20/30/50 nmi, default 50, an agent-authored reuse of the
-current RWR scale. The actual retail RCS +/- semantics remain unknown. Values
+RWR's former scale list (the RWR now follows the shared radar range). The actual retail RCS +/- semantics remain unknown. Values
 beyond the selected scale clip with an over-range indication rather than changing
 the underlying signature. The reference-radar calibration is a reviewable knob.
 
@@ -803,13 +803,13 @@ The entire black radar screen uses a green crosshair with a central gap instead 
 pointer, following John's 2026-09-17 reference image. Its position follows the
 mouse and uses the same scaling as contact selection. Takeover starts at the
 screen edge, including margins outside the contact plot, and ends at the bezel.
-It remains visible with the radar off. [Screen bounds](spec/missiles.md#radar-cursor-screen-boundary). L or the upper-right
-RELEASE LOCK button clears designation. [HUD rules](spec/missiles.md#weapon-hud-delivery).
+It remains visible with the radar off. [Screen bounds](spec/missiles.md#radar-cursor-screen-boundary). L, or the
+RELEASE LOCK button in the weapon diagnostic panel when it is shown, clears designation. [HUD rules](spec/missiles.md#weapon-hud-delivery).
 
 With the Easy targeting cheat on, the selection itself stays set while the
 target is off the scope, for as long as it flies, without weapon support.
 Without it the selection and its cue drop together. The display-only cue never supplies radar gun lead or missile
-guidance. L/RELEASE LOCK clears both.
+guidance. L (or RELEASE LOCK, when the diagnostic panel is shown) clears both.
 [Target-cue behavior](spec/gunsight-targeting.md#target-square-and-edge-chevron).
 
 The map also observes surface entities with the existing active-channel search

@@ -34,8 +34,8 @@ impl FlightCanvas {
                         ..Default::default()
                     };
                     let source = Sprite {
-                        width: 160,
-                        height: 156,
+                        width: crate::instruments::WIDTH,
+                        height: crate::instruments::HEIGHT,
                         rgba: raster.pixels,
                         glyphs: vec![],
                     };

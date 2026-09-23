@@ -261,7 +261,7 @@ fn all_theaters_include_aliases_and_skip_unrelated_disc_libraries() {
 fn aircraft_dependency_plan_follows_resources_across_formats() {
     let mut entries = vec![
  ("F18.PT",0,b"[brent's_relocatable_format]\n:shape\nstring \"F18.SH\"\n:store\nstring \"TEST.JT\"\nend".to_vec()),
- ("F18.SH",0,b"_SKIN.PIC\0".to_vec()),("F18.HUD",0,b"~F18H\0".to_vec()),("~F18H.PIC",0,vec![]),("WIN11.FNT",0,vec![]),("HUD11.FNT",0,vec![]),("FMENUD.MNU",0,vec![]),("PANEL.PIC",0,vec![]),("_SKIN.PIC",0,vec![]),("PALETTE.PAL",0,vec![0;768]),
+ ("F18.SH",0,b"_SKIN.PIC\0".to_vec()),("F18.HUD",0,b"~F18H\0".to_vec()),("~F18H.PIC",0,vec![]),("~F18_P.PIC",0,vec![]),("WIN11.FNT",0,vec![]),("HUD11.FNT",0,vec![]),("FMENUD.MNU",0,vec![]),("PANEL.PIC",0,vec![]),("_SKIN.PIC",0,vec![]),("PALETTE.PAL",0,vec![0;768]),
  ("TEST.JT",0,b"[brent's_relocatable_format]\n:sound\nstring \"TEST.5K\"\nend".to_vec()),("TEST.5K",0,vec![128]),("OTHER.PIC",0,vec![])];
     entries.extend(
         tore_formats::aircraft::COMBAT_RESOURCES
@@ -278,7 +278,9 @@ fn aircraft_dependency_plan_follows_resources_across_formats() {
     );
     let out = String::from_utf8_lossy(&result.stdout);
     assert!(out.contains("_SKIN.PIC") && out.contains("TEST.5K") && out.contains("~F18H.PIC"));
-    assert!(!out.contains(" / OTHER.PIC"));
+    assert!(out.contains("~F18_P.PIC"));
+    // The generic dialog frame is menu art, not an aircraft dependency.
+    assert!(!out.contains(" / OTHER.PIC") && !out.contains(" / PANEL.PIC"));
     assert!(!f.out.exists());
     let filtered = f.run(&["--aircraft", "f18", "--include", "TEST.5K"]);
     assert!(

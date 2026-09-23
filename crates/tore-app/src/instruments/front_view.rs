@@ -2,12 +2,12 @@
 //! Opinionated: John requested the marks on 2026-09-22; their layout is an
 //! agent choice. The original window shows the picture alone. Angles use the
 //! HUD camera projection so the marks stay registered with the picture.
-use super::Raster;
+use super::{Raster, SCREEN};
 use crate::{flight::State, hud};
 use tore_formats::font::Font;
 
-/// Camera picture inside the instrument raster: x, y, width, height.
-const VIEW: (i32, i32, i32, i32) = (11, 21, 138, 114);
+/// Camera picture in screen coordinates: x, y, width, height. It fills the screen.
+const VIEW: (i32, i32, i32, i32) = (0, 0, SCREEN.2, SCREEN.3);
 /// Half the horizon gap around the nose, keeping the marker readable.
 const HORIZON_GAP: f64 = 10.;
 /// Half the horizon bar's length, stopping short of the side readouts.
@@ -183,11 +183,10 @@ mod tests {
     }
     const COLOR: [u8; 4] = [10, 200, 30, 255];
     fn lit(r: &Raster, x: i32, y: i32) -> bool {
-        let i = (y as usize * super::super::WIDTH + x as usize) * 4;
-        r.pixels[i..i + 4] == COLOR
+        r.at(x, y) == COLOR
     }
     fn render(s: &Symbology) -> Raster {
-        let mut r = Raster::new();
+        let mut r = Raster::screen();
         draw(&mut r, &font(), s, [COLOR[0], COLOR[1], COLOR[2]]);
         r
     }
@@ -195,35 +194,38 @@ mod tests {
     #[test]
     fn view_mapping_matches_the_camera_panel_projection() {
         // The panel camera renders 138x114 with a 60 degree vertical field.
-        assert_eq!(to_view((320., 240.)), (80., 78.));
+        assert_eq!(to_view((320., 240.)), (69., 57.));
         let (_, y) = to_view(hud::project(0., 0., 0., 10f64.to_radians(), 1.).unwrap());
-        let expected = 78. - 57. * 3f64.sqrt() * 10f64.to_radians().tan();
+        let expected = 57. - 57. * 3f64.sqrt() * 10f64.to_radians().tan();
         assert!((y - expected).abs() < 1e-9);
     }
 
     #[test]
     fn level_horizon_is_a_centred_bar_with_a_gap_at_the_nose() {
         let r = render(&symbology(0., 0., None));
-        assert!(lit(&r, 40, 78) && lit(&r, 70, 78) && lit(&r, 90, 78) && lit(&r, 120, 78));
-        assert!(!lit(&r, 80, 78));
+        assert!(lit(&r, 29, 57) && lit(&r, 59, 57) && lit(&r, 79, 57) && lit(&r, 109, 57));
+        assert!(!lit(&r, 69, 57));
         // The bar stops short of the side readouts.
-        assert!(!lit(&r, 38, 78) && !lit(&r, 122, 78));
+        assert!(!lit(&r, 27, 57) && !lit(&r, 111, 57));
         // Clipped to the picture, never onto the frame or the buttons.
         let steep = render(&symbology(33., 0., None));
-        assert!((135..156).all(|y| (0..160).all(|x| !lit(&steep, x, y))));
+        let (w, h) = (super::super::WIDTH as i32, super::super::HEIGHT as i32);
+        assert!(
+            (SCREEN.3..h - SCREEN.1).all(|y| (-SCREEN.0..w - SCREEN.0).all(|x| !lit(&steep, x, y)))
+        );
     }
 
     #[test]
     fn horizon_moves_opposite_pitch_and_tilts_with_bank() {
         let climbing = render(&symbology(10., 0., None));
-        let below = 78 + (57. * 3f64.sqrt() * 10f64.to_radians().tan()).round() as i32;
-        assert!(lit(&climbing, 40, below) && !lit(&climbing, 40, 78));
+        let below = 57 + (57. * 3f64.sqrt() * 10f64.to_radians().tan()).round() as i32;
+        assert!(lit(&climbing, 29, below) && !lit(&climbing, 29, 57));
         // Right bank rolls the horizon's right end upward on screen.
         let banked = render(&symbology(0., 30., None));
         let dy = (30. * 30f64.to_radians().tan()).round() as i32;
         let near = |x, y: i32| (y - 1..=y + 1).any(|y| lit(&banked, x, y));
-        assert!(near(110, 78 - dy) && near(50, 78 + dy));
-        assert!(!near(110, 78 + dy) && !near(50, 78 - dy));
+        assert!(near(99, 57 - dy) && near(39, 57 + dy));
+        assert!(!near(99, 57 + dy) && !near(39, 57 - dy));
     }
 
     #[test]
@@ -231,9 +233,9 @@ mod tests {
         let level = render(&symbology(5., 0., Some((0., 0.))));
         let (_, y) = to_view(hud::project(5f64.to_radians(), 0., 0., 0., 1.).unwrap());
         let y = y.round() as i32;
-        assert!(lit(&level, 80 - 8, y) && lit(&level, 80 + 8, y) && lit(&level, 80, y - 6));
+        assert!(lit(&level, 69 - 8, y) && lit(&level, 69 + 8, y) && lit(&level, 69, y - 6));
         let without = render(&symbology(5., 0., None));
-        assert!(!lit(&without, 80, y - 6));
+        assert!(!lit(&without, 69, y - 6));
         let off = render(&symbology(0., 0., Some((40., 0.))));
         assert_eq!(off.pixels, render(&symbology(0., 0., None)).pixels);
     }
@@ -243,11 +245,11 @@ mod tests {
         let r = render(&symbology(0., 0., None));
         // The synthetic glyphs light their top-left pixel: "450" starts three
         // pixels inside the left edge and "12500" ends three inside the right.
-        let top = 78 - 7 - 3;
-        assert!(lit(&r, 14, top) && lit(&r, 19, top) && lit(&r, 24, top));
-        assert!(lit(&r, 121, top) && lit(&r, 141, top) && !lit(&r, 146, top));
+        let top = 57 - 7 - 3;
+        assert!(lit(&r, 3, top) && lit(&r, 8, top) && lit(&r, 13, top));
+        assert!(lit(&r, 110, top) && lit(&r, 130, top) && !lit(&r, 135, top));
         // No box: nothing is drawn around the digits.
-        assert!(!lit(&r, 14, top + 3) && !lit(&r, 13, top));
+        assert!(!lit(&r, 3, top + 3) && !lit(&r, 2, top));
     }
 
     #[test]

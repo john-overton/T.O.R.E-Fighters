@@ -3,22 +3,57 @@
 mod envelope;
 pub mod front_view;
 use crate::{aircraft::Airframe, flight::State, menu::Sprite, scope};
-use tore_formats::font::Font;
-pub const WIDTH: usize = 160;
-pub const HEIGHT: usize = 156;
+use tore_formats::{Pic, font::Font};
+/// Window raster size: the 81x80 frame picture at double size. See
+/// docs/spec/instrument-bezel.md.
+pub const WIDTH: usize = 162;
+pub const HEIGHT: usize = 160;
+/// The page screen inside the window: x, y, width, height. Page content is
+/// drawn in screen coordinates, with (0, 0) at this rectangle's top-left.
+pub const SCREEN: (i32, i32, i32, i32) = (12, 20, 138, 114);
+/// Left edges of the four button click areas, which share one top edge and size.
+const BUTTON_X: [i32; 4] = [18, 48, 78, 108];
+const BUTTON_Y: i32 = 134;
+const BUTTON_SIZE: (i32, i32) = (30, 26);
+/// Titles wider than this are shortened and end in "...".
+const TITLE_MAX_WIDTH: i32 = 98;
 const GREEN: [u8; 4] = [132, 193, 126, 255];
+/// Screen background of the green-on-black pages: a faint green, so they read
+/// as small CRTs. Opinionated, requested by John on 2026-09-23. Retail screen
+/// pixels measure black; see docs/spec/instrument-bezel.md.
+const CRT_SCREEN: [u8; 4] = [4, 18, 6, 255];
 const DIM: [u8; 4] = [48, 83, 44, 255];
 const BRIGHT: [u8; 4] = [206, 240, 200, 255];
 pub struct Raster {
     pub pixels: Vec<u8>,
+    /// Window position of drawing coordinate (0, 0).
+    origin: (i32, i32),
 }
 impl Raster {
+    /// A window raster drawn in window coordinates.
     pub fn new() -> Self {
         Self {
             pixels: vec![0; WIDTH * HEIGHT * 4],
+            origin: (0, 0),
         }
     }
+    /// A window raster drawn in screen coordinates.
+    #[cfg(test)]
+    fn screen() -> Self {
+        Self {
+            origin: (SCREEN.0, SCREEN.1),
+            ..Self::new()
+        }
+    }
+    /// The pixel at a drawing coordinate.
+    #[cfg(test)]
+    fn at(&self, x: i32, y: i32) -> [u8; 4] {
+        let (x, y) = (x + self.origin.0, y + self.origin.1);
+        let i = (y as usize * WIDTH + x as usize) * 4;
+        self.pixels[i..i + 4].try_into().unwrap()
+    }
     fn rect(&mut self, x: i32, y: i32, w: i32, h: i32, c: [u8; 4]) {
+        let (x, y) = (x + self.origin.0, y + self.origin.1);
         for yy in y.max(0)..(y + h).min(HEIGHT as i32) {
             for xx in x.max(0)..(x + w).min(WIDTH as i32) {
                 let i = (yy as usize * WIDTH + xx as usize) * 4;
@@ -71,14 +106,82 @@ impl Raster {
             }
         }
     }
+    /// Paints the frame picture at double size over the whole window, coloured
+    /// through the live cockpit palette like the cockpit art around it.
+    fn frame(&mut self, panel: &Pic, palette: &[[u8; 3]; 256]) {
+        for y in 0..HEIGHT.min(panel.height * 2) {
+            for x in 0..WIDTH.min(panel.width * 2) {
+                let source = y / 2 * panel.width + x / 2;
+                if !panel.mask[source] {
+                    continue;
+                }
+                let [r, g, b] = palette[usize::from(panel.pixels[source])];
+                let i = (y * WIDTH + x) * 4;
+                self.pixels[i..i + 4].copy_from_slice(&[r, g, b, 255]);
+            }
+        }
+    }
+    /// Window label text centred on `centre`: one blank pixel between glyphs.
+    fn label(&mut self, font: &Font, s: &str, centre: i32, top: i32, c: [u8; 4]) {
+        let mut x = centre - (label_width(font, s) - 1).max(0) / 2;
+        for ch in s.bytes() {
+            let g = &font.glyphs[ch as usize];
+            for &(xx, yy) in &g.pixels {
+                self.rect(x + xx as i32, top + yy as i32, 1, 1, c);
+            }
+            x += g.advance as i32 + 1;
+        }
+    }
+}
+/// Envelope and the picture pages keep black; the green-symbology pages,
+/// including their failed and switched-off states, get the CRT tint.
+fn screen_background(id: u8) -> [u8; 4] {
+    match id {
+        1..=4 => [0, 0, 0, 255],
+        _ => CRT_SCREEN,
+    }
+}
+/// Width of a window label: each glyph's advance plus one, less the last gap.
+fn label_width(font: &Font, s: &str) -> i32 {
+    s.bytes()
+        .map(|ch| font.glyphs[ch as usize].advance as i32 + 1)
+        .sum::<i32>()
+        .saturating_sub(1)
+        .max(0)
+}
+/// The title as shown: shortened with "..." until it fits the title bar.
+fn fit_title(font: &Font, title: &str) -> String {
+    if label_width(font, title) <= TITLE_MAX_WIDTH {
+        return title.into();
+    }
+    let mut kept = title.to_string();
+    while !kept.is_empty() && label_width(font, &format!("{kept}...")) > TITLE_MAX_WIDTH {
+        kept.pop();
+    }
+    format!("{kept}...")
+}
+/// The button under a window raster point, if any.
+fn button_at(x: f64, y: f64) -> Option<usize> {
+    let top = f64::from(BUTTON_Y);
+    if !(top..top + f64::from(BUTTON_SIZE.1)).contains(&y) {
+        return None;
+    }
+    BUTTON_X.iter().position(|&left| {
+        let left = f64::from(left);
+        (left..left + f64::from(BUTTON_SIZE.0)).contains(&x)
+    })
+}
+/// A window raster point in screen coordinates.
+fn to_screen((x, y): (f64, f64)) -> (f64, f64) {
+    (x - f64::from(SCREEN.0), y - f64::from(SCREEN.1))
 }
 /// Agent-proposed mouse tolerance in instrument raster pixels.
 pub const PICK_TOLERANCE: f64 = 7.;
 /// Readability cap on combined noise density, so text, the selector and valid
 /// track symbols stay legible over a noisy background.
 const MAX_NOISE_DENSITY: f64 = 0.35;
-/// Scope origin and plotted extents inside the instrument window.
-const SCOPE_ORIGIN: (f64, f64) = (80., 130.);
+/// Scope origin and plotted extents, in screen coordinates.
+const SCOPE_ORIGIN: (f64, f64) = (69., 109.);
 const SCOPE_HALF_WIDTH: f64 = 55.;
 const SCOPE_DEPTH: f64 = 90.;
 
@@ -89,6 +192,10 @@ enum RwrPlot {
     Clipped { rim: (i32, i32), inner: (i32, i32) },
 }
 
+/// The RWR scope's largest scale. The RWR shows the shared scope range up to
+/// this value and holds here while the radar is set further out.
+const RWR_MAX_SCALE_NMI: f64 = 50.;
+
 fn rwr_blink_on(tick: u64) -> bool {
     tick % 120 < 60
 }
@@ -97,8 +204,8 @@ fn rwr_plot(bearing: f64, distance_nmi: Option<f64>, scale_nmi: f64, radius: f64
     let direction = (bearing.sin(), -bearing.cos());
     let at = |r: f64| {
         (
-            (80. + direction.0 * r).round() as i32,
-            (76. + direction.1 * r).round() as i32,
+            (69. + direction.0 * r).round() as i32,
+            (55. + direction.1 * r).round() as i32,
         )
     };
     match distance_nmi {
@@ -186,7 +293,7 @@ fn draw_rwr_indicator(
         scope::Indicator::Incoming if blink_on => BRIGHT,
         scope::Indicator::Incoming => return,
     };
-    r.text(font, label, x, 124, colour);
+    r.text(font, label, x, 103, colour);
 }
 
 /// One projection for drawing and picking: bearing across, distance up.
@@ -254,12 +361,12 @@ impl Layout {
         assert!(slot < self.capacity());
         match self {
             Self::Large => {
-                let (x, y) = [(8, 8), (8, 316), (472, 316), (472, 8)][slot];
-                (x, y, 160, 156)
+                let (x, y) = [(8, 8), (8, 312), (470, 312), (470, 8)][slot];
+                (x, y, WIDTH as i32, HEIGHT as i32)
             }
             Self::Small => {
                 let x = [8, 110, 212, 332, 434, 536][slot];
-                (x, 378, 96, 94)
+                (x, 377, 96, 95)
             }
         }
     }
@@ -294,7 +401,11 @@ pub struct Instruments {
     pub front_shown: Option<front_view::Symbology>,
     /// The HUD's primary color, shared by the forward-view symbology.
     pub hud_color: [u8; 3],
-    pub rwr_range: usize,
+    /// The live cockpit palette, set by the host each frame. It colours the
+    /// window frame and its labels, as it colours the cockpit art.
+    pub palette: [[u8; 3]; 256],
+    /// Shared scope range index into `tore_sim::sensors::RANGE_LADDER_NMI`,
+    /// used by the radar scope and, capped at 50 miles, by the RWR.
     pub radar_range: usize,
     pub rcs_range: usize,
     /// Requested scope channel: 0 radar, 1 infrared.
@@ -314,7 +425,7 @@ impl Default for Instruments {
         Self {
             navigation: Default::default(),
             weapon_page: 0,
-            envelope_mode: envelope::Mode::All,
+            envelope_mode: envelope::Mode::Current,
             weapon_controls: Vec::new(),
             combat: None,
             pages: vec![7, 5, 9, 4],
@@ -325,9 +436,9 @@ impl Default for Instruments {
             front_pending: None,
             front_shown: None,
             hud_color: [GREEN[0], GREEN[1], GREEN[2]],
+            palette: [[0; 3]; 256],
             target_preview: None,
             camera_target: None,
-            rwr_range: 4,
             radar_range: tore_sim::sensors::DEFAULT_RANGE_INDEX,
             rcs_range: tore_sim::sensors::passive::DEFAULT_SCALE_INDEX,
             channel: 0,
@@ -385,7 +496,8 @@ impl Instruments {
             self.pages.push(page);
         }
     }
-    /// Reserve the upper-right diagnostic area without changing pointer transforms.
+    /// Reserve the upper-right weapon diagnostic area, when that panel is
+    /// shown, without changing pointer transforms.
     pub fn screen_rect(&self, slot: usize, size: [f64; 2]) -> (f64, f64, f64, f64) {
         let (x, mut y, w, h) = self.layout.rect_on(slot, size);
         if self.weapon_debug && self.layout == Layout::Large && slot == 3 {
@@ -413,10 +525,10 @@ impl Instruments {
                 return None;
             }
             let (ox, oy, w, h) = self.layout.rect(i);
-            let point = (
+            let point = to_screen((
                 (x - f64::from(ox)) * WIDTH as f64 / f64::from(w),
                 (y - f64::from(oy)) * HEIGHT as f64 / f64::from(h),
-            );
+            ));
             let range = readout.scope.range_nmi;
             scope::pick(
                 &readout.scope.contacts,
@@ -435,10 +547,13 @@ impl Instruments {
                     return None;
                 }
                 let (ox, oy, w, h) = self.layout.rect(i);
-                let px = (x - f64::from(ox)) * WIDTH as f64 / f64::from(w);
-                let py = (y - f64::from(oy)) * HEIGHT as f64 / f64::from(h);
-                ((11. ..149.).contains(&px) && (21. ..135.).contains(&py))
-                    .then_some((px as i32, py as i32))
+                let (px, py) = to_screen((
+                    (x - f64::from(ox)) * WIDTH as f64 / f64::from(w),
+                    (y - f64::from(oy)) * HEIGHT as f64 / f64::from(h),
+                ));
+                ((0. ..f64::from(SCREEN.2)).contains(&px)
+                    && (0. ..f64::from(SCREEN.3)).contains(&py))
+                .then_some((px as i32, py as i32))
             })
         });
         self.hovered = self
@@ -466,13 +581,7 @@ impl Instruments {
                 // Invert the same transform used to draw the raster.
                 let x = (x - ox as f64) * WIDTH as f64 / w as f64;
                 let y = (y - oy as f64) * HEIGHT as f64 / h as f64;
-                if (136. ..154.).contains(&y) {
-                    (0..4)
-                        .find(|b| (26. + *b as f64 * 29. ..44. + *b as f64 * 29.).contains(&x))
-                        .map(|b| (i, b))
-                } else {
-                    None
-                }
+                button_at(x, y).map(|b| (i, b))
             })
         });
         let contact = self.contact_at(p);
@@ -510,7 +619,6 @@ impl Instruments {
     /// Stock scope operations for pointer and hardware buttons. Range and
     /// channel are player controls; they never change a sensor's coverage.
     pub fn control(&mut self, slot: usize, button: usize) -> bool {
-        let last = tore_sim::sensors::RANGE_LADDER_NMI.len() - 1;
         let scales = tore_sim::sensors::passive::SCALE_LADDER_NMI.len() - 1;
         match (self.pages.get(slot), button) {
             (Some(1), 0..=2) => {
@@ -522,8 +630,8 @@ impl Instruments {
             }
             (Some(0), 0) => self.rcs_range = self.rcs_range.saturating_sub(1),
             (Some(0), 1) => self.rcs_range = (self.rcs_range + 1).min(scales),
-            (Some(5), 0) => self.rwr_range = self.rwr_range.saturating_sub(1),
-            (Some(5), 1) => self.rwr_range = (self.rwr_range + 1).min(4),
+            (Some(5 | 9), 0) => self.step_range(-1),
+            (Some(5 | 9), 1) => self.step_range(1),
             (Some(8), 0..=1) => {
                 if self.weapon_controls.len() < 32 {
                     self.weapon_controls.push(button);
@@ -541,13 +649,24 @@ impl Instruments {
                     self.navigation.pending.push(button);
                 }
             }
-            (Some(9), 0) => self.radar_range = self.radar_range.saturating_sub(1),
-            (Some(9), 1) => self.radar_range = (self.radar_range + 1).min(last),
             (Some(9), 2) => self.cycle_channel(),
             (Some(9), 3) => self.history = !self.history,
             _ => return false,
         }
         true
+    }
+    /// Steps the shared radar and RWR range one ladder setting, stopping at
+    /// either end. The RWR and radar buttons both use this.
+    pub fn step_range(&mut self, delta: i32) {
+        let last = tore_sim::sensors::RANGE_LADDER_NMI.len() as i32 - 1;
+        self.radar_range = (self.radar_range as i32 + delta).clamp(0, last) as usize;
+    }
+    /// The RWR scale in nautical miles: the shared scope range, capped at 50.
+    pub fn rwr_scale_nmi(&self) -> f64 {
+        tore_sim::sensors::RANGE_LADDER_NMI[self
+            .radar_range
+            .min(tore_sim::sensors::RANGE_LADDER_NMI.len() - 1)]
+        .min(RWR_MAX_SCALE_NMI)
     }
     /// The on-screen M button cycles the available radar and infrared
     /// channels. Availability is decided by the simulation, not here.
@@ -573,27 +692,15 @@ impl Instruments {
             .rcs_range
             .min(tore_sim::sensors::passive::SCALE_LADDER_NMI.len() - 1)]
     }
-    pub fn page(&self, id: u8, h: &Airframe, s: &State) -> Raster {
+    /// The aircraft's frame with its title, number and button letters over
+    /// a cleared screen, ready for page content in screen coordinates.
+    fn window(&self, id: u8, panel: &Pic, f: &Font, hud: &tore_formats::hud::Hud) -> Raster {
+        let color = |index: u8| {
+            let [r, g, b] = self.palette[usize::from(index)];
+            [r, g, b, 255]
+        };
         let mut r = Raster::new();
-        r.rect(0, 0, 160, 156, [98, 115, 143, 255]);
-        r.rect(0, 0, 160, 2, [190, 207, 216, 255]);
-        r.rect(0, 0, 2, 156, [190, 207, 216, 255]);
-        r.rect(158, 0, 2, 156, [24, 34, 44, 255]);
-        r.rect(0, 154, 160, 2, [24, 34, 44, 255]);
-        for (name, x, y) in [
-            ("EDGETL.PIC", 1, 1),
-            ("EDGETR.PIC", 144, 1),
-            ("EDGEBL.PIC", 1, 138),
-            ("EDGEBR.PIC", 144, 138),
-        ] {
-            if let Some(p) = h.sprites.get(name) {
-                r.sprite(p, x, y, 15, 17);
-            }
-        }
-        r.rect(10, 20, 140, 116, [188, 204, 208, 255]);
-        r.rect(11, 21, 138, 114, [0, 0, 0, 255]);
-        r.rect(23, 5, 12, 12, [54, 68, 88, 255]);
-        let f = &h.font;
+        r.frame(panel, &self.palette);
         let title = match id {
             0 => "RCS",
             1 => "ENVELOPE",
@@ -606,24 +713,11 @@ impl Instruments {
             8 => "WEAPONS",
             _ => "RADAR",
         };
-        r.text(f, &id.to_string(), 26, 7, [224, 235, 241, 255]);
-        let title_width: usize = title.bytes().map(|ch| f.glyphs[ch as usize].advance).sum();
-        r.text(
-            f,
-            title,
-            (WIDTH as i32 - title_width as i32) / 2,
-            7,
-            [224, 235, 241, 255],
-        );
-        for b in 0..4 {
-            let x = 26 + b * 29;
-            r.rect(x - 2, 137, 22, 17, [45, 57, 70, 255]);
-            r.rect(x, 137, 18, 15, [207, 227, 237, 255]);
-            r.rect(x, 137, 18, 1, [245, 251, 255, 255]);
-            r.rect(x + 18, 137, 2, 16, [52, 67, 86, 255]);
-            if b < 3 {
-                r.rect(x + 23, 137, 2, 17, [170, 187, 203, 255]);
-            }
+        let title_color = color(hud.title_color);
+        r.label(f, &fit_title(f, title), 81, 6, title_color);
+        r.label(f, &(id % 10).to_string(), 28, 6, title_color);
+        let slot = self.pages.iter().position(|p| *p == id);
+        for (b, &x) in BUTTON_X.iter().enumerate() {
             let label = match (id, b) {
                 (1, 0) => "U",
                 (1, 1) => "A",
@@ -642,8 +736,30 @@ impl Instruments {
                 (9, 3) => "Y",
                 _ => "",
             };
-            r.text(f, label, x + 6, 141, [20, 35, 46, 255]);
+            if label.is_empty() {
+                continue;
+            }
+            r.label(f, label, x + 16, BUTTON_Y + 8, color(hud.button_color));
+            // The press square covers the letter. Fitted: it stays while the
+            // button is held, where the original keeps it until a redraw.
+            if slot.is_some_and(|slot| self.pressed == Some((slot, b))) {
+                r.rect(x + 10, BUTTON_Y + 6, 14, 14, color(hud.press_color));
+            }
         }
+        // Pages clear their own screen, including over the F/A-18's green inset.
+        r.rect(
+            SCREEN.0,
+            SCREEN.1,
+            SCREEN.2,
+            SCREEN.3,
+            screen_background(id),
+        );
+        r.origin = (SCREEN.0, SCREEN.1);
+        r
+    }
+    pub fn page(&self, id: u8, h: &Airframe, s: &State) -> Raster {
+        let f = &h.font;
+        let mut r = self.window(id, &h.panel, f, &h.hud);
         let text = |r: &mut Raster, t: &str, x, y| r.text(f, t, x, y, GREEN);
         if (id == 9 && s.systems.has(32))
             || (id == 5
@@ -656,21 +772,21 @@ impl Instruments {
             return r;
         }
         if id == 6 && s.systems.has(33) {
-            text(&mut r, "NAV FAILED", 46, 73);
+            text(&mut r, "NAV FAILED", 35, 52);
             return r;
         }
         match id {
             0 => {
-                let (cx, cy, radius) = (80i32, 76i32, 48.);
+                let (cx, cy, radius) = (69i32, 55i32, 48.);
                 r.circle(cx, cy, radius, DIM);
                 r.circle(cx, cy, radius / 2., DIM);
-                r.line((cx, 22), (cx, 133), DIM);
-                r.line((13, cy), (147, cy), DIM);
+                r.line((cx, 1), (cx, 112), DIM);
+                r.line((2, cy), (136, cy), DIM);
                 for (label, x, y) in [
-                    ("0", 77, 24),
-                    ("90", 132, 72),
-                    ("180", 74, 126),
-                    ("270", 16, 72),
+                    ("0", 66, 3),
+                    ("90", 121, 51),
+                    ("180", 63, 105),
+                    ("270", 5, 51),
                 ] {
                     text(&mut r, label, x, y);
                 }
@@ -717,13 +833,13 @@ impl Instruments {
                             }
                         }
                     }
-                    text(&mut r, &format!("{:.0}", c.rcs.scale_nmi), 126, 25);
+                    text(&mut r, &format!("{:.0}", c.rcs.scale_nmi), 115, 4);
                     if over_range {
-                        text(&mut r, "OVER", 14, 25);
+                        text(&mut r, "OVER", 3, 4);
                     }
-                    text(&mut r, &format!("SIG {:.0}", c.rcs.signature), 14, 124);
+                    text(&mut r, &format!("SIG {:.0}", c.rcs.signature), 3, 103);
                 } else {
-                    text(&mut r, "NO EXPOSURE DATA", 30, 73);
+                    text(&mut r, "NO EXPOSURE DATA", 19, 52);
                 }
             }
             7 => {
@@ -775,39 +891,34 @@ impl Instruments {
                 .into_iter()
                 .enumerate()
                 {
-                    let y = 33 + i as i32 * 14;
-                    r.text(f, label, 20, y, color);
+                    let y = 12 + i as i32 * 14;
+                    r.text(f, label, 9, y, color);
                     let value = format!("{value:.0}%");
-                    r.text(f, &value, 138 - width(&value), y, color);
+                    r.text(f, &value, 127 - width(&value), y, color);
                 }
-                r.line((20, 91), (138, 91), green);
-                r.text(f, "FUEL", 20, 101, green);
+                r.line((9, 70), (127, 70), green);
+                r.text(f, "FUEL", 9, 80, green);
                 let fuel = format!("{:.0} LBS", s.fuel);
-                r.text(f, &fuel, 138 - width(&fuel), 101, green);
-                r.text(f, "(+ EXT", 20, 115, green);
+                r.text(f, &fuel, 127 - width(&fuel), 80, green);
+                r.text(f, "(+ EXT", 9, 94, green);
                 let fuel = format!("{:.0} LBS)", s.systems.external_lbs());
-                r.text(f, &fuel, 138 - width(&fuel), 115, green);
+                r.text(f, &fuel, 127 - width(&fuel), 94, green);
             }
             5 => {
-                let (cx, cy, radius) = (80i32, 76i32, 48.);
-                r.line((13, 76), (147, 76), DIM);
-                r.line((80, 22), (80, 133), DIM);
+                let (cx, cy, radius) = (69i32, 55i32, 48.);
+                r.line((2, cy), (136, cy), DIM);
+                r.line((cx, 1), (cx, 112), DIM);
                 r.circle(cx, cy, radius, DIM);
                 r.circle(cx, cy, radius / 2., DIM);
-                text(
-                    &mut r,
-                    ["5", "10", "20", "30", "50"][self.rwr_range],
-                    126,
-                    25,
-                );
-                r.rect(78, 74, 5, 1, GREEN);
-                r.rect(78, 74, 1, 5, GREEN);
-                r.rect(82, 74, 1, 5, GREEN);
-                r.rect(78, 78, 5, 1, GREEN);
+                let scale = self.rwr_scale_nmi();
+                text(&mut r, &format!("{scale:.0}"), 115, 4);
+                r.rect(67, 53, 5, 1, GREEN);
+                r.rect(67, 53, 1, 5, GREEN);
+                r.rect(71, 53, 1, 5, GREEN);
+                r.rect(67, 57, 5, 1, GREEN);
                 if let Some(combat) = &self.combat {
                     let rwr = &combat.rwr;
                     let blink_on = rwr_blink_on(rwr.tick);
-                    let scale = [5., 10., 20., 30., 50.][self.rwr_range];
                     for emitter in &rwr.emitters {
                         if emitter.state == scope::EmitterState::Tracking && !blink_on {
                             continue;
@@ -829,29 +940,29 @@ impl Instruments {
                             rwr_plot(missile.bearing_rad, missile.distance_nmi, scale, radius);
                         draw_rwr_missile(&mut r, plot, if missile.stale { DIM } else { BRIGHT });
                     }
-                    draw_rwr_indicator(&mut r, f, "R", 132, rwr.radar_indicator, blink_on);
-                    draw_rwr_indicator(&mut r, f, "I", 141, rwr.infrared_indicator, blink_on);
+                    draw_rwr_indicator(&mut r, f, "R", 121, rwr.radar_indicator, blink_on);
+                    draw_rwr_indicator(&mut r, f, "I", 130, rwr.infrared_indicator, blink_on);
                 }
                 if s.jammer && s.engine {
-                    text(&mut r, "JAM", 17, 124);
+                    text(&mut r, "JAM", 6, 103);
                 }
             }
             9 => {
                 for i in 1..4 {
-                    let y = 21 + i * 114 / 4;
-                    r.line((12, y), (148, y), DIM);
-                    let x = 11 + i * 138 / 4;
-                    r.line((x, 22), (x, 134), DIM);
+                    let y = i * SCREEN.3 / 4;
+                    r.line((1, y), (137, y), DIM);
+                    let x = i * SCREEN.2 / 4;
+                    r.line((x, 1), (x, 113), DIM);
                 }
                 match &self.combat {
-                    None => text(&mut r, "NO SENSOR DATA", 30, 73),
+                    None => text(&mut r, "NO SENSOR DATA", 19, 52),
                     Some(c) if !c.scope.operating => {
                         let reason = match (c.scope.infrared, c.scope.unavailable) {
                             (_, Some(text)) => text,
                             (true, _) => "IR UNAVAILABLE",
                             _ => "RADAR OFF",
                         };
-                        text(&mut r, reason, 40, 75);
+                        text(&mut r, reason, 29, 54);
                     }
                     Some(c) => {
                         let scope = &c.scope;
@@ -877,8 +988,8 @@ impl Instruments {
                             })
                             .collect();
                         if !bands.is_empty() {
-                            for y in 22..134 {
-                                for x in 12..149 {
+                            for y in 1..113 {
+                                for x in 1..138 {
                                     let bearing = ((f64::from(x) - SCOPE_ORIGIN.0)
                                         / SCOPE_HALF_WIDTH)
                                         .clamp(-1., 1.)
@@ -954,31 +1065,32 @@ impl Instruments {
                                 }
                             }
                         }
-                        text(&mut r, scope.mode.unwrap_or(scope.channel), 17, 25);
-                        text(&mut r, &format!("{range:.0}"), 126, 25);
+                        text(&mut r, scope.mode.unwrap_or(scope.channel), 6, 4);
+                        text(&mut r, &format!("{range:.0}"), 115, 4);
                         if scope.history {
-                            text(&mut r, "HIST", 17, 124);
+                            text(&mut r, "HIST", 6, 103);
                         }
                         if let Some(status) = scope.status {
                             let width: usize =
                                 status.bytes().map(|ch| f.glyphs[ch as usize].advance).sum();
-                            text(&mut r, status, 147 - width as i32, 124);
+                            text(&mut r, status, 136 - width as i32, 103);
                         }
                     }
                 }
                 if let Some((x, y)) = self.crosshair {
                     // Takeover and drawing cover the black screen, not just the contact plot.
-                    if x - 4 >= 11 {
-                        r.line((11, y), (x - 4, y), GREEN);
+                    let (right, bottom) = (SCREEN.2 - 1, SCREEN.3 - 1);
+                    if x - 4 >= 0 {
+                        r.line((0, y), (x - 4, y), GREEN);
                     }
-                    if x + 4 <= 148 {
-                        r.line((x + 4, y), (148, y), GREEN);
+                    if x + 4 <= right {
+                        r.line((x + 4, y), (right, y), GREEN);
                     }
-                    if y - 4 >= 21 {
-                        r.line((x, 21), (x, y - 4), GREEN);
+                    if y - 4 >= 0 {
+                        r.line((x, 0), (x, y - 4), GREEN);
                     }
-                    if y + 4 <= 134 {
-                        r.line((x, y + 4), (x, 134), GREEN);
+                    if y + 4 <= bottom {
+                        r.line((x, y + 4), (x, bottom), GREEN);
                     }
                 }
             }
@@ -988,15 +1100,15 @@ impl Instruments {
                     for (row, (name, count, selected)) in
                         c.weapons.iter().skip(page * 6).take(6).enumerate()
                     {
-                        let y = 26 + row as i32 * 14;
+                        let y = 5 + row as i32 * 14;
                         let colour = if *selected { BRIGHT } else { GREEN };
                         if *selected {
-                            r.text(f, ">", 16, y, colour);
+                            r.text(f, ">", 5, y, colour);
                         }
                         let count = count.to_string();
                         let width: usize =
                             count.bytes().map(|ch| f.glyphs[ch as usize].advance).sum();
-                        r.text(f, &count, 59 - width as i32, y, colour);
+                        r.text(f, &count, 48 - width as i32, y, colour);
                         let mut width = 0;
                         let name: String = name
                             .bytes()
@@ -1006,14 +1118,14 @@ impl Instruments {
                             })
                             .map(char::from)
                             .collect();
-                        r.text(f, &name, 65, y, colour);
+                        r.text(f, &name, 54, y, colour);
                     }
-                    text(&mut r, &format!("{} CHAFF", c.chaff), 15, 122);
+                    text(&mut r, &format!("{} CHAFF", c.chaff), 4, 101);
                     let flare = format!("{} FLARE", c.flares);
                     let width: usize = flare.bytes().map(|ch| f.glyphs[ch as usize].advance).sum();
-                    text(&mut r, &flare, 146 - width as i32, 122);
+                    text(&mut r, &flare, 135 - width as i32, 101);
                 } else {
-                    text(&mut r, "NO WEAPONS", 20, 35);
+                    text(&mut r, "NO WEAPONS", 9, 14);
                 }
             }
             6 => {
@@ -1021,7 +1133,7 @@ impl Instruments {
                 if let Some(selected) = nav.index() {
                     let page = selected / 3 * 3;
                     for (index, entry) in nav.entries().iter().enumerate().skip(page).take(3) {
-                        let y = 25 + (index - page) as i32 * 28;
+                        let y = 4 + (index - page) as i32 * 28;
                         let colour = if index == selected { BRIGHT } else { GREEN };
                         let label = format!(
                             "{}. {}",
@@ -1037,18 +1149,18 @@ impl Instruments {
                             })
                             .map(char::from)
                             .collect();
-                        r.text(f, &label, 15, y, colour);
+                        r.text(f, &label, 4, y, colour);
                         let bearing = format!("{:03}", entry.bearing(s.position));
-                        r.text(f, &bearing, 27, y + 12, colour);
+                        r.text(f, &bearing, 16, y + 12, colour);
                         let width: usize = bearing
                             .bytes()
                             .map(|ch| f.glyphs[ch as usize].advance)
                             .sum();
-                        r.circle(29 + width as i32, y + 14, 1., colour);
+                        r.circle(18 + width as i32, y + 14, 1., colour);
                         r.text(
                             f,
                             &format!(", {:.1} NM", entry.distance(s.position) / 6076.12),
-                            32 + width as i32,
+                            21 + width as i32,
                             y + 12,
                             colour,
                         );
@@ -1061,7 +1173,7 @@ impl Instruments {
                     } else {
                         "ETA --:--".into()
                     };
-                    text(&mut r, &eta, 52, 122);
+                    text(&mut r, &eta, 41, 101);
                 } else {
                     text(
                         &mut r,
@@ -1070,8 +1182,8 @@ impl Instruments {
                         } else {
                             "NO WAYPOINTS"
                         },
-                        17,
-                        65,
+                        6,
+                        44,
                     );
                     text(
                         &mut r,
@@ -1080,10 +1192,10 @@ impl Instruments {
                         } else {
                             "1 MISSION"
                         },
-                        30,
-                        89,
+                        19,
+                        68,
                     );
-                    text(&mut r, "ETA --:--", 52, 122);
+                    text(&mut r, "ETA --:--", 41, 101);
                 }
             }
             1 => envelope::draw(
@@ -1096,7 +1208,7 @@ impl Instruments {
             ),
             4 => {
                 if let Some(target) = self.combat.as_ref().and_then(|c| c.target.as_ref()) {
-                    r.rect(11, 21, 138, 114, [185, 185, 185, 255]);
+                    r.rect(0, 0, SCREEN.2, SCREEN.3, [185, 185, 185, 255]);
                     if self.camera_target == Some(target.id)
                         && let Some(pixels) = self.cameras.get(&4)
                     {
@@ -1109,10 +1221,10 @@ impl Instruments {
                                 rgba: gray,
                                 glyphs: vec![],
                             },
-                            11,
-                            21,
-                            138,
-                            114,
+                            0,
+                            0,
+                            SCREEN.2,
+                            SCREEN.3,
                         );
                     }
                     let ink = [20, 20, 20, 255];
@@ -1134,30 +1246,31 @@ impl Instruments {
                             .sum::<i32>()
                     };
                     let label = fit(&target.name.to_ascii_uppercase(), 108);
-                    r.text(f, &label, 12 + (119 - width(&label)) / 2, 24, ink);
+                    r.text(f, &label, 1 + (119 - width(&label)) / 2, 3, ink);
                     let activity = fit(&target.activity, 119);
-                    r.text(f, &activity, 12 + (119 - width(&activity)) / 2, 37, ink);
-                    r.text(f, target.goal, 135, 24, ink);
+                    r.text(f, &activity, 1 + (119 - width(&activity)) / 2, 16, ink);
+                    r.text(f, target.goal, 124, 3, ink);
                     if target.player_goal {
-                        r.rect(135, 34, 6, 1, ink);
+                        r.rect(124, 13, 6, 1, ink);
                     }
+                    // Skill dots sit on the title bar, above the screen.
                     for dot in 0..target.skill.unwrap_or(0) {
-                        r.rect(133 + i32::from(dot) * 4, 11, 2, 2, [230, 230, 230, 255]);
+                        r.rect(122 + i32::from(dot) * 4, -10, 2, 2, [230, 230, 230, 255]);
                     }
-                    r.rect(144, 22, 4, 48, [240, 240, 240, 255]);
-                    r.rect(145, 23, 2, 46, [0, 0, 0, 255]);
+                    r.rect(133, 1, 4, 48, [240, 240, 240, 255]);
+                    r.rect(134, 2, 2, 46, [0, 0, 0, 255]);
                     let filled = (target.damage * 46.).round() as i32;
-                    r.rect(145, 69 - filled, 2, filled, [255, 255, 255, 255]);
+                    r.rect(134, 48 - filled, 2, filled, [255, 255, 255, 255]);
                     let objective = match target.objective {
                         Some(crate::target_window::TargetObjective::Survive) => "Obj: Survive",
                         Some(crate::target_window::TargetObjective::Destroy) => "Obj: Destroy",
                         None => "",
                     };
-                    r.text(f, objective, 12 + (134 - width(objective)) / 2, 111, ink);
-                    r.text(f, &target.bearing, 12, 124, ink);
-                    r.text(f, &target.metric, 147 - width(&target.metric), 124, ink);
+                    r.text(f, objective, 1 + (134 - width(objective)) / 2, 90, ink);
+                    r.text(f, &target.bearing, 1, 103, ink);
+                    r.text(f, &target.metric, 136 - width(&target.metric), 103, ink);
                 } else {
-                    text(&mut r, "NO TARGET", 48, 73);
+                    text(&mut r, "NO TARGET", 37, 52);
                 }
             }
             2 | 3 => {
@@ -1169,10 +1282,10 @@ impl Instruments {
                             rgba: pixels.clone(),
                             glyphs: vec![],
                         },
-                        11,
-                        21,
-                        138,
-                        114,
+                        0,
+                        0,
+                        SCREEN.2,
+                        SCREEN.3,
                     );
                     if id == 2
                         && !s.systems.has(31)
@@ -1181,7 +1294,7 @@ impl Instruments {
                         front_view::draw(&mut r, f, symbology, self.hud_color);
                     }
                 } else {
-                    text(&mut r, "CAMERA LOADING", 30, 73);
+                    text(&mut r, "CAMERA LOADING", 19, 52);
                 }
             }
             _ => {}
@@ -1202,28 +1315,82 @@ mod tests {
     }
 
     #[test]
+    fn rwr_follows_the_radar_range_and_holds_at_50_miles() {
+        let mut i = Instruments::default();
+        // Flight start: RWR and radar both read 10 miles, and the weapon
+        // envelope opens on the current-conditions (U) mode.
+        assert_eq!(i.rwr_scale_nmi(), 10.);
+        assert_eq!(i.controls().range_index, 1);
+        assert_eq!(i.envelope_mode, envelope::Mode::Current);
+        for (index, rwr) in [(0, 5.), (1, 10.), (2, 25.), (3, 50.), (4, 50.), (5, 50.)] {
+            i.radar_range = index;
+            assert_eq!(i.rwr_scale_nmi(), rwr);
+            assert!(rwr <= tore_sim::sensors::RANGE_LADDER_NMI[index]);
+        }
+    }
+
+    #[test]
+    fn rwr_buttons_step_the_shared_range() {
+        let mut i = Instruments::default();
+        let rwr = i.pages.iter().position(|&p| p == 5).unwrap();
+        let radar = i.pages.iter().position(|&p| p == 9).unwrap();
+        assert!(i.control(rwr, 0));
+        assert_eq!((i.radar_range, i.rwr_scale_nmi()), (0, 5.));
+        assert!(i.control(rwr, 0));
+        assert_eq!(i.radar_range, 0);
+        let mut seen = vec![];
+        for _ in 0..8 {
+            assert!(i.control(rwr, 1));
+            seen.push((i.radar_range, i.rwr_scale_nmi()));
+        }
+        // Past 50 the RWR buttons keep moving the radar out while the RWR
+        // holds at its 50-mile maximum; the ladder stops at 150.
+        assert_eq!(
+            seen,
+            [
+                (1, 10.),
+                (2, 25.),
+                (3, 50.),
+                (4, 50.),
+                (5, 50.),
+                (5, 50.),
+                (5, 50.),
+                (5, 50.)
+            ]
+        );
+        assert!(i.control(rwr, 0));
+        assert_eq!((i.radar_range, i.rwr_scale_nmi()), (4, 50.));
+        // Radar buttons move the same setting the RWR reads.
+        assert!(i.control(radar, 0));
+        assert!(i.control(radar, 0));
+        assert_eq!((i.radar_range, i.rwr_scale_nmi()), (2, 25.));
+        i.step_range(-9);
+        assert_eq!(i.radar_range, 0);
+    }
+
+    #[test]
     fn rwr_projection_distinguishes_range_quality() {
-        assert_eq!(rwr_plot(0., Some(5.), 10., 48.), RwrPlot::Ranged(80, 52));
+        assert_eq!(rwr_plot(0., Some(5.), 10., 48.), RwrPlot::Ranged(69, 31));
         assert_eq!(
             rwr_plot(std::f64::consts::FRAC_PI_2, None, 10., 48.),
             RwrPlot::BearingOnly {
-                rim: (128, 76),
-                inner: (124, 76)
+                rim: (117, 55),
+                inner: (113, 55)
             }
         );
         assert_eq!(
             rwr_plot(std::f64::consts::PI, Some(11.), 10., 48.),
             RwrPlot::Clipped {
-                rim: (80, 124),
-                inner: (80, 119)
+                rim: (69, 103),
+                inner: (69, 98)
             }
         );
         for scale in [5., 10., 20., 30., 50.] {
             for (bearing, expected) in [
-                (0., (80, 28)),
-                (std::f64::consts::FRAC_PI_2, (128, 76)),
-                (std::f64::consts::PI, (80, 124)),
-                (-std::f64::consts::FRAC_PI_2, (32, 76)),
+                (0., (69, 7)),
+                (std::f64::consts::FRAC_PI_2, (117, 55)),
+                (std::f64::consts::PI, (69, 103)),
+                (-std::f64::consts::FRAC_PI_2, (21, 55)),
             ] {
                 assert_eq!(
                     rwr_plot(bearing, Some(scale), scale, 48.),
@@ -1236,8 +1403,8 @@ mod tests {
     #[test]
     fn manual_rwr_symbols_have_distinct_synthetic_rasters() {
         fn pixels(kind: scope::EmitterKind) -> Vec<u8> {
-            let mut raster = Raster::new();
-            draw_rwr_emitter(&mut raster, RwrPlot::Ranged(80, 76), kind, GREEN);
+            let mut raster = Raster::screen();
+            draw_rwr_emitter(&mut raster, RwrPlot::Ranged(69, 55), kind, GREEN);
             raster.pixels
         }
         let ground = pixels(scope::EmitterKind::Ground);
@@ -1250,11 +1417,12 @@ mod tests {
         assert_ne!(ground, unknown);
     }
 
+    /// The centre of a button's click area, in flight-canvas coordinates.
     fn button(i: &Instruments, slot: usize, b: usize) -> (f64, f64) {
         let (x, y, w, h) = i.layout.rect(slot);
         (
-            x as f64 + (35. + b as f64 * 29.) * w as f64 / 160.,
-            y as f64 + 145. * h as f64 / 156.,
+            x as f64 + f64::from(BUTTON_X[b] + 15) * w as f64 / WIDTH as f64,
+            y as f64 + f64::from(BUTTON_Y + 13) * h as f64 / HEIGHT as f64,
         )
     }
     #[test]
@@ -1298,7 +1466,7 @@ mod tests {
                 }
                 let slot = if layout == Layout::Large { 2 } else { 4 };
                 let (x, y, w, h) = layout.rect_on(slot, size);
-                let point = Some((x + 35. * w / 160., y + 145. * h / 156.));
+                let point = Some((x + 33. * w / WIDTH as f64, y + 147. * h / HEIGHT as f64));
                 instruments.screen_pointer(point, size, true);
                 assert!(instruments.screen_pointer(point, size, false));
                 assert_eq!(instruments.radar_range, 0);
@@ -1319,12 +1487,12 @@ mod tests {
             let plus = button(&i, 1, 1);
             i.pointer(Some(minus), true);
             assert!(!i.pointer(Some(plus), false));
-            assert_eq!(i.rwr_range, 4);
+            assert_eq!(i.radar_range, tore_sim::sensors::DEFAULT_RANGE_INDEX);
             for _ in 0..10 {
                 i.pointer(Some(minus), true);
                 assert!(i.pointer(Some(minus), false));
             }
-            assert_eq!(i.rwr_range, 0);
+            assert_eq!(i.radar_range, 0);
             i.pointer(Some(minus), true);
             assert!(!i.pointer(Some((0., 479.)), false));
         }
@@ -1366,6 +1534,205 @@ mod tests {
 }
 
 #[cfg(test)]
+mod frame_tests {
+    use super::*;
+    use tore_formats::{font::Glyph, hud::Hud};
+
+    /// Synthetic 81x80 frame: every pixel a different mix of indices 0..64.
+    fn panel() -> Pic {
+        Pic {
+            width: 81,
+            height: 80,
+            pixels: (0..81 * 80)
+                .map(|i| ((i * 7 + i / 81) % 64) as u8)
+                .collect(),
+            mask: vec![true; 81 * 80],
+            palette: vec![],
+            glyphs: vec![],
+        }
+    }
+    /// Glyphs light only their top-left cell pixel, so label placement is exact.
+    fn font(advance: impl Fn(u8) -> usize, ink: bool) -> Font {
+        Font {
+            height: 10,
+            glyphs: (0..=255u8)
+                .map(|ch| Glyph {
+                    advance: advance(ch),
+                    pixels: if ink { vec![(0, 0)] } else { vec![] },
+                })
+                .collect(),
+        }
+    }
+    fn hud() -> Hud {
+        Hud {
+            primary_color: 40,
+            panel: Some("~ab_p".into()),
+            title_color: 39,
+            button_color: 19,
+            press_color: 4,
+        }
+    }
+    fn palette(shift: u8) -> [[u8; 3]; 256] {
+        std::array::from_fn(|i| {
+            let i = i as u8;
+            [i.wrapping_add(shift), 255 - i, i / 2]
+        })
+    }
+    fn rgba(c: [u8; 3]) -> [u8; 4] {
+        [c[0], c[1], c[2], 255]
+    }
+    fn inside_screen(x: i32, y: i32) -> bool {
+        (SCREEN.0..SCREEN.0 + SCREEN.2).contains(&x) && (SCREEN.1..SCREEN.1 + SCREEN.3).contains(&y)
+    }
+
+    #[test]
+    fn frame_fills_the_window_at_double_size_through_the_live_palette() {
+        let panel = panel();
+        let blank = font(|_| 5, false);
+        for shift in [0, 90] {
+            let i = Instruments {
+                palette: palette(shift),
+                ..Default::default()
+            };
+            let r = i.window(9, &panel, &blank, &hud());
+            for y in 0..HEIGHT as i32 {
+                for x in 0..WIDTH as i32 {
+                    let expected = if inside_screen(x, y) {
+                        CRT_SCREEN
+                    } else {
+                        let index = panel.pixels[(y / 2 * 81 + x / 2) as usize];
+                        rgba(i.palette[usize::from(index)])
+                    };
+                    assert_eq!(r.at(x - SCREEN.0, y - SCREEN.1), expected, "{x},{y}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn green_pages_get_the_crt_tint_and_picture_pages_stay_black() {
+        let (panel, blank) = (panel(), font(|_| 5, false));
+        let i = Instruments::default();
+        for id in 0..10 {
+            let r = i.window(id, &panel, &blank, &hud());
+            let expected = if (1..=4).contains(&id) {
+                [0, 0, 0, 255]
+            } else {
+                CRT_SCREEN
+            };
+            for (x, y) in [(0, 0), (137, 113), (69, 57)] {
+                assert_eq!(r.at(x, y), expected, "page {id}");
+            }
+        }
+        // Faint: dark, and green is the strongest channel.
+        assert!(CRT_SCREEN[1] > CRT_SCREEN[0] && CRT_SCREEN[1] > CRT_SCREEN[2]);
+        assert!(CRT_SCREEN[..3].iter().all(|c| *c < 32));
+    }
+
+    #[test]
+    fn title_number_and_letters_sit_at_the_spec_positions_in_hud_colours() {
+        // Advances chosen so ENVELOPE is 51 pixels wide, as in WIN11.
+        let advance = |ch| match ch {
+            b'N' | b'V' | b'O' | b'P' => 6,
+            _ => 5,
+        };
+        let f = font(advance, true);
+        let i = Instruments {
+            palette: palette(0),
+            pages: vec![1],
+            ..Default::default()
+        };
+        let r = i.window(1, &panel(), &f, &hud());
+        let at = |x, y| r.at(x - SCREEN.0, y - SCREEN.1);
+        let title = rgba(i.palette[39]);
+        assert_eq!(label_width(&f, "ENVELOPE"), 51);
+        // Centred on x = 81 with one blank pixel between glyphs, top at y = 6.
+        let mut x = 56;
+        for ch in b"ENVELOPE" {
+            assert_eq!(at(x, 6), title);
+            x += advance(*ch) as i32 + 1;
+        }
+        // The page number is centred on x = 28.
+        assert_eq!(at(26, 6), title);
+        // U, A and C centred on each button's x + 16, top at y + 8.
+        let letter = rgba(i.palette[19]);
+        for left in [18, 48, 78] {
+            assert_eq!(at(left + 14, 142), letter);
+        }
+        // The fourth Envelope button has no letter: the frame shows through.
+        let index = panel().pixels[142 / 2 * 81 + 122 / 2];
+        assert_eq!(at(122, 142), rgba(i.palette[usize::from(index)]));
+    }
+
+    #[test]
+    fn a_held_button_shows_the_press_square_over_its_letter() {
+        let f = font(|_| 5, true);
+        let mut i = Instruments {
+            palette: palette(0),
+            pages: vec![7, 9],
+            ..Default::default()
+        };
+        i.pressed = Some((1, 2));
+        let r = i.window(9, &panel(), &f, &hud());
+        let at = |x, y| r.at(x - SCREEN.0, y - SCREEN.1);
+        let press = rgba(i.palette[4]);
+        for y in 140..154 {
+            for x in 88..102 {
+                assert_eq!(at(x, y), press, "{x},{y}");
+            }
+        }
+        for (x, y) in [(87, 140), (102, 153), (95, 139), (95, 154)] {
+            let index = panel().pixels[(y / 2 * 81 + x / 2) as usize];
+            assert_eq!(at(x, y), rgba(i.palette[usize::from(index)]), "{x},{y}");
+        }
+        // Other buttons keep their letters; another page's press shows nothing.
+        assert_eq!(at(32, 142), rgba(i.palette[19]));
+        let other = i.window(7, &panel(), &f, &hud());
+        for (x, y) in [(88, 140), (95, 147), (101, 153)] {
+            let index = panel().pixels[(y / 2 * 81 + x / 2) as usize];
+            let frame = rgba(i.palette[usize::from(index)]);
+            assert_eq!(other.at(x - SCREEN.0, y - SCREEN.1), frame);
+        }
+    }
+
+    #[test]
+    fn long_titles_are_shortened_with_an_ellipsis_to_98_pixels() {
+        let f = font(|_| 10, true);
+        assert_eq!(fit_title(&f, "RADAR"), "RADAR");
+        let fitted = fit_title(&f, "OTHER VIEW");
+        assert_eq!(fitted, "OTHER ...");
+        assert!(label_width(&f, &fitted) <= TITLE_MAX_WIDTH);
+        assert!(label_width(&f, "OTHER V...") > TITLE_MAX_WIDTH);
+    }
+
+    #[test]
+    fn button_click_areas_are_30_by_26_along_the_bottom() {
+        for (b, left) in BUTTON_X.iter().enumerate() {
+            let left = f64::from(*left);
+            assert_eq!(button_at(left, 134.), Some(b));
+            assert_eq!(button_at(left + 29.9, 159.9), Some(b));
+        }
+        for (x, y) in [(17.9, 140.), (138., 140.), (30., 133.9), (30., 160.)] {
+            assert_eq!(button_at(x, y), None, "{x},{y}");
+        }
+        // Buttons still work through the scaled window in both layouts.
+        for layout in [Layout::Large, Layout::Small] {
+            let mut i = Instruments::new(layout, Some(9));
+            let (x, y, w, h) = layout.rect(0);
+            let at = |rx: f64, ry: f64| {
+                Some((
+                    f64::from(x) + rx * f64::from(w) / WIDTH as f64,
+                    f64::from(y) + ry * f64::from(h) / HEIGHT as f64,
+                ))
+            };
+            i.pointer(at(110., 150.), true);
+            assert!(i.pointer(at(110., 150.), false));
+            assert!(i.history);
+        }
+    }
+}
+
+#[cfg(test)]
 mod picking_tests {
     use super::*;
     fn contact(id: u32, bearing_rad: f64, distance_ft: f64) -> scope::Contact {
@@ -1398,6 +1765,7 @@ mod picking_tests {
     fn point(i: &Instruments, slot: usize, c: &scope::Contact, size: [f64; 2]) -> (f64, f64) {
         let (rx, ry) = project(c.bearing_rad, c.distance_ft, 10.).expect("drawn contact");
         let (x, y, w, h) = i.screen_rect(slot, size);
+        let (rx, ry) = (rx + f64::from(SCREEN.0), ry + f64::from(SCREEN.1));
         (x + rx * w / WIDTH as f64, y + ry * h / HEIGHT as f64)
     }
     #[test]
@@ -1454,19 +1822,27 @@ mod picking_tests {
     fn top_right_scope_picking_follows_reserved_debug_space() {
         let mut i = Instruments {
             pages: vec![7, 5, 4, 9],
-            weapon_debug: true,
             combat: Some(readout(vec![contact(5, 0.3, 30_000.)])),
             ..Default::default()
         };
+        // The diagnostic panel is hidden by default and reserves no space.
+        assert!(!i.weapon_debug);
         let target = i.combat.as_ref().unwrap().scope.contacts[0].clone();
-        for size in [[1280., 720.], [720., 1000.]] {
-            let hit = point(&i, 3, &target, size);
-            i.hover(Some(hit), size);
-            assert_eq!(i.hovered, Some(5));
-            assert!(i.crosshair.is_some());
-            i.screen_pointer(Some(hit), size, true);
-            i.screen_pointer(Some(hit), size, false);
-            assert_eq!(i.designation.take(), Some(5));
+        for debug in [false, true] {
+            i.weapon_debug = debug;
+            for size in [[1280f64, 720.], [720., 1000.]] {
+                let scale = (size[0] / 640.).min(size[1] / 480.);
+                let normal = Layout::Large.rect_on(3, size);
+                let shift = if debug { 104. * scale } else { 0. };
+                assert_eq!(i.screen_rect(3, size).1, normal.1 + shift);
+                let hit = point(&i, 3, &target, size);
+                i.hover(Some(hit), size);
+                assert_eq!(i.hovered, Some(5));
+                assert!(i.crosshair.is_some());
+                i.screen_pointer(Some(hit), size, true);
+                i.screen_pointer(Some(hit), size, false);
+                assert_eq!(i.designation.take(), Some(5));
+            }
         }
     }
     #[test]
@@ -1511,7 +1887,7 @@ mod input_selection_tests {
         let pages = i.pages.clone();
         assert!(i.select(1));
         assert!(i.control(i.selected, 0));
-        assert_eq!(i.rwr_range, 3);
+        assert_eq!(i.radar_range, 0);
         assert!(i.cycle_selection(1));
         assert!(i.control(i.selected, 2));
         assert_eq!(i.channel, 1);

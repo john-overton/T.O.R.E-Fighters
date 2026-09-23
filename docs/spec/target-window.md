@@ -68,7 +68,8 @@ remain finite and use that same position. Displayed range, bearing and Hi/Lo
 still measure from the player, never from this presentation camera.
 Agent-chosen framing keeps image roll level and fits aircraft mesh vertices into
 90% of image width and 52% of image height, reserving the top/bottom text rows.
-The single objective row is at y=111 and uses the original instrument font.
+The single objective row is at y=110 in the 162 by 160 window and uses the
+original instrument font.
 One dimension fills that area without cropping the other. Zoom follows projected
 geometry each camera refresh, so range, target size, and aspect cannot leave a
 small target surrounded by empty space. Ground objects use their oriented bounds.

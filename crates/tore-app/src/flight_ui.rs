@@ -45,6 +45,25 @@ pub enum Command {
     InstrumentControl(usize),
 }
 type Control = (usize, (i32, i32, i32, i32), String);
+/// Authored Pref row for the weapon diagnostic panel. It is not in the
+/// retail menu; opinionated, requested by John on 2026-09-23.
+pub const WEAPON_DIAGNOSTICS: &str = "Weapon diagnostics?";
+/// Append the authored rows to the imported menu tree. The retail rows and
+/// their order are unchanged.
+pub fn add_authored_rows(tree: &mut [MenuNode]) {
+    if let Some(pref) = tree.iter_mut().find(|node| node.label == "Pref")
+        && !pref
+            .children
+            .iter()
+            .any(|row| row.label == WEAPON_DIAGNOSTICS)
+    {
+        pref.children.push(MenuNode {
+            label: WEAPON_DIAGNOSTICS.into(),
+            shortcut: String::new(),
+            children: vec![],
+        });
+    }
+}
 pub struct FlightUi {
     pub menu: bool,
     pub map: crate::flight_map::Map,
@@ -52,6 +71,8 @@ pub struct FlightUi {
     pub cockpit: bool,
     pub hud: bool,
     pub ladder: bool,
+    /// The upper-right weapon diagnostic panel; hidden unless chosen in Pref.
+    pub weapon_diagnostics: bool,
     /// Session-only cheats; they survive Restart but are not saved.
     pub cheats: tore_sim::cheats::Cheats,
     pub brightness: i16,
@@ -77,6 +98,7 @@ impl Default for FlightUi {
             cockpit: true,
             hud: true,
             ladder: true,
+            weapon_diagnostics: false,
             cheats: Default::default(),
             brightness: 0,
             zoom: 1.,
@@ -124,10 +146,17 @@ impl FlightUi {
         };
     }
 
-    /// On/Off for a working cheat row; the selected Damage choice reads On.
+    /// Whether the weapon diagnostic panel is drawn and takes clicks: only
+    /// when chosen, with the HUD shown, in the cockpit, back and up views.
+    pub fn weapon_diagnostics_shown(&self, flight_view: u8) -> bool {
+        self.weapon_diagnostics && self.hud && matches!(flight_view, 0 | 3 | 4)
+    }
+    /// On/Off for a working cheat row or the authored diagnostics row; the
+    /// selected Damage choice reads On.
     fn cheat_state(&self, label: &str) -> Option<&'static str> {
         let mut cheats = self.cheats;
         let on = match label {
+            WEAPON_DIAGNOSTICS => self.weapon_diagnostics,
             "Invulnerable" => cheats.invulnerable,
             "Normal" => !cheats.invulnerable,
             "Novice" => cheats.enemy_ai == Some(tore_sim::ai::Experience::Novice),
@@ -267,6 +296,15 @@ impl FlightUi {
             }
             "HUD pitch ladder?" => {
                 self.ladder = !self.ladder;
+                Command::Click
+            }
+            WEAPON_DIAGNOSTICS => {
+                self.weapon_diagnostics = !self.weapon_diagnostics;
+                self.message(if self.weapon_diagnostics {
+                    "Weapon diagnostics: on"
+                } else {
+                    "Weapon diagnostics: off"
+                });
                 Command::Click
             }
             "Dim HUD" => {
@@ -1018,6 +1056,70 @@ mod tests {
         assert_eq!(ui.cheats.enemy_ai, Some(tore_sim::ai::Experience::Novice));
         ui.activate("Unchanged", "");
         assert_eq!(ui.cheats.enemy_ai, None);
+    }
+
+    #[test]
+    fn weapon_diagnostics_row_is_hidden_by_default_and_moves_the_top_right_window() {
+        use crate::instruments::{Instruments, Layout};
+        let mut t = tree();
+        t.push(MenuNode {
+            label: "Pref".into(),
+            shortcut: String::new(),
+            children: vec![MenuNode {
+                label: "HUD pitch ladder?".into(),
+                shortcut: String::new(),
+                children: vec![],
+            }],
+        });
+        add_authored_rows(&mut t);
+        add_authored_rows(&mut t);
+        let rows: Vec<_> = t[1].children.iter().map(|n| n.label.as_str()).collect();
+        assert_eq!(rows, ["HUD pitch ladder?", WEAPON_DIAGNOSTICS]);
+        // Other roots are untouched.
+        assert_eq!(t[0].children.len(), 1);
+
+        let mut ui = FlightUi::default();
+        let mut i = Instruments::new(Layout::Large, None);
+        let size = [1280., 960.];
+        let normal = Layout::Large.rect_on(3, size);
+        i.weapon_debug = ui.weapon_diagnostics_shown(0);
+        assert!(!ui.weapon_diagnostics && !i.weapon_debug);
+        assert_eq!(i.screen_rect(3, size), normal);
+
+        // Escape, Right to Pref, Down to the authored row, Enter.
+        ui.key("Escape", false, false, false, &t);
+        ui.key("ArrowRight", false, false, false, &t);
+        ui.key("ArrowDown", false, false, false, &t);
+        let label = |ui: &FlightUi| {
+            ui.controls(&t)
+                .into_iter()
+                .find(|(id, ..)| *id == 1)
+                .map(|(.., label)| label)
+                .unwrap()
+        };
+        assert_eq!(label(&ui), format!("{WEAPON_DIAGNOSTICS}  Off"));
+        assert_eq!(ui.key("Enter", false, false, false, &t), Command::Click);
+        assert!(ui.weapon_diagnostics && ui.menu);
+        assert_eq!(label(&ui), format!("{WEAPON_DIAGNOSTICS}  On"));
+        assert_eq!(ui.notice.as_ref().unwrap().0, "Weapon diagnostics: on");
+        i.weapon_debug = ui.weapon_diagnostics_shown(0);
+        let (x, y, w, h) = i.screen_rect(3, size);
+        assert_eq!((x, w, h), (normal.0, normal.2, normal.3));
+        assert_eq!(y, normal.1 + 104. * 2.);
+        // Only the cockpit, back and up views with the HUD shown draw it.
+        assert!(!ui.weapon_diagnostics_shown(1) && !ui.weapon_diagnostics_shown(2));
+        ui.hud = false;
+        assert!(!ui.weapon_diagnostics_shown(0));
+        ui.hud = true;
+
+        ui.key("Enter", false, false, false, &t);
+        assert!(!ui.weapon_diagnostics);
+        assert!(
+            ui.pending_notices
+                .contains(&"Weapon diagnostics: off".to_owned())
+        );
+        i.weapon_debug = ui.weapon_diagnostics_shown(0);
+        assert_eq!(i.screen_rect(3, size), normal);
     }
 
     #[test]

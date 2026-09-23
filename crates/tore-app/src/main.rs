@@ -914,22 +914,14 @@ impl App {
                 Action::None
             }
             Command::Range(delta) => {
-                let last = match self.instruments.pages.last() {
-                    Some(5) => {
-                        self.instruments.rwr_range =
-                            (self.instruments.rwr_range as i32 + delta).clamp(0, 4) as usize;
-                        return Action::Click;
-                    }
-                    Some(0) => {
-                        let scales = tore_sim::sensors::passive::SCALE_LADDER_NMI.len() as i32 - 1;
-                        self.instruments.rcs_range =
-                            (self.instruments.rcs_range as i32 + delta).clamp(0, scales) as usize;
-                        return Action::Click;
-                    }
-                    _ => tore_sim::sensors::RANGE_LADDER_NMI.len() as i32 - 1,
-                };
-                self.instruments.radar_range =
-                    (self.instruments.radar_range as i32 + delta).clamp(0, last) as usize;
+                if self.instruments.pages.last() == Some(&0) {
+                    let scales = tore_sim::sensors::passive::SCALE_LADDER_NMI.len() as i32 - 1;
+                    self.instruments.rcs_range =
+                        (self.instruments.rcs_range as i32 + delta).clamp(0, scales) as usize;
+                } else {
+                    // The RWR and radar share one range setting.
+                    self.instruments.step_range(delta);
+                }
                 Action::Click
             }
             Command::Mode => {
@@ -1843,8 +1835,7 @@ impl ApplicationHandler for App {
                     self.frame_time = Instant::now();
                     self.flight_command(command)
                 } else if self.screen == Screen::Flight
-                    && self.flight_ui.hud
-                    && matches!(self.flight_view, 0 | 3 | 4)
+                    && self.flight_ui.weapon_diagnostics_shown(self.flight_view)
                     && !self.flight_ui.frozen()
                     && self.pointer.is_some_and(|p| {
                         let size = [
@@ -2745,7 +2736,7 @@ impl ApplicationHandler for App {
                         // so the selector marks the contact a click would take.
                         let window = renderer.window.inner_size();
                         self.instruments.weapon_debug =
-                            self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4);
+                            self.flight_ui.weapon_diagnostics_shown(self.flight_view);
                         self.instruments.hover(
                             self.pointer,
                             [f64::from(window.width), f64::from(window.height)],
@@ -2762,6 +2753,7 @@ impl ApplicationHandler for App {
                         );
                         self.instruments.hud_color =
                             cockpit_palette[usize::from(self.hornet.hud.primary_color)];
+                        self.instruments.palette = cockpit_palette;
                         self.flight_canvas.begin(
                             renderer.flight_size(),
                             &self.hornet,
@@ -2855,7 +2847,7 @@ impl ApplicationHandler for App {
                             &cockpit_palette,
                         );
                         self.menu.pixels.fill(0);
-                        if self.flight_ui.hud && matches!(self.flight_view, 0 | 3 | 4) {
+                        if self.flight_ui.weapon_diagnostics_shown(self.flight_view) {
                             weapon_hud::debug(
                                 &mut self.menu.pixels,
                                 &self.combat.state,
@@ -3814,6 +3806,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut flight_zoom = 1f32;
     let mut flight_menu = false;
     let mut flight_map = false;
+    let mut weapon_diagnostics = false;
     let mut controls_menu = false;
     let mut flight_mode_arg = None;
     let mut native_tables_path: Option<PathBuf> = None;
@@ -4133,6 +4126,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 }
             }
             "--flight-map" => { flight_map = true; initial_screen = Screen::Flight; }
+            "--weapon-diagnostics" => weapon_diagnostics = true,
             "--capture-flight" => {
                 capture_terrain = Some(PathBuf::from(
                     args.next().ok_or("--capture-flight needs a PPM path")?,
@@ -4318,7 +4312,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner. F1 front, F2 back, F3 up, F10 external. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, graphics. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0/1/2/3/4 chooses cockpit/chase/oblique/back/up. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, graphics. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -4871,10 +4865,16 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             }
             println!("{}", state.systems.summary(0.));
         }
-        let r =
-            instruments::Instruments::default().page(instrument_page.unwrap_or(7), &hornet, &state);
+        let mut panels = instruments::Instruments::default();
+        panels.palette = hornet.daylight_palette();
+        let r = panels.page(instrument_page.unwrap_or(7), &hornet, &state);
         let mut f = std::fs::File::create(path)?;
-        write!(f, "P6\n160 156\n255\n")?;
+        write!(
+            f,
+            "P6\n{} {}\n255\n",
+            instruments::WIDTH,
+            instruments::HEIGHT
+        )?;
         for p in r.pixels.chunks_exact(4) {
             f.write_all(&p[..3])?;
         }
@@ -5680,6 +5680,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             ui.cheats.no_turbulence = !turbulence_enabled;
             ui.menu = flight_menu;
             ui.map.open = flight_map;
+            ui.weapon_diagnostics = weapon_diagnostics;
             ui.paused = animation_capture || combat_probe.is_some();
             ui.look = flight_look.map(f32::to_radians);
             ui.zoom = flight_zoom;
@@ -5748,6 +5749,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     );
                     if std::env::args().any(|a| a == "--flight-zoom") {
                         app.flight_ui.zoom = flight_zoom;
+                    }
+                    if weapon_diagnostics {
+                        app.flight_ui.weapon_diagnostics = true;
                     }
                 }
                 Err(e) => {

@@ -141,9 +141,10 @@ actual destruction, not rounding of 99.x%.
 
 ## Presentation
 
-Use existing imported font and panel chrome. At the 160x156 raster, labels start
-at x=20 and values end at x=138. Gauge rows are y=33,47,61,75; the separator is
-y=91; fuel rows are y=101,115. Healthy RGB is (72,172,55), amber (235,187,60),
+Use the existing imported font inside the aircraft's
+[instrument bezel](instrument-bezel.md). In the 162 by 160 window, labels start
+at x=21 and values end at x=139. Gauge rows are y=32,46,60,74; the separator is
+y=90; fuel rows are y=100,114. Healthy RGB is (72,172,55), amber (235,187,60),
 red (235,70,50), fitted to the supplied screenshot. Buttons remain blank.
 Pressure below 75% is amber, at/below 25% red. Temperature above 25% is amber,
 at/above 75% red. These thresholds are fitted. As clarified by John on

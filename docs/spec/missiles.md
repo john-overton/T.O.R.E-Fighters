@@ -288,13 +288,15 @@ an independent onboard seeker, A/I, get an explicit `BORESIGHT` mode alongside
 passive sensors. Supported radar S still needs launcher support. Held and
 laser/designator rows gain no capability from the generic switch.
 
-Implemented control: a rebindable `weapon-seeker-mode` action and a clickable
-upper-right diagnostic mode label switch modes; no existing key is silently reassigned.
+Implemented control: a rebindable `weapon-seeker-mode` action (no default key) and
+the clickable mode label in the upper-right weapon diagnostic panel switch modes;
+no existing key is silently reassigned. The panel is hidden by default, and its
+labels take clicks only while it is shown.
 Arming an independent air-to-air missile with no designation automatically enters
 BORESIGHT when guidance is enabled. IR does not require radar power.
 Designating a contact returns to CUED. The explicit mode switch remains available
 with a retained designation for radar missiles; selected-track priority prevents
-that override for IR missiles. L and the upper-right RELEASE LOCK button clear the
+that override for IR missiles. L and the diagnostic panel's RELEASE LOCK button clear the
 aircraft designation and mounted seeker, without redirecting airborne shots.
 The FA manual p. 112 targeting list does not identify a clear-designation key;
 L is an existing host choice, not a recovered retail binding. Snapshot
@@ -462,9 +464,11 @@ missile's physics or random damage outcomes to force agreement with this cue.
 
 Mode, actual seeker state, release button, `R`, signed `C`, `EST` flight time,
 target aspect angle (`ASP`, in degrees),
-and three recent shot diagnostics stay in the upper-right debug window.
-Unavailable numeric debug values use `--`. A large upper-right instrument moves
-down 104 reference pixels to clear that window. The forward HUD omits BORE READY and retains CUED IN RNG; estimated chance
+and three recent shot diagnostics stay in the upper-right weapon diagnostic panel.
+The panel is hidden by default and shown with **Escape → Pref → Weapon
+diagnostics?**, a saved preference (opinionated, requested by John on 2026-09-23).
+Unavailable numeric debug values use `--`. Only while the panel is shown does a
+large upper-right instrument move down 104 reference pixels to clear it. The forward HUD omits BORE READY and retains CUED IN RNG; estimated chance
 cannot confer a lock.
 
 Use original HUD styling and fonts. Add seeker-state readouts and deterministic
@@ -629,8 +633,8 @@ and fitted maneuver losses at 120 Hz. Lead updates every 0.1 seconds. See
 
 **Opinionated, requested by John on 2026-09-17.** The radar crosshair replaces
 the OS pointer across the entire black instrument screen, not just the inset
-contact plot. In the 160 by 156 instrument raster, this is x in [11, 149) and
-y in [21, 135). Lines stop at the screen edges and retain a four-pixel central
+contact plot. In the 162 by 160 instrument window, this is x in [12, 150) and
+y in [20, 134), the screen given by the [bezel geometry](instrument-bezel.md). Lines stop at the screen edges and retain a four-pixel central
 gap. The bezel and bottom buttons keep the normal pointer. This applies when
 the radar is off or sensor data is unavailable too. Contact projection and
 selection tolerance do not change. Scaling uses the displayed instrument bounds.

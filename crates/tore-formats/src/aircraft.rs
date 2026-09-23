@@ -329,6 +329,11 @@ impl AircraftId {
             _ => self.stem(),
         }
     }
+    /// The instrument window frame picture for this cockpit family. Every
+    /// flyable identity's HUD names exactly this picture; the app checks it.
+    pub fn instrument_panel(self) -> String {
+        format!("~{}_P.PIC", self.cockpit_stem())
+    }
     pub fn cockpit(self) -> &'static str {
         match self {
             Self::F18 => "~F18H.PIC",
@@ -566,18 +571,6 @@ pub fn references(bytes: &[u8]) -> BTreeSet<String> {
         .map(str::to_ascii_uppercase)
         .collect()
 }
-pub const INSTRUMENT_ART: &[&str] = &[
-    "EDGETL.PIC",
-    "EDGETR.PIC",
-    "EDGEBL.PIC",
-    "EDGEBR.PIC",
-    "EDGELR.PIC",
-    "EDGETB.PIC",
-    "PANEL.PIC",
-    "PANELFNT.PIC",
-    "PANELFND.PIC",
-    "PANLFNT2.PIC",
-];
 /// Same dependency closure for CLI and app, independent of Python/reference checkout.
 pub fn dependencies(
     archives: &[&Archive],
@@ -653,10 +646,10 @@ pub fn dependency_report(
             &format!("{}.SH", id.stem()),
             "PALETTE.PAL",
             id.cockpit(),
+            &id.instrument_panel(),
             "WIN11.FNT",
             "HUD11.FNT",
             "FMENUD.MNU",
-            "PANEL.PIC",
         ] {
             if !catalog.contains(n) {
                 return Err(invalid(&format!("aircraft import missing {n}")));
@@ -685,7 +678,6 @@ pub fn dependency_report(
                 || n.starts_with(&format!("~{}", id.cockpit_stem()))
                 || n.starts_with(&format!("{}_", id.stem()))
                 || n.starts_with(&format!("_{}", id.stem()))
-                || INSTRUMENT_ART.contains(&n.as_str())
                 || (n.starts_with("WIN") || n.starts_with("HUD")) && n.ends_with(".FNT")
             {
                 selected.insert(n.clone());
@@ -1105,13 +1097,7 @@ mod dependency_tests {
         for &name in COMBAT_RESOURCES {
             resources.insert(name.into(), vec![0]);
         }
-        for name in [
-            "PALETTE.PAL",
-            "WIN11.FNT",
-            "HUD11.FNT",
-            "FMENUD.MNU",
-            "PANEL.PIC",
-        ] {
+        for name in ["PALETTE.PAL", "WIN11.FNT", "HUD11.FNT", "FMENUD.MNU"] {
             resources.insert(name.into(), vec![0]);
         }
         for id in AircraftId::ALL {
@@ -1123,6 +1109,7 @@ mod dependency_tests {
             resources.insert(id.hud().into(), vec![0]);
             resources.insert(id.pt().replace(".PT", ".PTS"), vec![0]);
             resources.insert(id.cockpit().into(), vec![0]);
+            resources.insert(id.instrument_panel(), vec![0]);
             resources.insert(
                 format!("{}.SH", id.stem()),
                 format!("_{}.PIC", id.stem()).into_bytes(),
@@ -1153,6 +1140,23 @@ mod dependency_tests {
         assert!(both.is_superset(&rafale));
         assert!(both.contains("F18.PT"));
         assert!(both.contains("&F18.11K"));
+    }
+    #[test]
+    fn each_cockpit_family_requires_its_own_instrument_window_frame() {
+        let a = archive(resources(), None);
+        let rafale = dependencies(&[&a], &[AircraftId::Rafale], false).unwrap();
+        assert!(rafale.contains("~RAF_P.PIC"));
+        assert!(!rafale.contains("~F18_P.PIC"));
+        assert_eq!(AircraftId::A4E.instrument_panel(), "~F4_P.PIC");
+        assert_eq!(AircraftId::Faxx.instrument_panel(), "~F22_P.PIC");
+        let missing = archive(resources(), Some("~RAF_P.PIC"));
+        assert!(
+            dependencies(&[&missing], &[AircraftId::Rafale], false)
+                .unwrap_err()
+                .to_string()
+                .contains("~RAF_P.PIC")
+        );
+        assert!(dependencies(&[&missing], &[AircraftId::F18], false).is_ok());
     }
     #[test]
     fn missing_selected_shape_does_not_fall_back_to_other_aircraft() {

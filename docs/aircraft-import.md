@@ -131,6 +131,7 @@ validate store placement; each consumer needs its own evidence.
 ### D. Integrate cockpit, controls and telemetry
 
 - [ ] Resolve the aircraft's own HUD/cockpit variants, fonts, mirror artwork,
+  instrument window frame (`~<cockpit>_P.PIC`, which the HUD must name),
   instrument dependencies and device capabilities from source.
 - [ ] Preserve cover-fit forward art, full-canvas world/HUD, independent instrument
   overlays, body-coordinate head-look and renderer-consistent projection.

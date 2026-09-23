@@ -18,6 +18,9 @@ pub struct Airframe {
     damage_art: crate::damage_art::DamageArt,
     pub palette: [[u8; 3]; 256],
     pub cockpit_pic: Pic,
+    /// Instrument window frame named by the HUD, kept as cockpit palette
+    /// indices so it follows the live cockpit palette.
+    pub panel: Pic,
     pub sprites: BTreeMap<String, Sprite>,
     pub font: Font,
     pub hud_font: Font,
@@ -78,11 +81,7 @@ impl Airframe {
             format!("~{}_CH.PIC", id.cockpit_stem()),
             format!("~{}_RH.PIC", id.cockpit_stem()),
         ];
-        for name in tore_formats::aircraft::INSTRUMENT_ART
-            .iter()
-            .copied()
-            .chain(cockpit_art.iter().map(String::as_str))
-        {
+        for name in cockpit_art.iter().map(String::as_str) {
             {
                 use tore_formats::aircraft::AircraftId;
                 let absent_overlay = matches!(
@@ -109,6 +108,15 @@ impl Airframe {
                     },
                 );
             }
+        }
+        let hud = tore_formats::hud::Hud::parse(get(id.hud())?)?;
+        let panel_name = hud.panel_resource();
+        if panel_name.as_deref() != Some(id.instrument_panel().as_str()) {
+            return Err("unreviewed HUD instrument window frame reference".into());
+        }
+        let panel = Pic::parse(get(&id.instrument_panel())?)?;
+        if (panel.width, panel.height) != (81, 80) {
+            return Err("unreviewed instrument window frame dimensions".into());
         }
         let font = Font::parse(get("WIN11.FNT")?)?;
         let sensors = tore_sim::sensors::SensorProfiles::from_source(&profile, |name| {
@@ -206,6 +214,7 @@ impl Airframe {
         }
         // John requested all map categories with no Escape-menu filters.
         flight_menu.retain(|node| node.label != "Map");
+        crate::flight_ui::add_authored_rows(&mut flight_menu);
 
         let engine_material = if crate::engine_material::outlet_count(id) > 0 {
             crate::engine_material::Image::load()?
@@ -250,15 +259,23 @@ impl Airframe {
             damage_art,
             palette,
             cockpit_pic: frame,
+            panel,
             sprites,
             font,
             hud_font: Font::parse(get("HUD11.FNT")?)?,
-            hud: tore_formats::hud::Hud::parse(get(id.hud())?)?,
+            hud,
             flight_menu,
             sensors,
             poses,
             streamer,
         })
+    }
+    /// The stored daytime cockpit palette, before weather, sunlight or HUD
+    /// brightness. Used where no world is loaded, such as page snapshots.
+    pub fn daylight_palette(&self) -> [[u8; 3]; 256] {
+        let mut colors = self.palette;
+        colors[..self.cockpit_pic.palette.len()].copy_from_slice(&self.cockpit_pic.palette);
+        colors
     }
     /// One palette for cockpit art and HUD, retaining the original private prefix.
     pub fn cockpit_palette(&self, world: &World, altitude: f64, brightness: i16) -> [[u8; 3]; 256] {
@@ -539,28 +556,54 @@ impl Airframe {
                 usize::from(s.gear > 0.)
             }]
         };
-        for source in shape.faces.iter().flat_map(|f| {
-            if damaged.is_some() {
-                vec![f.clone()]
-            } else if hornet_rig {
-                crate::aircraft_animation::rudder_faces(f, s)
-            } else if let Some(rig) = &self.rig {
-                rig.faces(f, s)
-            } else {
-                vec![f.clone()]
-            }
-        }) {
-            let Some(f) = (if damaged.is_some() {
-                Some(source.clone())
-            } else if hornet_rig {
-                crate::aircraft_animation::animate(&source, s)
-            } else if let Some(rig) = &self.rig {
-                rig.animate(&source, s)
-            } else {
-                crate::rafale_animation::animate(&source, s)
-            }) else {
+        let faces: Vec<_> = shape
+            .faces
+            .iter()
+            .flat_map(|f| {
+                if damaged.is_some() {
+                    vec![f.clone()]
+                } else if hornet_rig {
+                    crate::aircraft_animation::rudder_faces(f, s)
+                } else if let Some(rig) = &self.rig {
+                    rig.faces(f, s)
+                } else {
+                    vec![f.clone()]
+                }
+            })
+            .filter_map(|source| {
+                if damaged.is_some() {
+                    Some(source)
+                } else if hornet_rig {
+                    crate::aircraft_animation::animate(&source, s)
+                } else if let Some(rig) = &self.rig {
+                    rig.animate(&source, s)
+                } else {
+                    crate::rafale_animation::animate(&source, s)
+                }
+            })
+            .collect();
+        // Positive when the stored normal faces the camera.
+        let facing = |f: &tore_formats::shape::Face| {
+            f.normal.map_or(1., |n| {
+                let normal = orient(n);
+                let p = f.positions[0];
+                let p = orient([p[0] * model_scale, p[2] * model_scale, p[1] * model_scale]);
+                (0..3)
+                    .map(|i| normal[i] * (camera.position[i] - s.position[i] as f32 - p[i]))
+                    .sum::<f32>()
+            })
+        };
+        // Smooth mode submits complete geometry for camera-independent shadows,
+        // hiding only the rear face of each double-sided panel.
+        let hidden = if world.smooth_weather {
+            crate::aircraft_animation::hidden_twins(&faces, facing)
+        } else {
+            vec![false; faces.len()]
+        };
+        for (f, hidden) in faces.into_iter().zip(hidden) {
+            if hidden {
                 continue;
-            };
+            }
             // Temporarily keep surviving aircraft visually intact. Regional
             // damage still drives flight penalties and component failures.
             let surfaces = if fragment || s.damage_fraction < 1. {
@@ -569,19 +612,8 @@ impl Airframe {
                 self.damage_art.surfaces(&f, &s.damage_regions, model_scale)
             };
             for f in surfaces {
-                // Smooth mode submits complete geometry for camera-independent shadows.
-                if !world.smooth_weather
-                    && let Some(n) = f.normal
-                {
-                    let normal = orient(n);
-                    let p = f.positions[0];
-                    let p = orient([p[0] * model_scale, p[2] * model_scale, p[1] * model_scale]);
-                    let dot: f32 = (0..3)
-                        .map(|i| normal[i] * (camera.position[i] - s.position[i] as f32 - p[i]))
-                        .sum();
-                    if dot <= 0. {
-                        continue;
-                    }
+                if !world.smooth_weather && facing(&f) <= 0. {
+                    continue;
                 }
 
                 // Stepped compatibility uses the imported per-normal light remapping.

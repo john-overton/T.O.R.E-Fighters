@@ -292,7 +292,7 @@ Selection bars appear immediately, independently of weapon-track acquisition;
 all current air contacts are filled, whether acquired or not. The track-status
 text reports acquisition, and unselected hover corners remain distinct.
 
-**Fitted, agent decision:** on the 160 by 156 instrument raster, each bar is
+**Fitted, agent decision:** on the 162 by 160 instrument window raster, each bar is
 2 pixels wide and 7 high, centred vertically on the contact. Their left edges
 are at contact x minus 7 and x plus 6. The direction line is 1 pixel wide and
 9 pixels long from the contact centre, with rounded endpoints, in the contact's

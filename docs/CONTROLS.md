@@ -211,7 +211,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 
 | Situation | Input | Action |
 | --- | --- | --- |
-| Flight | Left click | Operate instrument buttons, designate a scope contact, click the HUD seeker label or RELEASE LOCK |
+| Flight | Left click | Operate instrument buttons, designate a scope contact, click the seeker label or RELEASE LOCK in the weapon diagnostic panel when Pref → Weapon diagnostics? shows it |
 | Flight | Hold right button and drag | Mouse look, when enabled on the Mouse tab |
 | Flight | macOS Command+Q | Exit to desktop |
 | Live map open | + / - | Zoom the map |

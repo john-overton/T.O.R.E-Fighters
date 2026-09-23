@@ -55,7 +55,7 @@ cargo run --locked -p tore-app
 
 Expect native borderless fullscreen on the monitor the window would have opened on, showing Choose Activity, and a terminal message such as `Renderer: Apple M3 (Metal, IntegratedGpu)`. The original 640 × 480 canvas scales proportionally and is letterboxed, so a 16:9 screen shows black bars either side. Close the window or use `? → Exit to Desktop`; Escape dismisses menus. On macOS, Command-Q also quits.
 
-Alt-Enter switches between borderless fullscreen and the previous windowed size, on every screen: the menus, the Quick Mission creator, the locate screen and flight. F11 is not used for this, because it already opens the in-flight keyboard help. The choice is saved as `fullscreen` in `preferences-v1.conf`, which is now format version 4; a version 3 file still loads and starts fullscreen. `--windowed` starts in a 960 × 720 window for one run without changing the saved choice, and `--window-size`, `--smoke-test` and the captures keep their fixed-size windows as before.
+Alt-Enter switches between borderless fullscreen and the previous windowed size, on every screen: the menus, the Quick Mission creator, the locate screen and flight. F11 is not used for this, because it already opens the in-flight keyboard help. The choice is saved as `fullscreen` in `preferences-v1.conf`, which is now format version 5; a version 3 file still loads and starts fullscreen. `--windowed` starts in a 960 × 720 window for one run without changing the saved choice, and `--window-size`, `--smoke-test` and the captures keep their fixed-size windows as before.
 
 On Windows a release build is a GUI application, so no console window appears behind the game. Nothing printed reaches a terminal there: `--version`, `--help`, `--import-only` output and import errors are silent on a Windows release build. Debug builds keep the console, so development output and the headless probes still print. A fatal startup error is also written to `last-error.txt` in the application data directory, next to `import-report.txt`, and that file is removed after the next successful start; on Windows release builds it is the only place the message appears.
 
@@ -995,7 +995,7 @@ optical composition. Both tests use no retail media.
 
 ## Systems instrument fixtures
 
-`--panel-snapshot PATH --instrument-page 7` renders the aircraft's actual default
+`--panel-snapshot PATH --instrument-page 7` renders one 162×160 window, framed and coloured with the aircraft's stored daytime cockpit palette, from the aircraft's actual default
 loadout, including external tanks. `--systems-preview 12,13,14` applies explicit
 panel-only oil pump, oil leak and hydraulic leak faults. Advance with
 `--flight-probe-ticks N` (default 1,200 in this fixture), and use

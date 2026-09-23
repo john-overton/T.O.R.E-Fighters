@@ -470,7 +470,8 @@ fn draw_gun(
     paint.rect(x.round() as i32, y.round() as i32, 2, 2);
 }
 
-/// Diagnostic state and controls are composed at the window's upper right.
+/// Diagnostic state and controls are composed at the window's upper right
+/// when Pref > Weapon diagnostics? is on; the host gates drawing and clicks.
 pub fn debug(
     pixels: &mut [u8],
     state: &live::State,
