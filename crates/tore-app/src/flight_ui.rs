@@ -46,6 +46,8 @@ pub enum Command {
     InstrumentSelect(usize),
     InstrumentCycle(i32),
     InstrumentControl(usize),
+    /// Alt-S: toggle radio silence.
+    RadioSilence,
 }
 type Control = (usize, (i32, i32, i32, i32), String);
 /// Authored Pref row for the weapon diagnostic panel. It is not in the
@@ -514,6 +516,7 @@ impl FlightUi {
                 "1" => Some(O::Formation(F::Echelon)),
                 "2" => Some(O::Formation(F::LineAbreast)),
                 "3" => Some(O::Formation(F::LineAstern)),
+                "s" => return Command::RadioSilence,
                 "0" => return Command::WingRecipient(None),
                 "4" | "5" | "6" | "7" => {
                     return Command::WingRecipient(Some(key.parse::<u8>().unwrap() - 3));

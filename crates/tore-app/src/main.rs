@@ -20,6 +20,7 @@ mod clouds;
 mod cockpit_renderer;
 mod combat;
 mod combat_tape;
+mod comms;
 mod controls_editor;
 mod damage_art;
 mod debrief;
@@ -194,6 +195,11 @@ struct App {
     enemy_skill: Option<tore_sim::ai::experience::EnemySkillOverride>,
     ai_wings: Option<ai_wings::AiWings>,
     ai_mission: ai_wings::Preset,
+    /// Radio and crew voice delivery; see docs/spec/radio-chatter.md.
+    comms: comms::Comms,
+    /// Imported phrase text for composing radio lines.
+    #[allow(dead_code)] // Removed once the radio and crew producers read it.
+    phrases: comms::Phrases,
     screen: Screen,
     frame_time: Instant,
     instrument_time: Instant,
@@ -227,6 +233,29 @@ struct App {
     finished: bool,
     next_frame: Option<Instant>,
     error: Option<Box<dyn Error>>,
+}
+/// Deliver due radio and crew lines: HUD text and recordings together.
+fn deliver_radio(
+    comms: &mut comms::Comms,
+    flight_ui: &mut flight_ui::FlightUi,
+    audio: Option<&audio::Audio>,
+    now: f64,
+) {
+    for call in comms.due(now) {
+        match call.route {
+            comms::Route::Radio => {
+                flight_ui.message(call.line());
+                if let Some(audio) = audio {
+                    audio.speech(&call.stems);
+                }
+            }
+            comms::Route::Direct => {
+                if let (Some(audio), Some(stem)) = (audio, call.stems.first()) {
+                    audio.direct_voice(stem);
+                }
+            }
+        }
+    }
 }
 /// Wing vapor line segments: position then RGBA, two vertices per segment.
 /// The five native colors are patterned fill types resolved through LAY
@@ -452,6 +481,11 @@ impl App {
     }
 
     /// Restart the resolved launch environment and its authored RNG policy.
+    /// Simulation seconds of the current flight, from the fixed 120 Hz tick.
+    fn sim_seconds(&self) -> f64 {
+        self.combat.state.tick() as f64 / 120.
+    }
+
     fn reset_weather(&mut self) {
         self.world.weather_presentation = tore_sim::environment::Presentation::seeded(1)
             .expect("fixed valid weather presentation seed");
@@ -764,11 +798,19 @@ impl App {
                         if let Some(audio) = &self.audio {
                             audio.radio(&report.radio, true);
                         }
+                        if !report.radio.is_empty() {
+                            self.comms.spoken(self.sim_seconds());
+                        }
                         self.flight_ui.message(report.message);
                     }
                     Some(Err(error)) => self.flight_ui.message(error.to_string()),
                     None => self.flight_ui.message("Wing order unavailable: no AI wing"),
                 }
+                Action::None
+            }
+            Command::RadioSilence => {
+                let message = self.comms.toggle_silence();
+                self.flight_ui.message(message);
                 Action::None
             }
             Command::DamageReport => {
@@ -1356,6 +1398,8 @@ impl App {
                 if let Some(audio) = &self.audio {
                     audio.restart_flight();
                 }
+                // A fixed seed keeps headless runs deterministic.
+                self.comms.restart(1);
                 if self.recorded_ticks > 0 {
                     self.finish_recording();
                 }
@@ -2561,6 +2605,13 @@ impl ApplicationHandler for App {
                                     self.flight_ui.message(message);
                                 }
                             }
+
+                            deliver_radio(
+                                &mut self.comms,
+                                &mut self.flight_ui,
+                                self.audio.as_ref(),
+                                self.combat.state.tick() as f64 / 120.,
+                            );
 
                             let danger = tore_sim::ejection::assess(&self.flight, |x, z| {
                                 f64::from(self.world.height(x as f32, z as f32))
@@ -5886,6 +5937,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         enemy_skill,
         ai_wings: None,
         ai_mission,
+        comms: comms::Comms::new(1),
+        phrases: comms::phrases(&theater_resources),
         preference_path: if preferences_enabled {
             Some(assets::data_directory()?.join("preferences-v1.conf"))
         } else {

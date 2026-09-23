@@ -205,6 +205,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Wing: line astern | Alt+3 | - | - |
 | Wing: spacing | Alt+8 | - | - |
 | Wing: stacking | Alt+K | - | - |
+| Radio silence | Alt+S | - | - |
 | Wing: loose/medium control | Alt+C | - | - |
 | Wing: approach target left | Alt+Shift+B | - | - |
 | Wing: approach target right | Alt+Shift+R | - | - |

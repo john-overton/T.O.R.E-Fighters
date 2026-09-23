@@ -23,6 +23,9 @@ enum RadioSource {
     Airport,
     Ejection,
 }
+/// Queued recordings for composed calls. A contact report alone can be a
+/// dozen recordings; wing orders keep their own limit of 16.
+const SPEECH_QUEUE: usize = 48;
 struct RadioVoice {
     source: RadioSource,
     voice: Voice,
@@ -305,6 +308,21 @@ impl Audio {
             {
                 mixer.escape_effect(&self.clips, "&CHUTE.5K");
             }
+        }
+    }
+    /// One delivered radio or crew line from [`crate::comms`]. Recordings play
+    /// in order after anything already queued; missing recordings are skipped.
+    /// A line that would not fit the queue is dropped whole, never truncated.
+    pub fn speech(&self, stems: &[String]) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.enqueue_speech(&self.clips, stems);
+        }
+    }
+    /// A recording played directly rather than over the radio, such as the
+    /// player's death scream.
+    pub fn direct_voice(&self, stem: &str) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.escape_effect(&self.clips, &format!("{stem}.5K"));
         }
     }
     pub fn wingman_ejected(&self) {
@@ -721,6 +739,25 @@ impl Mixer {
             }
         }
     }
+    fn enqueue_speech(&mut self, clips: &BTreeMap<String, Arc<Clip>>, stems: &[String]) {
+        if !self.effects_on || self.flight_paused {
+            return;
+        }
+        let voices: Vec<_> = stems
+            .iter()
+            .filter_map(|stem| clips.get(&format!("{stem}.5K")))
+            .map(|clip| RadioVoice {
+                source: RadioSource::Wing,
+                voice: Voice {
+                    clip: clip.clone(),
+                    position: 0.,
+                },
+            })
+            .collect();
+        if self.radio.len() + voices.len() <= SPEECH_QUEUE {
+            self.radio.extend(voices);
+        }
+    }
     fn cancel_radio(&mut self, source: RadioSource) {
         self.radio.retain(|voice| voice.source != source);
     }
@@ -1119,6 +1156,35 @@ mod tests {
         v.position = 2.0;
         assert_eq!(v.next(4.0, false), 0.0);
         assert_eq!(v.next(4.0, true), 0.0);
+    }
+    #[test]
+    fn speech_skips_missing_recordings_and_drops_whole_lines_when_full() {
+        let mut m = test_mixer();
+        let clips = BTreeMap::from([(
+            "^CLOCK02.5K".into(),
+            Arc::new(Clip {
+                samples: vec![192; 2],
+                rate: 4.,
+            }),
+        )]);
+        let line = |n: usize| vec!["^CLOCK02".to_string(); n];
+        m.enqueue_speech(&clips, &["^YOUR".into(), "^CLOCK02".into()]);
+        assert_eq!(m.radio.len(), 1, "text-only stems play nothing");
+        m.enqueue_speech(&clips, &line(SPEECH_QUEUE));
+        assert_eq!(
+            m.radio.len(),
+            1,
+            "a line that does not fit is not truncated"
+        );
+        m.enqueue_speech(&clips, &line(SPEECH_QUEUE - 1));
+        assert_eq!(m.radio.len(), SPEECH_QUEUE);
+        m.radio.clear();
+        m.flight_paused = true;
+        m.enqueue_speech(&clips, &line(1));
+        assert!(
+            m.radio.is_empty(),
+            "pause drops new speech like other radio"
+        );
     }
     #[test]
     fn radio_is_serial_pauses_and_interrupts_without_effects_overlap() {
