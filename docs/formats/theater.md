@@ -58,7 +58,7 @@ The terrain block builder at `0x4a9d00` copies the third byte of four corner cel
 
 Each placement covers four cells per side, or 32,768 feet. Quarter-turn UV selection starts at `0x4aa9ac`; texture scanning around `0x4aa72d` reverses source rows. Rust applies these rotations and a V flip. Index 255 is tested as cutout/water coverage at `0x4aa739`. The runtime now treats those texels as holes exposing the shared ocean/horizon pass; untextured color-255 cells also leave that pass visible. The former land-color fill and palette-223 water fallback caused rectangular green strips beyond beach artwork and have been removed. Bilinear coverage uses a fitted 0.5 cutoff, not a recovered native raster threshold. See [shoreline behavior](../spec/terrain-shorelines.md) and [validation](../baselines/ukraine-viewer.md#shoreline-correction-2026-09-16).
 
-Not yet recovered in the renderer: native adaptive subdivision/LOD, class-dependent material behavior, `tdic` coverage flags, exact shore/water geometry, native lighting and generic LAND/VLAND fallback mapping. Fixed triangles currently join each four-sample quad; the height query uses those same triangles. `UKR.MM` contains 257 object placements, now imported into the static scene with
+Named tiles and fitted LAND/VLAND presentation are implemented. Source-aware terrain detail transitions and class-dependent material behavior remain open; the host uses pixel coverage directly rather than the original `tdic` cache. The [terrain material review](terrain-materials.md) establishes the dictionary contract and named Kurile artwork, while distinguishing the remaining land-plane questions. Exact retail shore/water geometry and lighting remain unverified; current lighting is described below. Fixed triangles currently join each four-sample quad; the height query uses those same triangles. `UKR.MM` contains 257 object placements, now imported into the static scene with
 original shapes/textures, target identity and contact geometry. The sixteen base
 theaters share this path. [Airport placement contract](airport-placements.md)
 records unsupported shape and campaign boundaries.
@@ -112,11 +112,11 @@ The renderer now selects source sky/ocean decks and uses world-anchored plane pr
 
 ## Next recovery steps
 
-1. Decode the needed SH sky/cloud commands and their native callers; recover placement, scale, transparency and celestial motion.
-2. Port weather-record selection/interpolation and horizon/fog updates with deterministic state and synthetic arithmetic fixtures.
-3. Recover native adaptive terrain blocks, `tdic` coverage, fallback textures and shoreline/water behavior.
-4. Decode ground object placements and shape dependencies; compare known airfields and coast landmarks in the original game.
-5. Extend import profiles to a second theater and campaign variants, then collect native and cross-platform acceptance evidence.
+The [retail terrain detail plan](../ROADMAP.md#retail-terrain-detail-review)
+owns current terrain and scenery sequencing. The named-tile and coverage
+contracts are in [terrain materials](terrain-materials.md). Weather and
+celestial work is tracked in the linked weather guides. All 75 static layouts are selectable. Live campaign composition and further
+state-dependent source-detail behavior remain open. Retail visual comparison is unavailable.
 
 ## Broader extraction checkpoint
 
@@ -126,7 +126,7 @@ All 75 MM layouts parse. PGU.MM contains border placements (-4,244), (-4,248), (
 
 ## Runtime expansion to the 16 base theaters
 
-The viewer now uses the selected T2/MM, its referenced DAY2 variant and a variable-size texture array. The source texture naming convention uses the first three code characters: TVIET therefore needs TVI0–41.PIC. The shared profile now includes TVI. Kurile's base MM contains no tmap placements and needs no numbered texture layers; it renders source cell palette colors. Other theaters have 29–68 numbered texture layers in this preview.
+The viewer uses the selected base or variant MM, its referenced terrain and DAY2 palette, and paged indexed artwork. The numbered texture naming convention uses the first three code characters: TVIET therefore needs TVI0–41.PIC. The shared profile now includes TVI. Kurile has no numbered tmap placements; its 236 named placements now render with their original artwork. [Named-tile contract](terrain-materials.md#named-texture-placements). Other theaters have 29–68 numbered texture layers in this preview.
 
 Signed out-of-grid border placements remain preserved; the mesh only queries patches intersecting actual fine-grid quads. Camera starts and fixed triangles are authored investigation behavior. All 16 passed Metal startup/render checks; native landmark/shoreline/atmosphere parity remains open. See [runtime validation](../baselines/all-theaters.md#runtime-and-typography-follow-up).
 

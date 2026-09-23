@@ -208,3 +208,13 @@ Tab/arrows and Enter. Survival fields toggle between required and optional.
 Inactive groups preserve both settings. [Assignment and target-label rules](ai-awareness.md#quick-mission-objective-stamps)
 define the semantics; [validation](../baselines/mission-objectives.md) covers
 styling and two opposing-group discrimination.
+
+## Retail map variants
+
+John selected retail map-detail expansion on 2026-09-23. The existing location
+picker retains its sixteen base theaters and appends 59 imported MM variants.
+Each label contains the original map identity so variants can be distinguished.
+Selecting a variant loads its scenery and airport list; choosing another map
+resets the airport selection. Nationality/target menus use the variant's base
+theater tables. Restart retains the selected layout. The renderer uses the
+[static variant contract](terrain-detail.md), not a live campaign simulation.

@@ -491,7 +491,7 @@ TORE_PERF_FRAMES=330 TORE_PERF_ACTIVE=1 TORE_PERF_VIEWS=1 cargo run --locked -p 
 TORE_PERF_FRAMES=180 TORE_PERF_ACTIVE=1 cargo run --locked -p tore-app -- --free-flight --no-audio --instrument-page 3
 ```
 
-On PowerShell, set `$env:TORE_PERF_FRAMES="330"`, `$env:TORE_PERF_ACTIVE="1"`, and `$env:TORE_PERF_VIEWS="1"`, run the same Cargo command, then remove those environment variables. `TORE_PERF_FRAMES` accepts 60–100000 frames (0/off by default), prints mean/p50/p95/max milliseconds and exits after that many flight frames. The first 30 are excluded. Presence of `TORE_PERF_VIEWS` cycles front/back/up/chase/oblique every 30 frames; omit it to measure the selected view or switch views manually. These diagnostics only count flight frames; start with `--free-flight`. Avoid concurrent GPU workloads when comparing runs. Presence of `TORE_PERF_ACTIVE` explicitly keeps the bounded flight benchmark unpaused even if automation steals focus (it does not dismiss menus). Omit it for normal pause behavior and interactive pause measurements. The report includes paused frames and completed live camera readbacks; check these before interpreting a run as active flight.
+On PowerShell, set `$env:TORE_PERF_FRAMES="330"`, `$env:TORE_PERF_ACTIVE="1"`, and `$env:TORE_PERF_VIEWS="1"`, run the same Cargo command, then remove those environment variables. `TORE_PERF_FRAMES` accepts 60–100000 frames (0/off by default), prints mean/p50/p95/max milliseconds and exits after that many flight or terrain-viewer frames. The first 30 are excluded. Presence of `TORE_PERF_VIEWS` cycles front/back/up/chase/oblique every 30 frames; omit it to measure the selected view or switch views manually. Use `--free-flight` for aircraft measurements or `--viewer` with a fixed `TORE_WEATHER_VIEW` for terrain measurements. Avoid concurrent GPU workloads when comparing runs. Presence of `TORE_PERF_ACTIVE` explicitly keeps the bounded flight benchmark unpaused even if automation steals focus (it does not dismiss menus). Omit it for normal pause behavior and interactive pause measurements. The report includes paused frames and completed live camera readbacks; check these before interpreting a run as active flight.
 
 The report separates frame-start intervals, simulation/camera work, UI composition, and submission/presentation. These are CPU wall-clock measurements: presentation includes VSync/backpressure, and frame intervals are not verified display scanout times or GPU timestamps. A short run does not establish sustained thermal performance. See [measured baseline and remaining work](baselines/flight-performance.md).
 
@@ -1039,3 +1039,27 @@ not the function-key numbers. `--flight-reference player|target|missile` selects
 the reference for capture. Missing subjects return to Forward with feedback.
 Use an isolated profile with `--capture-flight .local/retail-views/view.ppm`.
 The [view validation](baselines/flight-views.md) records fixtures and limitations.
+
+## Retail map detail validation
+
+The location picker includes the sixteen base maps and 59 source variants.
+`--theater '~UKR1'` selects an exact variant for the viewer, free flight,
+Quick Mission or headless flight. Shell quotes preserve the tilde. Existing
+flight adapters remain independent of map selection.
+
+```sh
+TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --validate-maps --no-audio
+TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater KURILE --viewer --smoke-test
+TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater '~UKR1' --viewer --capture-terrain .local/ukr1.ppm
+```
+
+`--validate-maps` needs imported media but no display. It constructs every
+imported layout, reports source identity, placement/body counts, geometry and
+indexed artwork size, and exits with an error on construction failure. The
+other two commands need a display. Older caches require re-import for the
+`TORE_TERRAIN_V2` dependency set. Use the existing isolated import workflow
+above; never write extracted retail resources into tracked assets.
+
+Variants are static source scenery lists, with the
+[documented fitted grid/composition rule](spec/terrain-detail.md#host-presentation-where-the-source-rule-is-incomplete).
+They do not start a campaign or add autonomous ground behavior.

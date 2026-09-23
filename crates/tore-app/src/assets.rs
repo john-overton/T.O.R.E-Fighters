@@ -188,6 +188,7 @@ impl Assets {
             "WIN01.FNT",
             "UKR.T2",
             "UKR.MM",
+            "TORE_TERRAIN_V2",
             "SUN.SH",
             "MOON.SH",
             "STARS.SH",
@@ -377,10 +378,15 @@ impl Assets {
             &tore_formats::aircraft::AircraftId::ALL,
             true,
         )?;
-        let scene_layouts: Vec<String> = tore_formats::theater::THEATERS
+        let scene_layouts: Vec<String> = aircraft_libs
             .iter()
-            .map(|(code, _)| format!("{code}.MM"))
+            .flat_map(|archive| archive.entries.keys())
+            .filter(|name| {
+                name.ends_with(".MM") && tore_formats::theater::base_theater(name).is_some()
+            })
+            .cloned()
             .collect();
+        resources.insert("TORE_TERRAIN_V2".into(), vec![2]);
         let scene_names = tore_formats::mission::scene_dependencies(
             &aircraft_libs.iter().collect::<Vec<_>>(),
             &scene_layouts,

@@ -17,11 +17,12 @@ describe a full discovery/catalog/import pass, including conditional/dynamic
 references, missing-asset reason chains and separate visual/collision acceptance.
 That archive is kept for its recovered facts; sequencing lives in
 [the parity plan](parity-plan.md).
-The shared theater dependency resolver now follows matching MM placements to
-OBJ_TYPE definitions, explicit main SH resources and projected PIC references.
-The app uses the same resolver for all sixteen base theaters. Supported bodies
-render and receive target/contact identity; unsupported shape programs remain
-manifest-only with diagnostics. Missing required assets name their referring
+The shared theater dependency resolver follows matching MM placements to
+OBJ_TYPE definitions, explicit main SH resources and projected PIC references,
+plus named and numbered terrain texture dependencies. The app uses the same
+resolver for sixteen base maps and 59 retail variants. All their placed main
+shapes project; no-body controllers remain manifest-only. Large scenery art
+retains its original resolution through GPU paging. Missing required assets name their referring
 resource. [Airport evidence and remaining scope](baselines/ukraine-airports.md).
 
 ## Two different workflows

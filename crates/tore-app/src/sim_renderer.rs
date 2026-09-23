@@ -1,6 +1,33 @@
 //! Extensible 3D pass. World data/camera are independent of wgpu; UI composites afterward.
 use crate::terrain::{Camera, World};
 use wgpu::util::DeviceExt;
+
+/// Material-local packing flag. World and weather art use sixteen independent
+/// 256-square pages per physical layer, within portable texture-array limits.
+pub(crate) fn tile_layout(device: &wgpu::Device, packed: bool) -> wgpu::Buffer {
+    let mut value = [0u8; 16];
+    value[0] = u8::from(packed);
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Indexed material layout"),
+        contents: &value,
+        usage: wgpu::BufferUsages::UNIFORM,
+    })
+}
+
+fn pack_world_pages(indices: &[u8]) -> Vec<u8> {
+    assert!(indices.len().is_multiple_of(65536));
+    let count = indices.len() / 65536;
+    assert!(count <= 4096, "world artwork exceeds portable page budget");
+    let mut packed = vec![255; count.div_ceil(16).max(1) * 1024 * 1024];
+    for (page, bytes) in indices.chunks_exact(65536).enumerate() {
+        let origin = (page / 16) * 1024 * 1024 + (page % 16 / 4) * 256 * 1024 + (page % 4) * 256;
+        for y in 0..256 {
+            packed[origin + y * 1024..origin + y * 1024 + 256]
+                .copy_from_slice(&bytes[y * 256..y * 256 + 256]);
+        }
+    }
+    packed
+}
 fn bytes(values: &[f32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
@@ -71,6 +98,7 @@ pub struct SimRenderer {
     battle: Option<(wgpu::Buffer, u32)>,
     battle_contacts: Vec<Contact>,
     airports: Option<(wgpu::Buffer, u32)>,
+    airport_lines: Option<(wgpu::Buffer, u32)>,
     /// Per-model formation batches, with each aircraft's vertex range.
     dummies: Vec<(
         tore_formats::aircraft::AircraftId,
@@ -122,6 +150,7 @@ struct Pipelines {
     tracer_pipeline: wgpu::RenderPipeline,
     pipeline: wgpu::RenderPipeline,
     airport_pipeline: wgpu::RenderPipeline,
+    scenery_line_pipeline: wgpu::RenderPipeline,
     airport_decal_pipeline: wgpu::RenderPipeline,
     terrain_pipeline: wgpu::RenderPipeline,
     canopy_depth_pipeline: wgpu::RenderPipeline,
@@ -210,6 +239,10 @@ impl Pipelines {
             .constant = -8;
         let airport_decal_pipeline = device.create_render_pipeline(&surface_descriptor);
         surface_descriptor.depth_stencil.as_mut().unwrap().bias = Default::default();
+        surface_descriptor.primitive.topology = wgpu::PrimitiveTopology::LineList;
+        surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("scenery_line_fragment");
+        let scenery_line_pipeline = device.create_render_pipeline(&surface_descriptor);
+        surface_descriptor.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
         surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("fragment");
         let sky_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Sky layout"),
@@ -453,6 +486,7 @@ impl Pipelines {
             tracer_pipeline,
             pipeline,
             airport_pipeline,
+            scenery_line_pipeline,
             airport_decal_pipeline,
             terrain_pipeline,
             canopy_depth_pipeline,
@@ -540,6 +574,16 @@ impl SimRenderer {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(16),
+                    },
+                    count: None,
+                },
             ],
         });
         let lighting =
@@ -570,14 +614,21 @@ impl SimRenderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let indices = pack_world_pages(
+            &[
+                world.texture_indices.as_slice(),
+                world.sky_indices.as_slice(),
+            ]
+            .concat(),
+        );
+        let size = wgpu::Extent3d {
+            width: 1024,
+            height: 1024,
+            depth_or_array_layers: (indices.len() / (1024 * 1024)) as u32,
+        };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Original Ukraine terrain tiles"),
-            size: wgpu::Extent3d {
-                width: 256,
-                height: 256,
-                depth_or_array_layers: ((world.texture_indices.len() + world.sky_indices.len())
-                    / (256 * 256)) as u32,
-            },
+            label: Some("Original world artwork pages"),
+            size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -586,28 +637,14 @@ impl SimRenderer {
             view_formats: &[],
         });
         queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &[
-                world.texture_indices.as_slice(),
-                world.sky_indices.as_slice(),
-            ]
-            .concat(),
+            texture.as_image_copy(),
+            &indices,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(256),
-                rows_per_image: Some(256),
+                bytes_per_row: Some(1024),
+                rows_per_image: Some(1024),
             },
-            wgpu::Extent3d {
-                width: 256,
-                height: 256,
-                depth_or_array_layers: ((world.texture_indices.len() + world.sky_indices.len())
-                    / (256 * 256)) as u32,
-            },
+            size,
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
@@ -628,6 +665,7 @@ impl SimRenderer {
             view_formats: &[],
         });
         let palette_view = palette.create_view(&wgpu::TextureViewDescriptor::default());
+        let material_storage = tile_layout(device, true);
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Simulation scene bindings"),
             layout: &pipelines.pipeline.get_bind_group_layout(0),
@@ -651,6 +689,10 @@ impl SimRenderer {
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: wgpu::BindingResource::TextureView(&palette_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: material_storage.as_entire_binding(),
                 },
             ],
         });
@@ -689,6 +731,7 @@ impl SimRenderer {
             battle: None,
             battle_contacts: Vec::new(),
             airports: None,
+            airport_lines: None,
             vapor: None,
             p: pipelines,
             shader,
@@ -787,6 +830,29 @@ impl SimRenderer {
             }
             *count = (length / 10) as u32;
         }
+    }
+    pub fn airport_lines(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
+        let needed = (vertices.len() * 4).max(40) as u64;
+        if self
+            .airport_lines
+            .as_ref()
+            .is_none_or(|(buffer, _)| buffer.size() < needed)
+        {
+            self.airport_lines = Some((
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Source scenery line geometry"),
+                    size: needed,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                0,
+            ));
+        }
+        let (buffer, count) = self.airport_lines.as_mut().unwrap();
+        if !vertices.is_empty() {
+            queue.write_buffer(buffer, 0, &bytes(vertices));
+        }
+        *count = (vertices.len() / 10) as u32;
     }
     /// Seven floats per vertex: position then premultiplied-free RGBA.
     pub fn vapor(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
@@ -937,6 +1003,7 @@ impl SimRenderer {
             assert!(pic.palette.is_empty(), "unreviewed aircraft atlas palette");
             let palette_view = self.palette.create_view(&Default::default());
             let engine_view = engine.map(|image| image.upload(device, queue));
+            let material_storage = tile_layout(device, false);
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Aircraft textures"),
                 layout: &self.p.pipeline.get_bind_group_layout(0),
@@ -962,6 +1029,10 @@ impl SimRenderer {
                         resource: wgpu::BindingResource::TextureView(
                             engine_view.as_ref().unwrap_or(&palette_view),
                         ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: material_storage.as_entire_binding(),
                     },
                 ],
             });
@@ -1474,6 +1545,12 @@ impl SimRenderer {
             pass.set_pipeline(&self.p.airport_decal_pipeline);
             pass.draw(0..*count, 0..1);
         }
+        if let Some((buffer, count)) = &self.airport_lines {
+            pass.set_pipeline(&self.p.scenery_line_pipeline);
+            pass.set_bind_group(0, &self.bind, &[]);
+            pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.draw(0..*count, 0..1);
+        }
         pass.set_pipeline(&self.p.pipeline);
         if let Some((bind, vertices, count)) = &self.aircraft {
             pass.set_bind_group(0, bind, &[]);
@@ -1604,6 +1681,23 @@ impl SimRenderer {
 mod lighting_tests {
     use super::*;
 
+    #[test]
+    fn world_pages_pack_more_than_256_images_without_losing_indices() {
+        let mut pages = vec![0; 300 * 65536];
+        for (n, page) in pages.chunks_exact_mut(65536).enumerate() {
+            page.fill((n % 251) as u8);
+            page[0] = (n / 251) as u8;
+        }
+        let packed = pack_world_pages(&pages);
+        assert_eq!(packed.len(), 19 * 1024 * 1024);
+        for n in 0..300 {
+            for (x, y) in [(0, 0), (255, 255), (100, 42)] {
+                let at = (n / 16) * 1024 * 1024 + (n % 16 / 4 * 256 + y) * 1024 + n % 4 * 256 + x;
+                assert_eq!(packed[at], pages[n * 65536 + y * 256 + x]);
+            }
+        }
+        assert_eq!(packed[18 * 1024 * 1024 + 3 * 256 * 1024], 255);
+    }
     #[test]
     fn contacts_cover_nonempty_ranges_and_repeat_per_copy() {
         assert_eq!(Contact::new(30, 30, [0.; 3], 56.), None);

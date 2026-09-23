@@ -62,10 +62,13 @@ investigating or eventually editing it:
 The [Ukraine airport inventory](airport-placements.md) now identifies the first
 runway/building dependency set and its placement limits.
 
-The runtime importer follows base-layout placements through their OBJ_TYPE
+The runtime importer follows base and variant layout placements through their OBJ_TYPE
 prefix to explicit SH and projected PIC references. Static geometry uses the SH
-CODE header exponent for rendering and contact. Unsupported shape opcodes are
-diagnosed while their placement identity remains available.
+CODE header exponent for rendering and contact. All main shapes placed by the 75 reviewed layouts project with the scenery
+reader. It also preserves bounded line records, shown as one-pixel strokes, and
+selects a fitted loaded pose for the reviewed CHAP/SA2 load-count envelopes.
+No callback runs. Unreviewed shape opcodes still receive diagnostics while
+placement identity remains available. [Scenery coverage and limits](../spec/terrain-detail.md).
 
 The environment reader still handles environment/tmap fields independently.
 The bounded mission reader now parses object blocks for static scene construction;

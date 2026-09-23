@@ -19,6 +19,9 @@ pub struct ViewWeather {
 pub struct World {
     pub ocean_motion: crate::ocean::Motion,
     pub theater: Theater,
+    /// Exact selected MM identity, distinct from its referenced base grid.
+    pub layout: String,
+    pub land_texture: Option<usize>,
     pub environment: Environment,
     /// Immutable imported placement/airport geometry. Mutable health belongs to combat.
     pub airport_scene: tore_sim::airport::Scene,
@@ -36,6 +39,7 @@ pub struct World {
     pub vertices: Vec<f32>,
     /// Per-placement geometry, rebuilt into the dynamic scene from combat HP.
     pub static_vertices: BTreeMap<u32, Vec<f32>>,
+    pub static_lines: BTreeMap<u32, Vec<f32>>,
     pub texture_indices: Vec<u8>,
     /// Authoritative environment. One instance per world, so every camera,
     /// mirror and panel resolves the same instant.
@@ -86,6 +90,21 @@ fn pavement_height(shape: &tore_formats::shape::Shape) -> f64 {
         .map_or(0., |(height, _)| f64::from(f32::from_bits(height)))
 }
 
+/// Preserve every source index. Doubling 128-square images is exact nearest
+/// replication; all retail terrain images retain the same four-cell footprint.
+fn append_ground_texture(out: &mut Vec<u8>, pic: &Pic) -> AppResult<()> {
+    if pic.width != pic.height || !matches!(pic.width, 128 | 256) || !pic.palette.is_empty() {
+        return Err("unsupported indexed ground image".into());
+    }
+    for y in 0..256 {
+        for x in 0..256 {
+            let at = (y * pic.height / 256) * pic.width + x * pic.width / 256;
+            out.push(if pic.mask[at] { pic.pixels[at] } else { 255 });
+        }
+    }
+    Ok(())
+}
+
 impl World {
     pub fn for_theater(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> AppResult<Self> {
         Self::for_mission(resources, code, None)
@@ -103,17 +122,27 @@ impl World {
                 .get(n)
                 .ok_or_else(|| format!("Missing {n}; re-import media with --import"))
         };
-        let theater = Theater::parse(required(&format!("{code}.T2"))?)?;
-        let mut environment = Environment::parse(required(&format!("{code}.MM"))?)?;
-        if theater.cols < 2 || theater.rows < 2 || environment.map != format!("{code}.T2") {
-            return Err("unsupported theater map/dimensions".into());
+        let layout = format!("{}.MM", code.trim_end_matches(".MM"));
+        let base =
+            tore_formats::theater::base_theater(&layout).ok_or("unknown retail map layout")?;
+        let mut environment = Environment::parse(required(&layout)?)?;
+        if tore_formats::theater::base_theater(&environment.map) != Some(base) {
+            return Err("layout and terrain identities disagree".into());
         }
-        let mut catalog = Vec::new();
-        for (n, b) in resources {
-            if n.ends_with(".T2") {
-                let t = Theater::parse(b)?;
-                catalog.push((n.trim_end_matches(".T2").into(), t.name));
-            }
+        let grid = resources
+            .get(&environment.map)
+            .or_else(|| resources.get(&format!("{base}.T2")))
+            .ok_or("missing base terrain grid")?;
+        let mut theater = Theater::parse(grid)?;
+        let catalog = tore_formats::theater::map_catalog(resources)?;
+        if let Some((_, label)) = catalog
+            .iter()
+            .find(|(id, _)| *id == code.trim_end_matches(".MM"))
+        {
+            theater.name.clone_from(label);
+        }
+        if theater.cols < 2 || theater.rows < 2 {
+            return Err("unsupported theater dimensions".into());
         }
         let (layer, launch) = match condition {
             Some(index) => {
@@ -121,7 +150,7 @@ impl World {
                     .get(index)
                     .ok_or("weather condition outside source table")?;
                 (
-                    tore_sim::environment::layer_resource(index, &environment.map)?,
+                    tore_sim::environment::layer_resource(index, &format!("{base}.T2"))?,
                     Some([
                         choice.seconds_of_day / 3600,
                         choice.seconds_of_day / 60 % 60,
@@ -184,30 +213,32 @@ impl World {
         }
         environment.clouds = Some(cloud_altitude);
         let mut texture_indices = Vec::new();
-        let count = environment
-            .textures
-            .values()
-            .map(|p| p.texture + 1)
-            .max()
-            .unwrap_or(0);
-        let prefix = &code[..code.len().min(3)];
-        for i in 0..count {
-            let pic = Pic::parse(required(&format!("{prefix}{i}.PIC"))?)?;
-            if pic.width != 256 || pic.height != 256 {
-                return Err("expected 256-square terrain texture".into());
-            }
-            if !pic.palette.is_empty() {
-                return Err("terrain texture overrides the weather palette".into());
-            }
-            // Native terrain texture scanning tests 255 as water/cutout (0x4aa739);
-            // a masked-out texel is equally transparent, so it reuses that index.
-            texture_indices.extend(
-                pic.pixels
-                    .iter()
-                    .zip(&pic.mask)
-                    .map(|(index, visible)| if *visible { *index } else { 255 }),
-            );
+        let mut terrain_layers = BTreeMap::new();
+        for placement in environment.textures.values_mut() {
+            let name = placement.resource_name(base);
+            let layer = if let Some(layer) = terrain_layers.get(&name) {
+                *layer
+            } else {
+                let pic = Pic::parse(required(&name)?)?;
+                let layer = texture_indices.len() / 65536;
+                append_ground_texture(&mut texture_indices, &pic)?;
+                terrain_layers.insert(name, layer);
+                layer
+            };
+            // This world-local layer is not written back to the imported data.
+            placement.texture = layer;
         }
+        let land_name = format!("{}LAND.PIC", &base[..1]);
+        let land = resources
+            .get(&land_name)
+            .or_else(|| resources.get("LAND.PIC"));
+        let land_texture = if let Some(bytes) = land {
+            let layer = texture_indices.len() / 65536;
+            append_ground_texture(&mut texture_indices, &Pic::parse(bytes)?)?;
+            Some(layer)
+        } else {
+            None
+        };
         let mut sky_indices = Vec::new();
         let mut deck_textures = BTreeMap::new();
         for layer in weather.configuration().layers() {
@@ -247,6 +278,8 @@ impl World {
         let mut out = Self {
             ocean_motion: crate::ocean::Motion::from_environment()?,
             theater,
+            layout,
+            land_texture,
             environment,
             airport_scene: tore_sim::airport::Scene::default(),
             static_manifest: Vec::new(),
@@ -258,6 +291,7 @@ impl World {
             decks: [[0., 1., -1., 0.]; 2],
             vertices: Vec::new(),
             static_vertices: BTreeMap::new(),
+            static_lines: BTreeMap::new(),
             texture_indices,
             weather,
             visual_bands: Vec::new(),
@@ -278,7 +312,7 @@ impl World {
         };
         out.resolve_palette(0.);
         out.build_mesh();
-        out.build_airport_scene(resources, code)?;
+        out.build_airport_scene(resources, code.trim_end_matches(".MM"))?;
         Ok(out)
     }
 
@@ -320,7 +354,7 @@ impl World {
                         layout_name, main_shape, placement.object_type
                     )
                 })?;
-                let parsed = tore_formats::shape::Shape::parse(shape_bytes);
+                let parsed = tore_formats::shape::Shape::scenery(shape_bytes);
                 match parsed {
                     Ok(shape) => {
                         if definition.callbacks.iter().any(|name| name == "_STRIPProc")
@@ -348,7 +382,7 @@ impl World {
         let mut objects = Vec::new();
         let mut runways = Vec::new();
         let mut airports = Vec::new();
-        let mut static_layers = BTreeMap::<String, (f32, f32, f32, f32)>::new();
+        let mut static_layers = BTreeMap::<String, crate::static_art::Image>::new();
         let mut static_float_count = 0usize;
         for placement in &layout.placements {
             let definition = &definitions[&placement.object_type];
@@ -505,61 +539,28 @@ impl World {
                 if face.positions.len() < 3 {
                     continue;
                 }
-                let (layer, texture_height, texture_scale_x, texture_scale_y) =
-                    if face.texture.is_empty() || face.uv.is_empty() {
-                        (-1.0, 1.0, 1.0, 1.0)
-                    } else if let Some(layer) =
-                        static_layers.get(&face.texture.to_ascii_uppercase())
-                    {
-                        *layer
-                    } else {
-                        let texture_name = face.texture.to_ascii_uppercase();
-                        let pic =
-                            Pic::parse(resources.get(&texture_name).ok_or_else(|| {
-                                format!("missing static texture {texture_name}")
-                            })?)?;
-                        let layer =
-                            (self.texture_indices.len() + self.sky_indices.len()) as f32 / 65536.0;
-                        let mut pixels = vec![255; 65536];
-                        // Fitted compatibility: oversized source sheets are sampled
-                        // into one 256-square layer. Retain their complete artwork
-                        // and original UV proportions; extracted media is unchanged.
-                        let resize = pic.width > 256 || pic.height > 256;
-                        let width = if resize { 256 } else { pic.width };
-                        let height = if resize { 256 } else { pic.height };
-                        for y in 0..height {
-                            for x in 0..width {
-                                let sx = if resize { x * pic.width / 256 } else { x };
-                                let sy = if resize { y * pic.height / 256 } else { y };
-                                let source = sy * pic.width + sx;
-                                if pic.mask[source] {
-                                    pixels[y * 256 + x] = pic.pixels[source];
-                                }
-                            }
-                        }
-                        self.sky_indices.extend(pixels);
-                        let entry = (
-                            layer,
-                            pic.height as f32,
-                            if resize {
-                                256.0 / pic.width as f32
-                            } else {
-                                1.0
-                            },
-                            if resize {
-                                256.0 / pic.height as f32
-                            } else {
-                                1.0
-                            },
-                        );
-                        static_layers.insert(texture_name, entry);
-                        entry
-                    };
+                let image = if face.texture.is_empty() || face.uv.is_empty() {
+                    None
+                } else {
+                    let name = face.texture.to_ascii_uppercase();
+                    if !static_layers.contains_key(&name) {
+                        let pic = Pic::parse(
+                            resources
+                                .get(&name)
+                                .ok_or_else(|| format!("missing static texture {name}"))?,
+                        )?;
+                        let first = (self.texture_indices.len() + self.sky_indices.len()) / 65536;
+                        let image =
+                            crate::static_art::Image::append(&pic, &mut self.sky_indices, first)?;
+                        static_layers.insert(name.clone(), image);
+                    }
+                    static_layers.get(&name)
+                };
                 for triangle in 1..face.positions.len() - 1 {
-                    static_float_count += 30;
-                    if static_float_count > 32 * 1024 * 1024 / 4 {
+                    if static_float_count + instance_vertices.len() + 30 > 32 * 1024 * 1024 / 4 {
                         return Err("static scene exceeds 32 MiB geometry budget".into());
                     }
+                    let mut points = Vec::with_capacity(3);
                     for vertex_index in [0, triangle, triangle + 1] {
                         let point = face.positions[vertex_index];
                         let right = f64::from(point[0]) * scale;
@@ -572,24 +573,62 @@ impl World {
                                 + basis.forward[axis] * forward
                         });
                         let uv = face.uv.get(vertex_index).copied().unwrap_or([0.0; 2]);
-                        let uv = [
-                            (uv[0] + 0.5) * texture_scale_x / 256.0,
-                            (texture_height - 0.5 - uv[1]) * texture_scale_y / 256.0,
-                        ];
-                        instance_vertices.extend_from_slice(&[
+                        let uv = image.map_or([0., 0.], |image| {
+                            [uv[0] + 0.5, image.height as f32 - 0.5 - uv[1]]
+                        });
+                        points.push([
                             position[0] as f32,
                             position[1] as f32,
                             position[2] as f32,
                             uv[0],
                             uv[1],
-                            layer,
+                            -1.0,
                             0.0,
                             0.0,
                             0.0,
-                            f32::from(face.colors[vertex_index]),
+                            f32::from(face.colors[vertex_index]) + f32::from(face.fog as u8) * 256.,
                         ]);
                     }
+                    if let Some(image) = image {
+                        image.triangle(
+                            points.try_into().expect("three triangle corners"),
+                            &mut instance_vertices,
+                            32 * 1024 * 1024 / 4 - static_float_count,
+                        )?;
+                    } else {
+                        instance_vertices.extend(points.into_iter().flatten());
+                    }
                 }
+            }
+            let mut line_vertices = Vec::new();
+            for line in &shape.lines {
+                for point in line.positions {
+                    let [right, forward, up] = point.map(|v| f64::from(v) * scale);
+                    let position = std::array::from_fn::<_, 3, _>(|axis| {
+                        origin[axis]
+                            + basis.right[axis] * right
+                            + basis.up[axis] * up
+                            + basis.forward[axis] * forward
+                    });
+                    line_vertices.extend([
+                        position[0] as f32,
+                        position[1] as f32,
+                        position[2] as f32,
+                        0.,
+                        0.,
+                        -1.,
+                        0.,
+                        0.,
+                        0.,
+                        f32::from(line.color) + f32::from(line.fog as u8) * 256.,
+                    ]);
+                }
+            }
+            static_float_count += line_vertices.len();
+            self.static_lines.insert(id, line_vertices);
+            static_float_count += instance_vertices.len();
+            if static_float_count > 32 * 1024 * 1024 / 4 {
+                return Err("static scene exceeds 32 MiB geometry budget".into());
             }
             self.static_vertices.insert(id, instance_vertices);
         }
@@ -611,7 +650,10 @@ impl World {
                     .environment
                     .textures
                     .get(&((x & !3) as i32, (y & !3) as i32));
-                let layer = placement.map_or(-1.0, |p| p.texture as f32);
+                let layer = placement.map_or_else(
+                    || self.land_texture.map_or(-1.0, |l| l as f32),
+                    |p| p.texture as f32,
+                );
                 // Untextured water reveals the shared ocean/horizon pass. A
                 // shoreline texture defines coverage even on a water base cell.
                 if placement.is_none() && c.color == 255 {
@@ -711,19 +753,28 @@ impl World {
     }
 
     pub fn visible_static_vertices(&self, targets: &[tore_sim::combat::live::Target]) -> Vec<f32> {
+        self.visible_static_geometry(&self.static_vertices, targets)
+    }
+    pub fn visible_static_lines(&self, targets: &[tore_sim::combat::live::Target]) -> Vec<f32> {
+        self.visible_static_geometry(&self.static_lines, targets)
+    }
+    fn visible_static_geometry(
+        &self,
+        geometry: &BTreeMap<u32, Vec<f32>>,
+        targets: &[tore_sim::combat::live::Target],
+    ) -> Vec<f32> {
         let alive: BTreeSet<u32> = targets
             .iter()
             .filter(|target| target.hp > 0)
             .map(|target| target.id)
             .collect();
-        let total = self
-            .static_vertices
+        let total = geometry
             .iter()
             .filter(|(id, _)| alive.contains(id))
             .map(|(_, vertices)| vertices.len())
             .sum();
         let mut out = Vec::with_capacity(total);
-        for (id, vertices) in &self.static_vertices {
+        for (id, vertices) in geometry {
             if alive.contains(id) {
                 out.extend_from_slice(vertices);
             }
@@ -945,7 +996,7 @@ impl Camera {
     }
     pub fn for_world(world: &World) -> Self {
         let mut camera = Self::new();
-        if world.theater.name != "Ukraine" {
+        if tore_formats::theater::base_theater(&world.layout) != Some("UKR") {
             camera.position = [
                 (world.theater.cols as f32 - 1.0) * CELL_FEET * 0.5,
                 28000.0,
@@ -1028,6 +1079,45 @@ impl Camera {
 pub(crate) mod tests {
     use super::*;
     #[test]
+    fn variant_label_does_not_move_the_inspection_camera() {
+        let mut w = world();
+        w.layout = "UKR.MM".into();
+        let base = Camera::for_world(&w).position;
+        w.layout = "~UKR1.MM".into();
+        w.theater.name = "Ukraine (UKR1)".into();
+        assert_eq!(Camera::for_world(&w).position, base);
+        w.layout = "~FRA0.MM".into();
+        assert_ne!(Camera::for_world(&w).position, base);
+    }
+    #[test]
+    fn smaller_ground_art_preserves_every_source_texel_and_water() {
+        let mut pic = Pic {
+            width: 128,
+            height: 128,
+            pixels: vec![93; 128 * 128],
+            mask: vec![true; 128 * 128],
+            palette: vec![],
+            glyphs: vec![],
+        };
+        pic.pixels[1] = 255;
+        pic.pixels[128 * 127 + 127] = 17;
+        pic.mask[128] = false;
+        let mut bytes = Vec::new();
+        append_ground_texture(&mut bytes, &pic).unwrap();
+        assert_eq!(bytes.len(), 65536);
+        for y in 0..256 {
+            for x in 0..256 {
+                let at = (y / 2) * 128 + x / 2;
+                assert_eq!(
+                    bytes[y * 256 + x],
+                    if pic.mask[at] { pic.pixels[at] } else { 255 }
+                );
+            }
+        }
+        pic.width = 127;
+        assert!(append_ground_texture(&mut Vec::new(), &pic).is_err());
+    }
+    #[test]
     fn projection_matches_the_renderer_view() {
         let mut camera = Camera::new();
         camera.position = [0., 1000., 0.];
@@ -1075,6 +1165,9 @@ pub(crate) mod tests {
             catalog: vec![],
             vertices: vec![],
             static_vertices: BTreeMap::new(),
+            static_lines: BTreeMap::new(),
+            layout: "TEST.MM".into(),
+            land_texture: None,
             texture_indices: vec![],
             sky_indices: vec![],
             celestial: None,
@@ -1167,6 +1260,7 @@ pub(crate) mod tests {
                     row: 0,
                     texture: 2,
                     rotation,
+                    resource: None,
                 },
             );
             w.vertices.clear();

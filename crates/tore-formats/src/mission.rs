@@ -307,6 +307,16 @@ pub fn scene_dependencies(archives: &[&Archive], layouts: &[String]) -> Result<B
     for layout in layouts {
         let bytes = read(layout)?;
         out.insert(layout.to_ascii_uppercase());
+        let environment = crate::theater::Environment::parse(&bytes)?;
+        let base = crate::theater::base_theater(&environment.map)
+            .ok_or_else(|| invalid("unreviewed scenery map reference"))?;
+        out.insert(format!("{base}.T2"));
+        for placement in environment.textures.values() {
+            let name = placement.resource_name(base);
+            if out.insert(name.clone()) {
+                read(&name)?;
+            }
+        }
         for placement in Layout::parse(layout, &bytes)?.placements {
             let associated = airport_section(placement.section.as_deref());
             definitions
@@ -343,7 +353,7 @@ pub fn scene_dependencies(archives: &[&Archive], layouts: &[String]) -> Result<B
                 format!("{main_shape}: referred by {definition_name}: {error}"),
             )
         })?;
-        let shape = match crate::shape::Shape::parse(&shape_bytes) {
+        let shape = match crate::shape::Shape::scenery(&shape_bytes) {
             Ok(shape) => shape,
             Err(_) => continue,
         };
@@ -376,6 +386,7 @@ pub fn mission_nationality(map: Option<&str>, value: i32) -> i32 {
         low = low.wrapping_add(1);
     }
     if map
+        .map(|name| crate::theater::base_theater(name).unwrap_or(name))
         .and_then(|name| name.bytes().next())
         .is_some_and(|first| matches!(first.to_ascii_uppercase(), b'T' | b'U' | b'K'))
     {
@@ -394,6 +405,19 @@ pub fn mission_nationality(map: Option<&str>, value: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn variant_nationality_uses_the_same_theater_conversion() {
+        for value in [5, 6, 12, 13, 14, 137] {
+            assert_eq!(
+                mission_nationality(Some("~UKR1.T2"), value),
+                mission_nationality(Some("UKR.T2"), value)
+            );
+            assert_eq!(
+                mission_nationality(Some("$FRA0.T2"), value),
+                mission_nationality(Some("FRA.T2"), value)
+            );
+        }
+    }
     const SAMPLE: &str = "textFormat\nmap ukr.T2\nsides\n\t0\n\t128\n;--- Kiev Airport\nobj\n\ttype HANGR.OT\n\tpos 10 0 -20\n\tangle -90 1 2\n\tnationality 137\n\tflags $4003\n\tname \u{1}Hangar One\u{1}\n\talias -10114\n\tfuture inert callback\n\t.\n";
     #[test]
     fn preserves_identity_signed_values_and_unknowns() {

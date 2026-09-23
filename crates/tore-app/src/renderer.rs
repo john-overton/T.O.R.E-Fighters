@@ -159,8 +159,9 @@ impl Renderer {
     pub fn escapees(&mut self, art: &crate::ejection_art::Art, vertices: &[f32]) {
         self.sim.escapees(&self.device, &self.queue, art, vertices);
     }
-    pub fn airports(&mut self, vertices: &[f32]) {
+    pub fn airports(&mut self, vertices: &[f32], lines: &[f32]) {
         self.sim.airports(&self.device, &self.queue, vertices);
+        self.sim.airport_lines(&self.device, &self.queue, lines);
     }
     pub fn smoke(&mut self, art: &tore_formats::Pic, smoke: [&tore_sim::combat::smoke::Smoke; 2]) {
         self.sim.smoke(&self.device, &self.queue, art, smoke);

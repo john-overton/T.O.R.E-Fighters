@@ -15,9 +15,9 @@ struct ShadowOut { @builtin(position) position:vec4<f32>, @location(0) uv:vec2<f
  out.uv=uv;out.layer=layer;return out;
 }
 fn shadow_cutout(uv:vec2<f32>,layer:i32) {
- let size=vec2<i32>(textureDimensions(tiles));
+ let size=vec2<i32>(tile_size());
  let at=clamp(vec2<i32>(uv*vec2<f32>(size)),vec2<i32>(0),size-vec2<i32>(1));
- if textureLoad(tiles,at,layer,0).r==255u {discard;}
+ if read_tile(at,layer)==255u {discard;}
 }
 @fragment fn shadow_fragment(in:ShadowOut) {
  // Glass, flame sheets and emissive effects must not cast solid silhouettes.

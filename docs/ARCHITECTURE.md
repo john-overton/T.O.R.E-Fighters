@@ -51,7 +51,14 @@ Import user-owned media at runtime into platform application data. The v1 pack i
 
 ## First simulation renderer
 
-`terrain.rs` constructs a world from the selected retail T2/MM, numbered texture family and its DAY2 variant palette. Its camera and surface queries have no GPU/window dependency. `sim_renderer.rs` uploads geometry and a texture array, owns depth targets and draws terrain plus a fullscreen sky pass; `terrain.wgsl` supplies the initial perspective, sampling and fog. `renderer.rs` composes this scene with the transparent CPU HUD, resizing depth and surface together. This separation allows aircraft/object/weather passes and a deterministic simulation to be added without coupling format readers to wgpu.
+World image pages share a bounded 1024-square array, with sixteen logical pages
+per layer. `static_art.rs` retains large scenery pictures at source resolution
+and clips face geometry at page boundaries. Material-local storage metadata
+keeps rectangular aircraft/smoke images and paged world/weather art distinct.
+All sample, palette-remap and shadow paths use the corresponding addressing.
+[Source coverage and static variant composition](spec/terrain-detail.md).
+
+`terrain.rs` constructs a world from the selected retail MM and its resolved T2, named or numbered texture references and DAY2 variant palette. Its camera and surface queries have no GPU/window dependency. `sim_renderer.rs` uploads geometry and a texture array, owns depth targets and draws terrain plus a fullscreen sky pass; `terrain.wgsl` supplies the initial perspective, sampling and fog. `renderer.rs` composes this scene with the transparent CPU HUD, resizing depth and surface together. This separation allows aircraft/object/weather passes and a deterministic simulation to be added without coupling format readers to wgpu.
 
 The initial implementation uses full-resolution fixed triangles and an authored sky/fog projection. It is not the native adaptive renderer. All geometry/colors come from local source data at runtime; no retail derivatives are embedded. See [theater findings](formats/theater.md) for recovered versus authored behavior. The Hornet adapter now advances at 120 fixed ticks/second; the developer free camera still uses elapsed wall time for inspection.
 

@@ -11,6 +11,13 @@
 One page. What is specified, what is built, what is next. Milestones live in
 [ROADMAP.md](ROADMAP.md); how agents work is in [AGENTS.md](../AGENTS.md).
 
+**Retail map detail, 2026-09-23.** John selected source textures, artwork,
+scenery and variants. All sixteen base maps and 59 variants now load, with
+Kurile's named artwork, full-resolution scenery pages and visible main-shape
+placements. Generic land tiling and static variant composition are fitted.
+Shaders and expanded landscapes are [future work](ROADMAP.md#future-terrain-enhancements).
+[Evidence and limits](baselines/retail-terrain-review.md#implementation-validation).
+
 Airports are connected for the sixteen base theaters: source static placements,
 individual ground targets, runway support, tower text/verified recorded replies,
 and automatic ILS at or below 4,000 feet above airport ground. Campaign overlays,
@@ -88,6 +95,7 @@ name, with the numbers a player would notice.
 | [AI behavior](spec/ai.md) | Fighter decisions, timing, pursuit, targeting, steering and terrain, seeker gates, ammunition, wing orders and formations, threat warnings and countermeasures, routes and fuel | Established rules implemented as isolated components with synthetic tests; open items in the [M1e backlog](ROADMAP.md#ai-backlog-2026-09-17); Quick Mission hookup is partial |
 | [Ocean](spec/ocean.md) | Short ripples, close pixelation and distance filtering; original textures/colors | Implemented; [acceptance](baselines/ocean.md) |
 | [Terrain shorelines](spec/terrain-shorelines.md) | Beach/water coverage and absence of land-color strips | Implemented; validation in the viewer baseline |
+| [Ground textures and map detail](spec/terrain-detail.md) | Source terrain scale, named artwork, scenery scope and shader boundaries | Source detail expansion implemented for 75 static layouts; fitted land tiling and variant composition, dynamic states remain open |
 
 The research to build the first specs from already exists: recovered numbers are
 in [`formats/`](formats/) (weather, native flight, quick mission, ordnance menu,
@@ -104,7 +112,7 @@ player-visible numbers out of those files and leaving the byte layouts behind.
 | Main menu and Choose Activity | Original art, fonts, sounds, five backgrounds | native assets, spec-derived layout | [main-menu](baselines/main-menu.md) |
 | Quick Mission creator | Briefing screen, aircraft and theater selection, editable fields | mixed | [creator/ordnance](baselines/creator-ordnance.md) |
 | Load Ordnance screen | Original art, compatible weapon and fuel edits | mixed | [creator/ordnance](baselines/creator-ordnance.md) |
-| Theaters | All 16 selectable, terrain renderer, free camera; shoreline water cutouts corrected | native data, fitted rendering | [viewer](baselines/ukraine-viewer.md) |
+| Theaters | 16 base maps and 59 variants selectable; named/numbered artwork, fitted generic land and full-size scenery textures render. Dynamic scenery and campaign progression remain open | native data, fitted rendering | [terrain review](baselines/retail-terrain-review.md) |
 | Weather | Day/night palettes, horizon, sun/moon/stars, cloud sheets, fog maps | mixed | [weather](baselines/weather.md), [review](baselines/weather-review.md) |
 | Twelve aircraft in free flight | Source cockpits, HUD, instrument windows, external views, initial device rigs; new control-surface schedules remain open | fitted flight laws, native-derived components | [flight response](baselines/flight-response.md), [additional FA aircraft](baselines/aircraft-fa-expansion.md), [roster](baselines/aircraft-roster-expansion.md) |
 | Ground contact and landing | Runway contact, taxi, brakes, touchdown | **opinionated**, authored, not awaiting a recovered producer | [land foundation](baselines/native-land-foundation.md) |
@@ -119,7 +127,8 @@ research path. Do not change the default without being asked.
 
 ## Next
 
-Current scope: **M1 air-to-air awareness and engagement**. The
+Existing implementation track: **M1 air-to-air awareness and engagement**.
+The retail terrain expansion above adds no autonomous behavior. The
 [development specification](spec/ai-awareness.md) defines visual cones,
 four-tier memory, searching in Target view, shared AI/RWR missile information,
 blinking incoming-missile plots, skill-based defensive timing, jink/notch/dive,

@@ -9,7 +9,7 @@
 > <!-- tore-header v2 -->
 
 Implementation mode, 2026-09-20. `tore-formats::mission` reads bounded
-base-layout placements and side tables while retaining source order, unknown
+base and variant layout placements and side tables while retaining source order, unknown
 fields, signed aliases and authoring sections. The app resolves placed
 definitions, explicit main shapes and projected texture references.
 [Measured inputs and results](../baselines/ukraine-airports.md).
@@ -18,8 +18,9 @@ definitions, explicit main shapes and projected texture references.
 Every base placement receives a stable source key and reserved scene identity.
 Supported bodies render at their SH header scale and become live targets.
 No-body controllers and unsupported projections remain manifest-only with a
-diagnostic, without invisible contact boxes or targets. Campaign overlay replacement
-semantics remain unsupported and are rejected rather than appended to a base.
+diagnostic, without invisible contact boxes or targets. The 59 variant layouts are selectable as complete static scenes using the
+[fitted composition rule](../spec/terrain-detail.md#host-presentation-where-the-source-rule-is-incomplete).
+Live campaign overlay/progression semantics remain unsupported.
 
 ## Ukraine base layout
 
@@ -52,7 +53,7 @@ why filename guessing is wrong: BUNKER.OT references BUNKB.SH and COMM.OT
 references SHELT.SH. STRIP.OT references RUNWAY.SH.
 The complete measured type/shape inventory is in the linked baseline.
 
-All eighteen shapes produce nonempty geometry with the existing bounded gameplay
+All eighteen shapes produce nonempty geometry with the bounded scenery
 projection. Each exposes one named PIC texture, and all eighteen PICs extract
 from FA_2.LIB. This establishes a usable initial visual dependency set, not full
 SH branch, damage, LOD or collision coverage. No imported program is executed.

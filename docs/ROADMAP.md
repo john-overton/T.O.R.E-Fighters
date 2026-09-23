@@ -156,14 +156,67 @@ Exit: side-by-side comparison against retail screenshots recorded in the baselin
 
 ### 1b. Original terrain
 
-Work:
-- Importer: T2 and its dependents.  This is the first real reverse-engineering blocker of the rebuild.
-- Terrain renderer for retail theaters as shipped.  No real-elevation pipeline in this milestone.
-- Sky, horizon, and time of day at retail fidelity.
+Sixteen base theaters and 59 retail variants are selectable with original T2
+heights, named/numbered artwork, weather and visible static objects. The expansion
+below replaces the initial two-theater preview target; dynamic source behavior
+remains explicitly bounded. No real-elevation pipeline
+or reference-checkout terrain engine is part of this milestone.
 
-Deliverable: free camera over Ukraine and one other retail theater.
+### Retail terrain detail review
 
-Exit: theater layout matches retail mission geography.  Frame time recorded per platform.
+**Implementation mode. John selected retail detail for all maps on
+2026-09-23:** textures, artwork, scenery and map variants. Surface shaders and
+expanded landscapes are future work under [M4](#future-terrain-enhancements).
+No surface AI is authorized by this visual scope.
+
+[Measured findings](baselines/retail-terrain-review.md),
+[behavior specification](spec/terrain-detail.md), and
+[material contract](formats/terrain-materials.md) own the evidence. Complete
+usable source coverage without adding invented scenery or new terrain geometry.
+
+#### Delivery and remaining scope
+
+Implemented in the separate retail-terrain worktree:
+
+- All sixteen base theaters and 59 retail MM variants are imported and offered
+  in the existing location picker, with their own airport lists. Variant scenes
+  preserve their source identity and use the documented fitted composition rule.
+- Kurile's 236 named images, both source resolutions, numbered artwork and
+  original land fallback pictures render with live weather palettes and water
+  cutouts. The fallback's four-cell repeat scale is fitted.
+- Main-shape geometry for every visible placement in the 75 layouts projects,
+  including the formerly unsupported launcher poses. Large scenery images keep
+  every source pixel through paging, and reviewed line primitives render.
+- The shared importer and CLI follow layout dependencies. A cache-version marker
+  requires re-import of older bundles. The headless map validator checks every
+  imported layout without starting flight or autonomous behavior.
+
+Remaining original-behavior research: exact generic land-plane scale/projection,
+class-dependent visual rules, distance-dependent shape/terrain presentation,
+dynamic and destroyed scenery appearances, runtime decals, and live campaign
+progression/destruction persistence. The selectable variants are static source
+layouts, not a campaign engine. Missing TREE1/TREE2 resources do not authorize
+invented vegetation. These boundaries are explicit in the behavior spec.
+
+#### Acceptance
+
+Use synthetic fixtures for named/numbered placement parsing, both image sizes,
+border coordinates, masks, dependency failures, image paging and variant
+selection. Retain source terrain heights, object positions, runway alignment,
+weather palette changes and deterministic 120 Hz simulation. No retail-derived
+fixtures are committed.
+
+Construct and render every imported layout. Inspect matched close and distant
+views of Kurile coast, Ukraine land/cities, Pakistan high ground and desert/river
+scenes. Check the variant picker and ground-start identity. Record frame-time
+comparisons using the same camera/settings and state their scope. Run the
+repository checks and display smoke after rebasing. [Measured validation](baselines/retail-terrain-review.md#implementation-validation)
+records actual results and platform limits. Retail side-by-side comparison is
+unavailable and is not an acceptance blocker or an implied parity claim.
+
+The selected work is retail map detail. Shader enhancements and authored
+landscape expansion remain future M4 items; flight adapters, controls and
+compatibility modes stay available.
 
 ### Airport and ground-object expansion
 
@@ -892,6 +945,18 @@ without changing autonomous decisions. [Rules and known damage-rounding differen
 [validation](baselines/damage-smoke.md).
 
 ## Milestone 4: Remaster layer
+
+### Future terrain enhancements
+
+Deferred by John on 2026-09-23 while retail map detail is completed:
+
+- Optional close-range surface shaders for rock, soil and sand, with documented
+  material rules, strengths and distance filtering. Keep source art, colors and
+  an enhancement-off comparison. No shader trial is part of the current scope.
+- Expanded landscape geometry, vegetation and additional scenery. These are
+  authored additions needing a separate behavior/contact specification and
+  approval of their visual direction. They are not recovered retail detail.
+
 
 Everything here ships as toggleable layers over classic.
 

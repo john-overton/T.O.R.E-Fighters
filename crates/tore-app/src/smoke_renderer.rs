@@ -141,6 +141,7 @@ impl SmokeRenderer {
                 ..Default::default()
             });
             let palette = weather.0.create_view(&Default::default());
+            let material_storage = crate::sim_renderer::tile_layout(device, false);
             self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Smoke texture and camera"),
                 layout: &self.pipeline.get_bind_group_layout(0),
@@ -160,6 +161,10 @@ impl SmokeRenderer {
                     wgpu::BindGroupEntry {
                         binding: 3,
                         resource: wgpu::BindingResource::TextureView(weather.1),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: material_storage.as_entire_binding(),
                     },
                 ],
             }));

@@ -111,6 +111,15 @@ pub struct TexturePlacement {
     pub row: i32,
     pub texture: usize,
     pub rotation: u8,
+    /// An explicit PIC reference from tmap_named; numbered placements use the map prefix.
+    pub resource: Option<String>,
+}
+impl TexturePlacement {
+    pub fn resource_name(&self, base: &str) -> String {
+        self.resource
+            .clone()
+            .unwrap_or_else(|| format!("{}{}.PIC", &base[..base.len().min(3)], self.texture))
+    }
 }
 #[derive(Debug, Default)]
 pub struct Environment {
@@ -172,8 +181,27 @@ impl Environment {
                     }
                     out.time = Some(t);
                 }
-                "tmap" => {
-                    let v = [number(1)?, number(2)?, number(3)?, number(4)?];
+                "tmap" | "tmap_named" => {
+                    let named = parts[0] == "tmap_named";
+                    let resource = if named {
+                        let name = name_resource(
+                            parts
+                                .get(1)
+                                .ok_or_else(|| invalid("missing named texture"))?
+                                .as_bytes(),
+                        )?;
+                        if name.len() > 12 || name.contains('.') {
+                            return Err(invalid("invalid named terrain texture"));
+                        }
+                        Some(format!("{name}.PIC"))
+                    } else {
+                        None
+                    };
+                    let v = if named {
+                        [number(2)?, number(3)?, 0, 0]
+                    } else {
+                        [number(1)?, number(2)?, number(3)?, number(4)?]
+                    };
                     if v[0] < -4096
                         || v[1] < -4096
                         || v[0] > 4096
@@ -192,6 +220,7 @@ impl Environment {
                             row: v[1],
                             texture: v[2] as usize,
                             rotation: v[3] as u8,
+                            resource,
                         },
                     );
                     if out.textures.len() > 3500 {
@@ -223,6 +252,73 @@ pub const THEATERS: &[(&str, &[&str])] = &[
     ("VLA", &["VLA"]),
     ("WTA", &["WTA"]),
 ];
+
+/// Reviewed retail layout names. The original resource identity is retained;
+/// this identifies the shared base grid, never an object-overlay operation.
+pub fn base_theater(resource: &str) -> Option<&'static str> {
+    let name = resource.trim_end_matches(".MM").trim_end_matches(".T2");
+    if let Some((code, _)) = THEATERS.iter().find(|(code, _)| *code == name) {
+        return Some(code);
+    }
+    let name = name.strip_prefix('~').or_else(|| name.strip_prefix('$'))?;
+    THEATERS.iter().find_map(|(code, _)| {
+        let suffix = name.strip_prefix(code)?;
+        let valid = match *code {
+            "KURILE" | "TVIET" => suffix.is_empty(),
+            "UKR" => {
+                suffix == "F" || matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8")
+            }
+            "BAL" => {
+                suffix == "F" || matches!(suffix, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7")
+            }
+            "EGY" => {
+                suffix == "F"
+                    || matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+            }
+            "FRA" => {
+                suffix == "F"
+                    || matches!(
+                        suffix,
+                        "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+                    )
+            }
+            "VLA" => {
+                suffix == "F" || matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8")
+            }
+            _ => suffix == "F",
+        };
+        valid.then_some(*code)
+    })
+}
+
+/// Base theaters first, followed by the explicit imported retail layouts.
+pub fn map_catalog(resources: &BTreeMap<String, Vec<u8>>) -> Result<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    for (code, _) in THEATERS {
+        if let Some(bytes) = resources.get(&format!("{code}.T2")) {
+            out.push((code.to_string(), Theater::parse(bytes)?.name));
+        }
+    }
+    for name in resources
+        .keys()
+        .filter(|n| n.starts_with('~') && n.ends_with(".MM"))
+    {
+        if let Some(base) = base_theater(name) {
+            let code = name.trim_end_matches(".MM");
+            let base_name = out
+                .iter()
+                .find(|(n, _)| n == base)
+                .map(|(_, label)| label.clone());
+            if let Some(label) = base_name {
+                out.push((
+                    code.into(),
+                    format!("{label} ({})", code.trim_start_matches('~')),
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
 
 /// Conservative named dependency selection, not recursive SH/object resolution.
 /// All T2 grids remain included for the menu catalog, including a single-theater profile.
@@ -336,6 +432,65 @@ pub fn layer_palette(data: &[u8], keyframe: usize) -> Result<[[u8; 3]; 256]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn named_tiles_keep_names_borders_and_last_source_placement() {
+        let e = Environment::parse(b"textFormat\nmap kurile.T2\ntmap 0 4 2 3\ntmap_named k000004 0 4\ntmap_named k004004 -4 4\n").unwrap();
+        assert_eq!(e.textures.len(), 2);
+        let tile = &e.textures[&(0, 4)];
+        assert_eq!(tile.resource_name("KURILE"), "K000004.PIC");
+        assert_eq!(tile.rotation, 0);
+        assert_eq!(e.textures[&(-4, 4)].resource_name("KURILE"), "K004004.PIC");
+        for line in [
+            "tmap_named ../secret 0 0",
+            "tmap_named k000004.PIC 0 0",
+            "tmap_named k000004 1 0",
+            "tmap_named k000004 0",
+            "tmap_named k000004 4097 0",
+        ] {
+            assert!(Environment::parse(format!("textFormat\n{line}\n").as_bytes()).is_err());
+        }
+    }
+    #[test]
+    fn generated_grid_names_are_explicit_not_arbitrary_prefix_aliases() {
+        for (name, base) in [
+            ("~UKR1.MM", "UKR"),
+            ("$BAL7.T2", "BAL"),
+            ("~KURILE.MM", "KURILE"),
+            ("~TVIET.T2", "TVIET"),
+            ("~APAF.MM", "APA"),
+        ] {
+            assert_eq!(base_theater(name), Some(base));
+        }
+        for name in [
+            "UKR99",
+            "~UKR9.MM",
+            "~BAL8.MM",
+            "~KURILEF.MM",
+            "~FRAx.MM",
+            "../UKR.T2",
+            "OTHER.T2",
+        ] {
+            assert_eq!(base_theater(name), None);
+        }
+    }
+    #[test]
+    fn map_catalog_keeps_each_variant_identity_after_base_theaters() {
+        let resources = BTreeMap::from([
+            ("UKR.T2".into(), fixture()),
+            ("~UKR2.MM".into(), vec![]),
+            ("~UKR1.MM".into(), vec![]),
+            ("~UKR99.MM".into(), vec![]),
+        ]);
+        let catalog = map_catalog(&resources).unwrap();
+        assert_eq!(
+            catalog
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["UKR", "~UKR1", "~UKR2"]
+        );
+        assert_eq!(catalog[1].1, "Test (UKR1)");
+    }
     fn fixture() -> Vec<u8> {
         let mut b = vec![0; 149 + 4 * 3 + 3];
         b[..4].copy_from_slice(b"BIT2");

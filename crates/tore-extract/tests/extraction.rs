@@ -180,6 +180,7 @@ fn theater_profile_preserves_environment_dependencies_and_reports_metadata_error
         ("_MOON.PIC", 0, b"synthetic texture".to_vec()),
         ("_CLOUD1.PIC", 0, b"synthetic cloud".to_vec()),
         ("SKY8.PIC", 0, b"synthetic sky".to_vec()),
+        ("UKR2.PIC", 0, b"synthetic placed texture".to_vec()),
         ("UNRELATED", 0, b"other".to_vec()),
     ]);
     assert!(f.run(&["--theater", "ukr"]).status.success());
@@ -203,6 +204,35 @@ fn theater_profile_preserves_environment_dependencies_and_reports_metadata_error
     );
     // General raw extraction deliberately does not require decoded terrain validity.
     assert!(invalid.run(&[]).status.success());
+}
+
+#[test]
+fn named_terrain_dependencies_are_selected_without_a_theater_name_prefix() {
+    let f = Fixture::new(vec![
+        (
+            "KURILE.MM",
+            0,
+            b"textFormat\nmap kurile.T2\ntmap_named k000004 0 4\n".to_vec(),
+        ),
+        ("K000004.PIC", 0, b"synthetic named texture".to_vec()),
+        ("UNUSED.PIC", 0, b"other texture".to_vec()),
+    ]);
+    let result = f.run(&["--theater", "KURILE"]);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(f.out.join("OTHER.DAT/K000004.PIC").exists());
+    assert!(!f.out.join("OTHER.DAT/UNUSED.PIC").exists());
+    let report = fs::read_to_string(f.out.join("extraction-report.json")).unwrap();
+    assert!(report.contains("\"named_texture_col_row\":[[\"K000004.PIC\", 0, 4]]"));
+    let missing = Fixture::new(vec![(
+        "KURILE.MM",
+        0,
+        b"textFormat\nmap kurile.T2\ntmap_named missing 0 4\n".to_vec(),
+    )]);
+    assert!(!missing.run(&["--theater", "KURILE"]).status.success());
 }
 
 #[test]

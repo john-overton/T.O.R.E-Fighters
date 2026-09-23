@@ -14,6 +14,22 @@ fn scenery(color:vec3<f32>)->vec4<f32> {
 @group(0) @binding(2) var palette:texture_2d<f32>;
 @group(0) @binding(3) var weather_tiles:texture_2d_array<u32>;
 @group(0) @binding(4) var engine_art:texture_2d<f32>;
+@group(0) @binding(5) var<uniform> tile_storage:vec4<u32>;
+fn tile_size()->vec2<u32> {
+ if tile_storage.x!=0u {return vec2<u32>(256u);}
+ return textureDimensions(tiles);
+}
+fn page_coord(at:vec2<i32>,layer:i32)->vec2<i32> {
+ return at+vec2<i32>(layer%4,(layer%16)/4)*256;
+}
+fn read_tile(at:vec2<i32>,layer:i32)->u32 {
+ if tile_storage.x!=0u {return textureLoad(tiles,page_coord(at,layer),layer/16,0).r;}
+ return textureLoad(tiles,at,layer,0).r;
+}
+fn weather_index(at:vec2<i32>,layer:i32)->u32 {
+ if textureDimensions(weather_tiles).x==1024u {return textureLoad(weather_tiles,page_coord(at,layer),layer/16,0).r;}
+ return textureLoad(weather_tiles,at,layer,0).r;
+}
 // 0x4b3410: haze density is a piecewise-linear ramp between two recovered
 // distances, flat outside them. Imported shade tables supply discrete index
 // remaps before color lookup for terrain; authored-color effects remain separate.
@@ -134,8 +150,8 @@ fn native_ray_rows(distance:f32,altitude:f32)->vec2<i32>{
 }
 fn ray_index(index:u32,rows:vec2<i32>)->u32 {
  var result=index;
- if rows.y>=0 {result=textureLoad(weather_tiles,vec2<i32>(i32(result),rows.y),i32(scene.deck_a.w),0).r;}
- if rows.x>=0 {result=textureLoad(weather_tiles,vec2<i32>(i32(result),rows.x),i32(scene.deck_a.w),0).r;}
+ if rows.y>=0 {result=weather_index(vec2<i32>(i32(result),rows.y),i32(scene.deck_a.w));}
+ if rows.x>=0 {result=weather_index(vec2<i32>(i32(result),rows.x),i32(scene.deck_a.w));}
  return result;
 }
 // Authored presentation mode: interpolate neighboring original remap results.
@@ -178,13 +194,13 @@ fn remap_color(index:u32,rows:vec2<f32>)->vec3<f32>{
 }
 // Remap one original index before resolving RGB; transparency tests the source.
 fn texel(at:vec2<i32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec2<f32>)->vec4<f32>{
-   let original=textureLoad(tiles,at,layer,0).r;
+   let original=read_tile(at,layer);
    var index=original;
    var palette_row=row;
-   if sun_passes<0 && core>=0 { index=textureLoad(weather_tiles,vec2<i32>(i32(index),core),i32(scene.deck_a.w),0).r; }
+   if sun_passes<0 && core>=0 { index=weather_index(vec2<i32>(i32(index),core),i32(scene.deck_a.w)); }
    if sun_passes>=0 {
-    index=textureLoad(tiles,vec2<i32>(i32(index),i32(scene.deck_b.w)+row-1),i32(scene.deck_a.w),0).r;
-    for(var n=0;n<sun_passes;n++){ index=textureLoad(tiles,vec2<i32>(i32(index),0),i32(scene.deck_a.w),0).r; }
+    index=read_tile(vec2<i32>(i32(index),i32(scene.deck_b.w)+row-1),i32(scene.deck_a.w));
+    for(var n=0;n<sun_passes;n++){ index=read_tile(vec2<i32>(i32(index),0),i32(scene.deck_a.w)); }
     if core>=0 {index=u32(core);}
     palette_row=0;
    }
@@ -197,14 +213,14 @@ fn texel(at:vec2<i32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec2<f32>
 // Reviewed weather raster reads one texel, without mixing palette colors.
 // Float UV projection remains an adaptation of native fixed-point scanlines.
 fn weather_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec2<f32>)->vec4<f32>{
- let size=vec2<i32>(textureDimensions(tiles));
+ let size=vec2<i32>(tile_size());
  let at=clamp(vec2<i32>(floor(uv*vec2<f32>(size))),vec2<i32>(0),size-vec2<i32>(1));
  return texel(at,layer,row,sun_passes,core,remaps);
 }
 // Manual bilinear: indices cannot be filtered, so each of the four texels is
 // resolved through the palette first and the colors are blended premultiplied.
 fn sample_tile(uv:vec2<f32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec2<f32>)->vec4<f32>{
- let size=vec2<i32>(textureDimensions(tiles));
+ let size=vec2<i32>(tile_size());
  let p=uv*vec2<f32>(size)-vec2<f32>(0.5);
  let base=floor(p);
  let f=p-base;
@@ -234,7 +250,7 @@ fn lattice_hash(v:u32)->u32 {
  return (w>>22u)^w;
 }
 fn lattice_texel(block:vec2<i32>,level:i32,layer:i32,sun_passes:i32,core:i32,remaps:vec2<f32>)->vec4<f32>{
- let blocks=vec2<i32>(textureDimensions(tiles))>>vec2<u32>(u32(level));
+ let blocks=vec2<i32>(tile_size())>>vec2<u32>(u32(level));
  let at=clamp(block,vec2<i32>(0),blocks-vec2<i32>(1));
  if level==0 {return texel(at,layer,0,sun_passes,core,remaps);}
  let h=lattice_hash(u32(at.x)|(u32(at.y)<<9u)|(u32(level)<<18u));
@@ -262,7 +278,7 @@ fn lattice_bilinear(p:vec2<f32>,level:i32,layer:i32,sun_passes:i32,core:i32,rema
 // adjacent lattice levels sized to the remaining footprint. Footprints of one
 // texel or less take the unfiltered path unchanged.
 fn filtered_tile(uv:vec2<f32>,grad:vec4<f32>,layer:i32,sun_passes:i32,core:i32,remaps:vec2<f32>)->vec4<f32>{
- let size=vec2<f32>(textureDimensions(tiles));
+ let size=vec2<f32>(tile_size());
  let dx=grad.xy*size;let dy=grad.zw*size;
  let m11=dx.x*dx.x+dy.x*dy.x;let m22=dx.y*dx.y+dy.y*dy.y;let m12=dx.x*dx.y+dy.x*dy.y;
  let mid=0.5*(m11+m22);let spread=sqrt(0.25*(m11-m22)*(m11-m22)+m12*m12);
@@ -300,7 +316,7 @@ fn world_vertex(position:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec3<f32>,index:
  out.direction=p;out.altitude=position.y;out.uv=uv;out.layer=layer;out.own_color=select(0.0,1.0,index<0.0);
  // A negative index means the vertex carries its own color; terrain carries a
  // source palette index instead, resolved per frame and then Gouraud blended.
- if index>=0.0 { var source_index=u32(index)%256u; if out.light_row>=0 {source_index=textureLoad(weather_tiles,vec2<i32>(i32(source_index),out.light_row),i32(scene.deck_a.w),0).r;} out.color=shade(source_index,0).rgb; if fog_enabled {out.color=remap_color(source_index,ray_rows(length(p),position.y));} } else { out.color=linear(color); }
+ if index>=0.0 { var source_index=u32(index)%256u; if out.light_row>=0 {source_index=weather_index(vec2<i32>(i32(source_index),out.light_row),i32(scene.deck_a.w));} out.color=shade(source_index,0).rgb; if fog_enabled {out.color=remap_color(source_index,ray_rows(length(p),position.y));} } else { out.color=linear(color); }
  out.distance=length(p);return out;
 }
 @vertex fn vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
@@ -448,7 +464,7 @@ fn deck_transition(ray:vec3<f32>,altitude:f32,endpoint:f32)->f32 {
 }
 fn sun_index(original:u32,passes:i32,core:i32)->u32 {
  var index=original;
- for(var n=0;n<passes;n++){index=textureLoad(tiles,vec2<i32>(i32(index),0),i32(scene.deck_a.w),0).r;}
+ for(var n=0;n<passes;n++){index=read_tile(vec2<i32>(i32(index),0),i32(scene.deck_a.w));}
  if core>=0 {index=u32(core);}
  return index;
 }
@@ -479,7 +495,7 @@ fn celestial_occluded(ray:vec3<f32>)->bool {
 // User-requested ocean presentation. Resolve indexed art before filtering;
 // wrap every bilinear tap so the repeating water has no tile-edge seams.
 fn ocean_sample(uv:vec2<f32>,layer:i32,distance:f32,passes:i32,core:i32)->vec4<f32>{
- let size=vec2<i32>(textureDimensions(tiles));
+ let size=vec2<i32>(tile_size());
  let p=fract(uv)*vec2<f32>(size)-vec2<f32>(0.5);
  let base=vec2<i32>(floor(p));let f=fract(p);
  var sum=vec4<f32>(0.0);
@@ -813,4 +829,9 @@ struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, 
  let alpha=color.a*in.opacity*(1.0-clamp(haze(in.distance),0.0,1.0));
  let lit=cloud_lighting(color.rgb,in.direction,in.altitude);
  return vec4<f32>(lit*alpha,alpha);
+}
+
+// Source scenery lines are one-pixel strokes with the shared live palette/haze.
+@fragment fn scenery_line_fragment(in:VertexOut)->@location(0) vec4<f32> {
+ return scenery(aerial_perspective(in.color,in.direction,in.altitude));
 }

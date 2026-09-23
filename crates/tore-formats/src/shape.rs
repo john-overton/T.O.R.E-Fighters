@@ -221,14 +221,25 @@ impl Shape {
         Self::with_state(data, &BTreeMap::new())
     }
     pub fn with_state(data: &[u8], state: &BTreeMap<usize, i32>) -> Result<Self> {
-        Self::project(data, state, false)
+        Self::project(data, state, false, false)
     }
     /// Export validation follows explicit SH jumps; the gameplay projection stays unchanged.
     /// This interprets only bounded data records and reviewed state guard patterns, never x86.
     pub fn with_export_state(data: &[u8], state: &BTreeMap<usize, i32>) -> Result<Self> {
-        Self::project(data, state, true)
+        Self::project(data, state, true, false)
     }
-    fn project(data: &[u8], state: &BTreeMap<usize, i32>, export: bool) -> Result<Self> {
+    /// Static scenery pose with loaded launchers. Interprets bounded drawing
+    /// records and the reviewed CHAP/SA2 visual-selection envelope only.
+    /// No imported callback runs and no autonomous behavior is implied.
+    pub fn scenery(data: &[u8]) -> Result<Self> {
+        Self::project(data, &BTreeMap::new(), true, true)
+    }
+    fn project(
+        data: &[u8],
+        state: &BTreeMap<usize, i32>,
+        export: bool,
+        scenery: bool,
+    ) -> Result<Self> {
         let (c, base) = module::code(data)?;
         let mut slots = BTreeMap::<usize, [f32; 3]>::new();
         let mut colors = BTreeMap::new();
@@ -260,6 +271,38 @@ impl Shape {
                 break;
             }
             match op {
+                0xeb if scenery => {
+                    // CHAP/SA2: HARDNumLoaded returns through this envelope.
+                    // The static host chooses its loaded visual branch. This is
+                    // a data grammar, not a general x86 interpreter.
+                    if slice(c, p, 7)? != [0xeb, 5, 0xb8, 1, 0, 0, 0] {
+                        return Err(invalid("unreviewed scenery selection envelope"));
+                    }
+                    let draw = if slice(c, p + 7, 2)? == [0x83, 0xf8]
+                        && (1..=4).contains(&slice(c, p + 9, 1)?[0])
+                        && slice(c, p + 10, 2)? == [0x72, 0x11]
+                    {
+                        p + 12
+                    } else if slice(c, p + 7, 4)? == [0x0b, 0xc0, 0x74, 0x11] {
+                        p + 11
+                    } else {
+                        return Err(invalid("unreviewed scenery load comparison"));
+                    };
+                    if slice(c, draw, 1)? != [0x68]
+                        || slice(c, draw + 5, 1)? != [0x68]
+                        || slice(c, draw + 10, 1)? != [0xc3]
+                    {
+                        return Err(invalid("invalid scenery drawing reference"));
+                    }
+                    p = u32_at(c, draw + 1)?
+                        .checked_sub(base)
+                        .ok_or_else(|| invalid("scenery drawing reference underflow"))?;
+                    if slice(c, p, 2)? != [0x12, 0] {
+                        return Err(invalid(
+                            "scenery selection does not reference drawing records",
+                        ));
+                    }
+                }
                 0x48 if export => p = target(p + 4, word(c, p + 2)?, c)?,
                 0x38 => {
                     let t = target(p + 3, word(c, p + 1)?, c)?;
@@ -358,7 +401,7 @@ impl Shape {
                 }
                 0xe0 => {
                     // Export checks retain decals even though their runtime material is unknown.
-                    texture = if export {
+                    texture = if export && !scenery {
                         format!("@indexed:{}", u16_at(c, p + 2)?)
                     } else {
                         String::new()
@@ -630,6 +673,24 @@ mod tests {
         }
         c.extend_from_slice(&[0xfc, 0, 0, 100, 0, 3, 0, 1, 2, 0]);
         c
+    }
+    #[test]
+    fn scenery_loaded_pose_accepts_only_reviewed_drawing_envelopes() {
+        let mut code = vec![0xeb, 5, 0xb8, 1, 0, 0, 0, 0x83, 0xf8, 2, 0x72, 0x11, 0x68];
+        code.extend(0x1017u32.to_le_bytes());
+        code.extend([0x68, 0, 0, 0, 0, 0xc3, 0x12, 0, 1, 0, 0]);
+        code.extend(program());
+        let bytes = module::fixture(&code);
+        assert_eq!(Shape::scenery(&bytes).unwrap().faces.len(), 1);
+        assert!(
+            Shape::parse(&bytes).is_err(),
+            "aircraft projection stays separate"
+        );
+        code[10] = 0x75;
+        assert!(Shape::scenery(&module::fixture(&code)).is_err());
+        code[10] = 0x72;
+        code[13..17].copy_from_slice(&0xffffu32.to_le_bytes());
+        assert!(Shape::scenery(&module::fixture(&code)).is_err());
     }
     #[test]
     fn ejection_lines_resolve_bounded_vertex_slots() {

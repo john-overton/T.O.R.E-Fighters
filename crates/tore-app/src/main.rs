@@ -61,6 +61,7 @@ mod roster_animation;
 mod scope;
 mod sim_renderer;
 mod smoke_renderer;
+mod static_art;
 mod surface_lighting;
 mod target_window;
 mod terrain;
@@ -474,12 +475,7 @@ impl App {
     /// Rebuilds the world under one recovered weather condition. The renderer
     /// owns per-world GPU resources, so it is rebuilt with it.
     fn set_condition(&mut self, index: usize) -> AppResult<()> {
-        let code = self
-            .world
-            .environment
-            .map
-            .trim_end_matches(".T2")
-            .to_string();
+        let code = self.world.layout.trim_end_matches(".MM").to_string();
         self.world = terrain::World::for_mission(&self.theater_resources, &code, Some(index))?;
         if let Some(renderer) = &mut self.renderer {
             renderer.set_world(&self.world);
@@ -2906,6 +2902,7 @@ impl ApplicationHandler for App {
                             &self
                                 .world
                                 .visible_static_vertices(&self.combat.state.targets),
+                            &self.world.visible_static_lines(&self.combat.state.targets),
                         );
                         let target_due = self.target_refresh.due(now) || self.smoke_test;
                         let other_due = now.duration_since(self.instrument_time).as_millis() >= 100
@@ -3286,6 +3283,7 @@ impl ApplicationHandler for App {
                         &self
                             .world
                             .visible_static_vertices(&self.combat.state.targets),
+                        &self.world.visible_static_lines(&self.combat.state.targets),
                     );
                 }
                 let compose_ms = frame_start.elapsed().as_secs_f64() * 1000. - simulation_ms;
@@ -3324,7 +3322,7 @@ impl ApplicationHandler for App {
                         event_loop.exit();
                     }
                 }
-                if self.screen == Screen::Flight
+                if matches!(self.screen, Screen::Flight | Screen::Viewer)
                     && self.performance.record(
                         frame_start,
                         simulation_ms,
@@ -4200,6 +4198,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut validate_creator = false;
     let mut sensor_summary = false;
     let mut validate_weather = false;
+    let mut validate_maps = false;
     let mut weather_condition: Option<usize> = None;
     let mut airport_probe: Option<(u32, tore_sim::airport::Aircraft, Option<[f64; 2]>)> = None;
     let mut ground_start_airport: Option<u32> = None;
@@ -4672,6 +4671,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--scope-history" => scope_history = true,
             "--validate-weather" => validate_weather = true,
+            "--validate-maps" => validate_maps = true,
             "--weather-condition" => {
                 let value: usize = args
                     .next()
@@ -4690,7 +4690,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
                 );
                 println!(
-                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects one of the 16 original theater codes (default UKR).
+                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift/Ctrl-arrows look/orbit, Shift-/ recenter. Arrows pitch/bank, Z/X rudder, PageUp/Down throttle, Shift-B burner, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display.
 Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. Shift-O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, graphics. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
@@ -4884,6 +4884,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && !native_flight_report
         && !validate_creator
         && !validate_weather
+        && !validate_maps
         && !(airport_probe.is_some() && !(smoke_test && initial_screen == Screen::Flight))
         && std::env::var_os("TORE_ENVIRONMENT_PROBE").is_none();
     // Borderless fullscreen on the monitor the window would have opened on is
@@ -4978,6 +4979,34 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
     };
     if import_only {
+        return Ok(Outcome::Done);
+    }
+    if validate_maps {
+        let catalog = tore_formats::theater::map_catalog(&assets.theater_resources)?;
+        for (code, _) in &catalog {
+            let world = terrain::World::for_theater(&assets.theater_resources, code)?;
+            let bytes = world.texture_indices.len() + world.sky_indices.len();
+            if bytes / 65536 > 4096 {
+                return Err("map artwork exceeds GPU page budget".into());
+            }
+            println!(
+                "map {code}: source={} grid={}x{} textures={} placements={} bodies={} terrain_vertices={} scenery_vertices={} artwork_bytes={}",
+                world.environment.map,
+                world.theater.cols,
+                world.theater.rows,
+                world.environment.textures.len(),
+                world.static_manifest.len(),
+                world.airport_scene.objects.len(),
+                world.vertices.len() / 10,
+                world
+                    .static_vertices
+                    .values()
+                    .map(|v| v.len() / 10)
+                    .sum::<usize>(),
+                bytes
+            );
+        }
+        println!("Validated {} retail map layouts", catalog.len());
         return Ok(Outcome::Done);
     }
     let hornet = aircraft::Airframe::load(&assets.theater_resources, aircraft_id)?;

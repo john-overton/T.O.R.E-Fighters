@@ -436,18 +436,30 @@ fn analyze(
         let placements = e
             .textures
             .values()
+            .filter(|p| p.resource.is_none())
             .map(|p| format!("[{},{},{},{}]", p.col, p.row, p.texture, p.rotation))
             .collect::<Vec<_>>()
             .join(",");
+        let named = e
+            .textures
+            .values()
+            .filter_map(|p| {
+                p.resource
+                    .as_ref()
+                    .map(|name| format!("[{}, {}, {}]", quote(name), p.col, p.row))
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         return Ok(format!(
-            "{{\"format\":\"mission-environment\",\"map\":{},\"layer\":{},\"layer_parameter\":{},\"clouds\":{},\"wind_raw\":{},\"time\":{},\"tmap_col_row_texture_rotation\":[{}]}}",
+            "{{\"format\":\"mission-environment\",\"map\":{},\"layer\":{},\"layer_parameter\":{},\"clouds\":{},\"wind_raw\":{},\"time\":{},\"tmap_col_row_texture_rotation\":[{}],\"named_texture_col_row\":[{}]}}",
             quote(&e.map),
             quote(&e.layer),
             e.layer_parameter.map_or("null".into(), |v| v.to_string()),
             e.clouds.map_or("null".into(), |v| v.to_string()),
             pair(e.wind),
             pair(e.time),
-            placements
+            placements,
+            named
         ));
     }
     Ok("null".into())

@@ -69,6 +69,8 @@ pub struct QuickMission {
     /// Mission-wide setting used when a group inherits its objective.
     pub ai_mission: crate::ai_wings::Preset,
     options: Options,
+    theater_codes: Vec<String>,
+    theater_catalog: Vec<String>,
     start_modes: Vec<String>,
     airport_names: Vec<Vec<String>>,
     airport_objects: Vec<Vec<u32>>,
@@ -127,10 +129,30 @@ impl QuickMission {
         for i in [6, 9, 12, 23, 26, 29] {
             draft.values[i] = selected;
         }
+        let mut theater_codes: Vec<String> = source_theaters()
+            .iter()
+            .map(|code| code.to_string())
+            .collect();
+        options.fields[13].truncate(16);
+        let catalog = tore_formats::theater::map_catalog(data).unwrap_or_default();
+        for (code, label) in catalog.iter().filter(|(code, _)| code.starts_with('~')) {
+            theater_codes.push(code.clone());
+            options.fields[13].push(label.clone());
+        }
+        let mut theater_catalog: Vec<String> = tore_formats::theater::THEATERS
+            .iter()
+            .map(|(code, _)| code.to_string())
+            .collect();
+        theater_catalog.extend(
+            catalog
+                .into_iter()
+                .filter(|(code, _)| code.starts_with('~'))
+                .map(|(code, _)| code),
+        );
         let mut airport_names = Vec::new();
         let mut airport_objects = Vec::new();
         let mut definitions = BTreeMap::new();
-        for code in source_theaters() {
+        for code in &theater_codes {
             let name = format!("{code}.MM");
             let mut names = Vec::new();
             let mut ids = Vec::new();
@@ -175,6 +197,8 @@ impl QuickMission {
             group_must_survive: [false; OBJECTIVE_COUNT],
             ai_mission: crate::ai_wings::Preset::Free,
             options,
+            theater_codes,
+            theater_catalog,
             selector: None,
             cursor: 0,
             scroll: 0,
@@ -189,9 +213,9 @@ impl QuickMission {
             self.draft.values[34] = 0;
         }
         self.selection = index;
-        // Source order differs from the app's theater catalog.
-        if let Some((code, _)) = tore_formats::theater::THEATERS.get(index) {
-            self.draft.values[13] = source_theaters()
+        if let Some(code) = self.theater_catalog.get(index) {
+            self.draft.values[13] = self
+                .theater_codes
                 .iter()
                 .position(|c| c == code)
                 .unwrap_or(0);
@@ -201,7 +225,7 @@ impl QuickMission {
     fn nationalities(&mut self) {
         self.draft.values[3] = 0;
         self.draft.values[20] =
-            [10, 33, 14, 57, 3, 41, 23, 10, 20, 37, 34, 24, 9, 2, 10, 2][self.draft.values[13]];
+            [10, 33, 14, 57, 3, 41, 23, 10, 20, 37, 34, 24, 9, 2, 10, 2][self.base_theater_index()];
     }
     pub fn player(&self) -> Option<AircraftId> {
         self.aircraft_files
@@ -211,11 +235,20 @@ impl QuickMission {
     pub fn guns_only(&self) -> bool {
         self.draft.values[19] == 0
     }
-    pub fn theater_index(&self) -> usize {
-        let code = source_theaters()[self.draft.values[13]];
-        tore_formats::theater::THEATERS
+    fn base_theater_index(&self) -> usize {
+        let base = self
+            .theater_codes
+            .get(self.draft.values[13])
+            .and_then(|code| tore_formats::theater::base_theater(code));
+        source_theaters()
             .iter()
-            .position(|(c, _)| *c == code)
+            .position(|code| Some(*code) == base)
+            .unwrap_or(0)
+    }
+    pub fn theater_index(&self) -> usize {
+        self.theater_codes
+            .get(self.draft.values[13])
+            .and_then(|code| self.theater_catalog.iter().position(|c| c == code))
             .unwrap_or(0)
     }
     fn values(&self, id: usize) -> &[String] {
@@ -226,7 +259,7 @@ impl QuickMission {
         } else if id == 34 {
             &self.airport_names[self.draft.values[13]]
         } else if id == 30 {
-            &self.options.targets[self.draft.values[13]]
+            &self.options.targets[self.base_theater_index()]
         } else {
             &self.options.fields[id]
         }
@@ -1299,6 +1332,30 @@ pub fn hud(pixels: &mut [u8], sprites: &BTreeMap<String, Sprite>, camera: &Camer
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn variant_selection_retains_layout_and_uses_base_country_and_target_lists() {
+        let mut q = setup();
+        q.theater_codes.push("~UKR1".into());
+        q.theater_catalog.push("~UKR1".into());
+        q.options.fields[13].push("Ukraine (UKR1)".into());
+        q.airport_names.push(vec!["Variant runway".into()]);
+        q.airport_objects.push(vec![0x4000_0003]);
+        q.theater(16);
+        assert_eq!(q.theater_index(), 16);
+        assert_eq!(q.value(13), "Ukraine (UKR1)");
+        let base = source_theaters()
+            .iter()
+            .position(|name| *name == "UKR")
+            .unwrap();
+        assert_eq!(q.base_theater_index(), base);
+        assert_eq!(q.values(30), q.options.targets[base]);
+        assert_eq!(q.values(34), ["Variant runway"]);
+        q.apply(33, 1);
+        assert_eq!(q.ground_runway(), Some(0x4000_0003));
+        q.theater(0);
+        assert_eq!(q.theater_index(), 0);
+        assert_eq!(q.draft.values[34], 0);
+    }
     fn setup() -> QuickMission {
         let mut options = Options {
             fields: vec![vec!["value".into(); 60]; 33],
