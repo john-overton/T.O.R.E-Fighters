@@ -4,14 +4,15 @@
 
 <h1 align="center">T.O.R.E-Fighters</h1>
 
-<p align="center"><em>Tasteful Opinionated Reverse Engineered &mdash; a native Rust rebuild of Fighters Anthology</em></p>
+<p align="center"><em>Tasteful Opinionated Reverse Engineered: a native Rust rebuild of Fighters Anthology</em></p>
 
 <p align="center">
   <a href="https://github.com/john-overton/T.O.R.E-Fighters/actions/workflows/ci.yml"><img alt="Rust baseline build" src="https://github.com/john-overton/T.O.R.E-Fighters/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/john-overton/T.O.R.E-Fighters/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/john-overton/T.O.R.E-Fighters?include_prereleases&label=release"></a>
   <a href="rust-toolchain.toml"><img alt="Rust 1.91.1 pinned" src="https://img.shields.io/badge/rust-1.91.1-b7410e?logo=rust&logoColor=white"></a>
   <a href="docs/DEVELOPMENT.md"><img alt="Linux, Windows and macOS" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-2f6f9f"></a>
   <a href="LICENSE"><img alt="GNU General Public License v3.0" src="https://img.shields.io/badge/license-GPL--3.0-1f6feb"></a>
-  <a href="docs/ROADMAP.md"><img alt="Milestone M1 in progress" src="https://img.shields.io/badge/milestone-M1%20in%20progress-orange"></a>
+  <a href="docs/ROADMAP.md"><img alt="Milestone 1 released as v0.1.0, multiplayer next" src="https://img.shields.io/badge/milestone-M1%20released%2C%20M2%20next-orange"></a>
 </p>
 
 <p align="center">
@@ -32,9 +33,81 @@ Where the project is going is in [the roadmap](docs/ROADMAP.md). What is built
 and what comes next is on one page in [the parity plan](docs/parity-plan.md). The
 behaviour being rebuilt is described in [docs/spec/](docs/spec/).
 
-If the application fails to start, built-in logs and fatal reports help identify
-the failing stage. See [startup troubleshooting](docs/DEVELOPMENT.md#startup-logs-and-fatal-errors)
-for log locations, Windows Event Viewer and media-free diagnostic checks.
+## Getting started
+
+You need your own copy of Jane's Fighters Anthology: either the game installed
+on a computer, or disc 1. Disc 2 is not needed.
+
+### 1. Install
+
+Download the package for your computer from the
+[latest release](https://github.com/john-overton/T.O.R.E-Fighters/releases).
+
+| Platform | Package | First launch |
+| --- | --- | --- |
+| Windows (x86_64) | `.msi` installer | The build is unsigned, so SmartScreen warns you. Choose **More info**, then **Run anyway**. |
+| macOS, Apple Silicon or Intel | `.dmg` for your processor | The build is unsigned. Right-click the app, choose **Open**, then confirm. If macOS still refuses, use **System Settings > Privacy & Security > Open Anyway**. |
+| Linux (x86_64) | `.AppImage`, or `.tar.gz` | Make the AppImage executable (`chmod +x`), then run it. |
+
+### 2. Point it at your game
+
+On first launch T.O.R.E opens the **Locate Fighters Anthology** screen. There
+are three ways to tell it where your game is:
+
+- **Drag** the installed game folder, or the folder of your mounted disc 1, onto the window.
+- **Pick** one of the **Detected sources**. T.O.R.E looks at mounted discs and the usual install folders for you.
+- **Type** the folder path into the **Folder** box.
+
+Then press **Import**.
+
+<p align="center">
+  <img src="docs/images/first-run/locate.png" alt="The Locate Fighters Anthology screen, with a folder field, two detected sources and Import and Quit buttons" width="640">
+</p>
+
+A disc image (`.iso`) is not read directly. Mount it first, then choose the
+mounted folder.
+
+### 3. Wait for the import
+
+T.O.R.E reads what it needs from your copy once and keeps it in its own data
+folder. Your copy is never changed. The import takes a few moments and shows
+which archive it is reading.
+
+<p align="center">
+  <img src="docs/images/first-run/importing.png" alt="The import in progress, reading FA_2.LIB with a progress bar" width="640">
+</p>
+
+When the import finishes, press **Continue** to reach the main menu.
+
+<p align="center">
+  <img src="docs/images/first-run/import-complete.png" alt="Import complete, listing the game build and archives read, with a Continue button" width="640">
+</p>
+
+Later launches go straight to the main menu. To import from a different copy,
+use **Pref > Re-import media**, which opens the same screen again.
+
+### 4. Fly
+
+From **Choose Activity**, pick **Create Quick Mission**. Click the aircraft name
+in Wing 1 to choose your aircraft, and the theater name in "You are flying
+over…" to choose where. Press **OK** to fly.
+
+<p align="center">
+  <a href="https://john-overton.github.io/T.O.R.E-Fighters/tore-keyboard-map.html"><img src="docs/images/tore-keyboard-map.png" alt="T.O.R.E keyboard map, Fly &amp; Fight sheet" width="960"></a>
+</p>
+
+Press **F11** in flight for keyboard help, or **Escape** for the flight menu.
+The [interactive keyboard map](https://john-overton.github.io/T.O.R.E-Fighters/tore-keyboard-map.html)
+has Fly &amp; Fight, Comms and Cockpit &amp; View sheets and exports to PNG, ZIP
+or PDF. The [control reference](docs/FLIGHT-CONTROLS.md) lists every key, and
+**Escape > Control** remaps keys, gamepads, joysticks and head tracking
+([controller setup](docs/INPUT.md)).
+
+If the game does not start, it writes logs and a crash report that help us find
+out why. [Startup troubleshooting](docs/DEVELOPMENT.md#startup-logs-and-fatal-errors)
+says where to find them. Bugs and questions are welcome in
+[Issues](https://github.com/john-overton/T.O.R.E-Fighters/issues) and
+[Discussions](https://github.com/john-overton/T.O.R.E-Fighters/discussions).
 
 ## What makes it T.O.R.E
 
@@ -43,56 +116,63 @@ systems, and maps/weather. Checkboxes distinguish manual-described features from
 opinionated additions; each row says what is completed, partially implemented
 or planned, with remaining work and links to details.
 
-Our shared radar/RCS tuning, authored landing behavior and modern input layer
-are implemented examples. Per-weapon seeker activation distances, velocity-aware
-missile launches, uncued seeker search and additional weapon HUD/tone behavior
-are **planned**, not shipped. See the [missile update plan](docs/missile-update-plan.md).
+Examples of opinionated additions: the shared radar and radar cross-section
+tuning, authored landing behaviour, the modern input layer with head tracking,
+graphics options such as MSAA and a spotting aid for distant aircraft, and
+built-in startup diagnostics. Where the original's exact behaviour has not been
+recovered yet, T.O.R.E uses a documented approximation labelled *fitted*. See
+[behaviour provenance](docs/behavior-provenance.md).
 
 ## What works today
 
-The app launches into the original **Choose Activity** menu using artwork, button
-pieces, proportional fonts and sounds imported from your own Fighters Anthology
-files. Each launch picks one of the five original backgrounds. Buttons animate;
-`?`, `Pref` and `Multi` open dropdowns. Hovering is silent; sounds play on clicks
-and toggles.
+Version 0.1.0 completes most of [Milestone 1](docs/ROADMAP.md#milestone-1-faithful-quick-fight):
+a quick fight from the original main menu, through Quick Mission setup and
+flight, to the debrief.
 
-**Create Quick Mission** opens the original-style briefing: click the aircraft
-name in Wing 1 or the theater name in "You are flying over…" to select, then
-**OK** to fly. Thirteen aircraft are available, including F/A-18D, Rafale C,
-F-14D, A-4E, X-31 EFM and both F-22 variants, on any of the 16 imported theaters.
-[Additional roster and limits](docs/spec/roster-aircraft.md). All briefing fields are editable and unsupported mission systems are
-validated before launch. Custom weapons opens the original-art Load Ordnance
-screen with compatible weapon and fuel edits. Set enemy Wing 1 to zero for the
-supported single-aircraft preview.
+**Menus.** The app launches into the original **Choose Activity** menu using
+artwork, button pieces, proportional fonts, sounds and recorded music imported
+from your own copy. The Quick Mission creator, the Load Ordnance screen and the
+mission debrief use the original art too. All briefing fields are editable, and
+mission systems that are not built yet are refused before launch.
 [Testing steps and remaining gaps](docs/baselines/creator-ordnance.md).
 
-In the air: cockpit and HUD that adapt to the window aspect, screen-anchored
-raster instrument windows, live cockpit mirrors, external and chase views, and
-animated gear, flaps, airbrakes, hook and control surfaces. Momentum is carried
-independently of nose direction, so loops rotate through vertical properly.
-Weather uses the original day/night palettes, horizon, sun, moon, stars, cloud
-sheets and fog maps. Simulation runs at a fixed 120 Hz independent of rendering.
+**Aircraft and theaters.** Thirteen aircraft: F/A-18D, F-14D, A-4E, X-31 EFM,
+Rafale C, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N
+([roster and limits](docs/spec/roster-aircraft.md)). All 16 theaters and their
+59 retail map variants, with original terrain, artwork, scenery, weather and
+day/night palettes. Every base theater has airports with runways, targetable
+buildings, tower radio and ILS guidance.
 
-Controller support is a hand-rolled binding layer: standard gamepads have default
-bindings, and sticks, throttles, pedals and button boxes can use explicit
-profiles. **Escape → Control** edits bindings and enables rumble in flight.
-Instrument layouts, scope settings, cockpit/HUD/zoom and sound preferences
-persist between sessions. Inspect hardware without loading retail media with
-`cargo run --locked -p tore-app -- --list-inputs`.
+**Flight.** Cockpit and HUD that adapt to the window shape, instrument windows,
+the retail view suite, and animated gear, flaps, airbrakes, hook and control
+surfaces. Stalls, spins, runway wind, autopilot, ground starts for your whole
+wing, and ejection. Simulation runs at a fixed 120 Hz, independent of rendering.
 
-A development weapons range supports manual weapon testing: all 135 imported FA
-weapon definitions, arm/safe, sensor and range inhibits, damage-class fixtures,
-station failure, jettison, ECM contact resolution and optional recording and
-replay. One shared sensor component serves all thirteen aircraft from their own
-imported equipment: the radar and infrared scope, click-to-designate contacts,
-contact history, directional jammer noise and the radar cross section page all
-read the same observations. Its detection tuning is a deliberate design choice,
-not a retail measurement. [What it models](docs/radar.md).
-Ordinary free flight stays externally clean.
-[Capabilities and validation](docs/baselines/manual-weapons.md). Combat AI is not
-started.
+**Combat.** Guns with tracers and 25 working weapons, including four missile
+guidance types with seeker search, pitbull activation, HUD cues and seeker
+tone ([missile plan](docs/missile-update-plan.md)). One shared radar and
+infrared sensor serves all thirteen aircraft from their own imported equipment:
+the scope, click-to-designate contacts, jammer noise, RWR and the radar cross
+section page ([what it models](docs/radar.md)). Damage, smoke, debris,
+blackout and redout.
 
-## Run locally
+**AI.** Up to six wings and 29 AI aircraft per Quick Mission, each with its
+own sensors, weapons, fuel and flight model, at four skill levels. They search,
+engage, defend against missiles, fly formation, follow wing orders, take off
+and land in turn, and head home when fuel runs low ([AI spec](docs/spec/ai.md)).
+
+**Sound.** Radio chatter and wingman replies, a two-seat crew voice, and
+in-flight music picked by the original's situation rules, all from your own
+copy's recordings.
+
+**Cheats.** The in-flight Cheat menu and the loadout Cheat button
+([cheats](docs/spec/cheats.md)).
+
+**Not yet:** surface AI (SAM sites, AAA, vehicles and ships as active
+opponents), the remaining weapons, carriers, missions, campaigns, replay and
+multiplayer. Multiplayer is [Milestone 2](docs/ROADMAP.md#milestone-2-multiplayer).
+
+## Build from source
 
 Rust 1.91.1 is pinned through rustup. From the repository root:
 
@@ -101,13 +181,13 @@ source "$HOME/.cargo/env"
 cargo run --locked -p tore-app
 ```
 
-On first run the app imports local `gameassets/fighters-anthology/` media, or the source it remembers, into platform application data without asking. If it cannot find media on its own it opens a **Locate Fighters Anthology** screen: drop a folder on the window, pick a detected source, or type a path, then Import and Continue. An installed game folder and a mounted disc 1 both work. Later launches use that cache, and **Pref > Re-import media** returns to the same screen. To import another location from a terminal instead:
+A source build imports local `gameassets/fighters-anthology/` media, or the source it remembers, on first run without asking. If it cannot find media it opens the same **Locate Fighters Anthology** screen as the packaged game. To import another location from a terminal instead:
 
 ```sh
 cargo run --locked -p tore-app -- --import /path/to/fighters-anthology
 ```
 
-Use **? → Exit to Desktop** or close the window to quit. Escape dismisses a dropdown, Tab/arrows and Enter navigate, and M toggles music. `Pref` also toggles music and effects. Replay/continue are disabled until those systems exist.
+Use **? → Exit to Desktop** or close the window to quit. Escape dismisses a dropdown, Tab/arrows and Enter navigate, and M toggles music. `Pref` also toggles music and effects.
 
 To check startup, render one frame, and exit without audio:
 
@@ -115,9 +195,17 @@ To check startup, render one frame, and exit without audio:
 cargo run --locked -p tore-app -- --smoke-test
 ```
 
+To redraw the first-run screenshots above without any game media:
+
+```sh
+cargo run --locked -p tore-app -- --snapshot locate.ppm --snapshot-state locate
+```
+
+The `locate-importing` and `locate-done` states draw the other two.
+
 See [development setup](docs/DEVELOPMENT.md) for fresh-machine setup, Linux/Windows prerequisites, checks, and troubleshooting.
 
-## Fly
+## Fly from the command line
 
 ```sh
 cargo run --locked -p tore-app -- --free-flight --aircraft f18
@@ -125,28 +213,10 @@ cargo run --locked -p tore-app -- --free-flight --aircraft rafale --theater FRA
 cargo run --locked -p tore-app -- --free-flight --aircraft f14
 ```
 
-Arrows fly; PageUp/PageDown adjusts throttle; Shift-B enables afterburner.
-F1/F2/F3 look forward/back/up, F10 selects the external view, Backspace toggles
-cockpit art and Shift-0..9 toggles instruments. Look around with **Shift +
-arrows**; **Shift + /** recenters. **Escape → Pref → Large windows?** switches
-between four inset corner windows and six smaller bottom windows. Escape opens
-the paused flight menu, Ctrl-P pauses and resumes, and F11 opens keyboard help.
-See the [complete control reference](docs/FLIGHT-CONTROLS.md) and
-[controller setup](docs/INPUT.md).
-
-<p align="center">
-  <a href="https://john-overton.github.io/T.O.R.E-Fighters/tore-keyboard-map.html"><img src="docs/images/tore-keyboard-map.png" alt="T.O.R.E keyboard map, Fly &amp; Fight sheet" width="960"></a>
-</p>
-
-The [interactive keyboard map](https://john-overton.github.io/T.O.R.E-Fighters/tore-keyboard-map.html)
-has Fly &amp; Fight, Comms and Cockpit &amp; View sheets, and exports to PNG, ZIP or PDF.
-Its source is [docs/tore-keyboard-map.html](docs/tore-keyboard-map.html).
-
-Two other flight paths exist alongside the default and are selected explicitly:
-The default flight model is the researched hybrid adapter (`--researched-flight`);
-`--legacy-flight` preserves the older compatibility model, and `--native-flight-tables DIR`
-runs a restricted research build from statically extracted tables. Both are
-research options, not the default. See [the flight model](docs/FLIGHT-MODEL.md).
+The default flight model is the researched hybrid adapter (`--researched-flight`).
+Two research options are selected explicitly: `--legacy-flight` preserves the
+older compatibility model, and `--native-flight-tables DIR` runs a restricted
+build from statically extracted tables. See [the flight model](docs/FLIGHT-MODEL.md).
 
 The development weapons range is `--live-fire --aircraft f18`, and accepts any of
 the thirteen imported aircraft. Space fires, semicolon selects a weapon, backslash

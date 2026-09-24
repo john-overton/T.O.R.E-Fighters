@@ -66,7 +66,10 @@ rebuilds the game from the new pack without restarting the application.
 source, continues as soon as the import finishes, presents one menu frame and
 exits, so a first run can be checked end to end in one command.
 `--snapshot PATH --snapshot-state locate` writes the screen's layout headlessly
-with a fixed candidate list, without needing any media.
+with a fixed candidate list, without needing any media. The `locate-importing`
+and `locate-done` states draw the same screen part way through and at the end
+of a disc 1 import, using fixed figures; the README's getting-started pictures
+come from these three states.
 
 ## Accepted sources
 
