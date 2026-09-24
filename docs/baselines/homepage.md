@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, 2026-09-23. This pass builds the
+Implementation mode, 2026-09-23. This initial pass built the
 [static homepage](../index.html) on branch `website/boxed-homepage`, in the
 separate `T.O.R.E-Fighters-homepage` worktree based on `7502413`. No game code,
 adapter defaults, or simulation behavior changed. Design choices, image sources,
@@ -16,6 +16,11 @@ the requested screenshot exception, and publication instructions are in the
 [website guide](../WEBSITE.md).
 
 ## Gameplay captures
+
+These initial captures have been replaced by John's supplied screenshots.
+Current image sources and conversion details are in the
+[website guide](../WEBSITE.md#images). The evidence below describes the original
+captures, not the replacement images.
 
 All three selected images are real 1920 × 1080 GPU captures from the rebuilt
 game, using the default researched flight model, the Ukraine theater, and a

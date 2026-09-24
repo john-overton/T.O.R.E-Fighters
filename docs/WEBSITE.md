@@ -132,11 +132,23 @@ the normal local-only rule for generated retail derivatives, covering only
 It does not authorize publishing source media, extracted assets, or other
 derivatives.
 
-The screenshots come from the unmodified game at the worktree's base commit.
-They are converted from the game's PPM output, without synthetic elements or
-retouching. Original captures, profiles, and logs stay under ignored `.local/`.
-The gallery links to the full 1920 × 1080 images. Flight captures use a GPU and
-display; they are automated captures, not fully headless rendering.
+The current screenshots were supplied by John from his Pictures folder on
+2026-09-23, with the cockpit image requested as the main gallery screenshot:
 
-Capture settings and validation are recorded in the
-[homepage baseline](baselines/homepage.md).
+| Original | Web copy | Placement |
+| --- | --- | --- |
+| `screenshot-2026-09-23_20-03-54.png` | `game-dawn.webp` | Main cockpit screenshot |
+| `screenshot-2026-09-23_19-54-19.png` | `game-missile.webp` | Missile launch |
+| `screenshot-2026-09-23_19-58-03.png` | `game-takeoff.webp` | Takeoff |
+
+Agent choice: retain the existing image URLs and convert the PNGs to
+metadata-stripped WebP at quality 90, preserving their full 3840 × 2160
+resolution and framing. The historical `game-dawn.webp` filename now holds
+the cockpit image. Captions and alternative text describe the supplied images
+without assuming aircraft identity, theater, or capture settings. The original
+PNGs remain outside the repository; no game build identity was supplied with
+them, and they do not establish retail parity.
+
+The initial automated captures and website validation are recorded in the
+[homepage baseline](baselines/homepage.md); those captures have been replaced
+by the supplied screenshots above.
