@@ -833,7 +833,7 @@ impl Debrief {
         );
         self.controls.push((OK, ok));
         if let Some(lines) = self.pages.get(self.page) {
-            clipboard(&mut c, s, lines);
+            clipboard(&mut c, s, lines, self.page == 0);
         }
         if self.help {
             c.rect((84, 60, 180, 25), [212, 215, 218, 255]);
@@ -860,7 +860,7 @@ fn label(c: &mut Canvas, font: &Sprite, text: &str, (x, y, w): (i32, i32, i32)) 
 }
 
 /// Lays out one page of mission-text markup on the clipboard.
-fn clipboard(c: &mut Canvas, s: &BTreeMap<String, Sprite>, lines: &[String]) {
+fn clipboard(c: &mut Canvas, s: &BTreeMap<String, Sprite>, lines: &[String], first_page: bool) {
     let (mut center, mut header, mut bold, mut underline) = (false, false, false, false);
     let mut y = TOP;
     for line in lines {
@@ -890,7 +890,9 @@ fn clipboard(c: &mut Canvas, s: &BTreeMap<String, Sprite>, lines: &[String]) {
         }];
         let cells: Vec<&str> = line.split('\t').collect();
         let width = text_width(font, line.trim_end());
-        let mut x = if center && cells.len() == 1 {
+        // The first-page result sentence shares its heading's clipboard axis,
+        // even though QUICK.MT switches back to .left for the body.
+        let mut x = if (center || first_page) && cells.len() == 1 {
             CENTER - width / 2
         } else {
             LEFT

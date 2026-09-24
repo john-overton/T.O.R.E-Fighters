@@ -63,9 +63,10 @@ fn in_rect(point: (f64, f64), rect: (i32, i32, i32, i32)) -> bool {
         && point.1 < (rect.1 + rect.3) as f64
 }
 const BARS: [(i32, i32, i32, i32); 3] = [(78, 38, 17, 19), (96, 38, 39, 19), (135, 38, 45, 19)];
-/// Lower-left anchor of the version label, above the canvas edge and clear of
-/// the activity buttons.
-const VERSION_LABEL: (i32, i32) = (14, 462);
+/// Project-owned footer art and adjacent version, clear of the activity buttons.
+const BADGE_SIZE: usize = 64;
+const VERSION_BADGE: (i32, i32) = (14, 408);
+const VERSION_LABEL: (i32, i32) = (86, 433);
 impl State {
     pub fn new(buttons: Vec<Button>, music: bool) -> Self {
         let count = buttons.len();
@@ -478,6 +479,19 @@ impl Menu {
         // than MENUFONT.PIC, which smears over the artwork once the canvas is
         // scaled up. Built once here so `render` does not rebuild it a frame.
         sprites.insert("VERSIONFONT".into(), flat_font_large([255, 255, 255]));
+        // This is the project logo, not imported retail art. The committed RGBA
+        // derivative avoids adding an image decoder to the runtime.
+        let badge: &[u8; BADGE_SIZE * BADGE_SIZE * 4] =
+            include_bytes!("../assets/icon/tore-64.rgba");
+        sprites.insert(
+            "TOREBADGE".into(),
+            Sprite {
+                width: BADGE_SIZE,
+                height: BADGE_SIZE,
+                rgba: badge.to_vec(),
+                glyphs: vec![],
+            },
+        );
         Ok(Self {
             state,
             sprites,
@@ -519,7 +533,9 @@ impl Menu {
                 "FONTACD.PIC"
             }];
             let tx = x + (b.width - 10 - text_width(font, &b.label)) / 2;
-            canvas.text(font, &b.label, tx, y + 4, None);
+            // Lower the label onto the raised face, excluding the artwork's
+            // surrounding bevel and shadow (John, 2026-09-23).
+            canvas.text(font, &b.label, tx, y + 6, None);
             if self.state.keyboard && self.state.focus == Some(Target::Button(i)) {
                 canvas.outline((b.x - 2, b.y - 2, b.width - 7, 25), [204, 225, 205, 255]);
             }
@@ -533,12 +549,11 @@ impl Menu {
             canvas.centered_text(menu_font, label, rect);
         }
         let body = &self.sprites["ARMFONT.PIC"];
-        // Opinionated (John, 2026-09-22): the build's version sits in the lower
-        // left corner of the main menu. Drawn before popups and toasts so they
-        // can cover it. A one-pixel dark shadow under the glyphs keeps it
-        // legible over any of the five backgrounds.
+        // Opinionated (John, 2026-09-23): badge plus version, drawn before
+        // popups and toasts. The one-pixel shadow keeps the version legible.
+        canvas.blit(&self.sprites["TOREBADGE"], VERSION_BADGE, 0, BADGE_SIZE, 1.);
         let version_font = &self.sprites["VERSIONFONT"];
-        let version = crate::version::label();
+        let version = format!("v{}", crate::version::version());
         canvas.text(
             version_font,
             &version,

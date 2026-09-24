@@ -14,6 +14,7 @@ Outputs land in `crates/tore-app/assets/icon/`:
 - `tore-16.png` through `tore-512.png`, used by the Linux packages, the macOS
   `.iconset` and the Windows `.ico`.
 - `tore.ico`, the multi-resolution Windows icon.
+- `tore-64.rgba`, straight-alpha pixels embedded for the main-menu badge.
 
 Downscaling uses ImageMagick 7 (`magick`) with a Lanczos filter, plus a light
 unsharp pass at 64 px and below so the small sizes stay legible. Only
@@ -267,7 +268,7 @@ def build(check_only):
         print(f"Missing the source artwork: {SOURCE}", file=sys.stderr)
         return 1
     if check_only:
-        existing = sorted(OUTPUT.glob("tore-*.png")) + [OUTPUT / "tore.ico"]
+        existing = sorted(OUTPUT.glob("tore-*.png")) + [OUTPUT / "tore.ico", OUTPUT / "tore-64.rgba"]
         missing = [p for p in existing if not p.is_file()]
         if missing:
             print("Missing: " + ", ".join(str(p) for p in missing), file=sys.stderr)
@@ -291,6 +292,11 @@ def build(check_only):
     ico = OUTPUT / "tore.ico"
     ico.write_bytes(build_ico(images))
     written.append(ico)
+
+    badge = OUTPUT / "tore-64.rgba"
+    badge.write_bytes(run(["magick", str(OUTPUT / "tore-64.png"),
+                           "-depth", "8", "-alpha", "on", "RGBA:-"]))
+    written.append(badge)
 
     print("Wrote:")
     status = report(written)

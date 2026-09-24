@@ -20,8 +20,10 @@ scaled to 640 × 480, side by side and in 3× and 4× nearest-neighbour crops.
 
 - Background, clipboard, `?`, Cancel, OK, the striped default marker and the
   rocker land on the retail pixels.
-- Page text: headings, body lines, the PLAYER/WINGMAN columns and every table row
-  match retail position to within one pixel on all five pages; fonts match by
+- Page text: the original failed-mission comparison placed headings, body lines,
+  the PLAYER/WINGMAN columns and table rows within one pixel of the supplied
+  reference. First-page body text now follows the requested
+  [centering correction](../spec/debrief.md#presentation). Fonts match by
   glyph width (for example "You failed this Quick Mission." is 168 pixels, 166.7
   measured).
 - The page counter and PREV/NEXT labels match to within one pixel after moving

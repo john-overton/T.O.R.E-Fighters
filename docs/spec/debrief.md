@@ -62,6 +62,7 @@ Quick Mission (medium confidence, see the research).
 | Clipboard click area | The brown board: (248,66,333,404) on DEBSCV/DEBSCU, (278,66,303,404) on DEBSCR/DEBSC3; the panel controls stay on top | fitted |
 | Page fonts | BODYFONT body, BOLDFONT for `.bold`, HEADFONT for `.header`; imported colours on the background palette | retail fonts, face match to screenshots |
 | Text column | Left x=294, centred text on x=418, top line at y=162 | fitted to screenshots |
+| First-page result text | Both the heading and success/failure sentence are centred on x=418, including body lines marked `.left` in QUICK.MT. Other pages retain their column alignment | opinionated correction requested by John on 2026-09-23 |
 | Line height | 12 px; header lines 15 px | fitted to screenshots |
 | Tab stops | x=403 and x=478; a tab past the last stop does not move | retail |
 | Underline | 1 px, two rows below the capital baseline, under the underlined text only | fitted |

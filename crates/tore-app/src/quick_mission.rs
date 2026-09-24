@@ -27,6 +27,10 @@ const DOWN: usize = 73;
 const OBJECTIVE_BASE: usize = 80;
 const OBJECTIVE_COUNT: usize = 6;
 const SURVIVAL_BASE: usize = OBJECTIVE_BASE + OBJECTIVE_COUNT;
+const GROUND_SECTION: usize = 92;
+const GROUND_NOTICE_OK: usize = 93;
+const GROUND_SECTION_RECT: Rect = (334, 294, 278, 49);
+const GROUND_NOTICE_RECT: Rect = (166, 202, 308, 88);
 #[derive(Clone, Debug)]
 pub struct Draft {
     pub values: [usize; 35],
@@ -81,6 +85,7 @@ pub struct QuickMission {
     scroll: usize,
     controls: Vec<(usize, Rect)>,
     pub notice: Option<String>,
+    ground_notice: bool,
     pub help: bool,
     pub shift: bool,
 }
@@ -110,7 +115,7 @@ impl QuickMission {
             options.fields[field].truncate(4);
             options.fields[field].push("Dummy (400 KTS)".into());
         }
-        // The retail separation list ends at 50; 200 and 300 are host entries
+        // The retail list ends at 50; 100, 150, 200 and 300 are host entries
         // in the retail label style (John, 2026-09-23). Every entry is read as
         // nautical miles, as the manual states.
         options.fields[17].truncate(layout::RETAIL_SEPARATIONS);
@@ -213,6 +218,7 @@ impl QuickMission {
             scroll: 0,
             controls: vec![],
             notice: None,
+            ground_notice: false,
             help: false,
             shift: false,
         }
@@ -548,7 +554,16 @@ impl QuickMission {
         self.selection = self.theater_index();
         self.notice = None;
     }
+    fn show_ground_notice(&mut self) {
+        self.cancel();
+        self.notice = None;
+        self.ground_notice = true;
+    }
     fn open(&mut self, id: usize) {
+        if (30..=32).contains(&id) {
+            self.show_ground_notice();
+            return;
+        }
         self.selector = Some(id);
         self.cursor = if let Some(group) = id
             .checked_sub(OBJECTIVE_BASE)
@@ -592,6 +607,7 @@ impl QuickMission {
             // Debrief pages are prepared by the snapshot host.
             state if state.starts_with("debrief") => {}
             "help" => self.help = true,
+            "ground-targets-unavailable" => self.show_ground_notice(),
             "ground-start" => self.apply(33, 1),
             "airports" => {
                 self.apply(33, 1);
@@ -677,7 +693,7 @@ impl QuickMission {
             self.right_pressed = None;
             return o.right(down);
         }
-        if self.selector.is_some() || self.help {
+        if self.selector.is_some() || self.help || self.ground_notice {
             self.right_pressed = None;
             return Action::None;
         }
@@ -685,6 +701,7 @@ impl QuickMission {
             self.pressed = None;
             self.right_pressed = self.hover.filter(|id| {
                 (3..=34).contains(id)
+                    || *id == GROUND_SECTION
                     || (OBJECTIVE_BASE..SURVIVAL_BASE + OBJECTIVE_COUNT).contains(id)
             });
             return Action::None;
@@ -696,6 +713,10 @@ impl QuickMission {
         else {
             return Action::None;
         };
+        if matches!(id, 30..=32 | GROUND_SECTION) {
+            self.show_ground_notice();
+            return Action::Click;
+        }
         if id == 34 && !self.ground_start() {
             return Action::None;
         }
@@ -755,8 +776,17 @@ impl QuickMission {
         self.hover = None;
         self.selector = None;
         self.help = false;
+        self.ground_notice = false;
     }
     fn activate(&mut self, id: usize) -> Action {
+        if self.ground_notice {
+            return if id == GROUND_NOTICE_OK {
+                self.cancel();
+                Action::Click
+            } else {
+                Action::None
+            };
+        }
         if let Some(field) = self.selector {
             match id {
                 POP_OK => {
@@ -813,6 +843,7 @@ impl QuickMission {
                 }
             }
             CANCEL => return Action::Back,
+            30..=32 | GROUND_SECTION => self.show_ground_notice(),
             3..=34 => {
                 if id == 34 && !self.ground_start() {
                     return Action::None;
@@ -847,6 +878,13 @@ impl QuickMission {
             return o.key(key);
         }
         self.shift = shift;
+        if self.ground_notice {
+            return if matches!(key, "Enter" | " " | "Escape") {
+                self.activate(GROUND_NOTICE_OK)
+            } else {
+                Action::None
+            };
+        }
         if key == "Escape" {
             if self.selector.is_some() || self.help || self.notice.is_some() {
                 self.cancel();
@@ -1052,6 +1090,7 @@ impl QuickMission {
                 &[("Airport: ", None), ("", Some(34))],
             );
         }
+        self.controls.push((GROUND_SECTION, GROUND_SECTION_RECT));
         let (mut x, mut y) = (340, 301);
         for (text, id) in [
             ("Friendly ground target is ", None),
@@ -1159,6 +1198,20 @@ impl QuickMission {
             self.button(&mut c, sprites, POP_OK, "OK", (217, 437, 85, 24));
             self.button(&mut c, sprites, POP_CANCEL, "Cancel", (312, 437, 85, 24));
         }
+        if self.ground_notice {
+            self.controls.clear();
+            let (x, y, w, h) = GROUND_NOTICE_RECT;
+            c.rect((x + 4, y + 4, w, h), [16, 19, 20, 255]);
+            c.rect(GROUND_NOTICE_RECT, [35, 44, 46, 255]);
+            bevel(&mut c, GROUND_NOTICE_RECT, false);
+            for (text, y) in [
+                ("Ground targets, AAA and SAMs", 214),
+                ("are not implemented yet.", 231),
+            ] {
+                c.centered_text(font, text, (174, y, 292, 13));
+            }
+            self.button(&mut c, sprites, GROUND_NOTICE_OK, "OK", (285, 255, 85, 24));
+        }
         animating
     }
     fn line(
@@ -1213,7 +1266,7 @@ impl QuickMission {
             sprites,
             label,
             (r.0, r.1, r.2),
-            id == OK || id == POP_OK,
+            matches!(id, OK | POP_OK | GROUND_NOTICE_OK),
             self.pressed == Some(id),
         );
         self.controls.push((id, hit));
@@ -1752,11 +1805,6 @@ mod tests {
         assert_eq!(q.value(15), "night");
         q.activate(15); // Existing forward cycle reverses the last change.
         assert_eq!(q.value(15), "dawn");
-        q.apply(30, 1);
-        q.apply(31, 2);
-        q.apply(32, 2);
-        right_click(&mut q, 30);
-        assert_eq!(&q.draft.values[30..33], &[0, 0, 0]);
         q.options.fields[14].clear();
         assert!(matches!(right_click(&mut q, 14), Action::None));
     }
@@ -1784,6 +1832,45 @@ mod tests {
         q.help = true;
         assert!(matches!(right_click(&mut q, 15), Action::None));
         assert_eq!(q.draft.values, before);
+        q.cancel();
+        for field in [30, 31, 32, GROUND_SECTION] {
+            // Both pointer buttons show the notice without editing the draft.
+            q.hover = Some(field);
+            q.down();
+            assert!(matches!(q.up(), Action::Click));
+            assert!(q.ground_notice);
+            assert!(q.selector.is_none());
+            assert!(matches!(q.activate(OK), Action::None));
+            assert!(matches!(right_click(&mut q, 15), Action::None));
+            q.key("Escape", false);
+            assert!(matches!(right_click(&mut q, field), Action::Click));
+            assert!(q.ground_notice);
+            q.key("Enter", false);
+            assert!(!q.ground_notice);
+            assert_eq!(q.draft.values, before);
+        }
+        for field in 30..=32 {
+            q.focus = field;
+            for shift in [false, true] {
+                q.key("Enter", shift);
+                assert!(q.ground_notice);
+                assert!(q.selector.is_none());
+                q.activate(GROUND_NOTICE_OK);
+                assert_eq!(q.draft.values, before);
+            }
+            q.open(field); // Direct selector previews must not bypass the guard.
+            assert!(q.ground_notice && q.selector.is_none());
+            q.cancel();
+        }
+        // The sentence background, away from its value boxes, is also clickable.
+        q.controls = vec![(GROUND_SECTION, GROUND_SECTION_RECT)];
+        q.pointer(Some((340., 298.)));
+        q.down();
+        q.up();
+        assert!(q.ground_notice);
+        q.key(" ", false);
+        q.activate(15);
+        assert_ne!(q.draft.values[15], before[15]);
     }
     #[test]
     fn ground_start_airport_picker_cancels_and_resets_on_theater_change() {
@@ -2002,11 +2089,14 @@ mod tests {
         assert_eq!(legacy_pairs(&wings), q.dummy_wings());
     }
     #[test]
-    fn separation_lists_eight_nautical_choices_and_never_panics() {
+    fn separation_lists_ten_nautical_choices_and_never_panics() {
         let mut q = setup();
         let labels = q.values(17).to_vec();
-        assert_eq!(labels.len(), 8);
-        assert_eq!(&labels[6..], ["200 miles", "300 miles"]);
+        assert_eq!(labels.len(), 10);
+        assert_eq!(
+            &labels[6..],
+            ["100 miles", "150 miles", "200 miles", "300 miles"]
+        );
         for (index, nm) in SEPARATION_NM.into_iter().enumerate() {
             q.apply(17, index);
             assert_eq!(q.separation_nm(), nm);
@@ -2018,11 +2108,16 @@ mod tests {
         assert_eq!(q.separation_feet(), 5. * FEET_PER_NM);
         // Clicking cycles through the host entries and wraps.
         q.draft.values[17] = 5;
-        q.activate(17);
-        assert_eq!(q.value(17), "200 miles");
-        q.activate(17);
+        for expected in ["100 miles", "150 miles", "200 miles", "300 miles"] {
+            q.activate(17);
+            assert_eq!(q.value(17), expected);
+        }
         q.activate(17);
         assert_eq!(q.draft.values[17], 0);
+        for expected in ["300 miles", "200 miles", "150 miles", "100 miles"] {
+            right_click(&mut q, 17);
+            assert_eq!(q.value(17), expected);
+        }
     }
 
     const RUNWAY: u32 = 0x4000_0001;

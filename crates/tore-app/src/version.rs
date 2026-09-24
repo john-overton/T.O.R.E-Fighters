@@ -17,7 +17,7 @@ pub fn target() -> &'static str {
     env!("TORE_BUILD_TARGET")
 }
 
-/// The label shown on the main menu and printed at startup.
+/// The application name and version printed at startup.
 pub fn label() -> String {
     format!("T.O.R.E - v{}", version())
 }

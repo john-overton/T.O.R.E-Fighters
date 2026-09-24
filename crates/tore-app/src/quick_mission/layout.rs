@@ -14,8 +14,8 @@ use tore_sim::{
 pub const FEET_PER_NM: f64 = 6_076.12;
 
 /// Separation choices in nautical miles. The first six are the retail list;
-/// 200 and 300 are host additions requested by John on 2026-09-23.
-pub const SEPARATION_NM: [f64; 8] = [1., 2., 5., 10., 20., 50., 200., 300.];
+/// 100, 150, 200 and 300 are host additions requested by John on 2026-09-23.
+pub const SEPARATION_NM: [f64; 10] = [1., 2., 5., 10., 20., 50., 100., 150., 200., 300.];
 /// Retail entries in the imported separation list.
 pub const RETAIL_SEPARATIONS: usize = 6;
 
@@ -354,8 +354,11 @@ mod tests {
     }
 
     #[test]
-    fn separation_table_is_nautical_and_adds_200_and_300() {
-        assert_eq!(SEPARATION_NM, [1., 2., 5., 10., 20., 50., 200., 300.]);
+    fn separation_table_is_nautical_and_includes_host_choices() {
+        assert_eq!(
+            SEPARATION_NM,
+            [1., 2., 5., 10., 20., 50., 100., 150., 200., 300.]
+        );
         assert_eq!(FEET_PER_NM, 6_076.12);
         assert_eq!(RETAIL_SEPARATIONS, 6);
     }

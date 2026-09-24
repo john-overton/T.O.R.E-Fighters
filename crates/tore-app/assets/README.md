@@ -44,14 +44,15 @@ committed atlases consistently on Linux, Windows and macOS.
 
 ## Application icon
 
-`icon/tore-*.png` and `icon/tore.ico` are downscales of
+`icon/tore-*.png`, `icon/tore.ico` and `icon/tore-64.rgba` are downscales of
 `docs/images/tore-fighters-logo.png`, the project logo: a render of a round
 embroidered patch. It is our own artwork, made for this project, and is covered
 by the repository `LICENSE` like the rest of the source. It is not retail art
 and contains no retail game data.
 
 The committed set is 16, 32, 48, 64, 128, 256 and 512 px plus the Windows
-`tore.ico`, and stays under a 600 KB total budget that the generator enforces.
+`tore.ico` and a 16 KiB straight-alpha RGBA copy of the 64 px icon. The set
+stays under a 600 KB total budget that the generator enforces.
 1024 px is deliberately absent and 512 px is quantized to 255 colours; both
 choices are explained in [packaging](../../../docs/DEVELOPMENT.md#application-icon).
 
@@ -63,4 +64,5 @@ python3 tools/package/build_icons.py
 
 `crates/tore-app/build.rs` reads `icon/tore.ico` and embeds it in
 `tore-app.exe` on windows-msvc. The packaging scripts read the PNGs for the
-Linux desktop entry and the macOS `.icns`. Nothing here is loaded at run time.
+Linux desktop entry and the macOS `.icns`. The app embeds `tore-64.rgba` for
+the main-menu badge; no external image or runtime image decoder is needed.

@@ -192,7 +192,7 @@ is running for, then from `git describe`, then falls back to `0.0.0-dev`. A
 leading `v` is stripped. Packages are written to ignored `dist/`, and the
 staged bundle each package is built from stays in `dist/stage/`.
 
-The app carries its own version. The main menu shows `T.O.R.E - vX.Y.Z` in the
+The app carries its own version. The main menu shows the project badge with `vX.Y.Z` beside it in the
 lower left corner and `tore-app --version` prints it. A release build reads
 `TORE_BUILD_VERSION` at compile time; the workflow sets it to the tag (or to
 `git describe` on a test branch) and refuses a tag that does not match the
@@ -259,6 +259,7 @@ icons. `--check` reports the committed sizes without writing, and
 | `tore-128.png`, `tore-512.png` | macOS `.iconset` |
 | `tore-256.png` | Linux tar.gz and AppImage, macOS `.iconset`, the PNG entry of `tore.ico` |
 | `tore.ico` | the Windows executable, the MSI, both Windows shortcuts |
+| `tore-64.rgba` | compiled main-menu badge, using the same 64 px project icon |
 
 Downscaling uses a Lanczos filter, with a light unsharp pass at 64 px and below
 so the small sizes stay legible. Two size decisions keep the committed set
@@ -378,6 +379,14 @@ are outside application logging. See [diagnostic evidence](baselines/startup-dia
 - Linker/SDK error: check `xcode-select -p` and complete any pending Xcode first-launch setup.
 - No graphics adapter or display: run from a logged-in desktop session with working drivers. Compilation and tests do not require a window; the smoke test does.
 - Missing reference folder: the Rust app does not need it. Missing media: an existing valid cache still runs; otherwise import your own media. See [REFERENCES.md](REFERENCES.md).
+
+### Menu presentation checks
+
+The main menu uses the [badge and button-label layout](spec/main-menu-presentation.md).
+The first debrief page centers its result sentence under the heading.
+`--quick-mission --snapshot-state debrief-success --snapshot PATH` previews the
+success case; `debrief-1` retains the failed-mission preview. These CPU snapshots
+use the imported fonts and artwork and must stay under an ignored local path.
 
 ### Startup logs and fatal errors
 
@@ -776,6 +785,18 @@ porting an aircraft's sensors. For repeatable headless captures,
 `--sensor-channel radar|ir`, `--scope-range 5|10|25|50|100|150` and
 `--scope-history` set the scope before the capture. See
 [the component guide](radar.md) and [its validation](baselines/radar.md).
+
+The Quick Mission ground-target/AAA/SAM sentence is unavailable. Clicking it
+opens a small notice instead of changing settings; OK, Enter, Space or Escape
+closes the notice. The enemy-distance choices include 100 and 150 nautical miles
+between 50 and 200. `--separation` accepts the same choices. See the
+[creator contract](spec/quick-mission-menu.md#unavailable-ground-target-controls).
+Preview the notice or distance list without a display:
+
+```sh
+TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --quick-mission --snapshot-state ground-targets-unavailable --snapshot .local/ground-targets-unavailable.ppm --no-audio
+TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --quick-mission --snapshot-state field-17 --snapshot .local/separation-choices.ppm --no-audio
+```
 
 `--validate-creator` needs imported media but no display/audio, and checks all
 imported aircraft's supported placements, fuel, empty stations and accepted-ammo restart.

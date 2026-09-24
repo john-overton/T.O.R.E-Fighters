@@ -17,8 +17,10 @@
 
 ## Delivered behavior
 
-All 30 briefing fields are editable from the fingerprinted active FA selector
-contract. Scalar clicks cycle; Shift-click opens the list. Aircraft and theater clicks open
+The briefing uses the fingerprinted active FA selector contract. Active scalar
+fields cycle on click and open their lists with Shift. Ground-target/AAA/SAM
+controls now show an unavailable popup, following the
+[creator specification](../spec/quick-mission-menu.md#unavailable-ground-target-controls). Aircraft and theater clicks open
 the paged selector. Aircraft choices now follow the
 [imported-only menu specification](../spec/quick-mission-menu.md). List selection commits with OK/Enter; Cancel/Escape
 preserves the previous field. Theater selection maps all 16 source entries by

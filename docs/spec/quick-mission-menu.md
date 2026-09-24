@@ -29,8 +29,9 @@ inline option selects its previous available value, wrapping to the last value.
 This also works for aircraft/theater/airport fields without opening their list;
 their existing left-click behavior is unchanged. The player's wing count wraps
 from one to its maximum, never through zero. Empty lists do nothing. Existing
-field dependencies, including clearing defenses when ground targets are none,
-continue to apply. Require a matching right press/release on the same field.
+field dependencies continue to apply to editable settings. The ground-target
+section is unavailable as described below. Require a matching right
+press/release on the same field.
 Right-click cannot activate OK, Cancel, Exit, popup rows or controls behind a
 selector/help menu. Focus loss cancels a pending press. In the ordnance view,
 right-click retains its existing station-quantity decrement.
@@ -76,6 +77,24 @@ unknown. Further research would inspect the original dialog drawing data.
 
 The Aircraft menu label is vertically centered by visible glyph bounds within
 y=38..58, matching the [ordnance menu bar](ordnance-presentation.md).
+
+## Unavailable ground-target controls
+
+**Opinionated**, requested by John on 2026-09-23. The ground-target, AAA and
+SAM fields remain visible but cannot be edited. Clicking anywhere in that
+sentence block, including its three value boxes, opens a small modal notice:
+"Ground targets, AAA and SAMs are not implemented yet." Left-click,
+right-click, Shift activation and keyboard activation all leave the draft
+unchanged and never open a choice list. The other creator settings remain
+available after dismissing the notice.
+
+The popup reuses the menu font and original blue OK button. OK, Enter, Space
+or Escape dismiss it; inputs cannot change settings or launch a mission through
+it. Focus loss cancels it with the other temporary menus. Agent-selected layout
+on the 640 by 480 canvas: the sentence hit region is (334,294), 278 by 49;
+the centered popup is (166,202), 308 by 88, with its two text lines at y=214
+and y=231 and its OK button at (285,255). This disables host setup controls;
+it does not implement ground targets or defense behavior.
 
 ## Mission end
 
@@ -128,8 +147,9 @@ Restart restores all six groups exactly as launched.
 Separation is in nautical miles (6,076.12 ft), as the manual states (p.19:
 "between 1 and 50 nautical miles"). John chose nautical miles for every entry
 on 2026-09-23. The retail list offers 1, 2, 5, 10, 20 and 50 miles; John
-requested 200 and 300 miles on 2026-09-23, and the host appends them in the
-retail label style ("200 miles", "300 miles"). Every label means nautical
+requested 100, 150, 200 and 300 miles on 2026-09-23, and the host appends them in
+ascending order in the retail label style ("100 miles", "150 miles",
+"200 miles", "300 miles"). Every label means nautical
 miles. An out-of-range choice falls back to the 5 mile default instead of
 failing.
 
