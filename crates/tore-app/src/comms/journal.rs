@@ -8,10 +8,6 @@
 //! identical whether or not anything drains the journal. Opinionated
 //! addition requested by John on 2026-09-26 (docs/REPLAYS.md, "Communication
 //! journal"); the shape of the records is an agent decision.
-// The mission recorder drains and reads the journal, and main.rs reports the
-// wing order voice and the tower's replies. Until those host hooks land, some
-// of this API is read only by tests.
-#![allow(dead_code)]
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 
@@ -67,14 +63,17 @@ impl Journal {
     }
 
     /// The entries waiting, oldest first, without taking them.
+    #[allow(dead_code)] // For a live Comms panel, which reads without draining.
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
         self.entries.iter()
     }
 
+    #[allow(dead_code)] // Read by tests and a live Comms panel.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    #[allow(dead_code)] // Read by tests and a live Comms panel.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -183,6 +182,21 @@ impl Entry {
         .with_kind(Route::Airport, Kind::Important)
     }
 
+    /// The runway under the player's landing clearance became unusable, so
+    /// the host cut the tower speech queued or playing in the mixer and
+    /// showed `text`. Journal only: nothing leaves the channel's queue.
+    pub fn clearance_cancelled(at: f64, text: impl Into<String>) -> Self {
+        Self::note(
+            at,
+            "Tower",
+            Origin::of(Source::Tower, Cause::Tower(TowerEvent::ClearanceCancelled))
+                .to(Audience::Player),
+            Outcome::Cancelled(Reason::RunwayUnusable),
+        )
+        .with_text(text)
+        .with_kind(Route::Airport, Kind::Important)
+    }
+
     /// A player order the host refused before the wing saw it, for example
     /// "no AI wing" or a hostile airport for "land at selected airport".
     pub fn order_refused(at: f64, order: PlayerOrder, message: impl Into<String>) -> Self {
@@ -215,6 +229,7 @@ impl Entry {
     }
 
     /// One line of plain English, for logs and tests.
+    #[allow(dead_code)] // For logs, tests and a live Comms panel.
     pub fn describe(&self) -> String {
         let mut line = format!("{:.2}s {}", self.at, self.origin.source.name());
         if let Some(call) = self.call {
@@ -483,9 +498,15 @@ pub enum TowerEvent {
     Airborne,
     Farewell,
     LandingClearance,
-    Wind { knots: u32 },
-    LandingGrade { score: u32 },
+    Wind {
+        knots: u32,
+    },
+    LandingGrade {
+        score: u32,
+    },
     Welcome,
+    /// The runway under the player's landing clearance became unusable.
+    ClearanceCancelled,
 }
 
 /// One coaching check by the crew or the single-seat wingman.
@@ -787,6 +808,9 @@ impl fmt::Display for Cause {
                     write!(f, "you touched down, landing score {score}")
                 }
                 TowerEvent::Welcome => write!(f, "landed and stopped"),
+                TowerEvent::ClearanceCancelled => {
+                    write!(f, "the runway under your landing clearance was lost")
+                }
             },
             Cause::WingStatus {
                 go_around: true, ..

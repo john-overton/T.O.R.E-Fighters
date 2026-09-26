@@ -373,7 +373,10 @@ ends. Turbulence, missile-blast kicks and No crashes building rebounds that the
 host applies between steps join the record of the step before them. Units are
 feet, ft/s, lb (mass), lbf (force), G, radians and rad/s; runway wind is in
 knots. Stick arrays are [pitch, roll, yaw]; rate and control-scale arrays are
-[roll, pitch, yaw].
+[roll, pitch, yaw]. Mission recordings read the record after the whole tick,
+turbulence included, and keep it as the
+[telemetry tree](REPLAYS.md#display-trees) and as `flight.effect` events when an
+effect starts or stops ([flight-model effects](REPLAYS.md#flight-model-effects)).
 
 | Field | What it holds |
 | --- | --- |

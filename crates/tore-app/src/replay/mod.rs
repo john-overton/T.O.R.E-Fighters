@@ -23,6 +23,7 @@ pub mod screen;
 pub mod sound;
 pub mod tracks;
 pub mod trails;
+pub mod trees;
 pub mod viewer;
 pub mod weather;
 

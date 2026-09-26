@@ -579,7 +579,7 @@ pub fn write_summary(
     let comms: Vec<&TimedEvent> = recording
         .events()
         .iter()
-        .filter(|e| e.event.kind.starts_with("comms."))
+        .filter(|e| e.event.kind.starts_with("comms.") || e.event.kind == kind::AUDIO_MUSIC)
         .collect();
     if comms.is_empty() {
         writeln!(o, "none")?;

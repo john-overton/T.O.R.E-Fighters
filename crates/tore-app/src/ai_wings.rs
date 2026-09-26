@@ -29,6 +29,8 @@ mod engagement;
 pub use engagement::Preset;
 mod orders;
 pub mod outcome;
+mod record;
+pub use record::DecoyRoll;
 mod reports;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -327,6 +329,9 @@ pub struct AiWings {
     /// What the latest [`Self::step`] produced, kept for the replay recorder
     /// and debug panels. Nothing reads it back into a decision.
     last_output: tore_sim::ai::mission::MissionOutput,
+    /// Every decoy roll of the latest [`Self::step`], for the replay
+    /// recorder. Write-only: no decision reads it.
+    decoy_rolls: Vec<DecoyRoll>,
 }
 
 struct PendingGun {
@@ -792,6 +797,7 @@ impl AiWings {
             guns_only: false,
             player_departing: false,
             last_output: tore_sim::ai::mission::MissionOutput::default(),
+            decoy_rolls: Vec::new(),
         })
     }
 
@@ -818,14 +824,12 @@ impl AiWings {
 
     /// What the latest [`Self::step`] produced: launches, device releases,
     /// activities, fallbacks, wing requests and launch calls.
-    #[allow(dead_code)] // Read by the mission recorder.
     pub fn last_output(&self) -> &tore_sim::ai::mission::MissionOutput {
         &self.last_output
     }
 
     /// Drain the AI message journal (attack reports, wing orders, escort
     /// priorities, missile warnings). The recorder calls this once per tick.
-    #[allow(dead_code)] // Called by the mission recorder.
     pub fn take_ai_journal(&mut self) -> tore_sim::ai::thought::JournalBatch {
         self.mission.take_journal()
     }
@@ -927,6 +931,10 @@ impl AiWings {
         world: &World,
     ) -> AppResult<()> {
         let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
+        // The decoy draws and rolls describe this step only. Clearing the
+        // log never touches the generator's state.
+        self.device_random.clear_log();
+        self.decoy_rolls.clear();
         self.weapon_rules = state.weapon_rules;
         self.mission
             .set_missiles(if state.weapon_rules == Rules::Spec {
@@ -1758,15 +1766,26 @@ impl AiWings {
                         }),
                     decoy_susceptibility_percent: weapon.seeker.chaff_flare_chance,
                 };
-                if threat::decoy_missile(
+                let decoy = threat::decoy_missile(
                     &missile,
                     event.class,
                     effectiveness,
                     &mut self.device_random,
                 )
-                .map_err(|e| e.to_string())?
-                    == DecoyOutcome::Decoyed
-                {
+                .map_err(|e| e.to_string())?;
+                if decoy != DecoyOutcome::NotEligible {
+                    // Write-only: the roll this missile just made.
+                    self.decoy_rolls.push(DecoyRoll {
+                        projectile: projectile.id,
+                        releaser: event.actor,
+                        class: event.class,
+                        susceptibility: missile.decoy_susceptibility_percent,
+                        effectiveness,
+                        draw: self.device_random.log().draws().last().copied(),
+                        decoyed: decoy == DecoyOutcome::Decoyed,
+                    });
+                }
+                if decoy == DecoyOutcome::Decoyed {
                     state
                         .ledger
                         .resolve(projectile.id, tore_sim::combat::ledger::Resolution::Spoofed);

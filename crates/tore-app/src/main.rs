@@ -257,37 +257,14 @@ struct App {
     /// replay viewer plays one of its recordings.
     replays_screen: Option<replay::screen::Replays>,
 }
-/// The AI wingmen a player's wing order addresses, for the mission
-/// recording: every living member of the player's wing, or the one wingman
-/// Alt-4 to Alt-7 chose (1 is the first wingman), as the order rules pick
-/// them.
-fn wing_recipients(wings: Option<&ai_wings::AiWings>, recipient: Option<u8>) -> Vec<u32> {
-    let Some(wings) = wings else {
-        return Vec::new();
-    };
-    let mut members: Vec<(u8, u32)> = wings
-        .slots()
-        .iter()
-        .filter(|slot| {
-            slot.side == tore_sim::ai::launch::Side::Friendly
-                && slot.wing_number == 1
-                && wings.mission().actor(slot.id).is_some_and(|a| a.alive())
-        })
-        // The display number counts the player as the first member.
-        .map(|slot| (slot.member_number.saturating_sub(1), slot.id))
-        .filter(|(member, _)| recipient.is_none_or(|wanted| *member == wanted))
-        .collect();
-    members.sort_unstable();
-    members.into_iter().map(|(_, id)| id).collect()
-}
-/// Deliver due radio and crew lines: HUD text and recordings together.
-/// Returns the calls it delivered, for the mission recording.
+/// Deliver due radio and crew lines: HUD text and recordings together. The
+/// channel's journal records each delivery for the mission recording.
 fn deliver_radio(
     comms: &mut comms::Comms,
     flight_ui: &mut flight_ui::FlightUi,
     audio: Option<&audio::Audio>,
     now: f64,
-) -> Vec<comms::Call> {
+) {
     let due = comms.due(now);
     for call in &due {
         match call.route {
@@ -308,7 +285,6 @@ fn deliver_radio(
             }
         }
     }
-    due
 }
 /// Wing vapor line segments: position then RGBA, two vertices per segment.
 /// The five native colors are patterned fill types resolved through LAY
@@ -707,6 +683,7 @@ impl App {
             world: &self.world,
             events: &[],
             outcomes: &[],
+            journal: None,
         });
         recording.end(None, &mut self.combat);
         self.replay_recorder = Some(recording);
@@ -1014,6 +991,12 @@ impl App {
                     ) {
                         Ok(site) => Some(site),
                         Err(message) if self.ai_wings.is_some() => {
+                            // Journal only: refused before the wing saw it.
+                            self.comms.record(comms::journal::Entry::order_refused(
+                                self.sim_seconds(),
+                                order,
+                                message.clone(),
+                            ));
                             self.flight_ui.message(message);
                             return Action::None;
                         }
@@ -1022,7 +1005,6 @@ impl App {
                 } else {
                     None
                 };
-                let recipients = wing_recipients(self.ai_wings.as_ref(), self.wing_recipient);
                 let result = self.ai_wings.as_mut().map(|bridge| {
                     bridge.command_at(order, selected, self.wing_recipient, site.as_ref())
                 });
@@ -1030,34 +1012,33 @@ impl App {
                     Some(Ok(report)) => {
                         if let Some(audio) = &self.audio {
                             audio.radio(&report.radio, true);
+                            // Journal only: the order voice cut off the wing
+                            // lines the mixer was still playing.
+                            self.comms
+                                .cut_off(self.sim_seconds(), comms::journal::Reason::OrderVoice);
                         }
                         if !report.radio.is_empty() {
                             self.comms.spoken(self.sim_seconds());
                         }
-                        if let Some(recording) = &mut self.replay_recorder {
-                            recording.order(
-                                &format!("{order:?}"),
-                                recipients,
-                                &report.message,
-                                &report.radio,
-                                None,
-                            );
-                        }
                         self.flight_ui.message(report.message);
                     }
                     Some(Err(error)) => {
-                        if let Some(recording) = &mut self.replay_recorder {
-                            recording.order(
-                                &format!("{order:?}"),
-                                recipients,
-                                &error.to_string(),
-                                &[],
-                                Some(&error.to_string()),
-                            );
-                        }
+                        self.comms.record(comms::journal::Entry::order_refused(
+                            self.sim_seconds(),
+                            order,
+                            error.to_string(),
+                        ));
                         self.flight_ui.message(error.to_string());
                     }
-                    None => self.flight_ui.message("Wing order unavailable: no AI wing"),
+                    None => {
+                        let message = "Wing order unavailable: no AI wing";
+                        self.comms.record(comms::journal::Entry::order_refused(
+                            self.sim_seconds(),
+                            order,
+                            message,
+                        ));
+                        self.flight_ui.message(message);
+                    }
                 }
                 Action::None
             }
@@ -2901,12 +2882,14 @@ impl ApplicationHandler for App {
                                                 self.comms.cancel_airport();
                                                 self.comms
                                                     .spoken(self.combat.state.tick() as f64 / 120.);
-                                                if let Some(recording) = &mut self.replay_recorder {
-                                                    recording.tower(
-                                                        &airport_reply(&self.world, &reply),
+                                                // Journal only: the reply printed and played.
+                                                self.comms.record(
+                                                    comms::journal::Entry::tower_reply(
+                                                        self.combat.state.tick() as f64 / 120.,
+                                                        airport_reply(&self.world, &reply),
                                                         airport_reply_audio(&reply),
-                                                    );
-                                                }
+                                                    ),
+                                                );
                                                 self.flight_ui
                                                     .message(airport_reply(&self.world, &reply));
                                                 if let Some(audio) = &self.audio {
@@ -3098,8 +3081,14 @@ impl ApplicationHandler for App {
                                     airport_event,
                                     tore_sim::airport::Event::ClearanceInvalidated(_)
                                 ) {
-                                    self.flight_ui
-                                        .message("Landing clearance cancelled: runway unavailable");
+                                    let message = "Landing clearance cancelled: runway unavailable";
+                                    // Journal only: the tower speech it cuts.
+                                    self.comms
+                                        .record(comms::journal::Entry::clearance_cancelled(
+                                            self.combat.state.tick() as f64 / 120.,
+                                            message,
+                                        ));
+                                    self.flight_ui.message(message);
                                     if let Some(audio) = &self.audio {
                                         audio.cancel_airport_radio();
                                     }
@@ -3217,6 +3206,12 @@ impl ApplicationHandler for App {
                             // before the radio drains this tick's strikes.
                             if let Some(recording) = &mut self.replay_recorder {
                                 let outcomes = self.combat.state.ledger.take_outcomes();
+                                // The AI's messages of this tick; the journal
+                                // is write-only, so draining it changes nothing.
+                                let journal = self
+                                    .ai_wings
+                                    .as_mut()
+                                    .map(ai_wings::AiWings::take_ai_journal);
                                 recording.begin(replay::recorder::Tick {
                                     snapshot: self.combat.render_snapshot(),
                                     combat: &self.combat,
@@ -3227,6 +3222,7 @@ impl ApplicationHandler for App {
                                     world: &self.world,
                                     events: &events,
                                     outcomes: &outcomes,
+                                    journal: journal.as_ref(),
                                 });
                             }
 
@@ -3266,14 +3262,16 @@ impl ApplicationHandler for App {
                                 self.ai_wings.as_mut(),
                                 &self.flight,
                             );
-                            let delivered = deliver_radio(
+                            deliver_radio(
                                 &mut self.comms,
                                 &mut self.flight_ui,
                                 self.audio.as_ref(),
                                 self.combat.state.tick() as f64 / 120.,
                             );
+                            // Every communication decision of the tick, with
+                            // its trigger and reason. Write-only.
                             if let Some(recording) = &mut self.replay_recorder {
-                                recording.radio(&delivered, comms::crew(&self.hornet.profile));
+                                recording.drain_comms(&mut self.comms);
                             }
 
                             let danger = tore_sim::ejection::assess(&self.flight, |x, z| {
@@ -3312,21 +3310,13 @@ impl ApplicationHandler for App {
                                 // about 2 seconds after it is decided (native).
                                 let label = comms::crew(&self.hornet.profile)
                                     .map_or("YOU", comms::Crew::label);
-                                for stem in music.radio {
-                                    let delay = if stem == ai_wings::outcome::MISSION_ACCOMPLISHED {
-                                        2.
-                                    } else {
-                                        0.
-                                    };
-                                    self.comms.send(
-                                        self.combat.state.tick() as f64 / 120.,
-                                        comms::Call::new(
-                                            label,
-                                            comms::Phrase::stem(&self.phrases, stem),
-                                            comms::Kind::Important,
-                                        )
-                                        .after(delay),
-                                    );
+                                for call in music.radio_calls(label, &self.phrases) {
+                                    self.comms
+                                        .send(self.combat.state.tick() as f64 / 120., call);
+                                }
+                                // What the music's inputs asked for, and why.
+                                if let Some(recording) = &mut self.replay_recorder {
+                                    recording.comms(music.journal);
                                 }
                             }
                             // Audio observes authoritative poses and consumes each emission once.
@@ -5324,25 +5314,21 @@ fn ai_probe_run(
                     Ok(site) => Some(site),
                     Err(message) => {
                         println!("t={tick} order={order:?} refused: {message}");
+                        // Journal only: refused before the wing saw it.
+                        comms.record(comms::journal::Entry::order_refused(
+                            combat.state.tick() as f64 / 120.,
+                            *order,
+                            message,
+                        ));
                         continue;
                     }
                 }
             } else {
                 None
             };
-            let recipients = wing_recipients(Some(&bridge), None);
             let report =
                 bridge.command_at(*order, combat.state.designated(), None, site.as_ref())?;
             println!("t={tick} order={order:?} reply={:?}", report.message);
-            if let Some(recording) = &mut recording {
-                recording.order(
-                    &format!("{order:?}"),
-                    recipients,
-                    &report.message,
-                    &report.radio,
-                    None,
-                );
-            }
         }
         bridge.step(&mut combat.state, &flight, world)?;
         if let Some(recording) = &mut recording {
@@ -5357,6 +5343,8 @@ fn ai_probe_run(
         if let (Some(recording), Some(previous)) = (&mut recording, &previous) {
             combat.advance_render(&flight, Some(&bridge));
             let outcomes = combat.state.ledger.take_outcomes();
+            // Write-only: draining the AI's messages changes nothing.
+            let journal = bridge.take_ai_journal();
             recording.begin(replay::recorder::Tick {
                 snapshot: combat.render_snapshot(),
                 combat: &combat,
@@ -5367,6 +5355,7 @@ fn ai_probe_run(
                 world,
                 events: &events,
                 outcomes: &outcomes,
+                journal: Some(&journal),
             });
         }
         let now = combat.state.tick() as f64 / 120.;
@@ -5393,7 +5382,8 @@ fn ai_probe_run(
         );
         let due = comms.due(now);
         if let Some(recording) = &mut recording {
-            recording.radio(&due, crew);
+            // Write-only: every communication decision of the tick.
+            recording.drain_comms(&mut comms);
             // Sounds are drained only when recording; nothing else reads them.
             let emissions = combat.state.take_sound_events();
             let stations = &combat.state.configuration().stations;
@@ -5557,6 +5547,7 @@ fn start_probe_recording(
         world,
         events: &[],
         outcomes: &[],
+        journal: None,
     });
     Ok(recording)
 }

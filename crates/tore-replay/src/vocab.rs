@@ -28,12 +28,14 @@ pub mod kind {
     pub const WEAPON_TRACK_LOST: &str = "weapon.track_lost";
     /// A guided weapon followed a decoy. Subject: shooter. Object: the
     /// aircraft that released the decoy. Fields: `projectile`, `decoy`
-    /// (Text: chaff or flare), `reason`.
+    /// (Text: chaff or flare), `roll` and `threshold` (Int: the decoy roll
+    /// passed when roll < threshold), `susceptibility` and `effectiveness`
+    /// (Int, percent), `reason`.
     pub const WEAPON_DECOYED: &str = "weapon.decoyed";
     /// How a shot ended. Subject: shooter. Object: intended target. Fields:
     /// `projectile`, `result` (Text from [`super::outcome`]: hit, missed,
     /// spoofed, jammed), `damage` (Int), `hp_after` (Int), `reason` (Text),
-    /// `miss_ft` (Num).
+    /// `miss_ft` (Num: the closest the shot came to its target).
     pub const WEAPON_OUTCOME: &str = "weapon.outcome";
     /// Damage landed. Subject: attacker. Object: the aircraft or surface
     /// object hit. Fields: `projectile`, `weapon`, `damage` (Int), `hp_after`
@@ -74,18 +76,23 @@ pub mod kind {
     /// A spin began or ended. Subject: the aircraft. Fields: `on` (Bool),
     /// `direction` (Text: left or right).
     pub const FLIGHT_SPIN: &str = "flight.spin";
-    /// The pilot asked for more G than the limit allowed. Subject: the
-    /// aircraft. Fields: `asked`, `limit` (Num, G), `reason`.
+    /// The pilot held the stick at its stop, asking for more G than the
+    /// limit allowed. Subject: the aircraft. Fields: `asked` (Num, G: what
+    /// the aircraft's envelope offers at this speed), `limit` (Num, G: the
+    /// limit applied), `g` (Num: delivered), `reason` (what set the limit).
     pub const FLIGHT_G_LIMIT: &str = "flight.g_limit";
     /// The structure failed. Subject: the aircraft. Fields: `section` (Int),
-    /// `g` (Num).
+    /// `g` (Num), `reason`.
     pub const FLIGHT_STRUCTURAL_FAILURE: &str = "flight.structural_failure";
     /// A flight-model effect started or stopped applying. Subject: the
-    /// aircraft. Fields: `effect` (Text), `on` (Bool), `reason` (Text: the
-    /// because line). Tacview shows these as debug events.
+    /// aircraft. Fields: `effect` (Text), `on` (Bool), `factor` (Text: the
+    /// factor, limit or state it applied), `reason` (Text: the because
+    /// line), `momentary` (Bool: an effect of one moment, such as a
+    /// touchdown, which has no "off"). Tacview shows these as debug events.
     pub const FLIGHT_EFFECT: &str = "flight.effect";
     /// AI activity changed. Subject: the aircraft. Fields: `from`, `to`
-    /// (Text), `reason`.
+    /// (Text), `for_s` (Num: how long the previous activity lasted),
+    /// `reason`.
     pub const AI_ACTIVITY: &str = "ai.activity";
     /// AI target changed. Subject: the aircraft. Object: the new target.
     /// Fields: `from`, `to` (Id), `priority` (Text), `score` (Num),
@@ -96,7 +103,8 @@ pub mod kind {
     pub const AI_WEAPON_PHASE: &str = "ai.weapon_phase";
     /// AI started or changed a defensive reaction. Subject: the aircraft.
     /// Object: the threat's shooter. Fields: `threat` (Id of the projectile),
-    /// `reaction` (Text), `range_ft`, `reason`.
+    /// `reaction` (Text), `range_ft`, `reason`, and for a launch warning
+    /// `launch_range_ft` and `delay_s`.
     pub const AI_DEFENSE: &str = "ai.defense";
     /// AI fell back to a simpler behaviour. Subject: the aircraft. Fields:
     /// `from`, `to`, `reason`.
@@ -123,23 +131,35 @@ pub mod kind {
     /// `reason`, `wait_s`.
     pub const COMMS_DELIVERY: &str = "comms.delivery";
     /// A radio call. Subject: speaker. Fields: `speaker` (Text label),
-    /// `stems` (Text: the recordings, space separated), `route` (Text),
-    /// `trigger` (Text), `heard` (Bool: the player could hear it), `outcome`,
-    /// `reason`, `wait_s`. Text: the words.
+    /// `stems` (Text: the recordings, space separated), `route` (Text, from
+    /// [`super::route`]: how the cockpit plays it), `kind` (Text: chatter or
+    /// important), `audience` (Text), `trigger` (Text; see
+    /// [`super::trigger`]), `rolls` (Text: each random draw with its test),
+    /// `heard` (Bool: the player could hear it), `outcome`, `reason`,
+    /// `wait_s`, `due_s` (Num: the delay before a queued call is due),
+    /// `message` (Int: the call's number, shared by every entry about it).
+    /// Text: the words. Each line has one entry per thing that happened to
+    /// it, so a line the player heard is the one [`super::heard`] accepts.
     pub const COMMS_RADIO: &str = "comms.radio";
     /// A crew remark in the player's cockpit. Same fields as radio.
     pub const COMMS_CREW: &str = "comms.crew";
-    /// A tower reply. Same fields as radio, plus `airport` (Id).
+    /// A tower line. Same fields as radio, plus `airport` (Id).
     pub const COMMS_TOWER: &str = "comms.tower";
     /// A cockpit HUD message. Fields: `outcome`, `reason`. Text: the message.
     pub const COMMS_HUD: &str = "comms.hud";
     /// A seeker or lock tone changed. Subject: the aircraft. Fields: `tone`
-    /// (Text), `on` (Bool), `reason`.
+    /// (Text, from [`super::tone`]), `on` (Bool), `strength` (Num: its
+    /// loudness from 0 to 1), `surface` (Bool: the weapon aims at surface
+    /// targets, which changes the sound an infrared lock plays), `reason`.
+    /// A new entry also marks a change in strength of 0.05 or more.
     pub const AUDIO_TONE: &str = "audio.tone";
     /// The stall warning started or stopped. Subject: the aircraft. Fields:
     /// `on` (Bool).
     pub const AUDIO_STALL_WARNING: &str = "audio.stall_warning";
-    /// The music situation changed. Fields: `from`, `to` (Text), `reason`.
+    /// The situation music's inputs changed. Fields: `from`, `to` (Text: the
+    /// score they ask for), `outcome`, `reason` (Text: why each input is
+    /// on), and every input in [`super::music`] (Bool), so a replay can
+    /// hand the music the same inputs.
     pub const AUDIO_MUSIC: &str = "audio.music";
     /// A sound effect played. Subject: the source, if any. Fields: `sound`
     /// (Text), `x_ft`, `y_ft`, `z_ft`, `volume`.
@@ -297,6 +317,122 @@ pub mod field {
     pub const COMMAND: &str = "command";
     pub const SCALE: &str = "scale";
     pub const CHEAT: &str = "cheat";
+    pub const FACTOR: &str = "factor";
+    pub const MOMENTARY: &str = "momentary";
+    pub const FOR_S: &str = "for_s";
+    pub const ROLL: &str = "roll";
+    pub const ROLLS: &str = "rolls";
+    pub const THRESHOLD: &str = "threshold";
+    pub const SUSCEPTIBILITY: &str = "susceptibility";
+    pub const EFFECTIVENESS: &str = "effectiveness";
+    pub const LAUNCH_RANGE_FT: &str = "launch_range_ft";
+    pub const DELAY_S: &str = "delay_s";
+    pub const DUE_S: &str = "due_s";
+    pub const AUDIENCE: &str = "audience";
+    /// A radio call's kind: chatter or important.
+    pub const KIND: &str = "kind";
+    /// Which producer made a comms entry, from [`super::source`].
+    pub const SOURCE: &str = "source";
+    /// A seeker tone's loudness, 0 to 1.
+    pub const STRENGTH: &str = "strength";
+    /// A seeker tone's weapon aims at surface targets.
+    pub const SURFACE: &str = "surface";
+}
+
+/// Seeker tone names, for the `tone` field of `audio.tone`.
+pub mod tone {
+    pub const RADAR_LOCK: &str = "radar lock";
+    pub const RADAR_SEARCH: &str = "radar search";
+    pub const INFRARED_LOCK: &str = "infrared lock";
+    /// An infrared seeker searching for a surface target.
+    pub const GROUND: &str = "ground";
+    pub const INFRARED_SEARCH: &str = "infrared search";
+}
+
+/// How the cockpit plays a comms line, for the `route` field.
+pub mod route {
+    /// The radio: queued behind other radio speech.
+    pub const RADIO: &str = "radio";
+    /// Airport speech: the tower's own queue.
+    pub const TOWER: &str = "tower";
+    /// Played straight into the cockpit, such as the player's death scream.
+    pub const DIRECT: &str = "direct";
+}
+
+/// Triggers a replay acts on, for the `trigger` field. Other triggers are
+/// plain English and may change wording.
+pub mod trigger {
+    /// The tower's answer to the player's own request, which replaces tower
+    /// speech still queued or playing.
+    pub const PLAYER_REQUEST: &str = "player request";
+    /// The runway under the player's landing clearance became unusable,
+    /// which cuts tower speech still queued or playing.
+    pub const CLEARANCE_CANCELLED: &str = "landing clearance cancelled";
+}
+
+/// The situation music's inputs, as Bool fields of `audio.music`. Each
+/// matches the input of the same name the game's music takes.
+pub mod music {
+    /// The mission has succeeded.
+    pub const SUCCEEDED: &str = "succeeded";
+    /// The player has ejected.
+    pub const EJECTED: &str = "ejected";
+    /// The player is on the takeoff roll or climbing out after it.
+    pub const LAUNCHING: &str = "launching";
+    /// A designated enemy aircraft is within air range.
+    pub const AIR_TARGET: &str = "air_target";
+    /// A round hit the player recently.
+    pub const HIT_RECENTLY: &str = "hit_recently";
+    /// A designated enemy beyond air range, an AI aiming a missile at the
+    /// player, or a missile guided at the player.
+    pub const DANGER: &str = "danger";
+    /// The home condition has been reached this flight.
+    pub const HOME: &str = "home";
+    /// The player is parked, or rolling out after a landing.
+    pub const DECK: &str = "deck";
+    /// Every input, in the order the game declares them.
+    pub const ALL: [&str; 8] = [
+        SUCCEEDED,
+        EJECTED,
+        LAUNCHING,
+        AIR_TARGET,
+        HIT_RECENTLY,
+        DANGER,
+        HOME,
+        DECK,
+    ];
+}
+
+/// Whether a `comms.radio`, `comms.crew` or `comms.tower` entry is a line
+/// the player heard at its tick: `heard` is not false and the outcome is
+/// missing or delivered. A line's queued, held-back and cut-off entries
+/// are not, so each heard line counts once.
+pub fn heard(event: &crate::Event) -> bool {
+    event.flag(field::HEARD) != Some(false)
+        && event
+            .string(field::OUTCOME)
+            .is_none_or(|o| o == outcome::DELIVERED)
+}
+
+/// Producers of comms entries, for the `source` field.
+pub mod source {
+    /// An aircraft's radio call.
+    pub const RADIO: &str = "radio";
+    /// A wingman's radio answer to the player's order.
+    pub const REPLY: &str = "reply";
+    /// An AI radio event before it becomes a call; its rules decide which
+    /// events are said, so a held one is routine.
+    pub const CHATTER: &str = "chatter";
+    /// The player's crew, or the wingman coaching a single-seat player.
+    pub const CREW: &str = "crew";
+    /// Airport speech and the wingmen's airfield status.
+    pub const TOWER: &str = "tower";
+    /// A text line the AI posts on the HUD.
+    pub const HUD: &str = "hud";
+    /// A player order to the wing.
+    pub const ORDER: &str = "order";
+    /// The situation music.
+    pub const MUSIC: &str = "music";
 }
 
 /// Display tree channels.
@@ -366,10 +502,45 @@ pub mod outcome {
     pub const EXPIRED: &str = "expired";
     pub const APPLIED: &str = "applied";
     pub const REJECTED: &str = "rejected";
+    /// Said, but the player's radio does not receive it.
+    pub const UNHEARD: &str = "unheard";
+    /// Delivered, then cut off.
+    pub const INTERRUPTED: &str = "interrupted";
+    /// An order's answers are in, one delivery per recipient.
+    pub const ANSWERED: &str = "answered";
+    /// A check that found nothing to say.
+    pub const SILENT: &str = "silent";
+    /// A state change, not a message.
+    pub const NOTED: &str = "noted";
+    /// Delivered or offered, but not acted on.
+    pub const IGNORED: &str = "ignored";
+    /// A recipient that was not asked: bugged out, human or landed.
+    pub const SKIPPED: &str = "skipped";
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{field, kind, outcome};
+    use crate::Event;
+
+    #[test]
+    fn a_line_is_heard_once_at_its_delivery() {
+        let line = || Event::new(kind::COMMS_RADIO);
+        let said = |result: &str, heard: Option<bool>| {
+            let event = line().with(field::OUTCOME, result);
+            match heard {
+                Some(heard) => event.with(field::HEARD, heard),
+                None => event,
+            }
+        };
+        assert!(super::heard(&said(outcome::DELIVERED, Some(true))));
+        assert!(super::heard(&line()), "a recording without outcomes");
+        assert!(!super::heard(&said(outcome::QUEUED, None)));
+        assert!(!super::heard(&said(outcome::INTERRUPTED, Some(true))));
+        assert!(!super::heard(&said(outcome::UNHEARD, Some(false))));
+        assert!(!super::heard(&line().with(field::HEARD, false)));
+    }
+
     #[test]
     fn kinds_are_unique_dotted_names() {
         let mut seen = std::collections::HashSet::new();

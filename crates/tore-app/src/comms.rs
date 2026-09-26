@@ -482,8 +482,6 @@ impl Comms {
 
 // The host's journal hooks: the mission recorder drains the journal once a
 // tick, and main.rs reports the wing order voice, which cuts wing speech off.
-// Until those hooks land in main.rs, only tests call these.
-#[allow(dead_code)]
 impl Comms {
     /// Speech outside the channel cut off the wing and crew lines the mixer
     /// may still be playing, such as the player's wing order voice, which

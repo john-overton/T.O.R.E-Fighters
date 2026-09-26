@@ -172,17 +172,35 @@ fn comms_label(kind_name: &str) -> &'static str {
         kind::COMMS_CREW => "CREW",
         kind::COMMS_TOWER => "TOWER",
         kind::COMMS_HUD => "HUD",
+        kind::AUDIO_MUSIC => "MUSIC",
         _ => "COMMS",
     }
 }
 
 fn comms(event: &Event, names: &Names, pad: bool) -> String {
+    let label = comms_label(&event.kind);
+    if event.kind == kind::AUDIO_MUSIC {
+        // The music has no speaker: which score the inputs ask for, and why.
+        let change = format!(
+            "situation {} -> {}",
+            opt(event, field::FROM).unwrap_or_else(|| "?".into()),
+            opt(event, field::TO).unwrap_or_else(|| "?".into())
+        );
+        let mut line = if pad {
+            format!("{label:<8}{change}")
+        } else {
+            format!("{label} {change}")
+        };
+        if let Some(reason) = opt(event, field::REASON) {
+            line.push_str(&format!("; why: {reason}"));
+        }
+        return line;
+    }
     let who = event
         .string(field::SPEAKER)
         .map(str::to_owned)
         .or_else(|| event.subject.map(|id| names.who(id)))
         .unwrap_or_else(|| "someone".into());
-    let label = comms_label(&event.kind);
     let mut line = if pad {
         format!("{label:<8}{who}")
     } else {
@@ -279,11 +297,18 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
         kind::WEAPON_TRACK_LOST => {
             format!("{shot} from {s} lost track{}{}", to("of"), because(event))
         }
-        kind::WEAPON_DECOYED => format!(
-            "{shot} from {s} was decoyed by a {}{}",
-            opt(event, field::DECOY).unwrap_or_else(|| "decoy".into()),
-            to("from")
-        ),
+        kind::WEAPON_DECOYED => {
+            let decoy = match opt(event, field::DECOY) {
+                Some(d) if d == "chaff" => d,
+                Some(d) => format!("a {d}"),
+                None => "a decoy".into(),
+            };
+            let roll = match (event.num(field::ROLL), event.num(field::THRESHOLD)) {
+                (Some(r), Some(t)) => format!(" (roll {} < {})", num(r, 0), num(t, 0)),
+                _ => String::new(),
+            };
+            format!("{shot} from {s} was decoyed by {decoy}{}{roll}", to("from"))
+        }
         kind::WEAPON_OUTCOME => {
             let result = opt(event, field::RESULT).unwrap_or_else(|| "ended".into());
             let mut line = format!("{shot} from {s}{}: {result}", to("at"));
@@ -359,9 +384,15 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
         kind::FLIGHT_STRUCTURAL_FAILURE => format!("{s} suffered a structural failure"),
         kind::FLIGHT_EFFECT => {
             let effect = opt(event, field::EFFECT).unwrap_or_else(|| "an effect".into());
+            let factor = opt(event, field::FACTOR)
+                .map(|f| format!(" ({f})"))
+                .unwrap_or_default();
             match event.flag(field::ON) {
                 Some(false) => format!("{s}: {effect} stopped"),
-                _ => format!("{s}: {effect} applied{}", because(event)),
+                _ if event.flag(field::MOMENTARY) == Some(true) => {
+                    format!("{s}: {effect}{factor}{}", because(event))
+                }
+                _ => format!("{s}: {effect} applied{factor}{}", because(event)),
             }
         }
         kind::AI_ACTIVITY => format!("{s} activity {}{}", from_to(), because(event)),
@@ -398,7 +429,7 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             opt(event, field::DECISION).unwrap_or_else(|| "?".into()),
             because(event)
         ),
-        k if k.starts_with("comms.") => comms_text(event, names),
+        k if k.starts_with("comms.") || k == kind::AUDIO_MUSIC => comms_text(event, names),
         kind::PLAYER_COMMAND => format!(
             "{s} command {}{}",
             opt(event, field::COMMAND).unwrap_or_default(),

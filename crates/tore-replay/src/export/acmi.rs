@@ -17,7 +17,7 @@ use crate::model::{
     AircraftState, EffectKind, Event, Side, TICKS_PER_SECOND, TreeSample, WeaponClass, device,
 };
 use crate::reader::Recording;
-use crate::vocab::{channel, field, kind, node};
+use crate::vocab::{channel, field, kind, node, outcome};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Write;
 
@@ -735,7 +735,13 @@ fn write_event<W: Write>(
             Some(id) => acmi.event(tick, "Destroyed", &[id], &line),
             None => acmi.event(tick, "Message", &[], &line),
         },
-        kind::COMMS_RADIO if e.flag(field::HEARD) != Some(false) => {
+        // A line the player heard, once: its delivery, not its queuing or
+        // a later cut-off.
+        kind::COMMS_RADIO | kind::COMMS_CREW | kind::COMMS_TOWER
+            if e.flag(field::HEARD) == Some(true)
+                && e.string(field::OUTCOME)
+                    .is_none_or(|o| o == outcome::DELIVERED) =>
+        {
             let speaker = e
                 .string(field::SPEAKER)
                 .map(str::to_owned)

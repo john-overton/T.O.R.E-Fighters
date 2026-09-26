@@ -558,7 +558,10 @@ impl AiWings {
         Ok(report)
     }
 
-    /// Journal one player order with its outcome.
+    /// Journal one player order with its outcome. Every order that returns
+    /// a report goes out on the radio: the host plays its voice, even an
+    /// empty one, which cuts off wing speech, so the entry has the radio
+    /// route. A refusal the host makes itself has none.
     fn journal_order(
         &mut self,
         cause: Cause,
@@ -566,7 +569,7 @@ impl AiWings {
         report: &OrderReport,
         outcome: Outcome,
     ) {
-        let entry = Entry::note(
+        let mut entry = Entry::note(
             self.journal_clock(),
             "YOU",
             Origin::of(Source::Order, cause)
@@ -576,6 +579,7 @@ impl AiWings {
         )
         .with_text(report.message.clone())
         .with_stems(report.radio.iter().map(|stem| stem.to_string()).collect());
+        entry.route = Some(crate::comms::Route::Radio);
         self.watch.journal.push(entry);
     }
 
@@ -1455,6 +1459,7 @@ mod landing_tests {
         assert_eq!(entry.text, report.message);
         assert_eq!(entry.stems, ["^ATTACK"]);
         assert_eq!(entry.label, "YOU");
+        assert_eq!(entry.route, Some(crate::comms::Route::Radio));
         assert_eq!(entry.origin.speaker, Some(PLAYER_ID));
         assert_eq!(entry.origin.audience, Audience::Wing { member: None });
         assert_eq!(

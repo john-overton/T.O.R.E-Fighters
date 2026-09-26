@@ -15,11 +15,20 @@
 //! one carries a `system.gap` event. Nothing here feeds back into flight;
 //! every read is of state the tick already computed. Opinionated addition
 //! requested by John on 2026-09-26; see docs/REPLAYS.md.
+//!
+//! The reasons behind decisions live in two child modules: [`why`] turns the
+//! AI's and the flight model's write-only records into reason events and
+//! display trees, and [`journal`] turns the AI message journal and the
+//! communication journal into `comms.*` events.
+mod journal;
+mod why;
+
 use super::convert::{self, EffectWatch, FlightData, Presentation};
+use super::trees;
 use crate::{
     ai_wings::AiWings,
     combat::{self, CommandNote},
-    comms, flight, flight_ui,
+    flight, flight_ui,
     render_snapshot::RenderSnapshot,
     terrain,
 };
@@ -99,6 +108,8 @@ pub struct Tick<'a> {
     pub events: &'a [live::Event],
     /// Shot outcomes the ledger resolved during the tick.
     pub outcomes: &'a [ledger::Outcome],
+    /// The AI message journal, drained for this tick (`None` without AI).
+    pub journal: Option<&'a tore_sim::ai::thought::JournalBatch>,
 }
 
 /// What the recorder remembers about one aircraft between ticks.
@@ -117,9 +128,6 @@ struct Watch {
     pilot_dead: bool,
     hp: i32,
     sections: [i32; replay::SECTION_COUNT],
-    activity: Option<tore_sim::ai::controller::Activity>,
-    target: Option<u32>,
-    airfield: Option<tore_sim::ai::airfield::Phase>,
 }
 
 /// What the recorder remembers about one projectile between ticks.
@@ -132,6 +140,8 @@ struct Shot {
     position: [f64; 3],
     /// Its lost track was already reported.
     lost: bool,
+    /// When it lost track, for the reason its outcome gives.
+    lost_at: Option<u64>,
 }
 
 /// The seeker tone the player hears, without its loudness.
@@ -144,13 +154,45 @@ struct Tone {
 
 impl Tone {
     fn name(self) -> &'static str {
+        use tore_replay::vocab::tone;
         match (self.radar, self.locked, self.ground) {
-            (true, true, _) => "radar lock",
-            (true, false, _) => "radar search",
-            (false, true, _) => "infrared lock",
-            (false, false, true) => "ground",
-            (false, false, false) => "infrared search",
+            (true, true, _) => tone::RADAR_LOCK,
+            (true, false, _) => tone::RADAR_SEARCH,
+            (false, true, _) => tone::INFRARED_LOCK,
+            (false, false, true) => tone::GROUND,
+            (false, false, false) => tone::INFRARED_SEARCH,
         }
+    }
+}
+
+/// The smallest change in seeker tone loudness that is recorded, so a tone
+/// that swells with the seeker's quality makes a few entries, not one a
+/// tick (agent decision, 2026-09-26).
+const TONE_STEP: f64 = 0.05;
+
+/// The `audio.tone` entry for the player's seeker tone, `now` against what
+/// was `last` recorded, each with its loudness: when it starts, stops,
+/// changes, or its loudness moves by [`TONE_STEP`] or more.
+fn tone_event(last: Option<(Tone, f64)>, now: Option<(Tone, f64)>) -> Option<Event> {
+    let event = |tone: Tone, on: bool| {
+        Event::new(kind::AUDIO_TONE)
+            .with_subject(0)
+            .with(field::TONE, tone.name())
+            .with(field::ON, on)
+    };
+    match (last, now) {
+        (Some((was, then)), Some((tone, strength)))
+            if was == tone && (strength - then).abs() < TONE_STEP =>
+        {
+            None
+        }
+        (_, Some((tone, strength))) => Some(
+            event(tone, true)
+                .with(field::STRENGTH, trees::round(strength, 2))
+                .with(field::SURFACE, tone.ground),
+        ),
+        (Some((was, _)), None) => Some(event(was, false)),
+        (None, None) => None,
     }
 }
 
@@ -183,13 +225,18 @@ pub struct Recorder {
     shots: BTreeMap<u32, Shot>,
     /// Dropped frames not yet reported: first and last tick, events lost.
     gap: Option<(u64, u64, usize)>,
-    tone: Option<Tone>,
+    /// The seeker tone and its loudness as last recorded.
+    tone: Option<(Tone, f64)>,
     stall: Option<&'static str>,
     danger: bool,
     session: Option<Session>,
     bookmarks: u32,
     frames: u64,
     last_tick: Option<u64>,
+    /// Every registered identity, for names in reasons and trees.
+    infos: BTreeMap<u32, replay::AircraftInfo>,
+    /// What the reason events and trees remember between ticks.
+    why: why::Why,
 }
 
 impl Recorder {
@@ -245,6 +292,8 @@ impl Recorder {
             bookmarks: 0,
             frames: 0,
             last_tick: None,
+            infos: BTreeMap::new(),
+            why: why::Why::default(),
         };
         for info in roster {
             recorder.register(info.clone());
@@ -260,8 +309,14 @@ impl Recorder {
 
     fn register(&mut self, info: replay::AircraftInfo) {
         if self.registered.insert(info.id) {
+            self.infos.insert(info.id, info.clone());
             self.send(Message::Aircraft(Box::new(info)));
         }
+    }
+
+    /// An aircraft's label for reasons: `You`, `Enemy 2-1`.
+    fn who(&self, id: u32) -> String {
+        who(&self.infos, id)
     }
 
     /// Queues a message for the writer without ever waiting and says whether
@@ -470,82 +525,6 @@ impl Recorder {
         number
     }
 
-    /// Radio, tower and crew lines delivered this tick.
-    pub fn radio(&mut self, calls: &[comms::Call], crew: Option<comms::Crew>) {
-        for call in calls {
-            let (kind, route) = match call.route {
-                comms::Route::Airport => (kind::COMMS_TOWER, "tower"),
-                comms::Route::Direct => (kind::COMMS_RADIO, "direct"),
-                comms::Route::Radio if crew.is_some_and(|c| c.label() == call.label) => {
-                    (kind::COMMS_CREW, "radio")
-                }
-                comms::Route::Radio => (kind::COMMS_RADIO, "radio"),
-            };
-            let mut event = Event::new(kind)
-                .with(field::SPEAKER, call.label.as_str())
-                .with(field::STEMS, call.stems.join(" "))
-                .with(field::ROUTE, route)
-                .with(field::HEARD, true)
-                .with(field::OUTCOME, outcome::DELIVERED)
-                .with(
-                    "kind",
-                    match call.kind {
-                        comms::Kind::Chatter => "chatter",
-                        comms::Kind::Important => "important",
-                    },
-                )
-                .with_text(call.text.as_str());
-            // The player's own voice, the player's crew, or a sound played
-            // straight into the cockpit (the death scream).
-            if call.label == "YOU"
-                || call.route == comms::Route::Direct
-                || crew.is_some_and(|c| c.label() == call.label)
-            {
-                event = event.with_subject(0);
-            }
-            self.note(event);
-        }
-    }
-
-    /// A tower reply to the player's own request.
-    pub fn tower(&mut self, text: &str, stem: Option<&str>) {
-        self.note(
-            Event::new(kind::COMMS_TOWER)
-                .with(field::SPEAKER, "tower")
-                .with(field::STEMS, stem.unwrap_or_default())
-                .with(field::ROUTE, "tower")
-                .with(field::HEARD, true)
-                .with(field::OUTCOME, outcome::DELIVERED)
-                .with(field::TRIGGER, "player request")
-                .with_text(text),
-        );
-    }
-
-    /// An order the player gave the wing, with the wing's answer, or why
-    /// the wing could not take it.
-    pub fn order(
-        &mut self,
-        order: &str,
-        recipients: Vec<u32>,
-        reply: &str,
-        voice: &[&str],
-        refused: Option<&str>,
-    ) {
-        let mut event = Event::new(kind::COMMS_ORDER)
-            .with_subject(0)
-            .with(field::ORDER, order)
-            .with(field::RECIPIENTS, recipients)
-            .with(field::STEMS, voice.join(" "))
-            .with(field::TRIGGER, "player")
-            .with_text(reply);
-        if let Some(reason) = refused {
-            event = event
-                .with(field::OUTCOME, outcome::REJECTED)
-                .with(field::REASON, reason);
-        }
-        self.note(event);
-    }
-
     /// An AI aircraft's pilot ejected; `friendly` wingmen play a cue.
     pub fn wing_ejection(&mut self, id: u32, message: &str, friendly: bool) {
         if friendly {
@@ -684,6 +663,7 @@ impl Recorder {
                     status: seeker.map(|s| s.status),
                     position: pose.position,
                     lost: self.shots.get(&pose.id).is_some_and(|shot| shot.lost),
+                    lost_at: self.shots.get(&pose.id).and_then(|shot| shot.lost_at),
                 },
             );
         }
@@ -693,10 +673,14 @@ impl Recorder {
         frame.new_puffs = new_puffs(tick.combat);
 
         let mut events = Vec::new();
+        // Decoy rolls first: they explain this tick's spoofed outcomes.
+        self.decoys(&tick, &frame, &mut events);
         self.weapon_events(&tick, &frame, &mut shots, &live_shots, &mut events);
         self.aircraft_events(&tick, &frame, &mut events);
         self.cue_events(&tick, player_ground, &mut events);
         self.shots = shots;
+        // The reasons behind the tick and its display trees.
+        self.explain(&tick, &mut frame, &mut events);
         frame.events.extend(events);
         self.frames += 1;
         self.frame = Some(frame);
@@ -769,23 +753,46 @@ impl Recorder {
                 continue;
             };
             // The shot lost its target, once per shot: the target let go
-            // while it flew on, or its seeker gave up. Why is a later
-            // milestone's work.
+            // while it flew on, or its seeker gave up.
             const LOST: u8 = tore_sim::combat::missiles::seeker::Status::Lost as u8;
             let let_go = previous.target.is_some() && shot.target.is_none();
             let seeker_lost = shot.status == Some(LOST) && previous.status != Some(LOST);
             if !shot.lost && (let_go || seeker_lost) {
                 shot.lost = true;
+                shot.lost_at = Some(frame.tick);
+                let target = previous.target.or(shot.target);
                 let mut event = Event::new(kind::WEAPON_TRACK_LOST)
                     .with_subject(shot.owner)
                     .with(field::PROJECTILE, replay::Value::Id(*id));
-                if let Some(target) = previous.target.or(shot.target) {
+                if let Some(target) = target {
                     event = event.with_object(target);
+                    if let Some(state) = state_of(target) {
+                        event =
+                            event.with(field::RANGE_FT, distance(shot.position, state.position));
+                    }
                 }
                 if seeker_lost {
                     event = event.with("seeker", "lost");
                 }
-                events.push(event);
+                let decoyed = self.why.decoyed(*id);
+                let reason = if let Some(roll) = decoyed {
+                    format!(
+                        "decoyed by {} from {}",
+                        why::decoy_name(roll.class),
+                        self.who(roll.releaser)
+                    )
+                } else if seeker_lost {
+                    "the seeker lost the target".to_owned()
+                } else if target
+                    .and_then(state_of)
+                    .is_none_or(|state| !state.flags.alive)
+                {
+                    "its target was destroyed or is gone".to_owned()
+                } else {
+                    "it could not hold the target: seeker limits, terrain or guidance time"
+                        .to_owned()
+                };
+                events.push(event.with(field::REASON, reason));
             }
         }
         // Seeker milestones combat reported this tick.
@@ -828,8 +835,34 @@ impl Recorder {
             if let Some(damage) = damage {
                 event = event.with(field::DAMAGE, i64::from(damage));
             }
-            if let Some(weapon) = self.shots.get(&resolved.projectile).map(|shot| shot.weapon) {
+            let shot = self.shots.get(&resolved.projectile);
+            if let Some(weapon) = shot.map(|shot| shot.weapon) {
                 event = event.with(field::WEAPON, replay::Value::Id(weapon));
+            }
+            if let Some((miss, _)) = self.why.closest(resolved.projectile)
+                && resolved.resolution == ledger::Resolution::Missed
+            {
+                event = event.with(field::MISS_FT, trees::round(miss, 1));
+            }
+            let reason = match resolved.resolution {
+                ledger::Resolution::Spoofed => self.why.decoyed(resolved.projectile).map(|roll| {
+                    format!(
+                        "decoyed by {} from {} ({})",
+                        why::decoy_name(roll.class),
+                        self.who(roll.releaser),
+                        roll.draw.map_or_else(String::new, |d| trees::draw_text(&d))
+                    )
+                }),
+                ledger::Resolution::Jammed => {
+                    Some("the target's jammer or countermeasures deceived it".to_owned())
+                }
+                ledger::Resolution::Missed => shot
+                    .and_then(|shot| shot.lost_at)
+                    .map(|at| format!("it lost track of its target at {}", trees::clock(at))),
+                ledger::Resolution::Hit(_) => None,
+            };
+            if let Some(reason) = reason {
+                event = event.with(field::REASON, reason);
             }
             events.push(event);
         }
@@ -1051,10 +1084,19 @@ impl Recorder {
                 }
                 watch.on_ground = on_ground;
                 // Ejection and the pilot.
-                // Ejection and the pilot; why is a later milestone's work.
                 let escape = f.escape.as_ref().map(|e| e.phase);
                 if !first && watch.escape.is_none() && escape.is_some() {
-                    events.push(Event::new(kind::AIRCRAFT_EJECTED).with_subject(id));
+                    let mut event = Event::new(kind::AIRCRAFT_EJECTED).with_subject(id);
+                    let hazard = actor
+                        .and_then(|a| a.trace().ejection)
+                        .and_then(|e| e.assessment);
+                    if let Some(hazard) = hazard {
+                        event = event.with(field::REASON, trees::hazard_text(&hazard));
+                    } else if id == 0 && tick.pilot.commands.contains(&flight::PilotCommand::Eject)
+                    {
+                        event = event.with(field::REASON, "you pulled the ejection handle");
+                    }
+                    events.push(event);
                 }
                 watch.escape = escape;
                 let dead = f.systems.pilot.dead;
@@ -1105,44 +1147,6 @@ impl Recorder {
             }
             watch.wreck = wreck;
 
-            // The AI's visible decisions, with no reasons yet.
-            if let Some(actor) = actor {
-                let activity = actor.activity();
-                if !first && Some(activity) != watch.activity {
-                    events.push(
-                        Event::new(kind::AI_ACTIVITY)
-                            .with_subject(id)
-                            .with(field::FROM, watch.activity.map_or("-", |a| a.label()))
-                            .with(field::TO, activity.label()),
-                    );
-                }
-                watch.activity = Some(activity);
-                let target = actor.controller().target();
-                if !first && target != watch.target {
-                    let mut event = Event::new(kind::AI_TARGET).with_subject(id);
-                    if let Some(from) = watch.target {
-                        event = event.with(field::FROM, replay::Value::Id(from));
-                    }
-                    if let Some(to) = target {
-                        event = event.with_object(to).with(field::TO, replay::Value::Id(to));
-                    }
-                    events.push(event);
-                }
-                watch.target = target;
-                let phase = actor.airfield_phase();
-                if !first && phase != watch.airfield {
-                    let name = |p: Option<tore_sim::ai::airfield::Phase>| {
-                        p.map_or("-".to_owned(), |p| format!("{p:?}"))
-                    };
-                    events.push(
-                        Event::new(kind::AI_AIRFIELD_PHASE)
-                            .with_subject(id)
-                            .with(field::FROM, name(watch.airfield))
-                            .with(field::TO, name(phase)),
-                    );
-                }
-                watch.airfield = phase;
-            }
             self.watches.insert(id, watch);
         }
     }
@@ -1155,21 +1159,17 @@ impl Recorder {
             .combat
             .state
             .seeker_tone(combat::launcher(flight))
-            .map(|t| Tone {
-                radar: t.radar,
-                ground: t.ground,
-                locked: t.locked,
+            .map(|t| {
+                let tone = Tone {
+                    radar: t.radar,
+                    ground: t.ground,
+                    locked: t.locked,
+                };
+                // The loudness the mixer takes.
+                (tone, t.strength.clamp(0., 1.))
             });
-        if tone != self.tone {
-            let shown = tone.or(self.tone);
-            if let Some(shown) = shown {
-                events.push(
-                    Event::new(kind::AUDIO_TONE)
-                        .with_subject(0)
-                        .with(field::TONE, shown.name())
-                        .with(field::ON, tone.is_some()),
-                );
-            }
+        if let Some(event) = tone_event(self.tone, tone) {
+            events.push(event);
             self.tone = tone;
         }
         let stall = crate::audio::stall_cue(flight.stall_alert(player_ground));
@@ -1350,6 +1350,33 @@ fn fit(frame: &mut Frame) {
         "events",
         &mut notes,
     );
+    cut(
+        &mut frame.trees,
+        MAX_TREES_PER_TICK,
+        "display trees",
+        &mut notes,
+    );
+    for tree in &mut frame.trees {
+        if tree.nodes.len() > MAX_TREE_NODES {
+            notes.push(format!(
+                "{} nodes of a {} tree",
+                tree.nodes.len() - MAX_TREE_NODES,
+                tree.channel
+            ));
+            tree.nodes.truncate(MAX_TREE_NODES);
+        }
+        for node in &mut tree.nodes {
+            node.depth = node.depth.min(MAX_TREE_DEPTH - 1);
+            short(&mut node.label);
+            short(&mut node.note);
+            short(&mut node.unit);
+            match &mut node.value {
+                replay::Value::Text(text) => short(text),
+                replay::Value::Ids(ids) => ids.truncate(MAX_IDS_PER_VALUE),
+                _ => {}
+            }
+        }
+    }
     if !notes.is_empty() {
         frame
             .events
@@ -1405,6 +1432,15 @@ fn ground_height(world: &terrain::World, position: [f64; 3]) -> f64 {
 
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
+}
+
+/// An aircraft's registered label, or `aircraft 7` for one never registered.
+fn who(infos: &BTreeMap<u32, replay::AircraftInfo>, id: u32) -> String {
+    match infos.get(&id) {
+        Some(info) if !info.label.is_empty() => info.label.clone(),
+        Some(info) if !info.name.is_empty() => format!("{} {id}", info.name),
+        _ => format!("aircraft {id}"),
+    }
 }
 
 /// Airspeed as recorded, or the ground speed when none was.
@@ -1662,6 +1698,7 @@ mod tests {
             world: &world,
             events: &[],
             outcomes: &[],
+            journal: None,
         });
         recorder.end(Some(ui), combat);
     }
@@ -1703,6 +1740,36 @@ mod tests {
         )
         .unwrap();
         writer.push(&frame).unwrap();
+    }
+
+    #[test]
+    fn the_seeker_tone_is_recorded_with_its_loudness_and_surface() {
+        use tore_replay::vocab::tone as named;
+        let lock = Tone {
+            radar: false,
+            ground: true,
+            locked: true,
+        };
+        let search = Tone {
+            locked: false,
+            ..lock
+        };
+        let started = tone_event(None, Some((lock, 0.912))).unwrap();
+        assert_eq!(started.string(field::TONE), Some(named::INFRARED_LOCK));
+        assert_eq!(started.flag(field::ON), Some(true));
+        assert_eq!(started.num(field::STRENGTH), Some(0.91));
+        assert_eq!(started.flag(field::SURFACE), Some(true));
+        // Small swells are not recorded; one of a step or more is.
+        assert!(tone_event(Some((lock, 0.912)), Some((lock, 0.95))).is_none());
+        let louder = tone_event(Some((lock, 0.912)), Some((lock, 0.97))).unwrap();
+        assert_eq!(louder.num(field::STRENGTH), Some(0.97));
+        // A new tone at the same loudness, and the tone stopping.
+        let changed = tone_event(Some((lock, 0.5)), Some((search, 0.5))).unwrap();
+        assert_eq!(changed.string(field::TONE), Some(named::GROUND));
+        let stopped = tone_event(Some((search, 0.5)), None).unwrap();
+        assert_eq!(stopped.flag(field::ON), Some(false));
+        assert_eq!(stopped.string(field::TONE), Some(named::GROUND));
+        assert!(tone_event(None, None).is_none());
     }
 
     #[test]

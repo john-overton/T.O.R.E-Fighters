@@ -26,11 +26,9 @@ pub struct Step {
     /// Radio stems to queue now.
     pub radio: Vec<&'static str>,
     /// Journal entries of this step: the inputs changed, and why each is
-    /// on. The host moves them into the channel's journal.
-    #[allow(dead_code)] // Read by the mission recorder's host hook.
+    /// on. The host hands them to the mission recording.
     pub journal: Vec<Entry>,
     /// The trigger of each `radio` stem, in the same order.
-    #[allow(dead_code)] // Read by `radio_calls`, the host's hook.
     causes: Vec<Cause>,
 }
 
@@ -39,7 +37,6 @@ impl Step {
     /// mission result 2 s after it is decided, "almost home" at once, both
     /// important), each with its trigger. `label` is the crew label or
     /// `YOU`.
-    #[allow(dead_code)] // The host's hook: main.rs sends these today without a trigger.
     pub fn radio_calls(&self, label: &str, phrases: &Phrases) -> Vec<Call> {
         self.radio
             .iter()

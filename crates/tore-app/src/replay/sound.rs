@@ -31,16 +31,12 @@ use tore_sim::combat::missiles::seeker::{Seeker, Status};
 /// advances at most a quarter of a second a frame, so this only guards
 /// against a runaway caller.
 const MAX_TICKS: u64 = 120;
-/// The recording keeps which seeker tone played, not how strong it was, so
-/// the replay sounds it at the live strength for this seeker quality and
-/// estimated hit chance (fitted, agent decision 2026-09-26).
+/// A recording made before the recorder kept the seeker tone's loudness
+/// says which tone played, not how strong it was, so the replay sounds it
+/// at the live strength for this seeker quality and estimated hit chance
+/// (fitted, agent decision 2026-09-26).
 const TONE_QUALITY: f64 = 0.5;
 const TONE_PERCENT: u8 = 50;
-/// The trigger the recorder gives a tower reply to the player's request.
-const PLAYER_REQUEST: &str = "player request";
-/// The route the recorder gives a recording played straight into the
-/// cockpit.
-const DIRECT: &str = "direct";
 
 /// What one viewer frame played.
 pub struct Moment<'a> {
@@ -74,8 +70,9 @@ pub enum Cue {
     /// tower speech: [`Audio::airport_radio`], or
     /// [`Audio::cancel_airport_radio`] for a reply without a recording.
     TowerReply(Option<String>),
-    /// The player's aircraft was lost, which stops queued tower speech as
-    /// in flight: [`Audio::cancel_airport_radio`].
+    /// The player's aircraft was lost, or the runway under the player's
+    /// landing clearance was, which stops queued tower speech as in
+    /// flight: [`Audio::cancel_airport_radio`].
     TowerCancelled,
     /// A recording played straight into the cockpit, such as the player's
     /// death scream: [`Audio::direct_voice`].
@@ -154,7 +151,7 @@ impl Cue {
             Self::Tower(stems) => format!("tower {}", stems.join(" ")),
             Self::TowerReply(Some(stem)) => format!("tower reply {stem}"),
             Self::TowerReply(None) => "tower reply without a recording".into(),
-            Self::TowerCancelled => "player lost: tower speech cancelled".into(),
+            Self::TowerCancelled => "tower speech cancelled".into(),
             Self::Direct(stem) => format!("direct voice {stem}"),
             Self::Order(stems) => format!("order voice {}", stems.join(" ")).trim().into(),
             Self::Ejection(sound) => format!("ejection {sound}"),
@@ -518,35 +515,41 @@ impl ReplaySound {
 }
 
 /// The one-shot cue a recorded event plays, if any. Only lines the player
-/// heard and the radio delivered speak, only the player's own orders have a
-/// voice, and only the player's cockpit makes device sounds.
+/// heard and the radio delivered speak ([`vocab::heard`]: entries for lines
+/// that were queued, held back, cut off or not heard stay silent), only the
+/// player's own orders have a voice, and only the player's cockpit makes
+/// device sounds.
 fn cue(event: &Event) -> Option<Cue> {
-    use vocab::{field, kind};
+    use vocab::{field, kind, route, trigger};
     let stems = || -> Vec<String> {
         event
             .string(field::STEMS)
             .map(|s| s.split_whitespace().map(str::to_owned).collect())
             .unwrap_or_default()
     };
+    let spoken = || Some(stems()).filter(|s| !s.is_empty());
     let sound = || event.string(field::SOUND).map(str::to_owned);
     match event.kind.as_str() {
-        kind::COMMS_RADIO | kind::COMMS_CREW | kind::COMMS_TOWER if !heard(event) => None,
-        kind::COMMS_TOWER if event.string(field::TRIGGER) == Some(PLAYER_REQUEST) => {
+        // Nothing was said: the runway under the landing clearance was
+        // lost and flight cut the tower speech.
+        kind::COMMS_TOWER if event.string(field::TRIGGER) == Some(trigger::CLEARANCE_CANCELLED) => {
+            Some(Cue::TowerCancelled)
+        }
+        kind::COMMS_RADIO | kind::COMMS_CREW | kind::COMMS_TOWER if !vocab::heard(event) => None,
+        kind::COMMS_TOWER if event.string(field::TRIGGER) == Some(trigger::PLAYER_REQUEST) => {
             Some(Cue::TowerReply(stems().into_iter().next()))
         }
-        kind::COMMS_TOWER => Some(stems()).filter(|s| !s.is_empty()).map(Cue::Tower),
-        kind::COMMS_RADIO if event.string(field::ROUTE) == Some(DIRECT) => {
-            stems().into_iter().next().map(Cue::Direct)
+        // Each line plays the way flight plays its route; a recording
+        // without routes goes by the kind.
+        kind::COMMS_RADIO | kind::COMMS_CREW | kind::COMMS_TOWER => {
+            match event.string(field::ROUTE) {
+                Some(route::DIRECT) => stems().into_iter().next().map(Cue::Direct),
+                Some(route::TOWER) => spoken().map(Cue::Tower),
+                None if event.kind == kind::COMMS_TOWER => spoken().map(Cue::Tower),
+                _ => spoken().map(Cue::Speech),
+            }
         }
-        kind::COMMS_RADIO | kind::COMMS_CREW => {
-            Some(stems()).filter(|s| !s.is_empty()).map(Cue::Speech)
-        }
-        // As in flight, even an order without a voice cuts off queued wing
-        // speech; an order the wing refused says nothing.
-        kind::COMMS_ORDER
-            if event.subject == Some(0)
-                && event.string(field::OUTCOME) != Some(vocab::outcome::REJECTED) =>
-        {
+        kind::COMMS_ORDER if event.subject == Some(0) && order_voiced(event) => {
             Some(Cue::Order(stems()))
         }
         kind::AUDIO_EJECTION => match event.subject {
@@ -559,13 +562,17 @@ fn cue(event: &Event) -> Option<Cue> {
     }
 }
 
-/// A line the player heard and the radio delivered. Entries for lines that
-/// were queued, held back or not heard stay silent.
-fn heard(event: &Event) -> bool {
-    event.flag(vocab::field::HEARD) != Some(false)
-        && event
-            .string(vocab::field::OUTCOME)
-            .is_none_or(|outcome| outcome == vocab::outcome::DELIVERED)
+/// Whether a player order went out on the radio. As in flight, every order
+/// the wing answered, or refused, plays its voice, and even one without a
+/// voice cuts off queued wing speech; an order the game refused before it
+/// went out has no route and says nothing. In a recording without routes,
+/// every order but a rejected one went out.
+fn order_voiced(event: &Event) -> bool {
+    use vocab::field;
+    match event.string(field::ROUTE) {
+        Some(route) => route == vocab::route::RADIO,
+        None => event.string(field::OUTCOME) != Some(vocab::outcome::REJECTED),
+    }
 }
 
 /// A recorded impact or explosion as the traveling-sound model takes it.
@@ -620,7 +627,7 @@ fn timelines(
         match event.kind.as_str() {
             kind::AUDIO_TONE => {
                 let tone = if on {
-                    seeker_tone(event.string(field::TONE).unwrap_or_default(), &mut surface)
+                    seeker_tone(event, &mut surface)
                 } else {
                     surface = false;
                     None
@@ -637,23 +644,26 @@ fn timelines(
     (tones, stalls)
 }
 
-/// The tone a recorded tone name stands for, as the recorder names them.
-/// Its strength is the live rule's at [`TONE_QUALITY`] or
-/// [`TONE_PERCENT`]. An infrared lock does not say whether its weapon aims
-/// at the surface, so it keeps the surface search's tone before it
-/// (fitted, agent decision 2026-09-26).
-fn seeker_tone(name: &str, surface: &mut bool) -> Option<SeekerTone> {
-    let (radar, locked, ground) = match name {
-        "radar lock" => (true, true, false),
-        "radar search" => (true, false, false),
-        "infrared lock" => (false, true, *surface),
-        "ground" => (false, false, true),
-        "infrared search" => (false, false, false),
+/// The tone a recorded `audio.tone` entry stands for, at its recorded
+/// strength and with its recorded surface flag. A recording made before the
+/// recorder kept them sounds the tone at the live rule's strength for
+/// [`TONE_QUALITY`] or [`TONE_PERCENT`], and an infrared lock there keeps
+/// the surface search's tone before it (fitted, agent decision 2026-09-26).
+fn seeker_tone(event: &Event, surface: &mut bool) -> Option<SeekerTone> {
+    use vocab::{field, tone};
+    let (radar, locked, ground) = match event.string(field::TONE).unwrap_or_default() {
+        tone::RADAR_LOCK => (true, true, false),
+        tone::RADAR_SEARCH => (true, false, false),
+        tone::INFRARED_LOCK => (false, true, *surface),
+        tone::GROUND => (false, false, true),
+        tone::INFRARED_SEARCH => (false, false, false),
         _ => return None,
     };
+    let ground = event.flag(field::SURFACE).unwrap_or(ground);
     *surface = ground;
-    let strength = if radar {
-        Seeker {
+    let strength = match event.num(field::STRENGTH) {
+        Some(strength) => strength.clamp(0., 1.),
+        None if radar => Seeker {
             status: if locked {
                 Status::Locked
             } else {
@@ -662,9 +672,8 @@ fn seeker_tone(name: &str, surface: &mut bool) -> Option<SeekerTone> {
             quality: TONE_QUALITY,
             ..Seeker::default()
         }
-        .tone()
-    } else {
-        SeekerTone::ir_strength(TONE_PERCENT, locked)
+        .tone(),
+        None => SeekerTone::ir_strength(TONE_PERCENT, locked),
     };
     Some(SeekerTone {
         strength,
@@ -737,7 +746,7 @@ mod tests {
     /// Every kind of recorded cue, plus journal entries and orders that
     /// must stay silent.
     fn events(tick: u64) -> Vec<Event> {
-        use vocab::{field, kind, outcome};
+        use vocab::{field, kind, outcome, route, tone as named, trigger};
         let line = |kind: &str, stems: &str, route: &str| {
             Event::new(kind)
                 .with(field::STEMS, stems)
@@ -760,51 +769,70 @@ mod tests {
                 .with(field::ON, on)
                 .with(field::SOUND, sound)
         };
+        let order = |stems: &str| {
+            Event::new(kind::COMMS_ORDER)
+                .with_subject(0)
+                .with(field::STEMS, stems)
+        };
         match tick {
             5 => vec![
-                heard(line(kind::COMMS_RADIO, "^FOX2 ^RED2", "radio").with_subject(2)),
-                line(kind::COMMS_RADIO, "^CONTACT", "radio")
+                heard(line(kind::COMMS_RADIO, "^FOX2 ^RED2", route::RADIO).with_subject(2)),
+                line(kind::COMMS_RADIO, "^CONTACT", route::RADIO)
                     .with(field::HEARD, false)
-                    .with(field::OUTCOME, "unheard"),
+                    .with(field::OUTCOME, outcome::UNHEARD),
             ],
             6 => vec![
-                line(kind::COMMS_RADIO, "^SPLASH", "radio")
-                    .with(field::HEARD, true)
+                line(kind::COMMS_RADIO, "^SPLASH", route::RADIO)
                     .with(field::OUTCOME, outcome::QUEUED),
+                // Cut off after it was delivered: said once, at delivery.
+                line(kind::COMMS_RADIO, "^FOX2 ^RED2", route::RADIO)
+                    .with(field::HEARD, true)
+                    .with(field::OUTCOME, outcome::INTERRUPTED),
             ],
-            20 => vec![heard(line(kind::COMMS_CREW, "^CHECK6", "radio"))],
-            30 => vec![heard(line(kind::COMMS_TOWER, "^RWYFREE", "tower"))],
+            20 => vec![heard(line(kind::COMMS_CREW, "^CHECK6", route::RADIO))],
+            30 => vec![heard(line(kind::COMMS_TOWER, "^RWYFREE", route::TOWER))],
             40 => vec![
-                heard(line(kind::COMMS_TOWER, "^CLRLAND", "tower"))
-                    .with(field::TRIGGER, PLAYER_REQUEST),
+                heard(line(kind::COMMS_TOWER, "^CLRLAND", route::TOWER))
+                    .with(field::TRIGGER, trigger::PLAYER_REQUEST),
             ],
             41 => vec![
-                heard(line(kind::COMMS_TOWER, "", "tower")).with(field::TRIGGER, PLAYER_REQUEST),
+                heard(line(kind::COMMS_TOWER, "", route::TOWER))
+                    .with(field::TRIGGER, trigger::PLAYER_REQUEST),
             ],
-            50 => vec![heard(line(kind::COMMS_RADIO, "^SCREAM", DIRECT))],
-            60 => vec![
-                Event::new(kind::COMMS_ORDER)
-                    .with_subject(0)
-                    .with(field::STEMS, "^ENGAGE ^MYTGT"),
+            // The runway under the landing clearance was lost.
+            45 => vec![
+                line(kind::COMMS_TOWER, "", route::TOWER)
+                    .with(field::TRIGGER, trigger::CLEARANCE_CANCELLED)
+                    .with(field::HEARD, false)
+                    .with(field::OUTCOME, outcome::CANCELLED),
             ],
-            61 => vec![
-                Event::new(kind::COMMS_ORDER)
-                    .with_subject(0)
-                    .with(field::STEMS, "")
-                    .with(field::OUTCOME, outcome::REJECTED),
-            ],
+            // The death scream is a crew line played straight in.
+            50 => vec![heard(line(kind::COMMS_CREW, "^SCREAM", route::DIRECT))],
+            60 => vec![order("^ENGAGE ^MYTGT").with(field::ROUTE, route::RADIO)],
+            // Refused by the game before it went out.
+            61 => vec![order("").with(field::OUTCOME, outcome::REJECTED)],
             62 => vec![
                 Event::new(kind::COMMS_ORDER)
                     .with_subject(1)
                     .with(field::STEMS, "^ATTACK"),
             ],
             70 => vec![Event::new(kind::COMMS_HUD).with_text("Radar on")],
-            100 => vec![tone("infrared search", true)],
-            130 => vec![tone("infrared lock", true)],
-            160 => vec![tone("infrared lock", false)],
-            170 => vec![tone("ground", true)],
-            180 => vec![tone("infrared lock", true)],
-            190 => vec![tone("infrared lock", false)],
+            // A wingman's airfield status: a tower line on the radio.
+            72 => vec![heard(line(kind::COMMS_TOWER, "^ONFINAL", route::RADIO))],
+            // Refused by the wing: it went out and cut wing speech.
+            74 => vec![
+                order("")
+                    .with(field::ROUTE, route::RADIO)
+                    .with(field::OUTCOME, outcome::REJECTED),
+            ],
+            // Recorded before orders had routes.
+            76 => vec![order("^RTB")],
+            100 => vec![tone(named::INFRARED_SEARCH, true)],
+            130 => vec![tone(named::INFRARED_LOCK, true)],
+            160 => vec![tone(named::INFRARED_LOCK, false)],
+            170 => vec![tone(named::GROUND, true)],
+            180 => vec![tone(named::INFRARED_LOCK, true)],
+            190 => vec![tone(named::INFRARED_LOCK, false)],
             200 => vec![
                 Event::new(kind::AUDIO_RELEASE)
                     .with_subject(0)
@@ -1046,8 +1074,12 @@ mod tests {
             (30, "tower ^RWYFREE".into()),
             (40, "tower reply ^CLRLAND".into()),
             (41, "tower reply without a recording".into()),
+            (45, "tower speech cancelled".into()),
             (50, "direct voice ^SCREAM".into()),
             (60, "order voice ^ENGAGE ^MYTGT".into()),
+            (72, "radio ^ONFINAL".into()),
+            (74, "order voice".into()),
+            (76, "order voice ^RTB".into()),
             (100, seeker(false, false, false)),
             (130, seeker(false, false, true)),
             (160, "seeker tone off".into()),
@@ -1058,7 +1090,7 @@ mod tests {
             (600, "wingman ejected".into()),
             (FLAMEOUT, "effect &F18OFF.5K".into()),
             (1_000, "ejection ^EJECTX3.5K".into()),
-            (CRASH, "player lost: tower speech cancelled".into()),
+            (CRASH, "tower speech cancelled".into()),
             (LAST, "paused".into()),
         ];
         assert_eq!(heard(&cues), expected);
@@ -1373,22 +1405,65 @@ mod tests {
 
     #[test]
     fn recorded_tone_names_become_seeker_tones() {
+        use vocab::tone::{GROUND, INFRARED_LOCK, INFRARED_SEARCH, RADAR_LOCK, RADAR_SEARCH};
+        let named = |name: &str| Event::new(vocab::kind::AUDIO_TONE).with(vocab::field::TONE, name);
+        // A recording without loudness or surface flags.
         let mut surface = false;
-        let mut tone = |name| seeker_tone(name, &mut surface).unwrap();
-        let lock = tone("radar lock");
+        let mut tone = |name| seeker_tone(&named(name), &mut surface).unwrap();
+        let lock = tone(RADAR_LOCK);
         assert!(lock.radar && lock.locked && !lock.ground);
         assert!((lock.strength - 0.7).abs() < 1e-9);
-        assert!((tone("radar search").strength - 0.425).abs() < 1e-9);
-        assert!((tone("infrared search").strength - 0.2875).abs() < 1e-9);
-        assert!(!tone("infrared lock").ground);
-        assert!(tone("ground").ground);
-        let lock = tone("infrared lock");
+        assert!((tone(RADAR_SEARCH).strength - 0.425).abs() < 1e-9);
+        assert!((tone(INFRARED_SEARCH).strength - 0.2875).abs() < 1e-9);
+        assert!(!tone(INFRARED_LOCK).ground);
+        assert!(tone(GROUND).ground);
+        let lock = tone(INFRARED_LOCK);
         assert!(lock.ground && lock.locked && !lock.radar);
         assert!((lock.strength - 0.575).abs() < 1e-9);
-        assert!(seeker_tone("hum", &mut false).is_none());
+        assert!(seeker_tone(&named("hum"), &mut false).is_none());
         assert_eq!(stall_sound("&STALLWR.5K"), Some("&STALLWR.5K"));
         assert_eq!(stall_sound("&STALL.5K"), Some("&STALL.5K"));
         assert_eq!(stall_sound("&BEEP.5K"), None);
+    }
+
+    #[test]
+    fn recorded_strength_and_surface_are_played() {
+        use vocab::{field, kind, tone};
+        let at = |tick: u64, name: &str, strength: f64, surface: bool| TimedEvent {
+            tick,
+            event: Event::new(kind::AUDIO_TONE)
+                .with_subject(0)
+                .with(field::TONE, name)
+                .with(field::ON, true)
+                .with(field::STRENGTH, strength)
+                .with(field::SURFACE, surface),
+        };
+        let events = [
+            at(10, tone::INFRARED_SEARCH, 0.2, false),
+            // An infrared lock on a surface target straight away, with no
+            // surface search before it.
+            at(20, tone::INFRARED_LOCK, 0.91, true),
+            // The same lock, louder.
+            at(30, tone::INFRARED_LOCK, 0.97, true),
+            at(40, tone::RADAR_LOCK, 1.3, false),
+        ];
+        let (tones, _) = timelines(&events);
+        let played: Vec<(u64, f64, bool, bool)> = tones
+            .iter()
+            .map(|(tick, tone)| {
+                let tone = tone.unwrap();
+                (*tick, tone.strength, tone.ground, tone.locked)
+            })
+            .collect();
+        assert_eq!(
+            played,
+            [
+                (10, 0.2, false, false),
+                (20, 0.91, true, true),
+                (30, 0.97, true, true),
+                (40, 1., false, true),
+            ]
+        );
     }
 
     /// Prints what a real recording schedules when played through at 1x

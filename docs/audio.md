@@ -176,5 +176,7 @@ queued speech when the watched aircraft changes type and plays no engine
 start or stop sound of its own. `effect` plays one cockpit sound, such as a
 gear sound, and `ejection_cue` plays one recorded ejection cue the way
 `ejection` plays it. A seek resets the mixer with `restart_flight`, a pause
-uses `pause_flight`, and a replay has no music. What plays when, and the
-fitted seeker loudness, are in [replay sound](REPLAYS.md#sound).
+uses `pause_flight`, and a replay has no music yet, although the recording
+keeps the situation inputs that `situation` takes. The seeker tone plays at
+its recorded loudness. What plays when, and the fitted loudness for older
+recordings, are in [replay sound](REPLAYS.md#sound).

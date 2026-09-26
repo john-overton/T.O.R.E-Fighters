@@ -580,11 +580,20 @@ models, which ids draw with them) travel in the header. Everything the
 recorder reads was already computed by the tick. The few outputs it needed
 are write-only and bounded, drained by the host and never read by flight: the
 combat ledger's list of shot outcomes, the cockpit message requests in
-`FlightUi` and the player commands in `Combat`; `deliver_radio` returns the
-lines it delivered. Frames go to a writer thread through a queue two seconds
-deep; a full queue drops the frame and the next reports a gap, so the flight
-never waits for the disk. Probes with recording on and off print
-byte-identical output.
+`FlightUi`, the player commands in `Combat`, the AI message journal
+(`AiWings::take_ai_journal`, handed to the recorder in `Tick::journal`) and
+the communication journal (`Recorder::drain_comms`). Frames go to a writer
+thread through a queue two seconds deep; a full queue drops the frame and the
+next reports a gap, so the flight never waits for the disk. Probes with
+recording on and off print byte-identical output.
+
+The reasons live beside the capture: `replay/recorder/why.rs` reads the AI's
+controller and actor records, the flight model's `FlightTrace` and the
+bridge's decoy rolls, emits reason events on each change, and samples the
+display trees at their rates; `replay/recorder/journal.rs` maps the two
+journals to `comms.*`, `ai.defense` and `audio.music` events;
+`replay/trees.rs` builds the trees as pure functions of those records, so
+a live debug panel can build the same tree from the current tick.
 
 `replay/library.rs` owns the `replays/` folder: names, `replays-v1.conf`
 auto-delete settings, listing from each file's header, seek index and footer
@@ -614,4 +623,6 @@ it draws feeds back into the simulation; see [replays](REPLAYS.md#viewer).
 `replay/sound.rs` turns the stretch of recording each frame played at 1x
 forwards into plain-data cues for the same audio calls live flight makes,
 with the viewer's camera as the listener, and cancels them on a seek; see
-[replay sound](REPLAYS.md#sound).
+[replay sound](REPLAYS.md#sound). The names it acts on (tone names, routes,
+the two tower triggers, and `vocab::heard` for which entry of a line was
+heard) live in `tore_replay::vocab`, which the recorder writes with.

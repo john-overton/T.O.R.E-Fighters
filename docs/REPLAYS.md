@@ -89,35 +89,180 @@ Recording reads only state the tick already computed. The behaviour probes
 give byte-identical output with recording on and off, and the simulation's
 golden fingerprints are unchanged.
 
+What it costs, measured on the three-minute headless probes on an 8-core
+Apple Silicon Mac with nothing else running: with 9 aircraft the recorder
+takes about 10 microseconds of the simulation's tick (5 of them for the
+reasons and display trees; draining the communication journal takes well
+under a microsecond), and the whole process uses about 35 microseconds more
+CPU a tick with the writer thread, against a tick of 8,333 microseconds.
+With 5 aircraft the recorder takes about 7 microseconds (3 for the reasons
+and trees). A busy machine can starve the writer thread: once, with four
+probe runs and another agent's builds at the same time, a recording lost 57
+ticks to a `system.gap`; the same probe recorded every tick when rerun.
+
 ### What is recorded now
 
 | Family | Events |
 | --- | --- |
-| Weapons | `weapon.launch` with range, aspect, off-boresight angle, closure, heights and speeds at release (a gun round or rocket, which has no target of its own, is aimed at the shooter's current target: the AI's, or the player's designated one); `weapon.seeker_active`, `weapon.pitbull`, `weapon.track_lost` once per shot (the target let go, or the seeker lost it); `weapon.outcome` (hit, missed, spoofed, jammed) for every shot the debrief ledger closes |
+| Weapons | `weapon.launch` with range, aspect, off-boresight angle, closure, heights and speeds at release (a gun round or rocket, which has no target of its own, is aimed at the shooter's current target: the AI's, or the player's designated one); `weapon.seeker_active`, `weapon.pitbull`; `weapon.track_lost` once per shot, with the range and why (decoyed, the seeker lost it, the target is gone, or it could not hold the target); `weapon.decoyed` for each missile that followed chaff or a flare, with the roll, its threshold, and the missile's susceptibility and the device's effectiveness behind it; `weapon.outcome` (hit, missed, spoofed, jammed) for every shot the debrief ledger closes, with why (the decoy and its roll, the jammer, or a track lost earlier) and, for a guided miss, how close it came |
 | Combat | `combat.hit` from each aircraft's hit points, with the attacker, damage, hit points after and the region hit (plus damaged systems for the player); `combat.destroyed` with the killer; `combat.ground_impact` |
-| Aircraft | `aircraft.crashed` (flying into the ground or a structure, or a destroyed aircraft's wreck coming down or exploding), `aircraft.ejected`, `aircraft.pilot_killed`, `aircraft.took_off`, `aircraft.landed`, `aircraft.flameout`, `aircraft.fuel_out` |
-| Flight | `flight.departure` (mode changes), `flight.stall` and `flight.spin` on and off |
-| AI | `ai.activity`, `ai.target` and `ai.airfield_phase` changes, without reasons |
-| Communication | `comms.radio`, `comms.crew` and `comms.tower` for every line delivered (speaker, words and recordings), manual tower replies, `comms.order` for the player's wing orders (the wingmen addressed, the reply, or why it was refused), and `comms.hud` for every cockpit message line: shown, a repeat that moved the line on screen to the bottom with a fresh timer, or pushed off the screen by newer lines |
-| Audio | `audio.effect` (impacts and explosions), `audio.release` (weapon release sounds), `audio.tone` (seeker tones), `audio.stall_warning`, `audio.ejection` (warnings, seat, parachute, a wingman ejecting) and `audio.device` (gear, flaps, hook, brake) |
-| Player and system | `player.command` (combat commands and trigger releases), `player.bookmark`, `system.pause`, `system.resume`, `system.time_scale`, `system.cheat`, `system.restart` (first in a recording that follows a restart), `system.end`, `system.gap`, and `system.note` when a tick held more than the format stores |
+| Aircraft | `aircraft.crashed` (flying into the ground or a structure, or a destroyed aircraft's wreck coming down or exploding), `aircraft.ejected` with the hazard an AI pilot left for or your own ejection, `aircraft.pilot_killed`, `aircraft.took_off`, `aircraft.landed`, `aircraft.flameout`, `aircraft.fuel_out` |
+| Flight | `flight.departure` (mode changes), `flight.stall` and `flight.spin` on and off; `flight.effect` when a flight-model effect starts or stops, with what it applied and why ([below](#flight-model-effects)); `flight.g_limit` when the stick reaches its stop, with the G the envelope offers, the limit applied, the G delivered and what set the limit; `flight.structural_failure` with the section, the G and why |
+| AI | `ai.activity` (with how long the old activity lasted), `ai.target` (with priority and score), `ai.weapon_phase` (with the store and the weapon service's words), `ai.airfield_phase`, each with its reason ([below](#reasons-for-ai-decisions)); `ai.defense` when a missile defense starts, changes maneuver, releases chaff or flares, or ends, and when a launch warning arrives or is dropped; `ai.fallback` the first time each aircraft uses each fitted stand-in rule; `ai.ejection` when the ejection check finds a hazard, the pilot ejects, a go-around replaces an ejection, or the hazard passes |
+| Communication | Every entry of the [communication journal](#communication-journal) and of the AI message journal, with trigger, rolls, outcome and reason ([below](#communication-events)); and `comms.hud` for every cockpit message line: shown, a repeat that moved the line on screen to the bottom with a fresh timer, or pushed off the screen by newer lines |
+| Audio | `audio.effect` (impacts and explosions), `audio.release` (weapon release sounds), `audio.tone` (the seeker tone, its loudness and whether its weapon aims at the surface), `audio.stall_warning`, `audio.ejection` (warnings, seat, parachute, a wingman ejecting), `audio.device` (gear, flaps, hook, brake) and `audio.music` (every input of the situation music, the score they ask for, and why) |
+| Player and system | `player.command` (combat commands and trigger releases), `player.bookmark`, `system.pause`, `system.resume`, `system.time_scale`, `system.cheat`, `system.restart` (first in a recording that follows a restart), `system.end`, `system.gap`, and `system.note` when a tick held more than the format stores or a journal overflowed |
+| Display trees | `ai.thought` for every AI aircraft, `flight.telemetry` for every aircraft that flies, `weapon.guidance` for every guided missile ([below](#display-trees)) |
 
 Every second a frame carries a checksum of all aircraft's exact state,
 which `--recording-diff` uses. Every gun round is its own launch and
 outcome, as the debrief counts them, so the summary's shot table lists a
 burst round by round.
 
-Not recorded yet, awaiting the milestone that records the reasons behind
-decisions: the AI thinking and flight-model telemetry trees, AI weapon
-phases, defensive reactions, fallbacks and ejection decisions,
-`weapon.decoyed`, `flight.g_limit` and `flight.effect`, messages between AI
-aircraft (`comms.request`, `comms.report`, `comms.delivery`), calls that
-were queued, delayed, suppressed or dropped, and music changes. Reasons on
-recorded events are left empty where the game does not yet say why. The
-attacker on `combat.hit` comes from the debrief ledger's last shooter, and
-its projectile from the same tick's shot outcomes; two hits on one aircraft
-in one tick can be credited to the later shooter. A headless probe runs no
-weather, crew voice, music or cockpit messages, and its header says so.
+The attacker on `combat.hit` comes from the debrief ledger's last shooter,
+and its projectile from the same tick's shot outcomes; two hits on one
+aircraft in one tick can be credited to the later shooter. A headless probe
+runs no weather, crew voice, music or cockpit messages, and its header says
+so. What the records themselves cannot explain is listed with the
+[AI thinking record](#ai-thinking-record), the
+[telemetry record](FLIGHT-MODEL.md#telemetry-record) and the
+[communication journal](#not-visible-yet).
+
+### Display trees
+
+A display tree is what a debug panel shows, as numbered lines: a label, a
+value with its unit, and a note that says why. The recorder builds three
+kinds from the simulation's write-only records, and the debug panels will
+build the same trees from a live flight. The builders are pure functions in
+`tore-app/src/replay/trees.rs`; the layouts and rates are agent decisions
+(2026-09-26).
+
+| Channel | Subject | Recorded | And at once when |
+| --- | --- | --- | --- |
+| `ai.thought` | Each AI aircraft | 10 times a second while alive | Its activity, target, weapon phase, motion branch or maneuver changes |
+| `flight.telemetry` | You, and each AI aircraft | You 30 times a second, AI 5 times, while alive | An effect starts or stops |
+| `weapon.guidance` | Each guided missile | 10 times a second, and at launch | A decoy roll is made against it |
+
+Each aircraft and missile keeps its own phase within the rate, so the work
+spreads over the ticks. Numbers are rounded to what a panel shows (tenths of
+a nautical mile, whole degrees and knots, tens of feet for heights and
+pounds for thrust and drag); notes use clock times rather than running
+counts, so an unchanged line costs nothing in the file. Measurements (angle
+of attack, sideslip, Mach, dynamic pressure, height above ground) are
+labelled as measurements and never given as a cause.
+
+The **AI thinking** tree, top level first. Lines appear only when the
+record has something to say; the controller's lines appear only when its
+decision ran this tick, otherwise "Motion" says why not (an airfield
+sequence, destroyed, a training target).
+
+| Line | Value | Note and children |
+| --- | --- | --- |
+| Aircraft | Label | Aircraft, skill and where it came from, side, wing and place |
+| Mission | Role | Stance; holding formation, must rejoin; each remembered attack, acted on or ignored and why |
+| Activity | Activity (`Activity`) | Why it last changed; `Since` the clock time it began |
+| Target | Aircraft id (`Target`) | Its name; `Chosen by` (mission ranking, kept, nearest first, weapons held) and why; `Lost`; `Score` with its priority; `Runner-up` with its score, name and priority; the ranking's rules; who attacked it or its charge; `Not eligible`, up to three observed aircraft that could not be chosen and why |
+| Geometry | Range, nm | `Off nose` (ahead or behind, facing or not), `Aspect`, `Closure`, `Height` above or below |
+| Weapon | The chosen store and station | Target class; `Phase` (and the one before); `Fire?` with the first reason it did not fire and its numbers, for example "outside max range (6.1 nm > 5.8 nm)"; `Service`, the weapon service's words with its next deadline as a clock time; each store against this target, grouped, with its verdict and failing checks |
+| Defense | The missile | Its weapon and shooter; `Range`, `Maneuver` (notch, jink or not yet, with heading and pitch), `Countermeasures`, `Time to impact`, `Maneuver time`, `Margin`, `Why now` |
+| Motion | Branch (tactics, formation, missile defense, rejoining, search, ordered) | What the branch is doing; `Slot distance` and `Formation speed` in formation; `Choice` with every draw of the choice (for example "roll 37 < 50: best attack"), `Chosen at`, `Path`, `Situation` with the quadrant's percentages, any fitted rule, last-ditch candidate, engagement pitch and pursuit offsets; `Next choice`; `Rolls` made this tick outside a choice |
+| Steering | | `Heading`, `Pitch`, `Bank` and `Speed` delivered, each with `Asked`, what the maneuver asked for; `G` delivered with its `Limit`; `Terrain floor` |
+| Controls | | Pitch, roll, rudder, throttle, afterburner |
+| Fuel | Pounds | State; `Endurance`, `Time home`, `Heading home` |
+| Airfield | Phase | The gates (turn, runway, wing landed, leader landing); parking slot, a landing begun, why it left the sequence, a go-around |
+| Ejection | Watching, ejected or go-around | The hazard and seconds to impact; the phase that guarded it; whether it was a catastrophe |
+| Fitted rules | Names | Every stand-in rule used this tick |
+| Recent | Count | The last four decision changes, each labelled with its clock time, with what changed and why |
+
+The **telemetry** tree: `Aircraft` (label; aircraft and which flight-model
+path moved it), `Altitude` above sea level, `AGL` (measured), `Air data`
+(measurements: `TAS`, `Mach`, `AoA`, `Sideslip`, `q`), `Load` (`G`
+delivered, `Asked`, `G limit` with what set it), `Rates` (roll, pitch, yaw),
+`Thrust` (with `Lapse`, `Power available`, `Throttle`, `Afterburner`),
+`Drag` (airframe, fuel and stores, pull, gear, flaps, airbrake, slip, and
+damage when there is any), `Stall speed` (with `Authority`), `Fuel`,
+`Contact` on the ground, and `Effects applied`, one line per effect the
+step applied: its label, the factor, limit or state it applied, and a note
+saying why ([effects](#flight-model-effects)). The labels `TAS`, `Mach`,
+`AoA`, `Sideslip`, `AGL`, `G` and `G limit` are the ones the exports read.
+
+The **guidance** tree: `Weapon` (name; guidance kind), `Shooter`, `Target`,
+`Mode` (cued or boresight), `Seeker` (status; acquired, searching or not yet
+enabled) with `Quality` and `Tracking`, `Time of flight`, `Speed`,
+`Range to target`, `Closest approach` so far and when, `Intercept in`, and
+`Decoy roll`, the latest roll against it and whether it was decoyed or
+resisted.
+
+### Reasons for AI decisions
+
+Each decision change is recorded on the tick it happened, with a thought
+tree, and with a sentence built from the records: for an activity, the
+missile defense and its reasons, the tactic chosen, the store firing at
+whom, why there is no firing solution yet, holding formation until
+released, the search, the rejoin, the fuel state, or the airfield sequence;
+for a target, the mission ranking with priority, score and the runner-up,
+the nearest-first ranking, a target that left, or weapons held; for a
+weapon phase, the weapon service's words. When the aircraft heard something
+from another aircraft on the same tick (an attack report, a leader's
+release to free selection, a wing order, a launch warning), the reason ends
+with "after" and what it heard. Spacing and wing-control orders move the
+slot, not the decision, so they are not cited.
+
+### Flight-model effects
+
+`flight.effect` turns each effect of the [telemetry
+record](FLIGHT-MODEL.md#telemetry-record) into an "on" event when it starts
+and an "off" event when it stops, compared by `std::mem::discriminant` (and
+the device, for held devices). An effect that is gone for less than a
+quarter of a second (30 ticks) and comes back is the same episode, so
+flicker makes no events. Effects of one moment (a touchdown, a lift-off, a
+blast kick, the spin direction rule, a spin's end, an autopilot release, a
+building rebound) have an "on" event marked `momentary` and no "off". Every
+aircraft's first recorded tick lists the effects already in force. An AI
+aircraft's blast kick lands before its own flight step, so its record shows
+the rotation it caused (`Blast jolt`), not the kick.
+
+### Communication events
+
+| Journal entry | Event |
+| --- | --- |
+| Radio calls, wingman replies, AI chatter | `comms.radio` |
+| Crew remarks and coaching checks | `comms.crew` |
+| Tower lines and replies, and tower speech cut when the runway under your landing clearance is destroyed | `comms.tower`; the cut is `cancelled` because the runway is unusable |
+| AI text lines not shown yet (queued, held, replaced) | `comms.hud`; a line the HUD showed is recorded once, by the HUD |
+| Player orders | `comms.order`, then one `comms.delivery` per addressed wingman with its answer (applied, rejected or skipped) and why; an order that went out on the radio has the `radio` route, one the game refused before it went out has none |
+| Music inputs | `audio.music` with `from`, `to`, why, and every input (`succeeded`, `ejected`, `launching`, `air_target`, `hit_recently`, `danger`, `home`, `deck`) as true or false |
+| Attack evidence (AI message journal) | `comms.report` when queued, then one `comms.delivery` per recipient: delivered, ignored with why, or expired after 2 s without news |
+| A neutral leader releasing itself to free selection | `comms.order` with the attack that triggered it |
+| Wing orders between AI aircraft | `comms.request`, answered by one `comms.delivery` per recipient when there are several |
+| Launch warnings | `ai.defense` when they arrive (the reaction and devices scheduled) or are dropped (and why) |
+
+Each carries its `trigger`, the `rolls` it used, its `outcome` and
+`reason`, how long it waited, whether you heard it, its audience, its
+`route` (`radio`, `tower` or `direct`: how the cockpit plays it), and a
+`message` number shared by every entry about the same line or message.
+Radio call numbers are the channel's own; AI messages count from 2^32. An
+escort's changed priority is not an event; it shows in the escort's thought
+tree.
+
+A line has one entry for each thing that happened to it, so it is
+delivered, and heard, exactly once: the entry whose `outcome` is
+`delivered` (`tore_replay::vocab::heard` says which). Its queued entry
+comes before, and an `interrupted` one after, when your wing order voice
+cut it off. The replay's sound, subtitles and Tacview messages use only
+that entry. Two tower triggers are fixed names a replay acts on
+(`tore_replay::vocab::trigger`): `player request` on the tower's answer to
+your own request, and `landing clearance cancelled` on the cut; other
+triggers are plain English.
+
+The seeker tone (`audio.tone`) is recorded when it starts, stops or
+changes, and again when its loudness (`strength`, 0 to 1, as the mixer
+takes it) moves by 0.05 or more from the last entry, so a tone that swells
+with the seeker's signal makes a few entries rather than one a tick. Its
+name comes from `tore_replay::vocab::tone`, and `surface` says whether the
+weapon aims at surface targets, which changes the sound of an infrared
+lock. The music's inputs are journaled only when the flight has sound; a
+headless probe has none.
 
 ## File format
 
@@ -236,6 +381,13 @@ bytes for the aircraft alone). That is about **16.5 MB for a 10-minute
 mission with 17 aircraft**. Real AI control inputs are noisier than the
 test's, so expect somewhat more.
 
+The headless AI probes, three minutes each with every reason event and
+display tree, measured on 2026-09-26: 5 aircraft take 320 to 500 KB a
+minute, and 7 to 9 aircraft 630 to 760 KB a minute, so a 10-minute mission
+with 9 aircraft is about 7.6 MB. The reasons and trees add 100 to 220 KB a
+minute for 5 aircraft and 260 to 380 KB for 7 to 9, most of it each tree's
+full copy at the start of every one-second chunk.
+
 ### Limits
 
 The writer refuses input beyond these limits with a clear message and writes
@@ -310,10 +462,12 @@ aircraft's airborne time, highest and lowest G, lowest height above sea
 level and above the ground (when telemetry records it), stalls, spins, fuel
 used, shots, hits, kills, final state and time in each AI activity; a table
 of every shot (launch geometry, time of flight, peak speed, closest approach
-to the intended target, outcome and why); the communication transcript with
-reasons; a timeline of key events; each bookmark with the events of the ten
-seconds around it and every aircraft's state at that moment; and the
-anomaly flags.
+to the intended target, outcome and why); the communication transcript
+with triggers, outcomes and reasons, including the music's changes; a
+timeline of key events (G-limit hits and decoys among them; AI decisions
+and effect changes stay in the log and the bookmarks); each bookmark with
+the events of the ten seconds around it and every aircraft's state at that
+moment; and the anomaly flags.
 
 ### Anomaly flags
 
@@ -333,9 +487,9 @@ adjustable.
 | Track lost early | A guided weapon loses its target within 2 seconds of launch |
 | Fuel exhausted | An aircraft runs out of fuel |
 | Order rejected | A recipient rejects an order, request or report |
-| Call dropped, call suppressed | A call is dropped, or suppressed by a cooldown, limit or radio silence |
+| Call dropped, call suppressed | A call is dropped, or a spoken call (radio, crew, tower) is suppressed by a cooldown, limit or radio silence. The HUD's rate limit for AI lines, a cockpit message pushed off the screen by newer lines, and the AI's rules for which radio events become calls are routine and not flagged |
 | Long wait | A call waits in a queue more than 3 seconds |
-| Repeated call | The same speaker makes the same call 3 times within 10 seconds |
+| Repeated call | The same speaker makes the same call 3 times within 10 seconds, each saying counted once (not its queued or cut-off entry) |
 | Below terrain | Telemetry puts a live aircraft more than 5 ft below the ground |
 | Crash undamaged | An AI aircraft crashes with no damage: it flew into the ground |
 
@@ -376,11 +530,13 @@ Object ids are hexadecimal and never zero: aircraft, projectiles, decoys and
 parachutes each have their own range. Objects are removed with `-id` when
 they leave the recording (a wreck when it is gone).
 
-Events: `Destroyed` for kills, `Message` for radio calls the player could
-hear, `Bookmark` for the player's bookmarks, `TakenOff` and `Landed`, and
-`Debug` (shown with Tacview's `/Debug:on`) for AI decisions, orders and
-answers, comms reasons and flight-model changes. Commas in text are escaped
-as Tacview requires; line breaks become spaces.
+Events: `Destroyed` for kills, `Message` for each radio, crew or tower line
+the player heard, once, when it was delivered, `Bookmark` for the player's
+bookmarks, `TakenOff` and `Landed`, and `Debug` (shown with Tacview's
+`/Debug:on`) for AI decisions with their reasons, orders and answers, comms
+entries with an outcome or reason, flight-model effects starting and
+stopping, and G-limit hits. Commas in text are escaped as Tacview requires;
+line breaks become spaces.
 
 **Reference time.** The recording's date at the mission's local time of
 day, shifted by the anchor's longitude at 15 degrees an hour, so Tacview's
@@ -680,12 +836,14 @@ There is no cockpit, HUD, instrument panel or mirror in a replay.
   selected aircraft's is in brackets. Aircraft over 100 nautical miles away,
   wrecks on the ground and the aircraft the camera sits in have none.
 - **Mission timer** (T, on at first): mission time as `mm:ss.t` and the tick.
-- **Subtitles:** radio, tower and crew lines the player could hear, and
-  cockpit messages, for four seconds from their tick, newest lowest, up to
-  three.
+- **Subtitles:** radio, tower and crew lines the player heard, each once
+  from its delivery, and the cockpit messages the HUD showed or queued, for
+  four seconds from their tick, newest lowest, up to three.
 - **Comms list** (C): the last 14 recorded communication entries up to the
-  playhead, calls the player could not hear marked as such. The full,
-  filterable Comms panel comes with the debug panels.
+  playhead, calls the player could not hear marked as such. Every entry is
+  listed, so a line that waited in the queue appears when it was queued and
+  again when it was delivered. The full, filterable Comms panel comes with
+  the debug panels.
 - **Flight path trails** (R, off at first): each aircraft's and guided
   weapon's path over the last 30 seconds (Shift+R: 10, 30, 60, 120 or 300)
   as a thin line in its side's colour, a weapon's paler than its owner's.
@@ -719,17 +877,23 @@ scheduled is an agent design (2026-09-26); the code is
   recorded order, queued behind the line before as in flight: radio calls,
   crew remarks, tower lines, the tower's reply to the player's own request
   (which replaces waiting tower speech), and recordings played straight
-  into the cockpit, such as the death scream. A line recorded as not
-  heard, or as queued, held back or dropped rather than delivered, stays
-  silent. Cockpit messages have no voice.
-- **The player's wing orders:** the order voice, which cuts off waiting
-  wingman speech as in flight. An order the wing refused has no voice, and
-  orders between AI aircraft are silent.
-- **Cockpit sounds:** the seeker tone, the stall warning, gear, flap, hook
-  and air brake sounds, the ejection warnings, seat and parachute, and a
-  friendly wingman ejecting. They are the player's cockpit, whichever
-  aircraft the camera follows. Queued tower speech stops when the player's
-  aircraft is lost, as in flight.
+  into the cockpit, such as the death scream. Each plays the way its
+  recorded route plays in flight: the radio queue, the tower's own queue,
+  or straight in. The recording lists everything that happened to a line,
+  so only its delivery speaks: an entry recorded as not heard, or as
+  queued, held back, dropped or cut off, stays silent. Cockpit messages
+  have no voice.
+- **The player's wing orders:** every order that went out on the radio
+  plays its voice, which cuts off waiting wingman speech as in flight. An
+  order the wing refused has no voice but still cuts the speech off, as in
+  flight; one the game refused before it went out (no AI wing, no airport
+  to land at) does nothing. Orders between AI aircraft are silent.
+- **Cockpit sounds:** the seeker tone at its recorded loudness, the stall
+  warning, gear, flap, hook and air brake sounds, the ejection warnings,
+  seat and parachute, and a friendly wingman ejecting. They are the
+  player's cockpit, whichever aircraft the camera follows. Queued tower
+  speech stops when the player's aircraft is lost, and when the runway
+  under the player's landing clearance is destroyed, as in flight.
 - **Traveling sound:** impacts, explosions and the player's weapon
   releases, aircraft and missiles passing the camera, and sonic booms,
   through the flight's [distance, delay and stereo model](audio.md#traveling-sound)
@@ -760,15 +924,17 @@ What stops it:
 
 Fitted details, agent decisions (2026-09-26):
 
-- The recording names the seeker tone but not its loudness, which in
-  flight follows the seeker's signal quality or the estimated hit chance.
-  The replay uses the live strength at 50 percent: radar lock 0.7, radar
-  search 0.425, infrared lock 0.575 and infrared search 0.2875, times the
-  seeker volume.
-- A recorded infrared lock does not say whether its weapon aims at the
-  surface, which changes the lock tone. The replay takes the lock to be of
-  the same kind as the search tone before it, so a surface weapon's lock
-  after its surface search sounds as in flight.
+- The seeker tone's loudness follows the seeker's signal quality or the
+  estimated hit chance in flight. The recording keeps it in steps of 0.05
+  (see [Communication events](#communication-events)), so the replay's
+  tone can be up to 0.05 from the flight's between steps. A recording made
+  before the loudness was kept names only the tone, and the replay uses
+  the live strength at 50 percent: radar lock 0.7, radar search 0.425,
+  infrared lock 0.575 and infrared search 0.2875, times the seeker volume.
+- An infrared lock on a surface weapon plays a different tone. The
+  recording says whether the weapon aims at the surface; in a recording
+  made before it did, the replay takes the lock to be of the same kind as
+  the search tone before it.
 - The engine loop plays while the recorded engine runs and the aircraft
   is neither destroyed nor abandoned. AI aircraft are recorded as they are
   drawn, engine always running and afterburner never lit, so a watched AI
@@ -778,14 +944,12 @@ Fitted details, agent decisions (2026-09-26):
 
 Not in a replay:
 
-- **Music.** Nothing records the music's situation, the inputs that choose
-  a score, so a replay has no music.
+- **Music.** The recording keeps every change in the inputs that choose a
+  score (`audio.music`, recorded when the flight had sound), but the
+  replay does not hand them to the music yet, so a replay has no music.
 - Sounds that leave no record: the mixer's own choices, such as speech
   dropped from a full queue, and whatever a headless probe does not run
   (crew voice, music and cockpit messages).
-- Tower speech cut short when a landing clearance is cancelled because
-  the runway was destroyed: the recording keeps only the cockpit message,
-  so the replay lets the waiting tower line finish.
 
 Scheduling is checked without listening. The tests play a synthetic
 recording in frames of every length, at every speed and through jumps and
@@ -836,7 +1000,8 @@ about 1,200 ticks a frame, frames take about 2 ms more.
 ## Debug panels
 
 Filled in by a later milestone (M4): the AI thinking, telemetry, missile and
-timer panels.
+timer panels. They draw the [display trees](#display-trees), which
+recordings already carry.
 
 ### AI thinking record
 
@@ -891,7 +1056,12 @@ the controller on its latest tick.
 | Bingo | A bingo landing ordered this tick. |
 | Controls | The maneuver flown, the terrain floor, the steering adapter's whole output (the controls, its fallbacks and the attitude it asked for) and the attitude and speed the flight model delivered. |
 
-`AiActor::route_draws()` lists the draws of the private route home.
+`AiActor::route_draws()` lists the draws of the private route home. In the
+app, `AiWings::decoy_rolls()` lists each missile's roll against a released
+decoy in the latest step, with its draw and threshold (the bridge clears
+its decoy generator's draw log at the start of each step, which never
+touches the generator's state), `AiWings::decoy_draws()` the draws
+themselves, and `AiWings::station_weapon()` the weapon on a station.
 
 **Missile defense** (`AiActor::defense_decision()`) now also explains itself:
 the maneuver the evidence calls for (notch or jink) and its heading and
@@ -941,9 +1111,10 @@ scripted flight twice, draining the journal every tick and never, and hear
 the same lines at the same ticks with the same rolls left over. The shape of
 the records is an agent decision (2026-09-26).
 
-The code is `tore-app/src/comms/journal.rs`. Recording the entries as
-`comms.*` events is the recorder's next step; until then nothing drains the
-journal in flight, and it simply stays within its bound.
+The code is `tore-app/src/comms/journal.rs`. The mission recorder drains
+it every tick and records each entry as an event
+([communication events](#communication-events)); a flight that is not
+recorded never drains it, and it simply stays within its bound.
 
 ### What an entry holds
 
@@ -1038,10 +1209,8 @@ newest and counts the rest as lost.
   situation score really plays (its lockout, the once-per-flight scores,
   the Valkyries toggle and failed-load retries). The journal records what
   the inputs ask for.
-- **Lines the host speaks or prints itself**, until its hooks are added:
-  the wing order voice that cuts off wing speech, the tower's replies to
-  the player's requests, orders the host refuses before the wing sees
-  them, and the mission result calls sent without a trigger.
+- **The order voice without audio.** With no audio device nothing is cut
+  off, so no line is marked `interrupted`.
 - **Headless AI probes** run no crew voice, music or HUD delivery.
 
 ### Draining and host hooks
@@ -1052,11 +1221,19 @@ newest and counts the rest as lost.
   in `flight_music::Step::journal`.
 - `Entry::describe` prints one plain-English line; `Cause`, `Reason` and
   `Outcome` print their own text for event fields.
-- Host hooks: `Comms::cut_off(now, Reason::OrderVoice)` where the order
-  voice interrupts wing speech, `Comms::cancel_airport` and
-  `Entry::tower_reply` for tower replies, `Entry::order_refused` for orders
-  refused before delivery, and `Step::radio_calls` for the mission result
-  calls with their trigger.
+- Host hooks, all in place in `main.rs`:
+  `Comms::cut_off(now, Reason::OrderVoice)` where the order voice
+  interrupts wing speech, `Comms::cancel_airport` and `Entry::tower_reply`
+  for tower replies, `Entry::clearance_cancelled` where a destroyed runway
+  under the landing clearance cuts tower speech, `Entry::order_refused` for
+  orders refused before delivery (no AI wing, no landing site, an error),
+  and `Step::radio_calls` for the mission result calls with their trigger.
+  Every order the wing received is journaled with the `radio` route: the
+  host plays its voice, even an empty one.
+- The recorder drains it with `Recorder::drain_comms` after the tick's
+  radio is delivered (live flight and `--record-mission` probes alike),
+  notes entries its bound threw away, and takes the music's entries with
+  `Recorder::comms`.
 
 ## Command line
 
@@ -1095,11 +1272,22 @@ headless workflow.
   `Recording::peek` reads only the header, seek index and footer, for
   listings; an unfinished file peeks with no footer.
 - In the app, `replay/recorder.rs` captures a flight (`start_tick`,
-  `begin`, `note` and the other noting methods, `end`, `finish`),
-  `replay/library.rs` owns the folder and auto-delete (`list`, `plan`,
-  `cleanup`, `order_key`), `replay/screen.rs` is the Replays screen, and
-  `replay/cli.rs` the command line, whose `log` and `acmi` the screen's
-  export buttons call on a background thread.
+  `begin`, `note` and the other noting methods, `drain_comms`, `end`,
+  `finish`), `replay/library.rs` owns the folder and auto-delete (`list`,
+  `plan`, `cleanup`, `order_key`), `replay/screen.rs` is the Replays screen,
+  and `replay/cli.rs` the command line, whose `log` and `acmi` the screen's
+  export buttons call on a background thread. `Tick::journal` hands `begin`
+  the AI message journal the host drained for the tick.
+- `replay/recorder/why.rs` turns the AI's and the flight model's records
+  into reason events and display trees, with its rates, triggers and
+  debouncing; `replay/recorder/journal.rs` turns the two journals into
+  events. `replay/trees.rs` holds the pure tree builders (`ai_thought`,
+  `flight_telemetry`, `weapon_guidance`) and the shared wording
+  (`effect_line`, `draw_text`, `service_text` and the labels), for a live
+  panel as much as for the recorder. The recorder reads only through
+  shared references; draining the two write-only journals is its one
+  change, and a test flies the same synthetic mission with and without
+  recording and finds the same flight, decision and weapon state.
 - Export with `tore_replay::export` (`write_jsonl`, `write_summary`,
   `detect`, `write_acmi`, `compare`, `write_diff`).
 - Event kinds, field names, tree channels, well-known tree labels, units

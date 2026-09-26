@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tore_formats::aircraft::AircraftId;
-use tore_replay::{AircraftInfo, Recording, Side, TimedEvent, vocab};
+use tore_replay::{AircraftInfo, Event, Recording, Side, TimedEvent, vocab};
 
 /// Weather snapshots built ahead of the playhead each frame, in ticks:
 /// a ten-minute recording is ready in about a second.
@@ -266,6 +266,17 @@ fn screenshot_path(folder: &Path, recording: &Path, tick: u64) -> PathBuf {
         n += 1;
     }
     path
+}
+
+/// A cockpit message the HUD showed or queued, from the HUD's own record:
+/// not the communication journal's copy of an AI text line, which names its
+/// source, nor a message the HUD never showed.
+fn hud_shown(event: &Event) -> bool {
+    use vocab::{field, outcome};
+    event.get(field::SOURCE).is_none()
+        && event
+            .string(field::OUTCOME)
+            .is_none_or(|o| o == outcome::DELIVERED || o == outcome::QUEUED)
 }
 
 /// The events the timeline marks: launches, kills, orders and bookmarks.
@@ -1062,7 +1073,9 @@ impl Viewer {
             .iter()
             .filter_map(|e| {
                 let event = &e.event;
-                let heard = event.flag(vocab::field::HEARD) != Some(false);
+                // Once per line: at its delivery, not when it was queued
+                // or cut off.
+                let heard = vocab::heard(event);
                 let speaker = event
                     .string(vocab::field::SPEAKER)
                     .map(str::to_owned)
@@ -1079,7 +1092,7 @@ impl Viewer {
                         event.string(vocab::field::SPEAKER).unwrap_or("Crew"),
                         event.text
                     )),
-                    vocab::kind::COMMS_HUD => Some(event.text.clone()),
+                    vocab::kind::COMMS_HUD if hud_shown(event) => Some(event.text.clone()),
                     _ => None,
                 }
             })
@@ -1710,6 +1723,21 @@ mod tests {
         assert_eq!(model.markers.len(), 4);
         assert_eq!(model.aircraft, "You F/A-18D");
         assert_eq!(model.camera, "F10 External");
+    }
+
+    #[test]
+    fn hud_subtitles_are_what_the_hud_showed() {
+        use vocab::{field, kind, outcome, source};
+        let hud = |result: &str| Event::new(kind::COMMS_HUD).with(field::OUTCOME, result);
+        assert!(hud_shown(&hud(outcome::DELIVERED)));
+        assert!(hud_shown(&hud(outcome::QUEUED)));
+        assert!(hud_shown(&Event::new(kind::COMMS_HUD)));
+        assert!(!hud_shown(&hud(outcome::SUPPRESSED)));
+        assert!(!hud_shown(&hud(outcome::DROPPED)));
+        // The journal's copy of an AI text line waiting for the HUD.
+        assert!(!hud_shown(
+            &hud(outcome::QUEUED).with(field::SOURCE, source::HUD)
+        ));
     }
 
     #[test]

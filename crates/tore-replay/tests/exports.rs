@@ -13,7 +13,7 @@ use tore_replay::export::{
     AcmiOptions, CompareOptions, JsonlOptions, SummaryOptions, Thresholds, compare, detect,
     write_acmi, write_diff, write_jsonl, write_summary,
 };
-use tore_replay::vocab::{channel, field, kind, node, outcome, unit};
+use tore_replay::vocab::{channel, field, kind, node, outcome, source, unit};
 use tore_replay::*;
 
 const PI: f64 = std::f64::consts::PI;
@@ -264,6 +264,111 @@ fn golden_frames() -> Vec<Frame> {
                     .with(field::FROM, "FORMATION")
                     .with(field::TO, "ATTACKING")
                     .with(field::REASON, "leader released wing"),
+            ),
+            60 => {
+                // A queued call is not yet a line anyone heard.
+                frame.events.push(
+                    Event::new(kind::COMMS_RADIO)
+                        .with_subject(0)
+                        .with(field::SPEAKER, "You")
+                        .with(field::SOURCE, source::RADIO)
+                        .with(field::OUTCOME, outcome::QUEUED)
+                        .with(field::DUE_S, 0.5)
+                        .with(field::TRIGGER, "radar missile release at aircraft 2")
+                        .with(field::ROLLS, "roll 37 < 50: Fox call")
+                        .with(field::MESSAGE, 3i64)
+                        .with_text("Fox three, one away"),
+                );
+                // Routine holds are not suspects; a held radio call is.
+                frame.events.push(
+                    Event::new(kind::COMMS_HUD)
+                        .with(field::SOURCE, source::HUD)
+                        .with(field::OUTCOME, outcome::SUPPRESSED)
+                        .with(field::HEARD, false)
+                        .with(field::REASON, "one line per 2 s, 1.5 s left")
+                        .with_text("Attacking"),
+                );
+                frame.events.push(
+                    Event::new(kind::COMMS_RADIO)
+                        .with_subject(2)
+                        .with(field::SOURCE, source::CHATTER)
+                        .with(field::OUTCOME, outcome::SUPPRESSED)
+                        .with(field::HEARD, false)
+                        .with(field::TRIGGER, "new target you")
+                        .with(field::REASON, "contact cooldown (15 s), 3.0 s left"),
+                );
+                frame.events.push(
+                    Event::new(kind::COMMS_RADIO)
+                        .with_subject(0)
+                        .with(field::SPEAKER, "You")
+                        .with(field::SOURCE, source::RADIO)
+                        .with(field::OUTCOME, outcome::SUPPRESSED)
+                        .with(field::HEARD, false)
+                        .with(field::REASON, "unguided hits: one per shooter every 8 s")
+                        .with_text("Splash"),
+                );
+                frame.events.push(
+                    Event::new(kind::AUDIO_MUSIC)
+                        .with(field::FROM, "normal")
+                        .with(field::TO, "air")
+                        .with(field::OUTCOME, outcome::NOTED)
+                        .with(
+                            field::REASON,
+                            "inputs ask for Air: designated enemy inside 40000 ft",
+                        ),
+                );
+            }
+            150 => {
+                frame.events.push(
+                    Event::new(kind::FLIGHT_EFFECT)
+                        .with_subject(0)
+                        .with(field::EFFECT, "Low-speed G ceiling")
+                        .with(field::ON, true)
+                        .with(field::FACTOR, "limit 6.8 G")
+                        .with(
+                            field::REASON,
+                            "speed near the stall speed, on the ramp from 142 kt to 250 kt",
+                        ),
+                );
+                frame.events.push(
+                    Event::new(kind::FLIGHT_EFFECT)
+                        .with_subject(0)
+                        .with(field::EFFECT, "Blast kick")
+                        .with(field::ON, true)
+                        .with(field::FACTOR, "strength 1.2")
+                        .with(field::MOMENTARY, true)
+                        .with(field::REASON, "a missile blast nearby"),
+                );
+                frame.events.push(
+                    Event::new(kind::FLIGHT_G_LIMIT)
+                        .with_subject(0)
+                        .with(field::ASKED, 7.5)
+                        .with(field::LIMIT, 6.8)
+                        .with(field::G, 6.1)
+                        .with(
+                            field::REASON,
+                            "low-speed ceiling, fuel and stores divide by 1.1",
+                        ),
+                );
+            }
+            260 => frame.events.push(
+                Event::new(kind::WEAPON_DECOYED)
+                    .with_subject(0)
+                    .with_object(2)
+                    .with(field::PROJECTILE, Value::Id(1))
+                    .with(field::DECOY, "flare")
+                    .with(field::ROLL, 12i64)
+                    .with(field::THRESHOLD, 14i64)
+                    .with(
+                        field::REASON,
+                        "roll 12 < 14: decoy roll (susceptibility 40% x effectiveness 35%)",
+                    ),
+            ),
+            270 => frame.events.push(
+                Event::new(kind::FLIGHT_EFFECT)
+                    .with_subject(0)
+                    .with(field::EFFECT, "Low-speed G ceiling")
+                    .with(field::ON, false),
             ),
             120 => frame.events.push(
                 Event::new(kind::WEAPON_LAUNCH)
@@ -667,6 +772,19 @@ fn anomalies_are_found_with_their_numbers() {
                     .with(field::OUTCOME, outcome::DELIVERED)
                     .with_text("Bandit, bandit"),
             ),
+            // Said twice, each cut off after it was said: not a repeat.
+            4_700 | 4_800 => frame.events.push(
+                Event::new(kind::COMMS_RADIO)
+                    .with_subject(0)
+                    .with(field::OUTCOME, outcome::DELIVERED)
+                    .with_text("Splash one"),
+            ),
+            4_750 | 4_850 => frame.events.push(
+                Event::new(kind::COMMS_RADIO)
+                    .with_subject(0)
+                    .with(field::OUTCOME, outcome::INTERRUPTED)
+                    .with_text("Splash one"),
+            ),
             5_000 => frame
                 .events
                 .push(Event::new(kind::AIRCRAFT_CRASHED).with_subject(2)),
@@ -730,17 +848,25 @@ fn anomalies_are_found_with_their_numbers() {
     assert_eq!(find(kinds::CALL_DROPPED)[0].tick, 4_100);
     assert_eq!(find(kinds::CALL_SUPPRESSED)[0].tick, 4_200);
     assert_eq!(find(kinds::LONG_WAIT)[0].tick, 4_300);
-    assert_eq!(find(kinds::REPEATED_CALL)[0].tick, 4_400);
+    let repeated = find(kinds::REPEATED_CALL);
+    assert_eq!(repeated.len(), 1, "{repeated:?}");
+    assert_eq!(repeated[0].tick, 4_400);
     assert_eq!(find(kinds::CRASH_UNDAMAGED)[0].tick, 5_000);
     assert_eq!(find(kinds::BELOW_TERRAIN)[0].tick, 7_000);
     let fuel = find(kinds::FUEL_EXHAUSTED);
     assert_eq!(fuel.len(), 1);
     assert_eq!(fuel[0].tick, 47_000);
-    // Nothing is flagged in a clean flight.
+    // The golden flight flags only its held radio call and its rejected
+    // order: the HUD's rate limit and the AI's chatter rules are routine.
     let clean = golden_recording(&dir);
     let flags = detect(&clean, &Thresholds::default()).unwrap();
     let kinds_found: Vec<&str> = flags.iter().map(|a| a.kind).collect();
-    assert_eq!(kinds_found, vec![kinds::ORDER_REJECTED], "{flags:?}");
+    assert_eq!(
+        kinds_found,
+        vec![kinds::CALL_SUPPRESSED, kinds::ORDER_REJECTED],
+        "{flags:?}"
+    );
+    assert!(flags[0].detail.contains("Splash"));
     let _ = std::fs::remove_dir_all(dir);
 }
 

@@ -7,7 +7,7 @@ use super::text::{Names, clock, comms_text, num, seconds};
 use crate::error::Result;
 use crate::model::{AircraftState, Event, Frame, TICKS_PER_SECOND, TreeSample, Value};
 use crate::reader::Recording;
-use crate::vocab::{channel, field, kind, node, outcome};
+use crate::vocab::{channel, field, kind, node, outcome, source};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Anomaly kinds.
@@ -464,12 +464,16 @@ impl<'a> Detector<'a> {
     fn comms(&mut self, tick: u64, e: &Event) {
         // The comms phrase already carries the outcome, wait and reason.
         let line = comms_text(e, &self.names);
+        // Routine holds are not suspects: the HUD's rate limit for AI lines
+        // and the AI's rules for which radio events become calls. A drop is
+        // always a suspect.
+        let routine = e.kind == kind::COMMS_HUD || e.string(field::SOURCE) == Some(source::CHATTER);
         match e.string(field::OUTCOME) {
             Some(outcome::REJECTED) => {
                 self.flag(tick, e.subject, kinds::ORDER_REJECTED, line.clone());
             }
             Some(outcome::DROPPED) => self.flag(tick, e.subject, kinds::CALL_DROPPED, line.clone()),
-            Some(outcome::SUPPRESSED) => {
+            Some(outcome::SUPPRESSED) if !routine => {
                 self.flag(tick, e.subject, kinds::CALL_SUPPRESSED, line.clone());
             }
             _ => {}
@@ -483,9 +487,19 @@ impl<'a> Detector<'a> {
             e.kind.as_str(),
             kind::COMMS_RADIO | kind::COMMS_CREW | kind::COMMS_TOWER | kind::COMMS_HUD
         );
+        // Each saying once: not a line's queued or cut-off entry, nor one
+        // that was never said.
         let played = !matches!(
             e.string(field::OUTCOME),
-            Some(outcome::DROPPED | outcome::SUPPRESSED | outcome::CANCELLED | outcome::QUEUED)
+            Some(
+                outcome::DROPPED
+                    | outcome::SUPPRESSED
+                    | outcome::CANCELLED
+                    | outcome::QUEUED
+                    | outcome::INTERRUPTED
+                    | outcome::REPLACED
+                    | outcome::EXPIRED
+            )
         );
         if spoken && played && !e.text.is_empty() {
             let window = ticks(self.t.repeat_window_s);
