@@ -554,3 +554,34 @@ before weapon releases. Combat continues to own AI wreck motion, while the
 mission retains the detached pilot. The app imports original indexed art into
 a separate texture batch and schedules voice/effect transitions. See the
 [ejection specification](spec/ejection.md) and [source notes](formats/ejection.md).
+
+## Mission recordings
+
+`crates/tore-replay` is dependency free and knows nothing of the simulation
+or the renderer: the recording model, the chunked writer, the bounded reader
+and the exports (debug log, summary, anomaly flags, Tacview, comparison).
+`tore-app/src/replay/` is the only place the app's types meet it.
+
+The capture boundary is the per-tick `RenderSnapshot`. Each tick, right after
+the AI step, `replay/recorder.rs` reads the snapshot live flight draws plus
+flight data the snapshot lacks, and diffs both against the previous tick to
+find launches, hits, crashes, departures and AI activity changes.
+`replay/convert.rs` turns a snapshot into frame pieces and a decoded frame
+back into a snapshot; the draw rules that hold for a whole flight (loaded
+models, which ids draw with them) travel in the header. Everything the
+recorder reads was already computed by the tick. The few outputs it needed
+are write-only and bounded, drained by the host and never read by flight: the
+combat ledger's list of shot outcomes, the cockpit message requests in
+`FlightUi` and the player commands in `Combat`; `deliver_radio` returns the
+lines it delivered. Frames go to a writer thread through a queue two seconds
+deep; a full queue drops the frame and the next reports a gap, so the flight
+never waits for the disk. Probes with recording on and off print
+byte-identical output.
+
+`replay/library.rs` owns the `replays/` folder: names, `replays-v1.conf`
+auto-delete settings, listing from each file's header, seek index and footer
+(`Recording::peek`), and a cleanup that deletes only proven, unkept, inactive
+recordings. `terrain::World::identity` captures the resolved world for the
+header and `World::for_identity` rebuilds it without environment variables.
+`replay/cli.rs` holds the `--recording-*` commands and the tick-by-tick
+render check. See [mission replays](REPLAYS.md).

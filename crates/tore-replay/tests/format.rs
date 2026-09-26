@@ -306,6 +306,35 @@ fn small_file(dir: &std::path::Path, finish: bool) -> (Vec<u8>, Scenario) {
     (std::fs::read(path).unwrap(), scenario)
 }
 
+#[test]
+fn peek_reads_header_footer_and_span_without_scanning() {
+    let dir = temp_dir("peek");
+    let (bytes, scenario) = small_file(&dir, true);
+    let path = dir.join("finished.tore-replay");
+    std::fs::write(&path, &bytes).unwrap();
+    let peek = Recording::peek(&path).unwrap();
+    let full = Recording::open(&path).unwrap();
+    assert!(peek.complete);
+    assert_eq!(peek.header, *full.header());
+    assert_eq!(peek.footer.as_ref(), Some(&scenario.footer));
+    assert_eq!(peek.ticks, full.first_tick().zip(full.last_tick()));
+    assert_eq!(peek.frames, full.frame_count());
+    assert_eq!(peek.file_bytes, bytes.len() as u64);
+    // Still recording, or cut short: the header alone.
+    let unfinished = dir.join("unfinished");
+    std::fs::create_dir_all(&unfinished).unwrap();
+    let (bytes, _) = small_file(&unfinished, false);
+    let path = dir.join("partial.tore-replay");
+    std::fs::write(&path, &bytes).unwrap();
+    let peek = Recording::peek(&path).unwrap();
+    assert!(!peek.complete);
+    assert_eq!((peek.footer, peek.ticks, peek.frames), (None, None, 0));
+    assert_eq!(peek.header, scenario.header);
+    std::fs::write(&path, b"TOREREPL").unwrap();
+    assert!(Recording::peek(&path).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Chunk boundaries from the documented layout: 12-byte prelude, then
 /// 32-byte chunk headers with the body length at byte 8.
 fn chunk_offsets(bytes: &[u8]) -> Vec<(usize, u8, usize)> {

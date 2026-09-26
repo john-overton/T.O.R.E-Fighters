@@ -28,8 +28,94 @@ the crate's model once per tick.
 
 ## Recording
 
-Filled in by a later milestone (M1 recorder): when recording starts and
-stops, where files are stored, naming, and the auto-delete settings.
+### When
+
+Every flight records itself; there is nothing to switch on. Recording starts
+when a flight starts (Free Flight, a Quick Mission, the range), right after
+the scene is placed, and the first frame is the scene before the first
+tick. It stops when the flight ends: End mission (after the debrief is
+taken, so the footer carries its result), Restart (the old recording
+finishes and a new one starts), quitting the game, or re-importing media.
+The session log names each file as it starts and when it is saved; nothing
+is printed to the terminal. Captures, `--smoke-test` and frame timing runs
+do not record. `TORE_RECORD_MISSIONS=0` turns recording off for a run and
+`=1` forces it on, for example to time frames with recording on and off.
+
+### Where and what name
+
+Recordings live in `replays/` in the app data folder (which
+`TORE_DATA_DIR` overrides), named after the UTC date and time the flight
+started, the map and the player's aircraft:
+`2026-09-26_1540_UKR_F18.tore-replay`. A second flight starting in the same
+minute gets `-2`, `-3` and so on. The time is UTC, like the header's; the
+game has no time-zone data without a new dependency (agent decision,
+2026-09-26). Map names drop the `~` of variant layouts, and the aircraft
+part is the exact identity: the F/A-XX is `FAXX`, never the F-22N it
+borrows from.
+
+### Auto-delete
+
+`replays-v1.conf`, beside the other settings files, holds the rules:
+auto-delete on or off, keep the last N recordings (default 20) or delete
+those older than N days (default 30), and the recordings marked Keep. It is
+on by default with keep the last 20, so recordings never fill a disk
+unnoticed (agent decision, 2026-09-26). Cleanup runs when a recording
+finishes, and later when the Replays screen asks. It deletes only files it
+can prove it may: a recording's name and the format's magic bytes, not
+marked Keep, not the recording in progress, and not a `.partial` file
+written in the last ten minutes, which another running game may own.
+Anything else in the folder is never touched.
+
+### How
+
+The recorder runs inside the flight's fixed 120 Hz tick. Right after the
+AI's step, when combat and the AI have both written the tick's poses, it
+reads the same render snapshot live flight draws (see the
+[architecture](ARCHITECTURE.md#mission-recordings)) plus the flight data a
+snapshot does not carry: airspeed, G, fuel, the pilot's controls, ground
+contact, and whether the pilot is still flying it. It compares them with
+the previous tick to find what
+changed, and hooks later in the tick add the radio lines delivered, the
+sounds released and cockpit messages. Encoding and writing happen on a
+background thread fed by a queue two seconds deep. The flight never waits
+for the disk: if the queue is ever full, that tick's frame is dropped and
+the next frame starts with a `system.gap` event naming the missing ticks.
+Events noted between ticks (a pause, a bookmark, a wing order) go on the
+tick that was on screen.
+
+Recording reads only state the tick already computed. The behaviour probes
+give byte-identical output with recording on and off, and the simulation's
+golden fingerprints are unchanged.
+
+### What is recorded now
+
+| Family | Events |
+| --- | --- |
+| Weapons | `weapon.launch` with range, aspect, off-boresight angle, closure, heights and speeds at release (a gun round or rocket, which has no target of its own, is aimed at the shooter's current target: the AI's, or the player's designated one); `weapon.seeker_active`, `weapon.pitbull`, `weapon.track_lost` once per shot (the target let go, or the seeker lost it); `weapon.outcome` (hit, missed, spoofed, jammed) for every shot the debrief ledger closes |
+| Combat | `combat.hit` from each aircraft's hit points, with the attacker, damage, hit points after and the region hit (plus damaged systems for the player); `combat.destroyed` with the killer; `combat.ground_impact` |
+| Aircraft | `aircraft.crashed` (flying into the ground or a structure, or a destroyed aircraft's wreck coming down or exploding), `aircraft.ejected`, `aircraft.pilot_killed`, `aircraft.took_off`, `aircraft.landed`, `aircraft.flameout`, `aircraft.fuel_out` |
+| Flight | `flight.departure` (mode changes), `flight.stall` and `flight.spin` on and off |
+| AI | `ai.activity`, `ai.target` and `ai.airfield_phase` changes, without reasons |
+| Communication | `comms.radio`, `comms.crew` and `comms.tower` for every line delivered (speaker, words and recordings), manual tower replies, `comms.order` for the player's wing orders (the wingmen addressed, the reply, or why it was refused), and `comms.hud` for every cockpit message line: shown, a repeat that moved the line on screen to the bottom with a fresh timer, or pushed off the screen by newer lines |
+| Audio | `audio.effect` (impacts and explosions), `audio.release` (weapon release sounds), `audio.tone` (seeker tones), `audio.stall_warning`, `audio.ejection` (warnings, seat, parachute, a wingman ejecting) and `audio.device` (gear, flaps, hook, brake) |
+| Player and system | `player.command` (combat commands and trigger releases), `player.bookmark`, `system.pause`, `system.resume`, `system.time_scale`, `system.cheat`, `system.restart` (first in a recording that follows a restart), `system.end`, `system.gap`, and `system.note` when a tick held more than the format stores |
+
+Every second a frame carries a checksum of all aircraft's exact state,
+which `--recording-diff` uses. Every gun round is its own launch and
+outcome, as the debrief counts them, so the summary's shot table lists a
+burst round by round.
+
+Not recorded yet, awaiting the milestone that records the reasons behind
+decisions: the AI thinking and flight-model telemetry trees, AI weapon
+phases, defensive reactions, fallbacks and ejection decisions,
+`weapon.decoyed`, `flight.g_limit` and `flight.effect`, messages between AI
+aircraft (`comms.request`, `comms.report`, `comms.delivery`), calls that
+were queued, delayed, suppressed or dropped, and music changes. Reasons on
+recorded events are left empty where the game does not yet say why. The
+attacker on `combat.hit` comes from the debrief ledger's last shooter, and
+its projectile from the same tick's shot outcomes; two hits on one aircraft
+in one tick can be credited to the later shooter. A headless probe runs no
+weather, crew voice, music or cockpit messages, and its header says so.
 
 ## File format
 
@@ -372,7 +458,29 @@ cues are recorded, heard or unheard, with their reasons.
 
 ## Command line
 
-Filled in by a later milestone (M1): the `--recording-*` commands.
+These commands read recordings of what happened and need no game media.
+They are unrelated to `--record-input`, `--replay-input`, `--record-combat`
+and `--replay-combat`, which store controls or combat inputs and simulate
+them again.
+
+| Command | What it does |
+| --- | --- |
+| `--recording-info FILE` | Prints who, where and when, the weather, length, size, settings, result, every aircraft and weapon, events by kind and any damage |
+| `--recording-log FILE [--out DIR] [--from S] [--to S] [--ids 0,7] [--rate HZ]` | Writes `log.jsonl` and `summary.txt` to DIR (default: a `-log` folder beside the recording). `--from` and `--to` are mission seconds, `--ids` limits the log to those aircraft, `--rate` sets aircraft samples per second (default 1) |
+| `--recording-acmi FILE [--out FILE] [--rate HZ] [--guns]` | Writes a Tacview file (default: `.txt.acmi` beside the recording), 10 samples a second by default; `--guns` adds gun rounds |
+| `--recording-diff A B` | Prints how two recordings differ: header, identities, the first second their checksums differ, the first tick any aircraft's state differs, and event counts by family |
+| `--ai-probe-ticks N --record-mission PATH [--verify-render]` | Records a headless AI probe to PATH (never overwritten) without changing its output. `--verify-render` then rebuilds every tick from the file, compares it with the picture the probe drew, and prints one line: `AI probe verify-render: PASS ticks=... missing=0 differing=0`, or the first difference |
+
+For example, after John says "look at the replay from 3:40 pm" (15:40 UTC
+in the file name):
+
+```sh
+tore-app --recording-info replays/2026-09-26_1540_UKR_F18.tore-replay
+tore-app --recording-log replays/2026-09-26_1540_UKR_F18.tore-replay --from 200 --to 260
+```
+
+[Development](DEVELOPMENT.md#mission-recordings-for-debugging) has the
+headless workflow.
 
 ## For developers
 
@@ -381,6 +489,12 @@ Filled in by a later milestone (M1): the `--recording-*` commands.
   keeps its `.partial` file and flushes what it holds.
 - Read with `tore_replay::Recording` (`open`, `frame`, `frames`,
   `decode_chunk`, `tree`, `spawns`, `live_puffs`, `live_effects`, `events`).
+  `Recording::peek` reads only the header, seek index and footer, for
+  listings; an unfinished file peeks with no footer.
+- In the app, `replay/recorder.rs` captures a flight (`start_tick`,
+  `begin`, `note` and the other noting methods, `end`, `finish`),
+  `replay/library.rs` owns the folder and auto-delete, and `replay/cli.rs`
+  the command line.
 - Export with `tore_replay::export` (`write_jsonl`, `write_summary`,
   `detect`, `write_acmi`, `compare`, `write_diff`).
 - Event kinds, field names, tree channels, well-known tree labels, units

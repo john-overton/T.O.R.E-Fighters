@@ -667,7 +667,9 @@ fn missing_airport_audio(
     .filter(|stem| !phrases.contains_key(*stem) || !clips.contains_key(&format!("{stem}.5K")))
     .collect()
 }
-fn actuator_cues(
+/// Gear, flaps, hook and brake sounds for one tick's switch changes. Shared
+/// with the mission recorder, which logs them with or without a sound device.
+pub(crate) fn actuator_cues(
     before: &crate::flight::State,
     after: &crate::flight::State,
 ) -> [Option<&'static str>; 4] {
@@ -698,7 +700,9 @@ fn brake_cue(deployed: bool, on_ground: bool) -> &'static str {
         "&FLAPOPN.5K"
     }
 }
-fn stall_cue(
+/// The stall warning sound for a departure mode, if any. Shared with the
+/// mission recorder.
+pub(crate) fn stall_cue(
     mode: Option<tore_formats::flight_model::departure::DepartureMode>,
 ) -> Option<&'static str> {
     use tore_formats::flight_model::departure::DepartureMode::*;

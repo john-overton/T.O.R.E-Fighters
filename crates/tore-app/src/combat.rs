@@ -142,7 +142,20 @@ pub struct Combat {
     airport_objects: Vec<tore_sim::airport::StaticObject>,
     pub recorder: Option<crate::combat_tape::Recorder>,
     last_launcher: Option<Launcher>,
+    /// Player commands since the mission recorder last looked. Nothing in
+    /// flight reads them.
+    notes: std::collections::VecDeque<CommandNote>,
 }
+
+/// A player command combat received, kept for the mission recording.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandNote {
+    Command(live::Command),
+    /// The trigger was let go while it was held.
+    Release,
+}
+/// Command notes kept between drains; the oldest are dropped first.
+const MAX_COMMAND_NOTES: usize = 64;
 
 pub fn launcher(s: &flight::State) -> Launcher {
     Launcher {
@@ -251,6 +264,7 @@ impl Combat {
             ai_burners: Default::default(),
             recorder: None,
             last_launcher: None,
+            notes: Default::default(),
         })
     }
     /// The frame's fraction of the way from the previous tick to the current one.
@@ -333,11 +347,8 @@ impl Combat {
                 damage: Damage {
                     hp: self.state.player_hp,
                     initial_hp: capacity,
-                    // Whole amounts that reproduce the drawn fractions exactly.
-                    sections: self
-                        .state
-                        .player_damage_regions()
-                        .map(|fraction| (fraction * f64::from(capacity)).round() as i32),
+                    // The exact amounts the drawn fractions divide.
+                    sections: self.state.player_damage_amounts(),
                     structural: self.state.player_damage_section(),
                 },
                 airborne: true,
@@ -652,8 +663,20 @@ impl Combat {
         if let Some(r) = &mut self.recorder {
             r.record(&crate::combat_tape::command_name(command), l);
         }
+        self.note(CommandNote::Command(command));
         self.state.command(command, l);
         self.last_launcher = Some(l);
+    }
+    fn note(&mut self, note: CommandNote) {
+        if self.notes.len() == MAX_COMMAND_NOTES {
+            self.notes.pop_front();
+        }
+        self.notes.push_back(note);
+    }
+    /// Player commands since the last call, oldest first. For mission
+    /// recordings; flight never reads them.
+    pub fn take_notes(&mut self) -> Vec<CommandNote> {
+        self.notes.drain(..).collect()
     }
     pub fn finish_recording(&mut self) -> AppResult<()> {
         if let Some(mut r) = self.recorder.take() {
@@ -664,6 +687,9 @@ impl Combat {
     pub fn cancel(&mut self) {
         if let (Some(r), Some(l)) = (&mut self.recorder, self.last_launcher) {
             r.record("release", l);
+        }
+        if self.input.held || self.controller.held {
+            self.note(CommandNote::Release);
         }
         self.input.cancel();
         self.controller.cancel();
@@ -2310,6 +2336,7 @@ pub(crate) mod render_hash_tests {
             airport_objects: Vec::new(),
             recorder: None,
             last_launcher: None,
+            notes: Default::default(),
         }
     }
 

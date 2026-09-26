@@ -381,7 +381,7 @@ requests a preset. Axes are `pitch`, `roll`, `yaw`, `throttle`, `throttle-rate`,
 are `button:right`, `button:middle`, `button:back`, `button:forward`, `wheel:up`
 and `wheel:down`; each wheel notch is one press.
 
-UI actions: `pause`, `menu`, `end-flight`, `restart`, `view-front`, `view-back`,
+UI actions: `pause`, `menu`, `end-flight`, `restart`, `bookmark`, `view-front`, `view-back`,
 `view-up`, `view-external`, `view-track`, `view-threat`, `view-wing`,
 `view-target`, `view-target-player`, `view-fly-by`, `view-missile`, `store-view`,
 `view-target-track`, `center-look`, `cockpit`, `hud`, `zoom-in`, `zoom-out`,
@@ -473,6 +473,12 @@ cargo run --locked -p tore-app -- --replay-input flight-input.txt
 Pilot-only recording retains its clean-aircraft start, with no external stores,
 to preserve existing replay initial conditions. Normal unrecorded free flight
 loads supported default weapons. Use `--record-combat` for weapon-service tapes.
+
+These input tapes are separate from the mission recordings every flight makes
+([mission replays](REPLAYS.md)), which keep what happened rather than the
+controls. `bookmark` (Ctrl+B by default, "Mark replay moment" in the Game and
+menus group) marks the moment in that recording and shows "Bookmark N saved";
+it is a debugging aid, so the printable keyboard map leaves it out.
 
 Recording requires a direct free-flight start without a capture, probe or initial control/device-pose override and stops when that flight ends/restarts. Files are create-new and flushed
 on exit. Tapes contain **pilot inputs only**, not mission saves, UI/camera commands,

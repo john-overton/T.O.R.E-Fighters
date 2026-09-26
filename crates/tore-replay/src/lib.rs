@@ -29,8 +29,8 @@ pub use error::{Error, Result};
 pub use model::*;
 pub use predict::precision;
 pub use reader::{
-    CONTRAIL_PUFF_CAP, ChunkInfo, FrameIter, LONGEST_PUFF_TICKS, LiveEffect, LivePuff, Recording,
-    SMOKE_PUFF_CAP, Spawns, TimedEvent,
+    CONTRAIL_PUFF_CAP, ChunkInfo, FrameIter, LONGEST_PUFF_TICKS, LiveEffect, LivePuff, Peek,
+    Recording, SMOKE_PUFF_CAP, Spawns, TimedEvent,
 };
 pub use writer::{Writer, WriterOptions, partial_path};
 

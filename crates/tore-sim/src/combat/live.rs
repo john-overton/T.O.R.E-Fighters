@@ -821,6 +821,12 @@ impl State {
         self.player_localized_damage
             .fractions(self.config.damage_capacity)
     }
+    /// The player's regional damage as whole amounts, in section order: the
+    /// exact values [`State::player_damage_regions`] divides. Read-only, for
+    /// mission recordings.
+    pub fn player_damage_amounts(&self) -> [i32; DAMAGE_SECTIONS] {
+        self.player_localized_damage.amounts
+    }
     /// Development-only visual fixture. Gameplay damage always arrives through impacts.
     pub fn preview_localized_damage(&mut self, section: DamageSection, fraction: f64) {
         let fraction = fraction.clamp(0., 1.);

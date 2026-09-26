@@ -91,6 +91,21 @@ pub struct LivePuff {
     pub position: [f64; 3],
 }
 
+/// What [`Recording::peek`] reads without scanning the frames.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Peek {
+    pub header: Header,
+    /// Present when the file was finished.
+    pub footer: Option<Footer>,
+    /// First and last tick, known for a finished file.
+    pub ticks: Option<(u64, u64)>,
+    /// Frames the footer counts; 0 when it is missing.
+    pub frames: u64,
+    pub file_bytes: u64,
+    /// The file has its footer, seek index and trailer.
+    pub complete: bool,
+}
+
 /// An effect still playing at a given tick.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveEffect {
@@ -193,7 +208,61 @@ impl Recording {
         Self::load(Source::Memory(bytes), None, len)
     }
 
+    /// A recording's header, and for a finished one its footer and tick
+    /// span, read from the header, seek index and footer alone: nothing is
+    /// scanned or checked beyond those three chunks. A file that is not
+    /// finished (still recording, or cut short by a crash) peeks with no
+    /// footer and no span; [`Recording::open`] recovers what it holds.
+    pub fn peek(path: impl AsRef<Path>) -> Result<Peek> {
+        let path = path.as_ref();
+        let file = File::open(path)?;
+        let len = file.metadata()?.len();
+        let (recording, _) = Self::start(
+            Source::File(Mutex::new(file)),
+            Some(path.to_path_buf()),
+            len,
+        )?;
+        let mut peek = Peek {
+            header: recording.header.clone(),
+            footer: None,
+            ticks: None,
+            frames: 0,
+            file_bytes: len,
+            complete: false,
+        };
+        let Some((footer_offset, entries)) = recording.read_index() else {
+            return Ok(peek);
+        };
+        if let ChunkRead::Chunk(header, body) =
+            recording.read_chunk(footer_offset, MAX_CHUNK_BYTES)?
+            && header.kind == KIND_FOOTER
+            && let Ok((footer, frames, _)) = decode_footer(&body)
+        {
+            peek.footer = Some(footer);
+            peek.frames = frames;
+            peek.complete = true;
+            peek.ticks = entries.first().zip(entries.last()).map(|(first, last)| {
+                (
+                    first.first_tick,
+                    last.first_tick
+                        .saturating_add(u64::from(last.frames))
+                        .saturating_sub(1),
+                )
+            });
+        }
+        Ok(peek)
+    }
+
     fn load(source: Source, path: Option<PathBuf>, len: u64) -> Result<Self> {
+        let (mut recording, pos) = Self::start(source, path, len)?;
+        let index = recording.read_index();
+        recording.scan(pos, index.as_ref())?;
+        Ok(recording)
+    }
+
+    /// Reads the prelude and header; returns the recording so far and where
+    /// the first chunk after the header starts.
+    fn start(source: Source, path: Option<PathBuf>, len: u64) -> Result<(Self, u64)> {
         if len > MAX_FILE_BYTES {
             return Err(Error::Unsupported(format!(
                 "the file is {} MiB; recordings are limited to {} MiB",
@@ -235,9 +304,7 @@ impl Recording {
                 return Err(corrupt(format!("the header is damaged: {reason}")));
             }
         }
-        let index = recording.read_index();
-        recording.scan(pos, index.as_ref())?;
-        Ok(recording)
+        Ok((recording, pos))
     }
 
     /// Reads the chunk at `pos`, checking its checksum.

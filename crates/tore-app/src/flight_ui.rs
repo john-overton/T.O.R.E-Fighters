@@ -61,6 +61,8 @@ pub enum Command {
     RadioSilence,
     /// Ctrl+V: the Valkyries situation score.
     Valkyries,
+    /// Ctrl+B: mark this moment in the mission recording.
+    Bookmark,
 }
 type Control = (usize, (i32, i32, i32, i32), String);
 /// Flight messages: HUD-colored text in the HUD's font and size, with no
@@ -73,6 +75,21 @@ const NOTICE_LINES: usize = 7;
 /// The gap between the newest line's text and the bottom of the window, in
 /// 640x480 layer units.
 const NOTICE_MARGIN: f64 = 5.;
+/// What became of one cockpit message line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shown {
+    /// A new line at the bottom of the messages.
+    Now,
+    /// The same text was still on screen: that line moved to the bottom with
+    /// a fresh timer.
+    Repeated,
+    /// An earlier line that newer lines pushed off the top before its five
+    /// seconds were up.
+    PushedOff,
+}
+/// Cockpit message lines kept for a mission recording. Nothing in flight
+/// reads them; the recorder drains them each tick.
+const MAX_NOTES: usize = 256;
 /// Authored Pref row for the weapon diagnostic panel. It is not in the
 /// retail menu; opinionated, requested by John on 2026-09-23.
 pub const WEAPON_DIAGNOSTICS: &str = "Weapon diagnostics?";
@@ -110,6 +127,8 @@ pub struct FlightUi {
     pub effects: bool,
     /// Message lines shown at the bottom of the flight view, oldest first.
     pub notices: std::collections::VecDeque<(String, Instant)>,
+    /// Every message line and what became of it, for the recorder.
+    notes: std::collections::VecDeque<(String, Shown)>,
     pub help: bool,
     root: usize,
     path: Vec<usize>,
@@ -134,6 +153,7 @@ impl Default for FlightUi {
             time_scale: 1.,
             effects: true,
             notices: Default::default(),
+            notes: Default::default(),
             help: false,
             root: 0,
             path: vec![],
@@ -224,12 +244,37 @@ impl FlightUi {
     }
     pub fn message(&mut self, text: impl Into<String>) {
         let text = text.into();
+        let shown = if self
+            .notices
+            .iter()
+            .any(|(shown, at)| *shown == text && at.elapsed() < NOTICE_LIFETIME)
+        {
+            Shown::Repeated
+        } else {
+            Shown::Now
+        };
         // A repeated line moves to the bottom with a fresh timer.
         self.notices.retain(|(shown, _)| *shown != text);
-        self.notices.push_back((text, Instant::now()));
+        self.notices.push_back((text.clone(), Instant::now()));
+        self.note(text, shown);
         while self.notices.len() > NOTICE_LINES {
-            self.notices.pop_front();
+            if let Some((old, at)) = self.notices.pop_front()
+                && at.elapsed() < NOTICE_LIFETIME
+            {
+                self.note(old, Shown::PushedOff);
+            }
         }
+    }
+    fn note(&mut self, text: String, shown: Shown) {
+        if self.notes.len() == MAX_NOTES {
+            self.notes.pop_front();
+        }
+        self.notes.push_back((text, shown));
+    }
+    /// Message lines since the last call, oldest first, each with what
+    /// became of it. For mission recordings; flight never reads them.
+    pub fn take_notes(&mut self) -> Vec<(String, Shown)> {
+        self.notes.drain(..).collect()
     }
     fn unavailable(&mut self, label: &str) -> Command {
         self.message(format!("{label}: not implemented yet"));
@@ -543,6 +588,9 @@ impl FlightUi {
             // Range fixture, kept off the retail Shift-I airbase inventory.
             if key == "i" && shift {
                 return Command::Combat(tore_sim::combat::live::Command::Incoming);
+            }
+            if key == "b" && !shift {
+                return Command::Bookmark;
             }
             if key == "Tab" {
                 return Command::InstrumentCycle(if shift { -1 } else { 1 });
@@ -994,6 +1042,35 @@ mod tests {
         assert_eq!(shown(&ui).len(), NOTICE_LINES);
         assert_eq!(shown(&ui).last().unwrap(), &"Message 4");
         assert_eq!(shown(&ui).iter().filter(|m| **m == "Message 4").count(), 1);
+    }
+    #[test]
+    fn notes_say_what_became_of_each_message_line() {
+        let mut ui = FlightUi::default();
+        for n in 0..8 {
+            ui.message(format!("Message {n}"));
+        }
+        // The eighth line pushes the first off the top before its time.
+        let notes = ui.take_notes();
+        assert_eq!(notes.len(), 9);
+        assert!(notes[..8].iter().all(|(_, shown)| *shown == Shown::Now));
+        assert_eq!(notes[8], ("Message 0".into(), Shown::PushedOff));
+        ui.message("Message 5");
+        assert_eq!(ui.take_notes(), [("Message 5".into(), Shown::Repeated)]);
+        // A line whose five seconds are up is gone, so its text is new again
+        // and it pushes nothing still showing.
+        for (_, at) in &mut ui.notices {
+            *at -= NOTICE_LIFETIME;
+        }
+        ui.message("Message 6");
+        ui.message("Message 9");
+        assert_eq!(
+            ui.take_notes(),
+            [
+                ("Message 6".into(), Shown::Now),
+                ("Message 9".into(), Shown::Now)
+            ]
+        );
+        assert!(ui.take_notes().is_empty());
     }
     #[test]
     fn messages_expire_after_five_seconds() {

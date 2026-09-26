@@ -233,6 +233,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Slow motion | Shift+C | - | - |
 | End mission | Ctrl+Q | - | - |
 | Valkyries music | Ctrl+V | - | - |
+| Mark replay moment | Ctrl+B | - | - |
 | Restart flight | - | - | - |
 | Keyboard help | F11 | - | - |
 | Menu up | Up | - | D-pad up |

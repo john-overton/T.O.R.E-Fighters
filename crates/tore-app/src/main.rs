@@ -244,15 +244,45 @@ struct App {
     finished: bool,
     next_frame: Option<Instant>,
     error: Option<Box<dyn Error>>,
+    /// Where every flight's mission recording goes; `None` turns recording
+    /// off (captures and diagnostics). See docs/REPLAYS.md.
+    replay_library: Option<replay::library::Library>,
+    /// The flight being recorded.
+    replay_recorder: Option<replay::recorder::Recorder>,
+}
+/// The AI wingmen a player's wing order addresses, for the mission
+/// recording: every living member of the player's wing, or the one wingman
+/// Alt-4 to Alt-7 chose (1 is the first wingman), as the order rules pick
+/// them.
+fn wing_recipients(wings: Option<&ai_wings::AiWings>, recipient: Option<u8>) -> Vec<u32> {
+    let Some(wings) = wings else {
+        return Vec::new();
+    };
+    let mut members: Vec<(u8, u32)> = wings
+        .slots()
+        .iter()
+        .filter(|slot| {
+            slot.side == tore_sim::ai::launch::Side::Friendly
+                && slot.wing_number == 1
+                && wings.mission().actor(slot.id).is_some_and(|a| a.alive())
+        })
+        // The display number counts the player as the first member.
+        .map(|slot| (slot.member_number.saturating_sub(1), slot.id))
+        .filter(|(member, _)| recipient.is_none_or(|wanted| *member == wanted))
+        .collect();
+    members.sort_unstable();
+    members.into_iter().map(|(_, id)| id).collect()
 }
 /// Deliver due radio and crew lines: HUD text and recordings together.
+/// Returns the calls it delivered, for the mission recording.
 fn deliver_radio(
     comms: &mut comms::Comms,
     flight_ui: &mut flight_ui::FlightUi,
     audio: Option<&audio::Audio>,
     now: f64,
-) {
-    for call in comms.due(now) {
+) -> Vec<comms::Call> {
+    let due = comms.due(now);
+    for call in &due {
         match call.route {
             comms::Route::Radio | comms::Route::Airport => {
                 flight_ui.message(call.line());
@@ -271,6 +301,7 @@ fn deliver_radio(
             }
         }
     }
+    due
 }
 /// Wing vapor line segments: position then RGBA, two vertices per segment.
 /// The five native colors are patterned fill types resolved through LAY
@@ -572,6 +603,137 @@ impl App {
         }
     }
 
+    /// Starts recording the flight that was just set up. A recording that
+    /// cannot start is logged and the flight goes on unrecorded.
+    fn start_replay_recording(&mut self) {
+        use replay::{convert, recorder};
+        let Some(library) = &self.replay_library else {
+            return;
+        };
+        // Commands from before this flight belong to no recording.
+        let _ = self.combat.take_notes();
+        let started = std::time::SystemTime::now();
+        let snapshot = self.combat.render_snapshot();
+        let presentation = convert::Presentation::of(snapshot);
+        let aircraft = convert::identity_key(self.hornet.profile.id);
+        let path = match library.new_path(
+            started,
+            self.world.layout.trim_end_matches(".MM"),
+            aircraft.trim_end_matches(".PT"),
+        ) {
+            Ok(path) => path,
+            Err(error) => {
+                log::info!("Recording unavailable: {error}");
+                return;
+            }
+        };
+        let mut extra = vec![
+            (
+                "flight_model".to_owned(),
+                if self.native_tables.is_some() {
+                    "native-tables"
+                } else if self.researched_flight {
+                    "researched"
+                } else {
+                    "legacy"
+                }
+                .to_owned(),
+            ),
+            ("player.aircraft".into(), aircraft.into()),
+            (
+                "audio".into(),
+                if self.audio.is_some() { "on" } else { "off" }.into(),
+            ),
+        ];
+        if let Some((altitude, fuel)) = self.mission {
+            extra.push((
+                "mission.start".into(),
+                self.ground_start
+                    .map_or("airborne".to_owned(), |object| format!("runway {object}")),
+            ));
+            extra.push(("mission.altitude_ft".into(), altitude.to_string()));
+            extra.push(("mission.fuel_lb".into(), fuel.to_string()));
+            extra.push(("ai.mission".into(), self.ai_mission.to_string()));
+            extra.push((
+                "ai.aircraft".into(),
+                self.ai_wings
+                    .as_ref()
+                    .map_or(0, ai_wings::AiWings::len)
+                    .to_string(),
+            ));
+        }
+        if self.combat.range {
+            extra.push(("range".into(), "live fire".into()));
+        }
+        let cheats = recorder::cheats_on(&self.flight_ui.cheats);
+        if !cheats.is_empty() {
+            extra.push(("cheats".into(), cheats.join(",")));
+        }
+        let mission = if self.mission.is_some() {
+            tore_replay::MissionKind::QuickMission
+        } else {
+            tore_replay::MissionKind::FreeFlight
+        };
+        let header = recorder::header(mission, &self.world, &presentation, extra, started);
+        let roster = recorder::roster(
+            snapshot,
+            &self.hornet.profile.name,
+            self.mission.is_some(),
+            self.ai_wings.as_ref(),
+            self.combat.models(),
+        );
+        let mut recording = match recorder::Recorder::start(path, &header, &roster) {
+            Ok(recording) => recording,
+            Err(error) => {
+                log::info!("Recording unavailable: {error}");
+                return;
+            }
+        };
+        // The flight as it starts, before the first tick.
+        recording.begin(recorder::Tick {
+            snapshot: self.combat.render_snapshot(),
+            combat: &self.combat,
+            flight: &self.flight,
+            previous: &self.flight,
+            pilot: &flight::PilotInput::default(),
+            wings: self.ai_wings.as_ref(),
+            world: &self.world,
+            events: &[],
+            outcomes: &[],
+        });
+        recording.end(None, &mut self.combat);
+        self.replay_recorder = Some(recording);
+    }
+
+    /// Finishes the flight's recording, if one is running, and applies the
+    /// auto-delete settings. `reason` says why the flight ended.
+    fn finish_replay_recording(&mut self, reason: &str) {
+        let Some(mut recording) = self.replay_recorder.take() else {
+            return;
+        };
+        recording.note(
+            tore_replay::Event::new(tore_replay::vocab::kind::SYSTEM_END)
+                .with(tore_replay::vocab::field::REASON, reason),
+        );
+        let report = self
+            .mission
+            .is_some()
+            .then(|| debrief::capture(&self.combat, &self.flight, self.ai_wings.as_ref()));
+        let footer = replay_footer(&self.combat, report.as_ref(), reason);
+        if recording.finish(&footer).is_some()
+            && let Some(library) = &self.replay_library
+        {
+            let settings = library.settings();
+            let cleanup = library.cleanup(&settings, std::time::SystemTime::now(), &[]);
+            for path in &cleanup.deleted {
+                log::info!("Recording auto-deleted: {}", path.display());
+            }
+            for (path, error) in &cleanup.failed {
+                log::info!("Recording not deleted: {}: {error}", path.display());
+            }
+        }
+    }
+
     fn input_action(&mut self, action: tore_input::Action) -> Action {
         use flight_ui::Command;
         let name = match action {
@@ -685,6 +847,7 @@ impl App {
             "flare" => Command::Flare,
             "end-flight" => Command::End,
             "restart" => Command::Restart,
+            "bookmark" => Command::Bookmark,
             "view-front" => Command::View(0),
             "view-back" => Command::View(3),
             "view-up" => Command::View(4),
@@ -842,6 +1005,7 @@ impl App {
                 } else {
                     None
                 };
+                let recipients = wing_recipients(self.ai_wings.as_ref(), self.wing_recipient);
                 let result = self.ai_wings.as_mut().map(|bridge| {
                     bridge.command_at(order, selected, self.wing_recipient, site.as_ref())
                 });
@@ -853,10 +1017,42 @@ impl App {
                         if !report.radio.is_empty() {
                             self.comms.spoken(self.sim_seconds());
                         }
+                        if let Some(recording) = &mut self.replay_recorder {
+                            recording.order(
+                                &format!("{order:?}"),
+                                recipients,
+                                &report.message,
+                                &report.radio,
+                                None,
+                            );
+                        }
                         self.flight_ui.message(report.message);
                     }
-                    Some(Err(error)) => self.flight_ui.message(error.to_string()),
+                    Some(Err(error)) => {
+                        if let Some(recording) = &mut self.replay_recorder {
+                            recording.order(
+                                &format!("{order:?}"),
+                                recipients,
+                                &error.to_string(),
+                                &[],
+                                Some(&error.to_string()),
+                            );
+                        }
+                        self.flight_ui.message(error.to_string());
+                    }
                     None => self.flight_ui.message("Wing order unavailable: no AI wing"),
+                }
+                Action::None
+            }
+            Command::Bookmark => {
+                match self.replay_recorder.as_mut() {
+                    Some(recording) => {
+                        let number = recording.bookmark();
+                        self.flight_ui.message(format!("Bookmark {number} saved"));
+                    }
+                    None => self
+                        .flight_ui
+                        .message("Bookmark not saved: this flight is not being recorded"),
                 }
                 Action::None
             }
@@ -1560,6 +1756,9 @@ impl App {
                 }
             }
             Action::FreeFlight => {
+                // A flight still recording is being restarted.
+                let restarted = self.replay_recorder.is_some();
+                self.finish_replay_recording("restart");
                 if let Some(audio) = &self.audio {
                     audio.restart_flight();
                 }
@@ -1738,6 +1937,13 @@ impl App {
                 // Draw from the placed start, including the AI's own poses.
                 self.combat
                     .restart_render(&self.flight, self.ai_wings.as_ref());
+                // Every flight records itself from this picture on.
+                self.start_replay_recording();
+                if restarted && let Some(recording) = &mut self.replay_recorder {
+                    recording.note(tore_replay::Event::new(
+                        tore_replay::vocab::kind::SYSTEM_RESTART,
+                    ));
+                }
                 self.flight_music = flight_music::Observer::new(flight_music::home_base(
                     &self.world,
                     ground_airport,
@@ -1785,6 +1991,15 @@ impl App {
                     if let Some(ordnance) = &mut self.quick.ordnance {
                         ordnance.visible = false;
                     }
+                }
+                // After the debrief, before the wings go: the footer carries
+                // the same result.
+                if self.screen == Screen::Flight {
+                    self.finish_replay_recording(if self.mission.is_some() {
+                        "end mission"
+                    } else {
+                        "end flight"
+                    });
                 }
                 self.ai_wings = None;
                 self.wing_recipient = None;
@@ -2476,7 +2691,14 @@ impl ApplicationHandler for App {
                             wings.set_enemy_skill(self.flight_ui.cheats.enemy_ai);
                             wings.set_guns_only(self.flight_ui.cheats.guns_only);
                         }
+                        // Pauses, time compression and cheats, noted as they happen.
+                        if let Some(recording) = &mut self.replay_recorder {
+                            recording.session(&self.flight_ui);
+                        }
                         for _ in 0..steps {
+                            if let Some(recording) = &mut self.replay_recorder {
+                                recording.start_tick(Some(&mut self.flight_ui), &mut self.combat);
+                            }
                             for button in std::mem::take(&mut self.instruments.weapon_controls) {
                                 cycle_player_weapon(
                                     &mut self.combat,
@@ -2549,6 +2771,12 @@ impl ApplicationHandler for App {
                                                 self.comms.cancel_airport();
                                                 self.comms
                                                     .spoken(self.combat.state.tick() as f64 / 120.);
+                                                if let Some(recording) = &mut self.replay_recorder {
+                                                    recording.tower(
+                                                        &airport_reply(&self.world, &reply),
+                                                        airport_reply_audio(&reply),
+                                                    );
+                                                }
                                                 self.flight_ui
                                                     .message(airport_reply(&self.world, &reply));
                                                 if let Some(audio) = &self.audio {
@@ -2810,7 +3038,7 @@ impl ApplicationHandler for App {
                                                 .fire_sound
                                                 .as_deref()
                                         {
-                                            releases.push(name.to_string());
+                                            releases.push((name.to_string(), *i));
                                         }
                                     }
                                     Event::PlayerGroundImpact => {
@@ -2831,7 +3059,10 @@ impl ApplicationHandler for App {
                             if let Some(mut bridge) = self.ai_wings.take() {
                                 let stepped =
                                     bridge.step(&mut self.combat.state, &self.flight, &self.world);
-                                for (_, message, friendly) in bridge.ejection_events.drain(..) {
+                                for (id, message, friendly) in bridge.ejection_events.drain(..) {
+                                    if let Some(recording) = &mut self.replay_recorder {
+                                        recording.wing_ejection(id, &message, friendly);
+                                    }
                                     self.flight_ui.message(message);
                                     if friendly && let Some(audio) = &self.audio {
                                         audio.wingman_ejected();
@@ -2852,6 +3083,22 @@ impl ApplicationHandler for App {
                             // written their poses for it.
                             self.combat
                                 .advance_render(&self.flight, self.ai_wings.as_ref());
+                            // The mission recording reads the same picture,
+                            // before the radio drains this tick's strikes.
+                            if let Some(recording) = &mut self.replay_recorder {
+                                let outcomes = self.combat.state.ledger.take_outcomes();
+                                recording.begin(replay::recorder::Tick {
+                                    snapshot: self.combat.render_snapshot(),
+                                    combat: &self.combat,
+                                    flight: &self.flight,
+                                    previous: &self.previous_flight,
+                                    pilot: &pilot,
+                                    wings: self.ai_wings.as_ref(),
+                                    world: &self.world,
+                                    events: &events,
+                                    outcomes: &outcomes,
+                                });
+                            }
 
                             if (self.flight.crashed
                                 || self.flight.escape.is_some()
@@ -2889,12 +3136,15 @@ impl ApplicationHandler for App {
                                 self.ai_wings.as_mut(),
                                 &self.flight,
                             );
-                            deliver_radio(
+                            let delivered = deliver_radio(
                                 &mut self.comms,
                                 &mut self.flight_ui,
                                 self.audio.as_ref(),
                                 self.combat.state.tick() as f64 / 120.,
                             );
+                            if let Some(recording) = &mut self.replay_recorder {
+                                recording.radio(&delivered, comms::crew(&self.hornet.profile));
+                            }
 
                             let danger = tore_sim::ejection::assess(&self.flight, |x, z| {
                                 f64::from(self.world.height(x as f32, z as f32))
@@ -2993,9 +3243,21 @@ impl ApplicationHandler for App {
                                     },
                                     &audio::spatial_sources(&self.combat.state, &self.flight),
                                     &emissions,
-                                    &releases.iter().map(String::as_str).collect::<Vec<_>>(),
+                                    &releases
+                                        .iter()
+                                        .map(|(name, _)| name.as_str())
+                                        .collect::<Vec<_>>(),
                                     self.flight.position,
                                 );
+                            }
+                            if let Some(recording) = &mut self.replay_recorder {
+                                let stations = &self.combat.state.configuration().stations;
+                                let releases: Vec<(&str, &tore_formats::weapons::Weapon)> =
+                                    releases
+                                        .iter()
+                                        .map(|(name, i)| (name.as_str(), &stations[*i].weapon))
+                                        .collect();
+                                recording.sounds(&emissions, &releases);
                             }
 
                             if self.flight.crashed
@@ -3013,6 +3275,9 @@ impl ApplicationHandler for App {
                             self.input
                                 .afterburner_feedback(self.flight.afterburner_active());
                             self.input.feedback_tick();
+                            if let Some(recording) = &mut self.replay_recorder {
+                                recording.end(Some(&mut self.flight_ui), &mut self.combat);
+                            }
                         }
                         self.input.feedback_flush();
                         if !self.flight_ui.frozen() {
@@ -3620,6 +3885,7 @@ impl ApplicationHandler for App {
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         // Release GPU backends while the event loop's display connection is alive.
         self.input.stop();
+        self.finish_replay_recording("exit");
         self.save_preferences();
         if let Some(recording) = &mut self.input_recording {
             use std::io::Write;
@@ -3749,6 +4015,47 @@ struct ProbeScript {
     trace_ticks: u64,
     /// The leader fires its own weapons from this tick.
     attack: Option<ProbeAttack>,
+}
+
+/// `--record-mission PATH` on an AI probe, with `--verify-render`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProbeRecord {
+    /// The new recording's path; the probe refuses to overwrite a file.
+    path: PathBuf,
+    /// After the run, rebuild every tick from the file and compare it with
+    /// the live picture, printing one summary line.
+    verify: bool,
+}
+
+/// A recording's footer: why the flight ended, and for a mission the
+/// debrief's outcome, the player's fate and kills.
+fn replay_footer(
+    combat: &combat::Combat,
+    report: Option<&debrief::Report>,
+    reason: &str,
+) -> tore_replay::Footer {
+    let mut result = vec![("end".to_owned(), reason.to_owned())];
+    match report {
+        Some(report) => {
+            result.push((
+                "outcome".into(),
+                format!("{:?}", report.outcome).to_lowercase(),
+            ));
+            result.push((
+                "player".into(),
+                format!("{:?}", report.player.status).to_lowercase(),
+            ));
+            result.push((
+                "kills".into(),
+                report.player.kills.iter().sum::<u32>().to_string(),
+            ));
+        }
+        None => result.push(("kills".into(), combat.state.kills.to_string())),
+    }
+    tore_replay::Footer {
+        end_tick: combat.state.tick(),
+        result,
+    }
 }
 
 /// `--probe-attack TICK[:REPEAT_SECONDS]`.
@@ -4634,6 +4941,7 @@ fn ai_probe_run(
     enemy_skill: Option<tore_sim::ai::experience::EnemySkillOverride>,
     ai_mission: ai_wings::Preset,
     script: &ProbeScript,
+    record: Option<&ProbeRecord>,
 ) -> AppResult<()> {
     quick.draft.values[7] = if script.wing_only { 0 } else { 2 };
     quick.draft.values[8] = 1;
@@ -4805,7 +5113,30 @@ fn ai_probe_run(
         combat.state.friendlies = bridge.friendly_ids();
         ProbeAttacker::new(attack, &combat, &bridge)
     });
+    // A mission recording of the probe: the picture is taken the way live
+    // flight takes it, and nothing it reads feeds back into the run.
+    let mut recording = match record {
+        Some(record) => {
+            combat.restart_render(&flight, Some(&bridge));
+            let mut recording = start_probe_recording(
+                record, &combat, &flight, &bridge, hornet, world, ticks, ai_mission, script,
+            )?;
+            recording.end(None, &mut combat);
+            Some(recording)
+        }
+        None => None,
+    };
+    let verify = record.is_some_and(|r| r.verify);
+    let mut pictures = Vec::new();
+    if verify {
+        pictures.push(combat.render_snapshot().clone());
+    }
+    let mut noted_ejections = 0;
     for tick in 0..ticks as u64 {
+        let previous = recording.as_ref().map(|_| flight.clone());
+        if let Some(recording) = &mut recording {
+            recording.start_tick(None, &mut combat);
+        }
         let mut keys = flight::PilotInput::default();
         if scripted {
             pilot.fly(tick, &mut flight, &mut keys, world, parked.as_ref(), script);
@@ -4860,13 +5191,44 @@ fn ai_probe_run(
             } else {
                 None
             };
+            let recipients = wing_recipients(Some(&bridge), None);
             let report =
                 bridge.command_at(*order, combat.state.designated(), None, site.as_ref())?;
             println!("t={tick} order={order:?} reply={:?}", report.message);
+            if let Some(recording) = &mut recording {
+                recording.order(
+                    &format!("{order:?}"),
+                    recipients,
+                    &report.message,
+                    &report.radio,
+                    None,
+                );
+            }
         }
         bridge.step(&mut combat.state, &flight, world)?;
+        if let Some(recording) = &mut recording {
+            for (id, message, friendly) in bridge.ejection_events.iter().skip(noted_ejections) {
+                recording.wing_ejection(*id, message, *friendly);
+            }
+        }
         if let Some(attacker) = &mut attacker {
             attacker.observe(tick, &mut bridge);
+        }
+        noted_ejections = bridge.ejection_events.len();
+        if let (Some(recording), Some(previous)) = (&mut recording, &previous) {
+            combat.advance_render(&flight, Some(&bridge));
+            let outcomes = combat.state.ledger.take_outcomes();
+            recording.begin(replay::recorder::Tick {
+                snapshot: combat.render_snapshot(),
+                combat: &combat,
+                flight: &flight,
+                previous,
+                pilot: &keys,
+                wings: Some(&bridge),
+                world,
+                events: &events,
+                outcomes: &outcomes,
+            });
         }
         let now = combat.state.tick() as f64 / 120.;
         airfield_radio.step(
@@ -4890,10 +5252,30 @@ fn ai_probe_run(
             Some(&mut bridge),
             &flight,
         );
-        heard.extend(
-            comms
-                .due(now)
+        let due = comms.due(now);
+        if let Some(recording) = &mut recording {
+            recording.radio(&due, crew);
+            // Sounds are drained only when recording; nothing else reads them.
+            let emissions = combat.state.take_sound_events();
+            let stations = &combat.state.configuration().stations;
+            let releases: Vec<(&str, &tore_formats::weapons::Weapon)> = events
                 .iter()
+                .filter_map(|event| match event {
+                    tore_sim::combat::live::Event::Fired(i) => {
+                        let weapon = &stations[*i].weapon;
+                        Some((weapon.fire_sound.as_deref()?, weapon))
+                    }
+                    _ => None,
+                })
+                .collect();
+            recording.sounds(&emissions, &releases);
+            recording.end(None, &mut combat);
+            if verify {
+                pictures.push(combat.render_snapshot().clone());
+            }
+        }
+        heard.extend(
+            due.iter()
                 .map(|c| format!("{now:.1}s {} {:?}", c.line(), c.stems)),
         );
         watch.observe(tick, &bridge, &flight, world);
@@ -4943,7 +5325,101 @@ fn ai_probe_run(
             .map(|t| t.hp)
             .collect::<Vec<_>>()
     );
+    if let Some(mut recording) = recording {
+        recording.note(
+            tore_replay::Event::new(tore_replay::vocab::kind::SYSTEM_END)
+                .with(tore_replay::vocab::field::REASON, "probe finished"),
+        );
+        let path = recording
+            .finish(&replay_footer(&combat, Some(&report), "probe finished"))
+            .ok_or("the mission recording could not be finished; see the session log")?;
+        if verify {
+            let verification = replay::cli::verify(&path, &pictures)?;
+            println!("AI probe {}", verification.line());
+        }
+    }
     Ok(())
+}
+
+/// Starts `--record-mission` for an AI probe, with the probe's settings and
+/// what it does not simulate in the header, and records the start.
+#[allow(clippy::too_many_arguments)]
+fn start_probe_recording(
+    record: &ProbeRecord,
+    combat: &combat::Combat,
+    flight: &flight::State,
+    bridge: &ai_wings::AiWings,
+    hornet: &aircraft::Airframe,
+    world: &terrain::World,
+    ticks: usize,
+    ai_mission: ai_wings::Preset,
+    script: &ProbeScript,
+) -> AppResult<replay::recorder::Recorder> {
+    use replay::{convert, recorder};
+    let snapshot = combat.render_snapshot();
+    let mut extra = vec![
+        (
+            "probe".to_owned(),
+            "headless AI probe: no weather stepping, crew voice, music or cockpit messages"
+                .to_owned(),
+        ),
+        ("probe.ticks".into(), ticks.to_string()),
+        (
+            "flight_model".into(),
+            if flight.research.is_some() {
+                "researched"
+            } else {
+                "legacy"
+            }
+            .into(),
+        ),
+        (
+            "player.aircraft".into(),
+            convert::identity_key(hornet.profile.id).into(),
+        ),
+        ("ai.mission".into(), ai_mission.to_string()),
+        ("ai.aircraft".into(), bridge.len().to_string()),
+    ];
+    if script.takeoff {
+        extra.push(("probe.script".into(), "takeoff".into()));
+    }
+    if let Some(attack) = script.attack {
+        extra.push((
+            "probe.attack".into(),
+            format!("from tick {} repeat {} ticks", attack.from, attack.repeat),
+        ));
+    }
+    for (tick, order) in &script.orders {
+        extra.push(("probe.order".into(), format!("tick {tick}: {order:?}")));
+    }
+    let header = recorder::header(
+        tore_replay::MissionKind::Probe,
+        world,
+        &convert::Presentation::of(snapshot),
+        extra,
+        std::time::SystemTime::now(),
+    );
+    let roster = recorder::roster(
+        snapshot,
+        &hornet.profile.name,
+        true,
+        Some(bridge),
+        combat.models(),
+    );
+    let mut recording = recorder::Recorder::start(record.path.clone(), &header, &roster)
+        .map_err(|error| format!("--record-mission {}: {error}", record.path.display()))?;
+    recording.begin(recorder::Tick {
+        snapshot,
+        combat,
+        flight,
+        previous: flight,
+        pilot: &flight::PilotInput::default(),
+        wings: Some(bridge),
+        world,
+        events: &[],
+        outcomes: &[],
+    });
+    Ok(recording)
 }
 
 /// What the app should do when there is no usable pack in application data.
@@ -5564,6 +6040,19 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut fixture_wings = false;
     let mut ai_probe = None;
     let mut ai_roster_probe = false;
+    // Mission recordings: what happened, not re-simulation tapes.
+    let mut record_mission: Option<PathBuf> = None;
+    let mut verify_render = false;
+    let mut recording_info: Option<PathBuf> = None;
+    let mut recording_log: Option<PathBuf> = None;
+    let mut recording_acmi: Option<PathBuf> = None;
+    let mut recording_diff: Option<(PathBuf, PathBuf)> = None;
+    let mut recording_out: Option<PathBuf> = None;
+    let mut recording_from: Option<f64> = None;
+    let mut recording_to: Option<f64> = None;
+    let mut recording_ids: Option<Vec<u32>> = None;
+    let mut recording_rate: Option<f64> = None;
+    let mut recording_guns = false;
     // Session only. `docs/spec/ai-experience.md` records the flight-menu
     // enemy-skill preference's persistence as untraced, so this setting is not
     // written to the preferences file and does not survive a restart.
@@ -5822,6 +6311,72 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 ai_probe = Some(ticks);
                 ai_wings_enabled = true;
             }
+            "--record-mission" => {
+                record_mission = Some(PathBuf::from(
+                    args.next().ok_or("--record-mission needs a new path")?,
+                ));
+            }
+            "--verify-render" => verify_render = true,
+            "--recording-info" => {
+                recording_info = Some(PathBuf::from(
+                    args.next().ok_or("--recording-info needs a recording")?,
+                ));
+            }
+            "--recording-log" => {
+                recording_log = Some(PathBuf::from(
+                    args.next().ok_or("--recording-log needs a recording")?,
+                ));
+            }
+            "--recording-acmi" => {
+                recording_acmi = Some(PathBuf::from(
+                    args.next().ok_or("--recording-acmi needs a recording")?,
+                ));
+            }
+            "--recording-diff" => {
+                let usage = "--recording-diff needs two recordings";
+                let a = PathBuf::from(args.next().ok_or(usage)?);
+                let b = PathBuf::from(args.next().ok_or(usage)?);
+                recording_diff = Some((a, b));
+            }
+            "--out" => {
+                recording_out = Some(PathBuf::from(
+                    args.next().ok_or("--out needs a path")?,
+                ));
+            }
+            "--from" | "--to" => {
+                let seconds: f64 = args
+                    .next()
+                    .ok_or(format!("{arg} needs seconds of mission time"))?
+                    .parse()?;
+                if !(seconds.is_finite() && seconds >= 0.) {
+                    return Err(format!("{arg} needs seconds of mission time, 0 or more").into());
+                }
+                if arg == "--from" {
+                    recording_from = Some(seconds);
+                } else {
+                    recording_to = Some(seconds);
+                }
+            }
+            "--ids" => {
+                recording_ids = Some(
+                    args.next()
+                        .ok_or("--ids needs aircraft ids such as 0,7")?
+                        .split(',')
+                        .map(str::parse)
+                        .collect::<Result<_, _>>()?,
+                );
+            }
+            "--rate" => {
+                let hz: f64 = args
+                    .next()
+                    .ok_or("--rate needs samples per second")?
+                    .parse()?;
+                if !(hz.is_finite() && hz > 0. && hz <= 120.) {
+                    return Err("--rate needs samples per second above 0 and at most 120".into());
+                }
+                recording_rate = Some(hz);
+            }
+            "--guns" => recording_guns = true,
             "--missile-acceptance" => missile_acceptance = true,
             "--compatibility-weapons" => combat_commands.push(tore_sim::combat::live::Command::CompatibilityWeapons),
             "--combat-smoke" => {
@@ -6154,6 +6709,9 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
                 );
                 println!(
+                    "Mission recordings: every flight records what happened into replays/ in the data folder; Ctrl+B marks a moment (TORE_RECORD_MISSIONS=0 turns recording off for a run). These are not the --record-input/--replay-input or --record-combat/--replay-combat tapes, which store inputs and simulate them again. --recording-info FILE describes a recording. --recording-log FILE [--out DIR] [--from SECONDS] [--to SECONDS] [--ids 0,7] [--rate HZ] writes log.jsonl and summary.txt. --recording-acmi FILE [--out FILE] [--rate HZ] [--guns] writes a Tacview .txt.acmi file. --recording-diff A B compares two recordings. --ai-probe-ticks N --record-mission NEW_PATH records a headless probe without changing its output; --verify-render then checks every recorded tick redraws the picture the probe drew. See docs/REPLAYS.md."
+                );
+                println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display.
 Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, graphics, locate, locate-importing, locate-done. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
@@ -6277,6 +6835,74 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         locate_snapshot(path, &snapshot_state)?;
         return Ok(Outcome::Done);
     }
+    // Mission recording tools read a recording file and need no media.
+    let recording_commands = [
+        recording_info.is_some(),
+        recording_log.is_some(),
+        recording_acmi.is_some(),
+        recording_diff.is_some(),
+    ]
+    .into_iter()
+    .filter(|on| *on)
+    .count();
+    if recording_commands > 1 {
+        return Err("use one --recording-* command at a time".into());
+    }
+    if recording_out.is_some() && recording_log.is_none() && recording_acmi.is_none() {
+        return Err("--out goes with --recording-log or --recording-acmi".into());
+    }
+    if (recording_from.is_some() || recording_to.is_some() || recording_ids.is_some())
+        && recording_log.is_none()
+    {
+        return Err("--from, --to and --ids go with --recording-log".into());
+    }
+    if recording_rate.is_some() && recording_log.is_none() && recording_acmi.is_none() {
+        return Err("--rate goes with --recording-log or --recording-acmi".into());
+    }
+    if recording_guns && recording_acmi.is_none() {
+        return Err("--guns goes with --recording-acmi".into());
+    }
+    if record_mission.is_some() && (ai_probe.is_none() || ai_roster_probe) {
+        return Err("--record-mission records an --ai-probe-ticks run".into());
+    }
+    if verify_render && record_mission.is_none() {
+        return Err("--verify-render checks a --record-mission run".into());
+    }
+    if let Some(path) = recording_info {
+        replay::cli::info(&path, &mut std::io::stdout().lock())?;
+        return Ok(Outcome::Done);
+    }
+    if let Some(path) = recording_log {
+        let folder = replay::cli::log(
+            &path,
+            &replay::cli::LogOptions {
+                out: recording_out,
+                from_s: recording_from,
+                to_s: recording_to,
+                ids: recording_ids,
+                rate: recording_rate,
+            },
+        )?;
+        println!("Recording log: {}", folder.join("log.jsonl").display());
+        println!(
+            "Recording summary: {}",
+            folder.join("summary.txt").display()
+        );
+        return Ok(Outcome::Done);
+    }
+    if let Some(path) = recording_acmi {
+        let written = replay::cli::acmi(&path, recording_out, recording_rate, recording_guns)?;
+        println!("Tacview file: {}", written.display());
+        return Ok(Outcome::Done);
+    }
+    if let Some((a, b)) = recording_diff {
+        replay::cli::diff(&a, &b, &mut std::io::stdout().lock())?;
+        return Ok(Outcome::Done);
+    }
+    let probe_record = record_mission.map(|path| ProbeRecord {
+        path,
+        verify: verify_render,
+    });
     if let Some(seconds) = input_seconds {
         input::diagnostics(
             seconds,
@@ -7057,6 +7683,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             enemy_skill,
             ai_mission,
             &probe_script,
+            probe_record.as_ref(),
         )?;
         return Ok(Outcome::Done);
     }
@@ -7741,6 +8368,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         finished: false,
         next_frame: None,
         error: None,
+        replay_library: match std::env::var("TORE_RECORD_MISSIONS").as_deref() {
+            Err(std::env::VarError::NotPresent) => preferences_enabled,
+            Ok("1") => true,
+            Ok("0") => false,
+            _ => return Err("TORE_RECORD_MISSIONS needs 0 or 1".into()),
+        }
+        .then(|| assets::data_directory().map(|data| replay::library::Library::new(&data)))
+        .transpose()?,
+        replay_recorder: None,
     };
     diagnostics::stage_done();
     diagnostics::stage("saved preferences");

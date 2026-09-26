@@ -599,6 +599,7 @@ pub const ENTRIES: &[Entry] = &[
     cmd("key:Shift-c", "Slow motion", Game, &["Shift-c"]),
     cmd("end-flight", "End mission", Game, &["Ctrl-q"]),
     cmd("key:Ctrl-v", "Valkyries music", Game, &["Ctrl-v"]),
+    cmd("bookmark", "Mark replay moment", Game, &["Ctrl-b"]),
     cmd("restart", "Restart flight", Game, &[]),
     cmd("key:F11", "Keyboard help", Game, &["F11"]),
     fixed("menu-up", "Menu up", Game, &["ArrowUp"]),

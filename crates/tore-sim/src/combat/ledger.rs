@@ -1,11 +1,14 @@
 //! Mission results by shooter: every round, missile and bomb from launch to
 //! its outcome, plus credited kills. The debrief reads these totals; nothing
 //! in flight depends on them. See docs/spec/debrief.md.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use tore_formats::weapons::Weapon;
 
 /// Keeps the ledger bounded if a host records aims it never launches.
 const MAX_PENDING_AIMS: usize = 4096;
+/// Shot outcomes kept between drains; the oldest are dropped first, so a
+/// host that never drains them still uses bounded memory.
+pub const MAX_OUTCOMES: usize = 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ShotKind {
@@ -78,6 +81,16 @@ pub enum Resolution {
     Jammed,
 }
 
+/// How one shot ended, kept for mission recordings. Write-only: nothing in
+/// flight reads it; the host drains the list each tick with
+/// [`Ledger::take_outcomes`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Outcome {
+    pub projectile: u32,
+    pub key: Key,
+    pub resolution: Resolution,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Kill {
     pub owner: u32,
@@ -97,6 +110,8 @@ pub struct Ledger {
     /// The last shooter to damage each target, credited if it is later lost
     /// another way, such as its pilot ejecting or the wreck crashing.
     last_hit: BTreeMap<u32, Kill>,
+    /// Outcomes since the host last drained them.
+    outcomes: VecDeque<Outcome>,
 }
 
 impl Ledger {
@@ -130,6 +145,18 @@ impl Ledger {
             Resolution::Spoofed => tally.spoofed += 1,
             Resolution::Jammed => tally.jammed += 1,
         }
+        if self.outcomes.len() == MAX_OUTCOMES {
+            self.outcomes.pop_front();
+        }
+        self.outcomes.push_back(Outcome {
+            projectile,
+            key,
+            resolution,
+        });
+    }
+    /// Shot outcomes since the last call, oldest first.
+    pub fn take_outcomes(&mut self) -> Vec<Outcome> {
+        self.outcomes.drain(..).collect()
     }
     /// Remembers who last damaged `victim`.
     pub fn damaged(&mut self, hit: Kill) {
@@ -200,6 +227,46 @@ mod tests {
         // Missile 4 is still flying: it counts as failed.
         assert_eq!(missiles.failed(), 1);
         assert_eq!(ledger.total(|k| k.kind == ShotKind::Gun).failed(), 1);
+    }
+    #[test]
+    fn each_resolved_shot_is_reported_once_and_the_report_stays_bounded() {
+        let mut ledger = Ledger::default();
+        ledger.launch(1, 3, Some(0), ShotKind::AirToAir);
+        ledger.launch(2, 0, Some(3), ShotKind::Gun);
+        ledger.resolve(1, Resolution::Spoofed);
+        ledger.resolve(1, Resolution::Missed);
+        ledger.resolve(9, Resolution::Missed);
+        ledger.resolve(2, Resolution::Hit(40));
+        let key = |owner, aim, kind| Key { owner, aim, kind };
+        assert_eq!(
+            ledger.take_outcomes(),
+            [
+                Outcome {
+                    projectile: 1,
+                    key: key(3, Some(0), ShotKind::AirToAir),
+                    resolution: Resolution::Spoofed,
+                },
+                Outcome {
+                    projectile: 2,
+                    key: key(0, Some(3), ShotKind::Gun),
+                    resolution: Resolution::Hit(40),
+                },
+            ]
+        );
+        assert!(ledger.take_outcomes().is_empty());
+        // A host that never drains keeps only the newest.
+        for id in 0..(MAX_OUTCOMES as u32 + 10) {
+            ledger.launch(100 + id, 0, None, ShotKind::Gun);
+            ledger.resolve(100 + id, Resolution::Missed);
+        }
+        let outcomes = ledger.take_outcomes();
+        assert_eq!(outcomes.len(), MAX_OUTCOMES);
+        assert_eq!(outcomes[0].projectile, 110);
+        // The debrief totals are untouched by the drain.
+        assert_eq!(
+            ledger.total(|k| k.kind == ShotKind::Gun).missed,
+            MAX_OUTCOMES as u32 + 10
+        );
     }
     #[test]
     fn host_aims_override_unguided_targets_and_stay_bounded() {

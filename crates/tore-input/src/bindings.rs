@@ -122,6 +122,7 @@ impl Action {
                 | "menu"
                 | "end-flight"
                 | "restart"
+                | "bookmark"
                 | "view-front"
                 | "view-back"
                 | "view-up"

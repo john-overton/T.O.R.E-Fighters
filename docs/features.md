@@ -166,4 +166,16 @@ Passing our tests is not a claim of demonstrated retail parity.
 | Spotting aid for distant aircraft | ☐ | ☑ | Implemented. A pixel-sharp contrasting outline, or a small solid mark under 3 pixels, on other aircraft, hidden by terrain, cloud and heavy haze; Off, Subtle or Strong. Requested by John on 2026-09-22; constants are fitted. The background colour is estimated, and the mark-to-outline change can pop. | [Spotting aid](spec/graphics-options.md#spotting-aid) |
 | Terrain distance filtering | ☐ | ☑ | Implemented for terrain. Far ground no longer shimmers, keeping original palette colours. Airports, aircraft, ocean and sky decks are not filtered. Requested by John on 2026-09-22; method is an agent choice. | [Terrain filtering](spec/graphics-options.md#terrain-filtering) |
 
+## Mission recordings
+
+Opinionated additions requested by John on 2026-09-26. The retail "Replay
+Last Mission" button (fly the last mission again) is a separate, unrelated
+feature and stays unavailable.
+
+| Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
+| --- | :---: | :---: | --- | --- |
+| Mission recording | ☐ | ☑ | Partially implemented. Every flight records itself in the background into `replays/` in the app data folder, one file per flight, with no switch to turn on: every aircraft, weapon, effect, puff of smoke, debris piece and ejected pilot at every tick, plus launches, hits, kills, crashes, ejections, departures, AI activity and target changes, radio, tower and crew lines, cockpit messages, sounds, player commands, wing orders, pauses and cheats. Ctrl+B drops a bookmark. A headless check confirms a recording draws every tick within 1/64 ft of what the game drew. Auto-delete keeps the newest 20 by default, or deletes by age, and never touches kept files. Remaining: the Replays screen and viewer, the reasons behind AI decisions, flight-model effects and radio calls, and the auto-delete settings on screen. | [Mission replays](REPLAYS.md#recording) |
+| Mission logs | ☐ | ☑ | Implemented from the command line: `--recording-log` writes a plain-English summary (per-aircraft statistics, a table of every shot, the radio transcript, a timeline, bookmarks and anomaly flags) and a machine-readable JSON-lines log; `--recording-info` and `--recording-diff` describe and compare recordings. Remaining: export buttons on the Replays screen, and the "why" behind decisions, which the logs will carry once recorded. | [Command line](REPLAYS.md#command-line) |
+| Tacview export | ☐ | ☑ | Implemented from the command line (`--recording-acmi`): a Tacview text file with every aircraft by its exact name, weapons with their launcher, decoys, parachutes and events. Each theater is pinned to a fitted real-world spot. Not yet opened in Tacview itself; the map is Tacview's real-world terrain, not the game's. | [Tacview](REPLAYS.md#tacview) |
+
 [manual]: https://pdfcoffee.com/famanual-pdf-free.html

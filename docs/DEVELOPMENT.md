@@ -1077,6 +1077,38 @@ then prints each designation, shot, perceived attack, release, missile
 defence, kill and ejection, and an `AI probe attack:` summary line. Without the
 option the probe is unchanged.
 
+## Mission recordings for debugging
+
+Every flight in the game records itself into `replays/` in the data folder
+([mission replays](REPLAYS.md)). A headless AI probe records only when asked,
+which is the fastest way to reproduce a problem and read it back:
+
+```sh
+TORE_DATA_DIR="$PWD/.local/dev-profile" cargo run --locked -p tore-app -- \
+  --ai-probe-ticks 7200 --separation 5 --probe-attack 600:10 \
+  --record-mission .local/headless/attack.tore-replay --verify-render --no-audio
+```
+
+The probe's own output is unchanged by recording; `--verify-render` adds one
+line saying whether every recorded tick rebuilds the picture the probe drew,
+within the format's precision. Then read the recording back without media:
+
+```sh
+cargo run --locked -p tore-app -- --recording-info .local/headless/attack.tore-replay
+cargo run --locked -p tore-app -- --recording-log .local/headless/attack.tore-replay --rate 10
+cargo run --locked -p tore-app -- --recording-acmi .local/headless/attack.tore-replay
+cargo run --locked -p tore-app -- --recording-diff before.tore-replay after.tore-replay
+```
+
+`summary.txt` is the place to start: each aircraft's statistics, every shot
+with its launch geometry and outcome, the radio transcript, a timeline and
+the anomaly flags. `log.jsonl` has every event and a state sample per
+aircraft at `--rate` per second for tools. `--recording-diff` of two probe
+runs names the first tick where they part, which makes it a quick check
+that a change left behaviour alone. `TORE_RECORD_MISSIONS=0` stops the
+game recording a flight, and `=1` makes it record even during frame timing
+runs, so `TORE_PERF_FRAMES` can compare the two.
+
 
 ## Formation flight traces
 
