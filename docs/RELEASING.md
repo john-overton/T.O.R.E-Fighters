@@ -15,9 +15,9 @@ examples go from `0.1.0` to `0.1.1`; substitute your own numbers.
 
 | File | What to change |
 | --- | --- |
-| `crates/*/Cargo.toml` (all seven crates) | `version = "0.1.1"` on line 3. `tore-app` is the one the release checks; the rest are kept equal. |
+| `crates/*/Cargo.toml` (every crate, eight since `tore-replay` joined) | `version = "0.1.1"` on line 3. `tore-app` is the one the release checks; the rest are kept equal. |
 | `Cargo.lock` | Refreshed by the build in step 2; never edit it by hand. |
-| `README.md` | The milestone badge's alt text near the top, and "Version 0.1.0 completes..." under **What works today**, if the release changes what that paragraph says. |
+| `README.md` | The milestone badge's alt text near the top, and "Version 0.1.0 completes..." under **What works today**, with that section's paragraphs (such as **Replays**) if the release changes what they say. |
 | `docs/DEVELOPMENT.md` | The `TORE_BUILD_VERSION=0.1.0` example under **Packaging**. |
 
 One command covers every crate. On macOS:
@@ -36,9 +36,22 @@ git grep -n "0\.1\.0" -- ':!Cargo.lock' ':!docs/research' ':!docs/baselines'
 ```
 
 The build, run once without `--locked`, updates `Cargo.lock`. The search
-should list nothing that still needs changing. The example in the comment in
-`crates/tore-app/src/version.rs` can stay, and old baselines and research
-archives record past versions and stay as they are. Then run the
+should list nothing that still needs changing. These stay as they are:
+
+- the examples in the comments in `crates/tore-app/src/version.rs` and
+  `crates/tore-replay/src/model.rs`;
+- the synthetic recordings in the `tore-replay` tests (`src/format.rs` and
+  `tests/`) and their golden summary, log and Tacview outputs in
+  `crates/tore-replay/tests/golden/`, which use a fixed version so the
+  goldens do not change with each release;
+- old baselines and research archives, which record past versions.
+
+[Mission recordings](REPLAYS.md) need nothing: each stores the version of the
+build that made it, and recordings from earlier versions stay watchable,
+because a reader checks the recording's own format number, not the game
+version. That number (`FORMAT_VERSION` in `crates/tore-replay/src/lib.rs`)
+rises only for a format change older builds could not read past, never for a
+release. Then run the
 [everyday checks](DEVELOPMENT.md#everyday-checks).
 
 ## 3. Commit, tag and push

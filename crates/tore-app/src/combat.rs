@@ -2063,6 +2063,12 @@ pub(crate) mod render_hash_tests {
         0x7e3f_dcdd_a149_201d,
     ];
 
+    /// Where `HASHES` was recorded. The camera poses (`HASHES[3]`) are f64
+    /// angles from trigonometry, whose last bit differs between maths
+    /// libraries, so, as in tore-sim's golden tests, that hash is compared
+    /// only here. The drawn vertices are f32 and match on every CI platform.
+    const RECORDED_PLATFORM: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+
     /// FNV-1a over exact bit patterns.
     struct Fnv(u64);
     impl Fnv {
@@ -2866,7 +2872,10 @@ pub(crate) mod render_hash_tests {
             ));
         }
         assert!(drawn.iter().all(|&floats| floats > 10_000), "{drawn:?}");
-        let hashes = hashes.map(|hash| hash.0);
+        let mut hashes = hashes.map(|hash| hash.0);
+        if !RECORDED_PLATFORM {
+            hashes[3] = HASHES[3];
+        }
         assert_eq!(hashes, HASHES, "drawn output changed: {hashes:#018x?}");
     }
 

@@ -12,7 +12,7 @@
   <a href="rust-toolchain.toml"><img alt="Rust 1.91.1 pinned" src="https://img.shields.io/badge/rust-1.91.1-b7410e?logo=rust&logoColor=white"></a>
   <a href="docs/DEVELOPMENT.md"><img alt="Linux, Windows and macOS" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-2f6f9f"></a>
   <a href="LICENSE"><img alt="GNU General Public License v3.0" src="https://img.shields.io/badge/license-GPL--3.0-1f6feb"></a>
-  <a href="docs/ROADMAP.md"><img alt="Milestone 1 released as v0.1.0, multiplayer next" src="https://img.shields.io/badge/milestone-M1%20released%2C%20M2%20next-orange"></a>
+  <a href="docs/ROADMAP.md"><img alt="Milestone 1 released as v0.1.1, multiplayer next" src="https://img.shields.io/badge/milestone-M1%20released%2C%20M2%20next-orange"></a>
 </p>
 
 <p align="center">
@@ -126,7 +126,7 @@ recovered yet, T.O.R.E uses a documented approximation labelled *fitted*. See
 
 ## What works today
 
-Version 0.1.0 completes most of [Milestone 1](docs/ROADMAP.md#milestone-1-faithful-quick-fight):
+Version 0.1.1 completes most of [Milestone 1](docs/ROADMAP.md#milestone-1-faithful-quick-fight):
 a quick fight from the original main menu, through Quick Mission setup and
 flight, to the debrief.
 
@@ -154,8 +154,8 @@ guidance types with seeker search, pitbull activation, HUD cues and seeker
 tone ([missile plan](docs/missile-update-plan.md)). One shared radar and
 infrared sensor serves all thirteen aircraft from their own imported equipment:
 the scope, click-to-designate contacts, jammer noise, RWR and the radar cross
-section page ([what it models](docs/radar.md)). Damage, smoke, debris,
-blackout and redout.
+section page ([what it models](docs/radar.md)). Chaff and flares that can
+decoy missiles, damage, smoke, debris, blackout and redout.
 
 **AI.** Up to six wings and 29 AI aircraft per Quick Mission, each with its
 own sensors, weapons, fuel and flight model, at four skill levels. They search,
@@ -169,9 +169,17 @@ copy's recordings.
 **Cheats.** The in-flight Cheat menu and the loadout Cheat button
 ([cheats](docs/spec/cheats.md)).
 
+**Replays.** A T.O.R.E addition: every flight records itself, and **Replays**
+on the main menu plays it back from any aircraft or a free drone camera,
+forwards or backwards from 1/8x to 16x. Panels show the AI's reasoning,
+flight-model telemetry and every radio call and order, with why each
+happened. Recordings export to mission logs and to a Tacview file, not yet
+checked in Tacview itself ([mission replays](docs/REPLAYS.md)).
+
 **Not yet:** surface AI (SAM sites, AAA, vehicles and ships as active
-opponents), the remaining weapons, carriers, missions, campaigns, replay and
-multiplayer. Multiplayer is [Milestone 2](docs/ROADMAP.md#milestone-2-multiplayer).
+opponents), the remaining weapons, carriers, missions, campaigns, the
+original's Replay Last Mission (flying it again) and multiplayer.
+Multiplayer is [Milestone 2](docs/ROADMAP.md#milestone-2-multiplayer).
 
 ## Build from source
 

@@ -1930,7 +1930,7 @@ dependencies = [
 
 [[package]]
 name = "tore-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cpal",
  "log",
@@ -1948,7 +1948,7 @@ dependencies = [
 
 [[package]]
 name = "tore-diagnostics-native"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "objc2 0.5.2",
  "objc2-app-kit",
@@ -1957,22 +1957,22 @@ dependencies = [
 
 [[package]]
 name = "tore-extract"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tore-formats",
 ]
 
 [[package]]
 name = "tore-formats"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "tore-input"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "tore-input-native"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dispatch2",
  "libc",
@@ -1986,11 +1986,11 @@ dependencies = [
 
 [[package]]
 name = "tore-replay"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "tore-sim"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tore-formats",
  "tore-input",
