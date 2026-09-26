@@ -1485,8 +1485,7 @@ impl App {
     }
     /// Shows the Replays screen after the replay viewer, with the list read
     /// again, opening it when the viewer was started from the command line.
-    /// A viewer opened by Watch comes back to the screen without it.
-    #[allow(dead_code)] // Called when the replay viewer closes (replay/host.rs).
+    /// Called when the replay viewer closes (replay/host.rs).
     fn return_to_replays(&mut self) {
         match &mut self.replays_screen {
             Some(screen) => screen.refresh(),

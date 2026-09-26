@@ -542,12 +542,13 @@ agent choices too.
 
 ### Opening a recording
 
+- From the Replays screen: select a recording and press Watch (or
+  double-click it). A recording that cannot be opened stays on the Replays
+  screen, with the reason on its status line.
 - From the command line: `tore-app --watch-replay FILE`.
-- From the Replays screen (coming next): its Watch button sends
-  `Action::WatchReplay(path)`. A recording that cannot be opened leaves the
-  main menu showing why.
-- Esc leaves the viewer and returns to the main menu for now. The game's own
-  world and aircraft come back as they were.
+- Esc leaves the viewer and returns to the Replays screen, with the list read
+  again, including when the viewer was started from the command line. The
+  game's own world and aircraft come back as they were.
 
 The viewer builds the recorded world (map, weather choice, time of day,
 wind and cloud deck) from the header, so a replay looks the same whatever

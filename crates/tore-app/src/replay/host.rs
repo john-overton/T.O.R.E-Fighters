@@ -98,6 +98,9 @@ impl App {
             renderer.window.set_cursor_visible(true);
         }
         self.screen = Screen::Main;
+        // Back to the recordings list, re-read, even when the viewer was
+        // started from the command line.
+        self.return_to_replays();
     }
 
     fn replay_command(&mut self, event_loop: &ActiveEventLoop, command: Command) {
