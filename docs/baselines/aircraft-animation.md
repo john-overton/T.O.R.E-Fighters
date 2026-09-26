@@ -25,7 +25,7 @@ and continuous brakes. MiG-21 and MiG-23 brakes split fitted strips from their
 own source skin. MiG-29 and Su-25 upper/lower brakes use separate closing
 angles about their forward edges. F-14's existing brake branch now hinges
 continuously too. Existing applicable carrier hooks remain supported.
-F-22 main bays support manual Shift+O, recorded/rebound input, and the documented
+F-22 main bays support manual O (Shift+O before 2026-09-26), recorded/rebound input, and the documented
 manual-combat request. Its exterior glazing retains the amber grade at 75% opacity, with a clear
 cockpit view. The nearest glazing surface blends once over the opaque scene.
 

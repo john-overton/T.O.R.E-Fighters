@@ -2048,6 +2048,11 @@ impl AiMission {
         self.formation = formation;
     }
 
+    /// The formation wings fly until an order selects another.
+    pub fn formation(&self) -> Formation {
+        self.formation
+    }
+
     pub fn set_wing_control(&mut self, control: WingControl) {
         self.wing_control = control;
     }

@@ -123,6 +123,10 @@ pub enum Command {
     DamagePlayer,
     Incoming,
     ToggleTargetJammer,
+    /// Release one chaff cartridge against radar missiles guiding on the player.
+    ReleaseChaff,
+    /// Release one flare against infrared missiles guiding on the player.
+    ReleaseFlare,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1209,6 +1213,8 @@ impl State {
                     t.jammer_active = self.target_jammer;
                 }
             }
+            Command::ReleaseChaff => self.release_countermeasure(EffectKind::Chaff, launcher),
+            Command::ReleaseFlare => self.release_countermeasure(EffectKind::Flare, launcher),
             Command::ToggleSeekerMode => {
                 if self.weapon_rules == Rules::Compatibility || !self.guidance_available(launcher) {
                     return;
@@ -1285,6 +1291,46 @@ impl State {
             Command::FailStation => {
                 self.ammo[self.selected] |= 0x8000;
                 self.release();
+            }
+        }
+    }
+    /// One device per press, as the retail "Chaff launched, %d left" message
+    /// reports. Each missile guiding on the player with the matching seeker
+    /// class rolls the B47 decoy chance (docs/spec/countermeasures.md). An
+    /// empty or damaged dispenser releases nothing.
+    fn release_countermeasure(&mut self, kind: EffectKind, launcher: Launcher) {
+        let (count, effectiveness, signature) = match kind {
+            EffectKind::Chaff => (&mut self.chaff, self.config.ecm.chaff[1], 3),
+            _ => (&mut self.flares, self.config.ecm.flare[1], 2),
+        };
+        if *count == 0 || !launcher.alive || self.player_hp <= 0 {
+            return;
+        }
+        if !self.cheats.unlimited_ammo {
+            *count -= 1;
+        }
+        self.effect(launcher.position, kind);
+        for projectile in &mut self.projectiles {
+            let weapon = projectile
+                .weapon
+                .as_ref()
+                .unwrap_or(&self.config.stations[projectile.station].weapon);
+            let guiding = projectile.target == Some(0)
+                && weapon.seeker.signature == signature
+                && projectile.guidance.as_ref().is_none_or(|flight| {
+                    flight.enabled && flight.seeker.acquired && flight.seeker.observation.is_some()
+                });
+            if !guiding {
+                continue;
+            }
+            let threshold = crate::ai::threat::decoy_threshold(
+                weapon.seeker.chaff_flare_chance.min(100),
+                effectiveness.min(100),
+            );
+            if draw(&mut self.rng, 100) < u16::from(threshold) {
+                self.ledger.resolve(projectile.id, Resolution::Spoofed);
+                projectile.target = None;
+                projectile.guidance = None;
             }
         }
     }
@@ -4150,6 +4196,50 @@ mod tests {
             alive: true,
             controls: sensors::Controls::default(),
         }
+    }
+    #[test]
+    fn player_chaff_decoys_only_radar_missiles_guiding_on_the_player() {
+        let armed = |chance: u8| {
+            let mut s = fixture(true);
+            s.config.stations[0].weapon.seeker.chaff_flare_chance = chance;
+            s.config.ecm.chaff[1] = 100;
+            s.config.ecm.flare[1] = 100;
+            s.chaff = 2;
+            s.flares = 1;
+            s.command(Command::Incoming, launcher());
+            assert_eq!(s.projectiles[0].target, Some(0));
+            s
+        };
+        // A flare cannot decoy a radar seeker, but it is still spent.
+        let mut s = armed(100);
+        s.command(Command::ReleaseFlare, launcher());
+        assert_eq!((s.chaff, s.flares), (2, 0));
+        assert_eq!(s.projectiles[0].target, Some(0));
+        assert_eq!(s.effects.last().unwrap().kind, EffectKind::Flare);
+        // Chaff at 100 x 100 percent always decoys the radar missile.
+        s.command(Command::ReleaseChaff, launcher());
+        assert_eq!(s.chaff, 1);
+        assert_eq!(s.projectiles[0].target, None);
+        assert!(s.projectiles[0].guidance.is_none());
+        assert_eq!(s.effects.last().unwrap().kind, EffectKind::Chaff);
+        // A resistant seeker keeps guiding.
+        let mut s = armed(0);
+        s.command(Command::ReleaseChaff, launcher());
+        assert_eq!((s.chaff, s.projectiles[0].target), (1, Some(0)));
+        // An empty dispenser releases nothing.
+        let mut s = armed(100);
+        s.chaff = 0;
+        let effects = s.effects.len();
+        s.command(Command::ReleaseChaff, launcher());
+        assert_eq!(
+            (s.effects.len(), s.projectiles[0].target),
+            (effects, Some(0))
+        );
+        // Unlimited ammo releases without spending.
+        let mut s = armed(100);
+        s.cheats.unlimited_ammo = true;
+        s.command(Command::ReleaseChaff, launcher());
+        assert_eq!((s.chaff, s.projectiles[0].target), (2, None));
     }
     #[test]
     fn an_ai_round_does_not_credit_the_player_score() {

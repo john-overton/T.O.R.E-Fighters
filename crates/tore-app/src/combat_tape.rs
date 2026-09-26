@@ -165,6 +165,8 @@ pub fn command_name(c: Command) -> String {
         Command::DamagePlayer => "damage",
         Command::Incoming => "incoming",
         Command::ToggleTargetJammer => "target-jammer",
+        Command::ReleaseChaff => "chaff",
+        Command::ReleaseFlare => "flare",
         Command::DesignateTarget(_) => unreachable!("handled above"),
     }
     .into()
@@ -208,6 +210,8 @@ pub fn command(s: &str) -> Option<Command> {
         Command::DamagePlayer,
         Command::Incoming,
         Command::ToggleTargetJammer,
+        Command::ReleaseChaff,
+        Command::ReleaseFlare,
     ]
     .into_iter()
     .find(|c| command_name(*c) == s)
@@ -540,6 +544,16 @@ mod tests {
         assert_eq!(airport_command("airport-select:not-a-number"), None);
         assert_eq!(fields_for(5), 25);
         assert_eq!(fields_for(6), 25);
+    }
+    #[test]
+    fn countermeasure_commands_have_stable_names() {
+        for (command, name) in [
+            (Command::ReleaseChaff, "chaff"),
+            (Command::ReleaseFlare, "flare"),
+        ] {
+            assert_eq!(command_name(command), name);
+            assert_eq!(super::command(name), Some(command));
+        }
     }
     #[test]
     fn version_five_preserves_power_separately_from_transmission() {

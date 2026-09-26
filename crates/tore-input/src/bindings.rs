@@ -113,6 +113,10 @@ impl Action {
                 | "damage-report"
                 | "damage-player"
                 | "target-jammer"
+                | "chaff"
+                | "flare"
+                | "waypoint-next"
+                | "waypoint-previous"
                 | "incoming"
                 | "pause"
                 | "menu"
@@ -157,6 +161,24 @@ impl Action {
                 | "menu-back"
         ) {
             return Ok(Self::Ui(s.into()));
+        }
+        // FA keyboard throttle presets and 5 percent steps; the app applies
+        // the afterburner switch with the setting.
+        if let Some(value) = s.strip_prefix("throttle-preset=") {
+            let value = value.parse::<f64>();
+            if s.ends_with("=burner") || value.is_ok_and(|v| (0. ..=1.).contains(&v)) {
+                return Ok(Self::Ui(s.into()));
+            }
+            return Err("invalid throttle preset".into());
+        }
+        if let Some(value) = s.strip_prefix("throttle-step=") {
+            if value
+                .parse::<f64>()
+                .is_ok_and(|v| v != 0. && (-1. ..=1.).contains(&v))
+            {
+                return Ok(Self::Ui(s.into()));
+            }
+            return Err("invalid throttle step".into());
         }
         for (prefix, lo, hi) in [("page-", 0, 9), ("instrument-", 1, 6), ("control-", 1, 4)] {
             if s.strip_prefix(prefix)

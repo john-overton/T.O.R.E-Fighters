@@ -994,6 +994,11 @@ impl Controller {
         }
     }
 
+    /// The formation the last formation order selected, if any.
+    pub fn ordered_formation(&self) -> Option<Formation> {
+        self.recipient.formation
+    }
+
     pub fn wing_settings(&self) -> (Option<WingControl>, Option<i32>, Option<i32>) {
         (
             self.recipient.wing_control,

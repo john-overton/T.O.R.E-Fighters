@@ -21,8 +21,8 @@ instruments and navigation used during a sortie.
 - Exclude range fixtures, developer/test commands, damage injection, diagnostic
   toggles, startup command-line flags and AI tuning. Do not include a command
   simply because it appears in the complete input catalog. In particular,
-  Shift+I incoming missiles, Shift+Y target jammer and backslash range reset
-  do not belong on this map.
+  Ctrl+Shift+I incoming missiles, Shift+Y target jammer and backslash range
+  reset do not belong on this map.
 - Use [the input catalog](../crates/tore-app/src/input_catalog.rs) and
   [generated controls list](CONTROLS.md) for current default bindings. Check
   [input handling](../crates/tore-app/src/input.rs),
@@ -31,6 +31,14 @@ instruments and navigation used during a sortie.
   The [input guide](INPUT.md) explains binding and modifier conventions.
 - Show actual defaults. An action with no default key does not get an invented
   key. Profiles can remap controls; the map is not a display of the user's profile.
+- Defaults follow the original's key table ([keyboard spec](spec/keyboard.md));
+  where T.O.R.E differs is recorded in [key placement](INPUT.md#key-placement).
+  An original key whose feature T.O.R.E lacks only reports "not implemented
+  yet". That is not a command, so the key stays dim.
+- The keypad works as the navigation keys. Highlight a keypad key on the sheet
+  for its command, with the same label as the key it stands for: keypad 0 and
+  period (chaff, flare), 1 and 3 (rudder), 8, 2, 4 and 6 (stick) and Enter on
+  Fly & Fight; keypad 5 (center) and plus and minus (zoom) on Cockpit & View.
 - Identify context or capability limits in the key label, tooltip or callout.
   Examples include F-22 weapon bays and Home while the live map is open.
   Instrument button letters are not automatically global keyboard bindings.

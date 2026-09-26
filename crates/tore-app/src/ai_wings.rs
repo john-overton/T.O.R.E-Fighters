@@ -3631,6 +3631,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn alt_t_cycles_echelon_line_abreast_line_astern() {
+        use tore_sim::ai::wing::{Formation, PlayerOrder};
+        let mut selections = payload(None);
+        selections[0].wing.index = 0;
+        let mut wings =
+            AiWings::build_with(&selections, &spawned(), 0, |_| Ok((aircraft(), None))).unwrap();
+        // Wings start in the mission's echelon.
+        assert_eq!(wings.next_formation(None), Formation::LineAbreast);
+        for (ordered, next) in [
+            (Formation::LineAbreast, Formation::LineAstern),
+            (Formation::LineAstern, Formation::Echelon),
+            (Formation::Echelon, Formation::LineAbreast),
+        ] {
+            wings
+                .command(PlayerOrder::Formation(ordered), None, None)
+                .unwrap();
+            assert_eq!(wings.next_formation(None), next);
+        }
+    }
+
+    #[test]
     fn player_commands_report_acceptance_cancel_and_stay_in_the_addressed_wing() {
         use tore_sim::ai::wing::{PlayerApproach, PlayerBreak, PlayerOrder as O};
         let mut selections = payload(None);

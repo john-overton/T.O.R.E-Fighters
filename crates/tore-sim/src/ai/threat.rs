@@ -300,8 +300,16 @@ pub fn decoy_roll(
     if susceptibility_percent > 100 || effectiveness_percent > 100 {
         return Err(AiError::InvalidInput("decoy percentages exceed 100"));
     }
-    let threshold = u32::from(susceptibility_percent) * u32::from(effectiveness_percent) / 100;
-    Ok(random.chance(threshold as u8))
+    Ok(random.chance(decoy_threshold(
+        susceptibility_percent,
+        effectiveness_percent,
+    )))
+}
+
+/// B47: the decoy chance in whole percent, `susceptibility * effectiveness /
+/// 100` with integer truncation. The player's dispensers use the same rule.
+pub fn decoy_threshold(susceptibility_percent: u8, effectiveness_percent: u8) -> u8 {
+    (u32::from(susceptibility_percent) * u32::from(effectiveness_percent) / 100) as u8
 }
 
 /// A missile in flight as the decoy rule sees it.

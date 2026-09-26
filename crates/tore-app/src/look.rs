@@ -18,20 +18,14 @@ pub fn press(keys: &mut BTreeSet<String>, name: &str, modifiers: ModifiersState)
     if modifiers.alt_key() || modifiers.super_key() {
         return;
     }
-    if arrow(name) && (modifiers.shift_key() || modifiers.control_key()) {
+    // FA uses Shift for look; Ctrl with the arrows is its thrust vectoring.
+    if arrow(name) && modifiers.shift_key() {
         keys.remove(name);
         keys.insert(format!("Look{name}"));
     } else if !modifiers.control_key()
         && matches!(
             name,
-            "ArrowUp"
-                | "ArrowDown"
-                | "ArrowLeft"
-                | "ArrowRight"
-                | "z"
-                | "x"
-                | "PageUp"
-                | "PageDown"
+            "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "z" | "x" | "End" | "PageDown"
         )
     {
         keys.insert(name.into());
@@ -43,7 +37,7 @@ pub fn modifiers_changed(keys: &mut BTreeSet<String>, modifiers: ModifiersState)
     for key in previous {
         if key.starts_with("LookArrow") {
             keys.insert(key);
-        } else if arrow(&key) && (modifiers.shift_key() || modifiers.control_key()) {
+        } else if arrow(&key) && modifiers.shift_key() {
             press(keys, &key, modifiers);
         }
     }
@@ -136,19 +130,17 @@ mod tests {
     }
     #[test]
     fn look_arrows_never_become_flight_controls_until_released() {
-        for modifier in [ModifiersState::SHIFT, ModifiersState::CONTROL] {
-            let mut keys = BTreeSet::new();
-            press(&mut keys, "ArrowDown", ModifiersState::empty());
-            modifiers_changed(&mut keys, modifier);
-            assert!(!keys.contains("ArrowDown"));
-            assert!(keys.contains("LookArrowDown"));
-            modifiers_changed(&mut keys, ModifiersState::empty());
-            press(&mut keys, "ArrowDown", ModifiersState::empty());
-            assert!(!keys.contains("ArrowDown"));
-            keys.remove("LookArrowDown");
-            press(&mut keys, "ArrowDown", ModifiersState::empty());
-            assert!(keys.contains("ArrowDown"));
-        }
+        let mut keys = BTreeSet::new();
+        press(&mut keys, "ArrowDown", ModifiersState::empty());
+        modifiers_changed(&mut keys, ModifiersState::SHIFT);
+        assert!(!keys.contains("ArrowDown"));
+        assert!(keys.contains("LookArrowDown"));
+        modifiers_changed(&mut keys, ModifiersState::empty());
+        press(&mut keys, "ArrowDown", ModifiersState::empty());
+        assert!(!keys.contains("ArrowDown"));
+        keys.remove("LookArrowDown");
+        press(&mut keys, "ArrowDown", ModifiersState::empty());
+        assert!(keys.contains("ArrowDown"));
         let mut keys = BTreeSet::new();
         press(
             &mut keys,
@@ -161,6 +153,14 @@ mod tests {
             ModifiersState::ALT | ModifiersState::CONTROL,
         );
         assert!(keys.is_empty());
+        // Ctrl with the arrows is FA thrust vectoring: neither look nor stick.
+        press(&mut keys, "ArrowUp", ModifiersState::CONTROL);
+        assert!(keys.is_empty());
+        // End and PageDown are the FA rudder keys.
+        press(&mut keys, "End", ModifiersState::empty());
+        press(&mut keys, "PageDown", ModifiersState::empty());
+        press(&mut keys, "PageUp", ModifiersState::empty());
+        assert_eq!(keys, BTreeSet::from(["End".into(), "PageDown".into()]));
     }
     #[test]
     fn cockpit_cannot_look_below_eye_line_and_motion_is_time_based() {

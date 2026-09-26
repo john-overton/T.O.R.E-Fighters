@@ -198,6 +198,30 @@ fn profile_aliases_are_exact_and_limits_reject_bad_input() {
     assert!(Profile::parse(&"x".repeat(256 * 1024 + 1)).is_err());
 }
 #[test]
+fn fa_throttle_presets_steps_and_countermeasures_parse_as_ui_actions() {
+    for action in [
+        "throttle-preset=0",
+        "throttle-preset=0.75",
+        "throttle-preset=burner",
+        "throttle-step=-0.05",
+        "throttle-step=0.05",
+        "chaff",
+        "flare",
+        "waypoint-next",
+        "waypoint-previous",
+    ] {
+        assert_eq!(Action::parse(action), Ok(Action::Ui(action.into())));
+    }
+    for action in [
+        "throttle-preset=1.5",
+        "throttle-preset=full",
+        "throttle-step=0",
+        "throttle-step=2",
+    ] {
+        assert!(Action::parse(action).is_err(), "{action}");
+    }
+}
+#[test]
 fn calibration_bounds_noise_endpoints_inversion_and_invalid_samples() {
     let c = Calibration {
         curve: 2.,

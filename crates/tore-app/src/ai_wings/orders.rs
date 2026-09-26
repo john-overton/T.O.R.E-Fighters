@@ -240,6 +240,23 @@ impl AiWings {
         self.mission.set_priority_landing(airport);
     }
 
+    /// FA Alt+T: the formation after the one the first addressed wingman
+    /// flies, cycling echelon, line abreast, line astern.
+    pub fn next_formation(&self, recipient: Option<u8>) -> wing::Formation {
+        let current = self
+            .mission
+            .actors()
+            .iter()
+            .filter(|a| a.alive() && a.identity().side == FRIENDLY_SIDE && a.identity().wing == 0)
+            .filter(|a| recipient.is_none_or(|wanted| a.identity().member == wanted))
+            .min_by_key(|a| a.identity().member)
+            .and_then(|a| a.controller().ordered_formation())
+            .unwrap_or(self.mission.formation());
+        let all = wing::Formation::ALL;
+        let index = all.iter().position(|f| *f == current).unwrap_or(0);
+        all[(index + 1) % all.len()]
+    }
+
     /// [`Self::command_at`] without a landing site, as the tests use it.
     #[cfg(test)]
     pub fn command(

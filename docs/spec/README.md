@@ -70,5 +70,8 @@ flight, its rank and when a change is immediate or waits for a phrase boundary.
 coaching, G sounds, fuel calls and missile warnings, and who is labelled speaking.
 [Radio chatter](radio-chatter.md) specifies AI and player radio calls in flight:
 launch, hit and kill calls, contact and waypoint reports, and who hears them.
+[Keyboard](keyboard.md) records the original's in-flight key table, and
+[countermeasures](countermeasures.md) specifies the player's chaff and flare
+release.
 Supporting research lives in [`../formats/`](../formats/), measured evidence in
 [`../baselines/`](../baselines/), and frozen archives in [`../research/`](../research/).

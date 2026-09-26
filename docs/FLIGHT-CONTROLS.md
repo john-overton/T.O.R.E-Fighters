@@ -15,25 +15,30 @@ stowed and is completely hidden when retracted.
 
 The F/A-18D cockpit now covers the full flight canvas. The world renders behind transparent cockpit artwork and independently toggled instrument windows. There is no half-height viewport or opaque lower PANEL fill. Menus retain the proportional 640×480 canvas. This is still a development flight adapter; [behaviour provenance](behavior-provenance.md) records which flight and system components are spec-derived, native, fitted or opinionated.
 
-Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity → Create Quick Mission → OK. Free flight skips loadout and starts with clean external stations. On a MacBook, use **Fn/Globe with the function keys** when macOS assigns those keys to system actions. Fn-Up/Down supplies PageUp/PageDown on compact keyboards. The physical US key positions are used in flight, including shifted numbers and Option combinations.
+Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity → Create Quick Mission → OK. Free flight skips loadout and starts with clean external stations. On a MacBook, use **Fn/Globe with the function keys** when macOS assigns those keys to system actions. Fn-Right and Fn-Down supply End and Page Down, and Fn-Delete supplies Delete; there is no Insert key, so bind chaff yourself in **Pref → Controls...**. The physical US key positions are used in flight, including shifted numbers and Option combinations.
 
 ## Working flight commands
 
 | Key | Action | Evidence/status |
 | --- | --- | --- |
-| Arrows | Pitch/bank; Down pulls up | Keyboard flight adapter |
+| Arrows | Pitch/bank; Down pulls up | FA keyboard stick ([keyboard spec](spec/keyboard.md)) |
 | Shift-M | Toggle live map; Escape closes it | Right-side category toggles, buildings off; [map rules](spec/flight-map.md) |
-| Z / X | Left/right rudder | Development mapping |
-| PageUp / PageDown | Increase/decrease throttle while held | Development mapping |
-| 1…9 / 0 | 10…90% / full throttle | Development mapping |
-| Shift-B / E | Afterburner / engine toggle | Development mapping; afterburner requires engine and >95% throttle |
+| End / Page Down, or Z / X | Left/right rudder while held | FA keyboard rudder; Z / X are a T.O.R.E second pair ([key placement](INPUT.md#key-placement)) |
+| 1 / 2 / 3 / 4 / 5 | Throttle idle / 25 / 50 / 75 / 100%, afterburner off | FA keyboard throttle |
+| 6 | Throttle 100% with afterburner | FA keyboard throttle (101%); afterburner requires engine, fuel and an afterburning aircraft |
+| 7 / 8 | Throttle down / up 5%; 8 past 100% lights the afterburner, and any setting at or below 100% turns it off | FA keyboard throttle |
+| Shift-B / E | Afterburner switch / engine toggle | T.O.R.E additions on keys FA leaves free; afterburner also needs >95% throttle |
 | Shift+E twice | Eject, release between presses and confirm within 2 seconds | Manual p. 161; [ejection](spec/ejection.md) |
-| Shift+O | F-22 main weapon bays | Fitted 1-second presentation; other aircraft ignore it |
-| G / F / B / H | Gear / flaps / airbrake / hook | Adapter controls; full FA keyboard table still needs verification |
-| R / J | Radar / jammer | R returns to the radar channel when infrared is selected, and otherwise toggles radar power. Radar power gates radar contacts and locks; powered ECM applies recovered contact-probability terms; decoy behavior remains open |
-| M / O | Cycle the available sensor channels | Radar and the installed infrared sensor; with no infrared installed both report it unavailable and leave radar selected |
+| O | F-22 main weapon bays | FA bomb-bay key; fitted 1-second presentation; other aircraft ignore it |
+| G / F / B / H | Gear / flaps / airbrake and wheel brakes / hook | FA keys |
+| Insert / Delete | Release one chaff / one flare; keypad 0 and period too | FA keys; [countermeasures](spec/countermeasures.md) |
+| R / J | Radar / jammer | R returns to the radar channel when infrared is selected, and otherwise toggles radar power. Radar power gates radar contacts and locks; powered ECM applies recovered contact-probability terms |
+| M | Cycle the available sensor channels | FA's HARM key; radar and the installed infrared sensor; with no infrared installed it reports it unavailable and leaves radar selected |
 | I | Select the infrared channel | Passive: it stops radar transmission without moving the radar power switch |
 | Y | Toggle scope contact history | Draws past observations as dimming dots; see the [sensor component](radar.md) |
+| N | NAV / ILS mode | FA HUD navigation key |
+| W / Shift-W | Next / previous waypoint on the NAV window | FA keys; the NAV window's airport list when it shows airports |
+| ; or L | Clear the designation | FA unlock key; L is kept |
 | F1 | Forward cockpit view; reset pan/zoom | FA `FMENUD.MNU` |
 | F2 / F3 | Look back / up | FA menu; authored angles, forward artwork projects out of view naturally |
 | F4 | Track current target within head-look limits | Manual p. 103; fitted limits |
@@ -44,8 +49,8 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | F12 | Last player missile to its own target | Manual p. 103; fitted placement |
 | Alt + view key / Ctrl + view key | Reference selected target / last player missile; Alt+F4 still exits | Manual p. 104; [view rules](spec/flight-views.md) |
 | V | Save current camera into Other View and open its window | Manual p. 89 |
-| Shift + arrows / Ctrl + arrows | Cockpit look-around; exterior orbit | Shift is documented on FA manual p. 104; Ctrl remains a compatibility alias |
-| Shift + / | Recenter look/orbit without changing view or zoom; also recenters a head tracker | Development shortcut |
+| Shift + arrows | Cockpit look-around; exterior orbit | FA manual p. 104; Ctrl + arrows is FA thrust vectoring and does nothing yet |
+| Keypad 5 or Shift + / | Recenter look/orbit without changing view or zoom; also recenters a head tracker | Keypad 5 is FA's; Shift + / is a T.O.R.E second key |
 | Hold right mouse button and drag | Mouse look, with the same limits as keyboard look | Opinionated agent choice, 2026-09-22; see [input](INPUT.md#mouse-look) |
 | Head tracker (opentrack UDP 4242) | Turns the view on top of keyboard, stick and mouse look, with the same limits | See [head tracking](INPUT.md#head-tracking-and-trackir) |
 | + / - | Zoom view | USNF manual; authored 0.5–4× projection |
@@ -55,7 +60,7 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | D | Report ownship and systems damage in the sim log | Manual p. 161; requested summary |
 | Shift-0…9 | Toggle instrument windows (four large or six small) | FA menu; oldest open window is replaced |
 | Comma / period | Decrease/increase scope range | USNF manual; applies to the RWR or the RCS page if either is the last opened window, and to the radar scope otherwise |
-| C / Shift-C | Cycle 1×/2×/4×/8× time / select 0.5× | FA menu; fixed 120 Hz ticks, authored adapter time scaling |
+| C / Shift-C | Cycle 1×/2×/4×/8× time / select 0.5× slow motion | FA keys; fixed 120 Hz ticks, authored adapter time scaling |
 | A / Ctrl-A | Toggle heading/altitude hold / waypoint autopilot | [Autopilot behavior](spec/autopilot.md), requested USNF-ATF modes |
 | Ctrl-P | Pause/resume | FA menu |
 | Escape | Open/close in-flight menu; return one level from submenus/help | FA menu/manual |
@@ -64,7 +69,7 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | F11 | Open keyboard help | Development shortcut |
 | Alt-Enter | Switch between borderless fullscreen and the previous windowed size | Opinionated, requested by John on 2026-09-22; F11 is already keyboard help, so the window mode uses Alt-Enter alone |
 
-These replace the earlier provisional **A/D rudder, +/- throttle, T afterburner, F2/F3 external views**. T is reserved for original target cycling. The headless simulation still uses the same deterministic state model; desktop key translation is separate.
+These replace the earlier provisional **A/D rudder, +/- throttle, T afterburner, F2/F3 external views**, and on 2026-09-26 the development throttle (1…0 for 10…100%, Page Up/Down) and Z/X-only rudder. The headless simulation still uses the same deterministic state model; desktop key translation is separate.
 
 Autopilot leaves throttle manual. Stick or rudder input above 15% disengages it.
 Switching modes retains the captured altitude and heading. With no waypoint
@@ -89,16 +94,20 @@ component. [What it models, what is authored tuning and what is deferred](radar.
 
 ## Recovered commands awaiting their systems
 
-All shortcut labels present in the supplied `FMENUD.MNU` are recognized. This is **not a claim that every original desktop command or system is ported**. The complete FA non-menu key-dispatch table still needs recovery. Available source/manual commands without working systems display a short message:
+All shortcut labels present in the supplied `FMENUD.MNU` are recognized, and the FA in-flight key table is recovered in the [keyboard spec](spec/keyboard.md). This is **not a claim that every original command or system is ported**. FA keys whose systems T.O.R.E does not have yet display a short message:
 
-| Key | Reserved original action / remaining work |
+| Key | Original action / remaining work |
 | --- | --- |
-| W / Shift-W, N | Waypoint selection, navigation/weapons mode |
-| M | HARM seeker was the reserved action on this key. M now cycles sensor channels, so HARM has no binding until air-to-ground exists |
-| Shift-J / Shift-K | Jettison fuel / air-to-ground stores |
-| Ctrl-T / Alt-S | Target information / radio silence |
-| Alt-1…9 | Wingman straight/level, break and approach directions |
-| Alt-B/C/T/H/V/E/W/R/P/D | Wingman return, scope/formation/spacing, engagement, protection and disengagement |
+| U | IFF interrogation |
+| Shift-R | Air-to-ground radar |
+| Shift-A / Shift-G | AWACS / air-to-ground radar link |
+| Shift-F / Shift-D | Target damage / message history |
+| Shift-I | Airbase aircraft inventory |
+| Shift-J | Jettison external fuel |
+| Alt-F | Wingmen engage the IR/laser-designated target |
+| Ctrl-T | Target information (menu row) |
+
+Tab (gun), M's HARM seeker, Z/X wing sweep, Ctrl + arrows thrust vectoring and / and \ laser designation have no T.O.R.E binding yet ([key placement](INPUT.md#key-placement)).
 
 Space now holds the selected player trigger. Bracket keys select the previous/next weapon or NAV; T cycles radar targets, Shift-T cycles back and Enter selects a visible one. `--live-fire` enables the
 explicit PT-default test range; backslash resets its target at a suitable range
@@ -143,9 +152,9 @@ The performance pass removes the extra post-render wait, interpolates camera/air
 
 ## Look-around and exterior orbit
 
-Hold **Shift + arrows** (or **Ctrl + arrows**) to turn the camera at one radian/second. In the cockpit, Left/Right turn around horizontally; Up looks upward as far as overhead. Down returns toward the forward eye line and **cannot look below it**. This limit is relative to the aircraft's forward pitch, not an altitude or world-horizon constraint. In F10 exterior view, arrows orbit around the aircraft in both axes, including below it and over the poles; the aircraft stays centered at a constant distance. Vertical orbit can make the view inverted as it crosses overhead. No ground-collision constraint is added to this inspection orbit.
+Hold **Shift + arrows** to turn the camera at one radian/second. In the cockpit, Left/Right turn around horizontally; Up looks upward as far as overhead. Down returns toward the forward eye line and **cannot look below it**. This limit is relative to the aircraft's forward pitch, not an altitude or world-horizon constraint. In F10 exterior view, arrows orbit around the aircraft in both axes, including below it and over the poles; the aircraft stays centered at a constant distance. Vertical orbit can make the view inverted as it crosses overhead. No ground-collision constraint is added to this inspection orbit.
 
-Release the arrow to stop moving the view; its orientation stays where you left it. **Shift + /** recenters the current camera without changing view or zoom. **F1** returns to the forward cockpit and resets look/zoom. A look arrow remains claimed until physical release even if Shift/Ctrl is released first, so a repeated key cannot unexpectedly pitch or roll the aircraft. Pause/focus loss clears held input. Shift-/ uses the physical slash key, so US keyboards may label the resulting character `?`.
+Release the arrow to stop moving the view; its orientation stays where you left it. **Keypad 5** or **Shift + /** recenters the current camera without changing view or zoom. **F1** returns to the forward cockpit and resets look/zoom. A look arrow remains claimed until physical release even if Shift is released first, so a repeated key cannot unexpectedly pitch or roll the aircraft. Pause/focus loss clears held input. Shift-/ uses the physical slash key, so US keyboards may label the resulting character `?`.
 
 Head-look rotates about the aircraft’s axes, including during banked flight.
 Cockpit artwork and HUD remain pointed straight ahead relative to the aircraft.
@@ -164,7 +173,7 @@ cockpit artwork and mirrors disappear; HUD and instrument windows remain. At
 translates the aircraft-forward datum with the camera. The finite source art provides no rear/overhead interior.
 Mirrors use their original source silhouettes with live rear views. See [sliding cockpit validation](baselines/cockpit-slide.md).
 
-The FA manual, printed page 104, specifies Shift+arrows for keyboard panning and right Shift plus joystick for joystick panning. Ctrl+arrows remains the earlier USNF-compatible alias. [View evidence](spec/flight-views.md), [existing look validation](baselines/look-around.md).
+The FA manual, printed page 104, specifies Shift+arrows for keyboard panning and right Shift plus joystick for joystick panning. FA uses Ctrl+arrows for thrust vectoring, so the earlier USNF Ctrl+arrows look alias was removed on 2026-09-26. [View evidence](spec/flight-views.md), [existing look validation](baselines/look-around.md).
 
 ## Flight response and vertical flight
 
@@ -176,12 +185,12 @@ Attitude rotates as an orthonormal basis and is interpolated in that basis. The 
 
 The seven added aircraft now have fitted moving flaps, pitch/roll/yaw surfaces,
 rigid gear and continuous airbrakes. MiG-23 wings sweep visually with speed.
-F-22 main bays open with Shift+O or an armed guided-weapon designation; this does
+F-22 main bays open with O or an armed guided-weapon designation; this does
 not delay firing. Its exterior canopy is amber and 75% opaque; cockpit rendering stays clear.
 See the [animation contract](spec/aircraft-animation.md) for fits and limits.
 
 
-Use **0 then Shift+B** for full throttle and afterburner, and **F10** to inspect the model. G/F/B/H animate gear/flaps/airbrake/hook continuously. Pitch/roll inputs move fitted stabilators; Z/X move fitted trailing rudders. Engine/fuel/throttle gate afterburner consistently across HUD and audio; flame length has a short visual transition. These reuse original polygons with authored hinges and schedules. [Coverage, captures and remaining work](baselines/f18-animations.md).
+Use **6** for full throttle and afterburner, and **F10** to inspect the model. G/F/B/H animate gear/flaps/airbrake/hook continuously. Pitch/roll inputs move fitted stabilators; the rudder keys move fitted trailing rudders. Engine/fuel/throttle gate afterburner consistently across HUD and audio; flame length has a short visual transition. These reuse original polygons with authored hinges and schedules. [Coverage, captures and remaining work](baselines/f18-animations.md).
 
 During a banked pull, the adapter now retains load-related nose/flight-path separation and accounts for body-yaw turn response. The velocity marker remains projected from actual velocity: coordinated AoA is below the nose, while transient sideslip appears laterally. Native AoA/control-law parity remains open. [Details and probes](baselines/banked-pull-aoa.md).
 
@@ -266,11 +275,11 @@ This is separate from pilot-input recording and does not re-simulate flight.
 **D** reports your aircraft damage percentage, temperature/oil/hydraulic readings,
 remaining engine power and failed systems through the bottom-center sim log.
 It never damages the aircraft. The `damage-player` developer command and controller
-fixture remain available explicitly. In the `--live-fire` range, **Shift-I** spawns one incoming selected source weapon, and **Shift-Y** toggles
+fixture remain available explicitly. In the `--live-fire` range, **Ctrl-Shift-I** spawns one incoming selected source weapon, and **Shift-Y** toggles
 target ECM. Those two fixtures moved off I and Y when those keys took over
-infrared selection and contact history.
+infrared selection and contact history; the incoming fixture left Shift-I for FA's airbase inventory key.
 **J** controls own ECM and **R** radar. The incoming fixture does
-not command AI or spend player ammunition. K selected-group jettison, L clear designation, bracket NAV/weapon cycling,
+not command AI or spend player ammunition. Shift-K selected-group jettison, ; or L clear designation, bracket NAV/weapon cycling,
 T/Shift-T/Enter targeting, Space hold fire and backslash target replacement remain available.
 
 Standard Linux pads use **held Select** as the combat layer: RB fire, LB weapon,
@@ -549,8 +558,8 @@ use the normal pitch controls for takeoff. Ground start uses the researched mode
 the player's adapter is never switched automatically. The player's AI wingmen
 start queued on the taxiway and wait for the player to become airborne before
 entering the runway. The tower gives startup takeoff clearance, and departure
-and landing reports use the [airfield radio](spec/airfield-radio.md). Other wings remain airborne. Alt-U orders bug out; Alt-L orders
-landing at the airport selected with Shift-A. [Start behavior and fitted settings](spec/quick-mission-menu.md#player-ground-start).
+and landing reports use the [airfield radio](spec/airfield-radio.md). Other wings remain airborne. Alt-B orders bug out; Alt-L orders
+landing at the airport selected with Shift-N. [Start behavior and fitted settings](spec/quick-mission-menu.md#player-ground-start).
 
 While on a runway or using ILS, `XW` shows signed crosswind and the aircraft's
 MTOW-class limit in knots. `NOTICE`, `ROUGH` and `LIMIT` identify increasing

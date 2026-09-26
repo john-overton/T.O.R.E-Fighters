@@ -1821,6 +1821,8 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     live::Command::DamagePlayer,
                     live::Command::ToggleTargetJammer,
                     live::Command::Incoming,
+                    live::Command::ReleaseChaff,
+                    live::Command::ReleaseFlare,
                 ] {
                     combat.cancel();
                     combat.command(command, launcher(&flight));

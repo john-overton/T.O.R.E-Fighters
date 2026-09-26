@@ -96,7 +96,8 @@ over…" to choose where. Press **OK** to fly.
   <a href="https://john-overton.github.io/T.O.R.E-Fighters/tore-keyboard-map.html"><img src="docs/images/tore-keyboard-map.png" alt="T.O.R.E keyboard map, Fly &amp; Fight sheet" width="960"></a>
 </p>
 
-Press **F11** in flight for keyboard help, or **Escape** for the flight menu.
+Default keys follow the original game's keyboard layout. Press **F11** in
+flight for keyboard help, or **Escape** for the flight menu.
 The [interactive keyboard map](https://john-overton.github.io/T.O.R.E-Fighters/tore-keyboard-map.html)
 has Fly &amp; Fight, Comms and Cockpit &amp; View sheets and exports to PNG, ZIP
 or PDF. The [control reference](docs/FLIGHT-CONTROLS.md) lists every key, and

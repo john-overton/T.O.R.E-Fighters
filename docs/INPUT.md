@@ -45,7 +45,7 @@ cargo run --locked -p tore-app -- --monitor-inputs 30
 | D-pad up/down | Selected instrument's first/second stock button |
 | D-pad and south/east buttons in menus | Navigate and accept/back |
 
-Shift+O toggles the F-22 main bays. The `bay` action is available in the controls
+O toggles the F-22 main bays, as FA's bomb-bay key does. The `bay` action is available in the controls
 editor, text profiles and recorded input. Other aircraft ignore it.
 
 Keyboard assignments continue working. Standard keyboard axes have priority over
@@ -230,6 +230,51 @@ as the baseline on 2026-09-16. Keyboard values feed the same flight model; they
 do not define a separate all-or-nothing recovery law. Existing calibration,
 deadzones and response curves remain user-configurable. See
 [spin dynamics](spec/spin-transitions.md) for the fitted flight response.
+
+## Key placement
+
+Default keys follow Fighters Anthology wherever the original has the command
+([keyboard spec](spec/keyboard.md)). John asked for the retail keys on
+2026-09-26. The placement rules below are an agent decision from the same day:
+
+- A command FA has uses FA's key, even where T.O.R.E's version of the feature is
+  still fitted.
+- A T.O.R.E-only command uses a key FA leaves free. Where one sat on an FA key,
+  it kept its letter and gained Ctrl+Shift (tower repeat and cancel, the
+  incoming-missile range fixture), or moved to a free neighbour (next airport,
+  to Shift+N).
+- An FA key whose feature T.O.R.E lacks stays unassigned. Pressing it says "not
+  implemented yet": U (IFF), Shift+R (air-to-ground radar), Shift+A and Shift+G
+  (AWACS and air-to-ground radar links), Shift+F (target damage), Shift+I
+  (airbase inventory), Shift+J (drop tanks), Shift+D (message history) and
+  Alt+F (engage the laser-designated target).
+- The keypad follows FA whatever NumLock says: 0 and period release chaff and
+  flares, 1 and 3 are the rudder, 8, 2, 4 and 6 are the stick, 5 centers the
+  view, and plus and minus zoom. In the controls screen a keypad key is
+  recorded under the key it stands for, so the keypad cannot be bound
+  separately.
+
+T.O.R.E additions on keys FA leaves free: E (engine), Shift+U (HUD), F11
+(help), Ctrl+1–6, Ctrl+Shift+1–4 and Ctrl+Tab (instruments), Shift+N and
+Shift+L (next airport, request landing), Ctrl+Shift+R and Ctrl+Shift+C (tower
+repeat and cancel), Alt+L (land at selected airport), and Alt+0 with
+Alt+Shift+1–4 (address the flight or one wingman).
+
+Deliberate differences from FA:
+
+| Key | T.O.R.E | FA | Why |
+| --- | --- | --- | --- |
+| Ctrl+A | Waypoint autopilot | Find-nearest cheat, when the Multi menu allows it | John requested the two autopilot modes on 2026-09-17 |
+| Z / X | Rudder, alongside End / Page Down | Wing sweep | Laptops lack End and Page Down; T.O.R.E sweeps the F-14 automatically |
+| M | Cycle sensor channels | HARM seeker | No HARM channel yet |
+| Shift+K | Jettison the selected external group, live-fire range only | Jettison all air-to-ground ordnance | Fitted jettison |
+| L | Clear designation, alongside ; | Unused | Earlier T.O.R.E key, kept |
+| Shift+/ | Center view, alongside keypad 5 | Unused | Laptops lack a keypad |
+| Shift+B | Afterburner switch, alongside 6 | Unused | Gamepad Y uses the same switch |
+| Backslash | Reset range target (test) | IR/laser designation, only with advanced targeting on | Moves when that targeting exists |
+| Tab | Nothing | Fire the gun | Not wired yet |
+| Ctrl + arrows | Nothing | Thrust vectoring | Not implemented |
+| V | Save the view to Other View and open it | The same, then return the main view to the front | The main view stays |
 
 ## Profiles and calibration
 
@@ -561,13 +606,17 @@ new bindings or regenerate a profile deliberately. No saved file is overwritten.
 | West (X) | [ previous NAV/weapon |
 | North (Y) | J: own jammer toggle |
 | Left-stick click | R: radar toggle |
-| Right-stick click | K: selected external group jettison |
+| Right-stick click | Shift-K: selected external group jettison |
 | D-pad up | Backslash: replace range target |
 | D-pad down | Explicit `damage-player` developer fixture; keyboard D reports damage |
-| D-pad left | Next damage class fixture |
-| D-pad right | Selected station failure fixture |
+| D-pad left | Insert: release one chaff cartridge |
+| D-pad right | Delete: release one flare |
 | Start | Shift-Y: target jammer fixture |
-| Guide | Shift-I: one incoming selected source weapon fixture |
+| Guide | Ctrl-Shift-I: one incoming selected source weapon fixture |
+
+Chaff and flare took D-pad left and right from the damage-class and
+station-failure fixtures on 2026-09-26, an agent decision. Both fixtures remain
+bindable. [Countermeasure rules](spec/countermeasures.md).
 
 The `radar` equipment action behaves exactly like the keyboard R: while the
 infrared channel is selected it returns the scope to radar, and otherwise it
@@ -660,13 +709,12 @@ Armed independent air-to-air missiles automatically enter BORESIGHT when radar p
 selected. IR also supports bore with radar power off. A selected track takes
 priority for IR and forces CUED acquisition against that identity, even when a
 stronger bore return exists. Clear the track to return to BORESIGHT; airborne
-missiles keep their own targets. Select a target to return to CUED. Press **L**, the existing
+missiles keep their own targets. Select a target to return to CUED. Press **;** (FA's unlock key) or **L**, the
 `clear-designation` action, or click **RELEASE LOCK** in the upper-right weapon
 diagnostic panel when it is shown, to clear
 both sensor and HUD display selection. A selected target outside the HUD has a
 direction chevron; the Easy targeting cheat keeps it after sensor coverage is
-lost, which grants no weapon lock. [HUD target rules](spec/gunsight-targeting.md). The manual's targeting list
-does not establish a retail release key.
+lost, which grants no weapon lock. [HUD target rules](spec/gunsight-targeting.md).
 `weapon-seeker-mode` remains rebindable but has no default key; the diagnostic
 panel's mode label is clickable only while the panel is shown (**Escape → Pref →
 Weapon diagnostics?**). Supported radar weapons still need aircraft lock.
@@ -695,9 +743,12 @@ stations silence them. `TORE_SEEKER_VOLUME=0..1` sets maximum amplitude, default
 
 ## Player wing orders
 
-These host shortcuts are opinionated agent choices. Orders address friendly
-wing 1 in a live AI Quick Mission. Alt-0 selects the whole flight; Alt-4 through
-Alt-7 select wingmen 1 through 4. Restart restores whole-flight addressing.
+The keys follow Fighters Anthology's wingman table ([keyboard spec](spec/keyboard.md#wingman-orders)),
+adopted at John's request on 2026-09-26. Orders address friendly wing 1 in a
+live AI Quick Mission. FA always addresses the whole flight; addressing one
+wingman is a T.O.R.E addition on keys FA leaves free: Alt-0 selects the whole
+flight and Alt-Shift-1 through Alt-Shift-4 select wingmen 1 through 4. Restart
+restores whole-flight addressing.
 Unavailable recipients or targets produce explicit messages. Paused flight does
 not issue orders. The imported flight menu has no wing-order submenu.
 
@@ -708,34 +759,39 @@ perceived attacks on their flight or protected aircraft.
 
 | Shortcut | Order |
 | --- | --- |
-| Alt-B / Alt-R | Break left / right |
-| Alt-H / Alt-V / Alt-T | Break high / low / fly straight |
+| Alt-1 | Fly straight and level |
+| Alt-2 / Alt-3 | Break left / right |
+| Alt-4 / Alt-5 | Break low / high |
+| Alt-6 / Alt-7 / Alt-8 / Alt-9 | Approach the designated target from left / right / low / high |
 | Alt-E | Engage the designated target |
-| Alt-P | Protect me, maintain an escort duty |
+| Alt-R | Engage designated target from formation, medium control |
 | Alt-W | Attack on contact |
-| Alt-F | Engage designated target from formation, medium control |
+| Alt-P | Protect me, maintain an escort duty |
 | Alt-D | Disengage and return to neutral formation |
-| Alt-1 / Alt-2 / Alt-3 | Return to formation: echelon / line abreast / line astern |
-| Alt-8 | Toggle 512 / 2048 ft horizontal spacing |
-| Alt-K | Cycle level / 512 ft high / 512 ft low stacking |
+| Alt-B | Bug out: return to base and stop answering orders |
+| Alt-T | Next formation: echelon, line abreast, line astern, in turn |
 | Alt-C | Toggle loose / medium control |
-| Alt-U | Bug out: return to base and stop answering orders |
-| Alt-L | Land at the airport selected with Shift-A |
-| Alt-Shift-B / R / H / V | Approach the designated target from left / right / high / low |
-| Alt-0 / Alt-4 through Alt-7 | Address all wingmen / one wingman |
+| Alt-H | Toggle 512 / 2048 ft horizontal spacing |
+| Alt-V | Cycle level / 512 ft high / 512 ft low stacking |
+| Alt-L | Land at the airport selected with Shift-N |
+| Alt-S | Radio silence |
+| Alt-0 / Alt-Shift-1 through Alt-Shift-4 | Address all wingmen / one wingman |
 
-Input profiles can use these as `key:Alt-b`, `key:Alt-8`,
-`key:Alt-Shift-b` and the corresponding keys above. Alt-S remains the unimplemented
-original radio-silence shortcut; it is not repurposed for spacing.
+Input profiles can use these as `key:Alt-2`, `key:Alt-t`, `key:Alt-Shift-1`
+and the corresponding keys above.
 
-The manual's wingman table puts bug out on Alt-B. T.O.R.E keeps Alt-B as break
-left, and John chose Alt-U for bug out and Alt-L for land at selected airport
-on 2026-09-23. Land at selected airport has no retail equivalent; it is an
-opinionated addition John requested the same day. Bug out sends each addressed
+Where T.O.R.E's orders differ from FA's: FA's Alt-W engages every target of the
+designated target's class; T.O.R.E's attack on contact is the nearest order it
+has. FA's Alt-F engages the IR/laser-designated target, which T.O.R.E does not
+have yet, so Alt-F reports it unavailable. Alt-T starts from the formation the
+first addressed wingman flies. Bug out moved from Alt-U to FA's Alt-B on
+2026-09-26, when John adopted the FA layout; Alt-U no longer gives orders.
+Land at selected airport has no retail equivalent; it is an opinionated
+addition John requested on 2026-09-23. Bug out sends each addressed
 wingman to its own home runway, the departure runway after a ground start or
 else the nearest friendly or neutral airport. A wingman with no known base
 stays and is counted in the reply. Land at selected airport sends the addressed
-wingmen to the airport the tower has selected (Shift-A): the runway you are
+wingmen to the airport the tower has selected (Shift-N): the runway you are
 cleared for there, or else its longest usable runway. Hostile, unknown or
 unpermitted neutral airports and airports with no usable runway are refused
 with a message. A bugged-out wingman no longer answers any order; later orders
@@ -782,7 +838,7 @@ For live testing, use a Quick Mission with at least three friendly aircraft:
 
 1. Issue Alt-D, then change formation, spacing and stacking. Confirm smooth
    physical repositioning and one player call, without generic wingman replies.
-2. Select wingman 2 with Alt-5 and issue a break. Confirm wingman 1 keeps its
+2. Select wingman 2 with Alt-Shift-2 and issue a break. Confirm wingman 1 keeps its
    assignment. Alt-0 restores whole-flight orders.
 3. Designate a detected enemy and issue Alt-E, then immediately Alt-D. Confirm
    accepted recipients disengage and stale “Engaging” audio does not follow it.
@@ -798,8 +854,10 @@ target cues while suppressing weapon readouts. [Layout and defaults](spec/hud-la
 
 The controls editor exposes `airport-nav`, `airport-next`,
 `airport-request-landing`, `airport-repeat`, and `airport-cancel`. The default
-profile binds them to Shift-N, Shift-A, Shift-L, Shift-R, and Shift-C in that
-order. NAV mode, gear down, range, and airport-relative altitude govern automatic
+profile binds them to N, Shift-N, Shift-L, Ctrl-Shift-R, and Ctrl-Shift-C in
+that order. N is FA's NAV mode key. Next airport, repeat and cancel left
+Shift-A, Shift-R and Shift-C on 2026-09-26, because FA uses those for the AWACS
+link, air-to-ground radar and slow motion ([key placement](#key-placement)). NAV mode, gear down, range, and airport-relative altitude govern automatic
 ILS guidance; the threshold must also be within the aircraft's 90-degree
 forward cone. Outside the 5-NM/4,000-foot-above-airport band, even ILS ARM is
 hidden. A clearance is not required to display eligible guidance. Airport selection remains

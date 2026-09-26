@@ -43,23 +43,20 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Roll left | Left | - | - |
 | Roll right | Right | - | - |
 | Rudder (yaw) | - | - | - |
-| Rudder left | Z | - | LT |
-| Rudder right | X | - | RT |
+| Rudder left | End or Z | - | LT |
+| Rudder right | Page Down or X | - | RT |
 | Throttle lever | - | - | - |
 | Throttle rate (axis) | - | - | - |
-| Throttle up | Page Up | - | RB |
-| Throttle down | Page Down | - | LB |
-| Throttle idle | - | - | - |
-| Throttle 10% | 1 | - | - |
-| Throttle 20% | 2 | - | - |
-| Throttle 30% | 3 | - | - |
-| Throttle 40% | 4 | - | - |
-| Throttle 50% | 5 | - | - |
-| Throttle 60% | 6 | - | - |
-| Throttle 70% | 7 | - | - |
-| Throttle 80% | 8 | - | - |
-| Throttle 90% | 9 | - | - |
-| Throttle 100% | 0 | - | - |
+| Throttle up | - | - | RB |
+| Throttle down | - | - | LB |
+| Throttle idle | 1 | - | - |
+| Throttle 25% | 2 | - | - |
+| Throttle 50% | 3 | - | - |
+| Throttle 75% | 4 | - | - |
+| Throttle 100% | 5 | - | - |
+| Throttle afterburner | 6 | - | - |
+| Throttle down 5% | 7 | - | - |
+| Throttle up 5% | 8 | - | - |
 | Afterburner | Shift+B | - | Y |
 | Autopilot (heading/altitude) | A | - | - |
 | Waypoint autopilot | Ctrl+A | - | - |
@@ -74,7 +71,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Airbrake / wheel brakes | B | - | B |
 | Tailhook | H | - | - |
 | Engine on/off | E | - | - |
-| Weapon bays (F-22) | Shift+O | - | - |
+| Weapon bays (F-22) | O | - | - |
 | Damage report | D | - | - |
 
 ### Weapons
@@ -87,14 +84,16 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Next radar target | T | - | View + A |
 | Previous radar target | Shift+T | - | - |
 | Select visual target | Enter or Apostrophe | - | - |
-| Clear designation | L | - | View + B |
+| Clear designation | Semicolon or L | - | View + B |
 | Seeker mode (bore/cued) | - | - | - |
-| Jettison selected stores | K | - | View + Right stick press |
+| Release chaff | Insert | - | View + D-pad left |
+| Release flare | Delete | - | View + D-pad right |
+| Jettison selected stores | Shift+K | - | View + Right stick press |
 | Reset range target | Backslash | - | View + D-pad up |
-| Incoming missile (range) | Shift+I | - | View + Xbox |
+| Incoming missile (range) | Ctrl+Shift+I | - | View + Xbox |
 | Target jammer (range) | Shift+Y | - | View + Menu |
-| Next damage class (test) | - | - | View + D-pad left |
-| Fail station (test) | - | - | View + D-pad right |
+| Next damage class (test) | - | - | - |
+| Fail station (test) | - | - | - |
 | Damage player (test) | - | - | View + D-pad down |
 
 ### Sensors and instruments
@@ -103,11 +102,14 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | --- | --- | --- | --- |
 | Radar power / radar channel | R | - | View + Left stick press |
 | Jammer (ECM) | J | - | View + Y |
-| Cycle sensor channel | M or O | - | - |
+| Cycle sensor channel | M | - | - |
 | Infrared channel | I | - | - |
 | Contact history | Y | - | - |
 | Scope range down | Comma | - | - |
 | Scope range up | Period | - | - |
+| NAV / ILS mode | N | - | - |
+| Next waypoint | W | - | - |
+| Previous waypoint | Shift+W | - | - |
 | Next instrument | Ctrl+Tab | - | D-pad right |
 | Previous instrument | Ctrl+Shift+Tab | - | D-pad left |
 | Select instrument 1 | Ctrl+1 | - | - |
@@ -170,14 +172,14 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Target: external view | Alt+F10 | - | - |
 | Target: missile to target view | Alt+F12 | - | - |
 | Look left/right | - | Hold right button and drag | Right stick X |
-| Look left | Shift+Left or Ctrl+Left | - | - |
-| Look right | Shift+Right or Ctrl+Right | - | - |
+| Look left | Shift+Left | - | - |
+| Look right | Shift+Right | - | - |
 | Look up/down | - | Hold right button and drag | Right stick Y |
-| Look up | Shift+Up or Ctrl+Up | - | - |
-| Look down | Shift+Down or Ctrl+Down | - | - |
+| Look up | Shift+Up | - | - |
+| Look down | Shift+Down | - | - |
 | Head tracker yaw | - | - | - |
 | Head tracker pitch | - | - | - |
-| Center view | Shift+/ | - | Right stick press |
+| Center view | Keypad 5 or Shift+/ | - | Right stick press |
 | Zoom in | Equals | Wheel up | - |
 | Zoom out | Minus | Wheel down | - |
 | Cockpit art | Backspace | - | - |
@@ -190,39 +192,36 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 
 | Action | Keyboard | Mouse | Gamepad (Xbox) |
 | --- | --- | --- | --- |
-| Wing: break left | Alt+B | - | - |
-| Wing: break right | Alt+R | - | - |
-| Wing: break high | Alt+H | - | - |
-| Wing: break low | Alt+V | - | - |
-| Wing: fly straight | Alt+T | - | - |
+| Wing: fly straight | Alt+1 | - | - |
+| Wing: break left | Alt+2 | - | - |
+| Wing: break right | Alt+3 | - | - |
+| Wing: break low | Alt+4 | - | - |
+| Wing: break high | Alt+5 | - | - |
+| Wing: approach target left | Alt+6 | - | - |
+| Wing: approach target right | Alt+7 | - | - |
+| Wing: approach target low | Alt+8 | - | - |
+| Wing: approach target high | Alt+9 | - | - |
 | Wing: engage my target | Alt+E | - | - |
-| Wing: protect me | Alt+P | - | - |
+| Wing: engage from formation | Alt+R | - | - |
 | Wing: attack on contact | Alt+W | - | - |
-| Wing: engage from formation | Alt+F | - | - |
+| Wing: protect me | Alt+P | - | - |
 | Wing: disengage | Alt+D | - | - |
-| Wing: echelon | Alt+1 | - | - |
-| Wing: line abreast | Alt+2 | - | - |
-| Wing: line astern | Alt+3 | - | - |
-| Wing: spacing | Alt+8 | - | - |
-| Wing: stacking | Alt+K | - | - |
-| Radio silence | Alt+S | - | - |
-| Wing: bug out | Alt+U | - | - |
-| Wing: land at selected airport | Alt+L | - | - |
+| Wing: bug out | Alt+B | - | - |
+| Wing: next formation | Alt+T | - | - |
 | Wing: loose/medium control | Alt+C | - | - |
-| Wing: approach target left | Alt+Shift+B | - | - |
-| Wing: approach target right | Alt+Shift+R | - | - |
-| Wing: approach target high | Alt+Shift+H | - | - |
-| Wing: approach target low | Alt+Shift+V | - | - |
+| Wing: spacing | Alt+H | - | - |
+| Wing: stacking | Alt+V | - | - |
+| Wing: land at selected airport | Alt+L | - | - |
+| Radio silence | Alt+S | - | - |
 | Address whole flight | Alt+0 | - | - |
-| Address wingman 1 | Alt+4 | - | - |
-| Address wingman 2 | Alt+5 | - | - |
-| Address wingman 3 | Alt+6 | - | - |
-| Address wingman 4 | Alt+7 | - | - |
-| Airport NAV / ILS | Shift+N | - | - |
-| Next airport | Shift+A | - | - |
+| Address wingman 1 | Alt+Shift+1 | - | - |
+| Address wingman 2 | Alt+Shift+2 | - | - |
+| Address wingman 3 | Alt+Shift+3 | - | - |
+| Address wingman 4 | Alt+Shift+4 | - | - |
+| Next airport | Shift+N | - | - |
 | Request landing | Shift+L | - | - |
-| Repeat tower reply | Shift+R | - | - |
-| Cancel approach | Shift+C | - | - |
+| Repeat tower reply | Ctrl+Shift+R | - | - |
+| Cancel approach | Ctrl+Shift+C | - | - |
 
 ### Game and menus
 
@@ -231,6 +230,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Flight menu / back | Esc | - | Xbox |
 | Pause | Ctrl+P | - | Menu |
 | Time compression | C | - | - |
+| Slow motion | Shift+C | - | - |
 | End mission | Ctrl+Q | - | - |
 | Valkyries music | Ctrl+V | - | - |
 | Restart flight | - | - | - |

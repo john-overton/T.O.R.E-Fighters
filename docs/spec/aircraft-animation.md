@@ -92,7 +92,7 @@ smooth rendering; that difference from the original's culling is unchanged.
 ## F-22 main weapon bays
 
 Add a manually controlled main-bay presentation with 1-second travel and
-90-degree outward-opening doors. Shift+O toggles the bays, and the input action
+90-degree outward-opening doors. O, FA's bomb-bay key, toggles the bays, and the input action
 `bay` can be rebound and recorded. Aircraft without the reviewed F-22 bay rig
 ignore the command. On F-22, the existing manual weapon service also requests
 open bays while an armed, loaded guided weapon has a designated target. Clearing

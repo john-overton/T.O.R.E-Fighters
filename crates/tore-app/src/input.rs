@@ -14,25 +14,32 @@ const DEFAULTS: &str = "tore-input 1\n\
 bind keyboard flight-pitch pitch axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-roll roll axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-yaw yaw axis -1 0 1 0 1 1 100\n\
-bind keyboard flight-throttle throttle-rate axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-look-x look-x axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-look-y look-y axis -1 0 1 0 1 1 100\n\
 bind keyboard Shift-e eject press\n\
-bind keyboard Shift-n airport-nav press\n\
-bind keyboard Shift-a airport-next press\n\
+bind keyboard n airport-nav press\n\
+bind keyboard Shift-n airport-next press\n\
 bind keyboard Shift-l airport-request-landing press\n\
-bind keyboard Shift-r airport-repeat press\n\
-bind keyboard Shift-c airport-cancel press\n\
+bind keyboard Ctrl-Shift-r airport-repeat press\n\
+bind keyboard Ctrl-Shift-c airport-cancel press\n\
 bind mouse wheel:up zoom-in press\n\
 bind mouse wheel:down zoom-out press\n";
-const FLIGHT_KEYS: [&str; 6] = [
+const FLIGHT_KEYS: [&str; 5] = [
     "flight-pitch",
     "flight-roll",
     "flight-yaw",
-    "flight-throttle",
     "flight-look-x",
     "flight-look-y",
 ];
+/// FA keys 7 and 8 step a 0-101 percent throttle in which 101 is the
+/// afterburner: a step past 100 lights it, and any setting at or below 100
+/// turns it off (docs/spec/keyboard.md). Returns the throttle and the
+/// afterburner switch.
+pub fn fa_throttle_step(throttle: f64, burner: bool, delta: f64) -> (f64, bool) {
+    let current = throttle + if burner && throttle >= 1. { 0.01 } else { 0. };
+    let target = current + delta;
+    (target.clamp(0., 1.), target > 1. + 1e-9)
+}
 /// Stock bindings plus the player's profile. Stock keyboard/mouse bindings
 /// the player removed are left out.
 fn complete(custom: &Profile) -> Result<Profile, String> {
@@ -233,6 +240,19 @@ impl Input {
         if self.commands.len() < 256 {
             self.commands.push(command);
         }
+    }
+    /// Throttle and afterburner switch once the commands queued for the next
+    /// tick apply, starting from the aircraft's current settings.
+    pub fn pending_throttle(&self, throttle: f64, burner: bool) -> (f64, bool) {
+        self.commands.iter().fold(
+            (throttle, burner),
+            |(value, burner), command| match command {
+                PilotCommand::Throttle(v) => (*v, burner),
+                PilotCommand::AdjustThrottle(v) => ((value + v).clamp(0., 1.), burner),
+                PilotCommand::Set(tore_input::Switch::Burner, on) => (value, *on),
+                _ => (value, burner),
+            },
+        )
     }
     pub fn claimed(&self, key: &str) -> bool {
         self.key_claims.contains_key(key)
@@ -478,8 +498,11 @@ impl Input {
         for (control, value) in [
             ("flight-pitch", held("ArrowDown") - held("ArrowUp")),
             ("flight-roll", held("ArrowRight") - held("ArrowLeft")),
-            ("flight-yaw", held("x") - held("z")),
-            ("flight-throttle", held("PageUp") - held("PageDown")),
+            // FA rudder is End and PageDown; Z and X stay as a second pair.
+            (
+                "flight-yaw",
+                held("x").max(held("PageDown")) - held("z").max(held("End")),
+            ),
             (
                 "flight-look-x",
                 held("LookArrowRight") - held("LookArrowLeft"),
@@ -824,8 +847,8 @@ pub fn gamepad_text(device: &Device) -> String {
         ("button:308", "jammer", "press"),
         ("button:317", "radar", "press"),
         ("button:318", "jettison", "press"),
-        ("axis:16", "damage-class", "position=-1"),
-        ("axis:16", "fail-station", "position=1"),
+        ("axis:16", "chaff", "position=-1"),
+        ("axis:16", "flare", "position=1"),
         ("axis:17", "range-target", "position=-1"),
         ("axis:17", "damage-player", "position=1"),
         ("button:315", "target-jammer", "press"),
@@ -853,6 +876,22 @@ mod tests {
         input.resolver.profile.aliases.extend(profile.aliases);
         input.resolver.profile.bindings.extend(profile.bindings);
         input
+    }
+    #[test]
+    fn fa_throttle_steps_cross_into_and_out_of_afterburner() {
+        let near = |(t, b): (f64, bool), (u, c): (f64, bool)| (t - u).abs() < 1e-9 && b == c;
+        assert!(near(fa_throttle_step(1., false, 0.05), (1., true)));
+        assert!(near(fa_throttle_step(1., true, -0.05), (0.96, false)));
+        assert!(near(fa_throttle_step(0.96, false, 0.05), (1., true)));
+        assert!(near(fa_throttle_step(0.95, false, 0.05), (1., false)));
+        assert!(near(fa_throttle_step(0.5, true, 0.05), (0.55, false)));
+        assert!(near(fa_throttle_step(0.02, false, -0.05), (0., false)));
+        let mut i = input("");
+        i.queue(PilotCommand::Throttle(0.3));
+        i.queue(PilotCommand::AdjustThrottle(0.05));
+        i.queue(PilotCommand::Set(tore_input::Switch::Burner, true));
+        let (throttle, burner) = i.pending_throttle(0.9, false);
+        assert!((throttle - 0.35).abs() < 1e-9 && burner);
     }
     #[test]
     fn ejection_chord_requires_two_real_presses_and_is_rebindable() {

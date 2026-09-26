@@ -39,7 +39,7 @@ or autonomous target selection.
 | --- | --- |
 | Retail inputs | Exact PT equipment and target signatures; SEE range/angles; ECM capability/statistics |
 | Our detection rules | Square-root signature scaling, geometric look-down, radar/jammer generation matchups, notch and directional interference |
-| Controls | Automatic RWS/TWS, installed IR air-to-air, M/O channel cycle, Y history, hover selector, selection bars and track-status text, persistent clicked selection and bearing-only jammer noise |
+| Controls | Automatic RWS/TWS, installed IR air-to-air, M channel cycle, Y history, hover selector, selection bars and track-status text, persistent clicked selection and bearing-only jammer noise |
 | Track timing | Immediate selection; 0.5-second weapon-track acquisition; selection clears on observation loss; 1-second unselected stale plot |
 | Tracking limit | One selected target and at most one acquired fire-control track across radar and IR; other returns are search observations |
 | Missile support | One target for launcher illumination; fire-and-forget radar/IR missiles retain separate launch targets |
@@ -675,7 +675,9 @@ contacts.
 
 The previous defaults used Y for the target-jammer fixture and I for an incoming
 weapon fixture. The agent-authored migration shipped: Y is history, I selects
-infrared, and those two development commands moved to Shift-Y and Shift-I. Their
+infrared, and those two development commands moved to Shift-Y and Shift-I
+(the incoming fixture later moved again, to Ctrl-Shift-I, off FA's airbase
+inventory key). Their
 named actions, CLI commands and replay commands are unchanged, and
 user-customized bindings are preserved. The existing `radar-mode` controller
 action now cycles available sensor channels instead of toggling cosmetic

@@ -48,7 +48,8 @@ tracking can be rebound in Controls. F11 remains TORE keyboard help. These two
 host compatibility decisions are opinionated agent choices.
 
 Shift+arrows pan forward/back/up views and orbit external view, as page 104
-specifies. Ctrl+arrows remains a compatibility alias. Mouse, controller and head
+specifies. Ctrl+arrows is FA's thrust vectoring and does not look. Keypad 5
+recenters ([keyboard](keyboard.md)). Mouse, controller and head
 look retain the same limits. Automatic tracking, relation and fly-by cameras
 control their own direction. Zoom remains 0.5x to 4x. Selecting a view snaps immediately and resets
 look and zoom; Shift+/ centers without changing either the mode or zoom.

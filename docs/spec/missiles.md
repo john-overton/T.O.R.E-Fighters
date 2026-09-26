@@ -298,10 +298,10 @@ Arming an independent air-to-air missile with no designation automatically enter
 BORESIGHT when guidance is enabled. IR does not require radar power.
 Designating a contact returns to CUED. The explicit mode switch remains available
 with a retained designation for radar missiles; selected-track priority prevents
-that override for IR missiles. L and the diagnostic panel's RELEASE LOCK button clear the
-aircraft designation and mounted seeker, without redirecting airborne shots.
-The FA manual p. 112 targeting list does not identify a clear-designation key;
-L is an existing host choice, not a recovered retail binding. Snapshot
+that override for IR missiles. ; (FA's unlock key, see [keyboard](keyboard.md)), L and the
+diagnostic panel's RELEASE LOCK button clear the aircraft designation and
+mounted seeker, without redirecting airborne shots. L is an earlier host key,
+kept alongside. Snapshot
 the mode at launch; changing modes later cannot retask missiles in flight.
 
 In BORESIGHT, an armed, operational, loaded weapon can fire without designation,

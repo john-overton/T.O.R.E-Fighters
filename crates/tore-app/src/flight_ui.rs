@@ -6,6 +6,8 @@ use tore_input::Switch;
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Wing(tore_sim::ai::wing::PlayerOrder),
+    /// Alt+T: the next formation after the one the wing flies.
+    WingFormationCycle,
     WingRecipient(Option<u8>),
     Airport(tore_sim::airport::Command),
     AirportNav,
@@ -22,6 +24,10 @@ pub enum Command {
     DamageReport,
     Eject,
     Combat(tore_sim::combat::live::Command),
+    /// Release one chaff cartridge.
+    Chaff,
+    /// Release one flare.
+    Flare,
     Click,
     End,
     Exit,
@@ -33,7 +39,12 @@ pub enum Command {
     CenterLook,
     Panel(u8),
     WindowLayout,
-    Throttle(f64),
+    /// FA keys 1 to 6: a throttle setting, with the afterburner on (6) or off.
+    ThrottlePreset(f64, bool),
+    /// FA keys 7 and 8: move the throttle down or up by a fraction.
+    ThrottleStep(f64),
+    /// W / Shift-W: the next or previous NAV destination.
+    Waypoint(bool),
     Range(i32),
     /// Cycle the available sensor channels.
     Mode,
@@ -486,79 +497,56 @@ impl FlightUi {
                 Command::View(view)
             };
         }
-        if alt && !ctrl && shift {
-            use tore_sim::ai::wing::{PlayerApproach as A, PlayerOrder as O};
-            let approach = match key {
-                "b" => Some(A::Left),
-                "r" => Some(A::Right),
-                "h" => Some(A::High),
-                "v" => Some(A::Low),
-                _ => None,
-            };
-            if let Some(approach) = approach {
-                return Command::Wing(O::Approach(approach));
-            }
+        // Addressing one wingman is a T.O.R.E addition: FA sends every order
+        // to the whole flight and leaves Alt+Shift free.
+        if alt
+            && !ctrl
+            && shift
+            && let Ok(n @ 1..=4) = key.parse::<u8>()
+        {
+            return Command::WingRecipient(Some(n));
         }
         if alt && !ctrl && !shift {
-            use tore_sim::ai::wing::{Formation as F, PlayerBreak as B, PlayerOrder as O};
+            use tore_sim::ai::wing::{PlayerApproach as A, PlayerBreak as B, PlayerOrder as O};
+            // The FA wingman keys (docs/spec/keyboard.md). Alt+L and Alt+0 are
+            // T.O.R.E additions on keys FA leaves free.
             let order = match key {
-                "b" => Some(O::Break(B::Left)),
-                "r" => Some(O::Break(B::Right)),
-                "h" => Some(O::Break(B::High)),
-                "v" => Some(O::Break(B::Low)),
-                "t" => Some(O::Break(B::Straight)),
+                "1" => Some(O::Break(B::Straight)),
+                "2" => Some(O::Break(B::Left)),
+                "3" => Some(O::Break(B::Right)),
+                "4" => Some(O::Break(B::Low)),
+                "5" => Some(O::Break(B::High)),
+                "6" => Some(O::Approach(A::Left)),
+                "7" => Some(O::Approach(A::Right)),
+                "8" => Some(O::Approach(A::Low)),
+                "9" => Some(O::Approach(A::High)),
                 "e" => Some(O::EngageMyTarget),
-                "d" => Some(O::Disengage),
-                "p" => Some(O::ProtectMe),
+                "r" => Some(O::EngageFromFormation),
                 "w" => Some(O::AttackOnContact),
-                "f" => Some(O::EngageFromFormation),
-                "8" => Some(O::Spacing),
-                "k" => Some(O::Stacking),
+                "p" => Some(O::ProtectMe),
+                "d" => Some(O::Disengage),
+                "b" => Some(O::BugOut),
                 "c" => Some(O::ControlToggle),
-                // Retail bug out is Alt-B, which T.O.R.E keeps as break left.
-                // Alt-U and Alt-L were chosen by John on 2026-09-23.
-                "u" => Some(O::BugOut),
+                "h" => Some(O::Spacing),
+                "v" => Some(O::Stacking),
                 "l" => Some(O::LandAtSelected),
-                "1" => Some(O::Formation(F::Echelon)),
-                "2" => Some(O::Formation(F::LineAbreast)),
-                "3" => Some(O::Formation(F::LineAstern)),
+                "t" => return Command::WingFormationCycle,
+                "f" => return self.unavailable("Engage designated target"),
                 "s" => return Command::RadioSilence,
                 "0" => return Command::WingRecipient(None),
-                "4" | "5" | "6" | "7" => {
-                    return Command::WingRecipient(Some(key.parse::<u8>().unwrap() - 3));
-                }
                 _ => None,
             };
             if let Some(order) = order {
                 return Command::Wing(order);
             }
-            if matches!(
-                key,
-                "1" | "2"
-                    | "3"
-                    | "4"
-                    | "5"
-                    | "6"
-                    | "7"
-                    | "8"
-                    | "9"
-                    | "b"
-                    | "c"
-                    | "t"
-                    | "h"
-                    | "v"
-                    | "e"
-                    | "w"
-                    | "r"
-                    | "p"
-                    | "d"
-            ) {
-                return self.unavailable("Wingman command (no wingman)");
-            }
         }
         if ctrl && !alt {
             if key == "v" && !shift {
                 return Command::Valkyries;
+            }
+            // Range fixture, kept off the retail Shift-I airbase inventory.
+            if key == "i" && shift {
+                return Command::Combat(tore_sim::combat::live::Command::Incoming);
             }
             if key == "Tab" {
                 return Command::InstrumentCycle(if shift { -1 } else { 1 });
@@ -620,17 +608,25 @@ impl FlightUi {
                 "/" => Command::CenterLook,
                 "b" => Command::Toggle(Switch::Burner),
                 "e" => Command::Eject,
-                "o" => Command::Toggle(Switch::Bay),
                 "u" => {
                     self.hud = !self.hud;
                     Command::Click
                 }
-                "j" | "k" => self.unavailable("Jettison stores/fuel"),
-                // The development fixtures moved aside for the sensor keys.
+                // FA Shift-K dumps the air-to-ground stores; T.O.R.E drops
+                // the selected external group.
+                "k" => Command::Combat(tore_sim::combat::live::Command::Jettison),
+                // FA keys whose features T.O.R.E does not have yet.
+                "j" => self.unavailable("Jettison external fuel"),
+                "i" => self.unavailable("Airbase inventory"),
+                "r" => self.unavailable("Air-to-ground radar"),
+                "f" => self.unavailable("Target damage"),
+                "a" => self.unavailable("AWACS radar link"),
+                "g" => self.unavailable("Air-to-ground radar link"),
+                "d" => self.unavailable("Message history"),
+                // The development fixture moved aside for the sensor keys.
                 "y" => Command::Combat(tore_sim::combat::live::Command::ToggleTargetJammer),
-                "i" => Command::Combat(tore_sim::combat::live::Command::Incoming),
                 "t" => Command::TargetPrevious,
-                "w" => self.unavailable("Previous waypoint"),
+                "w" => Command::Waypoint(false),
                 _ => Command::None,
             };
         }
@@ -642,10 +638,17 @@ impl FlightUi {
             "e" => Command::Toggle(Switch::Engine),
             "r" => Command::Toggle(Switch::Radar),
             "j" => Command::Toggle(Switch::Jammer),
-            "0" => Command::Throttle(1.),
-            n if n.len() == 1 && n.as_bytes()[0].is_ascii_digit() => {
-                Command::Throttle((n.as_bytes()[0] - b'0') as f64 / 10.)
-            }
+            "o" => Command::Toggle(Switch::Bay),
+            // FA keyboard throttle: 0, 25, 50, 75 and 100 percent, then
+            // afterburner; 7 and 8 step 5 percent (docs/spec/keyboard.md).
+            "1" => Command::ThrottlePreset(0., false),
+            "2" => Command::ThrottlePreset(0.25, false),
+            "3" => Command::ThrottlePreset(0.5, false),
+            "4" => Command::ThrottlePreset(0.75, false),
+            "5" => Command::ThrottlePreset(1., false),
+            "6" => Command::ThrottlePreset(1., true),
+            "7" => Command::ThrottleStep(-0.05),
+            "8" => Command::ThrottleStep(0.05),
             "=" | "+" => {
                 self.zoom = (self.zoom * 1.2).min(4.);
                 Command::None
@@ -656,7 +659,7 @@ impl FlightUi {
             }
             "," => Command::Range(-1),
             "." => Command::Range(1),
-            "o" => Command::Mode,
+            "Numpad5" => Command::CenterLook,
             "F11" => {
                 self.menu = true;
                 self.help = true;
@@ -664,19 +667,21 @@ impl FlightUi {
             }
             "d" => Command::DamageReport,
             "y" => Command::SensorHistory,
-            "k" => Command::Combat(tore_sim::combat::live::Command::Jettison),
-            "l" => Command::Combat(tore_sim::combat::live::Command::ClearDesignation),
+            ";" | "l" => Command::Combat(tore_sim::combat::live::Command::ClearDesignation),
             "]" => Command::NextWeapon,
             "[" => Command::PreviousWeapon,
 
             "t" => Command::Target,
             "\\" => Command::RangeReset,
-            "w" => self.unavailable("Next waypoint"),
-            "n" => self.unavailable("Navigation / weapons mode"),
+            "w" => Command::Waypoint(true),
+            "u" => self.unavailable("IFF"),
             "i" => Command::SensorInfrared,
             "m" => Command::Mode,
 
             "Enter" | "'" => Command::TargetVisual,
+            // FA.EXE: scan codes 0x52 and 0x53 release chaff and flares.
+            "Insert" => Command::Chaff,
+            "Delete" => Command::Flare,
             "Space" => Command::None,
             "v" => Command::StoreView,
             _ => Command::None,
@@ -791,28 +796,34 @@ impl FlightUi {
                 Canvas(pixels).rect((10, 40, 620, 398), [24, 34, 45, 255]);
                 let mut lines: Vec<String> = vec![
                     "DESKTOP KEYBOARD COMMANDS - Esc returns".into(),
-                    "Arrows: pitch/bank | Z/X: rudder | PageUp/Down: throttle".into(),
-                    "1..9: 10..90%, 0: full | Shift-B: burner | E: engine".into(),
-                    "G: gear | F: flaps | B: brake | H: hook | J: jammer".into(),
+                    "Arrows: pitch/bank | End/PgDn or Z/X: rudder | 7/8: throttle -/+5%".into(),
+                    "1..5: idle/25/50/75/100% | 6: afterburner | Shift-B: burner".into(),
+                    "G: gear | F: flaps | B: brake | H: hook | O: bays | E: engine".into(),
                     "Shift-E twice within 2 seconds: eject (release between presses)".into(),
                     "F1 front / F2 back / F3 up / F4 track / F5 inbound missile".into(),
                     "F6 wing / F7 player-target / F8 target-player / F9 fly-by".into(),
                     "F10 external / F12 missile-target / V save Other View".into(),
                     "Alt+view target / Ctrl+view last missile (Alt-F4 exits)".into(),
-                    "Shift/Ctrl-arrows look/orbit / Shift-/ center".into(),
-                    "Shift-M: map | M/O: sensor channel | Shift-U: HUD".into(),
+                    "Shift-arrows look/orbit / Shift-/ or keypad 5 center".into(),
+                    "Shift-M: map | M: sensor channel | Shift-U: HUD".into(),
                     "Ctrl-Tab/Ctrl-Shift-Tab: instrument | Ctrl-1..6: slot".into(),
                     "Ctrl-Shift-1..4: stock instrument buttons (T.O.R.E)".into(),
                     "T/Shift-T: radar target | Enter/apostrophe: visual target | Space: fire"
                         .into(),
                     "A: heading/altitude | Ctrl-A: waypoint autopilot".into(),
                     "I: infrared | R: radar | Y: contact history | J: own ECM".into(),
-                    "Click a contact to designate it; L clears the designation".into(),
-                    "D damage report | Range: Shift-I incoming | Shift-Y target ECM".into(),
-                    "[ / ] NAV/weapons | K jettison | L clear".into(),
+                    "N: NAV/ILS mode | W/Shift-W: next/previous waypoint".into(),
+                    "Insert: chaff | Delete: flare (keypad 0 and . also work)".into(),
+                    "Click a contact to designate it; ; or L clears the designation".into(),
+                    "D damage report | Range: Ctrl-Shift-I incoming | Shift-Y target ECM".into(),
+                    "[ / ] NAV/weapons | Shift-K jettison".into(),
+                    "Tower: Shift-N airport | Shift-L landing | Ctrl-Shift-R/C repeat/cancel"
+                        .into(),
+                    "Wing: Alt-1 straight, 2-5 break, 6-9 approach, E/R/W engage, B bug out".into(),
+                    "Alt-T formation | Alt-H/V spacing/stack | Alt-0/Alt-Shift-1..4 address".into(),
                     "Pad: hold Select, RB fire / LB weapon / A target / B clear".into(),
                     "Select+X previous weapon / Y ECM / L3 radar / R3 jettison".into(),
-                    "Select+Dpad: up target / down hit / left class / right fault".into(),
+                    "Select+Dpad: up target / down hit / left chaff / right flare".into(),
                     "Select+Start target ECM / Guide incoming; F10 external".into(),
                     "Right-drag: mouse look | Esc > Control: remap any key".into(),
                     "Stock keys shown here; docs/CONTROLS.md lists them all".into(),
@@ -1005,6 +1016,9 @@ mod tests {
                 Command::DamageReport
             );
         }
+        // Shift+D is FA's message history, which reports itself unavailable.
+        ui.notice = None;
+        ui.pending_notices.clear();
         ui.message("Wing order");
         ui.message("Oil leak");
         assert_eq!(ui.notice.as_ref().unwrap().0, "Wing order");
@@ -1052,7 +1066,8 @@ mod tests {
                 Command::Toggle(switch)
             );
         }
-        assert_eq!(ui.key("a", true, false, false, &tree()), Command::None);
+        // Shift+A is FA's AWACS link; neither modifier reaches the autopilot.
+        assert_eq!(ui.key("a", true, false, false, &tree()), Command::Click);
         assert_eq!(ui.key("a", false, false, true, &tree()), Command::None);
         assert_eq!(
             ui.activate("Autopilot", "A"),
@@ -1337,17 +1352,53 @@ mod tests {
         for (key, command) in [
             ("[", Command::PreviousWeapon),
             ("]", Command::NextWeapon),
-            (";", Command::None),
-            ("u", Command::None),
+            ("9", Command::None),
+            ("0", Command::None),
+            ("k", Command::None),
         ] {
             assert_eq!(ui.key(key, false, false, false, &tree), command);
         }
     }
     #[test]
+    fn retail_keys_reach_their_fa_commands() {
+        use tore_sim::combat::live::Command as C;
+        let tree = tree();
+        let mut ui = FlightUi::default();
+        for (key, shift, command) in [
+            ("1", false, Command::ThrottlePreset(0., false)),
+            ("2", false, Command::ThrottlePreset(0.25, false)),
+            ("3", false, Command::ThrottlePreset(0.5, false)),
+            ("4", false, Command::ThrottlePreset(0.75, false)),
+            ("5", false, Command::ThrottlePreset(1., false)),
+            ("6", false, Command::ThrottlePreset(1., true)),
+            ("7", false, Command::ThrottleStep(-0.05)),
+            ("8", false, Command::ThrottleStep(0.05)),
+            ("Insert", false, Command::Chaff),
+            ("Delete", false, Command::Flare),
+            ("o", false, Command::Toggle(Switch::Bay)),
+            ("k", true, Command::Combat(C::Jettison)),
+            (";", false, Command::Combat(C::ClearDesignation)),
+            ("w", false, Command::Waypoint(true)),
+            ("w", true, Command::Waypoint(false)),
+            ("m", false, Command::Mode),
+            ("Numpad5", false, Command::CenterLook),
+        ] {
+            assert_eq!(ui.key(key, shift, false, false, &tree), command, "{key}");
+        }
+        // O no longer cycles the sensor channel; Shift-O no longer opens bays.
+        assert_eq!(ui.key("o", true, false, false, &tree), Command::None);
+        // The incoming fixture left Shift-I, the FA airbase inventory key.
+        assert_eq!(ui.key("i", true, false, false, &tree), Command::Click);
+        assert_eq!(
+            ui.key("i", true, true, false, &tree),
+            Command::Combat(C::Incoming)
+        );
+    }
+    #[test]
     fn manual_combat_commands_preserve_modifier_and_menu_isolation() {
         use tore_sim::combat::live::Command as C;
         let tree = tree();
-        for (key, command) in [("k", C::Jettison), ("l", C::ClearDesignation)] {
+        for (key, command) in [(";", C::ClearDesignation), ("l", C::ClearDesignation)] {
             let mut ui = FlightUi::default();
             assert_eq!(
                 ui.key(key, false, false, false, &tree),
@@ -1373,42 +1424,64 @@ mod tests {
         }
     }
     #[test]
-    fn player_wing_keys_produce_live_orders() {
-        use tore_sim::ai::wing::{Formation, PlayerBreak, PlayerOrder};
+    fn player_wing_keys_follow_the_fa_layout() {
+        use tore_sim::ai::wing::{PlayerApproach as A, PlayerBreak as B, PlayerOrder as O};
         let mut ui = FlightUi::default();
+        for (key, order) in [
+            ("1", O::Break(B::Straight)),
+            ("2", O::Break(B::Left)),
+            ("3", O::Break(B::Right)),
+            ("4", O::Break(B::Low)),
+            ("5", O::Break(B::High)),
+            ("6", O::Approach(A::Left)),
+            ("7", O::Approach(A::Right)),
+            ("8", O::Approach(A::Low)),
+            ("9", O::Approach(A::High)),
+            ("e", O::EngageMyTarget),
+            ("r", O::EngageFromFormation),
+            ("w", O::AttackOnContact),
+            ("p", O::ProtectMe),
+            ("d", O::Disengage),
+            ("b", O::BugOut),
+            ("c", O::ControlToggle),
+            ("h", O::Spacing),
+            ("v", O::Stacking),
+            ("l", O::LandAtSelected),
+        ] {
+            assert_eq!(
+                ui.key(key, false, false, true, &[]),
+                Command::Wing(order),
+                "{key}"
+            );
+        }
         assert_eq!(
-            ui.key("b", false, false, true, &[]),
-            Command::Wing(PlayerOrder::Break(PlayerBreak::Left))
+            ui.key("t", false, false, true, &[]),
+            Command::WingFormationCycle
         );
-        assert_eq!(
-            ui.key("e", false, false, true, &[]),
-            Command::Wing(PlayerOrder::EngageMyTarget)
-        );
-        assert_eq!(
-            ui.key("2", false, false, true, &[]),
-            Command::Wing(PlayerOrder::Formation(Formation::LineAbreast))
-        );
+        assert_eq!(ui.key("s", false, false, true, &[]), Command::RadioSilence);
     }
     #[test]
-    fn landing_orders_use_alt_u_and_alt_l() {
-        use tore_sim::ai::wing::PlayerOrder;
+    fn wing_addressing_uses_alt_zero_and_alt_shift_digits() {
         let mut ui = FlightUi::default();
         assert_eq!(
-            ui.key("u", false, false, true, &[]),
-            Command::Wing(PlayerOrder::BugOut)
+            ui.key("0", false, false, true, &[]),
+            Command::WingRecipient(None)
         );
-        assert_eq!(
-            ui.key("l", false, false, true, &[]),
-            Command::Wing(PlayerOrder::LandAtSelected)
-        );
-        // Recipient addressing is unchanged, and the unmodified and Shift
-        // keys keep their own meanings.
-        assert_eq!(
-            ui.key("5", false, false, true, &[]),
-            Command::WingRecipient(Some(2))
-        );
+        for n in 1..=4u8 {
+            assert_eq!(
+                ui.key(&n.to_string(), true, false, true, &[]),
+                Command::WingRecipient(Some(n))
+            );
+        }
         assert!(!matches!(
-            ui.key("u", false, false, false, &[]),
+            ui.key("5", true, false, true, &[]),
+            Command::WingRecipient(_)
+        ));
+        // Alt+U retired with bug out's move to Alt+B; unmodified and Shift
+        // keys keep their own meanings.
+        assert_eq!(ui.key("u", false, false, true, &[]), Command::None);
+        assert!(!matches!(
+            ui.key("b", false, false, false, &[]),
             Command::Wing(_)
         ));
         assert!(!matches!(

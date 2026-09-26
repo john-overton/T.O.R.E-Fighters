@@ -123,7 +123,7 @@ so raising the gear, climbing or flying away, a crash, ejection or restart
 releases it. Agent decision (2026-09-23, fitted): an airport's distance is
 measured to its nearest usable runway centre, since the scene has no single
 airport position, and an airport with no usable runway is ignored. The
-player's Shift-A selection also chooses where Alt-L (land at selected airport,
+player's Shift-N selection also chooses where Alt-L (land at selected airport,
 an opinionated addition John requested on 2026-09-23) sends the wing. The
 wingmen use the player's cleared runway at that airport, otherwise its longest
 usable runway, and share the tower's refusal of hostile, unknown and
