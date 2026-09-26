@@ -53,6 +53,7 @@ mod preferences;
 mod quick_mission;
 mod radio_calls;
 mod rafale_animation;
+mod render_snapshot;
 mod renderer;
 mod rocker;
 mod roster_animation;
@@ -915,6 +916,11 @@ impl App {
                 {
                     self.combat.cancel();
                     self.combat.command(command, combat::launcher(&self.flight));
+                    // Range commands can replace targets or launch a round now.
+                    if self.combat.range {
+                        self.combat
+                            .refresh_render(&self.flight, self.ai_wings.as_ref());
+                    }
                     if let Err(error) = self.flight.set_payload(
                         (self.combat.state.payload_lbs() - self.flight.systems.used_external_lbs())
                             .max(0.),
@@ -989,6 +995,8 @@ impl App {
                         tore_sim::combat::live::Command::ReplaceTarget,
                         combat::launcher(&self.flight),
                     );
+                    self.combat
+                        .refresh_render(&self.flight, self.ai_wings.as_ref());
                 } else {
                     self.flight_ui
                         .message("Target reset is available only with --live-fire");
@@ -1709,7 +1717,6 @@ impl App {
                             );
                             bridge.apply_group_survival(&self.quick.group_must_survive);
                             bridge.mirror_pose_out(&mut self.combat.state.targets);
-                            self.combat.sync_ai_devices(&bridge);
                             self.combat.ai_poses = !bridge.is_empty();
                             if bridge.is_empty() {
                                 self.flight_ui
@@ -1727,6 +1734,9 @@ impl App {
                         }
                     }
                 }
+                // Draw from the placed start, including the AI's own poses.
+                self.combat
+                    .restart_render(&self.flight, self.ai_wings.as_ref());
                 self.flight_music = flight_music::Observer::new(flight_music::home_base(
                     &self.world,
                     ground_airport,
@@ -2826,7 +2836,6 @@ impl ApplicationHandler for App {
                                         audio.wingman_ejected();
                                     }
                                 }
-                                self.combat.sync_ai_devices(&bridge);
                                 let message = bridge.take_message();
                                 self.ai_wings = Some(bridge);
                                 if let Err(error) = stepped {
@@ -2838,6 +2847,10 @@ impl ApplicationHandler for App {
                                     self.flight_ui.message(message);
                                 }
                             }
+                            // The tick's picture: combat and the AI have both
+                            // written their poses for it.
+                            self.combat
+                                .advance_render(&self.flight, self.ai_wings.as_ref());
 
                             if (self.flight.crashed
                                 || self.flight.escape.is_some()
@@ -3016,6 +3029,8 @@ impl ApplicationHandler for App {
                         } else {
                             self.flight_clock.remainder / flight::DT
                         });
+                        // Everything combat draws this frame, shared by every camera.
+                        let frame = self.combat.presented();
                         let presented = if self.flight_ui.frozen() {
                             self.flight.clone()
                         } else {
@@ -3087,7 +3102,7 @@ impl ApplicationHandler for App {
                         );
                         renderer.vapor(&vapor);
                         renderer.smoke(
-                            &self.combat.smoke_art,
+                            &self.combat.art.smoke,
                             [&self.combat.state.smoke, &self.combat.contrails],
                             &self.combat.state.devices,
                         );
@@ -3175,9 +3190,15 @@ impl ApplicationHandler for App {
                                             self.world.air_data(&presented).ok().as_ref(),
                                         )
                                     });
-                                    renderer
-                                        .dummies(self.combat.dummy_geometry(&camera, &self.world));
-                                    renderer.combat(&self.combat.vertices(
+                                    renderer.dummies(render_snapshot::aircraft_batches(
+                                        &frame,
+                                        self.combat.models(),
+                                        &camera,
+                                        &self.world,
+                                    ));
+                                    renderer.combat(&render_snapshot::combat_geometry(
+                                        &frame,
+                                        &self.combat.art,
                                         &self.hornet,
                                         &presented,
                                         &camera,
@@ -3234,22 +3255,28 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        if let Some(art) = &self.combat.escape_art {
-                            let pilots = presented
-                                .escape
-                                .iter()
-                                .chain(self.ai_wings.iter().flat_map(|w| w.escapees()));
+                        if let Some(art) = &self.combat.art.escape {
                             renderer.escapees(
                                 art,
-                                &art.vertices(
-                                    pilots,
+                                &art.vertices_for(
+                                    frame
+                                        .pilots
+                                        .iter()
+                                        .map(|p| (p.position, p.heading, p.phase)),
                                     &self.hornet.palette,
                                     self.camera.position.map(f64::from),
                                 ),
                             );
                         }
-                        renderer.dummies(self.combat.dummy_geometry(&self.camera, &self.world));
-                        renderer.combat(&self.combat.vertices(
+                        renderer.dummies(render_snapshot::aircraft_batches(
+                            &frame,
+                            self.combat.models(),
+                            &self.camera,
+                            &self.world,
+                        ));
+                        renderer.combat(&render_snapshot::combat_geometry(
+                            &frame,
+                            &self.combat.art,
                             &self.hornet,
                             &presented,
                             &self.camera,
@@ -6756,19 +6783,24 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             );
         }
     }
+    // Scripted setup keeps the render history as live flight does: a changed
+    // scene is retaken at once and each combat step ends a tick.
     if live_fire {
         combat.state.armed = true;
         combat.command(
             tore_sim::combat::live::Command::ReplaceTarget,
             combat::launcher(&flight),
         );
+        combat.refresh_render(&flight, None);
         // A scripted designation needs a current observation first, exactly as
         // a player's click does.
         combat.step(&mut flight, &world)?;
+        combat.advance_render(&flight, None);
     }
     for command in combat_commands {
         combat.command(command, combat::launcher(&flight));
     }
+    combat.refresh_render(&flight, None);
     // Lets released chaff and flares develop before a capture.
     if let Some(ticks) = countermeasure_preview {
         for _ in 0..ticks {
@@ -6776,6 +6808,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 f64::from(world.height(x as f32, z as f32))
             });
             combat.step(&mut flight, &world)?;
+            combat.advance_render(&flight, None);
         }
         let devices = &combat.state.devices;
         println!(
@@ -6808,6 +6841,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         // has the same support a player would wait for.
         for _ in 0..tore_sim::sensors::track::ACQUISITION_STEPS {
             combat.step(&mut flight, &world)?;
+            combat.advance_render(&flight, None);
         }
         combat.input.space(true, false, false);
         let mut feedback = tore_input::FeedbackMixer::default();
@@ -6823,6 +6857,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     feedback.event(cue);
                 }
             }
+            combat.advance_render(&flight, None);
             if matches!(
                 feedback.tick(),
                 Some(tore_input::FeedbackUpdate::Pulse { .. })
@@ -6848,6 +6883,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     if let Some([bearing, elevation, range]) = hud_target_preview {
         for _ in 0..120 {
             combat.step(&mut flight, &world)?;
+            combat.advance_render(&flight, None);
         }
         let id = combat
             .state
@@ -6878,8 +6914,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                         + body.right[i] * bearing.sin() * elevation.cos()
                         + body.up[i] * elevation.sin())
         });
+        combat.refresh_render(&flight, None);
         for _ in 0..24 {
             combat.step(&mut flight, &world)?;
+            combat.advance_render(&flight, None);
         }
         println!(
             "HUD target preview: bearing={} elevation={} display={:?} sensor={:?}",
@@ -6899,11 +6937,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         for target in &mut combat.state.targets {
             target.hp = (f64::from(target.initial_hp) * (1. - fraction)).round() as i32;
         }
+        combat.refresh_render(&flight, None);
         for _ in 0..damage_preview_ticks {
             flight.step(&tore_input::PilotInput::default(), |x, z| {
                 f64::from(world.height(x as f32, z as f32))
             });
             combat.step(&mut flight, &world)?;
+            combat.advance_render(&flight, None);
         }
         println!(
             "Damage preview: ticks={} debris={} impacts={} smoke={}",
@@ -6955,6 +6995,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             println!("Pilot death preview: exterior view {flight_view}");
         }
     }
+    // The first frame draws the prepared scene, ejected pilot included.
+    combat.refresh_render(&flight, None);
     if input_profile.is_none() {
         let default = assets::data_directory()?.join("input-v1.conf");
         if default.exists() {

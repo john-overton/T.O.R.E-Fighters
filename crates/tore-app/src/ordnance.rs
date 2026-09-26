@@ -934,6 +934,7 @@ pub fn validate_sources(
         {
             return Err(format!("{id:?}: invalid imported gun sight/range").into());
         }
+        gun.refresh_render(&gun_flight, None);
         let tracer = gun.vertices(&airframe, &gun_flight, &camera, world);
         if !tracer.vertices.chunks_exact(10).any(|v| v[5] == -8.) {
             return Err(format!("{id:?}: imported gun has no luminous tracer geometry").into());
@@ -965,7 +966,9 @@ pub fn validate_sources(
         flight.damage_variant = None;
         flight.damage_regions = [0.; tore_sim::combat::live::DAMAGE_SECTIONS];
         normal.state.targets[0].hp = 0;
+        normal.refresh_render(&flight, None);
         normal.step(&mut flight, world)?;
+        normal.advance_render(&flight, None);
         if normal.dummy_geometry(&camera, world)[0].1.is_empty() {
             return Err("falling wreck disappeared".into());
         }

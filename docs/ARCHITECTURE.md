@@ -134,8 +134,9 @@ flight adapter runs. The HUD reads this state. See the
 
 ### Flight presentation and measurement
 
-`flight::State` remains authoritative at 120 Hz. `main` retains the preceding tick for render-only pose interpolation (shortest-path wrapped angles); pause/crash show authoritative state and restart resets history. Camera, exterior geometry and HUD consume the same presented pose. Nearby aircraft retain their own preceding tick poses and use the same blend fraction in the main view, mirrors and camera panels. Combat snapshots them before simulation advances; reset clears that history. AI gear, flap, hook, brake, bay, exhaust and control-surface samples use that
-same render fraction; fixtures retain their fixed devices. Audio consumes
+`flight::State` remains authoritative at 120 Hz. `main` retains the preceding tick for render-only pose interpolation (shortest-path wrapped angles); pause/crash show authoritative state and restart resets history. Camera, exterior geometry and HUD consume the same presented pose. Everything else combat draws is captured once per tick, after the AI step, as a plain-data `RenderSnapshot` (`render_snapshot.rs`): other aircraft with their devices, damage and wreck state, fixtures, weapons, effects, debris and ejected pilots, plus the player's own pose. Combat keeps the last two snapshots, and the main view, mirrors and camera panels draw their blend at the same fraction through the shared `aircraft_batches` and `combat_geometry` helpers, which a mission replay uses to draw a recording, so both show the same picture. Chaff and flares are not part of the snapshot: the countermeasure renderer draws them from the combat state, and afterburner flame lights sit at the presented poses. Reset clears that history. AI gear, flap, hook, brake, bay, exhaust and control-surface samples use that
+same render fraction; an aircraft whose AI stopped flying holds its last
+devices, and fixtures retain their fixed devices. Audio consumes
 authoritative state. No renderer smoothing feeds back into physics.
 
 World camera depth uses `Depth32Float`, storing the near plane at depth 1 and

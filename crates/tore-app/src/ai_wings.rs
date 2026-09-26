@@ -1426,11 +1426,12 @@ impl AiWings {
         }
     }
 
-    pub fn escapees(&self) -> impl Iterator<Item = &tore_sim::ejection::Escape> {
+    /// Ejected AI pilots in roster order, each with the aircraft it left.
+    pub fn escapees(&self) -> impl Iterator<Item = (u32, &tore_sim::ejection::Escape)> {
         self.mission
             .actors()
             .iter()
-            .filter_map(|a| a.flight().escape.as_ref())
+            .filter_map(|a| a.flight().escape.as_ref().map(|escape| (a.id(), escape)))
     }
 
     /// A missile blast knocks an AI aircraft around, like the player's.

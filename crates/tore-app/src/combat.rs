@@ -3,13 +3,16 @@ use crate::{
     AppResult,
     aircraft::Airframe,
     flight,
-    sim_renderer::{CombatGeometry, Contact},
+    render_snapshot::{
+        AircraftPose, CombatArt, Damage, DebrisPose, Draw, EffectPose, Engine, PilotPose,
+        ProjectilePose, RenderSnapshot,
+    },
+    sim_renderer::Contact,
     terrain::{Camera, World},
 };
 use std::collections::BTreeMap;
-use tore_formats::{Pic, shape::Shape};
 use tore_sim::{
-    attitude::{Basis, Vector, unit},
+    attitude::{Basis, Vector},
     combat::live::{self, EffectKind, Event, Launcher},
 };
 
@@ -48,64 +51,71 @@ pub fn target_pose(target: &live::Target, ai_poses: bool) -> [f64; 3] {
         [target.velocity[0].atan2(target.velocity[2]), 0., 0.]
     }
 }
-/// Presentation snapshots are taken before combat advances and before the AI
-/// overwrites its live poses. They never feed back into sensors or physics.
-struct TargetPresentation {
-    previous: BTreeMap<u32, (Vector, Basis)>,
+/// The last two per-tick render snapshots and the frame's tick fraction.
+/// They are presentation only and never feed back into sensors or physics.
+struct RenderHistory {
+    /// The snapshot one tick earlier; none right after a restart.
+    previous: Option<RenderSnapshot>,
+    current: RenderSnapshot,
+    /// Each target's index in `previous` and in `current`, by id.
+    places: [BTreeMap<u32, usize>; 2],
     alpha: f64,
 }
-impl Default for TargetPresentation {
+impl Default for RenderHistory {
     fn default() -> Self {
         Self {
-            previous: BTreeMap::new(),
+            previous: None,
+            current: RenderSnapshot::default(),
+            places: Default::default(),
             alpha: 1.0,
         }
     }
 }
-impl TargetPresentation {
-    fn capture(&mut self, targets: &[live::Target], ai_poses: bool) {
-        self.previous.clear();
-        self.previous.extend(targets.iter().map(|t| {
-            let [yaw, pitch, bank] = target_pose(t, ai_poses);
-            (t.id, (t.position, Basis::new(yaw, pitch, bank)))
-        }));
+impl RenderHistory {
+    fn places(snapshot: &RenderSnapshot) -> BTreeMap<u32, usize> {
+        snapshot
+            .targets
+            .iter()
+            .enumerate()
+            .map(|(index, pose)| (pose.id, index))
+            .collect()
     }
-
-    fn pose(&self, target: &live::Target, ai_poses: bool) -> (Vector, [f64; 3]) {
-        let angles = target_pose(target, ai_poses);
-        let Some((position, basis)) = self.previous.get(&target.id) else {
-            return (target.position, angles);
-        };
-        let alpha = self.alpha.clamp(0., 1.);
-        (
-            std::array::from_fn(|i| position[i] + (target.position[i] - position[i]) * alpha),
-            basis
-                .blended(Basis::new(angles[0], angles[1], angles[2]), alpha)
-                .angles(),
-        )
+    /// Replaces the current snapshot, keeping the previous one.
+    fn set_current(&mut self, current: RenderSnapshot) {
+        self.places[1] = Self::places(&current);
+        self.current = current;
     }
-}
-
-fn apply_devices(pose: &mut flight::State, before: &[f64; 11], after: &[f64; 11], alpha: f64) {
-    let a = alpha.clamp(0., 1.);
-    [
-        pose.gear,
-        pose.flaps,
-        pose.brake,
-        pose.hook,
-        pose.bay,
-        pose.exhaust,
-        pose.elevator,
-        pose.aileron,
-        pose.rudder,
-        pose.speed,
-        pose.throttle,
-    ] = std::array::from_fn(|i| before[i] + (after[i] - before[i]) * a);
+    /// The current snapshot becomes the previous one.
+    fn advance(&mut self, next: RenderSnapshot) {
+        let places = Self::places(&next);
+        self.places[0] = std::mem::replace(&mut self.places[1], places);
+        self.previous = Some(std::mem::replace(&mut self.current, next));
+    }
+    fn current_target(&self, id: u32) -> Option<&AircraftPose> {
+        self.places[1]
+            .get(&id)
+            .map(|&index| &self.current.targets[index])
+    }
+    /// One target at the frame's tick fraction.
+    fn presented_target(&self, id: u32) -> Option<AircraftPose> {
+        let current = self.current_target(id)?;
+        let previous = self
+            .previous
+            .as_ref()
+            .zip(self.places[0].get(&id))
+            .map(|(snapshot, &index)| &snapshot.targets[index]);
+        Some(crate::render_snapshot::blend(
+            previous,
+            current,
+            self.alpha.clamp(0., 1.),
+        ))
+    }
 }
 
 pub struct Combat {
     pub state: live::State,
-    pub smoke_art: Pic,
+    /// Effect, smoke, weapon and ejection art drawn from render snapshots.
+    pub art: CombatArt,
     contrail_offsets: Vec<Vector>,
     contrail_sortie: u64,
     pub contrails: tore_sim::combat::smoke::Smoke,
@@ -119,9 +129,7 @@ pub struct Combat {
     /// Pilot-only tapes retain their existing clean-aircraft initial state.
     pub clean_recording: bool,
     initial_ammo: Option<Vec<u16>>,
-    presentation: TargetPresentation,
-    /// Previous and current AI device poses, sampled on simulation ticks.
-    ai_devices: BTreeMap<u32, ([f64; 11], [f64; 11])>,
+    render: RenderHistory,
     /// AI aircraft whose afterburner was lit at the last AI tick.
     ai_burners: std::collections::BTreeSet<u32>,
     dummies: Vec<(usize, Vector)>,
@@ -134,30 +142,6 @@ pub struct Combat {
     airport_objects: Vec<tore_sim::airport::StaticObject>,
     pub recorder: Option<crate::combat_tape::Recorder>,
     last_launcher: Option<Launcher>,
-    shapes: BTreeMap<String, Shape>,
-    pub escape_art: Option<crate::ejection_art::Art>,
-    explosions: Vec<Vec<([f32; 2], [f32; 3])>>,
-    ground_impacts: Vec<Vec<([f32; 2], [f32; 3])>>,
-}
-fn weapon_shapes(
-    config: &live::Configuration,
-    data: &BTreeMap<String, Vec<u8>>,
-) -> BTreeMap<String, Shape> {
-    config
-        .stations
-        .iter()
-        .filter_map(|station| {
-            let name = station.weapon.shape.as_ref()?;
-            let shape = data
-                .get(name)
-                .and_then(|bytes| Shape::parse(bytes).ok())
-                .filter(|shape| !shape.faces.is_empty());
-            if shape.is_none() {
-                log::warn!("Combat: {name} uses a tracer marker; line/point drawing remains open");
-            }
-            shape.map(|shape| (name.clone(), shape))
-        })
-        .collect()
 }
 
 pub fn launcher(s: &flight::State) -> Launcher {
@@ -242,27 +226,10 @@ impl Combat {
         config: live::Configuration,
         initial_ammo: Option<Vec<u16>>,
     ) -> AppResult<Self> {
-        let shapes = weapon_shapes(&config, data);
-        let pic = Pic::parse(
-            data.get("AIRLRG.PIC")
-                .ok_or("missing AIRLRG.PIC combat art")?,
-        )?;
-        if pic.width != 256 || pic.height != 232 {
-            return Err("unreviewed AIRLRG frame sheet".into());
-        }
-        // Fitted 3x4 frame layout over visually reviewed original effect art.
-        let explosions = effect_frames(&pic, &h.palette, 58);
-        let impact = Pic::parse(data.get("GRDLRGA.PIC").ok_or("missing GRDLRGA.PIC")?)?;
-        if impact.width != 256 || impact.height != 252 {
-            return Err("unreviewed ground impact sheet".into());
-        }
-        let ground_impacts = effect_frames(&impact, &h.palette, 63);
-        let smoke = Pic::parse(data.get("SMOKE.PIC").ok_or("missing SMOKE.PIC")?)?;
-        if smoke.width != 256 || smoke.height != 43 {
-            return Err("unreviewed smoke sheet dimensions".into());
-        }
+        let mut art = CombatArt::load(data, &h.palette)?;
+        art.add_weapon_shapes(&config, data);
         Ok(Self {
-            smoke_art: smoke,
+            art,
             contrail_offsets: h.contrail_offsets(),
             contrail_sortie: 0,
             contrails: Default::default(),
@@ -280,44 +247,217 @@ impl Combat {
             ai_poses: false,
             clean_recording: false,
             initial_ammo,
-            presentation: TargetPresentation::default(),
-            ai_devices: BTreeMap::new(),
+            render: RenderHistory::default(),
             ai_burners: Default::default(),
             recorder: None,
             last_launcher: None,
-            escape_art: match crate::ejection_art::Art::load(data) {
-                Ok(art) => Some(art),
-                Err(error) => {
-                    log::warn!("Optional ejection artwork unavailable: {error}");
-                    None
-                }
-            },
-            shapes,
-            explosions,
-            ground_impacts,
         })
     }
+    /// The frame's fraction of the way from the previous tick to the current one.
     pub fn present_targets(&mut self, alpha: f64) {
-        self.presentation.alpha = alpha;
+        self.render.alpha = alpha;
     }
 
-    pub fn sync_ai_devices(&mut self, wings: &crate::ai_wings::AiWings) {
-        for actor in wings.mission().actors().iter().filter(|a| a.alive()) {
-            let f = actor.flight();
-            let next = [
-                f.gear, f.flaps, f.brake, f.hook, f.bay, f.exhaust, f.elevator, f.aileron,
-                f.rudder, f.speed, f.throttle,
-            ];
-            let entry = self.ai_devices.entry(actor.id()).or_insert((next, next));
-            *entry = (entry.1, next);
-        }
-        self.ai_burners = wings
-            .mission()
-            .actors()
-            .iter()
-            .filter(|a| a.alive() && a.flight().afterburner_active())
-            .map(|a| a.id())
+    /// Everything combat draws for this tick, as plain data. `wings` supplies
+    /// the AI aircraft's devices and ejected pilots. An aircraft whose AI is
+    /// not alive, or that has no AI, keeps the devices last drawn for it.
+    pub fn snapshot(
+        &self,
+        player: &flight::State,
+        wings: Option<&crate::ai_wings::AiWings>,
+    ) -> RenderSnapshot {
+        let ownship = self.dummies.is_empty();
+        let model = |id: u32| {
+            id.checked_sub(1)
+                .and_then(|index| self.dummies.get(index as usize))
+                .map(|(model, _)| self.dummy_models[*model].profile.id)
+        };
+        let draw = |id: u32| {
+            if ownship {
+                Draw::Ownship
+            } else {
+                model(id).map_or(Draw::Hidden, Draw::Model)
+            }
+        };
+        let flying: BTreeMap<u32, [f64; crate::render_snapshot::DEVICES]> = wings
+            .into_iter()
+            .flat_map(|wings| wings.mission().actors())
+            .filter(|actor| actor.alive())
+            .map(|actor| (actor.id(), crate::render_snapshot::devices(actor.flight())))
             .collect();
+        // The last devices drawn hold once an aircraft stops flying.
+        let simulated = |id: u32| {
+            flying
+                .get(&id)
+                .copied()
+                .or_else(|| self.render.current_target(id).and_then(|pose| pose.devices))
+        };
+        let config = self.state.configuration();
+        let capacity = config.damage_capacity;
+        let player_engine = Engine {
+            lit: player.engine && player.fuel > 0.,
+            afterburner: player.afterburner_active(),
+            rates: player.auxiliary_rates,
+        };
+        // Fixtures copy the player's state with their own crash flag.
+        let fixture_afterburner = ownship
+            && if player.crashed {
+                let mut alive = player.clone();
+                alive.crashed = false;
+                alive.afterburner_active()
+            } else {
+                player_engine.afterburner
+            };
+        let model_engine = Engine {
+            lit: true,
+            afterburner: false,
+            rates: [0.; 3],
+        };
+        let pilot = |owner: u32, escape: &tore_sim::ejection::Escape| PilotPose {
+            owner,
+            position: escape.position,
+            heading: escape.heading,
+            phase: escape.phase,
+        };
+        RenderSnapshot {
+            tick: self.state.tick(),
+            player: AircraftPose {
+                id: 0,
+                aircraft: Some(config.aircraft),
+                draw: Draw::Ownship,
+                position: player.position,
+                attitude: [player.yaw, player.pitch, player.bank],
+                velocity: player.velocity,
+                devices: Some(crate::render_snapshot::devices(player)),
+                engine: player_engine,
+                damage: Damage {
+                    hp: self.state.player_hp,
+                    initial_hp: capacity,
+                    // Whole amounts that reproduce the drawn fractions exactly.
+                    sections: self
+                        .state
+                        .player_damage_regions()
+                        .map(|fraction| (fraction * f64::from(capacity)).round() as i32),
+                    structural: self.state.player_damage_section(),
+                },
+                airborne: true,
+                wreck: player.wreck.as_ref().map(|wreck| wreck.phase),
+                crashed: player.crashed,
+            },
+            targets: self
+                .state
+                .targets
+                .iter()
+                .map(|t| AircraftPose {
+                    id: t.id,
+                    aircraft: t.aircraft,
+                    draw: draw(t.id),
+                    position: t.position,
+                    attitude: target_pose(t, self.ai_poses),
+                    velocity: t.velocity,
+                    devices: simulated(t.id),
+                    engine: if ownship {
+                        Engine {
+                            afterburner: fixture_afterburner && t.hp > 0,
+                            ..player_engine
+                        }
+                    } else {
+                        model_engine
+                    },
+                    damage: Damage {
+                        hp: t.hp,
+                        initial_hp: t.initial_hp,
+                        sections: t.localized_damage.amounts,
+                        structural: t.localized_damage.structural_section,
+                    },
+                    airborne: t.airborne,
+                    wreck: t.wreck.as_ref().map(|wreck| wreck.phase),
+                    crashed: t.hp <= 0,
+                })
+                .collect(),
+            projectiles: self
+                .state
+                .projectiles
+                .iter()
+                .map(|p| {
+                    let weapon = p.weapon(config);
+                    ProjectilePose {
+                        id: p.id,
+                        owner: p.owner,
+                        weapon: weapon.source.clone(),
+                        shape: weapon.shape.clone(),
+                        gun: live::is_gun(weapon),
+                        tracer: p.tracer,
+                        position: p.position,
+                        previous: p.previous,
+                        direction: p.direction,
+                        target: p.target,
+                        incoming: p.incoming,
+                        speed_f8: p.speed_f8,
+                    }
+                })
+                .collect(),
+            effects: self
+                .state
+                .effects
+                .iter()
+                .map(|e| EffectPose {
+                    kind: e.kind,
+                    position: e.position,
+                    ticks: e.ticks,
+                })
+                .collect(),
+            debris: self
+                .state
+                .debris
+                .iter()
+                .map(|piece| DebrisPose {
+                    owner: piece.owner,
+                    draw: if piece.owner == 0 {
+                        Draw::Ownship
+                    } else {
+                        draw(piece.owner)
+                    },
+                    position: piece.position,
+                    attitude: piece.basis.angles(),
+                    variant: if piece.owner == 0 {
+                        player.damage_variant
+                    } else {
+                        self.state
+                            .targets
+                            .iter()
+                            .find(|target| target.id == piece.owner)
+                            .and_then(|target| target.localized_damage.structural_section)
+                            .map(|section| section as usize)
+                    },
+                })
+                .collect(),
+            pilots: player
+                .escape
+                .iter()
+                .map(|escape| pilot(0, escape))
+                .chain(
+                    wings
+                        .into_iter()
+                        .flat_map(|wings| wings.escapees())
+                        .map(|(owner, escape)| pilot(owner, escape)),
+                )
+                .collect(),
+            models: self.dummy_models.iter().map(|h| h.profile.id).collect(),
+        }
+    }
+    /// Notes which AI aircraft have their afterburner lit, as the AI tick
+    /// left them, for their flame lights. Without an AI the set is kept.
+    fn sample_burners(&mut self, wings: Option<&crate::ai_wings::AiWings>) {
+        if let Some(wings) = wings {
+            self.ai_burners = wings
+                .mission()
+                .actors()
+                .iter()
+                .filter(|a| a.alive() && a.flight().afterburner_active())
+                .map(|a| a.id())
+                .collect();
+        }
     }
 
     /// The flame of every lit afterburner as a light source, each engine
@@ -364,16 +504,62 @@ impl Combat {
                 .map_or(&self.contrail_offsets, |index| {
                     &self.dummy_contrail_offsets[index]
                 });
-            let (position, [yaw, pitch, bank]) = self.presentation.pose(target, self.ai_poses);
+            let (position, [yaw, pitch, bank]) = self.presented_pose(target);
             glows.extend(glow(position, Basis::new(yaw, pitch, bank), offsets));
         }
         glows
     }
-
-    fn apply_ai_devices(&self, id: u32, pose: &mut flight::State) {
-        if let Some((before, after)) = self.ai_devices.get(&id) {
-            apply_devices(pose, before, after, self.presentation.alpha);
-        }
+    /// Starts a new render history from the current state: after a reset and
+    /// once a mission's AI has placed its aircraft.
+    pub fn restart_render(
+        &mut self,
+        player: &flight::State,
+        wings: Option<&crate::ai_wings::AiWings>,
+    ) {
+        self.render = RenderHistory::default();
+        let current = self.snapshot(player, wings);
+        self.render.set_current(current);
+        self.sample_burners(wings);
+    }
+    /// Ends a simulation tick: the current snapshot becomes the previous one.
+    pub fn advance_render(
+        &mut self,
+        player: &flight::State,
+        wings: Option<&crate::ai_wings::AiWings>,
+    ) {
+        let next = self.snapshot(player, wings);
+        self.render.advance(next);
+        self.sample_burners(wings);
+    }
+    /// Retakes the current snapshot after a command changed the scene between
+    /// ticks, so the change shows at once as it always has.
+    pub fn refresh_render(
+        &mut self,
+        player: &flight::State,
+        wings: Option<&crate::ai_wings::AiWings>,
+    ) {
+        let current = self.snapshot(player, wings);
+        self.render.set_current(current);
+    }
+    /// The latest tick's snapshot, uninterpolated.
+    #[allow(dead_code)] // Read by the mission recorder.
+    pub fn render_snapshot(&self) -> &RenderSnapshot {
+        &self.render.current
+    }
+    /// The picture for this frame: the last two snapshots at the frame's tick fraction.
+    pub fn presented(&self) -> RenderSnapshot {
+        crate::render_snapshot::interpolate(
+            self.render.previous.as_ref(),
+            &self.render.current,
+            self.render.alpha,
+        )
+    }
+    fn presented_target(&self, id: u32) -> Option<AircraftPose> {
+        self.render.presented_target(id)
+    }
+    /// Aircraft models loaded for other aircraft, in draw order.
+    pub fn models(&self) -> &[Airframe] {
+        &self.dummy_models
     }
 
     /// Per-model vertices for the dummy formation, with each airborne
@@ -383,72 +569,22 @@ impl Combat {
         camera: &Camera,
         world: &World,
     ) -> Vec<(&Airframe, Vec<f32>, Vec<Contact>)> {
-        self.dummy_models
-            .iter()
-            .enumerate()
-            .map(|(index, model)| {
-                let mut vertices = Vec::new();
-                let mut contacts = Vec::new();
-                let extent = model.visual_extent();
-                for target in self
-                    .state
-                    .targets
-                    .iter()
-                    .filter(|t| t.airborne && Some(t.id) != camera.hidden_target)
-                {
-                    if self
-                        .dummies
-                        .get(target.id.saturating_sub(1) as usize)
-                        .is_none_or(|(i, _)| *i != index)
-                    {
-                        continue;
-                    }
-                    let mut pose = model.start(world);
-                    let (position, angles) = self.presentation.pose(target, self.ai_poses);
-                    pose.position = position;
-                    pose.damage_fraction = target.damage_fraction();
-                    pose.damage_variant = target
-                        .localized_damage
-                        .structural_section
-                        .map(|section| section as usize);
-                    pose.damage_regions = target.localized_damage.fractions(target.initial_hp);
-                    [pose.yaw, pose.pitch, pose.bank] = angles;
-                    pose.gear = 0.;
-                    pose.flaps = 0.;
-                    pose.exhaust = 0.;
-                    pose.bay = 0.;
-                    self.apply_ai_devices(target.id, &mut pose);
-                    let first = vertices.len() / 10;
-                    vertices.extend(model.vertices(&pose, camera, world));
-                    contacts.extend(Contact::new(
-                        first,
-                        vertices.len() / 10,
-                        pose.position,
-                        extent,
-                    ));
-                }
-                for piece in self.state.debris.iter().filter(|p| {
-                    p.owner > 0
-                        && self
-                            .dummies
-                            .get(p.owner as usize - 1)
-                            .is_some_and(|(i, _)| *i == index)
-                }) {
-                    let mut pose = model.start(world);
-                    pose.position = piece.position;
-                    pose.damage_variant = self
-                        .state
-                        .targets
-                        .iter()
-                        .find(|target| target.id == piece.owner)
-                        .and_then(|target| target.localized_damage.structural_section)
-                        .map(|section| section as usize);
-                    [pose.yaw, pose.pitch, pose.bank] = piece.basis.angles();
-                    vertices.extend(model.fragment_vertices(&pose, camera, world));
-                }
-                (model, vertices, contacts)
-            })
-            .collect()
+        crate::render_snapshot::aircraft_batches(
+            &self.presented(),
+            &self.dummy_models,
+            camera,
+            world,
+        )
+    }
+    /// Combat geometry drawn with the ownship airframe over its presented state.
+    pub fn vertices(
+        &self,
+        h: &Airframe,
+        s: &flight::State,
+        camera: &Camera,
+        world: &World,
+    ) -> crate::sim_renderer::CombatGeometry {
+        crate::render_snapshot::combat_geometry(&self.presented(), &self.art, h, s, camera, world)
     }
     /// Populate all six creator wings, retaining their sides for placement.
     pub fn mission_aircraft(
@@ -488,8 +624,8 @@ impl Combat {
                             .cloned()
                             .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
                     })?);
-                self.shapes
-                    .extend(weapon_shapes(self.dummy_configs.last().unwrap(), data));
+                self.art
+                    .add_weapon_shapes(self.dummy_configs.last().unwrap(), data);
                 self.dummy_contrail_offsets.push(h.contrail_offsets());
                 self.dummy_models.push(h);
                 self.dummy_models.len() - 1
@@ -534,8 +670,7 @@ impl Combat {
         self.state.release();
     }
     pub fn reset(&mut self, s: &mut flight::State) -> AppResult<()> {
-        self.presentation = TargetPresentation::default();
-        self.ai_devices.clear();
+        self.render = RenderHistory::default();
         self.ai_burners.clear();
         self.contrails = Default::default();
         self.contrail_sortie = self.contrail_sortie.wrapping_add(1);
@@ -591,11 +726,10 @@ impl Combat {
         for object in &self.airport_objects {
             Self::register_airport_object(&mut self.state, object)?;
         }
+        self.restart_render(s, None);
         Ok(())
     }
     pub fn step(&mut self, s: &mut flight::State, world: &World) -> AppResult<Vec<Event>> {
-        self.presentation
-            .capture(&self.state.targets, self.ai_poses);
         let l = launcher(s);
         self.last_launcher = Some(l);
         if let Some(r) = &mut self.recorder {
@@ -767,15 +901,23 @@ impl Combat {
     }
     pub fn view_pose(&self, target: &live::Target, presented: bool) -> ([f64; 3], [f64; 3]) {
         if presented {
-            self.presentation.pose(target, self.ai_poses)
+            self.presented_pose(target)
         } else {
             (target.position, target.basis.angles())
         }
     }
+    /// Where a target is drawn this frame; one missing from the snapshots is
+    /// drawn where it is.
+    fn presented_pose(&self, target: &live::Target) -> ([f64; 3], [f64; 3]) {
+        self.presented_target(target.id).map_or(
+            (target.position, target_pose(target, self.ai_poses)),
+            |pose| (pose.position, pose.attitude),
+        )
+    }
 
     pub fn target_camera(&self, player: &flight::State) -> Option<Camera> {
         let target = self.state.display_target()?;
-        let (position, _) = self.presentation.pose(target, self.ai_poses);
+        let (position, _) = self.presented_pose(target);
         Some(crate::target_window::camera(player.position, position))
     }
 
@@ -811,7 +953,12 @@ impl Combat {
             let mut pose = player.clone();
             pose.wreck = target.wreck.clone();
             pose.crashed = target.hp <= 0;
-            let (position, angles) = self.presentation.pose(target, self.ai_poses);
+            let presented = self.presented_target(target.id);
+            let (position, angles) = presented
+                .as_ref()
+                .map_or((target.position, target_pose(target, self.ai_poses)), |p| {
+                    (p.position, p.attitude)
+                });
             pose.position = position;
             [pose.yaw, pose.pitch, pose.bank] = angles;
             pose.damage_fraction = target.damage_fraction();
@@ -829,7 +976,9 @@ impl Combat {
             pose.rudder = 0.;
             pose.brake = 0.;
             pose.hook = 0.;
-            self.apply_ai_devices(target.id, &mut pose);
+            if let Some(devices) = presented.and_then(|p| p.devices) {
+                crate::render_snapshot::set_devices(&mut pose, devices);
+            }
             let vertices = model.vertices(&pose, &camera, world);
             crate::target_window::fit(
                 &mut camera,
@@ -1071,162 +1220,6 @@ impl Combat {
                 .unwrap_or_default()
         )
     }
-    pub fn vertices(
-        &self,
-        h: &Airframe,
-        s: &flight::State,
-        camera: &Camera,
-        world: &crate::terrain::World,
-    ) -> CombatGeometry {
-        let mut v = Vec::new();
-        // Targets drawn with the ownship airframe, when no dummy models load.
-        let mut contacts = Vec::new();
-        let extent = h.visual_extent();
-        for t in self
-            .state
-            .targets
-            .iter()
-            .filter(|t| t.airborne && Some(t.id) != camera.hidden_target)
-        {
-            let mut pose = s.clone();
-            pose.wreck = t.wreck.clone();
-            pose.crashed = t.hp <= 0;
-            let (position, angles) = self.presentation.pose(t, self.ai_poses);
-            pose.position = position;
-            pose.damage_fraction = t.damage_fraction();
-            pose.damage_variant = t
-                .localized_damage
-                .structural_section
-                .map(|section| section as usize);
-            pose.damage_regions = t.localized_damage.fractions(t.initial_hp);
-            [pose.yaw, pose.pitch, pose.bank] = angles;
-            pose.exhaust = 0.;
-            pose.gear = 0.;
-            pose.flaps = 0.;
-            pose.elevator = 0.;
-            pose.aileron = 0.;
-            pose.rudder = 0.;
-            pose.brake = 0.;
-            pose.hook = 0.;
-            self.apply_ai_devices(t.id, &mut pose);
-            if self.dummies.is_empty() {
-                let first = v.len() / 10;
-                v.extend(h.vertices(&pose, camera, world));
-                contacts.extend(Contact::new(first, v.len() / 10, pose.position, extent));
-            }
-        }
-        for piece in self
-            .state
-            .debris
-            .iter()
-            .filter(|p| p.owner == 0 || self.dummies.is_empty())
-        {
-            let mut pose = s.clone();
-            // Detached pieces have their own lifecycle, not the observer's wreck state.
-            pose.wreck = None;
-            pose.position = piece.position;
-            if piece.owner != 0 {
-                pose.damage_variant = self
-                    .state
-                    .targets
-                    .iter()
-                    .find(|target| target.id == piece.owner)
-                    .and_then(|target| target.localized_damage.structural_section)
-                    .map(|section| section as usize);
-            }
-            [pose.yaw, pose.pitch, pose.bank] = piece.basis.angles();
-            v.extend(h.fragment_vertices(&pose, camera, world));
-        }
-        // Attached external stores are hidden until the dedicated ordnance
-        // rendering pass. Loadout/flight state and launched projectiles remain
-        // independent of this presentation decision in every camera.
-        for p in &self.state.projectiles {
-            if Some(p.id) == camera.hidden_projectile {
-                continue;
-            }
-            let gun = live::is_gun(p.weapon(self.state.configuration()));
-            if !gun
-                && let Some(shape) = p
-                    .weapon(self.state.configuration())
-                    .shape
-                    .as_ref()
-                    .and_then(|name| self.shapes.get(name))
-            {
-                let right = unit([p.direction[2], 0., -p.direction[0]]);
-                mesh(
-                    &mut v,
-                    shape,
-                    p.position,
-                    right,
-                    tore_sim::attitude::cross(p.direction, right),
-                    p.direction,
-                    &h.palette,
-                );
-            }
-            if gun && p.tracer {
-                tracer(&mut v, p.previous, p.position, camera);
-            } else if !gun {
-                // A visible thin strip marks the actual swept projectile segment.
-                let right = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.).right;
-                let a: Vector = std::array::from_fn(|i| p.previous[i] + right[i] * 0.4);
-                let b: Vector = std::array::from_fn(|i| p.previous[i] - right[i] * 0.4);
-                for pos in [a, b, p.position] {
-                    vertex(&mut v, pos, [1., 0.8, 0.3]);
-                }
-            }
-        }
-        let basis = Basis::new(
-            f64::from(camera.yaw),
-            f64::from(camera.pitch),
-            -f64::from(camera.roll),
-        );
-        for e in &self.state.effects {
-            // Chaff and flares are drawn by countermeasure_renderer.
-            if matches!(
-                e.kind,
-                EffectKind::Launch | EffectKind::Flare | EffectKind::Chaff
-            ) {
-                continue;
-            }
-            let scale = if e.kind == EffectKind::Destroyed {
-                75.
-            } else {
-                15.
-            };
-            let duration = if e.kind == EffectKind::Destroyed {
-                240
-            } else {
-                45
-            };
-            let frame = (usize::from(duration - e.ticks) * 12 / usize::from(duration)).min(11);
-            let frames = if e.kind == EffectKind::DebrisImpact {
-                &self.ground_impacts
-            } else {
-                &self.explosions
-            };
-            for (xy, color) in &frames[frame] {
-                for d in [
-                    [0., 0.],
-                    [1. / 20., 0.],
-                    [0., 1. / 20.],
-                    [0., 1. / 20.],
-                    [1. / 20., 0.],
-                    [1. / 20., 1. / 20.],
-                ] {
-                    let pos: Vector = std::array::from_fn(|i| {
-                        e.position[i]
-                            + basis.right[i] * f64::from(xy[0] + d[0]) * scale
-                            + basis.up[i] * f64::from(xy[1] + d[1]) * scale
-                    });
-                    vertex(&mut v, pos, *color);
-                }
-            }
-        }
-        CombatGeometry {
-            vertices: v,
-            contacts,
-        }
-    }
 }
 
 pub(crate) fn apply_startup_weapon_state(state: &mut live::State) {
@@ -1239,133 +1232,6 @@ pub(crate) fn apply_startup_weapon_state(state: &mut live::State) {
         state.selected = index;
     }
     state.armed = true;
-}
-fn effect_frames(
-    pic: &Pic,
-    base: &[[u8; 3]; 256],
-    cell_height: usize,
-) -> Vec<Vec<([f32; 2], [f32; 3])>> {
-    let mut palette = *base;
-    palette[..pic.palette.len()].copy_from_slice(&pic.palette);
-    (0..12)
-        .map(|frame| {
-            let mut cells = Vec::new();
-            for y in 0..20 {
-                for x in 0..20 {
-                    let index = pic.pixels[(frame / 3 * cell_height + y * cell_height / 20)
-                        * pic.width
-                        + frame % 3 * 80
-                        + x * 80 / 20];
-                    if index != 255 {
-                        cells.push((
-                            [x as f32 / 20. - 0.5, 0.5 - y as f32 / 20.],
-                            palette[index as usize].map(|v| f32::from(v) / 255.),
-                        ));
-                    }
-                }
-            }
-            cells
-        })
-        .collect()
-}
-fn mesh(
-    out: &mut Vec<f32>,
-    shape: &Shape,
-    position: Vector,
-    right: Vector,
-    up: Vector,
-    forward: Vector,
-    palette: &[[u8; 3]; 256],
-) {
-    for face in &shape.faces {
-        // These are texture-only SH faces (including the missile exhaust
-        // sheets). Palette index zero is not an opaque substitute for them.
-        // Keep them omitted until the weapon texture/animation path is decoded.
-        if matches!(face.subtype, 0x4c | 0x5c | 0x6c | 0x7c) {
-            continue;
-        }
-        for i in 1..face.positions.len() - 1 {
-            for j in [0, i, i + 1] {
-                let q = face.positions[j];
-                let pos = std::array::from_fn(|k| {
-                    position[k]
-                        + (right[k] * f64::from(q[0])
-                            + up[k] * f64::from(q[2])
-                            + forward[k] * f64::from(q[1]))
-                            / 3.
-                });
-                vertex(
-                    out,
-                    pos,
-                    palette[face.colors[j] as usize].map(|c| f32::from(c) / 255.),
-                );
-                let layer = out.len() - 5;
-                out[layer] = -1.;
-            }
-        }
-    }
-}
-/// Camera-facing luminous ribbon over the actual swept gun segment.
-fn tracer(out: &mut Vec<f32>, previous: Vector, position: Vector, camera: &Camera) {
-    let segment: Vector = std::array::from_fn(|i| position[i] - previous[i]);
-    if tore_sim::attitude::dot(segment, segment) < 1e-12 {
-        return;
-    }
-    let view: Vector = std::array::from_fn(|i| f64::from(camera.position[i]) - position[i]);
-    let cross = tore_sim::attitude::cross(segment, view);
-    let (start, ribbon, side) = if tore_sim::attitude::dot(cross, cross)
-        > 0.25 * tore_sim::attitude::dot(view, view).max(1e-12)
-    {
-        (previous, segment, unit(cross))
-    } else {
-        // Viewed along its path, retain a small glow instead of collapsing
-        // the ribbon into a line with zero screen area.
-        let basis = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.);
-        (
-            std::array::from_fn(|i| position[i] - basis.up[i] * 0.25),
-            basis.up.map(|v| v * 0.5),
-            basis.right,
-        )
-    };
-    for [along, across] in [
-        [0., -1.],
-        [1., -1.],
-        [1., 1.],
-        [0., -1.],
-        [1., 1.],
-        [0., 1.],
-    ] {
-        let pos: Vector =
-            std::array::from_fn(|i| start[i] + ribbon[i] * along + side[i] * across * 1.2);
-        out.extend([
-            pos[0] as f32,
-            pos[1] as f32,
-            pos[2] as f32,
-            along as f32,
-            across as f32,
-            -8.,
-            1.,
-            1.,
-            1.,
-            -1.,
-        ]);
-    }
-}
-
-fn vertex(out: &mut Vec<f32>, pos: Vector, color: [f32; 3]) {
-    // Trailing -1 opts out of the weather palette: this color is already resolved.
-    out.extend([
-        pos[0] as f32,
-        pos[1] as f32,
-        pos[2] as f32,
-        0.,
-        0.,
-        -6., // Emissive effect; mesh() opts solid weapon bodies into lighting.
-        color[0],
-        color[1],
-        color[2],
-        -1.,
-    ]);
 }
 
 /// Uses the same imported configuration, flight state, trigger host, movement and
@@ -1994,48 +1860,6 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
 mod tests {
     use super::*;
     #[test]
-    fn ai_render_devices_follow_simulation_and_interpolate() {
-        let mut pose =
-            crate::flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
-        let before = [1., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.];
-        let after = [0., 0., 1., 1., 1., 1., 0.4, -0.4, 0.2, 400., 1.];
-        apply_devices(&mut pose, &before, &after, 0.);
-        assert_eq!((pose.gear, pose.flaps), (1., 1.));
-        apply_devices(&mut pose, &before, &after, 0.25);
-        assert_eq!(
-            (pose.gear, pose.flaps, pose.brake, pose.speed),
-            (0.75, 0.75, 0.25, 100.)
-        );
-        assert_eq!(
-            (pose.elevator, pose.aileron, pose.rudder),
-            (0.1, -0.1, 0.05)
-        );
-        apply_devices(&mut pose, &before, &after, 1.);
-        assert_eq!((pose.gear, pose.flaps), (0., 0.));
-    }
-
-    #[test]
-    fn tracer_ribbon_is_finite_camera_facing_and_visible_end_on() {
-        let mut camera = Camera::new();
-        camera.position = [0., 0., -100.];
-        camera.yaw = 0.;
-        camera.pitch = 0.;
-        for end in [[20., 0., 0.], [0., 0., 20.]] {
-            let mut output = Vec::new();
-            tracer(&mut output, [0.; 3], end, &camera);
-            assert_eq!(output.len(), 60);
-            assert!(output.iter().all(|v| v.is_finite()));
-            let points: Vec<[f32; 2]> = output.chunks_exact(10).map(|v| [v[0], v[1]]).collect();
-            let a = [points[1][0] - points[0][0], points[1][1] - points[0][1]];
-            let b = [points[2][0] - points[0][0], points[2][1] - points[0][1]];
-            assert!((a[0] * b[1] - a[1] * b[0]).abs() > 0.1);
-            assert!(output.chunks_exact(10).all(|v| v[5] == -8.));
-        }
-        let mut output = Vec::new();
-        tracer(&mut output, [0.; 3], [0.; 3], &camera);
-        assert!(output.is_empty());
-    }
-    #[test]
     fn fire_requires_unmodified_press_and_release_after_interruption() {
         let mut f = FireInput::default();
         f.space(true, false, true);
@@ -2053,43 +1877,12 @@ mod tests {
         f.space(true, false, false);
         assert!(f.held);
     }
-    #[test]
-    fn palette_mesh_does_not_turn_texture_only_exhaust_into_solid_faces() {
-        let face = tore_formats::shape::Face {
-            fog: tore_formats::shape::FogMode::Enabled,
-            positions: vec![[0., 0., 0.], [3., 0., 0.], [0., 3., 0.]],
-            colors: vec![1; 3],
-            uv: vec![],
-            texture: "SYNTHETIC.PIC".into(),
-            subtype: 0x61,
-            normal: None,
-            address: 0,
-        };
-        let mut exhaust = face.clone();
-        exhaust.subtype = 0x4c;
-        let shape = Shape {
-            lines: vec![],
-            faces: vec![face, exhaust],
-            state_words: Default::default(),
-        };
-        let mut out = vec![];
-        mesh(
-            &mut out,
-            &shape,
-            [0.; 3],
-            [1., 0., 0.],
-            [0., 1., 0.],
-            [0., 0., 1.],
-            &[[255; 3]; 256],
-        );
-        // One triangle of ten-float vertices; the exhaust face is omitted.
-        assert_eq!(out.len(), 30);
-    }
 }
 
 #[cfg(test)]
 mod ai_pose_tests {
     use super::*;
+    use crate::render_snapshot::blend;
     use tore_formats::aircraft::AircraftId;
     use tore_sim::{
         combat::missiles::{TargetRole, seeker::Heat},
@@ -2124,19 +1917,28 @@ mod ai_pose_tests {
         }
     }
 
+    /// A target's drawn pose as a snapshot records it.
+    fn drawn(t: &live::Target) -> AircraftPose {
+        AircraftPose {
+            id: t.id,
+            position: t.position,
+            attitude: target_pose(t, true),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn formation_rendering_shares_the_camera_tick_fraction() {
         // A fixed slot must stay fixed at every render fraction, including
         // frames without a simulation tick. 800 ft/s used to produce a
         // 6.67 ft (2.03 m) sawtooth when only the camera was interpolated.
         for turning in [false, true] {
-            let mut history = TargetPresentation::default();
             let mut t = target([0., 0., 800.], Basis::new(0., 0., 0.));
             let mut camera_before = [0.; 3];
             for tick in 0..240 {
                 let offset = [512., 0., -512.];
                 t.position = std::array::from_fn(|i| camera_before[i] + offset[i]);
-                history.capture(std::slice::from_ref(&t), true);
+                let previous = drawn(&t);
                 let heading = if turning { tick as f64 * 0.001 } else { 0. };
                 let camera_after: Vector = std::array::from_fn(|i| {
                     camera_before[i] + Basis::new(heading, 0., 0.).forward[i] * 800. / 120.
@@ -2145,21 +1947,19 @@ mod ai_pose_tests {
                 t.basis = Basis::new(heading, 0.1, 0.3);
                 let authoritative = t.position;
                 for alpha in [0., 0.13, 0.5, 0.91, 1.] {
-                    history.alpha = alpha;
-                    let (position, angles) = history.pose(&t, true);
+                    let pose = blend(Some(&previous), &drawn(&t), alpha);
                     for i in 0..3 {
                         let camera =
                             camera_before[i] + (camera_after[i] - camera_before[i]) * alpha;
-                        assert!((position[i] - camera - offset[i]).abs() < 1e-9);
+                        assert!((pose.position[i] - camera - offset[i]).abs() < 1e-9);
                     }
-                    assert!(angles.iter().all(|a| a.is_finite()));
+                    assert!(pose.attitude.iter().all(|a| a.is_finite()));
                     assert_eq!(t.position, authoritative);
                 }
                 camera_before = camera_after;
             }
-            history = TargetPresentation::default();
             assert_eq!(
-                history.pose(&t, true).0,
+                blend(None, &drawn(&t), 0.5).position,
                 t.position,
                 "restart must discard history"
             );
@@ -2168,19 +1968,21 @@ mod ai_pose_tests {
 
     #[test]
     fn target_presentation_blends_attitude_and_keeps_new_targets_current() {
-        let mut history = TargetPresentation::default();
         let mut t = target([0., 0., 800.], Basis::new(359_f64.to_radians(), 0., 0.));
-        history.capture(std::slice::from_ref(&t), true);
+        let previous = drawn(&t);
         t.basis = Basis::new(1_f64.to_radians(), 0., 0.);
-        history.alpha = 0.5;
-        let (_, angles) = history.pose(&t, true);
+        let pose = blend(Some(&previous), &drawn(&t), 0.5);
         assert!(
-            angles[0].sin().abs() < 1e-9,
+            pose.attitude[0].sin().abs() < 1e-9,
             "heading must take the short path"
         );
         t.id = 2;
         t.position = [100.; 3];
-        assert_eq!(history.pose(&t, true), (t.position, t.basis.angles()));
+        let pose = blend(None, &drawn(&t), 0.5);
+        assert_eq!(
+            (pose.position, pose.attitude),
+            (t.position, t.basis.angles())
+        );
     }
 
     /// The fixture rule is unchanged with AI poses disabled: heading from the
@@ -2219,12 +2021,13 @@ mod ai_pose_tests {
 #[cfg(test)]
 mod render_hash_tests {
     use super::*;
-    use crate::{damage_art::DamageArt, sim_renderer::Contact};
+    use crate::{damage_art::DamageArt, render_snapshot::combat_geometry};
     use tore_formats::{
         aircraft::AircraftId,
         shape::{Face, FogMode, Line, Shape},
         weapons::Weapon,
     };
+    use tore_sim::attitude::unit;
     use tore_sim::{
         combat::{
             FallState,
@@ -2478,14 +2281,14 @@ mod render_hash_tests {
     fn combat(models: Vec<Airframe>, dummies: Vec<(usize, Vector)>) -> Combat {
         Combat {
             state: state(),
-            smoke_art: Pic {
-                width: 1,
-                height: 1,
-                pixels: vec![0],
-                mask: vec![true],
-                palette: Vec::new(),
-                glyphs: Vec::new(),
-            },
+            art: CombatArt::synthetic(
+                BTreeMap::from([
+                    ("SYNMSL.SH".to_string(), missile_shape(0)),
+                    ("AIMSL.SH".to_string(), missile_shape(1)),
+                ]),
+                frames(1),
+                frames(2),
+            ),
             contrail_offsets: Vec::new(),
             contrail_sortie: 0,
             contrails: Default::default(),
@@ -2495,8 +2298,7 @@ mod render_hash_tests {
             ai_poses: true,
             clean_recording: false,
             initial_ammo: None,
-            presentation: TargetPresentation::default(),
-            ai_devices: BTreeMap::new(),
+            render: RenderHistory::default(),
             ai_burners: Default::default(),
             dummies,
             mission_spawns: None,
@@ -2507,13 +2309,6 @@ mod render_hash_tests {
             airport_objects: Vec::new(),
             recorder: None,
             last_launcher: None,
-            shapes: BTreeMap::from([
-                ("SYNMSL.SH".to_string(), missile_shape(0)),
-                ("AIMSL.SH".to_string(), missile_shape(1)),
-            ]),
-            escape_art: None,
-            explosions: frames(1),
-            ground_impacts: frames(2),
         }
     }
 
@@ -2945,21 +2740,36 @@ mod render_hash_tests {
         )
     }
 
-    /// Presents the scene at one tick fraction, as live flight would.
-    fn load(combat: &mut Combat, scene: &Scene, alpha: f64, ai_poses: bool) {
+    /// Presents the scene at one tick fraction, as live flight would: the
+    /// previous and current tick's snapshots, each aircraft's devices as the
+    /// AI simulated them on those ticks, and the frame's fraction.
+    fn load(
+        combat: &mut Combat,
+        scene: &Scene,
+        alpha: f64,
+        ai_poses: bool,
+        player: &flight::State,
+    ) {
         combat.ai_poses = ai_poses;
-        combat.presentation = TargetPresentation::default();
-        combat.presentation.capture(&scene.previous, ai_poses);
-        combat.presentation.alpha = alpha;
-        combat.ai_devices = scene
-            .devices
-            .iter()
-            .map(|&(id, before, after)| (id, (before, after)))
-            .collect();
+        combat.render = RenderHistory::default();
+        combat.state.targets.clone_from(&scene.previous);
+        let mut previous = combat.snapshot(player, None);
         combat.state.targets.clone_from(&scene.current);
         combat.state.projectiles.clone_from(&scene.projectiles);
         combat.state.effects.clone_from(&scene.effects);
         combat.state.debris.clone_from(&scene.debris);
+        let mut current = combat.snapshot(player, None);
+        for &(id, before, after) in &scene.devices {
+            for (snapshot, devices) in [(&mut previous, before), (&mut current, after)] {
+                if let Some(pose) = snapshot.targets.iter_mut().find(|pose| pose.id == id) {
+                    pose.devices = Some(devices);
+                }
+            }
+        }
+        combat.render = RenderHistory::default();
+        combat.render.set_current(previous);
+        combat.render.advance(current);
+        combat.present_targets(alpha);
     }
 
     #[test]
@@ -2976,13 +2786,14 @@ mod render_hash_tests {
         let mut drawn = [0; 3];
         for ai_poses in [true, false] {
             for alpha in [0., 0.37, 1.] {
-                load(&mut with_models, &scene, alpha, ai_poses);
-                load(&mut fixture, &scene, alpha, ai_poses);
+                load(&mut with_models, &scene, alpha, ai_poses, &player);
+                load(&mut fixture, &scene, alpha, ai_poses, &player);
                 for target in &scene.current {
                     let (position, angles) = with_models.view_pose(target, true);
                     hashes[3].doubles(&position);
                     hashes[3].doubles(&angles);
                 }
+                let [modelled, fixtures] = [&with_models, &fixture].map(Combat::presented);
                 for world in &worlds {
                     for camera in cameras() {
                         for (model, vertices, contacts) in
@@ -2993,11 +2804,25 @@ mod render_hash_tests {
                             hashes[0].contacts(&contacts);
                             drawn[0] += vertices.len();
                         }
-                        let geometry = fixture.vertices(&ownship, &player, &camera, world);
+                        let geometry = combat_geometry(
+                            &fixtures,
+                            &fixture.art,
+                            &ownship,
+                            &player,
+                            &camera,
+                            world,
+                        );
                         hashes[1].floats(&geometry.vertices);
                         hashes[1].contacts(&geometry.contacts);
                         drawn[1] += geometry.vertices.len();
-                        let geometry = with_models.vertices(&ownship, &player, &camera, world);
+                        let geometry = combat_geometry(
+                            &modelled,
+                            &with_models.art,
+                            &ownship,
+                            &player,
+                            &camera,
+                            world,
+                        );
                         hashes[2].floats(&geometry.vertices);
                         hashes[2].contacts(&geometry.contacts);
                         drawn[2] += geometry.vertices.len();
@@ -3008,8 +2833,8 @@ mod render_hash_tests {
         let art = escape_art();
         let pilots = pilots();
         for camera in cameras() {
-            hashes[4].floats(&art.vertices(
-                pilots.iter(),
+            hashes[4].floats(&art.vertices_for(
+                pilots.iter().map(|p| (p.position, p.heading, p.phase)),
                 &ownship.palette,
                 camera.position.map(f64::from),
             ));
@@ -3017,5 +2842,219 @@ mod render_hash_tests {
         assert!(drawn.iter().all(|&floats| floats > 10_000), "{drawn:?}");
         let hashes = hashes.map(|hash| hash.0);
         assert_eq!(hashes, HASHES, "drawn output changed: {hashes:#018x?}");
+    }
+
+    #[test]
+    fn snapshots_route_each_aircraft_and_piece_to_the_model_that_draws_it() {
+        use crate::render_snapshot::Draw;
+        let player = player();
+        let mut with_models = combat(models(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
+        let scene = scene(with_models.state.configuration());
+        load(&mut with_models, &scene, 0.5, true, &player);
+        let snapshot = with_models.render_snapshot();
+        let draw = |id| snapshot.target(id).unwrap().draw;
+        assert_eq!(draw(1), Draw::Model(AircraftId::F18));
+        assert_eq!(draw(2), Draw::Model(AircraftId::Rafale));
+        assert_eq!(draw(3), Draw::Model(AircraftId::F14));
+        assert_eq!(draw(20), Draw::Hidden, "no model slot");
+        assert_eq!(
+            snapshot.models,
+            [AircraftId::F18, AircraftId::Rafale, AircraftId::F14]
+        );
+        let debris: Vec<_> = snapshot
+            .debris
+            .iter()
+            .map(|piece| (piece.owner, piece.draw, piece.variant))
+            .collect();
+        assert_eq!(
+            debris,
+            [
+                (0, Draw::Ownship, player.damage_variant),
+                (1, Draw::Model(AircraftId::F18), None),
+                (2, Draw::Model(AircraftId::Rafale), Some(3)),
+                (4, Draw::Model(AircraftId::F18), Some(0)),
+                (20, Draw::Hidden, Some(3)),
+                (99, Draw::Hidden, None),
+            ]
+        );
+        let mut fixture = combat(Vec::new(), Vec::new());
+        load(&mut fixture, &scene, 0.5, true, &player);
+        let snapshot = fixture.render_snapshot();
+        assert!(snapshot.targets.iter().all(|t| t.draw == Draw::Ownship));
+        assert!(snapshot.debris.iter().all(|p| p.draw == Draw::Ownship));
+        assert_eq!(snapshot.player.id, 0);
+    }
+
+    /// Fixture targets drawn from a snapshot match the rule they were drawn
+    /// with before snapshots existed: a copy of the presented player state
+    /// with the target's pose, damage and crash flag, devices stowed. The
+    /// player states cover afterburner, dry, engine off, no fuel and a
+    /// crashed player whose afterburner switch is still on.
+    #[test]
+    fn fixture_targets_keep_the_player_copy_rule() {
+        let ownship = hornet_airframe(true);
+        let world = crate::terrain::tests::world();
+        let mut fixture = combat(Vec::new(), Vec::new());
+        let scene = scene(fixture.state.configuration());
+        fixture.state.targets.clone_from(&scene.current);
+        let mut states = Vec::new();
+        for case in 0..6 {
+            let mut s = player();
+            s.throttle = 1.;
+            match case {
+                1 => s.burner = false,
+                2 => s.engine = false,
+                3 => s.fuel = 0.,
+                4 => s.crashed = true,
+                5 => s.throttle = 0.5,
+                _ => {}
+            }
+            states.push(s);
+        }
+        assert!(states[0].afterburner_active() && !states[4].afterburner_active());
+        for s in &states {
+            fixture.restart_render(s, None);
+            let snapshot = fixture.presented();
+            for camera in cameras() {
+                let mut expected = Vec::new();
+                for t in scene
+                    .current
+                    .iter()
+                    .filter(|t| t.airborne && Some(t.id) != camera.hidden_target)
+                {
+                    let mut pose = s.clone();
+                    pose.wreck = t.wreck.clone();
+                    pose.crashed = t.hp <= 0;
+                    pose.position = t.position;
+                    pose.damage_fraction = t.damage_fraction();
+                    pose.damage_variant = t
+                        .localized_damage
+                        .structural_section
+                        .map(|section| section as usize);
+                    pose.damage_regions = t.localized_damage.fractions(t.initial_hp);
+                    [pose.yaw, pose.pitch, pose.bank] = target_pose(t, fixture.ai_poses);
+                    pose.exhaust = 0.;
+                    pose.gear = 0.;
+                    pose.flaps = 0.;
+                    pose.elevator = 0.;
+                    pose.aileron = 0.;
+                    pose.rudder = 0.;
+                    pose.brake = 0.;
+                    pose.hook = 0.;
+                    expected.extend(ownship.vertices(&pose, &camera, &world));
+                }
+                let drawn =
+                    combat_geometry(&snapshot, &fixture.art, &ownship, s, &camera, &world).vertices;
+                assert!(!expected.is_empty());
+                assert_eq!(drawn, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn devices_hold_once_nothing_simulates_the_aircraft() {
+        let player = player();
+        let mut combat = combat(models(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
+        combat.state.targets = scene(combat.state.configuration()).current;
+        combat.restart_render(&player, None);
+        let devices = |combat: &Combat| combat.render_snapshot().target(1).unwrap().devices;
+        assert_eq!(devices(&combat), None);
+        let last = [0.5; crate::render_snapshot::DEVICES];
+        combat
+            .render
+            .current
+            .targets
+            .iter_mut()
+            .find(|pose| pose.id == 1)
+            .unwrap()
+            .devices = Some(last);
+        combat.advance_render(&player, None);
+        assert_eq!(devices(&combat), Some(last));
+        combat.restart_render(&player, None);
+        assert_eq!(devices(&combat), None, "a restart forgets them");
+    }
+
+    /// A replay rebuilds the player's aircraft from snapshots alone and draws
+    /// exactly what live flight draws from the presented flight state.
+    #[test]
+    fn the_player_round_trips_through_snapshots() {
+        use crate::render_snapshot::{interpolate, pose_state};
+        let ownship = hornet_airframe(true);
+        let world = crate::terrain::tests::world();
+        let template =
+            flight::State::new(&flight::animation_tests::profile(), [0., 5000., 0.]).unwrap();
+        let mut combat = combat(Vec::new(), Vec::new());
+        let scene = scene(combat.state.configuration());
+        combat.state.targets.clone_from(&scene.current);
+        combat.state.projectiles.clone_from(&scene.projectiles);
+        combat.state.effects.clone_from(&scene.effects);
+        combat.state.debris.clone_from(&scene.debris);
+        let capacity = combat.state.configuration().damage_capacity;
+        for case in 0..8 {
+            let mut previous = player();
+            previous.position = [0., 5000., 2000.];
+            [previous.yaw, previous.pitch, previous.bank] = [0.1, 0., 0.2];
+            previous.velocity = [10., 0., 700.];
+            let mut current = previous.clone();
+            current.position = [30., 5010., 2100.];
+            [current.yaw, current.pitch, current.bank] = [0.2, 0.05, 0.4];
+            current.velocity = [20., 5., 710.];
+            [current.gear, current.flaps, current.exhaust] = [0.4, 0.2, 0.6];
+            [current.elevator, current.aileron, current.rudder] = [-0.1, 0.3, -0.2];
+            let mut hp = capacity / 5;
+            match case {
+                1 => {
+                    current.burner = false;
+                    [previous.throttle, current.throttle] = [0.5, 0.6];
+                }
+                2 => current.engine = false,
+                3 => hp = 0,
+                4 | 5 | 7 => {
+                    current.crashed = true;
+                    let mut wreck = tore_sim::wreck::Wreck::new(0, 9, [0.; 3]);
+                    if case == 5 {
+                        wreck.phase = tore_sim::wreck::Phase::Grounded;
+                    }
+                    current.wreck = Some(wreck);
+                }
+                _ => {}
+            }
+            // Afterburner lit, and still switched on after a crash.
+            if matches!(case, 6 | 7) {
+                [previous.throttle, current.throttle] = [0.99, 1.];
+            }
+            assert_eq!(current.afterburner_active(), case == 6);
+            // Damage as the combat step leaves it on the flight state.
+            combat
+                .state
+                .preview_localized_damage(DamageSection::LeftWing, 0.8);
+            combat.state.player_hp = hp;
+            for s in [&mut previous, &mut current] {
+                s.damage_fraction = (1. - f64::from(hp) / f64::from(capacity)).clamp(0., 1.);
+                s.damage_variant = combat
+                    .state
+                    .player_damage_section()
+                    .map(|section| section as usize);
+                s.damage_regions = combat.state.player_damage_regions();
+            }
+            let snapshots = [&previous, &current].map(|s| combat.snapshot(s, None));
+            for alpha in [0., 0.37, 1.] {
+                let presented = current.presented(&previous, alpha);
+                let frame = interpolate(Some(&snapshots[0]), &snapshots[1], alpha);
+                let rebuilt = pose_state(&template, &frame.player);
+                for camera in cameras() {
+                    assert_eq!(
+                        ownship.vertices(&rebuilt, &camera, &world),
+                        ownship.vertices(&presented, &camera, &world),
+                        "case {case} at {alpha}"
+                    );
+                    // Fixtures and the player's debris copy the player state.
+                    let [replayed, live] = [&rebuilt, &presented].map(|s| {
+                        combat_geometry(&frame, &combat.art, &ownship, s, &camera, &world).vertices
+                    });
+                    assert_eq!(replayed, live, "fixtures, case {case} at {alpha}");
+                }
+            }
+        }
     }
 }

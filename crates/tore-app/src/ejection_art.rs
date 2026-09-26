@@ -1,7 +1,7 @@
 //! Imported pilot/seat/chute poses. Never executes the SH module.
 use std::collections::BTreeMap;
 use tore_formats::{Pic, shape::Shape};
-use tore_sim::ejection::{Escape, Phase};
+use tore_sim::ejection::Phase;
 
 pub struct Art {
     pub atlas: Pic,
@@ -94,27 +94,28 @@ impl Art {
             regions,
         }
     }
-    pub fn vertices<'a>(
+    /// Pilot, seat and parachute vertices for each (position, heading, phase).
+    pub fn vertices_for(
         &self,
-        pilots: impl Iterator<Item = &'a Escape>,
+        pilots: impl IntoIterator<Item = ([f64; 3], f64, Phase)>,
         palette: &[[u8; 3]; 256],
         camera: [f64; 3],
     ) -> Vec<f32> {
         let mut out = Vec::new();
-        for pilot in pilots {
-            let pose = match pilot.phase {
+        for (position, heading, phase) in pilots {
+            let pose = match phase {
                 Phase::Seat => 0,
                 Phase::Freefall | Phase::Impact => 1,
                 Phase::Inflating => 2,
                 Phase::Parachute | Phase::Landed => 4,
             };
-            let (sin, cos) = (pilot.heading as f32).sin_cos();
+            let (sin, cos) = (heading as f32).sin_cos();
             for line in &self.poses[pose].lines {
                 let points = line.positions.map(|[x, z, y]| {
                     [
-                        pilot.position[0] + f64::from(x * cos + z * sin) / 3.,
-                        pilot.position[1] + f64::from(y) / 3.,
-                        pilot.position[2] + f64::from(-x * sin + z * cos) / 3.,
+                        position[0] + f64::from(x * cos + z * sin) / 3.,
+                        position[1] + f64::from(y) / 3.,
+                        position[2] + f64::from(-x * sin + z * cos) / 3.,
                     ]
                 });
                 let direction = std::array::from_fn(|i| points[1][i] - points[0][i]);
@@ -157,9 +158,9 @@ impl Art {
                         };
                         let color = palette[face.colors[j] as usize].map(|v| f32::from(v) / 255.);
                         out.extend_from_slice(&[
-                            pilot.position[0] as f32 + x * cos + z * sin,
-                            pilot.position[1] as f32 + y,
-                            pilot.position[2] as f32 - x * sin + z * cos,
+                            position[0] as f32 + x * cos + z * sin,
+                            position[1] as f32 + y,
+                            position[2] as f32 - x * sin + z * cos,
                             uv[0],
                             uv[1],
                             if face.uv.is_empty() { -1. } else { -2. },
