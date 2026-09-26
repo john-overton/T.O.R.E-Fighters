@@ -3730,7 +3730,7 @@ impl ApplicationHandler for App {
 }
 /// What the headless AI probe scripts for the human leader
 /// (`--maneuver takeoff`, `--probe-wing-size`, `--probe-wing-order`,
-/// `--probe-player-home`). Development harness only.
+/// `--probe-player-home`, `--probe-attack`). Development harness only.
 #[derive(Clone, Debug, Default)]
 struct ProbeScript {
     /// Take off from the ground start, climb and cruise on the autopilot.
@@ -3746,20 +3746,53 @@ struct ProbeScript {
     home: Option<(u64, u64)>,
     /// Ticks between trace lines for the player's wing, 0 for none.
     trace_ticks: u64,
+    /// The leader fires its own weapons from this tick.
+    attack: Option<ProbeAttack>,
+}
+
+/// `--probe-attack TICK[:REPEAT_SECONDS]`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProbeAttack {
+    /// First tick on which the leader looks for a shot.
+    from: u64,
+    /// Ticks from one shot to the next attack, 0 for a single attack.
+    repeat: u64,
 }
 
 impl ProbeScript {
-    /// `TICK:bug-out` or `TICK:land-selected`.
+    /// `TICK:bug-out`, `TICK:land-selected`, `TICK:attack-on-contact` or
+    /// `TICK:engage-my-target`.
     fn parse_order(text: &str) -> AppResult<(u64, tore_sim::ai::wing::PlayerOrder)> {
         use tore_sim::ai::wing::PlayerOrder;
-        let usage = "--probe-wing-order needs TICK:bug-out or TICK:land-selected";
+        let usage = "--probe-wing-order needs TICK:bug-out, TICK:land-selected, TICK:attack-on-contact or TICK:engage-my-target";
         let (tick, order) = text.split_once(':').ok_or(usage)?;
         let order = match order {
             "bug-out" => PlayerOrder::BugOut,
             "land-selected" => PlayerOrder::LandAtSelected,
+            "attack-on-contact" => PlayerOrder::AttackOnContact,
+            "engage-my-target" => PlayerOrder::EngageMyTarget,
             _ => return Err(usage.into()),
         };
         Ok((tick.parse()?, order))
+    }
+
+    /// `TICK` for a single attack, or `TICK:REPEAT_SECONDS`.
+    fn parse_attack(text: &str) -> AppResult<ProbeAttack> {
+        let usage = "--probe-attack needs TICK or TICK:REPEAT_SECONDS";
+        let (tick, repeat) = match text.split_once(':') {
+            Some((tick, seconds)) => {
+                let seconds: f64 = seconds.parse().map_err(|_| usage)?;
+                if !(seconds > 0. && seconds <= 3600.) {
+                    return Err("--probe-attack needs 0..3600 repeat seconds".into());
+                }
+                (tick, (seconds * 120.).round().max(1.) as u64)
+            }
+            None => (text, 0),
+        };
+        Ok(ProbeAttack {
+            from: tick.parse().map_err(|_| usage)?,
+            repeat,
+        })
     }
 }
 
@@ -4081,6 +4114,501 @@ impl ProbeWatch {
     }
 }
 
+/// Longest gun burst the scripted leader holds, in ticks.
+const PROBE_BURST_TICKS: u64 = 120;
+/// Ticks a selected missile may go without READY before the scripted leader
+/// changes to the gun, when the gun reaches the target.
+const PROBE_LOCK_TICKS: u64 = 240;
+/// The scripted leader fires the gun with the target this close to the pipper.
+const PROBE_PIPPER_DEG: f64 = 2.;
+
+/// The scripted leader's own weapons for `--probe-attack`, and what the probe
+/// reports about the fight that follows.
+///
+/// `fitted` test harness (agent decision, 2026-09-26), not game behaviour. The
+/// leader uses only the player's own controls, applied between ticks as key and
+/// mouse input is: a scope click designates the nearest hostile aircraft among
+/// the player's current sensor contacts, `]` steps through NAV and the
+/// stations to the chosen weapon, and Space fires. Rule: the weapon is the
+/// longest-reaching air-to-air store (missile or gun) whose employment zone
+/// holds the contact's observed range. A missile is one press once its readout
+/// says READY; after [`PROBE_LOCK_TICKS`] without READY the leader changes to
+/// the gun if the gun reaches. The gun fires while the target sits within
+/// [`PROBE_PIPPER_DEG`] of the HUD's gun pipper, for at most
+/// [`PROBE_BURST_TICKS`]. The flying is left to the rest of the probe script.
+/// After each shot the next attack waits the repeat interval, choosing the
+/// nearest target again; a single attack ends with its first shot.
+struct ProbeAttacker {
+    repeat: u64,
+    /// Tick of the next attack, `None` once a single attack has fired.
+    next: Option<u64>,
+    /// The attack in progress has not yet chosen its target.
+    fresh: bool,
+    /// The attack in progress has given up on missiles.
+    guns: bool,
+    /// The selected missile station and the tick it began waiting for READY.
+    waiting: Option<(usize, u64)>,
+    /// A missile press, released on the next tick.
+    pressed: bool,
+    /// First tick of the gun burst in progress.
+    burst: Option<u64>,
+    /// The leader's scope clicks, `]` presses, trigger presses, missiles,
+    /// gun bursts and gun rounds.
+    clicks: u32,
+    steps: u32,
+    presses: u32,
+    missiles: u32,
+    bursts: u32,
+    rounds: u32,
+    /// Hits on and destructions of AI aircraft by anyone, and hits on the
+    /// player, from the combat events.
+    hits: u32,
+    destroyed: u32,
+    player_damaged: u32,
+    /// Each AI aircraft's engagement gate last tick.
+    neutral: std::collections::BTreeMap<u32, bool>,
+    /// AI aircraft that have perceived an attack, or defended against a missile.
+    attacked: std::collections::BTreeSet<u32>,
+    defending: std::collections::BTreeSet<u32>,
+    /// Decoys the AI aircraft carried at the start.
+    decoys: u32,
+    ejections: u32,
+}
+
+impl ProbeAttacker {
+    fn new(attack: ProbeAttack, combat: &combat::Combat, bridge: &ai_wings::AiWings) -> Self {
+        let state = &combat.state;
+        let stations: Vec<_> = state
+            .configuration()
+            .stations
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let zone = s.weapon.seeker.zones[1];
+                format!(
+                    "{} x{} {}..{} ft{}",
+                    s.weapon.hud_name,
+                    state.rounds(i),
+                    zone.minimum_range,
+                    zone.maximum_range,
+                    if probe_air_to_air(&s.weapon) {
+                        ""
+                    } else {
+                        " (not air to air)"
+                    }
+                )
+            })
+            .collect();
+        println!(
+            "AI probe attack: from=t{} repeat={:.1}s stations=[{}]",
+            attack.from,
+            attack.repeat as f64 / 120.,
+            stations.join(", ")
+        );
+        let actors = bridge.mission().actors();
+        Self {
+            repeat: attack.repeat,
+            next: Some(attack.from),
+            fresh: true,
+            guns: false,
+            waiting: None,
+            pressed: false,
+            burst: None,
+            clicks: 0,
+            steps: 0,
+            presses: 0,
+            missiles: 0,
+            bursts: 0,
+            rounds: 0,
+            hits: 0,
+            destroyed: 0,
+            player_damaged: 0,
+            neutral: actors.iter().map(|a| (a.id(), a.is_neutral())).collect(),
+            attacked: Default::default(),
+            defending: Default::default(),
+            decoys: probe_decoys(bridge),
+            ejections: 0,
+        }
+    }
+
+    /// The player's controls for this tick, applied before it as key and
+    /// mouse input is. One control per tick.
+    fn aim(
+        &mut self,
+        tick: u64,
+        combat: &mut combat::Combat,
+        flight: &flight::State,
+        bridge: &ai_wings::AiWings,
+    ) {
+        use tore_sim::combat::live::{Command, Readiness, is_gun};
+        if std::mem::take(&mut self.pressed) {
+            combat.input.space(false, false, false);
+        }
+        if self.next.is_none_or(|next| tick < next) {
+            return;
+        }
+        let launcher = combat::launcher(flight);
+        if !launcher.alive
+            || flight.escape.is_some()
+            || flight.systems.pilot.dead
+            || combat.state.player_hp <= 0
+        {
+            self.end_burst(tick, combat);
+            return;
+        }
+        let seconds = tick as f64 / 120.;
+        let state = &combat.state;
+        let hostile = |id: u32| {
+            bridge
+                .slot(id)
+                .is_some_and(|s| s.side == tore_sim::ai::launch::Side::Enemy)
+                && state.targets.iter().any(|t| t.id == id && t.hp > 0)
+        };
+        let current = state
+            .designated()
+            .filter(|id| hostile(*id) && state.sensors.contact(*id).is_some());
+        if self.fresh || current.is_none() {
+            let nearest = state
+                .sensors
+                .contacts()
+                .iter()
+                .filter(|c| !c.destroyed && hostile(c.id))
+                .min_by(|a, b| {
+                    a.distance_ft
+                        .total_cmp(&b.distance_ft)
+                        .then(a.id.cmp(&b.id))
+                })
+                .map(|c| (c.id, c.distance_ft));
+            let Some((id, range)) = nearest else {
+                self.end_burst(tick, combat);
+                return;
+            };
+            self.fresh = false;
+            if current != Some(id) {
+                self.end_burst(tick, combat);
+                self.guns = false;
+                self.waiting = None;
+                combat.command(Command::DesignateTarget(id), launcher);
+                self.clicks += 1;
+                println!(
+                    "t={tick} ({seconds:.1}s) attack: designates {} at {range:.0} ft",
+                    probe_label(bridge, id)
+                );
+                return;
+            }
+        }
+        let Some((target, contact)) = combat
+            .state
+            .designated()
+            .and_then(|id| Some((id, *combat.state.sensors.contact(id)?)))
+        else {
+            return;
+        };
+        let range = contact.distance_ft;
+        let station = self
+            .guns
+            .then(|| probe_station(&combat.state, range, true))
+            .flatten()
+            .or_else(|| probe_station(&combat.state, range, false));
+        let Some(station) = station else {
+            self.end_burst(tick, combat);
+            return;
+        };
+        if !combat.state.armed || combat.state.selected != station {
+            self.end_burst(tick, combat);
+            combat.cancel();
+            combat.command(Command::NextSelection, launcher);
+            self.steps += 1;
+            if combat.state.armed && combat.state.selected == station {
+                println!(
+                    "t={tick} ({seconds:.1}s) attack: selects {} at {range:.0} ft",
+                    combat.state.configuration().stations[station]
+                        .weapon
+                        .hud_name
+                );
+            }
+            return;
+        }
+        let ready = combat.state.release_readiness == Readiness::Ready;
+        if is_gun(&combat.state.configuration().stations[station].weapon) {
+            let on = ready && probe_on_pipper(&combat.state, &launcher, station, &contact);
+            match self.burst {
+                Some(from) if !on || tick - from >= PROBE_BURST_TICKS => {
+                    self.end_burst(tick, combat);
+                }
+                Some(_) => {}
+                None if on => {
+                    combat.input.space(false, false, false);
+                    combat.input.space(true, false, false);
+                    self.burst = Some(tick);
+                    self.presses += 1;
+                    println!(
+                        "t={tick} ({seconds:.1}s) attack: gun at {} range={range:.0} ft",
+                        probe_label(bridge, target)
+                    );
+                }
+                None => {}
+            }
+        } else if ready {
+            combat.input.space(false, false, false);
+            combat.input.space(true, false, false);
+            self.pressed = true;
+            self.presses += 1;
+        } else {
+            let since = match self.waiting {
+                Some((waiting, since)) if waiting == station => since,
+                _ => {
+                    self.waiting = Some((station, tick));
+                    tick
+                }
+            };
+            if tick - since >= PROBE_LOCK_TICKS
+                && !self.guns
+                && probe_station(&combat.state, range, true).is_some()
+            {
+                self.guns = true;
+                println!(
+                    "t={tick} ({seconds:.1}s) attack: no {} shot ({}), changes to the gun",
+                    combat.state.configuration().stations[station]
+                        .weapon
+                        .hud_name,
+                    combat.state.release_readiness.label()
+                );
+            }
+        }
+    }
+
+    /// Release a gun burst in progress; the burst counts as this attack's shot.
+    fn end_burst(&mut self, tick: u64, combat: &mut combat::Combat) {
+        if self.burst.take().is_some() {
+            combat.input.space(false, false, false);
+            self.bursts += 1;
+            self.shot(tick);
+        }
+    }
+
+    fn shot(&mut self, tick: u64) {
+        self.next = (self.repeat > 0).then_some(tick + self.repeat);
+        self.fresh = true;
+        self.guns = false;
+        self.waiting = None;
+    }
+
+    /// This tick's combat events, after `Combat::step`.
+    fn events(
+        &mut self,
+        tick: u64,
+        events: &[tore_sim::combat::live::Event],
+        combat: &combat::Combat,
+        bridge: &ai_wings::AiWings,
+    ) {
+        use tore_sim::combat::live::Event;
+        let seconds = tick as f64 / 120.;
+        for event in events {
+            match event {
+                Event::Fired(station) => {
+                    let weapon = &combat.state.configuration().stations[*station].weapon;
+                    if tore_sim::combat::live::is_gun(weapon) {
+                        self.rounds += 1;
+                        continue;
+                    }
+                    self.missiles += 1;
+                    let target = combat.state.designated();
+                    println!(
+                        "t={tick} ({seconds:.1}s) attack: fires {} at {} range={:.0} ft",
+                        weapon.hud_name,
+                        target.map_or("-".into(), |id| probe_label(bridge, id)),
+                        target
+                            .and_then(|id| combat.state.sensors.observation(id))
+                            .map_or(0., |c| c.distance_ft)
+                    );
+                    self.shot(tick);
+                }
+                Event::Hit(id) if bridge.slot(*id).is_some() => self.hits += 1,
+                Event::Destroyed(id) if bridge.slot(*id).is_some() => {
+                    self.destroyed += 1;
+                    println!(
+                        "t={tick} ({seconds:.1}s) destroyed: {}",
+                        probe_label(bridge, *id)
+                    );
+                }
+                Event::PlayerDamaged(_) => self.player_damaged += 1,
+                Event::PlayerDestroyed => {
+                    println!("t={tick} ({seconds:.1}s) destroyed: player");
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// After the AI step: perceived attacks, releases, missile defence and
+    /// ejections.
+    fn observe(&mut self, tick: u64, bridge: &mut ai_wings::AiWings) {
+        let seconds = tick as f64 / 120.;
+        for slot in bridge.slots() {
+            let Some(actor) = bridge.mission().actor(slot.id) else {
+                continue;
+            };
+            if let Some(attack) = actor.perceived_attacks().first()
+                && self.attacked.insert(slot.id)
+            {
+                println!(
+                    "t={tick} ({seconds:.1}s) {} perceives an attack on {} by {}",
+                    slot.label(),
+                    probe_label(bridge, attack.report.defended_id),
+                    attack
+                        .report
+                        .attacker_id
+                        .map_or("an unknown attacker".into(), |id| probe_label(bridge, id))
+                );
+            }
+            let neutral = actor.is_neutral();
+            if self.neutral.insert(slot.id, neutral) == Some(true) && !neutral {
+                println!(
+                    "t={tick} ({seconds:.1}s) {} released to engage",
+                    slot.label()
+                );
+            }
+            if actor.defense_decision().is_some_and(|d| d.motion.is_some())
+                && self.defending.insert(slot.id)
+            {
+                println!(
+                    "t={tick} ({seconds:.1}s) {} defends against a missile",
+                    slot.label()
+                );
+            }
+        }
+        for (_, message, _) in bridge.ejection_events.drain(..) {
+            println!("t={tick} ({seconds:.1}s) {message}");
+            self.ejections += 1;
+        }
+    }
+
+    fn summary(&self, combat: &combat::Combat, flight: &flight::State, bridge: &ai_wings::AiWings) {
+        use tore_sim::ai::launch::Side;
+        let lost = |side: Side| {
+            let slots: Vec<_> = bridge.slots().iter().filter(|s| s.side == side).collect();
+            let down = slots
+                .iter()
+                .filter(|s| bridge.mission().actor(s.id).is_none_or(|a| !a.alive()))
+                .count();
+            format!("{down}/{}", slots.len())
+        };
+        let released = self.neutral.values().filter(|n| !**n).count();
+        println!(
+            "AI probe attack: clicks={} steps={} presses={} missiles={} gun_bursts={} gun_rounds={} player_hits={} player_kills={} hits={} destroyed={} lost_friendly={} lost_enemy={} player_alive={} player_damaged={} ejections={} perceived={} released={released} defending={} decoys_used={}",
+            self.clicks,
+            self.steps,
+            self.presses,
+            self.missiles,
+            self.bursts,
+            self.rounds,
+            combat.state.hits,
+            combat.state.kills,
+            self.hits,
+            self.destroyed,
+            lost(Side::Friendly),
+            lost(Side::Enemy),
+            !flight.crashed && combat.state.player_hp > 0,
+            self.player_damaged,
+            self.ejections,
+            self.attacked.len(),
+            self.defending.len(),
+            self.decoys.saturating_sub(probe_decoys(bridge)),
+        );
+    }
+}
+
+/// A missile with an air-to-air seeker profile, or a gun.
+fn probe_air_to_air(weapon: &tore_formats::weapons::Weapon) -> bool {
+    use tore_sim::combat::missiles::{Profile, TargetRole};
+    tore_sim::combat::live::is_gun(weapon)
+        || Profile::for_weapon(weapon).is_some_and(|p| p.role == TargetRole::Aircraft)
+}
+
+/// The scripted leader's weapon at this range: the longest-reaching loaded
+/// air-to-air station, or gun, whose employment zone holds it.
+fn probe_station(state: &tore_sim::combat::live::State, range_ft: f64, gun: bool) -> Option<usize> {
+    state
+        .configuration()
+        .stations
+        .iter()
+        .enumerate()
+        .filter(|(i, s)| {
+            let zone = s.weapon.seeker.zones[1];
+            state.rounds(*i) > 0
+                && state.ammo[*i] & 0x8000 == 0
+                && probe_air_to_air(&s.weapon)
+                && (!gun || tore_sim::combat::live::is_gun(&s.weapon))
+                && range_ft >= f64::from(zone.minimum_range)
+                && range_ft <= f64::from(zone.maximum_range)
+        })
+        .max_by(|(a, x), (b, y)| {
+            x.weapon.seeker.zones[1]
+                .maximum_range
+                .cmp(&y.weapon.seeker.zones[1].maximum_range)
+                .then(b.cmp(a))
+        })
+        .map(|(i, _)| i)
+}
+
+/// Whether the contact sits within [`PROBE_PIPPER_DEG`] of the gun pipper,
+/// solved as the HUD solves it, and inside the gun's reach.
+fn probe_on_pipper(
+    state: &tore_sim::combat::live::State,
+    launcher: &tore_sim::combat::live::Launcher,
+    station: usize,
+    contact: &tore_sim::sensors::Contact,
+) -> bool {
+    use tore_sim::{
+        combat::{gunsight, missiles},
+        sensors::Channel,
+    };
+    let station = &state.configuration().stations[station];
+    let radar = (contact.channel == Channel::Radar
+        && state.sensors.operating(Channel::Radar)
+        && launcher.radar)
+        .then_some(gunsight::TargetObservation {
+            position: contact.position,
+            velocity: contact.velocity,
+        });
+    let Ok(Some(solution)) = gunsight::solve(&station.weapon, launcher, station.mount, radar)
+    else {
+        return false;
+    };
+    let pipper = missiles::sub(solution.point, launcher.position);
+    let target = missiles::sub(contact.position, launcher.position);
+    let range = missiles::length(target);
+    range <= solution.maximum_range_ft
+        && tore_sim::attitude::dot(pipper, target) / (missiles::length(pipper) * range).max(1.)
+            >= PROBE_PIPPER_DEG.to_radians().cos()
+}
+
+/// Decoys every AI aircraft still carries.
+fn probe_decoys(bridge: &ai_wings::AiWings) -> u32 {
+    bridge
+        .mission()
+        .actors()
+        .iter()
+        .flat_map(|a| a.dispensers())
+        .map(|d| d.count)
+        .sum()
+}
+
+/// "Enemy 1-2" for an AI aircraft, "player" for the human leader.
+fn probe_label(bridge: &ai_wings::AiWings, id: u32) -> String {
+    bridge.slot(id).map_or_else(
+        || {
+            if id == 0 {
+                "player".into()
+            } else {
+                format!("id {id}")
+            }
+        },
+        ai_wings::Slot::label,
+    )
+}
+
 /// Deterministic headless AI probe (`--ai-probe-ticks`).
 ///
 /// It builds the same chain a flown Quick Mission builds: the existing spawner
@@ -4158,6 +4686,12 @@ fn ai_probe_run(
             std::array::from_fn(|i| basis.forward[i] * flight.speed + world.wind()[i]);
     }
     combat.reset(&mut flight)?;
+    if script.attack.is_some() {
+        // A flown mission's weapon startup: the gun selected and armed in the
+        // air, navigation mode on a ground start.
+        combat.apply_startup_weapons();
+        combat.state.armed = parked.is_none();
+    }
     if let Some(ground) = &parked {
         quick_mission::place_on_runway(world, &mut flight, ground, 0)?;
     }
@@ -4265,10 +4799,18 @@ fn ai_probe_run(
         trace: script.trace_ticks,
         ..Default::default()
     };
+    let mut attacker = script.attack.map(|attack| {
+        // As a flown mission does each frame: T and Enter skip friendlies.
+        combat.state.friendlies = bridge.friendly_ids();
+        ProbeAttacker::new(attack, &combat, &bridge)
+    });
     for tick in 0..ticks as u64 {
         let mut keys = flight::PilotInput::default();
         if scripted {
             pilot.fly(tick, &mut flight, &mut keys, world, parked.as_ref(), script);
+        }
+        if let Some(attacker) = &mut attacker {
+            attacker.aim(tick, &mut combat, &flight, &bridge);
         }
         if parked.is_some() {
             flight.step_surface(&keys, |x, z| world.surface(x, z));
@@ -4276,6 +4818,21 @@ fn ai_probe_run(
             flight.step(&keys, |x, z| f64::from(world.height(x as f32, z as f32)));
         }
         let events = combat.step(&mut flight, world)?;
+        if let Some(attacker) = &mut attacker {
+            attacker.events(tick, &events, &combat, &bridge);
+            // What a flown mission does with the same events.
+            for event in &events {
+                use tore_sim::combat::live::Event;
+                match event {
+                    Event::Jolt(jolt) => match jolt.target {
+                        None => flight.jolt_from(jolt.from, jolt.strength),
+                        Some(id) => bridge.jolt(id, jolt.from, jolt.strength),
+                    },
+                    Event::PlayerDestroyed => flight.crashed = true,
+                    _ => {}
+                }
+            }
+        }
         let [x, _, z] = flight.position;
         bridge.update_player_landing(
             &world.airport_scene,
@@ -4307,6 +4864,9 @@ fn ai_probe_run(
             println!("t={tick} order={order:?} reply={:?}", report.message);
         }
         bridge.step(&mut combat.state, &flight, world)?;
+        if let Some(attacker) = &mut attacker {
+            attacker.observe(tick, &mut bridge);
+        }
         let now = combat.state.tick() as f64 / 120.;
         airfield_radio.step(
             now,
@@ -4355,6 +4915,9 @@ fn ai_probe_run(
     println!("AI probe radio: calls={} heard={}", radio.made, radio.heard);
     for line in heard.iter().take(40) {
         println!("  {line}");
+    }
+    if let Some(attacker) = &attacker {
+        attacker.summary(&combat, &flight, &bridge);
     }
     // A single number that changes if any actor's path changes, so two runs can
     // be compared without diffing every coordinate.
@@ -5093,7 +5656,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 probe_script.wing_size = Some(size);
             }
             "--probe-wing-order" => probe_script.orders.push(ProbeScript::parse_order(
-                &args.next().ok_or("--probe-wing-order needs TICK:bug-out or TICK:land-selected")?,
+                &args.next().ok_or("--probe-wing-order needs TICK:ORDER")?,
+            )?),
+            "--probe-attack" => probe_script.attack = Some(ProbeScript::parse_attack(
+                &args.next().ok_or("--probe-attack needs TICK or TICK:REPEAT_SECONDS")?,
             )?),
             "--probe-trace" => {
                 let seconds: f64 = args.next().ok_or("--probe-trace needs seconds")?.parse()?;
@@ -5581,7 +6147,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -5622,6 +6188,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     if ai_probe.is_some() && (capture_terrain.is_some() || snapshot.is_some() || import_only) {
         return Err("--ai-probe-ticks is a headless probe and cannot capture or snapshot".into());
+    }
+    if probe_script.attack.is_some() && (ai_probe.is_none() || ai_roster_probe) {
+        return Err("--probe-attack scripts the leader of an --ai-probe-ticks run".into());
     }
     if ai_wings_enabled && ai_probe.is_none() {
         // The bridge reads the Quick Mission setup screen, so the flag opens it.
@@ -7511,5 +8080,50 @@ mod input_tests {
             airport_reply_audio(&Reply::Cancelled { airport: Some(1) }),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod probe_tests {
+    use super::*;
+    use tore_sim::ai::wing::PlayerOrder;
+
+    #[test]
+    fn probe_attack_takes_a_tick_and_an_optional_repeat() {
+        assert_eq!(
+            ProbeScript::parse_attack("600").unwrap(),
+            ProbeAttack {
+                from: 600,
+                repeat: 0
+            }
+        );
+        assert_eq!(
+            ProbeScript::parse_attack("600:10").unwrap(),
+            ProbeAttack {
+                from: 600,
+                repeat: 1200
+            }
+        );
+        assert_eq!(ProbeScript::parse_attack("0:0.5").unwrap().repeat, 60);
+        for bad in ["", "x", "600:", "600:0", "600:-1", "600:3601", "-1:10"] {
+            assert!(ProbeScript::parse_attack(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn probe_wing_orders_include_the_attack_orders() {
+        assert_eq!(
+            ProbeScript::parse_order("600:attack-on-contact").unwrap(),
+            (600, PlayerOrder::AttackOnContact)
+        );
+        assert_eq!(
+            ProbeScript::parse_order("601:engage-my-target").unwrap(),
+            (601, PlayerOrder::EngageMyTarget)
+        );
+        assert_eq!(
+            ProbeScript::parse_order("9000:bug-out").unwrap(),
+            (9000, PlayerOrder::BugOut)
+        );
+        assert!(ProbeScript::parse_order("600:attack").is_err());
     }
 }

@@ -1055,12 +1055,27 @@ For ground operations, combine it with `--ground-start AIRPORT`,
 `--probe-wing-size 1..5` and `--maneuver takeoff`. Add `--probe-wing-only`
 to omit the other wings. Those two wing options also apply to
 `--launch-quick-mission` for matching creator captures. Schedule an order with
-`--probe-wing-order TICK:land-selected` or `TICK:bug-out`; `--probe-trace SECONDS`
+`--probe-wing-order TICK:land-selected`, `TICK:bug-out`, `TICK:attack-on-contact`
+or `TICK:engage-my-target`; `--probe-trace SECONDS`
 prints each wingman's airfield phase and position. `--probe-player-home FROM:UNTIL`
 flies the scripted leader gear down toward the field during that tick range.
 `--separation 200` or `300` also exercises the expanded enemy-distance choices.
 The scripted leader is only a test harness and can hit terrain on a long cruise.
 [Reproduction and limits](baselines/ground-start.md#whole-wing-ground-start-2026-09-23).
+
+Quick Mission AI holds fire until it perceives an attack, so by default nobody
+fires in these probes. `--probe-attack TICK[:SECONDS]` makes the scripted leader
+attack from that tick with the player's own controls: it clicks the nearest
+hostile aircraft on its scope, steps `]` to the longest-reaching air-to-air
+weapon whose envelope holds the range and fires when the readout says READY.
+It changes to the gun when a missile gets no lock for two seconds, and fires
+the gun only with the target under the pipper. With SECONDS it attacks again
+that long after each shot. The enemy wing is released when it perceives the
+shot; the player's own wingmen follow a human leader and join only when
+ordered, for example with `--probe-wing-order TICK:attack-on-contact`. The probe
+then prints each designation, shot, perceived attack, release, missile
+defence, kill and ejection, and an `AI probe attack:` summary line. Without the
+option the probe is unchanged.
 
 
 ## Formation flight traces
