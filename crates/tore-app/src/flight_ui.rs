@@ -967,56 +967,86 @@ impl FlightUi {
     ) {
         self.notices
             .retain(|(_, at)| at.elapsed() < NOTICE_LIFETIME);
-        let [w, h] = canvas.size.map(f64::from);
-        let layer = (w / 640.).min(h / 480.);
-        let scale = layer * crate::flight_canvas::HUD_SCALE;
-        let lines: Vec<String> = self
-            .notices
-            .iter()
-            .flat_map(|(text, _)| wrap(font, text, (600. * layer / scale) as usize))
-            .collect();
-        let lines = &lines[lines.len().saturating_sub(NOTICE_LINES)..];
-        if lines.is_empty() {
-            return;
-        }
-        let line_height = (font.height + 1) as f64 * scale;
-        // The last line's spacing row sits below its text, inside the margin.
-        let bottom = h - NOTICE_MARGIN * layer + scale;
-        let top = (bottom - lines.len() as f64 * line_height).round();
-        // Glyph pixels become boxes; each screen pixel takes the area covered.
-        let (columns, rows) = (canvas.size[0] as usize, (bottom - top).ceil() as usize + 1);
-        let mut cover = vec![0f64; columns * rows];
-        for (i, line) in lines.iter().enumerate() {
-            let mut x = ((w - text_width(font, line) as f64 * scale) / 2.).round();
-            let y = i as f64 * line_height;
-            for ch in line.bytes() {
-                let glyph = &font.glyphs[ch as usize];
-                for &(gx, gy) in &glyph.pixels {
-                    let (left, up) = (x + gx as f64 * scale, y + gy as f64 * scale);
-                    let (right, down) = (left + scale, up + scale);
-                    for row in up.floor() as usize..(down.ceil() as usize).min(rows) {
-                        let dy = down.min(row as f64 + 1.) - up.max(row as f64);
-                        for column in left.max(0.).floor() as usize
-                            ..(right.ceil().max(0.) as usize).min(columns)
-                        {
-                            let dx = right.min(column as f64 + 1.) - left.max(column as f64);
-                            cover[row * columns + column] += dx * dy;
-                        }
+        draw_messages(
+            canvas,
+            font,
+            hud_color,
+            self.notices.iter().map(|(text, _)| text.as_str()),
+            0.,
+        );
+    }
+}
+/// How long a message line stays, for a replay rebuilding the lines on
+/// screen from the ones it recorded.
+pub const MESSAGE_LIFETIME: Duration = NOTICE_LIFETIME;
+/// The most message lines shown at once.
+pub const MESSAGE_LINES: usize = NOTICE_LINES;
+/// How far the full seven message lines reach above the edge they sit on,
+/// in 640x480 layer units, for the HUD font `font`: the band the debug
+/// panels and a replay's subtitles leave free.
+pub fn message_band(font: &Font) -> f64 {
+    let scale = crate::flight_canvas::HUD_SCALE;
+    NOTICE_MARGIN - scale + NOTICE_LINES as f64 * (font.height + 1) as f64 * scale
+}
+/// Draw message lines as flight shows them: in `hud_color` and the HUD's
+/// font at its on-screen size, centered, newest at the bottom, at most seven
+/// lines. They sit `raise` layer units higher than flight's, which a replay
+/// uses to keep them above its transport bar.
+pub fn draw_messages<'a>(
+    canvas: &mut crate::flight_canvas::FlightCanvas,
+    font: &Font,
+    hud_color: [u8; 3],
+    messages: impl IntoIterator<Item = &'a str>,
+    raise: f64,
+) {
+    let [w, h] = canvas.size.map(f64::from);
+    let layer = (w / 640.).min(h / 480.);
+    let scale = layer * crate::flight_canvas::HUD_SCALE;
+    let lines: Vec<String> = messages
+        .into_iter()
+        .flat_map(|text| wrap(font, text, (600. * layer / scale) as usize))
+        .collect();
+    let lines = &lines[lines.len().saturating_sub(NOTICE_LINES)..];
+    if lines.is_empty() {
+        return;
+    }
+    let line_height = (font.height + 1) as f64 * scale;
+    // The last line's spacing row sits below its text, inside the margin.
+    let bottom = h - (NOTICE_MARGIN + raise) * layer + scale;
+    let top = (bottom - lines.len() as f64 * line_height).round();
+    // Glyph pixels become boxes; each screen pixel takes the area covered.
+    let (columns, rows) = (canvas.size[0] as usize, (bottom - top).ceil() as usize + 1);
+    let mut cover = vec![0f64; columns * rows];
+    for (i, line) in lines.iter().enumerate() {
+        let mut x = ((w - text_width(font, line) as f64 * scale) / 2.).round();
+        let y = i as f64 * line_height;
+        for ch in line.bytes() {
+            let glyph = &font.glyphs[ch as usize];
+            for &(gx, gy) in &glyph.pixels {
+                let (left, up) = (x + gx as f64 * scale, y + gy as f64 * scale);
+                let (right, down) = (left + scale, up + scale);
+                for row in up.floor() as usize..(down.ceil() as usize).min(rows) {
+                    let dy = down.min(row as f64 + 1.) - up.max(row as f64);
+                    for column in
+                        left.max(0.).floor() as usize..(right.ceil().max(0.) as usize).min(columns)
+                    {
+                        let dx = right.min(column as f64 + 1.) - left.max(column as f64);
+                        cover[row * columns + column] += dx * dy;
                     }
                 }
-                x += glyph.advance as f64 * scale;
             }
+            x += glyph.advance as f64 * scale;
         }
-        for (at, amount) in cover.into_iter().enumerate() {
-            if amount > 0. {
-                let (column, row) = (at % columns, at / columns);
-                canvas.blend(
-                    column as i32,
-                    top as i32 + row as i32,
-                    hud_color,
-                    amount.min(1.),
-                );
-            }
+    }
+    for (at, amount) in cover.into_iter().enumerate() {
+        if amount > 0. {
+            let (column, row) = (at % columns, at / columns);
+            canvas.blend(
+                column as i32,
+                top as i32 + row as i32,
+                hud_color,
+                amount.min(1.),
+            );
         }
     }
 }
@@ -1121,6 +1151,49 @@ mod tests {
         assert!(lit.iter().all(|p| p[..3] == [0, 255, 0]));
         let alpha: f64 = lit.iter().map(|p| f64::from(p[3]) / 255.).sum();
         assert!((alpha - 3. * 1.445f64.powi(2)).abs() < 0.05);
+    }
+    #[test]
+    fn messages_can_sit_higher_and_fill_a_known_band() {
+        let font = Font {
+            height: 8,
+            glyphs: (0..256)
+                .map(|_| tore_formats::font::Glyph {
+                    advance: 6,
+                    pixels: vec![(0, 0)],
+                })
+                .collect(),
+        };
+        let drawn_rows = |raise: f64, count: usize| {
+            let mut canvas = crate::flight_canvas::FlightCanvas::default();
+            canvas.size = [1280, 960];
+            canvas.pixels = vec![0; 1280 * 960 * 4];
+            let lines: Vec<String> = (0..count).map(|n| format!("Line {n}")).collect();
+            draw_messages(
+                &mut canvas,
+                &font,
+                [0, 255, 0],
+                lines.iter().map(String::as_str),
+                raise,
+            );
+            let rows: Vec<usize> = canvas
+                .pixels
+                .chunks_exact(1280 * 4)
+                .enumerate()
+                .filter(|(_, row)| row.chunks_exact(4).any(|p| p[3] != 0))
+                .map(|(y, _)| y)
+                .collect();
+            (rows[0], *rows.last().unwrap())
+        };
+        // Raised by 50 layer units on a 2x layer: 100 pixels higher.
+        let (low_top, low_bottom) = drawn_rows(0., 1);
+        let (high_top, high_bottom) = drawn_rows(50., 1);
+        assert_eq!((low_top - high_top, low_bottom - high_bottom), (100, 100));
+        // Seven lines, and never more, stay inside the band.
+        let band = message_band(&font);
+        let (top, _) = drawn_rows(0., 7);
+        assert_eq!(drawn_rows(0., 9), drawn_rows(0., 7));
+        assert!(top as f64 >= 960. - band * 2. - 1., "{top} {band}");
+        assert!(top as f64 <= 960. - band * 2. + 3., "{top} {band}");
     }
     #[test]
     fn retail_views_work_without_menu_data_and_modifiers_do_not_leak() {

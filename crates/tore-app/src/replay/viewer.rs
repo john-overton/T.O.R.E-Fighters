@@ -337,6 +337,15 @@ struct Interface<'a> {
     labels: &'a [Label],
     model: &'a Model,
     panels: PanelLayer<'a>,
+    /// The cockpit messages on screen, in the HUD's font and colour.
+    messages: Option<Messages<'a>>,
+}
+
+/// Cockpit messages drawn as flight draws them, above the transport bar.
+struct Messages<'a> {
+    lines: &'a [String],
+    font: &'a tore_formats::font::Font,
+    color: [u8; 3],
 }
 
 /// Draws the interface over a blank view of `size`: the labels at the
@@ -360,6 +369,15 @@ fn compose(
     }
     let panels = &interface.panels;
     canvas.centered_rects(panels.pixels, panels.panels);
+    if let Some(messages) = &interface.messages {
+        crate::flight_ui::draw_messages(
+            canvas,
+            messages.font,
+            messages.color,
+            messages.lines.iter().map(String::as_str),
+            f64::from(overlay::HEIGHT as i32 - overlay::BAR_TOP),
+        );
+    }
     layer.fill(0);
     overlay::draw(layer, font, interface.model);
     canvas.anchored_layer(layer);
@@ -501,6 +519,26 @@ fn hud_shown(event: &Event) -> bool {
             .is_none_or(|o| o == outcome::DELIVERED || o == outcome::QUEUED)
 }
 
+/// The cockpit message lines `entries` leave on screen, oldest first,
+/// rebuilt as flight keeps them: a repeat moves to the bottom with a fresh
+/// start, and at most seven lines show. Pass the last five seconds' entries.
+fn message_lines(entries: &[TimedEvent]) -> Vec<String> {
+    let mut lines: std::collections::VecDeque<String> = Default::default();
+    for entry in entries {
+        let event = &entry.event;
+        if event.kind != vocab::kind::COMMS_HUD || !hud_shown(event) || event.text.trim().is_empty()
+        {
+            continue;
+        }
+        lines.retain(|line| *line != event.text);
+        lines.push_back(event.text.clone());
+        while lines.len() > crate::flight_ui::MESSAGE_LINES {
+            lines.pop_front();
+        }
+    }
+    lines.into()
+}
+
 /// The events the timeline marks: launches, kills, orders and bookmarks.
 fn markers(events: &[TimedEvent]) -> Vec<Marker> {
     events
@@ -587,6 +625,9 @@ pub struct Viewer {
     requests: Vec<Request>,
     /// The view's size in the last frame.
     size: [u32; 2],
+    /// Where the debug panels go: clear of the cockpit messages above the
+    /// transport bar.
+    layout: panels::Layout,
     view: u8,
     drone: Option<Drone>,
     /// Where the selected aircraft was last drawn, so a follow drone holds
@@ -753,6 +794,7 @@ impl Viewer {
             panel_layer: vec![0; overlay::WIDTH * overlay::HEIGHT * 4],
             requests: options.panels.clone(),
             size: [overlay::WIDTH as u32, overlay::HEIGHT as u32],
+            layout: panels::REPLAY,
             view: options.view.unwrap_or(EXTERNAL),
             drone: None,
             anchor: None,
@@ -1116,8 +1158,7 @@ impl Viewer {
             }
             None => false,
         };
-        self.panels
-            .pointer(panels::REPLAY, at.filter(|_| !over_menu));
+        self.panels.pointer(self.layout, at.filter(|_| !over_menu));
         self.bar.moved(
             layer.filter(|_| !over_menu || self.bar.scrubbing),
             &mut self.clock,
@@ -1149,7 +1190,7 @@ impl Viewer {
                     self.menu = None;
                 }
                 Owner::Menu
-            } else if self.panels.down(panels::REPLAY, at) {
+            } else if self.panels.down(self.layout, at) {
                 Owner::Panels
             } else {
                 self.bar.down(layer, &mut self.clock);
@@ -1176,7 +1217,7 @@ impl Viewer {
                     comms: &self.comms,
                     now: self.clock.tick(),
                 };
-                self.panels.up(panels::REPLAY, at, &data);
+                self.panels.up(self.layout, at, &data);
                 self.ui.comms = self.panels.comms_open();
                 return;
             }
@@ -1237,10 +1278,7 @@ impl Viewer {
             comms: &self.comms,
             now: self.clock.tick(),
         };
-        if self
-            .panels
-            .wheel(panels::REPLAY, self.point, notches, &data)
-        {
+        if self.panels.wheel(self.layout, self.point, notches, &data) {
             return;
         }
         match &mut self.drone {
@@ -1347,7 +1385,7 @@ impl Viewer {
         }
         let placement = Placement::new(size);
         let layer = placement.centered(at);
-        let on_panel = match self.panels.hit(panels::REPLAY, layer) {
+        let on_panel = match self.panels.hit(self.layout, layer) {
             Some(panels::Hit::Body(side) | panels::Hit::Pin(side) | panels::Hit::Close(side)) => {
                 self.panels.slot(side).map(|p| match p.kind {
                     Kind::Guidance => Target::Missile(p.subject),
@@ -1659,7 +1697,18 @@ impl Viewer {
         )
     }
 
-    /// Radio, tower, crew and cockpit lines heard in the last four seconds.
+    /// The cockpit messages on screen at `tick`, oldest first.
+    fn messages(&self, tick: u64) -> Vec<String> {
+        let life = (crate::flight_ui::MESSAGE_LIFETIME.as_secs_f64()
+            * tore_replay::TICKS_PER_SECOND as f64) as u64;
+        message_lines(
+            self.recording
+                .events_between(tick.saturating_sub(life - 1), tick),
+        )
+    }
+
+    /// Radio, tower and crew lines heard in the last four seconds. Cockpit
+    /// messages show as flight shows them instead ([`Self::messages`]).
     fn subtitles(&self, tick: u64) -> Vec<String> {
         let events = self
             .recording
@@ -1687,7 +1736,6 @@ impl Viewer {
                         event.string(vocab::field::SPEAKER).unwrap_or("Crew"),
                         event.text
                     )),
-                    vocab::kind::COMMS_HUD if hud_shown(event) => Some(event.text.clone()),
                     _ => None,
                 }
             })
@@ -1752,6 +1800,7 @@ impl Viewer {
             } else {
                 Vec::new()
             },
+            subtitle_lift: crate::flight_ui::message_band(&self.ownship.hud_font).ceil() as i32,
         }
     }
 
@@ -1928,6 +1977,20 @@ impl Viewer {
         if !self.requests.is_empty() {
             self.open_requests(camera);
         }
+        // The cockpit messages print above the transport bar as flight
+        // prints them above the window's edge; the debug panels and the
+        // subtitles stay clear of the seven lines they can fill.
+        let band = crate::flight_ui::message_band(&self.ownship.hud_font);
+        self.layout = panels::REPLAY.clear_of(overlay::BAR_TOP, band);
+        let messages = if self.ui.subtitles && !self.ui.hidden {
+            self.messages(tick)
+        } else {
+            Vec::new()
+        };
+        let hud_color = self
+            .ownship
+            .cockpit_palette(&self.world, f64::from(camera.position[1]), 0)
+            [usize::from(self.ownship.hud.primary_color)];
         let mut panel_rects = Vec::new();
         let mut menu_rect = None;
         let model = if self.ui.hidden {
@@ -1945,7 +2008,7 @@ impl Viewer {
             };
             panel_rects = self
                 .panels
-                .draw(&mut self.panel_layer, font, panels::REPLAY, &mut data);
+                .draw(&mut self.panel_layer, font, self.layout, &mut data);
             if let Some(menu) = &self.menu {
                 menu.draw(&mut self.panel_layer, font);
                 menu_rect = Some(menu.rect());
@@ -1967,6 +2030,11 @@ impl Viewer {
                     panels: &panel_rects,
                     menu: menu_rect,
                 },
+                messages: (!messages.is_empty()).then(|| Messages {
+                    lines: &messages,
+                    font: &self.ownship.hud_font,
+                    color: hud_color,
+                }),
             },
         );
     }
@@ -2053,6 +2121,7 @@ mod tests {
                 panels: &[panel],
                 menu: Some(menu),
             },
+            messages: None,
         };
         let mut canvas = FlightCanvas::default();
         let mut layer = vec![0; overlay::WIDTH * overlay::HEIGHT * 4];
@@ -2354,6 +2423,40 @@ mod tests {
                 format!("{} {} {}{outcome}", e.time, e.kind, e.main)
             })
             .collect()
+    }
+
+    #[test]
+    fn cockpit_messages_are_rebuilt_as_flight_keeps_them() {
+        use vocab::{field, outcome};
+        let hud = |tick: u64, text: &str, result: &str| TimedEvent {
+            tick,
+            event: Event::new(vocab::kind::COMMS_HUD)
+                .with(field::OUTCOME, result)
+                .with_text(text),
+        };
+        let mut entries: Vec<TimedEvent> = (0..9)
+            .map(|n| hud(n, &format!("Message {n}"), outcome::DELIVERED))
+            .collect();
+        // The seventh line newer than it pushed Message 1 off; that entry
+        // and one the comms journal kept for an AI line show nothing more.
+        entries.push(hud(9, "Message 1", outcome::REPLACED));
+        entries.push(TimedEvent {
+            tick: 9,
+            event: Event::new(vocab::kind::COMMS_HUD)
+                .with(field::SOURCE, vocab::source::HUD)
+                .with_text("Attacking"),
+        });
+        // A repeat moves to the bottom.
+        entries.push(hud(10, "Message 4", outcome::DELIVERED));
+        assert_eq!(
+            message_lines(&entries),
+            [2, 3, 5, 6, 7, 8, 4].map(|n| format!("Message {n}"))
+        );
+        assert!(message_lines(&[]).is_empty());
+        // Radio, crew and tower lines stay subtitles; messages left them.
+        let dir = TempDir::new("viewer-messages");
+        let v = viewer(&dir, &Options::default());
+        assert!(v.messages(f::LAST).is_empty());
     }
 
     #[test]

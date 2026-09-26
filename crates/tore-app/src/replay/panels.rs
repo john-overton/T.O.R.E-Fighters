@@ -45,6 +45,18 @@ pub const LIVE: Layout = Layout {
     bottom: 472,
 };
 
+impl Layout {
+    /// This layout ending clear of the flight messages, which reach `band`
+    /// layer units above `edge`: the window's bottom in flight, the
+    /// transport bar's top in a replay.
+    pub fn clear_of(self, edge: i32, band: f64) -> Self {
+        Self {
+            bottom: self.bottom.min(edge - band.ceil() as i32 - GAP),
+            ..self
+        }
+    }
+}
+
 const MARGIN: i32 = 6;
 const SIDE_WIDTH: i32 = 254;
 const GAP: i32 = 4;
@@ -1926,6 +1938,16 @@ pub(crate) mod tests {
         }
         // Live flight has no transport bar.
         assert_eq!(p.rects(LIVE).comms.unwrap().1 + COMMS_HEIGHT, 472);
+        // Both leave the flight messages' band free: seven lines reaching
+        // 60.3 units up from the window's edge, or from the bar's top.
+        let live = LIVE.clear_of(HEIGHT, 60.3);
+        assert_eq!((live.top, live.bottom), (28, 480 - 61 - GAP));
+        let replay = REPLAY.clear_of(430, 60.3);
+        assert_eq!(replay.bottom, 430 - 61 - GAP);
+        let comms = p.rects(replay).comms.unwrap();
+        assert_eq!(comms.1 + comms.3, replay.bottom);
+        // A layout already clear stays as it is.
+        assert_eq!(LIVE.clear_of(HEIGHT, 1.), LIVE);
         // Every part lies inside the layer and the panels never overlap.
         for r in rects.all() {
             assert!(r.0 >= 0 && r.1 >= 0 && r.0 + r.2 <= WIDTH && r.1 + r.3 <= HEIGHT);

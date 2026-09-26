@@ -1,8 +1,10 @@
 //! The replay viewer's interface, drawn in the 640x480 overlay layer with
 //! the Controls screen's colours, font and button style: the transport bar
-//! with its timeline along the bottom, the mission timer and messages along
-//! the top and subtitles above the bar. The debug panels and the right-click
-//! menu draw in a layer of their own (`panels.rs`, `context_menu.rs`). The
+//! with its timeline along the bottom, the mission timer and the viewer's
+//! own notices along the top, and subtitles above the cockpit messages that
+//! the viewer prints over the bar as flight prints them. The debug panels
+//! and the right-click menu draw in a layer of their own (`panels.rs`,
+//! `context_menu.rs`). The
 //! layer's top half is pinned to the top of the view and its bottom half to
 //! the bottom, so the bar sits on the bottom edge of any window shape.
 //! Layout and wording are agent design (2026-09-26).
@@ -45,8 +47,10 @@ pub const TRANSPORT: [Control; 8] = [
     Control::End,
 ];
 
+/// The top of the transport bar, which runs to the layer's bottom.
+pub const BAR_TOP: i32 = 430;
 /// The bar's background.
-const BAR: Rect = (0, 430, 640, 50);
+const BAR: Rect = (0, BAR_TOP, 640, HEIGHT as i32 - BAR_TOP);
 const BAR_FILL: [u8; 4] = [16, 24, 34, 215];
 /// Where a click or drag scrubs.
 const TIMELINE: Rect = (8, 432, 624, 20);
@@ -256,6 +260,9 @@ pub struct Model {
     pub timer: Option<String>,
     pub toast: Option<String>,
     pub subtitles: Vec<String>,
+    /// How far above their usual place the subtitles sit, clear of the
+    /// cockpit messages over the bar.
+    pub subtitle_lift: i32,
 }
 
 fn text(pixels: &mut [u8], font: &Font, color: [u8; 4], text: &str, at: (i32, i32)) {
@@ -386,11 +393,13 @@ pub fn draw(pixels: &mut [u8], font: &Font, model: &Model) {
         lit(Control::Aircraft),
     );
     labelled(pixels, font, HIDE, "Hide", lit(Control::HideUi));
-    // Subtitles stack upwards from just above the bar, newest lowest.
+    // Subtitles stack upwards from just above the bar and the cockpit
+    // messages over it, newest lowest.
     let step = font.height as i32 + 10;
     for (i, line) in model.subtitles.iter().rev().enumerate() {
         let line = fit(font, line, 600);
-        caption(pixels, font, &line, 320, 408 - i as i32 * step, WHITE);
+        let y = 408 - model.subtitle_lift - i as i32 * step;
+        caption(pixels, font, &line, 320, y, WHITE);
     }
     if let Some(timer) = &model.timer {
         Canvas(pixels).rect(

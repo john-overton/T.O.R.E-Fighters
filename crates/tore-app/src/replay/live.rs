@@ -130,6 +130,8 @@ pub struct Live {
     /// Panels asked for on the command line, opened on the first frame.
     pub requests: Vec<Request>,
     layer: Vec<u8>,
+    /// Where the panels go: clear of the flight messages along the bottom.
+    layout: panels::Layout,
 }
 
 impl Default for Live {
@@ -149,6 +151,7 @@ impl Default for Live {
             selected: None,
             requests: Vec::new(),
             layer: vec![0; panels::WIDTH as usize * panels::HEIGHT as usize * 4],
+            layout: panels::LIVE,
         }
     }
 }
@@ -327,14 +330,14 @@ impl Live {
             }
             None => false,
         };
-        self.panels.pointer(panels::LIVE, at.filter(|_| !over_menu));
+        self.panels.pointer(self.layout, at.filter(|_| !over_menu));
     }
 
     /// The pointer is on a panel or the menu.
     pub fn covers(&self) -> bool {
         self.point.is_some_and(|at| {
             self.menu.as_ref().is_some_and(|menu| menu.contains(at))
-                || self.panels.hit(panels::LIVE, at).is_some()
+                || self.panels.hit(self.layout, at).is_some()
         })
     }
 
@@ -354,7 +357,7 @@ impl Live {
     pub fn open_menu(&mut self, at: [f64; 2], size: [u32; 2], camera: &Camera, font: &Font) {
         let placement = Placement::new(size);
         let layer = placement.centered(at);
-        let on_panel = match self.panels.hit(panels::LIVE, layer) {
+        let on_panel = match self.panels.hit(self.layout, layer) {
             Some(panels::Hit::Body(side) | panels::Hit::Pin(side) | panels::Hit::Close(side)) => {
                 self.panels.slot(side).map(|p| match p.kind {
                     Kind::Guidance => Target::Missile(p.subject),
@@ -486,7 +489,7 @@ impl Live {
                     self.menu = None;
                 }
                 Some(Owner::Menu)
-            } else if self.panels.down(panels::LIVE, at) {
+            } else if self.panels.down(self.layout, at) {
                 Some(Owner::Panels)
             } else {
                 None
@@ -510,7 +513,7 @@ impl Live {
                     comms: &self.comms,
                     trees: &self.trees,
                 };
-                self.panels.up(panels::LIVE, at, &data);
+                self.panels.up(self.layout, at, &data);
                 Some(None)
             }
         }
@@ -532,7 +535,7 @@ impl Live {
             comms: &self.comms,
             trees: &self.trees,
         };
-        self.panels.wheel(panels::LIVE, self.point, notches, &data)
+        self.panels.wheel(self.layout, self.point, notches, &data)
     }
 
     /// What a right-click can pick in `picture`, with the name labels
@@ -575,6 +578,12 @@ impl Live {
     /// for, then draws. Reads the flight, never changes it.
     pub fn frame(&mut self, canvas: &mut FlightCanvas, flight: &Flight) {
         let frame = flight.frame;
+        // The messages print along the window's bottom edge in the HUD's
+        // font; the panels end above the seven lines they can fill.
+        self.layout = panels::LIVE.clear_of(
+            panels::HEIGHT,
+            crate::flight_ui::message_band(&flight.airframe.hud_font),
+        );
         let roster = crate::replay::recorder::roster(
             frame,
             &flight.airframe.profile.name,
@@ -672,7 +681,7 @@ impl Live {
         };
         let mut rects = self
             .panels
-            .draw(&mut self.layer, font, panels::LIVE, &mut data);
+            .draw(&mut self.layer, font, self.layout, &mut data);
         rects.push(timer_rect);
         if let Some(menu) = &self.menu {
             menu.draw(&mut self.layer, font);

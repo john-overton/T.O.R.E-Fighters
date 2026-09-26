@@ -101,7 +101,10 @@ pushes the oldest off the top. Repeating a message that is still shown moves it
 to the bottom with a fresh timer. The text uses the HUD's own font (`HUD11.FNT`)
 at the HUD's on-screen size, with the same smoothed edges. Opinionated, requested by
 John on 2026-09-26 as the retail look; the original's own timing, line count
-and size are untraced.
+and size are untraced. The debug panels (Pref → Debug panels?) end above
+the band the seven lines can fill, and a mission replay prints the recorded
+messages the same way just above its transport bar
+([mission replays](REPLAYS.md#interface-parts)).
 
 ## Recovered commands awaiting their systems
 

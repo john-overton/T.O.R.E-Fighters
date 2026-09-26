@@ -888,9 +888,14 @@ There is no cockpit, HUD, instrument panel or mirror in a replay.
   selected aircraft's is in brackets. Aircraft over 100 nautical miles away,
   wrecks on the ground and the aircraft the camera sits in have none.
 - **Mission timer** (T, on at first): mission time as `mm:ss.t` and the tick.
+- **Cockpit messages:** printed as flight prints them, in the HUD's colour
+  and font at its size, centered, newest lowest, just above the transport
+  bar where flight has the window's edge: each line for five seconds from
+  its tick, a repeat moving to the bottom with a fresh five seconds, at most
+  seven lines. They go with the subtitles' switch.
 - **Subtitles:** radio, tower and crew lines the player heard, each once
-  from its delivery, and the cockpit messages the HUD showed or queued, for
-  four seconds from their tick, newest lowest, up to three.
+  from its delivery, for four seconds from their tick, newest lowest, up to
+  three, above the band the seven message lines can fill.
 - **Comms panel** (C): every recorded comms and audio entry up to the
   playhead, each line once with its final outcome, filtered by kind and
   aircraft; see [the Comms panel](#the-comms-panel). While it is open the
@@ -1108,7 +1113,9 @@ closes the menu, and the wheel scrolls a long list.
 ### The panels
 
 Up to two panels show at once, one on each side, plus the Comms panel along
-the bottom. A new panel takes a free side, or the side whose unpinned panel
+the bottom. They end above the band the seven cockpit message lines can
+fill, in the HUD's font: over the window's edge in flight, over the
+transport bar in a replay, so the messages never print over a panel. A new panel takes a free side, or the side whose unpinned panel
 is older; with both pinned it says so and opens nothing. Each has **Pin**
 and a close button (x) in its title. An unpinned AI thinking or Telemetry
 panel follows the selected aircraft (in live flight, the aircraft the
