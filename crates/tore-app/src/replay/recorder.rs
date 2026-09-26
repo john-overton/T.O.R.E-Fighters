@@ -2128,7 +2128,7 @@ mod tests {
         let chaff = entries(0, kind::COMBAT_COUNTERMEASURE);
         assert_eq!(chaff.len(), 1);
         assert_eq!(
-            convert::device_release(&chaff[0]),
+            convert::device_release(&chaff[0], 0),
             Some(convert::DeviceRelease {
                 owner: 0,
                 kind: live::EffectKind::Chaff,
@@ -2138,6 +2138,8 @@ mod tests {
                     basis: launcher.basis,
                 },
                 number: 1,
+                // The fixture's combat never stepped.
+                tick: combat.state.tick(),
             })
         );
         assert_eq!(chaff[0].num(field::LEFT), Some(1.));
@@ -2152,7 +2154,7 @@ mod tests {
         // The AI's flare: every number back bit for bit; its dispensers are
         // unknown without an AI bridge, so no count is kept.
         let ai = entries(2, kind::COMBAT_COUNTERMEASURE);
-        let back = convert::device_release(&ai[0]).unwrap();
+        let back = convert::device_release(&ai[0], 2).unwrap();
         assert_eq!(
             (back.owner, back.kind, back.number),
             (7, live::EffectKind::Flare, 2)

@@ -146,6 +146,7 @@ pub fn aircraft_state(pose: &AircraftPose, data: &FlightData) -> replay::Aircraf
             alive: data.alive,
             ejected: data.ejected,
             animated: pose.devices.is_some(),
+            flame: pose.engine.flame,
         },
         wreck_phase: wreck_code(pose.wreck),
         fuel_lb: data.fuel_lb,
@@ -191,6 +192,7 @@ pub fn aircraft_pose(
             lit: state.flags.engine_on,
             afterburner: state.flags.afterburner,
             rates: state.auxiliary_rates,
+            flame: state.flags.flame,
         },
         damage: Damage {
             hp: state.hp,
@@ -420,7 +422,8 @@ fn live_effect_kind(kind: replay::EffectKind) -> Option<live::EffectKind> {
 
 /// One chaff cartridge or flare as a recording keeps it: the releasing
 /// aircraft, the kind, the aircraft's exact position, velocity and attitude
-/// when it left, and its number, which sets its look.
+/// when it left, its number, which sets its look, and the combat tick after
+/// whose step it left.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DeviceRelease {
     pub owner: u32,
@@ -428,6 +431,7 @@ pub struct DeviceRelease {
     pub kind: live::EffectKind,
     pub release: tore_sim::combat::countermeasures::Release,
     pub number: u64,
+    pub tick: u64,
 }
 
 /// `chaff` or `flare`, as the `decoy` field names them.
@@ -452,7 +456,8 @@ pub fn device_event(device: &DeviceRelease, left: Option<u32>) -> replay::Event 
     let mut event = replay::Event::new(replay::vocab::kind::COMBAT_COUNTERMEASURE)
         .with_subject(device.owner)
         .with(field::DECOY, decoy_name(device.kind))
-        .with(field::NUMBER, device.number as i64);
+        .with(field::NUMBER, device.number as i64)
+        .with(field::AFTER_TICK, device.tick as i64);
     if let Some(left) = left {
         event = event.with(field::LEFT, i64::from(left));
     }
@@ -473,8 +478,9 @@ pub fn device_event(device: &DeviceRelease, left: Option<u32>) -> replay::Event 
 }
 
 /// A recorded `combat.countermeasure` entry back into its release; `None`
-/// when a value is missing.
-pub fn device_release(event: &replay::Event) -> Option<DeviceRelease> {
+/// when a value is missing. `tick` is the entry's own tick, which stands in
+/// for a missing `after_tick`.
+pub fn device_release(event: &replay::Event, tick: u64) -> Option<DeviceRelease> {
     use replay::vocab::field;
     if event.kind != replay::vocab::kind::COMBAT_COUNTERMEASURE {
         return None;
@@ -504,6 +510,10 @@ pub fn device_release(event: &replay::Event) -> Option<DeviceRelease> {
             },
         },
         number: u64::try_from(event.get(field::NUMBER)?.as_i64()?).ok()?,
+        tick: match event.get(field::AFTER_TICK) {
+            Some(value) => u64::try_from(value.as_i64()?).ok()?,
+            None => tick,
+        },
     })
 }
 
@@ -739,6 +749,7 @@ fn aircraft_difference(live: &AircraftPose, replayed: &AircraftPose) -> Option<S
     }
     if live.engine.lit != replayed.engine.lit
         || live.engine.afterburner != replayed.engine.afterburner
+        || live.engine.flame != replayed.engine.flame
         || far(live.engine.rates, replayed.engine.rates, tolerance::RATE)
     {
         return Some(format!(
@@ -1215,6 +1226,7 @@ mod tests {
                 lit: true,
                 afterburner: true,
                 rates: [0.1, -0.4, 0.2],
+                flame: true,
             },
             damage: Damage {
                 hp: 12,

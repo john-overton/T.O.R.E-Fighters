@@ -58,11 +58,13 @@ pub mod kind {
     /// ([`super::field::POSITION`]), its velocity
     /// ([`super::field::VELOCITY`]) and its attitude as unit vectors
     /// ([`super::field::BASIS`]), all exact, so a viewer can fly the device
-    /// again as combat flew it. Recorded on the tick after whose step the
-    /// device left: the tick on screen for the player's own.
+    /// again as combat flew it; and `after_tick` (Int: the combat tick after
+    /// whose step it left; its next step is its first). The player's own is
+    /// recorded on the tick on screen when it left, an AI aircraft's on the
+    /// tick whose AI step released it.
     pub const COMBAT_COUNTERMEASURE: &str = "combat.countermeasure";
     /// A range reset removed every released chaff cloud and flare and
-    /// restarted their numbering.
+    /// restarted their numbering. Fields: `after_tick`.
     pub const COMBAT_COUNTERMEASURES_CLEARED: &str = "combat.countermeasures_cleared";
     /// An aircraft hit the ground. Subject: the aircraft. Fields: `speed_kt`,
     /// `reason`.
@@ -358,6 +360,9 @@ pub mod field {
     pub const NUMBER: &str = "number";
     /// Devices of the kind released that are left.
     pub const LEFT: &str = "left";
+    /// The combat tick after whose step a released device left, or a range
+    /// reset cleared the devices.
+    pub const AFTER_TICK: &str = "after_tick";
     /// The player's own aircraft made the sound.
     pub const OWN: &str = "own";
     /// A position in feet, world axes.

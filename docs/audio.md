@@ -169,7 +169,9 @@ through the same plain-data calls as flight: `speech`, `airport_speech`,
 `wingman_ejected`, and `spatial_tick` once per recorded tick with the replay
 camera as the listener and sources from `snapshot_sources`, which builds
 them from a drawn snapshot exactly as `spatial_sources` builds them from
-live state. Three calls exist only for replays. `replay_loops` stands in for
+live state. A recorded chaff or flare release keeps its own-aircraft mark,
+so the player's plays centered while the replay camera sits in the
+player's aircraft, as in the cockpit. Three calls exist only for replays. `replay_loops` stands in for
 `flight`: it sets the watched aircraft's engine and afterburner loops and
 the player's recorded stall warning, and unlike `flight` it never clears
 queued speech when the watched aircraft changes type and plays no engine

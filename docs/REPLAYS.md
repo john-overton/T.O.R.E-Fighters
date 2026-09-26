@@ -151,6 +151,17 @@ device is its own entry. The golden fingerprint
 `combat/player-countermeasures` was taken before these lists existed, and
 they leave it unchanged.
 
+Each entry also says after which combat tick's step the device left, and
+the viewer ([below](#what-is-drawn)) flies every device again from it, one
+tick at a time over the same ground, so its flight, flicker, smoke and
+strips are the ones combat drew. Every aircraft's frame also says whether
+its afterburner flame is lit (the `flame` flag), which lights the scene
+around it; unlike the `afterburner` flag, which is what its nozzle draws,
+it follows the flight model for AI aircraft too. `--verify-render` checks
+both: the flag with each aircraft, and every flare, smoke puff and chaff
+cloud against the devices combat flew, bit for bit. Releases lost to a
+`system.gap` are missing from a replay.
+
 ### Display trees
 
 A display tree is what a debug panel shows, as numbered lines: a label, a
@@ -453,6 +464,12 @@ beyond them.
   placeholder.
 - A jump in ticks, for example if the recorder falls behind, starts a new
   chunk and reads back as a gap.
+- New kinds of data arrive as new entries, fields and flag bits within the
+  version: released chaff and flares (`combat.countermeasure`) and the
+  `flame` flag came this way. A reader ignores flag bits it does not know,
+  and a recording from before them has no releases and no lit flames: its
+  chaff and flares were short effects, which the viewer does not draw, as
+  flight no longer draws them.
 
 ## Exports
 
@@ -537,7 +554,7 @@ left out after an object's first line, as the format allows.
 | Yaw, clockwise from north | `Yaw` and `Heading` in degrees, and `HDG` |
 | Airspeed | `TAS` (m/s) |
 | Telemetry tree lines Mach, AoA, Sideslip, AGL | `Mach`, `AOA`, `AOS`, `AGL` (m) |
-| Pilot throttle, afterburner flag | `Throttle`, `Afterburner` |
+| Pilot throttle, afterburner or lit flame flag | `Throttle`, `Afterburner` |
 | Gear, flaps, air brake, hook devices | `LandingGear`, `Flaps`, `AirBrakes`, `Tailhook` |
 | Fuel (lb), G | `FuelWeight` (kg), `VerticalGForce` |
 
@@ -836,6 +853,15 @@ under the playhead:
   by that tick.
 - Smoke and contrails rebuilt from their release ticks with the
   simulation's lifetimes, rise and caps; effects from their start ticks.
+- Chaff clouds and burning flares with their smoke trails and glare,
+  flown again from their recorded releases
+  ([chaff and flares](#chaff-and-flares)), and the light that flares and
+  lit afterburners throw on aircraft, ground, water, clouds and smoke, as
+  live flight draws them through the same renderer calls. Nothing is alive
+  a little over 33 seconds after the last release, so each stretch that
+  follows releases is flown from its start, with a copy kept every second
+  (up to 512 of them near where the playhead has been) so a jump or
+  reverse play steps at most a second.
 - The player's wing vapor, rebuilt by stepping the vapor history over the
   last 250 ticks of recorded poses from one of live flight's own commit
   ticks, so it matches live flight exactly once two seconds of history
@@ -909,6 +935,10 @@ scheduled is an agent design (2026-09-26); the code is
   so only its delivery speaks: an entry recorded as not heard, or as
   queued, held back, dropped or cut off, stays silent. Cockpit messages
   have no voice.
+- **Chaff and flare releases** sound as combat's other traveling sounds do,
+  from where they left their aircraft. The player's own plays at once and
+  centered while the camera sits in the player's aircraft, as it does in
+  the cockpit.
 - **The player's wing orders:** every order that went out on the radio
   plays its voice, which cuts off waiting wingman speech as in flight. An
   order the wing refused has no voice but still cuts the speech off, as in
@@ -1425,7 +1455,7 @@ them again.
 | `--recording-acmi FILE [--out FILE] [--rate HZ] [--guns]` | Writes a Tacview file (default: `.txt.acmi` beside the recording), 10 samples a second by default; `--guns` adds gun rounds |
 | `--recording-diff A B` | Prints how two recordings differ: header, identities, the first second their checksums differ, the first tick any aircraft's state differs, and event counts by family |
 | `--watch-replay FILE` | Opens the [viewer](#viewer) on a recording (this one needs the game media and a display); with `--capture-replay OUT.ppm --replay-tick N` it writes one frame and exits, see [captures](#captures-and-timing) |
-| `--ai-probe-ticks N --record-mission PATH [--verify-render]` | Records a headless AI probe to PATH (never overwritten) without changing its output. `--verify-render` then rebuilds every tick from the file, compares it with the picture the probe drew, and prints one line: `AI probe verify-render: PASS ticks=... missing=0 differing=0`, or the first difference |
+| `--ai-probe-ticks N --record-mission PATH [--verify-render]` | Records a headless AI probe to PATH (never overwritten) without changing its output. `--verify-render` then rebuilds every tick from the file, compares it with the picture the probe drew, and prints one line: `AI probe verify-render: PASS ticks=... missing=0 differing=0 device_ticks=...`, or the first difference; `device_ticks` counts the ticks with chaff or flares in the air, each checked against the devices the probe flew |
 
 For example, after John says "look at the replay from 3:40 pm" (15:40 UTC
 in the file name):

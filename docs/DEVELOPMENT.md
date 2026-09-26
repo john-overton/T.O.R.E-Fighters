@@ -1093,7 +1093,7 @@ TORE_DATA_DIR="$PWD/.local/dev-profile" cargo run --locked -p tore-app -- \
 
 The probe's own output is unchanged by recording; `--verify-render` adds one
 line saying whether every recorded tick rebuilds the picture the probe drew,
-within the format's precision. Then read the recording back without media:
+within the format's precision, and the released chaff and flares exactly. Then read the recording back without media:
 
 ```sh
 cargo run --locked -p tore-app -- --recording-info .local/headless/attack.tore-replay

@@ -343,11 +343,15 @@ pub struct AircraftFlags {
     /// them, `devices` holds zeros and the viewer keeps the model's neutral
     /// pose, as the game does for straight-flight fixtures.
     pub animated: bool,
+    /// The afterburner flame lights the scene. Unlike `afterburner`, which
+    /// is what the nozzle draws, this follows the flight model for every
+    /// aircraft. Files from before it read as unlit.
+    pub flame: bool,
 }
 
 impl AircraftFlags {
     /// Flag names in bit order.
-    pub const NAMES: [&str; 9] = [
+    pub const NAMES: [&str; 10] = [
         "engine_on",
         "afterburner",
         "airborne",
@@ -357,9 +361,10 @@ impl AircraftFlags {
         "alive",
         "ejected",
         "animated",
+        "flame",
     ];
 
-    fn array(self) -> [bool; 9] {
+    fn array(self) -> [bool; 10] {
         [
             self.engine_on,
             self.afterburner,
@@ -370,6 +375,7 @@ impl AircraftFlags {
             self.alive,
             self.ejected,
             self.animated,
+            self.flame,
         ]
     }
 
@@ -393,6 +399,7 @@ impl AircraftFlags {
             alive: on(6),
             ejected: on(7),
             animated: on(8),
+            flame: on(9),
         }
     }
 

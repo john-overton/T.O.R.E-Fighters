@@ -414,7 +414,12 @@ fn aircraft_properties(
         ("TAS", fixed(s.airspeed * M_PER_FT, 1)),
         ("HDG", fixed(s.attitude[0].to_degrees().rem_euclid(360.), 1)),
         ("Throttle", fixed(s.controls[3], 2)),
-        ("Afterburner", u8::from(s.flags.afterburner).to_string()),
+        // What the nozzle draws, or the flight model's lit flame, which an
+        // AI aircraft drawn from its start state has only in the flag.
+        (
+            "Afterburner",
+            u8::from(s.flags.afterburner || s.flags.flame).to_string(),
+        ),
         ("LandingGear", fixed(s.devices[device::GEAR], 2)),
         ("Flaps", fixed(s.devices[device::FLAPS], 2)),
         ("AirBrakes", fixed(s.devices[device::BRAKE], 2)),

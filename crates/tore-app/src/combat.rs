@@ -130,8 +130,6 @@ pub struct Combat {
     pub clean_recording: bool,
     initial_ammo: Option<Vec<u16>>,
     render: RenderHistory,
-    /// AI aircraft whose afterburner was lit at the last AI tick.
-    ai_burners: std::collections::BTreeSet<u32>,
     dummies: Vec<(usize, Vector)>,
     mission_spawns: Option<Vec<crate::ai_wings::MissionSpawn>>,
     /// The accepted Quick Mission layout, kept so restart rebuilds it exactly.
@@ -261,7 +259,6 @@ impl Combat {
             clean_recording: false,
             initial_ammo,
             render: RenderHistory::default(),
-            ai_burners: Default::default(),
             recorder: None,
             last_launcher: None,
             notes: Default::default(),
@@ -299,6 +296,13 @@ impl Combat {
             .filter(|actor| actor.alive())
             .map(|actor| (actor.id(), crate::render_snapshot::devices(actor.flight())))
             .collect();
+        // AI aircraft whose afterburner is lit, for their flame lights.
+        let burning: std::collections::BTreeSet<u32> = wings
+            .into_iter()
+            .flat_map(|wings| wings.mission().actors())
+            .filter(|actor| actor.alive() && actor.flight().afterburner_active())
+            .map(|actor| actor.id())
+            .collect();
         // The last devices drawn hold once an aircraft stops flying.
         let simulated = |id: u32| {
             flying
@@ -312,6 +316,9 @@ impl Combat {
             lit: player.engine && player.fuel > 0.,
             afterburner: player.afterburner_active(),
             rates: player.auxiliary_rates,
+            flame: player.afterburner_active()
+                && player.escape.is_none()
+                && self.state.player_hp > 0,
         };
         // Fixtures copy the player's state with their own crash flag.
         let fixture_afterburner = ownship
@@ -326,6 +333,7 @@ impl Combat {
             lit: true,
             afterburner: false,
             rates: [0.; 3],
+            flame: false,
         };
         let pilot = |owner: u32, escape: &tore_sim::ejection::Escape| PilotPose {
             owner,
@@ -367,13 +375,16 @@ impl Combat {
                     attitude: target_pose(t, self.ai_poses),
                     velocity: t.velocity,
                     devices: simulated(t.id),
-                    engine: if ownship {
-                        Engine {
-                            afterburner: fixture_afterburner && t.hp > 0,
-                            ..player_engine
+                    engine: Engine {
+                        flame: t.airborne && t.hp > 0 && burning.contains(&t.id),
+                        ..if ownship {
+                            Engine {
+                                afterburner: fixture_afterburner && t.hp > 0,
+                                ..player_engine
+                            }
+                        } else {
+                            model_engine
                         }
-                    } else {
-                        model_engine
                     },
                     damage: Damage {
                         hp: t.hp,
@@ -457,67 +468,46 @@ impl Combat {
             models: self.dummy_models.iter().map(|h| h.profile.id).collect(),
         }
     }
-    /// Notes which AI aircraft have their afterburner lit, as the AI tick
-    /// left them, for their flame lights. Without an AI the set is kept.
-    fn sample_burners(&mut self, wings: Option<&crate::ai_wings::AiWings>) {
-        if let Some(wings) = wings {
-            self.ai_burners = wings
-                .mission()
-                .actors()
-                .iter()
-                .filter(|a| a.alive() && a.flight().afterburner_active())
-                .map(|a| a.id())
-                .collect();
-        }
-    }
-
     /// The flame of every lit afterburner as a light source, each engine
-    /// sharing its aircraft's strength, at this frame's presented pose
-    /// (docs/spec/engine-material.md#afterburner-glow).
+    /// sharing its aircraft's strength, at this frame's presented poses
+    /// (docs/spec/engine-material.md#afterburner-glow): the player's from
+    /// its presented flight state, every other aircraft's from the presented
+    /// snapshot, as a replay draws them.
     pub fn afterburner_glows(
         &self,
         player: &flight::State,
     ) -> Vec<crate::countermeasure_renderer::Afterburner> {
-        use crate::countermeasure_renderer::{AFTERBURNER_BEHIND_FEET, AFTERBURNER_SHARE};
-        let glow = |position: Vector, basis: Basis, offsets: &[Vector]| {
-            let share = AFTERBURNER_SHARE / offsets.len().max(1) as f64;
-            offsets
-                .iter()
-                .map(|o| crate::countermeasure_renderer::Afterburner {
-                    position: std::array::from_fn(|i| {
-                        position[i]
-                            + basis.right[i] * o[0]
-                            + basis.up[i] * o[1]
-                            + basis.forward[i] * (o[2] - AFTERBURNER_BEHIND_FEET)
-                    }),
-                    share,
-                })
-                .collect::<Vec<_>>()
-        };
         let mut glows = Vec::new();
         if player.afterburner_active() && player.escape.is_none() && self.state.player_hp > 0 {
-            glows.extend(glow(
+            glows.extend(crate::render_snapshot::afterburner_glow(
                 player.position,
-                Basis::new(player.yaw, player.pitch, player.bank),
+                [player.yaw, player.pitch, player.bank],
                 &self.contrail_offsets,
             ));
         }
-        for target in self
-            .state
-            .targets
-            .iter()
-            .filter(|t| t.airborne && t.hp > 0 && self.ai_burners.contains(&t.id))
-        {
-            let offsets = target
-                .aircraft
-                .filter(|id| *id != self.state.configuration().aircraft)
-                .and_then(|id| self.dummy_models.iter().position(|h| h.profile.id == id))
-                .map_or(&self.contrail_offsets, |index| {
-                    &self.dummy_contrail_offsets[index]
-                });
-            let (position, [yaw, pitch, bank]) = self.presented_pose(target);
-            glows.extend(glow(position, Basis::new(yaw, pitch, bank), offsets));
-        }
+        let player_type = self.state.configuration().aircraft;
+        // Only the lit aircraft, blended as the picture blends them, so the
+        // rest of the picture is not built again for the lights.
+        let lit = RenderSnapshot {
+            targets: self
+                .render
+                .current
+                .targets
+                .iter()
+                .filter(|pose| pose.engine.flame)
+                .filter_map(|pose| self.presented_target(pose.id))
+                .collect(),
+            ..RenderSnapshot::default()
+        };
+        glows.extend(crate::render_snapshot::target_glows(&lit, |pose| {
+            crate::render_snapshot::engine_outlets(
+                pose.aircraft,
+                player_type,
+                &self.dummy_models,
+                &self.dummy_contrail_offsets,
+                &self.contrail_offsets,
+            )
+        }));
         glows
     }
     /// Starts a new render history from the current state: after a reset and
@@ -530,7 +520,6 @@ impl Combat {
         self.render = RenderHistory::default();
         let current = self.snapshot(player, wings);
         self.render.set_current(current);
-        self.sample_burners(wings);
     }
     /// Ends a simulation tick: the current snapshot becomes the previous one.
     pub fn advance_render(
@@ -540,7 +529,6 @@ impl Combat {
     ) {
         let next = self.snapshot(player, wings);
         self.render.advance(next);
-        self.sample_burners(wings);
     }
     /// Retakes the current snapshot after a command changed the scene between
     /// ticks, so the change shows at once as it always has.
@@ -697,7 +685,6 @@ impl Combat {
     }
     pub fn reset(&mut self, s: &mut flight::State) -> AppResult<()> {
         self.render = RenderHistory::default();
-        self.ai_burners.clear();
         self.contrails = Default::default();
         self.contrail_sortie = self.contrail_sortie.wrapping_add(1);
         let l = launcher(s);
@@ -2326,7 +2313,6 @@ pub(crate) mod render_hash_tests {
             clean_recording: false,
             initial_ammo: None,
             render: RenderHistory::default(),
-            ai_burners: Default::default(),
             dummies,
             mission_spawns: None,
             mission_layout: None,
@@ -2989,6 +2975,75 @@ pub(crate) mod render_hash_tests {
                 assert_eq!(drawn, expected);
             }
         }
+    }
+
+    #[test]
+    fn afterburner_lights_sit_in_the_flames_of_the_presented_poses() {
+        use crate::countermeasure_renderer::{
+            AFTERBURNER_BEHIND_FEET, AFTERBURNER_SHARE, Afterburner,
+        };
+        let player = player();
+        let mut combat = combat(models(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
+        combat.contrail_offsets = vec![[-2., 0.5, -20.], [2., 0.5, -20.]];
+        combat.dummy_contrail_offsets = vec![vec![[0., 1., -18.]], vec![], vec![[1., 0., -15.]]];
+        let scene = scene(combat.state.configuration());
+        let [previous, mut current] = snapshots(&mut combat, &scene, true, &player);
+        // Aircraft 1 (the player's type), 2 (Rafale) and 3 (F-14) burn.
+        for pose in &mut current.targets {
+            pose.engine.flame = matches!(pose.id, 1..=3);
+        }
+        combat.render = RenderHistory::default();
+        combat.render.set_current(previous);
+        combat.render.advance(current);
+        combat.present_targets(0.37);
+        // The lights as they were computed before the snapshots carried
+        // them: each lit aircraft's presented pose and its own outlets.
+        let glow = |position: Vector, [yaw, pitch, bank]: [f64; 3], offsets: &[Vector]| {
+            let basis = Basis::new(yaw, pitch, bank);
+            let share = AFTERBURNER_SHARE / offsets.len().max(1) as f64;
+            offsets
+                .iter()
+                .map(|o| Afterburner {
+                    position: std::array::from_fn(|i| {
+                        position[i]
+                            + basis.right[i] * o[0]
+                            + basis.up[i] * o[1]
+                            + basis.forward[i] * (o[2] - AFTERBURNER_BEHIND_FEET)
+                    }),
+                    share,
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut expected = Vec::new();
+        if player.afterburner_active() && player.escape.is_none() {
+            expected.extend(glow(
+                player.position,
+                [player.yaw, player.pitch, player.bank],
+                &combat.contrail_offsets,
+            ));
+        }
+        for target in combat
+            .state
+            .targets
+            .iter()
+            .filter(|t| matches!(t.id, 1..=3))
+        {
+            let offsets = match target.aircraft {
+                Some(AircraftId::Rafale) => &combat.dummy_contrail_offsets[1],
+                Some(AircraftId::F14) => &combat.dummy_contrail_offsets[2],
+                _ => &combat.contrail_offsets,
+            };
+            let (position, angles) = combat.presented_pose(target);
+            expected.extend(glow(position, angles, offsets));
+        }
+        let glows = combat.afterburner_glows(&player);
+        assert_eq!(glows, expected);
+        // Both of the player's type's engines, the Rafale's none and the
+        // F-14's one light the scene.
+        assert_eq!(
+            glows.len(),
+            3 + 2 * usize::from(player.afterburner_active())
+        );
     }
 
     #[test]

@@ -94,7 +94,7 @@ pub struct AircraftPose {
     pub crashed: bool,
 }
 
-/// What the nozzle material reads.
+/// What the nozzle material reads, and whether the flame lights the scene.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Engine {
     /// Engine running with internal fuel.
@@ -103,6 +103,70 @@ pub struct Engine {
     pub afterburner: bool,
     /// Angular rates the X-31 paddles and plume follow.
     pub rates: [f64; 3],
+    /// The afterburner flame lights the scene
+    /// (docs/spec/engine-material.md#afterburner-glow): the player's while
+    /// its pilot is aboard and it has hit points, and an AI aircraft's
+    /// while it flies with hit points, whatever its nozzle draws.
+    pub flame: bool,
+}
+
+/// One aircraft's lit afterburner as lights: one in each engine's flame,
+/// behind its outlet in `offsets` (right, up and forward from the aircraft's
+/// reference point, in feet), sharing the aircraft's strength
+/// (docs/spec/engine-material.md#afterburner-glow).
+pub fn afterburner_glow(
+    position: Vector,
+    [yaw, pitch, bank]: [f64; 3],
+    offsets: &[Vector],
+) -> Vec<crate::countermeasure_renderer::Afterburner> {
+    use crate::countermeasure_renderer::{AFTERBURNER_BEHIND_FEET, AFTERBURNER_SHARE, Afterburner};
+    let basis = Basis::new(yaw, pitch, bank);
+    let share = AFTERBURNER_SHARE / offsets.len().max(1) as f64;
+    offsets
+        .iter()
+        .map(|o| Afterburner {
+            position: std::array::from_fn(|i| {
+                position[i]
+                    + basis.right[i] * o[0]
+                    + basis.up[i] * o[1]
+                    + basis.forward[i] * (o[2] - AFTERBURNER_BEHIND_FEET)
+            }),
+            share,
+        })
+        .collect()
+}
+
+/// Where an aircraft's engine outlets sit, for its flame lights: its own
+/// model's, from `model_outlets` (parallel to `models`), when a model is
+/// loaded for its type and that is not the player's type; otherwise the
+/// player's airframe's.
+pub fn engine_outlets<'a>(
+    aircraft: Option<AircraftId>,
+    player: AircraftId,
+    models: &[Airframe],
+    model_outlets: &'a [Vec<Vector>],
+    player_outlets: &'a [Vector],
+) -> &'a [Vector] {
+    aircraft
+        .filter(|id| *id != player)
+        .and_then(|id| models.iter().position(|model| model.profile.id == id))
+        .and_then(|index| model_outlets.get(index))
+        .map_or(player_outlets, Vec::as_slice)
+}
+
+/// The lit afterburners of the aircraft in `snapshot` other than the player,
+/// in target order, at their poses. `offsets` gives an aircraft's engine
+/// outlets.
+pub fn target_glows<'a>(
+    snapshot: &RenderSnapshot,
+    offsets: impl Fn(&AircraftPose) -> &'a [Vector],
+) -> Vec<crate::countermeasure_renderer::Afterburner> {
+    snapshot
+        .targets
+        .iter()
+        .filter(|pose| pose.engine.flame)
+        .flat_map(|pose| afterburner_glow(pose.position, pose.attitude, offsets(pose)))
+        .collect()
 }
 
 /// Damage as whole numbers. The drawn fractions derive from them exactly as

@@ -5382,6 +5382,9 @@ fn ai_probe_run(
     };
     let verify = record.is_some_and(|r| r.verify);
     let mut pictures = Vec::new();
+    // The released chaff and flares as each tick left them, once everything
+    // released after its step had left, which is what a replay flies.
+    let mut devices = Vec::new();
     if verify {
         pictures.push(combat.render_snapshot().clone());
     }
@@ -5402,6 +5405,12 @@ fn ai_probe_run(
             flight.step_surface(&keys, |x, z| world.surface(x, z));
         } else {
             flight.step(&keys, |x, z| f64::from(world.height(x as f32, z as f32)));
+        }
+        if verify {
+            devices.push((
+                combat.state.tick(),
+                replay::devices::digest(&combat.state.devices),
+            ));
         }
         let events = combat.step(&mut flight, world)?;
         if let Some(attacker) = &mut attacker {
@@ -5588,7 +5597,11 @@ fn ai_probe_run(
             .finish(&replay_footer(&combat, Some(&report), "probe finished"))
             .ok_or("the mission recording could not be finished; see the session log")?;
         if verify {
-            let verification = replay::cli::verify(&path, &pictures)?;
+            devices.push((
+                combat.state.tick(),
+                replay::devices::digest(&combat.state.devices),
+            ));
+            let verification = replay::cli::verify(&path, &pictures, &devices, world)?;
             println!("AI probe {}", verification.line());
         }
     }

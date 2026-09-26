@@ -575,7 +575,9 @@ fn order_voiced(event: &Event) -> bool {
     }
 }
 
-/// A recorded impact or explosion as the traveling-sound model takes it.
+/// A recorded impact, explosion or chaff or flare release as the
+/// traveling-sound model takes it. The player's own release plays centered
+/// while the camera sits in the player's aircraft, as in its cockpit.
 fn emission(event: &Event) -> Option<Emission> {
     use vocab::field;
     let name = event.string(field::SOUND)?;
@@ -586,6 +588,8 @@ fn emission(event: &Event) -> Option<Emission> {
         Kind::AircraftPass,
         Kind::MissilePass,
         Kind::SonicBoom,
+        Kind::Chaff,
+        Kind::Flare,
     ]
     .into_iter()
     .find(|kind| format!("{kind:?}").to_lowercase() == name)?;
@@ -597,7 +601,7 @@ fn emission(event: &Event) -> Option<Emission> {
             event.num(field::Z_FT)?,
         ],
         arrived: false,
-        own: false,
+        own: event.flag(field::OWN) == Some(true),
     })
 }
 
@@ -1401,6 +1405,33 @@ mod tests {
         host.selected = 1;
         let cues = host.play_to(LAST, 1. / 60.);
         assert!(!heard(&cues).iter().any(|(_, t)| t.contains("OFF")));
+    }
+
+    #[test]
+    fn recorded_chaff_and_flare_sounds_travel_and_the_players_own_is_its_own() {
+        use vocab::{field, kind};
+        let release = |sound: &str, own: bool| {
+            let event = Event::new(kind::AUDIO_EFFECT)
+                .with(field::SOUND, sound)
+                .with(field::X_FT, 10.)
+                .with(field::Y_FT, 20.)
+                .with(field::Z_FT, 30.);
+            if own {
+                event.with(field::OWN, true)
+            } else {
+                event
+            }
+        };
+        let chaff = emission(&release("chaff", true)).unwrap();
+        assert_eq!(
+            (chaff.kind, chaff.position, chaff.arrived, chaff.own),
+            (Kind::Chaff, [10., 20., 30.], false, true)
+        );
+        let flare = emission(&release("flare", false)).unwrap();
+        assert_eq!((flare.kind, flare.own), (Kind::Flare, false));
+        // An older recording's impact keeps playing as before.
+        assert!(!emission(&release("impact", false)).unwrap().own);
+        assert!(emission(&release("hum", true)).is_none());
     }
 
     #[test]

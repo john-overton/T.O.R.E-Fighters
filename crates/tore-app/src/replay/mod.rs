@@ -11,6 +11,7 @@ pub mod context_menu;
 pub mod convert;
 #[cfg(test)]
 mod demo;
+pub mod devices;
 pub mod drone;
 #[cfg(test)]
 pub(crate) mod fixture;

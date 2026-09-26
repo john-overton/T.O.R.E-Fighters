@@ -162,8 +162,9 @@ pub const MAX_STRIKES: usize = 64;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DeviceNote {
     Released(DeviceRelease),
-    /// A range reset removed every device and restarted their numbering.
-    Cleared,
+    /// A range reset removed every device and restarted their numbering,
+    /// after the step of this combat tick.
+    Cleared(u64),
 }
 /// One chaff cartridge or flare leaving an aircraft.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -176,6 +177,9 @@ pub struct DeviceRelease {
     /// The device's number among this flight's releases, from 1. It chose
     /// the device's look.
     pub number: u64,
+    /// The combat tick after whose step the device left; the next step is
+    /// its first.
+    pub tick: u64,
     /// The player's devices of this kind left afterwards; `None` for an AI
     /// aircraft, whose dispensers combat does not hold.
     pub left: Option<u8>,
@@ -1767,7 +1771,7 @@ impl State {
         self.effects.clear();
         self.smoke = super::smoke::Smoke::default();
         self.devices = Default::default();
-        self.note_devices(DeviceNote::Cleared);
+        self.note_devices(DeviceNote::Cleared(self.tick));
         self.debris.clear();
         self.targets
             .retain(|t| self.ground_bounds.contains_key(&t.id));
@@ -2067,6 +2071,7 @@ impl State {
             kind,
             release,
             number: self.devices.released(),
+            tick: self.tick,
             left: (owner == PLAYER_OWNER).then_some(match kind {
                 EffectKind::Chaff => self.chaff,
                 _ => self.flares,
@@ -4466,6 +4471,7 @@ mod tests {
                     kind: EffectKind::Chaff,
                     release: player,
                     number: 1,
+                    tick: 0,
                     left: Some(1),
                 }),
                 DeviceNote::Released(DeviceRelease {
@@ -4473,6 +4479,7 @@ mod tests {
                     kind: EffectKind::Flare,
                     release: player,
                     number: 2,
+                    tick: 0,
                     left: Some(0),
                 }),
                 DeviceNote::Released(DeviceRelease {
@@ -4484,6 +4491,7 @@ mod tests {
                         basis: Basis::new(0.5, 0., 0.),
                     },
                     number: 3,
+                    tick: 0,
                     left: None,
                 }),
             ]
@@ -4506,7 +4514,7 @@ mod tests {
         assert!(s.take_device_notes().is_empty() && s.take_decoy_rolls().is_empty());
         // A range reset clears the devices, and says so.
         s.range_target(launcher());
-        assert_eq!(s.take_device_notes(), [DeviceNote::Cleared]);
+        assert_eq!(s.take_device_notes(), [DeviceNote::Cleared(0)]);
         // Bounded when nobody drains them.
         for _ in 0..MAX_RELEASE_RECORDS + 5 {
             s.device_released(player, EffectKind::Chaff, 4);

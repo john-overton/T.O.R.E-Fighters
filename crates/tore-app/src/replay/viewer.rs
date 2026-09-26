@@ -14,6 +14,7 @@ use crate::render_snapshot::{self, AircraftPose, CombatArt, RenderSnapshot};
 use crate::renderer::Renderer;
 use crate::replay::clock::{self, Clock, Direction};
 use crate::replay::context_menu::{self, Action, Menu, Outcome, Pickable, RightClick, Target};
+use crate::replay::devices::DeviceTrack;
 use crate::replay::drone::{Drone, Mode};
 use crate::replay::overlay::{self, Control, Marker, MarkerKind, Model, Placement};
 use crate::replay::panels::{self, Data, Kind, Panels, RecordedTrees};
@@ -552,6 +553,11 @@ pub struct Viewer {
     tracks: Tracks,
     scanner: Scanner,
     weather: WeatherTrack,
+    /// Released chaff and flares, flown again from their releases.
+    devices: DeviceTrack,
+    /// Where each airframe's engine outlets sit, for the afterburner
+    /// lights: the player's airframe's, then each model's.
+    outlets: (Vec<[f64; 3]>, Vec<Vec<[f64; 3]>>),
     /// Voices, tones and effects at normal speed.
     sound: ReplaySound,
     pub clock: Clock,
@@ -719,6 +725,11 @@ impl Viewer {
             ),
             targets: targets(events),
             missiles: missiles(&recording),
+            devices: DeviceTrack::new(events),
+            outlets: (
+                ownship.contrail_offsets(),
+                models.iter().map(Airframe::contrail_offsets).collect(),
+            ),
             recording,
             world,
             scratch: template.clone(),
@@ -1793,11 +1804,29 @@ impl Viewer {
         };
         renderer.vapor(&vapor);
         let [smoke, contrails] = self.playback.smoke(tick);
-        // Recordings do not carry released chaff and flares yet, so none are
-        // drawn and nothing lights the scene.
-        let devices = tore_sim::combat::countermeasures::Devices::default();
-        renderer.smoke(&self.art.smoke, [smoke, contrails], &devices);
-        renderer.emitters(&devices, &[]);
+        // Chaff and flares flown again from their releases, lit and lighting
+        // the scene with every lit afterburner, as live flight draws them.
+        let devices = self.devices.at(tick, &self.world);
+        renderer.smoke(&self.art.smoke, [smoke, contrails], devices);
+        let (player_outlets, model_outlets) = &self.outlets;
+        let mut glows = Vec::new();
+        if picture.player.engine.flame {
+            glows.extend(render_snapshot::afterburner_glow(
+                picture.player.position,
+                picture.player.attitude,
+                player_outlets,
+            ));
+        }
+        glows.extend(render_snapshot::target_glows(&picture, |pose| {
+            render_snapshot::engine_outlets(
+                pose.aircraft,
+                self.ownship.profile.id,
+                &self.models,
+                model_outlets,
+                player_outlets,
+            )
+        }));
+        renderer.emitters(devices, &glows);
         let destroyed = self.tracks.destroyed(tick);
         if self
             .airports

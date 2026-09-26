@@ -231,6 +231,8 @@ pub struct Verification {
     pub compared: usize,
     pub missing: usize,
     pub differing: usize,
+    /// Ticks compared with chaff or flares in the air.
+    pub device_ticks: usize,
     /// The first difference: its tick and what differed.
     pub first: Option<(u64, String)>,
 }
@@ -242,11 +244,12 @@ impl Verification {
     /// One line for the probe's output.
     pub fn line(&self) -> String {
         format!(
-            "verify-render: {} ticks={} missing={} differing={}{}",
+            "verify-render: {} ticks={} missing={} differing={} device_ticks={}{}",
             if self.passed() { "PASS" } else { "FAIL" },
             self.compared,
             self.missing,
             self.differing,
+            self.device_ticks,
             self.first
                 .as_ref()
                 .map_or(String::new(), |(tick, what)| format!(
@@ -257,15 +260,28 @@ impl Verification {
 }
 
 /// Rebuilds every recorded tick and compares it with the live snapshot
-/// taken at that tick, within the format's precision.
-pub fn verify(path: &Path, live: &[RenderSnapshot]) -> AppResult<Verification> {
+/// taken at that tick, within the format's precision, and the chaff and
+/// flares flown again from their releases with the devices combat flew,
+/// exactly. `devices` holds each tick's live devices as
+/// [`super::devices::digest`] fingerprints them, taken once everything
+/// released after that tick's step had left; `world` is the probe's own.
+pub fn verify(
+    path: &Path,
+    live: &[RenderSnapshot],
+    devices: &[(u64, u64)],
+    world: &crate::terrain::World,
+) -> AppResult<Verification> {
     let recording = open(path)?;
     let presentation = Presentation::from_header(recording.header());
     let identities = Identities::of(&recording);
+    let flown: std::collections::BTreeMap<u64, u64> = devices.iter().copied().collect();
+    let mut track = super::devices::DeviceTrack::new(recording.events());
+    let none = super::devices::digest(&Default::default());
     let mut result = Verification {
         compared: 0,
         missing: 0,
         differing: 0,
+        device_ticks: 0,
         first: None,
     };
     for snapshot in live {
@@ -276,7 +292,13 @@ pub fn verify(path: &Path, live: &[RenderSnapshot]) -> AppResult<Verification> {
         let effects = recording.live_effects(snapshot.tick, convert::EFFECT_LOOKBACK_TICKS)?;
         let rebuilt = convert::snapshot(&frame, &effects, &presentation, &identities);
         result.compared += 1;
-        if let Some(what) = convert::difference(snapshot, &rebuilt) {
+        let difference = convert::difference(snapshot, &rebuilt).or_else(|| {
+            let expected = *flown.get(&snapshot.tick)?;
+            let replayed = super::devices::digest(track.at(snapshot.tick, world));
+            result.device_ticks += usize::from(expected != none);
+            (replayed != expected).then(|| "the released chaff and flares differ".to_owned())
+        });
+        if let Some(what) = difference {
             result.differing += 1;
             result.first.get_or_insert((snapshot.tick, what));
         }

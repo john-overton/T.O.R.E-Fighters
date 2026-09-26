@@ -91,7 +91,7 @@ fn devices_left(notes: &[DeviceNote], dispensers: &Dispensers) -> Vec<Option<u32
                     dispensers.get(&key(device)).map(|count| count + after)
                 }
             },
-            DeviceNote::Cleared => None,
+            DeviceNote::Cleared(_) => None,
         })
         .collect()
 }
@@ -111,10 +111,12 @@ impl Recorder {
                         kind: device.kind,
                         release: device.release,
                         number: device.number,
+                        tick: device.tick,
                     },
                     left,
                 ),
-                DeviceNote::Cleared => Event::new(kind::COMBAT_COUNTERMEASURES_CLEARED)
+                DeviceNote::Cleared(tick) => Event::new(kind::COMBAT_COUNTERMEASURES_CLEARED)
+                    .with(tore_replay::vocab::field::AFTER_TICK, tick as i64)
                     .with_text("a range reset removed every chaff cloud and flare"),
             };
             self.note(event);
@@ -148,6 +150,7 @@ mod tests {
                     basis: tore_sim::attitude::Basis::new(0., 0., 0.),
                 },
                 number: 1,
+                tick: 0,
                 left,
             })
         };
@@ -156,7 +159,7 @@ mod tests {
             release(7, Flare, None),
             release(0, Chaff, Some(3)),
             release(7, Flare, None),
-            DeviceNote::Cleared,
+            DeviceNote::Cleared(0),
             release(7, Chaff, None),
             release(9, Flare, None),
         ];
