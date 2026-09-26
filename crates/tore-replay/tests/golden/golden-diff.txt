@@ -1,0 +1,33 @@
+T.O.R.E recording comparison (A against B)
+==========================================
+
+A covers    0:00.0 to 0:03.9 (ticks 0 to 479)
+B covers    0:00.0 to 0:03.9 (ticks 0 to 479)
+
+Header
+------
+identical
+
+State checksums
+---------------
+first differs at 0:03.0 (tick 360), after 4 compared
+last match at 0:02.0 (tick 240)
+
+First divergence
+----------------
+at 0:02.0 (tick 250):
+  Enemy 2-1: 10 ft apart
+
+Events
+------
+kills: same (1 each)
+launches: differ (A 1, B 2), first at #2:
+  A nothing (ran out)
+  B 0:03.3  You launched AIM-120
+hits: same (1 each)
+shot outcomes: same (1 each)
+AI decisions: same (2 each)
+comms: same (3 each)
+player and system events: same (1 each)
+
+Verdict: the recordings differ

@@ -1,0 +1,66 @@
+T.O.R.E mission summary
+=======================
+
+Recording   format 1, game 0.1.0 (golden), recorded 2026-09-26T15:40:00Z
+Mission     Quick Mission in Ukraine (UKR), layout UKR.MM
+Conditions  clear (weather 1), starts 12:00:00 local, wind 12.5 ft/s toward 180 deg (from 000)
+Clouds      DAY2.LAY, no scattered deck
+Settings    flight_model=researched
+Result      outcome victory, kills 1
+Length      0:04.0 (480 frames, ticks 0 to 479), finished normally
+
+Aircraft
+--------
+You (F/A-18D, F18.PT; friendly wing 1-1; human)
+  airborne 0:04.0 | max 2 G at 0:00.0 | min 2 G at 0:00.0 | lowest 20,000 ft MSL at 0:00.0 | lowest 18,750 ft AGL at 0:00.0
+  stalls 0 | spins 0 | fuel 9,000 -> 8,990 lb (used 10 lb)
+  shots 1 | hits 1 | kills 1 | end: alive, 1,000 of 1,000 hp
+Friendly 1-2 (F/A-18D, F18.PT; friendly wing 1-2; Regular)
+  not in any recorded frame
+Enemy 2-1 (MiG-29, MIG29.PT; enemy wing 2-1; Veteran)
+  airborne 0:03.5 | max 1 G at 0:00.0 | min 1 G at 0:00.0 | lowest 18,000 ft MSL at 0:00.0 | lowest height above ground not recorded
+  stalls 0 | spins 0 | fuel 5,000 -> 4,993 lb (used 7 lb)
+  shots 0 | hits 0 | kills 0 | end: destroyed, 0 of 800 hp
+  AI activity: ATTACKING 1.7 s, DEFENDING 0.8 s
+
+Shots
+-----
+#1 0:01.0  You -> Enemy 2-1  AIM-120 (radar)
+   launch: range 0.9 nm, aspect 35 deg, off boresight 12 deg, closure 820 kt, heights 20,000 / 18,000 ft, speeds 474 / 355 kt
+   flight: time of flight 1.5 s, peak speed 2,267 kt, closest approach 27 ft at 0:02.4
+   outcome: hit, damage 800, hp after 0 (0:02.5)
+
+Communication
+-------------
+0:01.0  RADIO   You: "Fox three, one away" [delivered], heard by you, waited 0.25 s, trigger: missile release
+0:01.0  ORDER   You -> Friendly 1-2: engage my target
+0:01.0  ANSWER  Friendly 1-2 -> You [rejected]; why: its sensors cannot see the target
+
+Timeline
+--------
+0:01.0  You launched AIM-120 at Enemy 2-1 from 0.9 nm, aspect 35 deg
+0:02.5  shot 1 from You at Enemy 2-1: hit, damage 800, hp after 0
+0:02.5  You hit Enemy 2-1 with AIM-120 for 800 damage, hp now 0
+0:02.5  Enemy 2-1 was destroyed by You (AIM-120)
+0:03.0  Bookmark: "odd dip"
+
+Bookmarks
+---------
+0:03.0 "odd dip"
+  events from 0:00.0 to 0:08.0:
+    0:00.0  Enemy 2-1 activity FORMATION -> ATTACKING because leader released wing
+    0:01.0  You launched AIM-120 at Enemy 2-1 from 0.9 nm, aspect 35 deg
+    0:01.0  RADIO You: "Fox three, one away" [delivered], heard by you, waited 0.25 s, trigger: missile release
+    0:01.0  ORDER You -> Friendly 1-2: engage my target
+    0:01.0  ANSWER Friendly 1-2 -> You [rejected]; why: its sensors cannot see the target
+    0:01.6  Enemy 2-1 activity ATTACKING -> DEFENDING because missile inbound, 1.2 nm
+    0:02.5  shot 1 from You at Enemy 2-1: hit, damage 800, hp after 0
+    0:02.5  You hit Enemy 2-1 with AIM-120 for 800 damage, hp now 0
+    0:02.5  Enemy 2-1 was destroyed by You (AIM-120)
+  aircraft at 0:03.0:
+    You  20,000 ft MSL, 474 kt, heading 068, G 2, alive, 1,000 of 1,000 hp
+    Enemy 2-1  17,800 ft MSL, 355 kt, heading 270, G 1, destroyed, 0 of 800 hp
+
+Anomalies
+---------
+0:01.0  order_rejected       ANSWER Friendly 1-2 -> You [rejected]; why: its sensors cannot see the target
