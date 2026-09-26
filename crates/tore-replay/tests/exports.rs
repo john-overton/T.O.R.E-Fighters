@@ -439,7 +439,10 @@ fn golden_frames() -> Vec<Frame> {
                     .with(field::DECOY, decoy)
                     .with(field::NUMBER, tick as i64 - 254)
                     .with(field::LEFT, left);
-                let forward = state.forward();
+                // Along the velocity: both fly level without slip, and
+                // `forward()` would use the platform's sine and cosine.
+                let speed = state.ground_speed();
+                let forward = state.velocity.map(|v| v / speed);
                 let numbers = state
                     .position
                     .into_iter()
