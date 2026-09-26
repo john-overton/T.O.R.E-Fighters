@@ -197,7 +197,7 @@ lower left corner and `tore-app --version` prints it. A release build reads
 `TORE_BUILD_VERSION` at compile time; the workflow sets it to the tag (or to
 `git describe` on a test branch) and refuses a tag that does not match the
 version in `crates/tore-app/Cargo.toml`. A build without the variable reports
-the crate version. Bump `Cargo.toml` before tagging.
+the crate version. Follow the [release checklist](RELEASING.md) before tagging.
 
 Build the release binaries first, stamping the same version the package will
 carry:
