@@ -79,9 +79,11 @@ contact, and whether the pilot is still flying it. It compares them with
 the previous tick to find what
 changed, and hooks later in the tick add the radio lines delivered, the
 sounds released and cockpit messages. Encoding and writing happen on a
-background thread fed by a queue two seconds deep. The flight never waits
+background thread fed by a queue two seconds deep. Live flight never waits
 for the disk: if the queue is ever full, that tick's frame is dropped and
 the next frame starts with a `system.gap` event naming the missing ticks.
+A headless probe recording (`--record-mission`) has no frame rate to
+protect, so it waits for the writer instead and never has gaps.
 Events noted between ticks (a pause, a bookmark, a wing order) go on the
 tick that was on screen.
 
@@ -97,8 +99,10 @@ under a microsecond), and the whole process uses about 35 microseconds more
 CPU a tick with the writer thread, against a tick of 8,333 microseconds.
 With 5 aircraft the recorder takes about 7 microseconds (3 for the reasons
 and trees). A busy machine can starve the writer thread: once, with four
-probe runs and another agent's builds at the same time, a recording lost 57
-ticks to a `system.gap`; the same probe recorded every tick when rerun.
+probe runs and another agent's builds at the same time, a probe recording
+lost 57 ticks to a `system.gap`. Probe recordings now wait for the writer
+instead, so that cannot recur there; live flight keeps dropping rather than
+stalling, which only a machine far busier than the game itself would cause.
 
 ### What is recorded now
 

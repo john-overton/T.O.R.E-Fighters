@@ -5537,6 +5537,9 @@ fn start_probe_recording(
     );
     let mut recording = recorder::Recorder::start(record.path.clone(), &header, &roster)
         .map_err(|error| format!("--record-mission {}: {error}", record.path.display()))?;
+    // A probe has no frame rate to protect: wait for the writer rather than
+    // drop ticks when the machine is busy.
+    recording.wait_for_writer();
     recording.begin(recorder::Tick {
         snapshot,
         combat,

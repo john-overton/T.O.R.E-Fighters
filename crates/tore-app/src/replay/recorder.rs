@@ -10,9 +10,12 @@
 //! tick opens, so anything noted between ticks (a pause, a bookmark, an
 //! order) lands on the tick the player was looking at.
 //!
-//! The simulation never waits for the disk: frames travel to the writer on a
+//! Live flight never waits for the disk: frames travel to the writer on a
 //! bounded queue, and if it is ever full the frame is dropped and the next
-//! one carries a `system.gap` event. Nothing here feeds back into flight;
+//! one carries a `system.gap` event. A headless probe recording, which has
+//! no frame rate to protect, waits for the writer instead
+//! ([`Recorder::wait_for_writer`]), so it never has gaps however loaded the
+//! machine is. Nothing here feeds back into flight;
 //! every read is of state the tick already computed. Opinionated addition
 //! requested by John on 2026-09-26; see docs/REPLAYS.md.
 //!
@@ -225,6 +228,8 @@ pub struct Recorder {
     shots: BTreeMap<u32, Shot>,
     /// Dropped frames not yet reported: first and last tick, events lost.
     gap: Option<(u64, u64, usize)>,
+    /// Wait for a full queue instead of dropping frames (headless runs).
+    wait: bool,
     /// The seeker tone and its loudness as last recorded.
     tone: Option<(Tone, f64)>,
     stall: Option<&'static str>,
@@ -285,6 +290,7 @@ impl Recorder {
             watches: BTreeMap::new(),
             shots: BTreeMap::new(),
             gap: None,
+            wait: false,
             tone: None,
             stall: None,
             danger: false,
@@ -319,13 +325,31 @@ impl Recorder {
         who(&self.infos, id)
     }
 
-    /// Queues a message for the writer without ever waiting and says whether
-    /// it went. Registrations that do not fit wait in the backlog and count
-    /// as sent; a frame that does not fit is not sent.
+    /// Makes the recorder wait for a full queue instead of dropping frames.
+    /// For headless runs only: live flight must never wait for the disk.
+    pub fn wait_for_writer(&mut self) {
+        self.wait = true;
+    }
+
+    /// Queues a message for the writer and says whether it went. Normally it
+    /// never waits: registrations that do not fit wait in the backlog and
+    /// count as sent; a frame that does not fit is not sent. After
+    /// [`Recorder::wait_for_writer`] every message waits for room instead.
     fn send(&mut self, message: Message) -> bool {
         let Some(sender) = &self.sender else {
             return false;
         };
+        if self.wait {
+            let mut pending = std::mem::take(&mut self.backlog);
+            pending.push(message);
+            for message in pending {
+                if sender.send(message).is_err() {
+                    self.sender = None;
+                    return false;
+                }
+            }
+            return true;
+        }
         while !self.backlog.is_empty() {
             match sender.try_send(self.backlog.remove(0)) {
                 Ok(()) => {}
@@ -1801,6 +1825,39 @@ mod tests {
         assert_eq!((from, to), (last_sent + 1, 6));
         assert_eq!(next[0].tick, 7);
         // Nothing waits forever: the recorder never blocked.
+    }
+
+    #[test]
+    fn waiting_for_the_writer_never_drops_a_frame() {
+        let (mut recorder, receiver) = Recorder::detached(3, &[]);
+        recorder.wait_for_writer();
+        // A slow writer on its own thread, as in a busy headless run.
+        let writer = std::thread::spawn(move || {
+            let mut ticks = Vec::new();
+            for message in receiver {
+                if let Message::Frame(frame) = message {
+                    assert!(
+                        frame.events.iter().all(|e| e.kind != kind::SYSTEM_GAP),
+                        "a waiting recorder reported a gap"
+                    );
+                    ticks.push(frame.tick);
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            }
+            ticks
+        });
+        let mut combat = fixture::combat(Vec::new(), Vec::new());
+        let player = fixture::player();
+        combat.restart_render(&player, None);
+        let snapshot = combat.render_snapshot().clone();
+        let mut ui = flight_ui::FlightUi::default();
+        for number in 0..12 {
+            tick(&mut recorder, &mut combat, &snapshot, number, &mut ui);
+        }
+        // The last frame is still held for notes; every earlier one arrived.
+        drop(recorder);
+        let ticks = writer.join().unwrap();
+        assert_eq!(ticks, (0..11).collect::<Vec<u64>>());
     }
 
     #[test]
