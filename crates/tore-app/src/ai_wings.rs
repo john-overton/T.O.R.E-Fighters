@@ -909,7 +909,7 @@ impl AiWings {
 
     /// Take the pending activity line, if the rate limiter released one.
     pub fn take_message(&mut self) -> Option<String> {
-        self.reports.take().or_else(|| self.pending_message.take())
+        self.take_line()
     }
 
     /// One 120 Hz tick of AI, run immediately after `Combat::step`.
@@ -1879,10 +1879,14 @@ impl AiWings {
             }
             if tick < self.last_message_tick + MESSAGE_INTERVAL_TICKS && self.last_message_tick > 0
             {
+                let remaining = self.last_message_tick + MESSAGE_INTERVAL_TICKS - tick;
+                self.activity_held(*id, *activity, remaining);
                 continue;
             }
             let Some(slot) = self.slot(*id) else { continue };
-            self.pending_message = Some(format!("{}: {}", slot.label(), activity.label()));
+            let message = format!("{}: {}", slot.label(), activity.label());
+            self.activity_posted(*id, *activity);
+            self.pending_message = Some(message);
             self.last_message_tick = tick.max(1);
         }
     }

@@ -8,7 +8,15 @@
 //! snapshot per fixed 120 Hz tick and draws its random numbers from the
 //! channel's roll. The host adapter at the end of this file builds the input
 //! from the live flight, combat and AI state.
-use crate::comms::{self, Call, Comms, Crew, Elevation, Kind, Phrase, Phrases};
+//!
+//! Each line, each coaching check that finds nothing to say, each change in
+//! whether the crew may comment, and each draw of the roll is written to the
+//! channel's journal. Writing it never draws a roll.
+use crate::ai_wings::PLAYER_ID;
+use crate::comms::journal::{
+    Audience, Cause, Coaching, Entry, Gate, NoSpeaker, Origin, Outcome, Reason, Roll, Source, Test,
+};
+use crate::comms::{self, Call, Comms, Crew, Elevation, Kind, Phrase, Phrases, Route};
 use std::collections::BTreeSet;
 use tore_sim::ai::route::FuelState;
 use tore_sim::attitude::{Basis, Vector, dot};
@@ -320,6 +328,45 @@ pub struct CrewVoice {
     warned: BTreeSet<u32>,
     crashed: bool,
     home: Option<Vector>,
+    /// The comment gate last journaled; `None` before the first. Journal
+    /// only: no rule reads it.
+    gate: Option<Option<Gate>>,
+}
+
+/// A chance roll that passes below `percent`, recorded in `rolls`.
+fn chance(comms: &mut Comms, rolls: &mut Vec<Roll>, rule: &'static str, percent: u32) -> bool {
+    let value = comms.roll();
+    rolls.push(Roll::new(rule, value, Test::Below(percent)));
+    value < percent
+}
+
+/// Why nobody can coach a single-seat player, once [`CrewVoice::speaker`]
+/// found no speaker.
+fn no_speaker(input: &Input) -> NoSpeaker {
+    let Some(w) = input.wingman.as_ref() else {
+        return NoSpeaker::NoWingman;
+    };
+    if !w.alive {
+        return NoSpeaker::WingmanDown;
+    }
+    if w.target != input.designated {
+        return NoSpeaker::OtherTarget {
+            his: w.target,
+            ours: input.designated,
+        };
+    }
+    let offset: Vector = std::array::from_fn(|i| w.position[i] - input.own.position[i]);
+    NoSpeaker::TooFar {
+        range_ft: length(offset),
+    }
+}
+
+/// What the G load says this tick.
+enum GSound {
+    /// A line: its variants, the extra wait, the trigger and any chance roll.
+    Line(&'static [&'static str], f64, Cause, Option<Roll>),
+    /// Entering hard G, but the strain chance did not come up.
+    Missed(Cause, Roll),
 }
 
 impl CrewVoice {
@@ -347,6 +394,7 @@ impl CrewVoice {
             warned: BTreeSet::new(),
             crashed: false,
             home: None,
+            gate: None,
         }
     }
     /// The home point for fuel calls: the first position seen this flight.
@@ -358,16 +406,24 @@ impl CrewVoice {
     pub fn step(&mut self, input: &Input, comms: &mut Comms, phrases: &Phrases) {
         let now = input.now;
         if input.crashed && !self.crashed && !input.ejected {
-            let stem = Comms::pick(comms.roll(), SCREAM);
+            let roll = comms.roll();
+            let stem = Comms::pick(roll, SCREAM);
+            let origin = Origin::of(Source::Crew, Cause::Destroyed)
+                .by(PLAYER_ID)
+                .to(Audience::Cockpit)
+                .rolls(vec![Roll::pick("death scream", roll, SCREAM.len())]);
             comms.send(
                 now,
-                Call::new("", Phrase::stem(phrases, stem), Kind::Important).direct(),
+                Call::new("", Phrase::stem(phrases, stem), Kind::Important)
+                    .direct()
+                    .because(origin),
             );
         }
         self.crashed = input.crashed;
         let g = input.g.floor() as i32;
         let previous_g = self.last_g.replace(g);
         if input.crashed || input.ejected || input.pilot_dead {
+            self.gate(now, comms, Some(Gate::Lost));
             return;
         }
         if let Some(crew) = self.crew {
@@ -375,6 +431,11 @@ impl CrewVoice {
             self.missile_warnings(crew, &input.incoming, comms, phrases, now);
         }
         if !comms.channel_free(now) || input.doomed {
+            // Every delivered line shows the 3 s channel hold, so only the
+            // eject warning is journaled as a gate here.
+            if input.doomed {
+                self.gate(now, comms, Some(Gate::EjectDanger));
+            }
             return;
         }
         if comms.radio_silence {
@@ -382,24 +443,53 @@ impl CrewVoice {
             if input.over_water.is_some() {
                 self.wet = input.over_water;
             }
+            self.gate(now, comms, Some(Gate::RadioSilence));
             return;
         }
         if !input.free_flight {
+            self.gate(now, comms, Some(Gate::NotFreeFlight));
             return;
         }
         let Some(speaker) = self.speaker(input) else {
+            self.gate(now, comms, Some(Gate::NoSpeaker(no_speaker(input))));
             return;
         };
-        if !speaker.wingman
-            && let Some((stems, wait)) = self.g_sound(previous_g, g, input.clock_minute, comms)
-        {
-            let stem = Comms::pick(comms.roll(), stems);
-            comms.send(
-                now,
-                Call::new(speaker.label, Phrase::stem(phrases, stem), Kind::Chatter),
-            );
-            self.next = self.next.max(now) + wait;
-            return;
+        self.gate(now, comms, None);
+        let speaker_id = (!speaker.wingman).then_some(PLAYER_ID);
+        let origin = |cause, rolls| {
+            let origin = Origin::of(Source::Crew, cause)
+                .to(Audience::Cockpit)
+                .rolls(rolls);
+            match speaker_id {
+                Some(id) => origin.by(id),
+                None => origin,
+            }
+        };
+        if !speaker.wingman {
+            match self.g_event(previous_g, g, input.clock_minute, comms) {
+                Some(GSound::Line(stems, wait, cause, chance)) => {
+                    let roll = comms.roll();
+                    let stem = Comms::pick(roll, stems);
+                    let rolls = chance
+                        .into_iter()
+                        .chain([Roll::pick("G sound", roll, stems.len())])
+                        .collect();
+                    comms.send(
+                        now,
+                        Call::new(speaker.label, Phrase::stem(phrases, stem), Kind::Chatter)
+                            .because(origin(cause, rolls)),
+                    );
+                    self.next = self.next.max(now) + wait;
+                    return;
+                }
+                Some(GSound::Missed(cause, roll)) => comms.record(Entry::note(
+                    now,
+                    speaker.label.clone(),
+                    origin(cause, vec![roll]),
+                    Outcome::Suppressed(Reason::Chance),
+                )),
+                None => {}
+            }
         }
         let geometry = input.target.as_ref().map(|t| geometry(&input.own, &t.body));
         let situation = classify(input.target.as_ref(), geometry.as_ref(), self.fighter);
@@ -410,46 +500,109 @@ impl CrewVoice {
             return;
         }
         let far = geometry.is_some_and(|g| g.range > FAR_FT);
-        self.next = now + 4. + f64::from(comms.roll() % 4) + if far { 2. } else { 0. };
+        let wait_roll = comms.roll();
+        self.next = now + 4. + f64::from(wait_roll % 4) + if far { 2. } else { 0. };
+        let mut rolls = vec![Roll::new(
+            if far {
+                "coaching wait: 4 s plus the roll mod 4, and 2 s beyond 8,000 ft"
+            } else {
+                "coaching wait: 4 s plus the roll mod 4"
+            },
+            wait_roll,
+            Test::Modulo(4),
+        )];
         let previous = self.last_situation.replace(situation);
         let nm = geometry.map(|g| (g.range / FEET_PER_NM) as u32);
         let previous_nm = std::mem::replace(&mut self.last_nm, nm);
-        let line = match (situation, geometry) {
-            (Situation::Clear, _) => self.feet(input.over_water, comms),
-            (Situation::Silent, _) | (Situation::Surface { ahead: false }, _) => None,
+        let (line, rule) = match (situation, geometry) {
+            (Situation::Clear, _) => self.feet(input.over_water, comms, &mut rolls),
+            (Situation::Silent, _) => (
+                None,
+                "the target is going down, or your aircraft is not a fighter",
+            ),
+            (Situation::Surface { ahead: false }, _) => (None, "the surface target is behind"),
             (Situation::Surface { ahead: true }, Some(g)) => {
                 let nm = nm.unwrap_or(0);
                 if previous_nm.is_some_and(|p| p > 10) && nm <= 10 {
-                    Some((Line::Stems(&["^APPTRGT"]), 0.))
+                    (
+                        Some((Line::Stems(&["^APPTRGT"]), 0.)),
+                        "approaching the target: inside 10 nm",
+                    )
                 } else if previous_nm != Some(nm) && nm >= 1 {
                     let rounded = (g.range / FEET_PER_NM).round() as u32;
-                    Some((Line::Phrase(range_call(phrases, rounded, g.bearing)), 0.))
+                    (
+                        Some((Line::Phrase(range_call(phrases, rounded, g.bearing)), 0.)),
+                        "range to the target: a new whole mile",
+                    )
                 } else {
-                    None
+                    (None, "range to the target: the same whole mile")
                 }
             }
-            (situation, Some(g)) => {
-                self.dogfight(situation, previous, &g, input, &speaker, comms, phrases)
-            }
-            (_, None) => None,
+            (situation, Some(g)) => self.dogfight(
+                situation, previous, &g, input, &speaker, comms, phrases, &mut rolls,
+            ),
+            (_, None) => (None, "no target geometry"),
+        };
+        let coaching = |next_s| {
+            Cause::Coaching(Box::new(Coaching {
+                situation,
+                previous,
+                range_ft: geometry.map(|g| g.range),
+                rule,
+                next_s,
+            }))
         };
         let Some((phrase, wait)) = line else {
+            comms.record(Entry::note(
+                now,
+                speaker.label,
+                origin(coaching(self.next - now), rolls),
+                Outcome::Silent,
+            ));
             return;
         };
         match phrase {
             Line::Stems(stems) => {
-                let stem = Comms::pick(comms.roll(), stems);
+                let roll = comms.roll();
+                let stem = Comms::pick(roll, stems);
+                rolls.push(Roll::pick("the line", roll, stems.len()));
                 self.next += wait;
                 comms.send(
                     now,
-                    Call::new(speaker.label, Phrase::stem(phrases, stem), Kind::Chatter),
+                    Call::new(speaker.label, Phrase::stem(phrases, stem), Kind::Chatter)
+                        .because(origin(coaching(self.next - now), rolls)),
                 );
             }
             Line::Phrase(phrase) => {
                 self.next += wait;
-                comms.send(now, Call::new(speaker.label, phrase, Kind::Chatter));
+                comms.send(
+                    now,
+                    Call::new(speaker.label, phrase, Kind::Chatter)
+                        .because(origin(coaching(self.next - now), rolls)),
+                );
             }
         }
+    }
+
+    /// Journal a change in whether the crew may comment. Never read back.
+    fn gate(&mut self, now: f64, comms: &mut Comms, gate: Option<Gate>) {
+        if let Some(last) = self.gate {
+            let same = match (last, gate) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.same(&b),
+                _ => false,
+            };
+            if same {
+                return;
+            }
+        }
+        let from = self.gate.replace(gate).flatten();
+        comms.record(Entry::note(
+            now,
+            self.crew.map_or("Crew", Crew::label),
+            Origin::of(Source::Crew, Cause::CrewGate { from, to: gate }).to(Audience::Cockpit),
+            Outcome::Noted,
+        ));
     }
 
     /// The crew of a two-seater, else the first wingman when he qualifies.
@@ -471,6 +624,7 @@ impl CrewVoice {
     }
 
     /// Strain on a hard pull or push, and the -1 G crossing count.
+    #[cfg(test)]
     fn g_sound(
         &mut self,
         previous: Option<i32>,
@@ -478,6 +632,20 @@ impl CrewVoice {
         minute: i64,
         comms: &mut Comms,
     ) -> Option<(&'static [&'static str], f64)> {
+        match self.g_event(previous, g, minute, comms)? {
+            GSound::Line(stems, wait, ..) => Some((stems, wait)),
+            GSound::Missed(..) => None,
+        }
+    }
+
+    /// [`Self::g_sound`] with its trigger and roll, for the journal.
+    fn g_event(
+        &mut self,
+        previous: Option<i32>,
+        g: i32,
+        minute: i64,
+        comms: &mut Comms,
+    ) -> Option<GSound> {
         let previous = previous?;
         if (previous >= -1) != (g >= -1) {
             if minute != self.crossing_minute {
@@ -486,19 +654,40 @@ impl CrewVoice {
             }
             self.crossings += 1;
             if self.crossings == 18 {
-                return Some((&["^EASEUP"], 5.));
+                return Some(GSound::Line(
+                    &["^EASEUP"],
+                    5.,
+                    Cause::Crossings { count: 18 },
+                    None,
+                ));
             }
             if self.crossings >= 20 {
+                let count = self.crossings;
                 self.crossings = 0;
-                return Some((SICK, 15.));
+                return Some(GSound::Line(SICK, 15., Cause::Crossings { count }, None));
             }
             return None;
         }
         let hard = |g: i32| !(-3 < g && g < 5);
-        (hard(g) && !hard(previous) && comms.roll() < 30).then_some((STRAIN, 3.))
+        if !hard(g) || hard(previous) {
+            return None;
+        }
+        let value = comms.roll();
+        let cause = Cause::HardG { g, previous };
+        let roll = Roll::new("strain sound", value, Test::Below(30));
+        Some(if value < 30 {
+            GSound::Line(STRAIN, 3., cause, Some(roll))
+        } else {
+            GSound::Missed(cause, roll)
+        })
     }
 
-    fn feet(&mut self, over_water: Option<bool>, comms: &mut Comms) -> Option<(Line, f64)> {
+    fn feet(
+        &mut self,
+        over_water: Option<bool>,
+        comms: &mut Comms,
+        rolls: &mut Vec<Roll>,
+    ) -> (Option<(Line, f64)>, &'static str) {
         let changed = match (self.wet, over_water) {
             (Some(was), Some(now)) if was != now => Some(now),
             _ => None,
@@ -507,14 +696,28 @@ impl CrewVoice {
             self.wet = over_water;
         }
         match changed {
-            Some(wet) => Some((Line::Stems(if wet { FEET_WET } else { FEET_DRY }), 10.)),
+            Some(true) => (
+                Some((Line::Stems(FEET_WET), 10.)),
+                "feet wet: now over water",
+            ),
+            Some(false) => (
+                Some((Line::Stems(FEET_DRY), 10.)),
+                "feet dry: now over land",
+            ),
             None => {
-                self.next += 5. + f64::from(comms.roll() % 5);
-                None
+                let value = comms.roll();
+                self.next += 5. + f64::from(value % 5);
+                rolls.push(Roll::new(
+                    "quiet check: 5 s more plus the roll mod 5",
+                    value,
+                    Test::Modulo(5),
+                ));
+                (None, "no target in reach and no coastline change")
             }
         }
     }
 
+    /// The dogfight line for `situation`, and the rule that chose it.
     #[allow(clippy::too_many_arguments)]
     fn dogfight(
         &self,
@@ -525,7 +728,8 @@ impl CrewVoice {
         speaker: &Speaker,
         comms: &mut Comms,
         phrases: &Phrases,
-    ) -> Option<(Line, f64)> {
+        rolls: &mut Vec<Roll>,
+    ) -> (Option<(Line, f64)>, &'static str) {
         let you = speaker.wingman;
         let own = !you;
         let position = |away| Line::Phrase(position_call(phrases, you, g, away));
@@ -535,69 +739,120 @@ impl CrewVoice {
         };
         match situation {
             Situation::HeadOn => {
-                if g.range > 10_000. && comms.roll() < 50 {
-                    Some((position(false), 2.))
+                if g.range > 10_000. && chance(comms, rolls, "head-on position call", 50) {
+                    (
+                        Some((position(false), 2.)),
+                        "head-on beyond 10,000 ft: position call",
+                    )
                 } else if g.range < 5_000.
                     && g.his_azimuth.abs() <= 10.
                     && g.his_elevation.abs() <= 10.
                 {
-                    Some((
-                        Line::Stems(if you { CLOSE_WINGMAN } else { CLOSE_SELF }),
-                        0.,
-                    ))
+                    (
+                        Some((
+                            Line::Stems(if you { CLOSE_WINGMAN } else { CLOSE_SELF }),
+                            0.,
+                        )),
+                        "head-on inside 5,000 ft with his nose on us",
+                    )
                 } else if g.range < 20_000. {
-                    Some((Line::Stems(CLOSING), 0.))
+                    (
+                        Some((Line::Stems(CLOSING), 0.)),
+                        "head-on inside 20,000 ft: closing",
+                    )
                 } else {
-                    None
+                    (None, "head-on: no line at this range")
                 }
             }
             Situation::Offensive => {
                 let closure = input.own.speed - input.target.map_or(0., |t| t.body.speed);
                 if previous == Some(Situation::HeadOn) {
-                    Some((Line::Stems(AFTER_PASS), 4.))
+                    (
+                        Some((Line::Stems(AFTER_PASS), 4.)),
+                        "offensive after the head-on pass",
+                    )
                 } else if own
                     && input.gun_selected
                     && g.range >= 5_000.
                     && input.missile_would_lock
-                    && comms.roll() < 25
+                    && chance(comms, rolls, "switch to missiles", 25)
                 {
-                    Some((Line::Stems(&["^SWCMISS"]), 4.))
+                    (
+                        Some((Line::Stems(&["^SWCMISS"]), 4.)),
+                        "offensive with the gun beyond 5,000 ft and a missile that would lock",
+                    )
                 } else if g.range < 1_200. && closure >= 146. {
-                    Some((Line::Stems(&["^DONTOVR"]), 4.))
-                } else if you && comms.roll() < 25 {
-                    Some((Line::Stems(NO_TONE), 4.))
-                } else if g.range >= 10_000. && comms.roll() < 50 {
-                    Some((position(false), 2.))
+                    (
+                        Some((Line::Stems(&["^DONTOVR"]), 4.)),
+                        "offensive inside 1,200 ft closing at 146 ft/s or more",
+                    )
+                } else if you && chance(comms, rolls, "no tone", 25) {
+                    (
+                        Some((Line::Stems(NO_TONE), 4.)),
+                        "offensive: the wingman has no tone",
+                    )
+                } else if g.range >= 10_000. && chance(comms, rolls, "offensive position call", 50)
+                {
+                    (
+                        Some((position(false), 2.)),
+                        "offensive beyond 10,000 ft: position call",
+                    )
                 } else {
-                    Some((Line::Stems(OFFENSIVE), 3. + 4.))
+                    (
+                        Some((Line::Stems(OFFENSIVE), 3. + 4.)),
+                        "offensive: encouragement",
+                    )
                 }
             }
             Situation::Defensive => {
                 if previous == Some(Situation::Neutral) {
-                    Some((Line::Stems(COMING_AROUND), 0.))
+                    (
+                        Some((Line::Stems(COMING_AROUND), 0.)),
+                        "defensive after neutral: he is coming around",
+                    )
                 } else if g.off_nose > 160. && g.his_azimuth.abs() <= 30. && input.g.abs() <= 3. {
-                    Some((
-                        Line::Stems(if you { BREAK_WINGMAN } else { BREAK_SELF }),
-                        0.,
-                    ))
-                } else if own && input.own.speed > input.corner_speed + 110. && comms.roll() < 25 {
-                    Some((Line::Stems(&["^SLOWDWN"]), 0.))
-                } else if flying_ace && comms.roll() < 25 {
-                    Some((Line::Stems(SKILLED), 0.))
+                    (
+                        Some((
+                            Line::Stems(if you { BREAK_WINGMAN } else { BREAK_SELF }),
+                            0.,
+                        )),
+                        "defensive: he is behind with his nose on us, pulling 3 G or less: break",
+                    )
+                } else if own
+                    && input.own.speed > input.corner_speed + 110.
+                    && chance(comms, rolls, "slow down", 25)
+                {
+                    (
+                        Some((Line::Stems(&["^SLOWDWN"]), 0.)),
+                        "defensive, over corner speed plus 110 ft/s: slow down",
+                    )
+                } else if flying_ace && chance(comms, rolls, "a skilled enemy", 25) {
+                    (Some((Line::Stems(SKILLED), 0.)), "defensive against an ace")
                 } else {
-                    Some((position(false), 0.))
+                    (Some((position(false), 0.)), "defensive: position call")
                 }
             }
             Situation::Neutral => {
                 if previous == Some(Situation::HeadOn) {
-                    Some((Line::Stems(LOST_HIM), 3.))
-                } else if (60.0..=120.0).contains(&target_pitch.abs()) && comms.roll() < 25 {
-                    Some((Line::Stems(&["^VERTICL"]), 0.))
+                    (
+                        Some((Line::Stems(LOST_HIM), 3.)),
+                        "neutral after the head-on pass: lost him",
+                    )
+                } else if (60.0..=120.0).contains(&target_pitch.abs())
+                    && chance(comms, rolls, "going vertical", 25)
+                {
+                    (
+                        Some((Line::Stems(&["^VERTICL"]), 0.)),
+                        "neutral: he is going vertical",
+                    )
                 } else {
-                    Some((position(true), 0.))
+                    (
+                        Some((position(true), 0.)),
+                        "neutral: position call, heading away",
+                    )
                 }
             }
-            _ => None,
+            _ => (None, "no dogfight line"),
         }
     }
 
@@ -619,9 +874,13 @@ impl CrewVoice {
         };
         if level > self.fuel_said {
             self.fuel_said = level;
+            let origin = Origin::of(Source::Crew, Cause::Fuel { state: fuel })
+                .by(PLAYER_ID)
+                .to(Audience::Cockpit);
             comms.send(
                 now,
-                Call::new(crew.label(), Phrase::stem(phrases, stem), Kind::Important),
+                Call::new(crew.label(), Phrase::stem(phrases, stem), Kind::Important)
+                    .because(origin),
             );
         }
     }
@@ -641,21 +900,45 @@ impl CrewVoice {
             if missile.age < MISSILE_WARNING_AGE || !self.warned.insert(missile.id) {
                 continue;
             }
-            let stem = match missile.signature {
-                2 => comms
-                    .cooldown("crew-infrared-warning", now, MISSILE_REPEAT)
-                    .then_some("^ATOLFLR"),
-                3 => comms
-                    .cooldown("crew-radar-warning", now, MISSILE_REPEAT)
-                    .then_some("^APEXCHF"),
-                _ => Some("^MISSBRK"),
+            let (key, stem) = match missile.signature {
+                2 => (Some("crew-infrared-warning"), "^ATOLFLR"),
+                3 => (Some("crew-radar-warning"), "^APEXCHF"),
+                _ => (None, "^MISSBRK"),
             };
-            if let Some(stem) = stem {
-                comms.send(
+            let origin = Origin::of(
+                Source::Crew,
+                Cause::MissileLaunch {
+                    missile: missile.id,
+                    age: missile.age,
+                    signature: missile.signature,
+                },
+            )
+            .by(PLAYER_ID)
+            .to(Audience::Cockpit);
+            let phrase = Phrase::stem(phrases, stem);
+            match key {
+                // The missile is already marked as warned, so a warning the
+                // shared limit holds back is never called later.
+                Some(key) if !comms.cooldown(key, now, MISSILE_REPEAT) => {
+                    let remaining = comms.remaining(key, now);
+                    comms.record(
+                        Entry::note(
+                            now,
+                            crew.label(),
+                            origin,
+                            Outcome::Suppressed(Reason::WarnedDuringCooldown { key, remaining }),
+                        )
+                        .with_text(phrase.text)
+                        .with_stems(phrase.stems)
+                        .with_kind(Route::Radio, Kind::Important),
+                    );
+                }
+                _ => comms.send(
                     now,
-                    Call::new(crew.label(), Phrase::stem(phrases, stem), Kind::Important)
-                        .after(MISSILE_CALL_DELAY),
-                );
+                    Call::new(crew.label(), phrase, Kind::Important)
+                        .after(MISSILE_CALL_DELAY)
+                        .because(origin),
+                ),
             }
         }
     }
@@ -1422,5 +1705,267 @@ mod tests {
         let mut i = with_aircraft(input(), 1_000., 0.);
         i.target.as_mut().unwrap().body.speed = 600. - 146.;
         assert_eq!(run(&mut voice, &mut comms, &i)[0].stems, ["^DONTOVR"]);
+    }
+
+    /// The crew's gate changes, in order, from the journal.
+    fn gates(comms: &mut Comms) -> Vec<Option<Gate>> {
+        comms
+            .take_journal()
+            .into_iter()
+            .filter_map(|e| match e.origin.cause {
+                Cause::CrewGate { to, .. } => Some(to),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn crew_gates_are_journaled_when_they_change() {
+        let mut voice = rio();
+        let mut comms = Comms::new(1);
+        let mut i = input();
+        i.free_flight = false;
+        run(&mut voice, &mut comms, &i);
+        i.now = 1.;
+        run(&mut voice, &mut comms, &i);
+        comms.toggle_silence();
+        i.now = 2.;
+        i.free_flight = true;
+        run(&mut voice, &mut comms, &i);
+        comms.toggle_silence();
+        i.now = 3.;
+        run(&mut voice, &mut comms, &i);
+        i.now = 4.;
+        i.doomed = true;
+        run(&mut voice, &mut comms, &i);
+        i.now = 5.;
+        i.crashed = true;
+        run(&mut voice, &mut comms, &i);
+        assert_eq!(
+            gates(&mut comms),
+            [
+                Some(Gate::NotFreeFlight),
+                Some(Gate::RadioSilence),
+                None,
+                Some(Gate::EjectDanger),
+                Some(Gate::Lost)
+            ],
+            "one entry per change, none for a gate that holds"
+        );
+        // A single-seat player: why the wingman cannot coach.
+        let mut comms = Comms::new(1);
+        let mut voice = CrewVoice::with(None, true);
+        let mut i = with_aircraft(input(), -5_000., 0.);
+        i.wingman = Some(Wingman {
+            label: "Friendly 1-2".into(),
+            alive: true,
+            target: Some(7),
+            position: [0., 10_000., -15_001.],
+        });
+        run(&mut voice, &mut comms, &i);
+        i.now = 1.;
+        i.wingman.as_mut().unwrap().target = None;
+        run(&mut voice, &mut comms, &i);
+        assert_eq!(
+            gates(&mut comms),
+            [
+                Some(Gate::NoSpeaker(NoSpeaker::TooFar { range_ft: 15_001. })),
+                Some(Gate::NoSpeaker(NoSpeaker::OtherTarget {
+                    his: None,
+                    ours: Some(7)
+                })),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_missile_warned_during_the_cooldown_is_journaled_and_never_called() {
+        let mut voice = rio();
+        let mut comms = Comms::new(1);
+        let missile = |id, age, signature| Incoming { id, age, signature };
+        let mut i = input();
+        i.incoming = vec![missile(1, 1.0, 2)];
+        run(&mut voice, &mut comms, &i);
+        i.now = 1.;
+        i.incoming = vec![missile(1, 2.0, 2), missile(2, 1.0, 2)];
+        run(&mut voice, &mut comms, &i);
+        i.now = 10.;
+        i.incoming = vec![missile(2, 10.0, 2)];
+        run(&mut voice, &mut comms, &i);
+        let entries = comms.take_journal();
+        let about = |id| {
+            entries
+                .iter()
+                .filter(move |e| {
+                    matches!(e.origin.cause, Cause::MissileLaunch { missile, .. } if missile == id)
+                })
+                .map(|e| e.outcome.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            about(1),
+            [
+                Outcome::Queued {
+                    due: 0.5,
+                    expires: None
+                },
+                Outcome::Delivered { waited: 1. }
+            ]
+        );
+        assert_eq!(
+            about(2),
+            [Outcome::Suppressed(Reason::WarnedDuringCooldown {
+                key: "crew-infrared-warning",
+                remaining: 5.
+            })],
+            "held by the 6 s limit once, and never called after it"
+        );
+    }
+
+    #[test]
+    fn coaching_lines_carry_their_situation_rule_and_rolls() {
+        let mut voice = rio();
+        let mut comms = Comms::new(3);
+        let i = with_aircraft(input(), -5_000., 0.);
+        let heard = run(&mut voice, &mut comms, &i);
+        let line = comms
+            .take_journal()
+            .into_iter()
+            .find(|e| matches!(e.outcome, Outcome::Delivered { .. }))
+            .unwrap();
+        assert_eq!(line.stems, heard[0].stems);
+        let Cause::Coaching(c) = &line.origin.cause else {
+            panic!("{:?}", line.origin.cause);
+        };
+        assert_eq!(c.situation, Situation::Defensive);
+        assert_eq!(c.range_ft, Some(5_000.));
+        assert!(c.rule.ends_with("break"), "{}", c.rule);
+        assert!((4. ..=7.).contains(&c.next_s), "{}", c.next_s);
+        let rolls = &line.origin.rolls;
+        assert_eq!(rolls[0].test, Test::Modulo(4), "the wait");
+        assert_eq!(
+            rolls.last().unwrap().test,
+            Test::Modulo(BREAK_SELF.len() as u32),
+            "the variant"
+        );
+        assert_eq!(line.origin.speaker, Some(PLAYER_ID));
+        assert_eq!(line.origin.audience, Audience::Cockpit);
+        // With nothing to say, the check is still journaled with its rolls.
+        let mut voice = rio();
+        let mut comms = Comms::new(3);
+        run(&mut voice, &mut comms, &input());
+        let quiet = comms
+            .take_journal()
+            .into_iter()
+            .find(|e| e.outcome == Outcome::Silent)
+            .unwrap();
+        assert_eq!(
+            quiet.origin.rolls.len(),
+            2,
+            "the wait and the quiet extension"
+        );
+    }
+
+    /// Draining the journal every tick, or never, changes nothing that is
+    /// said or when, and draws no roll.
+    #[test]
+    fn draining_the_journal_every_tick_changes_nothing_that_is_said() {
+        use crate::ai_wings::Member;
+        use crate::radio_calls::{Radio, Release, Scene};
+        use tore_sim::combat::live::Strike;
+        let member = |id, enemy, flight, position| Member {
+            id,
+            enemy,
+            flight,
+            position,
+            alive: true,
+        };
+        let members = vec![member(1, false, 0, 1), member(3, true, 1, 0)];
+        let targets: Vec<_> = [(1, [500., 10_000., -500.]), (3, [0., 10_000., 30_000.])]
+            .into_iter()
+            .map(|(id, position)| {
+                let mut t = crate::ai_wings::tests::spawned().remove(0);
+                t.id = id;
+                t.position = position;
+                t.aircraft = Some(tore_formats::aircraft::AircraftId::Mig29);
+                t
+            })
+            .collect();
+        let friendlies = [1].into();
+        let phrases = phrases();
+        let script = |drain: bool| {
+            let mut voice = rio();
+            let mut comms = Comms::new(7);
+            let mut radio = Radio::default();
+            let mut heard = Vec::new();
+            let mut journaled = 0;
+            for tick in 0..120 * 90 {
+                let now = f64::from(tick) / 120.;
+                let scene = Scene {
+                    now,
+                    phrases: &phrases,
+                    crew: Some(Crew::Rio),
+                    player_alive: true,
+                    player_position: [0., 10_000., 0.],
+                    members: &members,
+                    targets: &targets,
+                    friendlies: &friendlies,
+                };
+                if tick % 360 == 0 {
+                    let release = Release {
+                        flags: 1,
+                        seeker: 2,
+                        phoenix: false,
+                        target: Some(3),
+                    };
+                    radio.release(&mut comms, &scene, 1, release);
+                }
+                if tick % 50 == 0 {
+                    let owner = if tick % 100 == 0 { 1 } else { PLAYER_ID };
+                    let strike = Strike {
+                        owner,
+                        victim: Some(3),
+                        weapon_flags: 0x80,
+                        destroyed: tick == 6_000,
+                    };
+                    radio.strike(&mut comms, &scene, &strike);
+                }
+                // An enemy swinging from our tail to our nose, missiles now
+                // and then, and a hard pull every 20 seconds.
+                let angle = f64::from(tick) / 1_000.;
+                let mut i = with_aircraft(input(), -5_000. * angle.cos(), 90. * angle.sin());
+                i.now = now;
+                i.g = if tick % 2_400 < 60 { 6. } else { 1. };
+                i.incoming = (0..3)
+                    .map(|n| Incoming {
+                        id: tick / 900 * 3 + n,
+                        age: f64::from(tick % 900) / 120.,
+                        signature: [2, 3, 5][n as usize],
+                    })
+                    .collect();
+                voice.step(&i, &mut comms, &phrases);
+                heard.extend(
+                    comms
+                        .due(now)
+                        .iter()
+                        .map(|c| format!("{now:.3} {} {:?}", c.line(), c.stems)),
+                );
+                if drain {
+                    journaled += comms.take_journal().len();
+                }
+            }
+            let kept = comms.journal().len() as u64 + comms.journal().lost();
+            (heard, comms.roll(), journaled, kept)
+        };
+        let (drained, next_drained, journaled, _) = script(true);
+        let (kept, next_kept, _, kept_entries) = script(false);
+        assert_eq!(drained, kept);
+        assert_eq!(next_drained, next_kept, "the same rolls were drawn");
+        assert!(drained.len() > 30, "{}", drained.len());
+        assert!(journaled > drained.len() * 2, "{journaled}");
+        assert_eq!(
+            journaled as u64, kept_entries,
+            "the same entries, kept or lost to the bound"
+        );
     }
 }

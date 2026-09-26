@@ -2,8 +2,14 @@
 //! [`crate::radio_calls`], which decides who hears them and how they are
 //! worded. Behaviour: docs/spec/radio-chatter.md. This module only watches
 //! the mission; it never changes an AI decision.
+//!
+//! It also keeps the wing's journal (see [`crate::comms::journal`]): the
+//! contact rules that hold a report back, events pushed out of a full
+//! queue, and the orders, reports and text lines the other wing modules
+//! record. `radio_calls::step` moves it into the channel's journal.
 use super::*;
 use crate::comms::Elevation;
+use crate::comms::journal::{Cause, Entry, Journal, Origin, Outcome, Reason, Source, WingReply};
 use crate::radio_calls::Release;
 use tore_sim::ai::{route::FuelState, wing::WingControl};
 
@@ -55,12 +61,77 @@ pub enum Chatter {
     },
     Contact {
         speaker: u32,
+        /// The aircraft reported.
+        target: u32,
         contact: Contact,
     },
     Fuel {
         speaker: u32,
         level: FuelLevel,
     },
+}
+impl Chatter {
+    /// Who raised the event and why, for the journal.
+    fn origin(&self) -> Origin {
+        let (speaker, cause) = match self {
+            Chatter::Release { speaker, release } => (
+                *speaker,
+                Cause::Release {
+                    target: release.target,
+                    store: crate::comms::journal::Store {
+                        flags: release.flags,
+                        seeker: release.seeker,
+                        phoenix: release.phoenix,
+                    },
+                },
+            ),
+            Chatter::LaunchWarning {
+                speaker,
+                by_aircraft,
+            } => (
+                *speaker,
+                Cause::LaunchSeen {
+                    by_aircraft: *by_aircraft,
+                },
+            ),
+            Chatter::Death {
+                speaker,
+                ejection_seat,
+            } => (
+                *speaker,
+                Cause::Death {
+                    ejection_seat: *ejection_seat,
+                },
+            ),
+            Chatter::Engage { speaker, aircraft } => (
+                *speaker,
+                Cause::Reply(WingReply::Engage {
+                    aircraft: *aircraft,
+                }),
+            ),
+            Chatter::Showtime { speaker } => (*speaker, Cause::Reply(WingReply::Showtime)),
+            Chatter::Contact {
+                speaker,
+                target,
+                contact,
+            } => (
+                *speaker,
+                Cause::Contact {
+                    target: *target,
+                    count: contact.count,
+                    miles: contact.miles,
+                    advise: contact.advise,
+                },
+            ),
+            Chatter::Fuel { speaker, level } => (
+                *speaker,
+                Cause::AiFuel {
+                    level: *level as u8,
+                },
+            ),
+        };
+        Origin::of(Source::Chatter, cause).by(speaker)
+    }
 }
 
 /// A new aircraft contact, measured from the player, who is the only
@@ -125,6 +196,11 @@ pub(super) struct Watch {
     /// By PT resource name.
     names: BTreeMap<&'static str, String>,
     seats: BTreeMap<&'static str, bool>,
+    /// The tick each aircraft's contact block from an accepted attack
+    /// order ends, to tell it from the contact cooldown. Journal only.
+    engage_until: BTreeMap<u32, u64>,
+    /// The wing's journal, drained into the channel's journal.
+    pub(super) journal: Journal,
 }
 impl Watch {
     /// Remember a type's short name and ejection seat (PLANE flags 0x10).
@@ -142,14 +218,44 @@ impl Watch {
 impl AiWings {
     pub(super) fn chat(&mut self, event: Chatter) {
         if self.chatter.len() == MAX_EVENTS {
-            self.chatter.remove(0);
+            let dropped = self.chatter.remove(0);
+            let entry = Entry::note(
+                self.journal_clock(),
+                self.journal_label(dropped.origin().speaker.unwrap_or(PLAYER_ID)),
+                dropped.origin(),
+                Outcome::Dropped(Reason::QueueFull { limit: MAX_EVENTS }),
+            );
+            self.watch.journal.push(entry);
         }
         self.chatter.push(event);
     }
 
+    /// The wing's journal entries since the last take: player orders with
+    /// every wingman's answer, AI text lines, formation reports and the
+    /// chatter rules. `radio_calls::step` moves them into the channel's
+    /// journal each tick, so a host drains only the channel.
+    pub fn take_journal(&mut self) -> Vec<Entry> {
+        self.watch.journal.take()
+    }
+
+    /// The mission clock in seconds, the wing journal's time.
+    pub(super) fn journal_clock(&self) -> f64 {
+        self.mission.tick() as f64 / 120.
+    }
+
+    /// "Friendly 1-2", or "YOU" for the player.
+    pub(super) fn journal_label(&self, id: u32) -> String {
+        if id == PLAYER_ID {
+            return "YOU".into();
+        }
+        self.slot(id)
+            .map_or_else(|| format!("Aircraft {id}"), Slot::label)
+    }
+
     /// An accepted attack order: the reply, and the 20 second contact block
-    /// with the ordered target recorded as already reported.
-    pub(super) fn engaged(&mut self, speaker: u32, target: Option<u32>) {
+    /// with the ordered target recorded as already reported. Returns whether
+    /// the reply is the aircraft-target variant, for the journal.
+    pub(super) fn engaged(&mut self, speaker: u32, target: Option<u32>) -> bool {
         let aircraft = target.is_none_or(|t| t == PLAYER_ID || self.slot(t).is_some());
         self.chat(Chatter::Engage { speaker, aircraft });
         let until = self.mission.tick() + ENGAGE_BLOCK_TICKS;
@@ -158,6 +264,8 @@ impl AiWings {
         if target.is_some() {
             entry.1 = target;
         }
+        self.watch.engage_until.insert(speaker, until);
+        aircraft
     }
 
     /// Radio labels and listeners for every AI aircraft. `fitted` flight
@@ -241,8 +349,20 @@ impl AiWings {
             let Some(target) = target.filter(|t| Some(*t) != previous) else {
                 continue;
             };
+            // Why a new target makes no report, for the journal.
+            let mut held = |reason| {
+                self.watch.journal.push(Entry::note(
+                    tick as f64 / 120.,
+                    slot.label(),
+                    Origin::of(Source::Chatter, Cause::NewTarget { target }).by(slot.id),
+                    Outcome::Suppressed(reason),
+                ));
+            };
             // Only the first two aircraft of a flight report.
             if actor.identity().member > 1 {
+                held(Reason::OnlyFirstTwo {
+                    member: actor.identity().member,
+                });
                 continue;
             }
             let (next, last) = self
@@ -252,12 +372,26 @@ impl AiWings {
                 .copied()
                 .unwrap_or((0, None));
             if tick < next || last == Some(target) {
+                let remaining = next.saturating_sub(tick) as f64 / 120.;
+                held(if last == Some(target) {
+                    Reason::SameTarget { target }
+                } else if self.watch.engage_until.get(&slot.id) == Some(&next) {
+                    Reason::EngageBlock { remaining }
+                } else {
+                    Reason::ContactCooldown { remaining }
+                });
                 continue;
             }
             let control = actor.controller().wing_settings().0;
             let advise = actor.identity().member != 0
                 && control.is_some_and(|c| c as u8 >= WingControl::Medium as u8);
             let Some(contact) = self.contact(target, player, advise) else {
+                self.watch.journal.push(Entry::note(
+                    tick as f64 / 120.,
+                    slot.label(),
+                    Origin::of(Source::Chatter, Cause::NewTarget { target }).by(slot.id),
+                    Outcome::Suppressed(Reason::NoContact { target }),
+                ));
                 continue;
             };
             self.watch
@@ -265,6 +399,7 @@ impl AiWings {
                 .insert(slot.id, (tick + CONTACT_TICKS, Some(target)));
             events.push(Chatter::Contact {
                 speaker: slot.id,
+                target,
                 contact,
             });
         }
@@ -501,5 +636,151 @@ mod tests {
             wings.chat(Chatter::Showtime { speaker: 1 });
         }
         assert_eq!(wings.chatter.len(), MAX_EVENTS);
+    }
+
+    #[test]
+    fn a_full_event_queue_journals_what_it_pushed_out() {
+        let mut wings = wings();
+        for _ in 0..MAX_EVENTS + 2 {
+            wings.chat(Chatter::Showtime { speaker: 1 });
+        }
+        let dropped = wings.take_journal();
+        assert_eq!(dropped.len(), 2);
+        assert_eq!(
+            dropped[0].outcome,
+            Outcome::Dropped(Reason::QueueFull { limit: MAX_EVENTS })
+        );
+        assert_eq!(dropped[0].origin.cause, Cause::Reply(WingReply::Showtime));
+        assert_eq!(dropped[0].label, "Friendly 1-2");
+    }
+
+    /// The journal's reasons for the new target `target` of each aircraft.
+    fn contact_reasons(wings: &mut AiWings, target: u32) -> Vec<(Option<u32>, Outcome)> {
+        wings
+            .take_journal()
+            .into_iter()
+            .filter(|e| e.origin.cause == Cause::NewTarget { target })
+            .map(|e| (e.origin.speaker, e.outcome))
+            .collect()
+    }
+
+    #[test]
+    fn contact_rules_journal_why_a_new_target_is_not_reported() {
+        use tore_sim::ai::wing::{TargetId, TargetOrder, WingRequest};
+        let mut wings = wings();
+        let mut targets = spawned();
+        let player = crate::flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
+        for id in [1, 2] {
+            wings
+                .mission
+                .order(
+                    id,
+                    WingRequest::TargetAssignment(TargetOrder::ConcreteTarget(TargetId(3))),
+                )
+                .unwrap()
+                .unwrap();
+        }
+        // Red two reported aircraft 4 one second ago: 14 s of its 15 s
+        // cooldown are left after the next tick.
+        let next = wings.mission.tick() + 1 + 14 * 120;
+        wings.watch.contacts.insert(1, (next, Some(4)));
+        let output = wings
+            .advance(player_object(player.position), &mut targets, &flat)
+            .unwrap();
+        wings.observe_chatter(&output, &player);
+        assert_eq!(
+            wings.mission.actor(1).unwrap().controller().target(),
+            Some(3)
+        );
+        assert_eq!(
+            contact_reasons(&mut wings, 3),
+            [
+                (
+                    Some(1),
+                    Outcome::Suppressed(Reason::ContactCooldown { remaining: 14. })
+                ),
+                (
+                    Some(2),
+                    Outcome::Suppressed(Reason::OnlyFirstTwo { member: 2 })
+                ),
+            ]
+        );
+        // The same target again, then the block after an attack order.
+        let tick = wings.mission.tick();
+        let again = |wings: &mut AiWings, contacts: (u64, Option<u32>), engaged: bool| {
+            wings.watch.targets.insert(1, None);
+            wings.watch.targets.insert(2, Some(3));
+            wings.watch.contacts.insert(1, contacts);
+            if engaged {
+                wings.watch.engage_until.insert(1, contacts.0);
+            }
+            wings.observe_chatter(&Default::default(), &player);
+            contact_reasons(wings, 3)
+        };
+        assert_eq!(
+            again(&mut wings, (0, Some(3)), false),
+            [(
+                Some(1),
+                Outcome::Suppressed(Reason::SameTarget { target: 3 })
+            )]
+        );
+        assert_eq!(
+            again(&mut wings, (tick + 600, Some(4)), true),
+            [(
+                Some(1),
+                Outcome::Suppressed(Reason::EngageBlock { remaining: 5. })
+            )]
+        );
+        // With the rules clear, the report is made and nothing is held.
+        assert!(again(&mut wings, (0, None), false).is_empty());
+        assert!(matches!(
+            wings.chatter.last(),
+            Some(Chatter::Contact {
+                speaker: 1,
+                target: 3,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn draining_the_wing_journal_changes_no_event() {
+        use tore_sim::ai::wing::{PlayerOrder, TargetOrder, WingRequest};
+        let run = |drain: bool| {
+            let mut wings = wings();
+            let mut targets = spawned();
+            let player = crate::flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
+            wings
+                .mission
+                .order(1, WingRequest::TargetAssignment(TargetOrder::FreeSelection))
+                .unwrap()
+                .unwrap();
+            let mut events = Vec::new();
+            let mut lines = Vec::new();
+            let mut journaled = 0;
+            for tick in 0..600 {
+                if tick == 300 {
+                    wings
+                        .command(PlayerOrder::EngageMyTarget, Some(3), None)
+                        .unwrap();
+                }
+                let output = wings
+                    .advance(player_object(player.position), &mut targets, &flat)
+                    .unwrap();
+                wings.observe_chatter(&output, &player);
+                events.append(&mut wings.chatter);
+                lines.extend(wings.take_message());
+                if drain {
+                    journaled += wings.take_journal().len();
+                }
+            }
+            (events, lines, wings.positions(), journaled)
+        };
+        let (drained, drained_lines, drained_at, journaled) = run(true);
+        let (kept, kept_lines, kept_at, _) = run(false);
+        assert_eq!(drained, kept);
+        assert_eq!(drained_lines, kept_lines);
+        assert_eq!(drained_at, kept_at);
+        assert!(journaled > 0);
     }
 }

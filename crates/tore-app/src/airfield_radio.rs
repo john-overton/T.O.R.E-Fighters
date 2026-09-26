@@ -1,7 +1,11 @@
 //! Airport and wing status cues. Observes flight only; never flies aircraft.
 //! Behavior and provenance: docs/spec/airfield-radio.md.
+//!
+//! Every notice queued, coalesced, pushed out, expired or cancelled is
+//! written to the channel's journal with its trigger.
 use crate::{
     ai_wings::AiWings,
+    comms::journal::{Audience, Cause, Entry, Origin, Outcome, Reason, Roll, Source, TowerEvent},
     comms::{Call, Comms, Kind, Phrase, Phrases},
     flight,
     terrain::World,
@@ -16,12 +20,21 @@ const INTERVAL: f64 = 3.;
 const EXPIRES: f64 = 15.;
 const RANGE_FT: f64 = 7. * 6076.12;
 const PLAYER: u32 = 0;
+/// Notices waiting at most; a new one pushes out the oldest.
+const QUEUE: usize = 24;
 
 struct Notice {
     actor: u32,
     key: u8,
     until: f64,
+    /// When it was queued, for the journal.
+    queued: f64,
     call: Call,
+}
+
+/// A tower line to the player about `event`.
+fn tower_origin(event: TowerEvent) -> Origin {
+    Origin::of(Source::Tower, Cause::Tower(event)).to(Audience::Player)
 }
 #[derive(Default)]
 struct Departure {
@@ -48,6 +61,11 @@ pub struct AirfieldRadio {
     wing: BTreeMap<u32, (Option<Phase>, u32)>,
     pending: VecDeque<Notice>,
     next: f64,
+    /// Journal entries made away from the channel (queueing, tower
+    /// replies), handed to it at the next delivery.
+    notes: Vec<Entry>,
+    /// The latest time seen, for entries made by methods given none.
+    clock: f64,
 }
 
 fn recorded(phrases: &Phrases, stem: &str) -> Phrase {
@@ -107,31 +125,91 @@ impl AirfieldRadio {
             Reply::Selected { .. } | Reply::Cancelled { .. } | Reply::Declined { .. } => {
                 self.approach = Approach::default();
                 self.clearance_announced = None;
-                self.pending.retain(|n| n.actor != PLAYER);
+                self.retain(
+                    self.clock,
+                    |n| n.actor != PLAYER,
+                    |_| Outcome::Cancelled(Reason::TowerReply),
+                );
             }
             Reply::Landed { .. } => self.approach.welcomed = true,
         }
     }
+    /// The player's aircraft is lost: forget the player's airfield state.
     pub fn invalidate(&mut self) {
-        self.pending.retain(|n| n.actor != PLAYER);
+        self.retain(
+            self.clock,
+            |n| n.actor != PLAYER,
+            |_| Outcome::Cancelled(Reason::AircraftLost),
+        );
         self.approach = Approach::default();
         self.departure = Departure::default();
         self.clearance_announced = None;
     }
-    fn queue(&mut self, now: f64, actor: u32, key: u8, call: Call) {
-        self.pending.retain(|n| n.actor != actor || n.key != key);
-        if self.pending.len() >= 24 {
-            self.pending.pop_front();
+    /// Keep the notices `keep` accepts; journal each other one with `gone`.
+    fn retain(
+        &mut self,
+        at: f64,
+        keep: impl Fn(&Notice) -> bool,
+        gone: impl Fn(&Notice) -> Outcome,
+    ) {
+        let mut kept = VecDeque::with_capacity(self.pending.len());
+        for notice in self.pending.drain(..) {
+            if keep(&notice) {
+                kept.push_back(notice);
+            } else {
+                self.notes
+                    .push(Entry::call(at, None, &notice.call, gone(&notice)));
+            }
         }
+        self.pending = kept;
+    }
+    fn queue(&mut self, now: f64, actor: u32, key: u8, call: Call) {
+        self.clock = now;
+        self.retain(
+            now,
+            |n| n.actor != actor || n.key != key,
+            |_| Outcome::Replaced(Reason::Coalesced),
+        );
+        if self.pending.len() >= QUEUE
+            && let Some(oldest) = self.pending.pop_front()
+        {
+            self.notes.push(Entry::call(
+                now,
+                None,
+                &oldest.call,
+                Outcome::Dropped(Reason::QueueFull { limit: QUEUE }),
+            ));
+        }
+        self.notes.push(Entry::call(
+            now,
+            None,
+            &call,
+            Outcome::Queued {
+                due: now,
+                expires: Some(now + EXPIRES),
+            },
+        ));
         self.pending.push_back(Notice {
             actor,
             key,
             until: now + EXPIRES,
+            queued: now,
             call,
         });
     }
     fn deliver(&mut self, now: f64, comms: &mut Comms) {
-        self.pending.retain(|n| n.until >= now);
+        self.clock = now;
+        self.retain(
+            now,
+            |n| n.until >= now,
+            |n| {
+                Outcome::Expired(Reason::OlderThan {
+                    seconds: EXPIRES,
+                    age: now - n.queued,
+                })
+            },
+        );
+        comms.record_all(self.notes.drain(..));
         if now < self.next || !comms.channel_free(now) {
             return;
         }
@@ -140,7 +218,8 @@ impl AirfieldRadio {
             .iter()
             .position(|n| n.actor == PLAYER)
             .unwrap_or(0);
-        if let Some(notice) = self.pending.remove(next) {
+        if let Some(mut notice) = self.pending.remove(next) {
+            notice.call.origin.since = Some(notice.queued);
             let heard = !comms.radio_silence || notice.call.kind == Kind::Important;
             comms.send(now, notice.call);
             if heard {
@@ -162,10 +241,12 @@ impl AirfieldRadio {
         service: &Service,
         wings: Option<&AiWings>,
     ) {
+        self.clock = now;
         if flight.crashed || flight.escape.is_some() || flight.systems.pilot.dead {
             self.invalidate();
-            self.pending.clear();
-            comms.cancel_airport();
+            self.retain(now, |_| false, |_| Outcome::Cancelled(Reason::AircraftLost));
+            comms.record_all(self.notes.drain(..));
+            comms.cancel_airport_because(Reason::AircraftLost);
             return;
         } else {
             self.player(now, phrases, comms, flight, world, service, wings);
@@ -174,7 +255,11 @@ impl AirfieldRadio {
             let members = wings.radio_members();
             for member in members.iter().filter(|m| !m.enemy && m.flight == 0) {
                 if !member.alive {
-                    self.pending.retain(|n| n.actor != member.id);
+                    self.retain(
+                        now,
+                        |n| n.actor != member.id,
+                        |_| Outcome::Cancelled(Reason::WingmanDown),
+                    );
                     continue;
                 }
                 let Some(actor) = wings.mission().actor(member.id) else {
@@ -187,23 +272,29 @@ impl AirfieldRadio {
                     continue;
                 }
                 // Free flight has no airfield status and invalidates pending taxi reports.
-                self.pending.retain(|n| n.actor != member.id);
+                self.retain(
+                    now,
+                    |n| n.actor != member.id,
+                    |_| Outcome::Replaced(Reason::StatusChanged),
+                );
                 let Some(sequence) = actor.airfield() else {
                     continue;
                 };
                 let label = crate::radio_calls::label(member);
                 let tower = tower(world, sequence.runway().airport);
                 let go_around = previous.is_some_and(|(_, old)| turns > old);
+                let mut rolls = Vec::new();
                 let (text, stem) = if go_around {
                     ("Going around", Some("^GOARND"))
                 } else {
                     match phase {
                         Some(Phase::Waiting) => ("Holding short for takeoff", None),
                         Some(Phase::Taxi) => ("Taxiing to the runway", None),
-                        Some(Phase::LineUp) => (
-                            "Cleared for takeoff",
-                            Some(Comms::pick(comms.roll(), &["^TAKOFF1", "^RDYROLL"])),
-                        ),
+                        Some(Phase::LineUp) => ("Cleared for takeoff", {
+                            let roll = comms.roll();
+                            rolls.push(Roll::pick("takeoff call", roll, 2));
+                            Some(Comms::pick(roll, &["^TAKOFF1", "^RDYROLL"]))
+                        }),
                         Some(Phase::TakeoffRoll) => ("Taking off", None),
                         Some(Phase::ClimbOut) => ("Airborne", Some("^AIRBORN")),
                         Some(Phase::Inbound) => ("Returning to base", None),
@@ -234,7 +325,11 @@ impl AirfieldRadio {
                     },
                     |stem| call(phrases, &tower, stem, Some(&label), false),
                 );
-                self.queue(now, member.id, 0, report);
+                let origin = Origin::of(Source::Tower, Cause::WingStatus { phase, go_around })
+                    .by(member.id)
+                    .to(Audience::Airport)
+                    .rolls(rolls);
+                self.queue(now, member.id, 0, report.because(origin));
             }
         }
         self.deliver(now, comms);
@@ -255,12 +350,18 @@ impl AirfieldRadio {
             let tower = tower(world, runway.airport);
             if !service.usable(runway.object) {
                 self.departure = Departure::default();
-                self.pending.retain(|n| n.actor != PLAYER);
+                self.retain(
+                    now,
+                    |n| n.actor != PLAYER,
+                    |_| Outcome::Cancelled(Reason::RunwayUnusable),
+                );
             } else if supported && !self.departure.cleared {
                 if !busy(wings, runway, PLAYER) {
                     self.departure.cleared = true;
                     let stem = "^TAKOFF1";
-                    self.queue(now, PLAYER, 1, call(phrases, &tower, stem, None, true));
+                    let clearance = call(phrases, &tower, stem, None, true)
+                        .because(tower_origin(TowerEvent::TakeoffClearance));
+                    self.queue(now, PLAYER, 1, clearance);
                 } else if !self.departure.hold {
                     self.departure.hold = true;
                     self.queue(
@@ -272,7 +373,8 @@ impl AirfieldRadio {
                             Phrase::default().raw("Hold position, runway occupied", None),
                             Kind::Important,
                         )
-                        .airport(),
+                        .airport()
+                        .because(tower_origin(TowerEvent::RunwayOccupied)),
                     );
                 }
             } else if !supported && !self.departure.airborne {
@@ -281,15 +383,27 @@ impl AirfieldRadio {
                     now,
                     PLAYER,
                     2,
-                    call(phrases, &tower, "^AIRBORN", None, true),
+                    call(phrases, &tower, "^AIRBORN", None, true)
+                        .because(tower_origin(TowerEvent::Airborne)),
                 );
             } else if !supported
                 && f.position[1] - runway.elevation_ft > 10.
                 && !self.departure.farewell
             {
                 self.departure.farewell = true;
-                let stem = Comms::pick(comms.roll(), &["^GDLUCK", "^GDHUNT"]);
-                self.queue(now, PLAYER, 3, call(phrases, &tower, stem, None, false));
+                let roll = comms.roll();
+                let stem = Comms::pick(roll, &["^GDLUCK", "^GDHUNT"]);
+                let origin = tower_origin(TowerEvent::Farewell).rolls(vec![Roll::pick(
+                    "farewell call",
+                    roll,
+                    2,
+                )]);
+                self.queue(
+                    now,
+                    PLAYER,
+                    3,
+                    call(phrases, &tower, stem, None, false).because(origin),
+                );
             }
         }
         if self.approach.runway.is_none()
@@ -309,7 +423,16 @@ impl AirfieldRadio {
             {
                 self.approach = Approach::default();
                 self.clearance_announced = None;
-                self.pending.retain(|n| n.actor != PLAYER || n.key < 4);
+                let reason = if service.usable(runway.object) {
+                    Reason::ApproachLeft
+                } else {
+                    Reason::RunwayUnusable
+                };
+                self.retain(
+                    now,
+                    |n| n.actor != PLAYER || n.key < 4,
+                    |_| Outcome::Cancelled(reason.clone()),
+                );
                 return;
             }
             let tower = tower(world, runway.airport);
@@ -319,7 +442,8 @@ impl AirfieldRadio {
                     now,
                     PLAYER,
                     4,
-                    call(phrases, &tower, "^CLRLAND", None, true),
+                    call(phrases, &tower, "^CLRLAND", None, true)
+                        .because(tower_origin(TowerEvent::LandingClearance)),
                 );
             } else if self.clearance_announced == Some(runway.object) && !self.approach.wind {
                 self.approach.wind = true;
@@ -332,7 +456,9 @@ impl AirfieldRadio {
                     now,
                     PLAYER,
                     5,
-                    Call::new(tower.clone(), phrase, Kind::Important).airport(),
+                    Call::new(tower.clone(), phrase, Kind::Important)
+                        .airport()
+                        .because(tower_origin(TowerEvent::Wind { knots })),
                 );
             }
             if let Some(r) = &f.research
@@ -348,7 +474,13 @@ impl AirfieldRadio {
                 } else {
                     "^BADLAND"
                 };
-                self.queue(now, PLAYER, 6, call(phrases, &tower, stem, None, true));
+                let origin = tower_origin(TowerEvent::LandingGrade { score });
+                self.queue(
+                    now,
+                    PLAYER,
+                    6,
+                    call(phrases, &tower, stem, None, true).because(origin),
+                );
             }
             if self.approach.landed
                 && supported
@@ -356,8 +488,19 @@ impl AirfieldRadio {
                 && !self.approach.welcomed
             {
                 self.approach.welcomed = true;
-                let stem = Comms::pick(comms.roll(), &["^WELBACK", "^WELHOME"]);
-                self.queue(now, PLAYER, 7, call(phrases, &tower, stem, None, true));
+                let roll = comms.roll();
+                let stem = Comms::pick(roll, &["^WELBACK", "^WELHOME"]);
+                let origin = tower_origin(TowerEvent::Welcome).rolls(vec![Roll::pick(
+                    "welcome call",
+                    roll,
+                    2,
+                )]);
+                self.queue(
+                    now,
+                    PLAYER,
+                    7,
+                    call(phrases, &tower, stem, None, true).because(origin),
+                );
             }
         }
         if let Some(r) = &f.research {
@@ -577,5 +720,126 @@ mod tests {
         r.queue(23., 0, 1, line("Important", Kind::Important).airport());
         r.deliver(23., &mut c);
         assert_eq!(c.due(23.)[0].text, "Important");
+    }
+    #[test]
+    fn tower_notices_journal_coalescing_the_full_queue_and_expiry() {
+        let mut r = AirfieldRadio::default();
+        let mut c = Comms::new(1);
+        let line =
+            |text: &str| Call::new("Fixture", Phrase::default().raw(text, None), Kind::Chatter);
+        r.queue(0., 2, 0, line("Taxi"));
+        r.queue(0., 2, 0, line("Airborne"));
+        r.queue(0., 3, 0, line("Old"));
+        r.deliver(0., &mut c);
+        assert_eq!(c.due(0.)[0].text, "Airborne");
+        r.deliver(16., &mut c);
+        for actor in 10..10 + 25 {
+            r.queue(20., actor, 0, line(&format!("Status {actor}")));
+        }
+        r.deliver(20., &mut c);
+        let entries = c.take_journal();
+        let outcomes = |text: &str| {
+            entries
+                .iter()
+                .filter(|e| e.text == text)
+                .map(|e| e.outcome.clone())
+                .collect::<Vec<_>>()
+        };
+        let queued = |at: f64| Outcome::Queued {
+            due: at,
+            expires: Some(at + EXPIRES),
+        };
+        assert_eq!(
+            outcomes("Taxi"),
+            [queued(0.), Outcome::Replaced(Reason::Coalesced)]
+        );
+        assert_eq!(
+            outcomes("Old"),
+            [
+                queued(0.),
+                Outcome::Expired(Reason::OlderThan {
+                    seconds: 15.,
+                    age: 16.
+                })
+            ]
+        );
+        assert_eq!(
+            outcomes("Status 10"),
+            [
+                queued(20.),
+                Outcome::Dropped(Reason::QueueFull { limit: 24 })
+            ]
+        );
+        // The tower's queue, then the channel's.
+        let airborne: Vec<_> = entries.iter().filter(|e| e.text == "Airborne").collect();
+        assert_eq!(airborne.len(), 3);
+        assert_eq!(airborne[0].outcome, queued(0.));
+        assert_eq!(airborne[2].outcome, Outcome::Delivered { waited: 0. });
+        assert_eq!(
+            airborne[2].origin.since,
+            Some(0.),
+            "queued at the tower at 0 s"
+        );
+        assert_eq!(airborne[1].call, airborne[2].call);
+    }
+    #[test]
+    fn tower_replies_and_a_lost_aircraft_cancel_the_players_notices() {
+        let mut r = AirfieldRadio::default();
+        let mut c = Comms::new(1);
+        let line = |text: &str| {
+            Call::new(
+                "Fixture",
+                Phrase::default().raw(text, None),
+                Kind::Important,
+            )
+            .airport()
+        };
+        r.queue(0., PLAYER, 4, line("Cleared to land"));
+        r.queue(0., 2, 0, line("Wing status"));
+        r.reply(&Reply::Cancelled { airport: Some(7) });
+        r.queue(1., PLAYER, 6, line("Grade"));
+        r.invalidate();
+        r.deliver(1., &mut c);
+        let cancelled: Vec<_> = c
+            .take_journal()
+            .into_iter()
+            .filter(|e| matches!(e.outcome, Outcome::Cancelled(_)))
+            .map(|e| (e.text, e.at, e.outcome))
+            .collect();
+        assert_eq!(
+            cancelled,
+            [
+                (
+                    "Cleared to land".to_string(),
+                    0.,
+                    Outcome::Cancelled(Reason::TowerReply)
+                ),
+                (
+                    "Grade".to_string(),
+                    1.,
+                    Outcome::Cancelled(Reason::AircraftLost)
+                ),
+            ]
+        );
+        assert_eq!(c.due(1.)[0].text, "Wing status", "a wingman's notice stays");
+    }
+    #[test]
+    fn tower_calls_carry_their_trigger() {
+        let (w, s, f, p) = fixture();
+        let mut r = AirfieldRadio::default();
+        let mut c = Comms::new(1);
+        r.reset(w.runway_view(1000));
+        tick(&mut r, &mut c, &p, &w, &s, &f, 0.);
+        let delivered = c
+            .take_journal()
+            .into_iter()
+            .find(|e| matches!(e.outcome, Outcome::Delivered { .. }))
+            .unwrap();
+        assert_eq!(delivered.stems, ["^TAKOFF1"]);
+        assert_eq!(
+            delivered.origin.cause,
+            Cause::Tower(TowerEvent::TakeoffClearance)
+        );
+        assert_eq!(delivered.origin.audience, Audience::Player);
     }
 }

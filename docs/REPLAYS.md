@@ -543,8 +543,133 @@ What cannot be explained yet:
 
 ## Communication journal
 
-Filled in by a later milestone (M2): how orders, reports, radio calls and
-cues are recorded, heard or unheard, with their reasons.
+Every radio call, wingman reply, crew remark, tower line, AI text line and
+player order is written to a journal as it happens: when, who said it to
+whom, the words and recordings, what triggered it, any random roll it used
+with its threshold, and what became of it, with the reason. Lines that were
+never said are kept too, with the rule that held them back. The journal is
+**write-only**: no rule reads it and writing it never draws a random number,
+so what is said and when is the same with or without it. Tests run the same
+scripted flight twice, draining the journal every tick and never, and hear
+the same lines at the same ticks with the same rolls left over. The shape of
+the records is an agent decision (2026-09-26).
+
+The code is `tore-app/src/comms/journal.rs`. Recording the entries as
+`comms.*` events is the recorder's next step; until then nothing drains the
+journal in flight, and it simply stays within its bound.
+
+### What an entry holds
+
+| Field | Meaning |
+| --- | --- |
+| Time | Simulation seconds on the producer's clock; the recorder stamps its own tick |
+| Call number | Shared by every entry about one line: queued, then delivered, dropped, cancelled or cut off |
+| Source | `RADIO`, `REPLY` (a wingman answering the player's order), `CREW`, `TOWER`, `HUD` (the AI's text lines), `ORDER`, `CHATTER` (an AI radio event before it becomes a call) or `MUSIC` |
+| Speaker and audience | The aircraft id (0 is the player), the name as printed (`Red two`, `RIO`, `YOU`), and who it was addressed to: the cockpit, the flight leader, the flight, the player, the airport frequency, or the wingmen an order addressed |
+| Words | The text, the recording stems, the route (radio, airport or direct) and whether radio silence may drop it |
+| Trigger | A typed cause with its numbers, for example "infrared missile release at aircraft 3", "hit by aircraft 5 (aircraft, gun rounds)", "fuel state bingo", "situation Defensive, target 5000 ft: break" |
+| Rolls | Each draw in the order made: "roll 37 < 50: Fox call", "roll 12 < 40: Splash one with the type name", "roll 13 mod 8 = 5: hit call", including draws a held call still used up |
+| Outcome and reason | See the next table |
+
+| Outcome | Meaning |
+| --- | --- |
+| `queued` | Waiting in the channel until it is due, or in the tower's own queue until it expires |
+| `delivered` | Printed and played, with the seconds it waited; a tower notice also carries when it entered the tower's queue. An AI text line: shown on the HUD |
+| `dropped` | Radio silence dropped routine chatter when it was sent, or a full queue pushed out its oldest line |
+| `suppressed` | A rule held it back, with the time left on a cooldown or limit |
+| `unheard` | Said, but the player's radio does not receive it: another flight, an enemy flight, the player is down, or the speaker has no radio identity |
+| `replaced` | A newer notice about the same thing took its place, or an unread AI text line was overwritten |
+| `expired` | A tower notice older than 15 seconds |
+| `cancelled` | Taken off a queue: the tower answered the player's request, the player's aircraft was lost, the runway became unusable, the player left the approach, the wingman went down, or the aircraft entered an airfield sequence or left formation |
+| `interrupted` | Delivered, then cut off by the player's wing order voice |
+| `answered` | An order's answers, one per addressed wingman, and who replied |
+| `rejected` | An order nobody received, and why |
+| `silent` | A crew coaching check that found nothing to say, with the rule and the rolls it drew |
+| `noted` | A state change: the crew's comment gate, or the music's inputs |
+
+Shared names follow `tore_replay::vocab::outcome`; `unheard`, `interrupted`,
+`answered`, `silent` and `noted` are the journal's own.
+
+### Reasons, by producer
+
+- **The channel.** Radio silence, the 64-call queue, the wait before
+  delivery, airport calls cancelled, and lines cut off by a wing order
+  voice.
+- **Radio calls.** The listener rule; a release with no target; the 4 s bomb
+  and gun cooldowns; unguided hits limited to one per shooter every 8 s and
+  one every 4 s overall; "I'm hit" from gun rounds once per aircraft every
+  8 s; ground kills after a bomb kill (4 s); friendly fire beyond 52,800 ft
+  and its 6 s cooldown. Rolls: the Fox chance under 50, "Splash one" at 40
+  or more, contact size words, and every variant.
+- **Crew.** Changes in whether the crew may comment (aircraft lost, the
+  eject warning, radio silence, not in free flight, or why nobody can coach
+  a single-seat player: no wingman, wingman down, a different target, or
+  beyond 15,000 ft). Each coaching check: the situation, the previous one,
+  the range, the rule that chose the line or why none did, the next check
+  time and the rolls. G strain and the -1 G crossing count, fuel states,
+  and missile warnings, including a missile held back by the shared 6 s
+  limit, which is then never called.
+- **Tower.** Each trigger (runway free or occupied, airborne, climb-out,
+  landing clearance, wind, landing score, welcome, a wingman's airfield
+  phase or go-around), the 15 s lifetime, the 24-notice queue, and
+  notices coalesced by aircraft and topic.
+- **AI chatter.** Why a new target makes no contact report: only the first
+  two aircraft of a flight report, the 15 s cooldown, never the same target
+  twice, the 20 s block after accepting an attack order, or a target that is
+  not a living airborne aircraft. Events pushed out of the 64-event queue.
+- **Player orders.** Every addressed wingman's answer: applied (with or
+  without motion), rejected with the receiver's reason, rejected because its
+  sensors cannot see the target, or skipped (bugged out, flown by a human,
+  already landed, taking off or landing, no base); the silent side orders
+  with their outcomes; a refusal before anyone received it (no wingmen,
+  all bugged out, no valid hostile target, no airport selected); and which
+  wingman replied and with what, or why nobody did.
+- **AI text lines.** Formation reports queued, held by the 10 s limit per
+  aircraft, replaced, pushed out of the 16-report queue, cancelled, and
+  shown; the activity line held by its 2 s limit, overwritten unread, and
+  shown.
+- **Situation music.** When an input changes: the score the inputs ask for
+  and why each input is on (the designated enemy inside or beyond
+  40,000 ft, a hit within 30 s, an AI aircraft aiming at the player within
+  4 s, missiles guided at the player, success, home, deck, takeoff,
+  ejection).
+
+### Repeats and bounds
+
+A gun fires one release per round, so a rule is listed once per window:
+once per cooldown or limit for each aircraft, and at most every 4 s for a
+rule without one. Crew gates are listed when they change; the 3 s channel
+hold is not listed as a gate, because every delivered line shows it. At
+most 1,024 entries wait between drains; a host that never drains keeps the
+newest and counts the rest as lost.
+
+### Not visible yet
+
+- **The mixer's own decisions** inside the audio device: speech dropped
+  because its queue is full or sound effects are off or paused, when a
+  delivered line actually starts after the lines ahead of it, and which
+  situation score really plays (its lockout, the once-per-flight scores,
+  the Valkyries toggle and failed-load retries). The journal records what
+  the inputs ask for.
+- **Lines the host speaks or prints itself**, until its hooks are added:
+  the wing order voice that cuts off wing speech, the tower's replies to
+  the player's requests, orders the host refuses before the wing sees
+  them, and the mission result calls sent without a trigger.
+- **Headless AI probes** run no crew voice, music or HUD delivery.
+
+### Draining and host hooks
+
+- Drain with `Comms::take_journal` once a tick. `radio_calls::step` moves
+  the wing's journal (`AiWings::take_journal`) into the channel's each
+  tick, so one call gets everything except the music's entries, which come
+  in `flight_music::Step::journal`.
+- `Entry::describe` prints one plain-English line; `Cause`, `Reason` and
+  `Outcome` print their own text for event fields.
+- Host hooks: `Comms::cut_off(now, Reason::OrderVoice)` where the order
+  voice interrupts wing speech, `Comms::cancel_airport` and
+  `Entry::tower_reply` for tower replies, `Entry::order_refused` for orders
+  refused before delivery, and `Step::radio_calls` for the mission result
+  calls with their trigger.
 
 ## Command line
 

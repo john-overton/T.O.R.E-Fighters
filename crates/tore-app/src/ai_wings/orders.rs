@@ -1,5 +1,12 @@
 //! Player delivery uses the same B46 receiver as AI team requests.
+//!
+//! Every order is written to the wing's journal: each addressed wingman's
+//! answer (including the ones skipped before delivery), the silent side
+//! orders, a refusal before anyone received it, and which wingman replied.
 use super::*;
+use crate::comms::journal::{
+    Answer, Answered, Audience, Cause, Entry, Origin, Outcome, Reason, Reply, Source, WingReply,
+};
 use tore_sim::{
     ai::{
         airfield::{AirfieldAnchors, LandingOrder, LandingReason, Phase, RunwayView},
@@ -290,18 +297,45 @@ impl AiWings {
         members.sort_unstable();
         let first = members.first().map(|(_, id)| *id);
         members.retain(|(member, _)| recipient.is_none_or(|wanted| *member == wanted));
+        let cause = Cause::Order {
+            order,
+            selected,
+            target: None,
+        };
         if members.is_empty() {
-            return Ok(unavailable_no_wingmen());
+            let report = unavailable_no_wingmen();
+            self.journal_order(
+                cause,
+                recipient,
+                &report,
+                Outcome::Refused(Reason::NoWingmen),
+            );
+            return Ok(report);
         }
         // A bugged-out wingman no longer answers orders (manual p.160).
         let before = members.len();
-        members.retain(|(_, id)| !self.mission.actor(*id).unwrap().bugged_out());
+        let mut answers = Vec::new();
+        members.retain(|(member, id)| {
+            let gone = self.mission.actor(*id).unwrap().bugged_out();
+            if gone {
+                answers.push(Answer {
+                    recipient: *id,
+                    member: *member,
+                    result: Answered::BuggedOut,
+                    side: Vec::new(),
+                });
+            }
+            !gone
+        });
         let bugged_out = before - members.len();
         if members.is_empty() {
-            return Ok(OrderReport {
+            let report = OrderReport {
                 message: bugged_out_notice(bugged_out, recipient),
                 radio: vec![],
-            });
+            };
+            let outcome = Outcome::Refused(Reason::AllBuggedOut { count: bugged_out });
+            self.journal_order(cause, recipient, &report, outcome);
+            return Ok(report);
         }
         let needs_target = matches!(
             order,
@@ -315,16 +349,25 @@ impl AiWings {
                 .is_some_and(|a| a.alive() && a.identity().side != FRIENDLY_SIDE)
         });
         if needs_target && target.is_none() {
-            return Ok(OrderReport {
+            let report = OrderReport {
                 message: "Wing order unavailable: no valid hostile target".into(),
                 radio: vec![],
-            });
+            };
+            let outcome = Outcome::Refused(Reason::NoHostileTarget);
+            self.journal_order(cause, recipient, &report, outcome);
+            return Ok(report);
         }
+        let cause = Cause::Order {
+            order,
+            selected,
+            target,
+        };
         let mut applied = 0;
         let mut rejected = 0;
         let mut no_motion = 0;
         let mut sender = None;
-        for (_, id) in &members {
+        let mut replied = None;
+        for (member, id) in &members {
             let actor = self.mission.actor(*id).unwrap();
             let (control, horizontal, vertical) = actor.controller().wing_settings();
             let old_control = control.unwrap_or(WingControl::Loose);
@@ -388,18 +431,28 @@ impl AiWings {
                 })
             {
                 rejected += 1;
+                answers.push(Answer {
+                    recipient: *id,
+                    member: *member,
+                    result: Answered::CannotSeeTarget,
+                    side: Vec::new(),
+                });
                 continue;
             }
             // Apply the silent control side effect before installing motion.
             // Break has no side effect, so it cannot cancel itself here.
+            let mut side = Vec::new();
             if control != old_control {
-                self.mission
+                let outcome = self
+                    .mission
                     .order(*id, WingRequest::WingControl(control))
                     .unwrap()
                     .map_err(|e| e.to_string())?;
+                side.push(("wing control change", outcome));
             }
             if matches!(order, PlayerOrder::Approach(_)) {
-                self.mission
+                let outcome = self
+                    .mission
                     .order(
                         *id,
                         WingRequest::TargetAssignment(TargetOrder::ConcreteTarget(TargetId(
@@ -408,12 +461,19 @@ impl AiWings {
                     )
                     .unwrap()
                     .map_err(|e| e.to_string())?;
+                side.push(("approach target", outcome));
             }
             let outcome = self
                 .mission
                 .order(*id, request)
                 .unwrap()
                 .map_err(|e| e.to_string())?;
+            answers.push(Answer {
+                recipient: *id,
+                member: *member,
+                result: Answered::Receiver(outcome),
+                side,
+            });
             if matches!(order, PlayerOrder::Formation(_) | PlayerOrder::Disengage)
                 && !matches!(outcome, ReceiverOutcome::Rejected(_))
             {
@@ -446,9 +506,19 @@ impl AiWings {
                         match order {
                             PlayerOrder::EngageMyTarget
                             | PlayerOrder::EngageFromFormation
-                            | PlayerOrder::AttackOnContact => self.engaged(*id, target),
+                            | PlayerOrder::AttackOnContact => {
+                                let aircraft = self.engaged(*id, target);
+                                replied = Some(Reply::Replied {
+                                    by: *id,
+                                    reply: WingReply::Engage { aircraft },
+                                });
+                            }
                             PlayerOrder::ProtectMe => {
                                 self.chat(Chatter::Showtime { speaker: *id });
+                                replied = Some(Reply::Replied {
+                                    by: *id,
+                                    reply: WingReply::Showtime,
+                                });
                             }
                             _ => {}
                         }
@@ -477,7 +547,36 @@ impl AiWings {
         if bugged_out > 0 {
             message.push_str(&format!(", {bugged_out} bugged out"));
         }
-        Ok(OrderReport { message, radio })
+        let report = OrderReport { message, radio };
+        let reply = replied.unwrap_or_else(|| no_reply(order, first, &answers));
+        self.journal_order(
+            cause,
+            recipient,
+            &report,
+            Outcome::Answered { answers, reply },
+        );
+        Ok(report)
+    }
+
+    /// Journal one player order with its outcome.
+    fn journal_order(
+        &mut self,
+        cause: Cause,
+        recipient: Option<u8>,
+        report: &OrderReport,
+        outcome: Outcome,
+    ) {
+        let entry = Entry::note(
+            self.journal_clock(),
+            "YOU",
+            Origin::of(Source::Order, cause)
+                .by(PLAYER_ID)
+                .to(Audience::Wing { member: recipient }),
+            outcome,
+        )
+        .with_text(report.message.clone())
+        .with_stems(report.radio.iter().map(|stem| stem.to_string()).collect());
+        self.watch.journal.push(entry);
     }
 
     /// Bug out and land at the selected airport: each addressed wingman
@@ -498,30 +597,54 @@ impl AiWings {
             .map(|a| (a.identity().member, a.id()))
             .collect();
         members.sort_unstable();
+        let cause = Cause::Order {
+            order,
+            selected: None,
+            target: None,
+        };
         if members.is_empty() {
-            return Ok(unavailable_no_wingmen());
+            let report = unavailable_no_wingmen();
+            self.journal_order(
+                cause,
+                recipient,
+                &report,
+                Outcome::Refused(Reason::NoWingmen),
+            );
+            return Ok(report);
         }
         let (label, reason) = match (order, site) {
             (PlayerOrder::BugOut, _) => ("Bug out".to_owned(), LandingReason::BugOut),
             (_, Some(site)) => (format!("Land at {}", site.name), LandingReason::Ordered),
             (_, None) => {
-                return Ok(OrderReport {
+                let report = OrderReport {
                     message: "Wing order unavailable: no airport selected (Shift-A selects one)"
                         .into(),
                     radio: vec![],
-                });
+                };
+                let outcome = Outcome::Refused(Reason::NoAirportSelected);
+                self.journal_order(cause, recipient, &report, outcome);
+                return Ok(report);
             }
         };
         let (mut accepted, mut rejected, mut no_base, mut bugged_out, mut human) = (0, 0, 0, 0, 0);
         let (mut busy, mut landed) = (0, 0);
-        for (_, id) in members {
+        let mut answers = Vec::new();
+        let answer = |id, member, result| Answer {
+            recipient: id,
+            member,
+            result,
+            side: Vec::new(),
+        };
+        for (member, id) in members {
             let actor = self.mission.actor(id).unwrap();
             if actor.identity().human_controlled {
                 human += 1;
+                answers.push(answer(id, member, Answered::Human));
                 continue;
             }
             if actor.bugged_out() {
                 bugged_out += 1;
+                answers.push(answer(id, member, Answered::BuggedOut));
                 continue;
             }
             // Retail ignores bug out in any airport state or on the ground
@@ -536,12 +659,14 @@ impl AiWings {
             let phase = actor.airfield_phase();
             if phase == Some(Phase::Parked) {
                 landed += 1;
+                answers.push(answer(id, member, Answered::AlreadyLanded));
                 continue;
             }
             if reason == LandingReason::BugOut
                 && (phase.is_some_and(|p| p != Phase::Inbound) || on_ground)
             {
                 busy += 1;
+                answers.push(answer(id, member, Answered::OnAirfield));
                 continue;
             }
             let runway = match site {
@@ -550,6 +675,7 @@ impl AiWings {
             };
             let Some(runway) = runway else {
                 no_base += 1;
+                answers.push(answer(id, member, Answered::NoBase));
                 continue;
             };
             let outcome = self
@@ -557,6 +683,7 @@ impl AiWings {
                 .order(id, WingRequest::Land(LandingOrder { runway, reason }))
                 .unwrap()
                 .map_err(|e| e.to_string())?;
+            answers.push(answer(id, member, Answered::Receiver(outcome)));
             if let ReceiverOutcome::Rejected(why) = outcome {
                 match why {
                     wing::RejectReason::BuggedOut => bugged_out += 1,
@@ -573,10 +700,13 @@ impl AiWings {
         }
         if accepted == 0 && rejected == 0 && no_base == 0 && human == 0 && busy == 0 && landed == 0
         {
-            return Ok(OrderReport {
+            let report = OrderReport {
                 message: bugged_out_notice(bugged_out, recipient),
                 radio: vec![],
-            });
+            };
+            let outcome = Outcome::Refused(Reason::AllBuggedOut { count: bugged_out });
+            self.journal_order(cause, recipient, &report, outcome);
+            return Ok(report);
         }
         let mut parts = vec![format!(
             "{accepted} {}",
@@ -604,10 +734,42 @@ impl AiWings {
         if human > 0 {
             parts.push(format!("{human} flown by a human"));
         }
-        Ok(OrderReport {
+        let report = OrderReport {
             message: format!("{label}: {}", parts.join(", ")),
             radio: vec![],
-        })
+        };
+        let outcome = Outcome::Answered {
+            answers,
+            reply: Reply::NotExpected,
+        };
+        self.journal_order(cause, recipient, &report, outcome);
+        Ok(report)
+    }
+}
+
+/// Why nobody replied to an order over the radio. Only the first wingman
+/// replies, only to the attack and "protect me" orders, and only when its
+/// answer applies the order or installs motion.
+fn no_reply(order: PlayerOrder, first: Option<u32>, answers: &[Answer]) -> Reply {
+    let has_reply = matches!(
+        order,
+        PlayerOrder::EngageMyTarget
+            | PlayerOrder::EngageFromFormation
+            | PlayerOrder::AttackOnContact
+            | PlayerOrder::ProtectMe
+    );
+    if !has_reply {
+        return Reply::NotExpected;
+    }
+    match first {
+        Some(first)
+            if answers
+                .iter()
+                .any(|a| a.recipient == first && a.result != Answered::BuggedOut) =>
+        {
+            Reply::FirstDidNotApply { first }
+        }
+        first => Reply::FirstNotAddressed { first },
     }
 }
 
@@ -1259,6 +1421,159 @@ mod landing_tests {
         assert!(
             wings.mission.actor(1).unwrap().landing_order().is_none(),
             "only the addressed wingman lands"
+        );
+    }
+
+    /// The latest order in the wing's journal.
+    fn order_entry(wings: &mut AiWings) -> Entry {
+        wings
+            .take_journal()
+            .into_iter()
+            .rfind(|e| e.origin.source == Source::Order)
+            .unwrap()
+    }
+
+    /// Each answer as (wingman, member number, applied or rejected).
+    fn answered(entry: &Entry) -> (Vec<(u32, u8, &'static str)>, Reply) {
+        let Outcome::Answered { answers, reply } = &entry.outcome else {
+            panic!("{:?}", entry.outcome);
+        };
+        let answers = answers
+            .iter()
+            .map(|a| (a.recipient, a.member, a.result.name()))
+            .collect();
+        (answers, *reply)
+    }
+
+    #[test]
+    fn every_answer_and_the_wingman_who_replied_are_journaled() {
+        let mut wings = bridge();
+        let report = wings
+            .command(PlayerOrder::EngageMyTarget, Some(3), None)
+            .unwrap();
+        let entry = order_entry(&mut wings);
+        assert_eq!(entry.text, report.message);
+        assert_eq!(entry.stems, ["^ATTACK"]);
+        assert_eq!(entry.label, "YOU");
+        assert_eq!(entry.origin.speaker, Some(PLAYER_ID));
+        assert_eq!(entry.origin.audience, Audience::Wing { member: None });
+        assert_eq!(
+            entry.origin.cause,
+            Cause::Order {
+                order: PlayerOrder::EngageMyTarget,
+                selected: Some(3),
+                target: Some(3),
+            }
+        );
+        assert_eq!(
+            answered(&entry),
+            (
+                vec![(1, 1, "applied"), (2, 2, "applied")],
+                Reply::Replied {
+                    by: 1,
+                    reply: WingReply::Engage { aircraft: true }
+                }
+            )
+        );
+        // Only the first wingman replies.
+        wings
+            .command(PlayerOrder::EngageMyTarget, Some(3), Some(2))
+            .unwrap();
+        let entry = order_entry(&mut wings);
+        assert_eq!(entry.origin.audience, Audience::Wing { member: Some(2) });
+        assert_eq!(
+            answered(&entry),
+            (
+                vec![(2, 2, "applied")],
+                Reply::FirstNotAddressed { first: Some(1) }
+            )
+        );
+        wings
+            .command(PlayerOrder::Formation(wing::Formation::Echelon), None, None)
+            .unwrap();
+        assert_eq!(answered(&order_entry(&mut wings)).1, Reply::NotExpected);
+    }
+
+    #[test]
+    fn a_wingman_whose_sensors_cannot_see_the_target_is_journaled() {
+        let mut selections = super::super::tests::payload(None);
+        selections[0].wing.index = 0;
+        let blind = sensors::SensorProfiles {
+            aircraft: AircraftId::F18,
+            radar: None,
+            infrared: None,
+            visual: None,
+            jammer: None,
+            signature: sensors::SignatureProfile::default(),
+        };
+        let mut wings =
+            AiWings::build_with(&selections, &super::super::tests::spawned(), 0, |_| {
+                Ok((super::super::tests::aircraft(), Some(blind.clone())))
+            })
+            .unwrap();
+        wings
+            .command(PlayerOrder::EngageMyTarget, Some(3), None)
+            .unwrap();
+        let entry = order_entry(&mut wings);
+        let Outcome::Answered { answers, reply } = &entry.outcome else {
+            panic!("{:?}", entry.outcome);
+        };
+        assert!(
+            answers
+                .iter()
+                .all(|a| a.result == Answered::CannotSeeTarget && a.side.is_empty()),
+            "{answers:?}"
+        );
+        assert_eq!(answers.len(), 2);
+        assert_eq!(*reply, Reply::FirstDidNotApply { first: 1 });
+        assert!(
+            entry
+                .outcome
+                .to_string()
+                .contains("rejected: its sensors cannot see the target")
+        );
+    }
+
+    #[test]
+    fn bugged_out_wingmen_and_refusals_are_journaled() {
+        let mut wings = bridge();
+        let home = view(500, 10_000.);
+        wings
+            .mission
+            .actor_mut(1)
+            .unwrap()
+            .set_home_runway(Some(home));
+        wings.mission.actor_mut(2).unwrap().set_home_runway(None);
+        wings.command(PlayerOrder::BugOut, None, None).unwrap();
+        let entry = order_entry(&mut wings);
+        let Outcome::Answered { answers, .. } = &entry.outcome else {
+            panic!("{:?}", entry.outcome);
+        };
+        assert_eq!(answers[0].result.name(), "applied");
+        assert_eq!(answers[1].result, Answered::NoBase);
+        wings.command(PlayerOrder::Disengage, None, None).unwrap();
+        let (answers, _) = answered(&order_entry(&mut wings));
+        assert_eq!(answers[0], (1, 1, "skipped"), "bugged out before delivery");
+        assert_eq!(answers[1].0, 2);
+        let refused = |wings: &mut AiWings, order, recipient| {
+            wings.command(order, None, recipient).unwrap();
+            order_entry(wings).outcome
+        };
+        assert_eq!(
+            refused(&mut wings, PlayerOrder::BugOut, Some(1)),
+            Outcome::Refused(Reason::AllBuggedOut { count: 1 })
+        );
+        assert_eq!(
+            refused(&mut wings, PlayerOrder::EngageMyTarget, Some(2)),
+            Outcome::Refused(Reason::NoHostileTarget)
+        );
+        assert_eq!(
+            refused(&mut wings, PlayerOrder::LandAtSelected, Some(2)),
+            Outcome::Refused(Reason::NoAirportSelected)
+        );
+        assert_eq!(
+            refused(&mut wings, PlayerOrder::Disengage, Some(3)),
+            Outcome::Refused(Reason::NoWingmen)
         );
     }
 }

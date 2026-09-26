@@ -424,7 +424,10 @@ import; the existing archive and PCM readers load original recordings.
 Radio chatter is observation only: `ai_wings/chatter` turns mission output
 into events, combat's strike list attributes projectile damage, and
 `radio_calls` words them and applies the listener rule before `comms` delivers
-them. [Radio chatter](spec/radio-chatter.md#implementation-in-tore),
+them. Each decision, said or held back, is also written to a bounded,
+write-only journal (`comms::journal`) that the host drains once a tick
+([communication journal](REPLAYS.md#communication-journal)).
+[Radio chatter](spec/radio-chatter.md#implementation-in-tore),
 [command behavior](spec/ai.md#live-wing-command-and-radio-integration),
 [radio data](formats/radio.md), [controls](INPUT.md#player-wing-orders).
 

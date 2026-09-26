@@ -150,3 +150,13 @@ Routine wing calls obey radio silence. Airport recordings have their own queue
 ownership so a cancelled airport message cannot remove wing or crew speech.
 [Static evidence](formats/radio.md#airport-speech-review),
 [validation and carrier limits](baselines/airfield-radio.md).
+
+## Communication journal
+
+Every line through the shared channel, and every line a rule holds back, is
+also written to a write-only journal with its trigger, its random rolls and
+the reason for its outcome, for mission recordings. Writing it never changes
+what is said or when. The mixer's own decisions are not in it: speech
+dropped because its queue is full or because effects are off or paused, when
+a queued line actually starts, and which situation score really plays. See
+the [communication journal](REPLAYS.md#communication-journal).

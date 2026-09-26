@@ -3,6 +3,9 @@
 //! docs/spec/radio-chatter.md. The player's combat events and the AI's
 //! [`Chatter`] are the producers; `comms` owns delay, radio silence and
 //! playback. Nothing here changes combat or AI state.
+//!
+//! Every call made, heard or not, and every call a rule holds back is
+//! written to the channel's journal with its trigger, rolls and reason.
 use std::collections::{BTreeMap, BTreeSet};
 
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
@@ -12,7 +15,10 @@ use tore_sim::combat::{
 };
 
 use crate::ai_wings::{AiWings, Chatter, Contact, FuelLevel, Member, PLAYER_ID};
-use crate::comms::{self, Call, Comms, Crew, Kind, Phrase, Phrases};
+use crate::comms::journal::{
+    self, Cause, Entry, Origin, Outcome, REPEAT_S, Reason, Roll, Source, Store, Test, WingReply,
+};
+use crate::comms::{self, Call, Comms, Crew, Kind, Phrase, Phrases, Route};
 
 /// Flight colours, first flight first (spec-derived).
 pub const FLIGHTS: [&str; 8] = [
@@ -74,6 +80,15 @@ pub enum Audience {
     /// The player alone.
     Player,
 }
+impl From<Audience> for journal::Audience {
+    fn from(audience: Audience) -> Self {
+        match audience {
+            Audience::Leader => Self::Leader,
+            Audience::Flight => Self::Flight,
+            Audience::Player => Self::Player,
+        }
+    }
+}
 
 /// A weapon release as the launch call reads it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,6 +116,13 @@ impl Release {
     fn guided(&self) -> bool {
         self.flags & 1 != 0
     }
+    fn store(&self) -> Store {
+        Store {
+            flags: self.flags,
+            seeker: self.seeker,
+            phoenix: self.phoenix,
+        }
+    }
 }
 
 /// What kind of object fired the round that hit an aircraft.
@@ -109,6 +131,15 @@ enum Attacker {
     Aircraft,
     Aaa,
     Other,
+}
+impl From<Attacker> for journal::Attacker {
+    fn from(attacker: Attacker) -> Self {
+        match attacker {
+            Attacker::Aircraft => Self::Aircraft,
+            Attacker::Aaa => Self::Aaa,
+            Attacker::Other => Self::Other,
+        }
+    }
 }
 
 /// "Red two": flight colour and position word. A flight past the eighth has
@@ -197,6 +228,107 @@ impl Scene<'_> {
         };
         heard.then(|| label(member))
     }
+    /// Why [`Self::label`] found the player is not a receiver. Journal only.
+    fn unheard(&self, speaker: u32) -> Reason {
+        match self.member(speaker) {
+            None => Reason::NoRadioIdentity,
+            Some(member) if member.enemy => Reason::EnemyFlight,
+            Some(member) if !self.in_player_flight(member) => Reason::OtherFlight,
+            Some(_) => Reason::PlayerDown,
+        }
+    }
+    /// The speaker's radio name whether or not the player hears it, for the
+    /// journal.
+    fn name(&self, speaker: u32) -> String {
+        if speaker == PLAYER_ID {
+            "YOU".into()
+        } else {
+            self.member(speaker)
+                .map_or_else(|| format!("Aircraft {speaker}"), label)
+        }
+    }
+}
+
+/// How the launch call read its roll: the Fox chance, a generic variant, or
+/// nothing for the one-recording calls.
+fn launch_roll(roll: u32, release: &Release, aircraft: bool) -> Roll {
+    if release.phoenix || release.bomb() {
+        Roll::new("launch call with one recording", roll, Test::Unused)
+    } else if matches!(release.seeker, 2 | 3) && aircraft {
+        Roll::new(
+            "Fox call, else a generic call by the roll mod 3",
+            roll,
+            Test::Below(50),
+        )
+    } else {
+        Roll::pick("generic launch call", roll, GENERIC_LAUNCH.len())
+    }
+}
+
+/// How the contact report read its roll: the size words.
+fn contact_roll(roll: u32, contact: &Contact) -> Roll {
+    match contact.count {
+        _ if contact.miles > SIZE_MILES => {
+            Roll::new("size words beyond 15 miles", roll, Test::Unused)
+        }
+        2 => Roll::new(
+            "size of a pair: pair of, two-ship formation, or multiple",
+            roll,
+            Test::Bands(&[40, 70]),
+        ),
+        3..=12 => Roll::new("size as a number, else multiple", roll, Test::Below(50)),
+        _ => Roll::new("size words for one or many", roll, Test::Unused),
+    }
+}
+
+/// Record a call a rule held back. Only the first in the rule's window is
+/// listed for each speaker, so a gun burst makes one entry per cooldown.
+#[allow(clippy::too_many_arguments)]
+fn held(
+    comms: &mut Comms,
+    scene: &Scene,
+    speaker: u32,
+    cause: Cause,
+    rolls: Vec<Roll>,
+    rule: &'static str,
+    until: f64,
+    reason: Reason,
+) {
+    if comms.first_in_window(rule, speaker, scene.now, until) {
+        comms.record(Entry::note(
+            scene.now,
+            scene.name(speaker),
+            Origin::of(Source::Radio, cause).by(speaker).rolls(rolls),
+            Outcome::Suppressed(reason),
+        ));
+    }
+}
+
+/// Record a call a shared cooldown held back.
+fn cooled(
+    comms: &mut Comms,
+    scene: &Scene,
+    speaker: u32,
+    cause: Cause,
+    rolls: Vec<Roll>,
+    key: &'static str,
+    seconds: f64,
+) {
+    let remaining = comms.remaining(key, scene.now);
+    held(
+        comms,
+        scene,
+        speaker,
+        cause,
+        rolls,
+        key,
+        scene.now + remaining,
+        Reason::Cooldown {
+            key,
+            seconds,
+            remaining,
+        },
+    );
 }
 
 /// The launch call wording for `roll`, before cooldowns. `aircraft` is
@@ -317,6 +449,8 @@ pub struct Radio {
     pub heard: u32,
 }
 impl Radio {
+    /// Make a call. The listener rule decides whether the player hears it;
+    /// an unheard call is journaled and goes no further.
     #[allow(clippy::too_many_arguments)]
     fn say(
         &mut self,
@@ -327,36 +461,69 @@ impl Radio {
         phrase: Phrase,
         kind: Kind,
         delay: f64,
+        origin: Origin,
     ) {
         self.made += 1;
+        let origin = origin.by(speaker).to(audience.into());
         let Some(label) = scene.label(speaker, audience) else {
+            comms.record(
+                Entry::note(
+                    scene.now,
+                    scene.name(speaker),
+                    origin,
+                    Outcome::Unheard(scene.unheard(speaker)),
+                )
+                .with_text(phrase.text)
+                .with_stems(phrase.stems)
+                .with_kind(Route::Radio, kind),
+            );
             return;
         };
         self.heard += 1;
         // The player's own calls are voiced when they are sent.
         let delay = if speaker == PLAYER_ID { 0. } else { delay };
-        comms.send(scene.now, Call::new(label, phrase, kind).after(delay));
+        comms.send(
+            scene.now,
+            Call::new(label, phrase, kind).after(delay).because(origin),
+        );
     }
 
     /// A weapon release: to the shooter's flight after half a second.
     pub fn release(&mut self, comms: &mut Comms, scene: &Scene, speaker: u32, release: Release) {
+        let cause = Cause::Release {
+            target: release.target,
+            store: release.store(),
+        };
         if release.target.is_none() && !release.bomb() {
+            held(
+                comms,
+                scene,
+                speaker,
+                cause,
+                Vec::new(),
+                "release without a target",
+                scene.now + REPEAT_S,
+                Reason::NoTarget,
+            );
             return;
         }
         if !release.phoenix {
             if release.bomb() {
                 if !comms.cooldown(BOMBS, scene.now, 4.) {
+                    cooled(comms, scene, speaker, cause, Vec::new(), BOMBS, 4.);
                     return;
                 }
             } else if !release.guided() && !comms.cooldown(GUN, scene.now, 4.) {
                 // `fitted`: the gun's 4 s cooldown silences the whole call,
                 // so a burst of rounds makes one call, not one per round.
+                cooled(comms, scene, speaker, cause, Vec::new(), GUN, 4.);
                 return;
             }
         }
         let roll = comms.roll();
         let aircraft = release.target.is_some_and(|t| scene.aircraft(t));
         let phrase = launch_phrase(scene.phrases, roll, &release, aircraft);
+        let rolls = vec![launch_roll(roll, &release, aircraft)];
         self.say(
             comms,
             scene,
@@ -365,6 +532,7 @@ impl Radio {
             phrase,
             Kind::Chatter,
             0.5,
+            Origin::of(Source::Radio, cause).rolls(rolls),
         );
     }
 
@@ -385,48 +553,98 @@ impl Radio {
             if scene.aircraft(victim) {
                 self.damaged(comms, scene, victim, shooter, strike);
             }
-        } else if shooter == PLAYER_ID
-            && victim != PLAYER_ID
-            && scene.aircraft(victim)
-            && scene.target(victim).is_some_and(|t| {
-                missiles::length(missiles::sub(t.position, scene.player_position))
-                    <= FRIENDLY_FIRE_FT
-            })
-            && comms.cooldown(COMPLAINT, scene.now, 6.)
-        {
-            let roll = comms.roll();
-            let phrase = Phrase::stem(scene.phrases, Comms::pick(roll, &FRIENDLY_FIRE));
-            self.say(
-                comms,
-                scene,
-                victim,
-                Audience::Player,
-                phrase,
-                Kind::Chatter,
-                2.,
-            );
+        } else if shooter == PLAYER_ID && victim != PLAYER_ID && scene.aircraft(victim) {
+            let Some(range_ft) = scene
+                .target(victim)
+                .map(|t| missiles::length(missiles::sub(t.position, scene.player_position)))
+            else {
+                return;
+            };
+            let cause = Cause::FriendlyFire { range_ft };
+            if range_ft <= FRIENDLY_FIRE_FT {
+                if comms.cooldown(COMPLAINT, scene.now, 6.) {
+                    let roll = comms.roll();
+                    let phrase = Phrase::stem(scene.phrases, Comms::pick(roll, &FRIENDLY_FIRE));
+                    let rolls = vec![Roll::pick("complaint", roll, FRIENDLY_FIRE.len())];
+                    self.say(
+                        comms,
+                        scene,
+                        victim,
+                        Audience::Player,
+                        phrase,
+                        Kind::Chatter,
+                        2.,
+                        Origin::of(Source::Radio, cause).rolls(rolls),
+                    );
+                } else {
+                    cooled(comms, scene, victim, cause, Vec::new(), COMPLAINT, 6.);
+                }
+            } else {
+                held(
+                    comms,
+                    scene,
+                    victim,
+                    cause,
+                    Vec::new(),
+                    "friendly fire too far away",
+                    scene.now + REPEAT_S,
+                    Reason::TooFar {
+                        range_ft,
+                        limit_ft: FRIENDLY_FIRE_FT,
+                    },
+                );
+            }
         }
     }
 
     fn hit(&mut self, comms: &mut Comms, scene: &Scene, shooter: u32, strike: &Strike) {
         let now = scene.now;
         let unguided = strike.weapon_flags & 1 == 0;
+        let cause = Cause::Hit {
+            victim: strike.victim.unwrap_or(PLAYER_ID),
+            guided: !unguided,
+        };
         if unguided && scene.aircraft(shooter) {
-            if self.unguided_hits.get(&shooter).is_some_and(|t| now < *t) {
+            if let Some(until) = self
+                .unguided_hits
+                .get(&shooter)
+                .copied()
+                .filter(|t| now < *t)
+            {
+                let rule = "unguided hits per shooter";
+                let reason = Reason::PerAircraft {
+                    rule,
+                    id: shooter,
+                    seconds: 8.,
+                    remaining: until - now,
+                };
+                held(
+                    comms,
+                    scene,
+                    shooter,
+                    cause,
+                    Vec::new(),
+                    rule,
+                    until,
+                    reason,
+                );
                 return;
             }
             self.unguided_hits.insert(shooter, now + 8.);
         }
         let roll = comms.roll();
-        let stem = if unguided {
+        let (stem, count) = if unguided {
             if !comms.cooldown(UNGUIDED_HIT, now, 4.) {
+                let rolls = vec![Roll::new("hit call", roll, Test::Unused)];
+                cooled(comms, scene, shooter, cause, rolls, UNGUIDED_HIT, 4.);
                 return;
             }
-            Comms::pick(roll, &UNGUIDED_HITS)
+            (Comms::pick(roll, &UNGUIDED_HITS), UNGUIDED_HITS.len())
         } else {
-            Comms::pick(roll, &GUIDED_HITS)
+            (Comms::pick(roll, &GUIDED_HITS), GUIDED_HITS.len())
         };
         let phrase = Phrase::stem(scene.phrases, stem);
+        let rolls = vec![Roll::pick("hit call", roll, count)];
         self.say(
             comms,
             scene,
@@ -435,30 +653,64 @@ impl Radio {
             phrase,
             Kind::Chatter,
             0.5,
+            Origin::of(Source::Radio, cause).rolls(rolls),
         );
     }
 
     fn kill(&mut self, comms: &mut Comms, scene: &Scene, shooter: u32, victim: u32, s: &Strike) {
         let roll = comms.roll();
-        let phrase = if scene.aircraft(victim) {
+        let aircraft = scene.aircraft(victim);
+        let bomb = s.weapon_flags & 0x10 != 0;
+        let cause = Cause::Kill {
+            victim,
+            aircraft,
+            bomb,
+        };
+        let (phrase, rolls) = if aircraft {
             let named = scene
                 .target(victim)
                 .and_then(|t| t.aircraft)
                 .filter(|id| !always_generic(*id));
-            // A fresh 40% roll picks the generic set.
-            match named {
-                Some(id) if comms.roll() >= 40 => splash(scene.phrases, id),
-                _ => Phrase::stem(scene.phrases, Comms::pick(roll, &AIRCRAFT_KILLS)),
+            // A fresh 40% roll picks the generic set; it is drawn only for
+            // a named type.
+            let second = named.map(|_| comms.roll());
+            let splash_roll = second.map(|value| {
+                Roll::new(
+                    "\"Splash one\" with the type name",
+                    value,
+                    Test::AtLeast(40),
+                )
+            });
+            match (named, second) {
+                (Some(id), Some(value)) if value >= 40 => (
+                    splash(scene.phrases, id),
+                    [
+                        Some(Roll::new("kill call", roll, Test::Unused)),
+                        splash_roll,
+                    ],
+                ),
+                _ => (
+                    Phrase::stem(scene.phrases, Comms::pick(roll, &AIRCRAFT_KILLS)),
+                    [
+                        Some(Roll::pick("kill call", roll, AIRCRAFT_KILLS.len())),
+                        splash_roll,
+                    ],
+                ),
             }
         } else {
             if comms.cooling(OTHER_KILL, scene.now) {
+                let rolls = vec![Roll::new("kill call", roll, Test::Unused)];
+                cooled(comms, scene, shooter, cause, rolls, OTHER_KILL, 4.);
                 return;
             }
             // Only a bomb kill starts the 4 s cooldown.
-            if s.weapon_flags & 0x10 != 0 {
+            if bomb {
                 comms.cooldown(OTHER_KILL, scene.now, 4.);
             }
-            Phrase::stem(scene.phrases, Comms::pick(roll, &OTHER_KILLS))
+            (
+                Phrase::stem(scene.phrases, Comms::pick(roll, &OTHER_KILLS)),
+                [Some(Roll::pick("kill call", roll, OTHER_KILLS.len())), None],
+            )
         };
         self.say(
             comms,
@@ -468,28 +720,46 @@ impl Radio {
             phrase,
             Kind::Chatter,
             0.5,
+            Origin::of(Source::Radio, cause).rolls(rolls.into_iter().flatten().collect()),
         );
     }
 
     /// "I'm hit", by the aircraft that took an enemy round.
     fn damaged(&mut self, comms: &mut Comms, scene: &Scene, victim: u32, by: u32, s: &Strike) {
-        if s.weapon_flags & 0x80 != 0 {
-            if self
+        let gun = s.weapon_flags & 0x80 != 0;
+        let attacker = scene.attacker(by);
+        let cause = Cause::Damaged {
+            by,
+            attacker: attacker.into(),
+            gun,
+        };
+        if gun {
+            if let Some(until) = self
                 .bullet_hits
                 .get(&victim)
-                .is_some_and(|t| scene.now < *t)
+                .copied()
+                .filter(|t| scene.now < *t)
             {
+                let rule = "\"I'm hit\" from gun rounds per aircraft";
+                let reason = Reason::PerAircraft {
+                    rule,
+                    id: victim,
+                    seconds: 8.,
+                    remaining: until - scene.now,
+                };
+                held(comms, scene, victim, cause, Vec::new(), rule, until, reason);
                 return;
             }
             self.bullet_hits.insert(victim, scene.now + 8.);
         }
         let roll = comms.roll();
-        let set: &[&str] = match scene.attacker(by) {
+        let set: &[&str] = match attacker {
             Attacker::Aircraft => &HIT_BY_AIRCRAFT,
             Attacker::Aaa => &HIT_BY_AAA,
             Attacker::Other => &HIT_BY_OTHER,
         };
         let phrase = Phrase::stem(scene.phrases, Comms::pick(roll, set));
+        let rolls = vec![Roll::pick("\"I'm hit\" call", roll, set.len())];
         self.say(
             comms,
             scene,
@@ -498,12 +768,14 @@ impl Radio {
             phrase,
             Kind::Chatter,
             0.,
+            Origin::of(Source::Radio, cause).rolls(rolls),
         );
     }
 
     /// One AI radio event.
     pub fn chatter(&mut self, comms: &mut Comms, scene: &Scene, event: &Chatter) {
         let p = |stem: &str| Phrase::stem(scene.phrases, stem);
+        let radio = |cause| Origin::of(Source::Radio, cause);
         match event {
             Chatter::Release { speaker, release } => self.release(comms, scene, *speaker, *release),
             Chatter::LaunchWarning {
@@ -519,6 +791,9 @@ impl Radio {
                     p(stem),
                     Kind::Important,
                     0.5,
+                    radio(Cause::LaunchSeen {
+                        by_aircraft: *by_aircraft,
+                    }),
                 );
             }
             Chatter::Death {
@@ -532,6 +807,7 @@ impl Radio {
                     &DEATHS[..3]
                 };
                 let phrase = p(Comms::pick(roll, set));
+                let rolls = vec![Roll::pick("death call", roll, set.len())];
                 self.say(
                     comms,
                     scene,
@@ -540,14 +816,24 @@ impl Radio {
                     phrase,
                     Kind::Important,
                     0.,
+                    radio(Cause::Death {
+                        ejection_seat: *ejection_seat,
+                    })
+                    .rolls(rolls),
                 );
             }
             Chatter::Engage { speaker, aircraft } => {
                 let roll = comms.roll();
-                let stem = if *aircraft {
-                    Comms::pick(roll, &ENGAGE_AIRCRAFT)
+                let (stem, roll) = if *aircraft {
+                    (
+                        Comms::pick(roll, &ENGAGE_AIRCRAFT),
+                        Roll::pick("engage reply", roll, ENGAGE_AIRCRAFT.len()),
+                    )
                 } else {
-                    "^ENGAGE"
+                    (
+                        "^ENGAGE",
+                        Roll::new("engage reply for a surface target", roll, Test::Unused),
+                    )
                 };
                 self.say(
                     comms,
@@ -557,6 +843,13 @@ impl Radio {
                     p(stem),
                     Kind::Chatter,
                     2.,
+                    Origin::of(
+                        Source::Reply,
+                        Cause::Reply(WingReply::Engage {
+                            aircraft: *aircraft,
+                        }),
+                    )
+                    .rolls(vec![roll]),
                 );
             }
             Chatter::Showtime { speaker } => self.say(
@@ -567,10 +860,16 @@ impl Radio {
                 p("^SHWTIME"),
                 Kind::Important,
                 2.,
+                Origin::of(Source::Reply, Cause::Reply(WingReply::Showtime)),
             ),
-            Chatter::Contact { speaker, contact } => {
+            Chatter::Contact {
+                speaker,
+                target,
+                contact,
+            } => {
                 let roll = comms.roll();
                 let phrase = contact_phrase(scene.phrases, roll, contact);
+                let rolls = vec![contact_roll(roll, contact)];
                 self.say(
                     comms,
                     scene,
@@ -579,6 +878,13 @@ impl Radio {
                     phrase,
                     Kind::Chatter,
                     0.5,
+                    radio(Cause::Contact {
+                        target: *target,
+                        count: contact.count,
+                        miles: contact.miles,
+                        advise: contact.advise,
+                    })
+                    .rolls(rolls),
                 );
             }
             Chatter::Fuel { speaker, level } => {
@@ -596,6 +902,9 @@ impl Radio {
                     p(stem),
                     Kind::Important,
                     0.,
+                    radio(Cause::AiFuel {
+                        level: *level as u8,
+                    }),
                 );
             }
         }
@@ -617,7 +926,12 @@ pub fn step(
 ) {
     let strikes = state.take_strikes();
     let (members, chatter) = match wings {
-        Some(wings) => (wings.radio_members(), std::mem::take(&mut wings.chatter)),
+        Some(wings) => {
+            // The wing's orders, reports and chatter records join the
+            // channel's journal, so the host drains one journal.
+            comms.record_all(wings.take_journal());
+            (wings.radio_members(), std::mem::take(&mut wings.chatter))
+        }
         None => (Vec::new(), Vec::new()),
     };
     let scene = Scene {
@@ -1103,5 +1417,156 @@ mod tests {
         );
         radio.chatter(&mut comms, &s, &Chatter::Showtime { speaker: 1 });
         assert_eq!(comms.due(5.).len(), 1);
+    }
+
+    #[test]
+    fn unheard_calls_are_journaled_with_the_listener_rule() {
+        let w = World::new();
+        let mut comms = Comms::new(1);
+        let mut radio = Radio::default();
+        radio.release(&mut comms, &w.scene(0.), 2, IR);
+        let at_red_two = Release {
+            target: Some(1),
+            ..IR
+        };
+        radio.release(&mut comms, &w.scene(0.), 3, at_red_two);
+        let down = Scene {
+            player_alive: false,
+            ..w.scene(0.)
+        };
+        radio.release(&mut comms, &down, 1, IR);
+        let journal = comms.take_journal();
+        let unheard: Vec<_> = journal
+            .iter()
+            .map(|e| (e.label.as_str(), e.outcome.clone()))
+            .collect();
+        assert_eq!(
+            unheard,
+            [
+                ("Blue one", Outcome::Unheard(Reason::OtherFlight)),
+                ("Green one", Outcome::Unheard(Reason::EnemyFlight)),
+                ("Red two", Outcome::Unheard(Reason::PlayerDown)),
+            ]
+        );
+        assert_eq!((radio.made, radio.heard), (3, 0), "the counters agree");
+        let blue = &journal[0];
+        assert_eq!(blue.origin.speaker, Some(2));
+        assert_eq!(blue.origin.audience, journal::Audience::Flight);
+        assert_eq!(
+            blue.origin.cause,
+            Cause::Release {
+                target: Some(3),
+                store: Store {
+                    flags: 1,
+                    seeker: 2,
+                    phoenix: false
+                }
+            }
+        );
+        assert_eq!(
+            blue.origin.rolls[0].test,
+            Test::Below(50),
+            "an infrared shot at an aircraft: the Fox two chance"
+        );
+        assert_eq!(
+            blue.origin.cause.to_string(),
+            "infrared missile release at aircraft 3"
+        );
+    }
+
+    #[test]
+    fn hit_limits_are_journaled_once_per_window_with_the_time_left() {
+        let w = World::new();
+        let mut comms = Comms::new(1);
+        let mut radio = Radio::default();
+        let gun = strike(1, Some(3), 0x80, false);
+        radio.strike(&mut comms, &w.scene(20.), &gun);
+        radio.strike(
+            &mut comms,
+            &w.scene(21.),
+            &strike(PLAYER_ID, Some(3), 0x80, false),
+        );
+        radio.strike(&mut comms, &w.scene(22.), &gun);
+        radio.strike(&mut comms, &w.scene(23.), &gun);
+        let held: Vec<_> = comms
+            .take_journal()
+            .into_iter()
+            .filter(|e| matches!(e.outcome, Outcome::Suppressed(_)))
+            .map(|e| (e.label, e.outcome, e.origin.rolls))
+            .collect();
+        assert_eq!(
+            held,
+            [
+                (
+                    "YOU".to_string(),
+                    Outcome::Suppressed(Reason::Cooldown {
+                        key: UNGUIDED_HIT,
+                        seconds: 4.,
+                        remaining: 3.
+                    }),
+                    vec![Roll::new("hit call", held[0].2[0].value, Test::Unused)]
+                ),
+                (
+                    "Green one".to_string(),
+                    Outcome::Suppressed(Reason::PerAircraft {
+                        rule: "\"I'm hit\" from gun rounds per aircraft",
+                        id: 3,
+                        seconds: 8.,
+                        remaining: 7.
+                    }),
+                    vec![]
+                ),
+                (
+                    "Red two".to_string(),
+                    Outcome::Suppressed(Reason::PerAircraft {
+                        rule: "unguided hits per shooter",
+                        id: 1,
+                        seconds: 8.,
+                        remaining: 6.
+                    }),
+                    vec![]
+                ),
+            ],
+            "the roll a held hit call still draws is listed; repeats in a window are not"
+        );
+    }
+
+    #[test]
+    fn kill_calls_journal_the_splash_roll_and_its_threshold() {
+        let w = World::new();
+        let mut splashes = 0;
+        for seed in 0..60 {
+            let mut comms = Comms::new(seed);
+            let mut radio = Radio::default();
+            radio.strike(
+                &mut comms,
+                &w.scene(0.),
+                &strike(PLAYER_ID, Some(3), 1, true),
+            );
+            let entry = comms.take_journal().remove(0);
+            let rolls = &entry.origin.rolls;
+            assert_eq!(rolls.len(), 2, "a named type draws a second roll");
+            assert_eq!(rolls[1].test, Test::AtLeast(40));
+            let splash = rolls[1].value >= 40;
+            splashes += usize::from(splash);
+            assert_eq!(entry.stems[0] == "^SPLASH", splash);
+            assert_eq!(
+                rolls[0].test,
+                if splash {
+                    Test::Unused
+                } else {
+                    Test::Modulo(AIRCRAFT_KILLS.len() as u32)
+                }
+            );
+            assert_eq!(
+                entry.origin.cause,
+                Cause::Kill {
+                    victim: 3,
+                    aircraft: true,
+                    bomb: false
+                }
+            );
+        }
+        assert!((20..60).contains(&splashes), "{splashes}");
     }
 }
