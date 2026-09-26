@@ -75,10 +75,9 @@ impl App {
         self.screen = Screen::Replay;
         self.mouse_look = None;
         self.menu.state.cancel();
-        // Replay sound comes later; until then the replay is silent.
+        // The replay starts silent; its sound follows the playhead.
         if let Some(audio) = &self.audio {
-            audio.restart_flight();
-            audio.flight(None);
+            crate::replay::sound::stop(audio);
         }
         if let (Some(renderer), Some(replay)) = (&self.renderer, &self.replay) {
             renderer.window.set_title(&replay.viewer.title());
@@ -90,6 +89,9 @@ impl App {
     /// and aircraft.
     pub(crate) fn leave_replay(&mut self) {
         let entered = self.replay.take().is_some_and(|r| r.viewer.entered());
+        if let Some(audio) = &self.audio {
+            crate::replay::sound::stop(audio);
+        }
         if let Some(renderer) = &mut self.renderer {
             if entered {
                 renderer.set_world(&self.world);
@@ -252,6 +254,7 @@ impl App {
             renderer,
             &mut self.flight_canvas,
             self.modifiers.shift_key(),
+            self.audio.as_ref(),
         );
         renderer.window.set_cursor_visible(viewer.pointer_visible());
         match result {

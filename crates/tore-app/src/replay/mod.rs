@@ -20,6 +20,7 @@ pub mod playback;
 pub mod png;
 pub mod recorder;
 pub mod screen;
+pub mod sound;
 pub mod tracks;
 pub mod trails;
 pub mod viewer;

@@ -99,6 +99,90 @@ pub fn spatial_sources(
     );
     sources
 }
+/// [`spatial_sources`] from a drawn snapshot, for the replay viewer: the
+/// player, every airborne aircraft and every missile with a reviewed
+/// profile, a missile's velocity taken from its last tick of travel as
+/// live flight takes it. Presentation only, like its live twin.
+pub fn snapshot_sources(
+    snapshot: &crate::render_snapshot::RenderSnapshot,
+) -> Vec<tore_sim::acoustics::Source> {
+    use tore_sim::acoustics::{Source, SourceId};
+    let player = &snapshot.player;
+    let mut sources = vec![Source {
+        id: SourceId::Aircraft(0),
+        position: player.position,
+        velocity: player.velocity,
+    }];
+    sources.extend(
+        snapshot
+            .targets
+            .iter()
+            .filter(|t| t.airborne)
+            .map(|t| Source {
+                id: SourceId::Aircraft(t.id),
+                position: t.position,
+                velocity: t.velocity,
+            }),
+    );
+    sources.extend(
+        snapshot
+            .projectiles
+            .iter()
+            .filter(|p| tore_sim::combat::missiles::Profile::reviewed(&p.weapon))
+            .map(|p| Source {
+                id: SourceId::Missile(p.id),
+                position: p.position,
+                velocity: std::array::from_fn(|i| (p.position[i] - p.previous[i]) * 120.),
+            }),
+    );
+    sources
+}
+/// Aircraft profile keys of the engine recordings.
+const ENGINE_LOOP: &str = "loopSound";
+const BURNER_LOOP: &str = "secondSound";
+const ENGINE_START: &str = "engineOnSound";
+const ENGINE_STOP: &str = "engineOffSound";
+/// Engine loop gain for a running engine at `throttle`, 0 to 1.
+fn engine_gain(throttle: f64) -> f32 {
+    0.08 + 0.15 * throttle as f32
+}
+/// Afterburner loop gain while the burner is lit.
+const BURNER_GAIN: f32 = 0.15;
+/// The engine recordings an aircraft profile names.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EngineSounds {
+    /// The engine and afterburner loops.
+    pub engine: Option<String>,
+    pub burner: Option<String>,
+    /// Played once as the engine starts or stops.
+    pub start: Option<String>,
+    pub stop: Option<String>,
+}
+impl EngineSounds {
+    pub fn of(aircraft: &tore_formats::aircraft::Aircraft) -> Self {
+        let get = |key: &str| aircraft.sounds.get(key).cloned();
+        Self {
+            engine: get(ENGINE_LOOP),
+            burner: get(BURNER_LOOP),
+            start: get(ENGINE_START),
+            stop: get(ENGINE_STOP),
+        }
+    }
+}
+/// The engine of the aircraft a replay is watching, for
+/// [`Audio::replay_loops`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct EngineLoops {
+    /// The aircraft type; a change of type swaps the loops.
+    pub aircraft: tore_formats::aircraft::AircraftId,
+    pub sounds: EngineSounds,
+    /// The engine runs with the pilot aboard.
+    pub running: bool,
+    /// Throttle, 0 to 1.
+    pub throttle: f64,
+    /// The afterburner is lit.
+    pub afterburner: bool,
+}
 fn cue(action: Action) -> Option<&'static str> {
     match action {
         Action::Theater(_)
@@ -339,6 +423,31 @@ impl Audio {
             mixer.escape_voice(&self.clips, "^PUNCH.5K", false);
         }
     }
+    /// One recording played once in the cockpit, such as a gear, flap or
+    /// engine start sound, for the replay viewer. Sound effects off or a
+    /// pause drop it, as they drop the live cues.
+    pub fn effect(&self, name: &str) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.escape_effect(&self.clips, name);
+        }
+    }
+    /// One recorded ejection cue, for the replay viewer, played the way
+    /// [`Audio::ejection`] plays it.
+    pub fn ejection_cue(&self, sound: &str) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.ejection_cue(&self.clips, sound);
+        }
+    }
+    /// The replay viewer's steady sounds for one frame, its stand-in for
+    /// [`Audio::flight`]: the engine and afterburner loops of the aircraft
+    /// being watched, if any, and the stall warning the player heard.
+    /// Watching another aircraft swaps the loops without touching queued
+    /// speech, and no engine start or stop sound plays here.
+    pub fn replay_loops(&self, engine: Option<&EngineLoops>, stall: Option<&'static str>) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.replay_loops(&self.clips, engine, stall);
+        }
+    }
     /// Airport speech supersedes stale airport speech without cancelling wing radio.
     pub fn airport_radio(&self, stems: &[&str]) {
         if let Ok(mut mixer) = self.mixer.lock() {
@@ -514,7 +623,7 @@ impl Audio {
                 if m.engine.is_none() {
                     m.engine = a
                         .sounds
-                        .get("loopSound")
+                        .get(ENGINE_LOOP)
                         .and_then(|n| self.clips.get(n))
                         .map(|clip| Voice {
                             clip: clip.clone(),
@@ -522,7 +631,7 @@ impl Audio {
                         });
                     m.burner = a
                         .sounds
-                        .get("secondSound")
+                        .get(BURNER_LOOP)
                         .and_then(|n| self.clips.get(n))
                         .map(|clip| Voice {
                             clip: clip.clone(),
@@ -535,11 +644,7 @@ impl Audio {
                     && m.voices.len() < 8
                     && let Some(clip) = a
                         .sounds
-                        .get(if s.engine {
-                            "engineOnSound"
-                        } else {
-                            "engineOffSound"
-                        })
+                        .get(if s.engine { ENGINE_START } else { ENGINE_STOP })
                         .and_then(|n| self.clips.get(n))
                 {
                     m.voices.push(Voice {
@@ -548,12 +653,12 @@ impl Audio {
                     });
                 }
                 m.engine_gain = if s.engine && s.escape.is_none() {
-                    0.08 + 0.15 * s.throttle as f32
+                    engine_gain(s.throttle)
                 } else {
                     0.
                 };
                 m.burner_gain = if s.afterburner_active() && s.escape.is_none() {
-                    0.15
+                    BURNER_GAIN
                 } else {
                     0.
                 };
@@ -749,6 +854,61 @@ impl Mixer {
                 position: 0.,
             });
         }
+    }
+    /// A spoken seat warning (`^`) jumps the radio queue as an urgent
+    /// escape voice; the seat and parachute sounds play at once.
+    fn ejection_cue(&mut self, clips: &BTreeMap<String, Arc<Clip>>, sound: &str) {
+        if sound.starts_with('^') {
+            self.escape_voice(clips, sound, true);
+        } else {
+            self.escape_effect(clips, sound);
+        }
+    }
+    fn replay_loops(
+        &mut self,
+        clips: &BTreeMap<String, Arc<Clip>>,
+        engine: Option<&EngineLoops>,
+        stall: Option<&'static str>,
+    ) {
+        self.flight_on = true;
+        if self.stall_cue != stall {
+            self.stall = stall.and_then(|name| clips.get(name)).map(|clip| Voice {
+                clip: clip.clone(),
+                position: 0.,
+            });
+            self.stall_cue = stall;
+        }
+        let Some(engine) = engine else {
+            self.engine_gain = 0.;
+            self.burner_gain = 0.;
+            return;
+        };
+        // A reset leaves the aircraft type but drops the loops.
+        if self.engine_aircraft != Some(engine.aircraft)
+            || (self.engine.is_none() && self.burner.is_none())
+        {
+            let voice = |name: &Option<String>| {
+                name.as_ref()
+                    .and_then(|name| clips.get(name))
+                    .map(|clip| Voice {
+                        clip: clip.clone(),
+                        position: 0.,
+                    })
+            };
+            self.engine = voice(&engine.sounds.engine);
+            self.burner = voice(&engine.sounds.burner);
+            self.engine_aircraft = Some(engine.aircraft);
+        }
+        self.engine_gain = if engine.running {
+            engine_gain(engine.throttle)
+        } else {
+            0.
+        };
+        self.burner_gain = if engine.running && engine.afterburner {
+            BURNER_GAIN
+        } else {
+            0.
+        };
     }
     fn enqueue_radio(
         &mut self,
@@ -1369,5 +1529,137 @@ mod tests {
             missing_airport_audio(&BTreeMap::new(), &BTreeMap::new()),
             vec!["^CLRLAND", "^WELHOME"]
         );
+    }
+
+    #[test]
+    fn replay_sources_match_live_sources_for_the_same_tick() {
+        use crate::combat::render_hash_tests as fixture;
+        use tore_sim::acoustics::SourceId;
+        let player = fixture::player();
+        let mut combat = fixture::combat(Vec::new(), Vec::new());
+        let scene = fixture::scene(combat.state.configuration());
+        // Leaves the scene's current tick in combat, then one shot becomes
+        // a reviewed missile so the missile rule is exercised too.
+        fixture::snapshots(&mut combat, &scene, true, &player);
+        let mut missile = combat.state.configuration().stations[1].weapon.clone();
+        missile.source = "AIM9M.JT".into();
+        combat.state.projectiles[0].weapon = Some(missile);
+        let live = spatial_sources(&combat.state, &player);
+        let replay = snapshot_sources(&combat.snapshot(&player, None));
+        assert_eq!(live.len(), replay.len());
+        for (live, replay) in live.iter().zip(&replay) {
+            assert_eq!(live.id, replay.id);
+            assert_eq!(live.position, replay.position);
+            assert_eq!(live.velocity, replay.velocity);
+        }
+        assert!(replay.iter().any(|s| matches!(s.id, SourceId::Missile(_))));
+        assert!(
+            combat.state.targets.iter().any(|t| !t.airborne),
+            "grounded aircraft are left out"
+        );
+    }
+
+    #[test]
+    fn replay_loops_swap_engines_without_touching_speech() {
+        use tore_formats::aircraft::AircraftId;
+        let clip = |value| {
+            Arc::new(Clip {
+                samples: vec![value; 8],
+                rate: 4.,
+            })
+        };
+        let clips = BTreeMap::from([
+            ("F18LOOP".into(), clip(192)),
+            ("F18AB".into(), clip(160)),
+            ("MIGLOOP".into(), clip(64)),
+            ("&STALL.5K".into(), clip(200)),
+            ("^WING.5K".into(), clip(100)),
+        ]);
+        let loops = |aircraft, engine: &str, burner: Option<&str>| EngineLoops {
+            aircraft,
+            sounds: EngineSounds {
+                engine: Some(engine.into()),
+                burner: burner.map(Into::into),
+                ..Default::default()
+            },
+            running: true,
+            throttle: 0.4,
+            afterburner: true,
+        };
+        let mut m = test_mixer();
+        m.stall = None;
+        m.stall_cue = None;
+        m.flight_on = false;
+        m.enqueue_speech(&clips, &["^WING".into()]);
+        let hornet = loops(AircraftId::F18, "F18LOOP", Some("F18AB"));
+        m.replay_loops(&clips, Some(&hornet), None);
+        assert!(m.flight_on);
+        assert!(Arc::ptr_eq(
+            &m.engine.as_ref().unwrap().clip,
+            &clips["F18LOOP"]
+        ));
+        assert!((m.engine_gain - engine_gain(0.4)).abs() < 1e-6);
+        assert_eq!(m.burner_gain, BURNER_GAIN);
+        // The loop keeps its place from frame to frame.
+        m.engine.as_mut().unwrap().position = 3.;
+        m.replay_loops(&clips, Some(&hornet), Some("&STALL.5K"));
+        assert_eq!(m.engine.as_ref().unwrap().position, 3.);
+        assert_eq!(m.stall_cue, Some("&STALL.5K"));
+        assert!(m.stall.is_some());
+        // Watching a MiG swaps the loops; queued speech and the stall
+        // warning stay.
+        let mig = loops(AircraftId::Mig29, "MIGLOOP", None);
+        m.replay_loops(&clips, Some(&mig), Some("&STALL.5K"));
+        assert!(Arc::ptr_eq(
+            &m.engine.as_ref().unwrap().clip,
+            &clips["MIGLOOP"]
+        ));
+        assert!(m.burner.is_none());
+        assert_eq!(m.radio.len(), 1);
+        assert!(m.stall.is_some());
+        // A stopped engine, or no aircraft at all, is silent.
+        let stopped = EngineLoops {
+            running: false,
+            ..hornet.clone()
+        };
+        m.replay_loops(&clips, Some(&stopped), None);
+        assert_eq!((m.engine_gain, m.burner_gain), (0., 0.));
+        assert!(m.stall.is_none());
+        m.replay_loops(&clips, Some(&hornet), None);
+        m.replay_loops(&clips, None, None);
+        assert_eq!((m.engine_gain, m.burner_gain), (0., 0.));
+        // A reset drops the loops but not the type; they come back.
+        m.engine = None;
+        m.burner = None;
+        m.replay_loops(&clips, Some(&hornet), None);
+        assert!(m.engine.is_some() && m.burner.is_some());
+    }
+
+    #[test]
+    fn replay_ejection_cues_play_as_live_ejection_plays_them() {
+        let clip = Arc::new(Clip {
+            samples: vec![150; 80],
+            rate: 8000.,
+        });
+        let clips = BTreeMap::from([
+            ("^EJECTNG.5K".into(), clip.clone()),
+            ("&EJECT.5K".into(), clip.clone()),
+            ("^WING.5K".into(), clip),
+        ]);
+        let mut m = test_mixer();
+        m.enqueue_speech(&clips, &["^WING".into()]);
+        m.ejection_cue(&clips, "^EJECTNG.5K");
+        assert_eq!(m.radio.len(), 2);
+        assert_eq!(
+            m.radio.front().unwrap().source,
+            RadioSource::Ejection,
+            "the spoken warning jumps the queue"
+        );
+        m.ejection_cue(&clips, "&EJECT.5K");
+        assert_eq!(m.voices.len(), 1);
+        m.flight_paused = true;
+        m.ejection_cue(&clips, "&EJECT.5K");
+        m.ejection_cue(&clips, "^EJECTNG.5K");
+        assert_eq!((m.radio.len(), m.voices.len()), (2, 1));
     }
 }

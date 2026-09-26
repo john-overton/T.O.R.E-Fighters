@@ -16,6 +16,7 @@ use crate::replay::clock::{self, Clock, Direction};
 use crate::replay::drone::{Drone, Mode};
 use crate::replay::overlay::{self, Control, Marker, MarkerKind, Model, Placement};
 use crate::replay::playback::Playback;
+use crate::replay::sound::{self, ReplaySound};
 use crate::replay::tracks::{Scanner, Tracks};
 use crate::replay::trails;
 use crate::replay::weather::WeatherTrack;
@@ -319,6 +320,8 @@ pub struct Viewer {
     tracks: Tracks,
     scanner: Scanner,
     weather: WeatherTrack,
+    /// Voices, tones and effects at normal speed.
+    sound: ReplaySound,
     pub clock: Clock,
     info: BTreeMap<u32, AircraftInfo>,
     markers: Vec<Marker>,
@@ -459,6 +462,10 @@ impl Viewer {
                 } else {
                     last
                 },
+            ),
+            sound: ReplaySound::new(
+                Arc::clone(&recording),
+                std::iter::once(&ownship.profile).chain(models.iter().map(|m| &m.profile)),
             ),
             targets: targets(events),
             recording,
@@ -1182,12 +1189,13 @@ impl Viewer {
 
     /// Advances playback by the real time since the last frame and draws
     /// it: the 3D view through the same renderer calls live flight makes,
-    /// then the interface.
+    /// then the interface. The stretch played sounds on `audio`.
     pub fn frame(
         &mut self,
         renderer: &mut Renderer,
         canvas: &mut FlightCanvas,
         shift: bool,
+        audio: Option<&crate::audio::Audio>,
     ) -> AppResult<Timing> {
         self.enter(renderer);
         let now = Instant::now();
@@ -1198,6 +1206,7 @@ impl Viewer {
         self.scanner.poll(&mut self.tracks);
         self.weather
             .build(&mut self.world, &self.tracks, WEATHER_BUDGET);
+        let from = self.clock.position();
         if !self.bar.scrubbing {
             self.clock.advance(seconds);
         }
@@ -1206,6 +1215,15 @@ impl Viewer {
         self.weather.seek(&mut self.world, &self.tracks, tick);
         let player = self.player_state(&picture, tick);
         let camera = self.frame_camera(&picture, tick, seconds, shift);
+        let moment = sound::Moment {
+            from,
+            clock: &self.clock,
+            scrubbing: self.bar.scrubbing,
+            camera: &camera,
+            view: self.drone.is_none().then_some(self.view),
+            selected: self.selected,
+        };
+        self.sound.frame(audio, &moment);
         self.world.resolve_palette(f64::from(camera.position[1]));
         let vapor = match self.playback.vapor(tick, &self.ownship, &mut self.scratch) {
             Some(vapor) => crate::vapor_vertices(

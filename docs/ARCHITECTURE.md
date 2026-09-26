@@ -611,3 +611,7 @@ the playhead from the recording (`replay/playback.rs`) and makes the same
 renderer calls as live flight, with the cockpit and mirrors switched off every
 frame and a blank flight canvas carrying only the viewer's interface. Nothing
 it draws feeds back into the simulation; see [replays](REPLAYS.md#viewer).
+`replay/sound.rs` turns the stretch of recording each frame played at 1x
+forwards into plain-data cues for the same audio calls live flight makes,
+with the viewer's camera as the listener, and cancels them on a seek; see
+[replay sound](REPLAYS.md#sound).

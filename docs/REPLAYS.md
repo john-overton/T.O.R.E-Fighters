@@ -670,8 +670,7 @@ under the playhead:
   headless probe never steps the weather, so its recordings keep the launch
   sky.
 
-There is no cockpit, HUD, instrument panel or mirror in a replay. The
-viewer is silent for now.
+There is no cockpit, HUD, instrument panel or mirror in a replay.
 
 ### Interface parts
 
@@ -707,6 +706,96 @@ once. A background pass does that when the viewer opens, a second at a
 time; until it has reached a moment, trails there are shorter and the sky
 waits at the last moment it has reached.
 
+### Sound
+
+John asked on 2026-09-26 to hear the communication in a replay: the
+voices, tones and effects played back at normal speed. At exactly 1x
+forwards the viewer plays what the player heard, through the same sound
+calls live flight makes, so it sounds as the flight did. How it is
+scheduled is an agent design (2026-09-26); the code is
+`tore-app/src/replay/sound.rs`.
+
+- **Radio, crew and tower lines** the player heard, each once and in
+  recorded order, queued behind the line before as in flight: radio calls,
+  crew remarks, tower lines, the tower's reply to the player's own request
+  (which replaces waiting tower speech), and recordings played straight
+  into the cockpit, such as the death scream. A line recorded as not
+  heard, or as queued, held back or dropped rather than delivered, stays
+  silent. Cockpit messages have no voice.
+- **The player's wing orders:** the order voice, which cuts off waiting
+  wingman speech as in flight. An order the wing refused has no voice, and
+  orders between AI aircraft are silent.
+- **Cockpit sounds:** the seeker tone, the stall warning, gear, flap, hook
+  and air brake sounds, the ejection warnings, seat and parachute, and a
+  friendly wingman ejecting. They are the player's cockpit, whichever
+  aircraft the camera follows. Queued tower speech stops when the player's
+  aircraft is lost, as in flight.
+- **Traveling sound:** impacts, explosions and the player's weapon
+  releases, aircraft and missiles passing the camera, and sonic booms,
+  through the flight's [distance, delay and stereo model](audio.md#traveling-sound)
+  with the viewer's camera as the listener. The model steps once for every
+  recorded tick played, so sound takes as long to arrive as in flight. A
+  camera inside the player's cockpit hears the player's releases at once,
+  as the cockpit does. A cut to another view, another aircraft or the drone
+  starts the pass detector afresh, so a cut never sounds like something
+  flying past.
+- **Engine:** the engine and afterburner loops of the aircraft the camera
+  follows, from its recorded engine, afterburner and throttle, and its
+  start or stop sound when its engine lights or stops while it is watched.
+  Following another aircraft swaps the loops without cutting off speech.
+
+What stops it:
+
+- **Pause** freezes everything playing, a line mid-word included, and
+  playing on resumes it. Playback pauses itself at the end, so sound
+  freezes there too.
+- **Any other speed, reverse, dragging the timeline, or a jump** of the
+  playhead (the arrows, a marker, Home, End, a click on the timeline, a
+  step while paused) cancels waiting speech and silences tones, loops and
+  traveling sound. Back at 1x forwards, sound starts afresh from the
+  playhead: the seeker tone, stall warning and engine sounding at that
+  moment come back at once, and when the playhead sits exactly on a tick,
+  that tick's cues play too.
+- **Leaving the viewer** stops everything.
+
+Fitted details, agent decisions (2026-09-26):
+
+- The recording names the seeker tone but not its loudness, which in
+  flight follows the seeker's signal quality or the estimated hit chance.
+  The replay uses the live strength at 50 percent: radar lock 0.7, radar
+  search 0.425, infrared lock 0.575 and infrared search 0.2875, times the
+  seeker volume.
+- A recorded infrared lock does not say whether its weapon aims at the
+  surface, which changes the lock tone. The replay takes the lock to be of
+  the same kind as the search tone before it, so a surface weapon's lock
+  after its surface search sounds as in flight.
+- The engine loop plays while the recorded engine runs and the aircraft
+  is neither destroyed nor abandoned. AI aircraft are recorded as they are
+  drawn, engine always running and afterburner never lit, so a watched AI
+  aircraft hums at its recorded throttle.
+- Only missiles with a reviewed profile pass the camera audibly, as in
+  flight.
+
+Not in a replay:
+
+- **Music.** Nothing records the music's situation, the inputs that choose
+  a score, so a replay has no music.
+- Sounds that leave no record: the mixer's own choices, such as speech
+  dropped from a full queue, and whatever a headless probe does not run
+  (crew voice, music and cockpit messages).
+- Tower speech cut short when a landing clearance is cancelled because
+  the runway was destroyed: the recording keeps only the cockpit message,
+  so the replay lets the waiting tower line finish.
+
+Scheduling is checked without listening. The tests play a synthetic
+recording in frames of every length, at every speed and through jumps and
+pauses. `TORE_REPLAY_SOUND_LOG=1` writes every cue the viewer schedules,
+with its tick, to the session log (traveling sound only on ticks with an
+impact, explosion or release, and loops only when they change), and
+`TORE_REPLAY_SOUND_FILE=FILE cargo test --locked -p tore-app replay::sound -- --ignored --nocapture`
+prints the same for a whole recording played at 1x, without a display.
+Nobody has listened to a replay yet.
+
 ### Captures and timing
 
 For checking the viewer without a keyboard:
@@ -737,8 +826,8 @@ about 1,200 ticks a frame, frames take about 2 ms more.
 
 ### Known limits
 
-- No cockpit, HUD, instruments or replay sound yet (planned with the debug
-  panels), no right-click menu, and the keys cannot be rebound.
+- No cockpit, HUD or instruments, no music, no right-click menu yet, and
+  the keys cannot be rebound. Replay sound has not been checked by ear.
 - Checked by eye with synthetic recordings and headless AI probe
   recordings; a recording of a flight flown by hand has not been watched
   yet.
@@ -1034,7 +1123,8 @@ headless workflow.
   plumbing in the app), `playback.rs` (any tick's picture, smoke and wing
   vapor), `clock.rs` (playhead, speeds, steps, markers), `tracks.rs` (the
   background pass: trail samples, building hit points, the player's path
-  for the weather), `weather.rs` (weather snapshots), `drone.rs`,
+  for the weather), `weather.rs` (weather snapshots), `sound.rs` (which
+  recorded sounds play and when, as plain-data cues), `drone.rs`,
   `trails.rs`, `overlay.rs` (the interface and its pointer handling) and
   `png.rs`. Tests use a synthetic recording (`replay/fixture.rs`); a longer
   demonstration recording over the imported Ukraine map, for looking at the

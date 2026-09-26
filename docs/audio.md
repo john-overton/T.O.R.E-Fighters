@@ -160,3 +160,21 @@ what is said or when. The mixer's own decisions are not in it: speech
 dropped because its queue is full or because effects are off or paused, when
 a queued line actually starts, and which situation score really plays. See
 the [communication journal](REPLAYS.md#communication-journal).
+
+## Replay sound
+
+A mission replay at exactly 1x forwards plays back what the player heard
+through the same plain-data calls as flight: `speech`, `airport_speech`,
+`airport_radio`, `direct_voice`, `radio` for the order voice, `seeker`,
+`wingman_ejected`, and `spatial_tick` once per recorded tick with the replay
+camera as the listener and sources from `snapshot_sources`, which builds
+them from a drawn snapshot exactly as `spatial_sources` builds them from
+live state. Three calls exist only for replays. `replay_loops` stands in for
+`flight`: it sets the watched aircraft's engine and afterburner loops and
+the player's recorded stall warning, and unlike `flight` it never clears
+queued speech when the watched aircraft changes type and plays no engine
+start or stop sound of its own. `effect` plays one cockpit sound, such as a
+gear sound, and `ejection_cue` plays one recorded ejection cue the way
+`ejection` plays it. A seek resets the mixer with `restart_flight`, a pause
+uses `pause_flight`, and a replay has no music. What plays when, and the
+fitted seeker loudness, are in [replay sound](REPLAYS.md#sound).

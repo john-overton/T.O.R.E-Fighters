@@ -67,9 +67,10 @@ impl Profile {
         Ok(())
     }
 
-    /// Explicit reviewed identities only. This does not expand store allowlists.
-    pub fn for_weapon(w: &Weapon) -> Option<Self> {
-        let (guidance, active) = match w.source.as_str() {
+    /// Guidance and active-seeker range, in nautical miles, of each reviewed
+    /// identity, by weapon record name.
+    fn reviewed_guidance(source: &str) -> Option<(Guidance, Option<f64>)> {
+        Some(match source {
             "AIM120.JT" | "MICA.JT" | "AA12.JT" => (Guidance::Active, Some(5.)),
             "AAML.JT" | "AGM84A.JT" | "AM39.JT" => (Guidance::Active, Some(8.)),
             "AIM54C.JT" => (Guidance::Active, Some(10.)),
@@ -80,7 +81,19 @@ impl Profile {
             | "AGM65G.JT" => (Guidance::Infrared, None),
             "AGM45.JT" | "AGM88.JT" => (Guidance::Emitter, None),
             _ => return None,
-        };
+        })
+    }
+
+    /// Whether the weapon record named `source` has a reviewed profile, as
+    /// [`Profile::for_weapon`] decides: for presentation that knows a
+    /// weapon only by name, such as a mission replay's sound.
+    pub fn reviewed(source: &str) -> bool {
+        Self::reviewed_guidance(source).is_some()
+    }
+
+    /// Explicit reviewed identities only. This does not expand store allowlists.
+    pub fn for_weapon(w: &Weapon) -> Option<Self> {
+        let (guidance, active) = Self::reviewed_guidance(&w.source)?;
         let role = match w.source.as_str() {
             "AGM65G.JT" | "AGM45.JT" | "AGM88.JT" | "AGM84A.JT" | "AM39.JT" | "AS16.JT"
             | "AS7.JT" => TargetRole::Surface,

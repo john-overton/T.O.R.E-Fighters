@@ -2100,7 +2100,7 @@ impl App {
         }
         if let Some(audio) = &self.audio {
             audio.scene(match self.screen {
-                // A replay stays silent until replay sound arrives.
+                // A replay has no music: nothing records the music's situation.
                 Screen::Flight | Screen::Replay => audio::music::Scene::Score(0),
                 Screen::Main => audio::music::Scene::Main,
                 _ => audio::music::Scene::Brief,
@@ -8674,7 +8674,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             _ => audio::music::Scene::Brief,
         });
         audio.preferences(app.menu.state.music, app.menu.state.effects);
-        // A replay stays silent until replay sound arrives.
+        // A replay starts silent; its sound follows the playhead.
         if app.screen == Screen::Replay {
             audio.restart_flight();
         }

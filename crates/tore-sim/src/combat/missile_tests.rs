@@ -212,6 +212,12 @@ fn all_nine_activation_thresholds_and_no_false_pitbull() {
         "AS14.JT", "AS30.JT", "AT12.JT", "AT2.JT", "ASROC.JT", "SA19.JT", "SAN11.JT",
     ] {
         assert!(Profile::for_weapon(&weapon(name)).is_none());
+        assert!(!Profile::reviewed(name));
+    }
+    // The name-only answer agrees with the full profile.
+    for name in ["AIM120.JT", "R530.JT", "AIM9M.JT", "AGM65G.JT", "AGM88.JT"] {
+        assert!(Profile::for_weapon(&weapon(name)).is_some());
+        assert!(Profile::reviewed(name));
     }
 }
 #[test]
