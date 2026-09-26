@@ -335,6 +335,7 @@
           <span class="platform-code" aria-hidden="true">WIN / 64</span><h3>Windows</h3>
           <p class="platform-detail">64-bit Intel / AMD</p><p class="download-meta">MSI installer</p>
           <a class="button download-button" href="https://github.com/john-overton/T.O.R.E-Fighters/releases" aria-label="View Windows releases on GitHub"><span>View releases</span><span aria-hidden="true">↗</span></a>
+          <a id="windows-x86" class="download-extra" href="https://github.com/john-overton/T.O.R.E-Fighters/releases" hidden>Also available as 32-bit MSI</a>
         </article>
         <article class="download-card" id="download-macos-arm">
           <span class="platform-code" aria-hidden="true">MAC / ARM64</span><h3>macOS</h3>
@@ -503,6 +504,16 @@
           const meta = card.querySelector('.download-meta');
           let asset = findAsset(platform.suffix);
           let format = platform.format;
+          if (platform.id === 'windows') {
+            const x86 = findAsset('-windows-x86.msi');
+            if (x86) {
+              const extra = document.getElementById('windows-x86');
+              extra.href = x86.browser_download_url;
+              extra.textContent = 'Or 32-bit MSI · ' + size(x86);
+              extra.setAttribute('aria-label', 'Download ' + release.tag_name + ' for Windows 32-bit (MSI)');
+              extra.hidden = false;
+            }
+          }
           if (platform.id === 'linux') {
             const archive = findAsset('-linux-x86_64.tar.gz');
             if (!asset && archive) {
