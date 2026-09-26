@@ -156,6 +156,38 @@ fn airfield_anchors(
     })
 }
 
+/// Placements without a standing combat target: destroyed, or never registered.
+fn fallen(
+    geometry: &BTreeMap<u32, Vec<f32>>,
+    targets: &[tore_sim::combat::live::Target],
+) -> BTreeSet<u32> {
+    let alive: BTreeSet<u32> = targets
+        .iter()
+        .filter(|target| target.hp > 0)
+        .map(|target| target.id)
+        .collect();
+    geometry
+        .keys()
+        .filter(|id| !alive.contains(id))
+        .copied()
+        .collect()
+}
+/// Every placement's geometry except the destroyed ones, in placement order.
+fn standing(geometry: &BTreeMap<u32, Vec<f32>>, destroyed: &BTreeSet<u32>) -> Vec<f32> {
+    let total = geometry
+        .iter()
+        .filter(|(id, _)| !destroyed.contains(id))
+        .map(|(_, vertices)| vertices.len())
+        .sum();
+    let mut out = Vec::with_capacity(total);
+    for (id, vertices) in geometry {
+        if !destroyed.contains(id) {
+            out.extend_from_slice(vertices);
+        }
+    }
+    out
+}
+
 fn anchor_points(
     anchors: &tore_sim::ai::airfield::AirfieldAnchors,
 ) -> impl Iterator<Item = [f64; 3]> + '_ {
@@ -851,34 +883,20 @@ impl World {
         surface
     }
 
+    /// Placement geometry whose object still has a standing combat target.
     pub fn visible_static_vertices(&self, targets: &[tore_sim::combat::live::Target]) -> Vec<f32> {
-        self.visible_static_geometry(&self.static_vertices, targets)
+        self.visible_static_vertices_where(&fallen(&self.static_vertices, targets))
     }
     pub fn visible_static_lines(&self, targets: &[tore_sim::combat::live::Target]) -> Vec<f32> {
-        self.visible_static_geometry(&self.static_lines, targets)
+        self.visible_static_lines_where(&fallen(&self.static_lines, targets))
     }
-    fn visible_static_geometry(
-        &self,
-        geometry: &BTreeMap<u32, Vec<f32>>,
-        targets: &[tore_sim::combat::live::Target],
-    ) -> Vec<f32> {
-        let alive: BTreeSet<u32> = targets
-            .iter()
-            .filter(|target| target.hp > 0)
-            .map(|target| target.id)
-            .collect();
-        let total = geometry
-            .iter()
-            .filter(|(id, _)| alive.contains(id))
-            .map(|(_, vertices)| vertices.len())
-            .sum();
-        let mut out = Vec::with_capacity(total);
-        for (id, vertices) in geometry {
-            if alive.contains(id) {
-                out.extend_from_slice(vertices);
-            }
-        }
-        out
+    /// Placement geometry except the `destroyed` objects, for a mission
+    /// replay that recorded which objects were destroyed.
+    pub fn visible_static_vertices_where(&self, destroyed: &BTreeSet<u32>) -> Vec<f32> {
+        standing(&self.static_vertices, destroyed)
+    }
+    pub fn visible_static_lines_where(&self, destroyed: &BTreeSet<u32>) -> Vec<f32> {
+        standing(&self.static_lines, destroyed)
     }
 
     /// Earliest solid building contact. Runways remain a separate surface query.
@@ -1236,6 +1254,34 @@ pub(crate) mod tests {
         // Behind the camera or off the side is not on screen.
         assert_eq!(camera.project(size, [0., 1000., -5000.]), None);
         assert_eq!(camera.project(size, [9000., 1000., 5000.]), None);
+    }
+    #[test]
+    fn listed_destroyed_objects_hide_as_their_fallen_targets_do() {
+        let mut w = world();
+        for id in [1, 2, 3] {
+            w.static_vertices.insert(id, vec![id as f32; 10]);
+            w.static_lines.insert(id, vec![-(id as f32); 10]);
+        }
+        // Object 1 stands, 2 was destroyed and 3 never had a target.
+        let mut targets = crate::ai_wings::tests::spawned();
+        targets.truncate(2);
+        targets[1].hp = 0;
+        let expected = |ids: &[u32], sign: f32| -> Vec<f32> {
+            ids.iter()
+                .flat_map(|id| vec![sign * *id as f32; 10])
+                .collect()
+        };
+        assert_eq!(w.visible_static_vertices(&targets), expected(&[1], 1.));
+        assert_eq!(w.visible_static_lines(&targets), expected(&[1], -1.));
+        let destroyed = BTreeSet::from([2]);
+        assert_eq!(
+            w.visible_static_vertices_where(&destroyed),
+            expected(&[1, 3], 1.)
+        );
+        assert_eq!(
+            w.visible_static_lines_where(&destroyed),
+            expected(&[1, 3], -1.)
+        );
     }
     pub(crate) fn world() -> World {
         use tore_formats::theater::TerrainCell;

@@ -17,6 +17,12 @@ pub enum Reference {
     Player,
     Target,
     Missile,
+    /// Any aircraft by id, 0 being the player. It never selects the cockpit:
+    /// the front, back, up and track views sit at that aircraft and hide it
+    /// through the camera's hidden target, and the missile view follows that
+    /// aircraft's newest missile.
+    #[allow(dead_code)] // Selected by the mission replay viewer.
+    Aircraft(u32),
 }
 
 pub fn key(key: &str) -> Option<u8> {
@@ -36,20 +42,49 @@ pub fn key(key: &str) -> Option<u8> {
     })
 }
 
+/// One aircraft, ground object or missile a view can follow.
 #[derive(Clone, Copy, Debug)]
-struct Body {
+pub(crate) struct Body {
     id: u32,
     position: Vector,
     velocity: Vector,
     basis: Basis,
     missile: bool,
 }
+impl Body {
+    pub(crate) fn new(id: u32, position: Vector, velocity: Vector, basis: Basis) -> Self {
+        Self {
+            id,
+            position,
+            velocity,
+            basis,
+            missile: false,
+        }
+    }
+    pub(crate) fn missile(id: u32, position: Vector, velocity: Vector, basis: Basis) -> Self {
+        Self {
+            missile: true,
+            ..Self::new(id, position, velocity, basis)
+        }
+    }
+}
+/// A missile in flight: its body, who fired it and at what.
 #[derive(Clone, Copy)]
-struct Shot {
+pub(crate) struct Shot {
     body: Body,
     owner: u32,
     target: Option<u32>,
     incoming: bool,
+}
+impl Shot {
+    pub(crate) fn new(body: Body, owner: u32, target: Option<u32>, incoming: bool) -> Self {
+        Self {
+            body,
+            owner,
+            target,
+            incoming,
+        }
+    }
 }
 
 pub struct Scene {
@@ -60,38 +95,54 @@ pub struct Scene {
     missiles: Vec<Shot>,
 }
 impl Scene {
+    /// A scene from its parts, so a replay can build one from recorded poses.
+    /// `target` is the selected target's id; `wings` lists each flying wing
+    /// aircraft as (id, friendly, wing number, member number).
+    pub(crate) fn from_parts(
+        player: Body,
+        target: Option<u32>,
+        bodies: Vec<Body>,
+        wings: Vec<(u32, bool, u8, u8)>,
+        missiles: Vec<Shot>,
+    ) -> Self {
+        Self {
+            player,
+            target,
+            bodies,
+            wings,
+            missiles,
+        }
+    }
     pub fn new(
         player: &flight::State,
         combat: &Combat,
         wings: Option<&crate::ai_wings::AiWings>,
         presented: bool,
     ) -> Self {
-        Self {
-            player: Body {
-                id: 0,
-                position: player.view_position(),
-                velocity: player.velocity,
-                basis: Basis::new(player.yaw, player.pitch, player.bank),
-                missile: false,
-            },
-            target: combat.state.display_target().map(|t| t.id),
-            bodies: combat
+        Self::from_parts(
+            Body::new(
+                0,
+                player.view_position(),
+                player.velocity,
+                Basis::new(player.yaw, player.pitch, player.bank),
+            ),
+            combat.state.display_target().map(|t| t.id),
+            combat
                 .state
                 .targets
                 .iter()
                 .filter(|t| t.airborne || t.hp > 0)
                 .map(|t| {
                     let (position, angles) = combat.view_pose(t, presented);
-                    Body {
-                        id: t.id,
+                    Body::new(
+                        t.id,
                         position,
-                        velocity: t.velocity,
-                        basis: Basis::new(angles[0], angles[1], angles[2]),
-                        missile: false,
-                    }
+                        t.velocity,
+                        Basis::new(angles[0], angles[1], angles[2]),
+                    )
                 })
                 .collect(),
-            wings: wings.map_or_else(Vec::new, |w| {
+            wings.map_or_else(Vec::new, |w| {
                 w.slots()
                     .iter()
                     .filter(|slot| {
@@ -111,32 +162,31 @@ impl Scene {
                     })
                     .collect()
             }),
-            missiles: combat
+            combat
                 .state
                 .projectiles
                 .iter()
                 .filter(|p| !tore_sim::combat::live::is_gun(p.weapon(combat.state.configuration())))
                 .map(|p| {
                     let direction = unit(p.direction, [0., 0., 1.]);
-                    Shot {
-                        body: Body {
-                            id: p.id,
-                            position: p.position,
-                            velocity: direction.map(|v| v * f64::from(p.speed_f8) / 256.),
-                            basis: Basis::new(
+                    Shot::new(
+                        Body::missile(
+                            p.id,
+                            p.position,
+                            direction.map(|v| v * f64::from(p.speed_f8) / 256.),
+                            Basis::new(
                                 direction[0].atan2(direction[2]),
                                 direction[1].atan2(direction[0].hypot(direction[2])),
                                 0.,
                             ),
-                            missile: true,
-                        },
-                        owner: p.owner,
-                        target: p.target,
-                        incoming: p.incoming,
-                    }
+                        ),
+                        p.owner,
+                        p.target,
+                        p.incoming,
+                    )
                 })
                 .collect(),
-        }
+        )
     }
     fn body(&self, id: u32) -> Option<Body> {
         if id == 0 {
@@ -263,6 +313,7 @@ impl Rig {
             Reference::Player => scene.player,
             Reference::Target => scene.target()?,
             Reference::Missile => self.missile(scene)?.body,
+            Reference::Aircraft(id) => scene.body(id).ok_or("That aircraft is not in the scene")?,
         };
         if matches!(view, 0..=4) {
             if self.reference != Reference::Player {
@@ -323,16 +374,21 @@ impl Rig {
                     camera = facing(eye, subject.position, subject.basis.forward);
                 }
                 MISSILE => {
-                    let missile = if self.reference == Reference::Target {
-                        scene
-                            .missiles
-                            .iter()
-                            .filter(|p| p.owner == subject.id)
-                            .max_by_key(|p| p.body.id)
-                            .ok_or("Target has no live missile")?
-                    } else {
-                        self.missile(scene)?
-                    };
+                    let missile =
+                        if matches!(self.reference, Reference::Target | Reference::Aircraft(_)) {
+                            scene
+                                .missiles
+                                .iter()
+                                .filter(|p| p.owner == subject.id)
+                                .max_by_key(|p| p.body.id)
+                                .ok_or(if self.reference == Reference::Target {
+                                    "Target has no live missile"
+                                } else {
+                                    "That aircraft has no live missile"
+                                })?
+                        } else {
+                            self.missile(scene)?
+                        };
                     let target = missile.target.and_then(|id| scene.body(id)).map_or_else(
                         || {
                             std::array::from_fn(|i| {
@@ -590,6 +646,77 @@ mod tests {
             rig.camera(WING, &scene, Camera::new(), [0.; 2], 1.)
                 .is_err()
         );
+    }
+    #[test]
+    fn any_aircraft_can_be_the_subject_of_every_view() {
+        let level = Basis::new(0., 0., 0.);
+        let scene = Scene::from_parts(
+            Body::new(0, [0., 1000., 0.], [0., 0., 200.], level),
+            Some(2),
+            vec![
+                Body::new(1, [1000., 1000., 0.], [0., 0., 200.], level),
+                Body::new(2, [0., 1000., 1000.], [0., 0., 200.], level),
+                Body::new(3, [1000., 1000., -500.], [0., 0., 200.], level),
+            ],
+            vec![(1, false, 1, 1), (3, false, 1, 2)],
+            vec![
+                Shot::new(
+                    Body::missile(10, [0., 1000., 400.], [0.; 3], level),
+                    1,
+                    None,
+                    false,
+                ),
+                Shot::new(
+                    Body::missile(11, [0., 1000., 500.], [0.; 3], level),
+                    1,
+                    Some(2),
+                    false,
+                ),
+                Shot::new(
+                    Body::missile(12, [1000., 1000., 500.], [0.; 3], level),
+                    2,
+                    Some(1),
+                    false,
+                ),
+            ],
+        );
+        let mut rig = Rig::default();
+        rig.select(Reference::Aircraft(1));
+        // Cockpit-like views sit at the aircraft and hide it; never the cockpit.
+        let c = camera(&mut rig, 0, &scene);
+        assert_eq!(c.position, [1000., 1000., 0.]);
+        assert_eq!(c.hidden_target, Some(1));
+        assert!(!rig.cockpit(0) && !rig.cockpit(TRACK));
+        assert_eq!(camera(&mut rig, TRACK, &scene).hidden_target, Some(1));
+        assert_eq!(camera(&mut rig, 1, &scene).hidden_target, None);
+        // Its newest missile, toward that missile's target.
+        near(
+            camera(&mut rig, MISSILE, &scene).position.map(f64::from),
+            [0., 1010., 470.],
+        );
+        // The missile aimed at it, and its wingman.
+        near(
+            camera(&mut rig, THREAT, &scene).position.map(f64::from),
+            [1000., 1060., -180.],
+        );
+        near(
+            camera(&mut rig, WING, &scene).position.map(f64::from),
+            [1000., 1060., 180.],
+        );
+        // The player by id, and an aircraft no longer in the scene.
+        rig.select(Reference::Aircraft(0));
+        let c = camera(&mut rig, 0, &scene);
+        assert_eq!(c.position, [0., 1000., 0.]);
+        assert_eq!(c.hidden_target, Some(0));
+        rig.select(Reference::Aircraft(9));
+        assert!(rig.camera(0, &scene, Camera::new(), [0.; 2], 1.).is_err());
+        rig.select(Reference::Aircraft(3));
+        assert!(
+            rig.camera(MISSILE, &scene, Camera::new(), [0.; 2], 1.)
+                .is_err()
+        );
+        rig.save(0, [0.; 2], 1.);
+        assert!(rig.other_shows_player());
     }
     #[test]
     fn default_other_view_is_back_and_retains_flight_keys() {

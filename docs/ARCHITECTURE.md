@@ -119,7 +119,8 @@ combat and wing snapshots. The camera rig owns only presentation state: the
 reference, last player missile, fixed fly-by position and saved Other View.
 Weather, spatial audio, main rendering and the Other View panel use the same
 camera rules. Remote aircraft/missile interior cameras hide the reference body without removing
-it from simulation. [Behavior and fitted constants](spec/flight-views.md).
+it from simulation. A replay builds the same scene from recorded poses, and any
+aircraft can be the reference. [Behavior and fitted constants](spec/flight-views.md).
 
 `flight_ui.rs` owns desktop command dispatch, imported menu navigation, session presentation settings and pause state. `hud.rs` draws the forward-flight HUD from state and source font glyphs, projecting the ladder/path through the renderer's 60-degree camera convention. Simulation remains independent of both. The full-canvas cockpit is transparent art over the world; instrument windows are independent rasters. Menu/focus pauses stop fixed ticks and engine loops, and input transitions clear held controls. Shader zoom is shared by terrain and sky projection; camera previews restore the main camera before drawing.
 
@@ -441,7 +442,8 @@ operation. See [glare](spec/sun-glow.md#continuous-lens-flare-composition) and
 Airport scenes are immutable imported data owned by `terrain::World`. Static
 GPU geometry is batched by placement and filtered each frame from combat-owned
 target HP, so destroyed objects disappear consistently in main and mirror
-views. The airport service derives availability from those combat targets and
+views; a replay filters by its recorded destroyed objects instead. The airport
+service derives availability from those combat targets and
 owns player selection, clearance, landing progress, and typed replies.
 Weather-only reconstruction preserves service and combat state. Theater changes
 and flight restart rebuild both from the imported scene.
