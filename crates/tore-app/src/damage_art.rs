@@ -125,6 +125,21 @@ impl DamageArt {
             regions,
         })
     }
+    /// Synthetic damage art for drawing tests without retail media.
+    #[cfg(test)]
+    pub(crate) fn synthetic(
+        extents: [f32; 3],
+        bodies: [Shape; 2],
+        fragments: [Shape; 2],
+        regions: BTreeMap<String, [usize; 3]>,
+    ) -> Self {
+        Self {
+            extents,
+            bodies,
+            fragments,
+            regions,
+        }
+    }
     pub fn variant(id: AircraftId, section: Option<usize>) -> Option<usize> {
         tore_sim::combat::debris::damage_variant(id, section?)
     }

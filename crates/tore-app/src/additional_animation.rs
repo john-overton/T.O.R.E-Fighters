@@ -177,6 +177,26 @@ impl Rig {
         }
         Ok((Self { id, parts }, shape))
     }
+    /// A rig over synthetic face addresses, for drawing tests without retail shapes.
+    #[cfg(test)]
+    pub(crate) fn synthetic(
+        id: AircraftId,
+        flame: &[usize],
+        brake: &[usize],
+        gear: &[usize],
+        hook: &[usize],
+    ) -> Self {
+        let parts = [
+            (flame, Part::Flame),
+            (brake, Part::Brake),
+            (gear, Part::Gear),
+            (hook, Part::Hook),
+        ]
+        .into_iter()
+        .flat_map(|(addresses, part)| addresses.iter().map(move |address| (*address, part)))
+        .collect();
+        Self { id, parts }
+    }
     pub fn scale(&self) -> f32 {
         // FA F14 has header exponent 10; A4/F31 have 8. Retain the host's
         // fitted one-third-foot scale, applying the source exponent difference.

@@ -2212,3 +2212,810 @@ mod ai_pose_tests {
         assert!(pose[2].abs() > 0.5, "bank was discarded: {pose:?}");
     }
 }
+
+/// Exact drawn output of one synthetic combat scene. The hashes pin every
+/// vertex live flight uploads for other aircraft, debris, weapons, effects
+/// and ejected pilots, so a presentation refactor can prove it changed nothing.
+#[cfg(test)]
+mod render_hash_tests {
+    use super::*;
+    use crate::{damage_art::DamageArt, sim_renderer::Contact};
+    use tore_formats::{
+        aircraft::AircraftId,
+        shape::{Face, FogMode, Line, Shape},
+        weapons::Weapon,
+    };
+    use tore_sim::{
+        combat::{
+            FallState,
+            debris::Piece,
+            live::{DamageSection, LocalizedDamage},
+            missiles::{TargetRole, seeker::Heat},
+        },
+        ejection::{Escape, Phase},
+        sensors,
+    };
+
+    /// Batches per model, fixture targets with the ownship, combat geometry
+    /// beside loaded models, camera poses and ejected pilots.
+    const HASHES: [u64; 5] = [
+        0xd383_5c36_01f2_ee53,
+        0x512b_90ca_288a_4dfd,
+        0x8f02_bfe4_efe7_7fb5,
+        0x7ddb_79bb_1315_bf69,
+        0x7e3f_dcdd_a149_201d,
+    ];
+
+    /// FNV-1a over exact bit patterns.
+    struct Fnv(u64);
+    impl Fnv {
+        fn new() -> Self {
+            Self(0xcbf2_9ce4_8422_2325)
+        }
+        fn bytes(&mut self, bytes: &[u8]) {
+            for byte in bytes {
+                self.0 = (self.0 ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        fn count(&mut self, count: usize) {
+            self.bytes(&(count as u64).to_le_bytes());
+        }
+        fn floats(&mut self, values: &[f32]) {
+            self.count(values.len());
+            for value in values {
+                self.bytes(&value.to_bits().to_le_bytes());
+            }
+        }
+        fn doubles(&mut self, values: &[f64]) {
+            self.count(values.len());
+            for value in values {
+                self.bytes(&value.to_bits().to_le_bytes());
+            }
+        }
+        fn contacts(&mut self, contacts: &[Contact]) {
+            self.count(contacts.len());
+            for contact in contacts {
+                self.bytes(&contact.first.to_le_bytes());
+                self.bytes(&contact.count.to_le_bytes());
+                self.floats(&contact.center);
+                self.floats(&[contact.extent]);
+            }
+        }
+    }
+
+    /// A small source-space polygon (X right, Y forward, Z up) around `at`.
+    fn face(address: usize, at: [f32; 3], corners: usize, texture: &str, subtype: u8) -> Face {
+        Face {
+            positions: (0..corners)
+                .map(|i| {
+                    let angle = i as f32 * std::f32::consts::TAU / corners as f32 + 0.3;
+                    [
+                        at[0] + 4. * angle.cos(),
+                        at[1] + 3. * angle.sin(),
+                        at[2] + angle.sin(),
+                    ]
+                })
+                .collect(),
+            colors: (0..corners)
+                .map(|i| (address % 97 + i * 31) as u8)
+                .collect(),
+            fog: if address.is_multiple_of(2) {
+                FogMode::Enabled
+            } else {
+                FogMode::Disabled
+            },
+            uv: if texture.is_empty() {
+                Vec::new()
+            } else {
+                (0..corners)
+                    .map(|i| [1. + i as f32, 2. + (i % 2) as f32])
+                    .collect()
+            },
+            texture: texture.into(),
+            subtype,
+            normal: Some([0.3, 0.8, -0.5]),
+            address,
+        }
+    }
+    fn shape(faces: Vec<Face>) -> Shape {
+        Shape {
+            lines: Vec::new(),
+            faces,
+            state_words: Default::default(),
+        }
+    }
+    /// Reviewed F/A-18D part addresses: body, flame, both nozzles, brake,
+    /// hook, gear and doors, flap, both tailplanes and a split rudder.
+    fn hornet() -> Shape {
+        let mut rudder = face(0x5467, [0.; 3], 4, "", 0x20);
+        rudder.positions = vec![
+            [8., -40., 4.],
+            [8., -20., 4.],
+            [18., -30., 24.],
+            [18., -45., 24.],
+        ];
+        shape(vec![
+            face(0x1000, [0., 10., 0.], 4, "_SYN.PIC", 0x60),
+            face(0x1001, [-12., -5., 1.], 3, "", 0x21),
+            face(0x5310, [0., -58., 0.], 4, "_SYN.PIC", 0x4c),
+            face(0x3ff7, [-3., -50., 0.], 4, "", 0x20),
+            face(0x4026, [3., -50., 0.], 4, "", 0x20),
+            face(0x5059, [0., -28., 5.], 3, "", 0x20),
+            face(0x4a03, [0., -37., -3.], 3, "", 0x20),
+            face(0x4b69, [-3., 0., -6.], 3, "", 0x20),
+            face(0x4bfa, [8., -7., -6.], 3, "", 0x20),
+            face(0x4ee1, [0., 55., -6.], 3, "", 0x20),
+            face(0x525b, [-13., -8., 4.], 4, "", 0x20),
+            face(0x449f, [-11., -43., 0.], 3, "", 0x20),
+            face(0x486b, [11., -43., 0.], 3, "", 0x20),
+            rudder,
+        ])
+    }
+    /// Rafale C parts; the gear-down pose adds a main gear leg.
+    fn rafale(gear: bool) -> Shape {
+        let mut faces = vec![
+            face(0x1000, [0., 12., 0.], 4, "_SYN.PIC", 0x60),
+            face(0x4265, [0., -49., 0.], 4, "_SYN.PIC", 0x4c),
+            face(0x3032, [-2., -45., 0.], 4, "", 0x20),
+            face(0x3e1e, [2., -3., 4.], 3, "", 0x20),
+            face(0x3b2f, [-2., 7., -7.], 3, "", 0x20),
+            face(0x4190, [-10., -23., -1.], 4, "", 0x20),
+            face(0x3d81, [-5., 30., 0.], 3, "", 0x20),
+            face(0x3f08, [0., -40., 10.], 3, "", 0x20),
+        ];
+        if gear {
+            faces.push(face(0x3c50, [-4., 10., -7.], 3, "", 0x20));
+        }
+        shape(faces)
+    }
+    /// F-14 parts over a synthetic rig: swept wing, flap, tailplane, split
+    /// rudder, cold nozzle, and rig flame, gear, hook and brake groups.
+    fn tomcat() -> Shape {
+        shape(vec![
+            face(0x1000, [0., 8., 0.], 4, "_SYN.PIC", 0x60),
+            face(0x3000, [0., -20., 0.], 4, "", 0x4c),
+            face(0x3100, [0., 17., -3.], 3, "", 0x20),
+            face(0x3101, [5., 1., -2.], 3, "", 0x20),
+            face(0x3200, [0., -5., -2.], 3, "", 0x20),
+            face(0x3300, [2., -11., 1.], 3, "", 0x20),
+            face(0x4e00, [-12., -2., 1.], 4, "", 0x20),
+            face(0x540d, [10., -6., 1.], 3, "", 0x20),
+            face(0x4828, [-6., -12., 0.], 3, "", 0x20),
+            face(0x4a7b, [4., -14., 6.], 4, "", 0x20),
+            face(0x48a6, [-2., -16., 0.], 4, "", 0x20),
+        ])
+    }
+    fn damage() -> DamageArt {
+        let piece = |address: usize, texture: &str| {
+            shape(vec![
+                face(address, [2., 5., 1.], 4, texture, 0x60),
+                face(address + 1, [-6., -9., 0.], 3, "", 0x20),
+            ])
+        };
+        DamageArt::synthetic(
+            [20., 60., 12.],
+            [piece(0x2000, "_DMG.PIC"), piece(0x2100, "_SYN.PIC")],
+            [piece(0x2200, "_DMG.PIC"), piece(0x2300, "")],
+            BTreeMap::from([
+                ("_SYN.PIC".to_string(), [16, 8, 0]),
+                ("_DMG.PIC".to_string(), [16, 4, 8]),
+                ("_F18_A.PIC".to_string(), [16, 4, 12]),
+            ]),
+        )
+    }
+    fn hornet_airframe(material: bool) -> Airframe {
+        Airframe::synthetic(
+            AircraftId::F18,
+            (0..16).map(|_| hornet()).collect(),
+            None,
+            damage(),
+            material.then(|| crate::engine_material::Image {
+                width: 2,
+                height: 2,
+                pixels: vec![200; 16],
+            }),
+        )
+    }
+    fn models() -> Vec<Airframe> {
+        vec![
+            hornet_airframe(false),
+            Airframe::synthetic(
+                AircraftId::Rafale,
+                vec![rafale(false), rafale(true)],
+                None,
+                damage(),
+                None,
+            ),
+            Airframe::synthetic(
+                AircraftId::F14,
+                vec![tomcat()],
+                Some(crate::additional_animation::Rig::synthetic(
+                    AircraftId::F14,
+                    &[0x3000],
+                    &[0x3300],
+                    &[0x3100, 0x3101],
+                    &[0x3200],
+                )),
+                damage(),
+                None,
+            ),
+        ]
+    }
+    fn missile_shape(seed: usize) -> Shape {
+        shape(vec![
+            face(0x10 + seed, [0., 10., 0.], 4, "", 0x61),
+            face(0x20 + seed, [0., -10., 1.], 3, "", 0x4c),
+            face(0x30 + seed, [2., 0., 0.], 3, "", 0x20),
+        ])
+    }
+    /// Twelve synthetic effect frames, a different cell count per frame.
+    fn frames(seed: usize) -> Vec<Vec<([f32; 2], [f32; 3])>> {
+        (0..12)
+            .map(|frame| {
+                (0..=(frame + seed) % 4)
+                    .map(|cell| {
+                        (
+                            [cell as f32 / 20. - 0.5, 0.5 - frame as f32 / 20.],
+                            [frame as f32 / 12., cell as f32 / 4., seed as f32 / 8.],
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+    /// The player's gun and one missile station with a loaded shape.
+    fn state() -> live::State {
+        let mut config = crate::ai_wings::tests::combat_fixture(false)
+            .configuration()
+            .clone();
+        config.stations[0].weapon.source = "M61.JT".into();
+        let mut missile = config.stations[0].clone();
+        missile.weapon.source = "SYNMSL.JT".into();
+        missile.weapon.shape = Some("SYNMSL.SH".into());
+        config.stations.push(missile);
+        live::State::new(config, true).unwrap()
+    }
+    fn combat(models: Vec<Airframe>, dummies: Vec<(usize, Vector)>) -> Combat {
+        Combat {
+            state: state(),
+            smoke_art: Pic {
+                width: 1,
+                height: 1,
+                pixels: vec![0],
+                mask: vec![true],
+                palette: Vec::new(),
+                glyphs: Vec::new(),
+            },
+            contrail_offsets: Vec::new(),
+            contrail_sortie: 0,
+            contrails: Default::default(),
+            input: FireInput::default(),
+            controller: FireInput::default(),
+            range: false,
+            ai_poses: true,
+            clean_recording: false,
+            initial_ammo: None,
+            presentation: TargetPresentation::default(),
+            ai_devices: BTreeMap::new(),
+            ai_burners: Default::default(),
+            dummies,
+            mission_spawns: None,
+            mission_layout: None,
+            dummy_models: models,
+            dummy_configs: Vec::new(),
+            dummy_contrail_offsets: Vec::new(),
+            airport_objects: Vec::new(),
+            recorder: None,
+            last_launcher: None,
+            shapes: BTreeMap::from([
+                ("SYNMSL.SH".to_string(), missile_shape(0)),
+                ("AIMSL.SH".to_string(), missile_shape(1)),
+            ]),
+            escape_art: None,
+            explosions: frames(1),
+            ground_impacts: frames(2),
+        }
+    }
+
+    fn aircraft(
+        id: u32,
+        kind: AircraftId,
+        position: Vector,
+        velocity: Vector,
+        basis: Basis,
+    ) -> live::Target {
+        live::Target {
+            aircraft: Some(kind),
+            role: TargetRole::Aircraft,
+            heat: Heat::Unknown,
+            radar_emitting: false,
+            id,
+            position,
+            velocity,
+            basis,
+            configuration: sensors::Configuration::CLEAN,
+            signature: sensors::SignatureProfile::default(),
+            jammer: None,
+            jammer_active: false,
+            airborne: true,
+            on_ground: false,
+            radius: 28.,
+            hp: 100,
+            initial_hp: 100,
+            fragment_offsets: [[0.; 3]; 2],
+            wreck: None,
+            wreck_power: tore_sim::wreck::Power::default(),
+            fragment_released: false,
+            localized_damage: LocalizedDamage::default(),
+            category: 0,
+        }
+    }
+    fn damaged(amounts: [i32; 6], section: Option<DamageSection>) -> LocalizedDamage {
+        LocalizedDamage {
+            amounts,
+            structural_variant: section.map(|s| usize::from(s as u8 > 2)),
+            structural_section: section,
+        }
+    }
+    fn wreck(id: u32, phase: tore_sim::wreck::Phase) -> Option<tore_sim::wreck::Wreck> {
+        let mut wreck = tore_sim::wreck::Wreck::new(id, 100, [0.; 3]);
+        wreck.phase = phase;
+        Some(wreck)
+    }
+    fn shot(
+        id: u32,
+        owner: u32,
+        station: usize,
+        weapon: Option<Weapon>,
+        [position, previous]: [Vector; 2],
+        direction: Vector,
+        tracer: bool,
+    ) -> live::Projectile {
+        live::Projectile {
+            id,
+            owner,
+            weapon,
+            guidance: None,
+            motion: None,
+            guidance_ticks: None,
+            age: 3,
+            incoming: owner != 0,
+            station,
+            position,
+            previous,
+            direction: unit(direction),
+            speed_f8: 900 * 256,
+            launched_t: 0,
+            target: Some(1),
+            fall: FallState::default(),
+            gun_round: None,
+            tracer,
+        }
+    }
+    fn piece(owner: u32, position: Vector, basis: Basis) -> Piece {
+        Piece {
+            owner,
+            variant: 0,
+            position,
+            velocity: [0.; 3],
+            basis,
+        }
+    }
+
+    struct Scene {
+        previous: Vec<live::Target>,
+        current: Vec<live::Target>,
+        devices: Vec<(u32, [f64; 11], [f64; 11])>,
+        projectiles: Vec<live::Projectile>,
+        effects: Vec<live::Effect>,
+        debris: Vec<Piece>,
+    }
+    fn scene(config: &live::Configuration) -> Scene {
+        use AircraftId::{F14, F18, Rafale};
+        use tore_sim::wreck::Phase::{Exploded, Falling};
+        let b = Basis::new;
+        let mut current: Vec<_> = [
+            (
+                1,
+                F18,
+                [12., 5003., 3006.5],
+                [80., 20., 700.],
+                [0.25, 0.06, 0.5],
+            ),
+            (
+                2,
+                Rafale,
+                [405., 5099., 2507.],
+                [30., -5., 650.],
+                [0.05, -0.12, -0.35],
+            ),
+            (
+                3,
+                F14,
+                [-590., 4905., 3510.],
+                [50., 25., 600.],
+                [0.12, 0.21, 0.12],
+            ),
+            (
+                4,
+                F18,
+                [201., 4795., 4005.],
+                [10., -60., 500.],
+                [0.3, -0.5, 1.2],
+            ),
+            (
+                5,
+                Rafale,
+                [-300., 5200., 2800.],
+                [0., -40., 400.],
+                [5.9, -0.3, 2.],
+            ),
+            (6, F14, [900., 5000., 3000.], [0.; 3], [1., 0., 0.]),
+            (7, F18, [150., 5050., 2200.], [0., 0., 750.], [0., 0.02, 0.]),
+            (
+                20,
+                F18,
+                [-800., 5100., 2600.],
+                [-20., 0., 640.],
+                [6.2, 0.1, -0.6],
+            ),
+            (100, F18, [300., 4000., 3000.], [0.; 3], [0.7, 0., 0.]),
+            (101, F18, [320., 4000., 3040.], [0.; 3], [1.7, 0., 0.]),
+        ]
+        .into_iter()
+        .map(|(id, kind, position, velocity, [yaw, pitch, bank])| {
+            aircraft(id, kind, position, velocity, b(yaw, pitch, bank))
+        })
+        .collect();
+        // Flying on with a failed left wing.
+        current[1].hp = 60;
+        current[1].localized_damage = damaged([0, 0, 5, 80, 0, 0], Some(DamageSection::LeftWing));
+        // Destroyed through the nose and falling.
+        current[3].hp = 0;
+        current[3].localized_damage = damaged([90, 0, 0, 0, 0, 0], Some(DamageSection::Nose));
+        current[3].wreck = wreck(4, Falling);
+        // Destroyed without a structural break, wreck already exploded.
+        current[4].hp = 0;
+        current[4].localized_damage = damaged([30, 30, 20, 10, 5, 5], None);
+        current[4].wreck = wreck(5, Exploded);
+        // Parked.
+        current[5].airborne = false;
+        current[5].on_ground = true;
+        // No model slot, carrying a left-wing break for its debris.
+        current[7].localized_damage = damaged([0, 0, 0, 80, 0, 0], Some(DamageSection::LeftWing));
+        // Ground objects, one standing and one destroyed.
+        for (target, hp) in current[8..].iter_mut().zip([50, 0]) {
+            target.aircraft = None;
+            target.role = TargetRole::Surface;
+            target.airborne = false;
+            target.hp = hp;
+        }
+        let mut previous: Vec<_> = current
+            .iter()
+            .filter(|t| t.id != 20)
+            .cloned()
+            .map(|mut t| {
+                let shift = f64::from(t.id % 10);
+                t.position = [
+                    t.position[0] - 3. * shift,
+                    t.position[1] + 0.5 * shift,
+                    t.position[2] - 6. - shift,
+                ];
+                t.velocity[0] -= 10.;
+                let [yaw, pitch, bank] = t.basis.angles();
+                t.basis = Basis::new(yaw - 0.02 * shift, pitch + 0.01, bank - 0.05 * shift);
+                t
+            })
+            .collect();
+        // A heading that crosses north between ticks.
+        previous[1].basis = Basis::new(6.26, -0.1, -0.3);
+        previous.push(aircraft(
+            21,
+            F18,
+            [0., 5000., 0.],
+            [0., 0., 700.],
+            b(0., 0., 0.),
+        ));
+        let devices = vec![
+            (
+                1,
+                [1., 0.5, 0., 0., 0., 0.2, 0.1, -0.3, 0.05, 700., 0.6],
+                [0.8, 0.4, 0.3, 0.1, 0., 0.6, -0.2, 0.2, -0.1, 720., 0.9],
+            ),
+            (
+                2,
+                [0.3, 0.2, 0.5, 0., 0., 1., 0.2, 0.1, 0.3, 600., 0.8],
+                [0.2, 0.25, 0.6, 0., 0., 0.9, 0.15, 0.2, 0.25, 610., 0.85],
+            ),
+            (
+                3,
+                [0., 0.2, 0.4, 1., 0., 0.5, 0.3, -0.2, 0.2, 800., 0.5],
+                [0.5, 0.1, 0.3, 1., 0., 0.7, 0.25, -0.1, 0.25, 860., 0.55],
+            ),
+            (
+                5,
+                [0., 0., 0., 0., 0., 0.4, 0.2, 0.2, 0.1, 500., 0.4],
+                [0., 0., 0., 0., 0., 0.3, 0.1, 0.25, 0.15, 480., 0.3],
+            ),
+        ];
+        let weapon = |source: &str, shape: Option<&str>| {
+            let mut weapon = config.stations[1].weapon.clone();
+            weapon.source = source.into();
+            weapon.shape = shape.map(Into::into);
+            Some(weapon)
+        };
+        let projectiles = vec![
+            shot(
+                10,
+                0,
+                0,
+                None,
+                [[3., 5001., 130.], [0., 5000., 100.]],
+                [3., 1., 30.],
+                true,
+            ),
+            shot(
+                11,
+                0,
+                0,
+                None,
+                [[5., 5002., 160.], [2., 5001., 130.]],
+                [3., 1., 30.],
+                false,
+            ),
+            shot(
+                12,
+                0,
+                0,
+                None,
+                [[9., 5003., 90.], [9., 5003., 90.]],
+                [0., 0., 1.],
+                true,
+            ),
+            shot(
+                13,
+                0,
+                1,
+                None,
+                [[100., 5020., 900.], [98., 5019., 880.]],
+                [0.1, 0.05, 0.99],
+                false,
+            ),
+            shot(
+                14,
+                1,
+                0,
+                weapon("AIMSL.JT", Some("AIMSL.SH")),
+                [[300., 5040., 1500.], [301., 5041., 1520.]],
+                [-0.05, -0.05, -1.],
+                false,
+            ),
+            shot(
+                15,
+                2,
+                0,
+                weapon("NOSHAPE.JT", None),
+                [[-200., 4990., 1800.], [-199., 4990., 1790.]],
+                [-0.1, 0., 1.],
+                false,
+            ),
+            shot(
+                16,
+                3,
+                0,
+                weapon("GSH301.JT", None),
+                [[-100., 5010., 1200.], [-95., 5011., 1180.]],
+                [-0.25, -0.05, 1.],
+                true,
+            ),
+            shot(
+                17,
+                0,
+                1,
+                None,
+                [[50., 5015., 700.], [49., 5015., 690.]],
+                [0.1, 0., 1.],
+                false,
+            ),
+        ];
+        let effect = |kind, position, ticks| live::Effect {
+            position,
+            kind,
+            ticks,
+        };
+        let effects = vec![
+            effect(EffectKind::Flare, [10., 5050., 500.], 45),
+            effect(EffectKind::Flare, [14., 5040., 520.], 12),
+            effect(EffectKind::Chaff, [-20., 5060., 480.], 30),
+            effect(EffectKind::Launch, [0., 5000., 300.], 40),
+            effect(EffectKind::Hit, [30., 5000., 900.], 45),
+            effect(EffectKind::Hit, [35., 5005., 910.], 23),
+            effect(EffectKind::Hit, [40., 5010., 920.], 1),
+            effect(EffectKind::Destroyed, [200., 4800., 4000.], 240),
+            effect(EffectKind::Destroyed, [210., 4790., 4010.], 121),
+            effect(EffectKind::Destroyed, [220., 4780., 4020.], 7),
+            effect(EffectKind::Ground, [0., 4000., 1500.], 45),
+            effect(EffectKind::Ground, [10., 4000., 1510.], 3),
+            effect(EffectKind::DebrisImpact, [-30., 4000., 1600.], 45),
+            effect(EffectKind::DebrisImpact, [-40., 4000., 1610.], 20),
+        ];
+        let debris = vec![
+            piece(0, [50., 5010., 2900.], b(0.4, 0.2, 0.9)),
+            piece(1, [20., 5000., 3000.], b(1., 0., 0.3)),
+            piece(2, [410., 5090., 2510.], b(2., 0.4, -1.)),
+            piece(4, [210., 4780., 4010.], b(0.1, -0.2, 0.5)),
+            piece(20, [-790., 5100., 2610.], b(0.3, 0.3, 0.3)),
+            piece(99, [0., 5000., 2500.], b(0., 0., 0.)),
+        ];
+        Scene {
+            previous,
+            current,
+            devices,
+            projectiles,
+            effects,
+            debris,
+        }
+    }
+    /// The presented player state that fixture targets copy.
+    fn player() -> flight::State {
+        let mut s =
+            flight::State::new(&flight::animation_tests::profile(), [0., 5000., 0.]).unwrap();
+        s.bay = 0.35;
+        s.speed = 820.;
+        s.throttle = 0.95;
+        s.burner = true;
+        s.exhaust = 0.8;
+        s.gear = 1.;
+        s.flaps = 0.5;
+        s.brake = 0.2;
+        s.hook = 0.4;
+        s.elevator = 0.3;
+        s.aileron = -0.2;
+        s.rudder = 0.1;
+        s.auxiliary_rates = [0.1, 0.4, -0.3];
+        s.damage_variant = Some(DamageSection::LeftWing as usize);
+        s
+    }
+    fn camera(position: [f32; 3], [yaw, pitch, roll]: [f32; 3]) -> Camera {
+        let mut camera = Camera::new();
+        camera.position = position;
+        camera.yaw = yaw;
+        camera.pitch = pitch;
+        camera.roll = roll;
+        camera
+    }
+    /// A general view, one hiding target 7 and missile 17, and one looking
+    /// straight down the player's first tracer.
+    fn cameras() -> Vec<Camera> {
+        let mut hiding = camera([500., 5100., 1500.], [-0.3, 0.05, -0.2]);
+        hiding.hidden_target = Some(7);
+        hiding.hidden_projectile = Some(17);
+        vec![
+            camera([-400., 5400., 600.], [0.2, -0.15, 0.1]),
+            hiding,
+            camera([33., 5011., 430.], [3.24, -0.03, 0.]),
+        ]
+    }
+    fn pilots() -> Vec<Escape> {
+        [
+            Phase::Seat,
+            Phase::Freefall,
+            Phase::Inflating,
+            Phase::Parachute,
+            Phase::Landed,
+            Phase::Impact,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, phase)| {
+            let i = i as f64;
+            let mut pilot = Escape::new(
+                [100. * i, 5000. - 50. * i, 2000. + 30. * i],
+                [0.; 3],
+                Basis::new(0.4 * i, 0., 0.),
+            );
+            pilot.phase = phase;
+            pilot
+        })
+        .collect()
+    }
+    fn escape_art() -> crate::ejection_art::Art {
+        let pose = |n: usize| Shape {
+            lines: vec![
+                Line {
+                    positions: [[0., 0., 3. + n as f32], [2., 1., 9.]],
+                    color: 40 + n as u8,
+                    fog: FogMode::Enabled,
+                },
+                Line {
+                    positions: [[1.; 3], [1.; 3]],
+                    color: 1,
+                    fog: FogMode::Disabled,
+                },
+            ],
+            faces: vec![
+                face(0x10 + n, [0., 0., 2.], 4, "_EJECTA.PIC", 0x60),
+                face(0x20 + n, [1., 1., 1.], 3, "", 0x20),
+            ],
+            state_words: Default::default(),
+        };
+        crate::ejection_art::Art::synthetic(
+            (0..5).map(pose).collect(),
+            &[("_EJECTA.PIC", 8, 8), ("_EJECTB.PIC", 8, 4)],
+        )
+    }
+
+    /// Presents the scene at one tick fraction, as live flight would.
+    fn load(combat: &mut Combat, scene: &Scene, alpha: f64, ai_poses: bool) {
+        combat.ai_poses = ai_poses;
+        combat.presentation = TargetPresentation::default();
+        combat.presentation.capture(&scene.previous, ai_poses);
+        combat.presentation.alpha = alpha;
+        combat.ai_devices = scene
+            .devices
+            .iter()
+            .map(|&(id, before, after)| (id, (before, after)))
+            .collect();
+        combat.state.targets.clone_from(&scene.current);
+        combat.state.projectiles.clone_from(&scene.projectiles);
+        combat.state.effects.clone_from(&scene.effects);
+        combat.state.debris.clone_from(&scene.debris);
+    }
+
+    #[test]
+    fn drawn_combat_scene_is_unchanged() {
+        let ownship = hornet_airframe(true);
+        let player = player();
+        let mut stepped = crate::terrain::tests::world();
+        stepped.smooth_weather = false;
+        let worlds = [crate::terrain::tests::world(), stepped];
+        let mut with_models = combat(models(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
+        let mut fixture = combat(Vec::new(), Vec::new());
+        let scene = scene(with_models.state.configuration());
+        let mut hashes = [(); 5].map(|()| Fnv::new());
+        let mut drawn = [0; 3];
+        for ai_poses in [true, false] {
+            for alpha in [0., 0.37, 1.] {
+                load(&mut with_models, &scene, alpha, ai_poses);
+                load(&mut fixture, &scene, alpha, ai_poses);
+                for target in &scene.current {
+                    let (position, angles) = with_models.view_pose(target, true);
+                    hashes[3].doubles(&position);
+                    hashes[3].doubles(&angles);
+                }
+                for world in &worlds {
+                    for camera in cameras() {
+                        for (model, vertices, contacts) in
+                            with_models.dummy_geometry(&camera, world)
+                        {
+                            hashes[0].bytes(format!("{:?}", model.profile.id).as_bytes());
+                            hashes[0].floats(&vertices);
+                            hashes[0].contacts(&contacts);
+                            drawn[0] += vertices.len();
+                        }
+                        let geometry = fixture.vertices(&ownship, &player, &camera, world);
+                        hashes[1].floats(&geometry.vertices);
+                        hashes[1].contacts(&geometry.contacts);
+                        drawn[1] += geometry.vertices.len();
+                        let geometry = with_models.vertices(&ownship, &player, &camera, world);
+                        hashes[2].floats(&geometry.vertices);
+                        hashes[2].contacts(&geometry.contacts);
+                        drawn[2] += geometry.vertices.len();
+                    }
+                }
+            }
+        }
+        let art = escape_art();
+        let pilots = pilots();
+        for camera in cameras() {
+            hashes[4].floats(&art.vertices(
+                pilots.iter(),
+                &ownship.palette,
+                camera.position.map(f64::from),
+            ));
+        }
+        assert!(drawn.iter().all(|&floats| floats > 10_000), "{drawn:?}");
+        let hashes = hashes.map(|hash| hash.0);
+        assert_eq!(hashes, HASHES, "drawn output changed: {hashes:#018x?}");
+    }
+}

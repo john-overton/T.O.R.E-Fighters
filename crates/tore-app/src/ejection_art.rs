@@ -70,6 +70,30 @@ impl Art {
             regions,
         })
     }
+    /// Synthetic poses over a blank atlas with the named texture rows, for
+    /// drawing tests without retail media.
+    #[cfg(test)]
+    pub(crate) fn synthetic(poses: Vec<Shape>, textures: &[(&str, usize, usize)]) -> Self {
+        let mut regions = BTreeMap::new();
+        let (mut width, mut height) = (0, 0);
+        for (name, texture_width, texture_height) in textures {
+            regions.insert((*name).to_string(), (height, *texture_height));
+            height += texture_height;
+            width = width.max(*texture_width);
+        }
+        Self {
+            atlas: Pic {
+                width,
+                height,
+                pixels: vec![7; width * height],
+                mask: vec![true; width * height],
+                palette: Vec::new(),
+                glyphs: Vec::new(),
+            },
+            poses,
+            regions,
+        }
+    }
     pub fn vertices<'a>(
         &self,
         pilots: impl Iterator<Item = &'a Escape>,

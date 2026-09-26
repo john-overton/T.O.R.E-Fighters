@@ -221,24 +221,7 @@ impl Airframe {
         } else {
             None
         };
-        let mut nozzle_bounds = [[
-            f32::INFINITY,
-            f32::NEG_INFINITY,
-            f32::INFINITY,
-            f32::NEG_INFINITY,
-        ]; 2];
-        for face in &poses[0].faces {
-            if crate::engine_material::nozzle(id, face.address) {
-                let group = crate::engine_material::outlet_group(id, &face.positions);
-                for p in &face.positions {
-                    let b = &mut nozzle_bounds[group];
-                    b[0] = b[0].min(p[0]);
-                    b[1] = b[1].max(p[0]);
-                    b[2] = b[2].min(p[2]);
-                    b[3] = b[3].max(p[2]);
-                }
-            }
-        }
+        let nozzle_bounds = nozzle_bounds(id, &poses[0]);
         if engine_material.is_some() {
             let count = crate::engine_material::outlet_count(id);
             if nozzle_bounds[..count]
@@ -740,6 +723,95 @@ impl Airframe {
             }
         }
         result
+    }
+}
+
+/// Source-space X and Z bounds of each engine outlet's nozzle faces, which
+/// the engine material spans.
+fn nozzle_bounds(id: tore_formats::aircraft::AircraftId, shape: &Shape) -> [[f32; 4]; 2] {
+    let mut bounds = [[
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+    ]; 2];
+    for face in &shape.faces {
+        if crate::engine_material::nozzle(id, face.address) {
+            let group = crate::engine_material::outlet_group(id, &face.positions);
+            for p in &face.positions {
+                let b = &mut bounds[group];
+                b[0] = b[0].min(p[0]);
+                b[1] = b[1].max(p[0]);
+                b[2] = b[2].min(p[2]);
+                b[3] = b[3].max(p[2]);
+            }
+        }
+    }
+    bounds
+}
+
+#[cfg(test)]
+impl Airframe {
+    /// A drawable airframe built from synthetic geometry, so drawing tests run
+    /// without retail media. The flight model is the synthetic F/A-18D one;
+    /// `id` selects the drawing rules (rig, damage variants, engine outlets).
+    pub(crate) fn synthetic(
+        id: tore_formats::aircraft::AircraftId,
+        poses: Vec<Shape>,
+        rig: Option<crate::additional_animation::Rig>,
+        damage_art: crate::damage_art::DamageArt,
+        engine_material: Option<crate::engine_material::Image>,
+    ) -> Self {
+        let source = crate::flight::animation_tests::profile();
+        let model =
+            tore_sim::models::AircraftModel::for_aircraft(&source).expect("synthetic flight model");
+        let mut profile = source;
+        profile.id = id;
+        let pic = |size: usize| Pic {
+            width: size,
+            height: size,
+            pixels: (0..size * size).map(|i| (i % 251) as u8).collect(),
+            mask: vec![true; size * size],
+            palette: Vec::new(),
+            glyphs: Vec::new(),
+        };
+        let font = || Font {
+            height: 1,
+            glyphs: Vec::new(),
+        };
+        Self {
+            nozzle_bounds: nozzle_bounds(id, &poses[0]),
+            engine_material,
+            rig,
+            streamer: None,
+            model,
+            profile,
+            atlas: pic(16),
+            damage_art,
+            palette: std::array::from_fn(|i| [i as u8, 255 - i as u8, (i * 37 % 256) as u8]),
+            cockpit_pic: pic(1),
+            panel: pic(1),
+            sprites: BTreeMap::new(),
+            font: font(),
+            hud_font: font(),
+            hud: tore_formats::hud::Hud {
+                primary_color: 0,
+                panel: None,
+                title_color: 0,
+                button_color: 0,
+                press_color: 0,
+            },
+            flight_menu: Vec::new(),
+            sensors: tore_sim::sensors::SensorProfiles {
+                aircraft: id,
+                radar: None,
+                infrared: None,
+                visual: None,
+                jammer: None,
+                signature: Default::default(),
+            },
+            poses,
+        }
     }
 }
 
