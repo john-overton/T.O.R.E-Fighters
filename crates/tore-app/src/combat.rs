@@ -122,6 +122,8 @@ pub struct Combat {
     presentation: TargetPresentation,
     /// Previous and current AI device poses, sampled on simulation ticks.
     ai_devices: BTreeMap<u32, ([f64; 11], [f64; 11])>,
+    /// AI aircraft whose afterburner was lit at the last AI tick.
+    ai_burners: std::collections::BTreeSet<u32>,
     dummies: Vec<(usize, Vector)>,
     mission_spawns: Option<Vec<crate::ai_wings::MissionSpawn>>,
     /// The accepted Quick Mission layout, kept so restart rebuilds it exactly.
@@ -280,6 +282,7 @@ impl Combat {
             initial_ammo,
             presentation: TargetPresentation::default(),
             ai_devices: BTreeMap::new(),
+            ai_burners: Default::default(),
             recorder: None,
             last_launcher: None,
             escape_art: match crate::ejection_art::Art::load(data) {
@@ -308,6 +311,61 @@ impl Combat {
             let entry = self.ai_devices.entry(actor.id()).or_insert((next, next));
             *entry = (entry.1, next);
         }
+        self.ai_burners = wings
+            .mission()
+            .actors()
+            .iter()
+            .filter(|a| a.alive() && a.flight().afterburner_active())
+            .map(|a| a.id())
+            .collect();
+    }
+
+    /// One glow point just behind the nozzles of every aircraft with its
+    /// afterburner lit, at this frame's presented pose
+    /// (docs/spec/engine-material.md#afterburner-glow).
+    pub fn afterburner_glows(
+        &self,
+        player: &flight::State,
+    ) -> Vec<crate::countermeasure_renderer::Afterburner> {
+        let glow = |position: Vector, basis: Basis, offsets: &[Vector]| {
+            let count = offsets.len().max(1) as f64;
+            let mean: Vector =
+                std::array::from_fn(|i| offsets.iter().map(|o| o[i]).sum::<f64>() / count);
+            crate::countermeasure_renderer::Afterburner {
+                position: std::array::from_fn(|i| {
+                    position[i]
+                        + basis.right[i] * mean[0]
+                        + basis.up[i] * mean[1]
+                        + basis.forward[i]
+                            * (mean[2] - crate::countermeasure_renderer::AFTERBURNER_BEHIND_FEET)
+                }),
+            }
+        };
+        let mut glows = Vec::new();
+        if player.afterburner_active() && player.escape.is_none() && self.state.player_hp > 0 {
+            glows.push(glow(
+                player.position,
+                Basis::new(player.yaw, player.pitch, player.bank),
+                &self.contrail_offsets,
+            ));
+        }
+        for target in self
+            .state
+            .targets
+            .iter()
+            .filter(|t| t.airborne && t.hp > 0 && self.ai_burners.contains(&t.id))
+        {
+            let offsets = target
+                .aircraft
+                .filter(|id| *id != self.state.configuration().aircraft)
+                .and_then(|id| self.dummy_models.iter().position(|h| h.profile.id == id))
+                .map_or(&self.contrail_offsets, |index| {
+                    &self.dummy_contrail_offsets[index]
+                });
+            let (position, [yaw, pitch, bank]) = self.presentation.pose(target, self.ai_poses);
+            glows.push(glow(position, Basis::new(yaw, pitch, bank), offsets));
+        }
+        glows
     }
 
     fn apply_ai_devices(&self, id: u32, pose: &mut flight::State) {
@@ -476,6 +534,7 @@ impl Combat {
     pub fn reset(&mut self, s: &mut flight::State) -> AppResult<()> {
         self.presentation = TargetPresentation::default();
         self.ai_devices.clear();
+        self.ai_burners.clear();
         self.contrails = Default::default();
         self.contrail_sortie = self.contrail_sortie.wrapping_add(1);
         let l = launcher(s);

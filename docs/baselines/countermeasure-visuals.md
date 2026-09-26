@@ -58,6 +58,21 @@ comparisons with a running retail copy.
 - **Original graphics and no anti-aliasing**: flares, glare and smoke render
   in both, including the single-sample glare pass.
 
+## Afterburner glow
+
+Added the same day at John's request. Captured with `--flight-devices
+0,0,0,0,1`:
+- **Night, from behind**: a small glare at the nozzles.
+- **Night, 60 feet over desert**: a soft warm pool on the sand, clearly weaker
+  than a flare's.
+- **Day, same pose**: a faint warm tint near the aircraft.
+- **Night, from the front**: the glare peeks past the tail and is partly hidden
+  by the airframe.
+
+A unit test checks that each afterburner adds a light at a quarter of a
+flare's strength and a quarter-intensity, glare-only instance. AI afterburner
+glows use the same path but were not captured.
+
 ## Not run
 
 - A Quick Mission with many AI salvos was not profiled. The bounds are 128

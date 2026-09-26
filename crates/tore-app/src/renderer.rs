@@ -174,6 +174,14 @@ impl Renderer {
         self.sim
             .smoke(&self.device, &self.queue, art, smoke, devices);
     }
+    /// Burning flares, chaff and lit afterburners, which light the scene.
+    pub fn emitters(
+        &mut self,
+        devices: &tore_sim::combat::countermeasures::Devices,
+        afterburners: &[crate::countermeasure_renderer::Afterburner],
+    ) {
+        self.sim.emitters(&self.queue, devices, afterburners);
+    }
     pub fn vapor(&mut self, vertices: &[f32]) {
         self.sim.vapor(&self.device, &self.queue, vertices);
     }

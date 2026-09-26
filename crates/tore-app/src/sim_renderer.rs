@@ -791,7 +791,16 @@ impl SimRenderer {
             smoke,
         );
         self.smoke.flare_smoke(devices);
-        self.countermeasures.upload(queue, devices);
+    }
+    /// This frame's light and glare sources: burning flares, chaff and lit
+    /// afterburners. Call before drawing, after `smoke`.
+    pub fn emitters(
+        &mut self,
+        queue: &wgpu::Queue,
+        devices: &tore_sim::combat::countermeasures::Devices,
+        afterburners: &[crate::countermeasure_renderer::Afterburner],
+    ) {
+        self.countermeasures.upload(queue, devices, afterburners);
     }
     pub fn combat(
         &mut self,
@@ -1659,7 +1668,7 @@ impl SimRenderer {
         }
         // Flare glare goes over the finished image, where it can spill across
         // the aircraft that released it while the core stays in view.
-        if self.countermeasures.has_flares() {
+        if self.countermeasures.has_glare() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Flare glare"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2156,7 +2165,7 @@ mod lighting_tests {
                         devices.step(&|_, _| 0.);
                     }
                 }
-                renderer.countermeasures.upload(&queue, &devices);
+                renderer.countermeasures.upload(&queue, &devices, &[]);
                 let mut camera = Camera::new();
                 camera.position = [0., 200., 0.];
                 camera.pitch = -std::f32::consts::FRAC_PI_2;

@@ -3091,6 +3091,10 @@ impl ApplicationHandler for App {
                             [&self.combat.state.smoke, &self.combat.contrails],
                             &self.combat.state.devices,
                         );
+                        renderer.emitters(
+                            &self.combat.state.devices,
+                            &self.combat.afterburner_glows(&presented),
+                        );
                         match renderer.poll_previews() {
                             Ok(previews) => {
                                 self.performance.completed_previews += previews.len();
