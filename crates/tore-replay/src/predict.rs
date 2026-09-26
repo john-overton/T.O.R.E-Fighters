@@ -43,11 +43,13 @@ pub mod precision {
     pub const CONTROL: f64 = 1. / 1024.;
     /// Fuel, pounds.
     pub const FUEL_LB: f64 = 1. / 16.;
+    /// Auxiliary body rates, radians per second.
+    pub const RATE_RAD_S: f64 = 1. / 4096.;
 }
 
 use precision::{
-    ANGLE_RAD as ANGLE, CONTROL, FUEL_LB as FUEL, G, POSITION_FT as POS, SIGNED,
-    SPEED_FPS as SPEED, UNIT, VELOCITY_FPS as VEL,
+    ANGLE_RAD as ANGLE, CONTROL, FUEL_LB as FUEL, G, POSITION_FT as POS, RATE_RAD_S as RATE,
+    SIGNED, SPEED_FPS as SPEED, UNIT, VELOCITY_FPS as VEL,
 };
 
 /// Beyond these magnitudes a value is stored exactly in a key record.
@@ -252,7 +254,10 @@ const A_FLAGS: u64 = 1 << 9;
 const A_WRECK: u64 = 1 << 10;
 const A_DAMAGE: u64 = 1 << 11;
 const A_KEY: u64 = 1 << 12;
-const A_ALL: u64 = A_KEY - 1;
+/// Placed after the key bit, so change records without rates keep the
+/// layout they had before the rates were added.
+const A_RATES: u64 = 1 << 13;
+const A_ALL: u64 = (A_KEY - 1) | A_RATES;
 
 fn aircraft_encodable(s: &AircraftState) -> bool {
     s.position.iter().all(|v| within(*v, POSITION_LIMIT))
@@ -267,6 +272,7 @@ fn aircraft_encodable(s: &AircraftState) -> bool {
             .zip(SLOTS)
             .all(|(v, slot)| slot.encodable(*v))
         && s.controls.iter().all(|v| within(*v, SCALAR_LIMIT))
+        && s.auxiliary_rates.iter().all(|v| within(*v, SCALAR_LIMIT))
 }
 
 /// What the reader knows about one aircraft after its latest record.
@@ -281,6 +287,7 @@ pub(crate) struct AircraftPred {
     heat: Chan,
     fuel: Chan,
     controls: [Chan; 4],
+    rates: [Chan; 3],
     flags: u16,
     wreck: u8,
     hp: i32,
@@ -302,6 +309,7 @@ impl AircraftPred {
             heat: Chan::key(s.heat),
             fuel: Chan::key(s.fuel_lb),
             controls: s.controls.map(Chan::key),
+            rates: s.auxiliary_rates.map(Chan::key),
             flags: s.flags.bits(),
             wreck: s.wreck_phase,
             hp: s.hp,
@@ -330,6 +338,7 @@ impl AircraftPred {
             wreck_phase: self.wreck,
             fuel_lb: self.fuel.value(FUEL),
             controls: from_fn(|i| self.controls[i].value(CONTROL)),
+            auxiliary_rates: from_fn(|i| self.rates[i].value(RATE)),
             hp: self.hp,
             max_hp: self.max_hp,
             sections: self.sections,
@@ -369,7 +378,8 @@ fn put_aircraft_key(buf: &mut Vec<u8>, s: &AircraftState) {
         .chain([&s.airspeed, &s.g])
         .chain(&s.devices)
         .chain([&s.heat, &s.fuel_lb])
-        .chain(&s.controls);
+        .chain(&s.controls)
+        .chain(&s.auxiliary_rates);
     for v in floats {
         put_xf64(buf, *v);
     }
@@ -397,6 +407,7 @@ fn get_aircraft_key(input: &mut In) -> Result<AircraftState> {
     let heat = f()?;
     let fuel_lb = f()?;
     let controls = [f()?, f()?, f()?, f()?];
+    let auxiliary_rates = [f()?, f()?, f()?];
     let flags = AircraftFlags::from_bits(
         u16::try_from(input.uv()?).map_err(|_| corrupt("aircraft flags are out of range"))?,
     );
@@ -421,6 +432,7 @@ fn get_aircraft_key(input: &mut In) -> Result<AircraftState> {
         wreck_phase,
         fuel_lb,
         controls,
+        auxiliary_rates,
         hp,
         max_hp,
         sections,
@@ -477,6 +489,10 @@ pub(crate) fn put_aircraft(
         let pred = p.controls[i].p1();
         p.controls[i].code(s.controls[i], CONTROL, pred)
     });
+    let rates: [i64; 3] = from_fn(|i| {
+        let pred = p.rates[i].p2();
+        p.rates[i].code(s.auxiliary_rates[i], RATE, pred)
+    });
     let flags = s.flags.bits();
     let mut damage = 0u64;
     let mut damage_values: Vec<i64> = Vec::new();
@@ -514,6 +530,7 @@ pub(crate) fn put_aircraft(
     set(A_FLAGS, flags != p.flags);
     set(A_WRECK, s.wreck_phase != p.wreck);
     set(A_DAMAGE, damage != 0);
+    set(A_RATES, rates != [0; 3]);
     put_uv(buf, mask);
     if mask & A_POS != 0 {
         put_triple(buf, pos);
@@ -572,6 +589,9 @@ pub(crate) fn put_aircraft(
         if structural_changed {
             put_opt_u8(buf, s.structural_section);
         }
+    }
+    if mask & A_RATES != 0 {
+        put_triple(buf, rates);
     }
     p.flags = flags;
     p.wreck = s.wreck_phase;
@@ -685,6 +705,15 @@ pub(crate) fn get_aircraft(input: &mut In, old: Option<AircraftPred>) -> Result<
         if on(2 + SECTION_COUNT) {
             p.structural = get_opt_u8(input)?;
         }
+    }
+    let rates = if has(A_RATES) {
+        input.triple()?
+    } else {
+        [0; 3]
+    };
+    for (c, r) in p.rates.iter_mut().zip(rates) {
+        let pred = c.p2();
+        c.apply(pred, r);
     }
     Ok(p)
 }

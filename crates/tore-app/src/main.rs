@@ -55,6 +55,7 @@ mod radio_calls;
 mod rafale_animation;
 mod render_snapshot;
 mod renderer;
+mod replay;
 mod rocker;
 mod roster_animation;
 mod scope;

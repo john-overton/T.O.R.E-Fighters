@@ -7,8 +7,8 @@ use crate::model::AircraftState;
 
 /// FNV-1a 64 over every aircraft's exact state, in id order so list order
 /// does not matter: id, position, attitude, velocity, airspeed, G, devices,
-/// heat, fuel, controls (as IEEE bits), then flags, wreck phase, hit points,
-/// regional damage and the structural section.
+/// heat, fuel, controls, auxiliary rates (as IEEE bits), then flags, wreck
+/// phase, hit points, regional damage and the structural section.
 pub fn state_checksum(aircraft: &[AircraftState]) -> u64 {
     let mut sorted: Vec<&AircraftState> = aircraft.iter().collect();
     sorted.sort_by_key(|a| a.id);
@@ -23,7 +23,8 @@ pub fn state_checksum(aircraft: &[AircraftState]) -> u64 {
             .chain([&a.airspeed, &a.g])
             .chain(&a.devices)
             .chain([&a.heat, &a.fuel_lb])
-            .chain(&a.controls);
+            .chain(&a.controls)
+            .chain(&a.auxiliary_rates);
         for v in floats {
             hash = fnv1a(hash, &v.to_bits().to_le_bytes());
         }

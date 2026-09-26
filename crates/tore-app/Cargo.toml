@@ -16,6 +16,7 @@ tracing = { version = "0.1", default-features = false, features = ["log"] }
 tore-input = { path = "../tore-input" }
 tore-input-native = { path = "../tore-input-native" }
 tore-sim = { path = "../tore-sim" }
+tore-replay = { path = "../tore-replay" }
 cpal = "0.16"
 tore-formats = { path = "../tore-formats" }
 pollster = "0.4"

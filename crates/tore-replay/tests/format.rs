@@ -22,6 +22,7 @@ struct Worst {
     signed: f64,
     fuel: f64,
     control: f64,
+    rate: f64,
     direction: f64,
 }
 
@@ -68,6 +69,11 @@ fn check_aircraft(truth: &AircraftState, read: &AircraftState, worst: &mut Worst
         let e = (truth.controls[i] - read.controls[i]).abs();
         assert!(e <= CONTROL / 2. + EPS);
         worst.control = worst.control.max(e);
+    }
+    for i in 0..3 {
+        let e = (truth.auxiliary_rates[i] - read.auxiliary_rates[i]).abs();
+        assert!(e <= RATE_RAD_S / 2. + EPS, "rate {i} error {e}");
+        worst.rate = worst.rate.max(e);
     }
     assert_eq!(truth.flags, read.flags);
     assert_eq!(truth.wreck_phase, read.wreck_phase);

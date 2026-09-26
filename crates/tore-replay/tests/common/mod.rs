@@ -216,6 +216,13 @@ impl Flier {
                 0.1 * (t * 1.1).sin(),
                 0.8 + 0.15 * (t * 0.05).sin(),
             ],
+            // Thrust vectoring follows the stick on violent flights only, so
+            // both a busy and an idle rate channel are exercised.
+            auxiliary_rates: if self.violent {
+                [roll_rate * 0.1, pitch_rate * 0.5, 0.2 * (t * 0.9).sin()]
+            } else {
+                [0.; 3]
+            },
             hp: self.hp,
             max_hp: 1_000,
             sections: [0, (1_000 - self.hp) / 2, 0, 0, 0, 0],

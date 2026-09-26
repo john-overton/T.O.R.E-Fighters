@@ -23,6 +23,10 @@ pub struct World {
     pub theater: Theater,
     /// Exact selected MM identity, distinct from its referenced base grid.
     pub layout: String,
+    /// The recovered weather choice the world was built with, if any; `None`
+    /// keeps the mission's own `layer` line and time.
+    #[allow(dead_code)] // Read by the mission recorder.
+    pub condition: Option<usize>,
     pub land_texture: Option<usize>,
     pub environment: Environment,
     /// Immutable imported placement/airport geometry. Mutable health belongs to combat.
@@ -200,6 +204,114 @@ fn anchor_points(
         .copied()
 }
 
+/// Names of the six recovered weather choices, in table order, as the
+/// command line and recordings show them.
+#[allow(dead_code)] // Read by the mission recorder.
+pub const CONDITION_NAMES: [&str; 6] = ["clear", "cloudy", "foggy", "dawn", "sunset", "night"];
+
+/// The launch settings a mission recording keeps for its world, resolved
+/// once when it was flown. [`World::for_identity`] builds from these instead
+/// of the environment variables and mission defaults.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recorded {
+    /// Layout code without `.MM`, for example `UKR` or `~UKR1`.
+    pub code: String,
+    /// The weather choice, when the mission picked one.
+    pub condition: Option<usize>,
+    /// The resolved `.LAY` resource; `None` resolves it as a launch does.
+    pub layer: Option<String>,
+    /// Start time: hour and minute.
+    pub time: [i32; 2],
+    /// Explicit wind in degrees and feet per second, or `None` for the
+    /// generated default.
+    pub wind: Option<[i32; 2]>,
+    /// Scattered cloud deck in feet, 0 for none.
+    pub cloud_altitude: i32,
+    pub weather_seed: i32,
+}
+
+impl Recorded {
+    /// Reads a recorded identity back into launch settings, refusing values
+    /// a launch could not have produced.
+    pub fn from_identity(identity: &tore_replay::World) -> AppResult<Self> {
+        let code = identity.layout.trim_end_matches(".MM").to_owned();
+        if code.is_empty() || tore_formats::theater::base_theater(&identity.layout).is_none() {
+            return Err(format!(
+                "the recording names an unknown map layout {:?}",
+                identity.layout
+            )
+            .into());
+        }
+        let condition = identity
+            .weather
+            .map(|index| {
+                usize::try_from(index)
+                    .ok()
+                    .filter(|index| *index < tore_sim::environment::CONDITIONS.len())
+                    .ok_or_else(|| {
+                        format!("the recording names weather choice {index}, which does not exist")
+                    })
+            })
+            .transpose()?;
+        let seconds = identity.time_of_day_s;
+        if !(seconds.is_finite() && seconds.fract() == 0. && (0. ..86_400.).contains(&seconds)) {
+            return Err(
+                format!("the recording's start time {seconds} s is not a time of day").into(),
+            );
+        }
+        let seconds = seconds as i32;
+        if seconds % 60 != 0 {
+            return Err("the recording's start time is not a whole minute".into());
+        }
+        let cloud_altitude = match identity.clouds.deck_ft {
+            None => 0,
+            Some(feet) if feet.fract() == 0. && (0. ..=400_000.).contains(&feet) => feet as i32,
+            Some(feet) => {
+                return Err(
+                    format!("the recording's cloud deck at {feet} ft is out of range").into(),
+                );
+            }
+        };
+        let weather_seed = match identity.weather_seed {
+            None => 1,
+            Some(seed) => i32::try_from(seed)
+                .map_err(|_| format!("the recording's weather seed {seed} is out of range"))?,
+        };
+        Ok(Self {
+            code,
+            condition,
+            layer: Some(identity.clouds.module.clone()).filter(|layer| !layer.is_empty()),
+            time: [seconds / 3600, seconds / 60 % 60],
+            wind: wind_setting(identity.wind_fps)?,
+            cloud_altitude,
+            weather_seed,
+        })
+    }
+}
+
+/// The wind setting that resolves to exactly `fps`, bit for bit: `None` when
+/// it is the generated default, otherwise the explicit heading and speed.
+/// Every heading that resolves to the same vector behaves the same, because
+/// the simulation reads only the vector.
+fn wind_setting(fps: [f64; 3]) -> AppResult<Option<[i32; 2]>> {
+    use tore_formats::flight_model::clock_rng::NativeRng;
+    use tore_sim::environment::wind::Wind;
+    let same = |wind: Wind| wind.world_fps().map(f64::to_bits) == fps.map(f64::to_bits);
+    if same(Wind::resolve(None, &mut NativeRng::seeded(1)?)?) {
+        return Ok(None);
+    }
+    let speed = fps[0].hypot(fps[2]).round();
+    if (0. ..=200.).contains(&speed) {
+        for heading in -360..=360 {
+            let setting = [heading, speed as i32];
+            if same(Wind::resolve(Some(setting), &mut NativeRng::seeded(1)?)?) {
+                return Ok(Some(setting));
+            }
+        }
+    }
+    Err(format!("the recorded wind {fps:?} matches no wind setting").into())
+}
+
 impl World {
     pub fn for_theater(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> AppResult<Self> {
         Self::for_mission(resources, code, None)
@@ -207,10 +319,76 @@ impl World {
 
     /// `condition` selects one of the six recovered weather choices; without it
     /// the mission's own `layer` line and time are used unchanged.
+    /// `TORE_WEATHER_TIME`, `TORE_WIND` and `TORE_CLOUD_ALTITUDE` override the
+    /// start time, wind and cloud deck.
     pub fn for_mission(
         resources: &BTreeMap<String, Vec<u8>>,
         code: &str,
         condition: Option<usize>,
+    ) -> AppResult<Self> {
+        Self::build(resources, code, condition, None)
+    }
+
+    /// Rebuilds the world a mission recording was flown in from its
+    /// recorded, resolved identity: layout, weather choice and layer, start
+    /// time, wind and cloud deck. It reads none of the environment variables
+    /// [`World::for_mission`] honours, so a replay looks the same whatever
+    /// the viewer's settings are.
+    #[allow(dead_code)] // Used by the mission replay viewer.
+    pub fn for_identity(
+        resources: &BTreeMap<String, Vec<u8>>,
+        identity: &tore_replay::World,
+    ) -> AppResult<Self> {
+        let recorded = Recorded::from_identity(identity)?;
+        Self::build(
+            resources,
+            &recorded.code,
+            recorded.condition,
+            Some(&recorded),
+        )
+    }
+
+    /// This world's resolved identity, as a recording's header keeps it.
+    #[allow(dead_code)] // Read by the mission recorder.
+    pub fn identity(&self) -> tore_replay::World {
+        let configuration = self.weather.configuration();
+        let cell = f64::from(CELL_FEET);
+        tore_replay::World {
+            theater: tore_formats::theater::base_theater(&self.layout)
+                .unwrap_or_default()
+                .to_owned(),
+            theater_name: self.theater.name.clone(),
+            layout: self.layout.clone(),
+            weather: self.condition.and_then(|c| u32::try_from(c).ok()),
+            weather_name: self
+                .condition
+                .and_then(|c| CONDITION_NAMES.get(c))
+                .map_or("map default", |name| name)
+                .to_owned(),
+            // Weather presentation is always seeded with 1 at launch.
+            weather_seed: Some(1),
+            time_of_day_s: f64::from(configuration.start_seconds()),
+            wind_fps: configuration.wind_world_fps(),
+            clouds: tore_replay::Clouds {
+                module: self.environment.layer.clone(),
+                deck_ft: self
+                    .environment
+                    .clouds
+                    .filter(|feet| *feet != 0)
+                    .map(f64::from),
+            },
+            extent_ft: Some([
+                self.theater.cols.saturating_sub(1) as f64 * cell,
+                self.theater.rows.saturating_sub(1) as f64 * cell,
+            ]),
+        }
+    }
+
+    fn build(
+        resources: &BTreeMap<String, Vec<u8>>,
+        code: &str,
+        condition: Option<usize>,
+        recorded: Option<&Recorded>,
     ) -> AppResult<Self> {
         let required = |n: &str| {
             resources
@@ -254,34 +432,46 @@ impl World {
             }
             None => (environment.layer.clone(), environment.time),
         };
+        // A recording names the layer it resolved, so a later change to the
+        // choice table cannot change an old replay's sky.
+        let layer = recorded.and_then(|r| r.layer.clone()).unwrap_or(layer);
         let module = tore_formats::weather::Module::parse(required(&layer)?)?;
-        let [hour, minute] = match std::env::var("TORE_WEATHER_TIME") {
-            Ok(text) => {
-                let (h, m) = text
-                    .split_once(':')
-                    .ok_or("TORE_WEATHER_TIME needs HH:MM")?;
-                [h.parse::<i32>()?, m.parse::<i32>()?]
-            }
-            Err(_) => launch.unwrap_or([12, 0]),
+        let [hour, minute] = match recorded {
+            Some(recorded) => recorded.time,
+            None => match std::env::var("TORE_WEATHER_TIME") {
+                Ok(text) => {
+                    let (h, m) = text
+                        .split_once(':')
+                        .ok_or("TORE_WEATHER_TIME needs HH:MM")?;
+                    [h.parse::<i32>()?, m.parse::<i32>()?]
+                }
+                Err(_) => launch.unwrap_or([12, 0]),
+            },
         };
-        let wind = match std::env::var("TORE_WIND") {
-            Ok(value) => {
-                let (heading, speed) = value
-                    .split_once(',')
-                    .ok_or("TORE_WIND needs heading,speed in degrees/feet per second")?;
-                Some([heading.parse::<i32>()?, speed.parse::<i32>()?])
-            }
-            Err(std::env::VarError::NotPresent) => environment.wind,
-            Err(e) => return Err(e.into()),
+        let wind = match recorded {
+            Some(recorded) => recorded.wind,
+            None => match std::env::var("TORE_WIND") {
+                Ok(value) => {
+                    let (heading, speed) = value
+                        .split_once(',')
+                        .ok_or("TORE_WIND needs heading,speed in degrees/feet per second")?;
+                    Some([heading.parse::<i32>()?, speed.parse::<i32>()?])
+                }
+                Err(std::env::VarError::NotPresent) => environment.wind,
+                Err(e) => return Err(e.into()),
+            },
         };
-        let weather =
-            tore_sim::environment::Environment::new(tore_sim::environment::Configuration::new(
-                module,
-                hour,
-                minute,
-                condition.map_or_else(|| environment.layer_parameter.unwrap_or(0), |i| i as i32),
-                wind,
-            )?);
+        let mut configuration = tore_sim::environment::Configuration::new(
+            module,
+            hour,
+            minute,
+            condition.map_or_else(|| environment.layer_parameter.unwrap_or(0), |i| i as i32),
+            wind,
+        )?;
+        if let Some(recorded) = recorded {
+            configuration = configuration.with_weather_seed(recorded.weather_seed)?;
+        }
+        let weather = tore_sim::environment::Environment::new(configuration);
         if weather.sample(0.).is_none() {
             return Err("mission weather layer covers no altitude at its launch time".into());
         }
@@ -289,7 +479,9 @@ impl World {
         environment.layer = layer;
         environment.layer_parameter = Some(weather.configuration().parameter());
         environment.time = Some([hour, minute]);
-        let cloud_altitude = if let Ok(value) = std::env::var("TORE_CLOUD_ALTITUDE") {
+        let cloud_altitude = if let Some(recorded) = recorded {
+            recorded.cloud_altitude
+        } else if let Ok(value) = std::env::var("TORE_CLOUD_ALTITUDE") {
             let value = value.parse::<i32>()?;
             if !(0..=400_000).contains(&value) {
                 return Err("cloud altitude outside 0..400000 feet".into());
@@ -374,6 +566,7 @@ impl World {
             ocean_motion: crate::ocean::Motion::from_environment()?,
             theater,
             layout,
+            condition,
             land_texture,
             environment,
             airport_scene: tore_sim::airport::Scene::default(),
@@ -1283,6 +1476,109 @@ pub(crate) mod tests {
             expected(&[1, 3], -1.)
         );
     }
+    /// A world's identity survives a recording header, and rebuilding from it
+    /// restores the launch settings exactly, whatever set the wind.
+    #[test]
+    fn recorded_identity_restores_the_launch_settings() {
+        use tore_sim::environment::{Configuration, Environment as Weather};
+        let module = || {
+            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
+                .unwrap()
+        };
+        let dir = crate::replay::tests::TempDir::new("identity");
+        let winds = [
+            None,
+            Some([-155, 20]),
+            Some([90, 0]),
+            Some([-360, 7]),
+            Some([360, 200]),
+            Some([13, 13]),
+        ];
+        for (n, wind) in winds.into_iter().enumerate() {
+            let configuration = Configuration::new(module(), 7, 21, 3, wind).unwrap();
+            let mut w = world();
+            w.layout = "~UKR1.MM".into();
+            w.theater.name = "Ukraine (UKR1)".into();
+            w.condition = Some(3);
+            w.environment.layer = "DAY2.LAY".into();
+            w.environment.clouds = Some(12_345);
+            w.weather = tore_sim::environment::Environment::new(configuration.clone());
+            let identity = w.identity();
+            assert_eq!(identity.theater, "UKR");
+            assert_eq!(identity.weather_name, "dawn");
+            assert_eq!(identity.extent_ft, Some([f64::from(CELL_FEET); 2]));
+            // Through a recording's text header and back.
+            let header = tore_replay::Header {
+                world: identity,
+                ..Default::default()
+            };
+            let path = dir.path().join(format!("{n}.tore-replay"));
+            let writer = tore_replay::Writer::create(&path, &header).unwrap();
+            let path = writer.finish(&tore_replay::Footer::default()).unwrap();
+            let identity = tore_replay::Recording::open(path)
+                .unwrap()
+                .header()
+                .world
+                .clone();
+            let recorded = Recorded::from_identity(&identity).unwrap();
+            assert_eq!(
+                recorded,
+                Recorded {
+                    code: "~UKR1".into(),
+                    condition: Some(3),
+                    layer: Some("DAY2.LAY".into()),
+                    time: [7, 21],
+                    wind: recorded.wind,
+                    cloud_altitude: 12_345,
+                    weather_seed: 1,
+                }
+            );
+            let rebuilt = Configuration::new(module(), 7, 21, 3, recorded.wind).unwrap();
+            assert_eq!(
+                rebuilt.wind_world_fps().map(f64::to_bits),
+                configuration.wind_world_fps().map(f64::to_bits),
+                "wind {wind:?} rebuilt as {:?}",
+                recorded.wind
+            );
+            assert_eq!(rebuilt.wind().origin, configuration.wind().origin);
+            let _ = Weather::new(rebuilt);
+        }
+        // No deck and the map's own weather.
+        let mut w = world();
+        w.environment.clouds = Some(0);
+        let identity = w.identity();
+        assert_eq!(identity.clouds.deck_ft, None);
+        assert_eq!(identity.weather, None);
+        assert_eq!(identity.weather_name, "map default");
+    }
+
+    #[test]
+    fn impossible_identities_are_refused() {
+        let good = || {
+            let mut w = world();
+            w.layout = "UKR.MM".into();
+            w.identity()
+        };
+        assert!(Recorded::from_identity(&good()).is_ok());
+        let mut bad = good();
+        bad.layout = "NOWHERE.MM".into();
+        assert!(Recorded::from_identity(&bad).is_err());
+        let mut bad = good();
+        bad.weather = Some(6);
+        assert!(Recorded::from_identity(&bad).is_err());
+        for seconds in [-60., 86_400., 30.5, 90., f64::NAN] {
+            let mut bad = good();
+            bad.time_of_day_s = seconds;
+            assert!(Recorded::from_identity(&bad).is_err(), "{seconds}");
+        }
+        let mut bad = good();
+        bad.clouds.deck_ft = Some(400_001.);
+        assert!(Recorded::from_identity(&bad).is_err());
+        let mut bad = good();
+        bad.wind_fps = [3.3, 0., 4.4];
+        assert!(Recorded::from_identity(&bad).is_err());
+    }
+
     pub(crate) fn world() -> World {
         use tore_formats::theater::TerrainCell;
         let cells = [0, 4, 8, 12]
@@ -1313,6 +1609,7 @@ pub(crate) mod tests {
             static_vertices: BTreeMap::new(),
             static_lines: BTreeMap::new(),
             layout: "TEST.MM".into(),
+            condition: None,
             land_texture: None,
             texture_indices: vec![],
             sky_indices: vec![],

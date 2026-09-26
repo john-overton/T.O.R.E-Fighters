@@ -1939,6 +1939,7 @@ dependencies = [
  "tore-formats",
  "tore-input",
  "tore-input-native",
+ "tore-replay",
  "tore-sim",
  "tracing",
  "wgpu",

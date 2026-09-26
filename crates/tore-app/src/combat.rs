@@ -2018,8 +2018,9 @@ mod ai_pose_tests {
 /// Exact drawn output of one synthetic combat scene. The hashes pin every
 /// vertex live flight uploads for other aircraft, debris, weapons, effects
 /// and ejected pilots, so a presentation refactor can prove it changed nothing.
+/// Mission recordings reuse the scene to prove a replay draws the same.
 #[cfg(test)]
-mod render_hash_tests {
+pub(crate) mod render_hash_tests {
     use super::*;
     use crate::{damage_art::DamageArt, render_snapshot::combat_geometry};
     use tore_formats::{
@@ -2206,7 +2207,7 @@ mod render_hash_tests {
             ]),
         )
     }
-    fn hornet_airframe(material: bool) -> Airframe {
+    pub(crate) fn hornet_airframe(material: bool) -> Airframe {
         Airframe::synthetic(
             AircraftId::F18,
             (0..16).map(|_| hornet()).collect(),
@@ -2219,7 +2220,7 @@ mod render_hash_tests {
             }),
         )
     }
-    fn models() -> Vec<Airframe> {
+    pub(crate) fn models() -> Vec<Airframe> {
         vec![
             hornet_airframe(false),
             Airframe::synthetic(
@@ -2278,7 +2279,7 @@ mod render_hash_tests {
         config.stations.push(missile);
         live::State::new(config, true).unwrap()
     }
-    fn combat(models: Vec<Airframe>, dummies: Vec<(usize, Vector)>) -> Combat {
+    pub(crate) fn combat(models: Vec<Airframe>, dummies: Vec<(usize, Vector)>) -> Combat {
         Combat {
             state: state(),
             art: CombatArt::synthetic(
@@ -2397,7 +2398,7 @@ mod render_hash_tests {
         }
     }
 
-    struct Scene {
+    pub(crate) struct Scene {
         previous: Vec<live::Target>,
         current: Vec<live::Target>,
         devices: Vec<(u32, [f64; 11], [f64; 11])>,
@@ -2405,7 +2406,7 @@ mod render_hash_tests {
         effects: Vec<live::Effect>,
         debris: Vec<Piece>,
     }
-    fn scene(config: &live::Configuration) -> Scene {
+    pub(crate) fn scene(config: &live::Configuration) -> Scene {
         use AircraftId::{F14, F18, Rafale};
         use tore_sim::wreck::Phase::{Exploded, Falling};
         let b = Basis::new;
@@ -2652,7 +2653,7 @@ mod render_hash_tests {
         }
     }
     /// The presented player state that fixture targets copy.
-    fn player() -> flight::State {
+    pub(crate) fn player() -> flight::State {
         let mut s =
             flight::State::new(&flight::animation_tests::profile(), [0., 5000., 0.]).unwrap();
         s.bay = 0.35;
@@ -2681,7 +2682,7 @@ mod render_hash_tests {
     }
     /// A general view, one hiding target 7 and missile 17, and one looking
     /// straight down the player's first tracer.
-    fn cameras() -> Vec<Camera> {
+    pub(crate) fn cameras() -> Vec<Camera> {
         let mut hiding = camera([500., 5100., 1500.], [-0.3, 0.05, -0.2]);
         hiding.hidden_target = Some(7);
         hiding.hidden_projectile = Some(17);
@@ -2691,7 +2692,7 @@ mod render_hash_tests {
             camera([33., 5011., 430.], [3.24, -0.03, 0.]),
         ]
     }
-    fn pilots() -> Vec<Escape> {
+    pub(crate) fn pilots() -> Vec<Escape> {
         [
             Phase::Seat,
             Phase::Freefall,
@@ -2714,7 +2715,7 @@ mod render_hash_tests {
         })
         .collect()
     }
-    fn escape_art() -> crate::ejection_art::Art {
+    pub(crate) fn escape_art() -> crate::ejection_art::Art {
         let pose = |n: usize| Shape {
             lines: vec![
                 Line {
@@ -2750,6 +2751,21 @@ mod render_hash_tests {
         ai_poses: bool,
         player: &flight::State,
     ) {
+        let [previous, current] = snapshots(combat, scene, ai_poses, player);
+        combat.render = RenderHistory::default();
+        combat.render.set_current(previous);
+        combat.render.advance(current);
+        combat.present_targets(alpha);
+    }
+    /// The scene's previous and current tick as live flight snapshots them,
+    /// with each aircraft's devices as the AI simulated them on those ticks.
+    /// Leaves the current tick's scene in `combat.state`.
+    pub(crate) fn snapshots(
+        combat: &mut Combat,
+        scene: &Scene,
+        ai_poses: bool,
+        player: &flight::State,
+    ) -> [RenderSnapshot; 2] {
         combat.ai_poses = ai_poses;
         combat.render = RenderHistory::default();
         combat.state.targets.clone_from(&scene.previous);
@@ -2766,10 +2782,7 @@ mod render_hash_tests {
                 }
             }
         }
-        combat.render = RenderHistory::default();
-        combat.render.set_current(previous);
-        combat.render.advance(current);
-        combat.present_targets(alpha);
+        [previous, current]
     }
 
     #[test]

@@ -107,7 +107,7 @@ is positive right wing down.
 
 | Item | Values |
 | --- | --- |
-| Aircraft | Position, attitude, velocity, airspeed, G, the 11 animated devices, engine heat, flags (engine, afterburner, airborne, on the ground, crashed, wreck gone, alive, ejected), wreck phase, fuel, pilot controls, hit points, regional damage and the failed structural section |
+| Aircraft | Position, attitude, velocity, airspeed, G, the 11 animated devices, engine heat, flags (engine, afterburner, airborne, on the ground, crashed, wreck gone, alive, ejected, and animated: whether anything moves the devices, since straight-flight fixtures keep the model's neutral pose), wreck phase, fuel, pilot controls, the auxiliary body rates that thrust-vectoring paddles and plumes follow, hit points, regional damage and the failed structural section |
 | Projectiles | Owner, weapon, target, position, previous position, direction, speed, tracer, inbound on the player, age, and the seeker's state |
 | Debris and ejected pilots | Position and attitude or heading |
 | Effects and puffs | Only those released this tick; the viewer ages them itself |
@@ -132,6 +132,7 @@ these bounds on every tick, with no drift.
 | Devices from 0 to 1, engine heat | 1/255 | 1/510, kept within 0 to 1 |
 | Elevator, aileron and rudder | 1/127 | 1/254, kept within -1 to 1 |
 | Pilot controls | 1/1024 | 1/2048 |
+| Auxiliary body rates | 1/4096 rad/s | 1/8192 rad/s |
 | Fuel | 1/16 lb | 1/32 lb |
 | Ids, flags, hit points, regional damage, wreck phase, seeker, events, trees, checksums | exact | none |
 
@@ -141,10 +142,11 @@ reads back bit for bit.
 ### Size
 
 On a synthetic 60-second flight with 17 aircraft, contrails, AI thinking 10
-times a second and player telemetry 30 times a second, the file took 13.2
-bytes per aircraft per tick (11.4 bytes for the aircraft alone). That is
-about **16 MB for a 10-minute mission with 17 aircraft**. Real AI control
-inputs are noisier than the test's, so expect somewhat more.
+times a second, player telemetry 30 times a second and thrust vectoring on
+the violent flights, the file took 13.5 bytes per aircraft per tick (11.7
+bytes for the aircraft alone). That is about **16.5 MB for a 10-minute
+mission with 17 aircraft**. Real AI control inputs are noisier than the
+test's, so expect somewhat more.
 
 ### Limits
 
@@ -383,6 +385,20 @@ Filled in by a later milestone (M1): the `--recording-*` commands.
   `detect`, `write_acmi`, `compare`, `write_diff`).
 - Event kinds, field names, tree channels, well-known tree labels, units
   and outcomes live in `tore_replay::vocab`, with each kind's fields listed.
+- The app converts between its per-tick `RenderSnapshot` and the recording
+  in `tore-app/src/replay/convert.rs`: `aircraft_state`, `projectile_state`,
+  `debris_states`, `escapee_state` and `EffectWatch` (effects are recorded
+  once, when they start) on the way in; `snapshot` on the way out, which
+  draws the same picture through the same helpers; `difference` names the
+  first thing two snapshots disagree on beyond the precision above. The
+  draw rules that hold for a whole flight (which models are loaded, which
+  aircraft draw with them) are header extras, read with
+  `Presentation::from_header`. Ground objects are not aircraft: only their
+  hit points are recorded.
+- `terrain::World::for_identity` rebuilds the recorded world from the
+  header's resolved settings (layout, weather choice and layer, start time,
+  wind and cloud deck) without reading `TORE_WEATHER_TIME`, `TORE_WIND` or
+  `TORE_CLOUD_ALTITUDE`; `World::identity` captures them from a live world.
 - Tests use synthetic recordings only; golden outputs live in
   `crates/tore-replay/tests/golden` and are rewritten with
   `TORE_UPDATE_GOLDEN=1 cargo test --locked -p tore-replay`.

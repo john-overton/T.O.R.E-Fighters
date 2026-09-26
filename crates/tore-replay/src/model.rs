@@ -339,11 +339,15 @@ pub struct AircraftFlags {
     pub wreck_gone: bool,
     pub alive: bool,
     pub ejected: bool,
+    /// Something simulates the animated devices. When false nothing moves
+    /// them, `devices` holds zeros and the viewer keeps the model's neutral
+    /// pose, as the game does for straight-flight fixtures.
+    pub animated: bool,
 }
 
 impl AircraftFlags {
     /// Flag names in bit order.
-    pub const NAMES: [&str; 8] = [
+    pub const NAMES: [&str; 9] = [
         "engine_on",
         "afterburner",
         "airborne",
@@ -352,9 +356,10 @@ impl AircraftFlags {
         "wreck_gone",
         "alive",
         "ejected",
+        "animated",
     ];
 
-    fn array(self) -> [bool; 8] {
+    fn array(self) -> [bool; 9] {
         [
             self.engine_on,
             self.afterburner,
@@ -364,6 +369,7 @@ impl AircraftFlags {
             self.wreck_gone,
             self.alive,
             self.ejected,
+            self.animated,
         ]
     }
 
@@ -386,6 +392,7 @@ impl AircraftFlags {
             wreck_gone: on(5),
             alive: on(6),
             ejected: on(7),
+            animated: on(8),
         }
     }
 
@@ -425,6 +432,10 @@ pub struct AircraftState {
     pub fuel_lb: f64,
     /// Pilot controls, in the order of [`control`].
     pub controls: [f64; 4],
+    /// Auxiliary body rates in radians per second, `[roll, pitch, yaw]`.
+    /// Thrust-vectoring paddles and plumes are drawn from them; zero for
+    /// aircraft without them.
+    pub auxiliary_rates: [f64; 3],
     /// Hit points, exact.
     pub hp: i32,
     pub max_hp: i32,
