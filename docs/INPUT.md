@@ -264,8 +264,10 @@ Default keys follow Fighters Anthology wherever the original has the command
 T.O.R.E additions on keys FA leaves free: E (engine), Shift+U (HUD), F11
 (help), Ctrl+1–6, Ctrl+Shift+1–4 and Ctrl+Tab (instruments), Shift+N and
 Shift+L (next airport, request landing), Ctrl+Shift+R and Ctrl+Shift+C (tower
-repeat and cancel), Alt+L (land at selected airport), and Alt+0 with
-Alt+Shift+1–4 (address the flight or one wingman).
+repeat and cancel), Alt+L (land at selected airport), Alt+0 with
+Alt+Shift+1–4 (address the flight or one wingman), and Ctrl+B (mark a
+[mission replay](REPLAYS.md#when) moment). With Pref → Debug panels? on, a
+right-click that does not drag opens the debug menu, which takes no key.
 
 Deliberate differences from FA:
 

@@ -41,6 +41,13 @@ is printed to the terminal. Captures, `--smoke-test` and frame timing runs
 do not record. `TORE_RECORD_MISSIONS=0` turns recording off for a run and
 `=1` forces it on, for example to time frames with recording on and off.
 
+**Ctrl+B** in flight marks the moment in the recording ("Bookmark N saved"),
+for "something odd just happened". It is the `bookmark` action ("Mark replay
+moment", Game and menus), rebindable like any other. Fighters Anthology
+gives Ctrl+B no command, so it follows the
+[key placement rules](INPUT.md#key-placement) for T.O.R.E-only commands.
+The debug panels' right-click takes no key.
+
 ### Where and what name
 
 Recordings live in `replays/` in the app data folder (which

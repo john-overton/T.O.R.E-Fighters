@@ -1746,6 +1746,34 @@ mod tests {
         assert_eq!(ui.key("s", false, false, true, &[]), Command::RadioSilence);
     }
     #[test]
+    fn the_bookmark_takes_ctrl_b_which_fa_leaves_free() {
+        let mut ui = FlightUi::default();
+        // key(name, shift, ctrl, alt, tree)
+        assert_eq!(ui.key("b", false, true, false, &[]), Command::Bookmark);
+        // B, Shift+B and Alt+B keep their own meanings.
+        assert_eq!(
+            ui.key("b", false, false, false, &[]),
+            Command::Toggle(Switch::Airbrake)
+        );
+        assert_eq!(
+            ui.key("b", true, false, false, &[]),
+            Command::Toggle(Switch::Burner)
+        );
+        assert_eq!(
+            ui.key("b", false, false, true, &[]),
+            Command::Wing(tore_sim::ai::wing::PlayerOrder::BugOut)
+        );
+        assert_ne!(ui.key("b", true, true, false, &[]), Command::Bookmark);
+        // No FA Ctrl command lands on it (docs/spec/keyboard.md).
+        for key in ["a", "z", "x", "r", "p", "q", "v", "t", "f"] {
+            assert_ne!(
+                ui.key(key, false, true, false, &[]),
+                Command::Bookmark,
+                "{key}"
+            );
+        }
+    }
+    #[test]
     fn wing_addressing_uses_alt_zero_and_alt_shift_digits() {
         let mut ui = FlightUi::default();
         assert_eq!(
