@@ -53,6 +53,9 @@ pub(super) struct Why {
     guides: BTreeMap<u32, Guide>,
     /// This tick's decoy rolls, by projectile.
     decoys: BTreeMap<u32, DecoyRoll>,
+    /// The player's decoy rolls made between ticks, already written; the
+    /// next tick's reasons and guidance trees read them.
+    pub(super) pending_rolls: Vec<DecoyRoll>,
     /// The last AI message number given out.
     next_message: i64,
     /// Attack reports by (attacker, defended aircraft, projectile), so a
@@ -173,6 +176,27 @@ pub(super) fn decoy_name(class: SeekerClass) -> &'static str {
         SeekerClass::Radar => "chaff",
         SeekerClass::Infrared => "a flare",
     }
+}
+
+/// The `weapon.decoyed` entry for a roll that decoyed its missile, fired by
+/// `owner` when known.
+pub(super) fn decoyed_event(roll: &DecoyRoll, owner: Option<u32>) -> Event {
+    let mut event = Event::new(kind::WEAPON_DECOYED)
+        .with_object(roll.releaser)
+        .with(field::PROJECTILE, Value::Id(roll.projectile))
+        .with(field::DECOY, decoy_kind(roll.class))
+        .with(field::SUSCEPTIBILITY, i64::from(roll.susceptibility))
+        .with(field::EFFECTIVENESS, i64::from(roll.effectiveness));
+    if let Some(owner) = owner {
+        event = event.with_subject(owner);
+    }
+    if let Some(draw) = roll.draw {
+        event = event.with(field::ROLL, i64::from(draw.value));
+        if let Some(threshold) = draw.threshold {
+            event = event.with(field::THRESHOLD, i64::from(threshold));
+        }
+    }
+    event.with(field::REASON, roll_reason(roll))
 }
 
 fn roll_reason(roll: &DecoyRoll) -> String {
@@ -451,15 +475,15 @@ impl Recorder {
     /// guidance trees.
     pub(super) fn decoys(&mut self, tick: &Tick<'_>, frame: &Frame, events: &mut Vec<Event>) {
         self.why.decoys.clear();
+        // The player's rolls since the last tick; their entries are written.
+        for roll in std::mem::take(&mut self.why.pending_rolls) {
+            self.keep_roll(roll);
+        }
         let Some(wings) = tick.wings else {
             return;
         };
         for roll in wings.decoy_rolls() {
-            self.why.decoys.insert(roll.projectile, *roll);
-            if let Some(guide) = self.why.guides.get_mut(&roll.projectile) {
-                guide.roll = Some(*roll);
-                guide.force = true;
-            }
+            self.keep_roll(*roll);
             if !roll.decoyed {
                 continue;
             }
@@ -474,22 +498,17 @@ impl Recorder {
                         .find(|p| p.id == roll.projectile)
                         .map(|p| p.owner)
                 });
-            let mut event = Event::new(kind::WEAPON_DECOYED)
-                .with_object(roll.releaser)
-                .with(field::PROJECTILE, Value::Id(roll.projectile))
-                .with(field::DECOY, decoy_kind(roll.class))
-                .with(field::SUSCEPTIBILITY, i64::from(roll.susceptibility))
-                .with(field::EFFECTIVENESS, i64::from(roll.effectiveness));
-            if let Some(owner) = owner {
-                event = event.with_subject(owner);
-            }
-            if let Some(draw) = roll.draw {
-                event = event.with(field::ROLL, i64::from(draw.value));
-                if let Some(threshold) = draw.threshold {
-                    event = event.with(field::THRESHOLD, i64::from(threshold));
-                }
-            }
-            events.push(event.with(field::REASON, roll_reason(roll)));
+            events.push(decoyed_event(roll, owner));
+        }
+    }
+
+    /// A roll this tick's outcome reasons and the missile's guidance tree
+    /// read.
+    fn keep_roll(&mut self, roll: DecoyRoll) {
+        self.why.decoys.insert(roll.projectile, roll);
+        if let Some(guide) = self.why.guides.get_mut(&roll.projectile) {
+            guide.roll = Some(roll);
+            guide.force = true;
         }
     }
 

@@ -139,6 +139,9 @@ const AIRCRAFT: u64 = 1;
 const PROJECTILE: u64 = 2;
 const DECOY: u64 = 3;
 const PARACHUTE: u64 = 4;
+/// How long a released flare burns and a chaff cloud drifts, in ticks.
+const DEVICE_FLARE_TICKS: u64 = 3_600;
+const DEVICE_CHAFF_TICKS: u64 = 2_400;
 
 fn object_id(kind: u64, value: u64) -> u64 {
     kind << 40 | value
@@ -687,6 +690,39 @@ pub fn write_acmi(
                 vec![("Type", tags.to_owned()), ("Name", name.to_owned())],
             )?;
             decoys.push((tick + u64::from(effect.duration_ticks.max(1)), id));
+        }
+        // Released chaff and flares, where they left their aircraft. A
+        // flare burns for 30 seconds and chaff drifts for 20
+        // (docs/spec/countermeasures.md); the export keeps them where they
+        // were released rather than flying them.
+        for e in frame
+            .events
+            .iter()
+            .filter(|e| e.kind == crate::vocab::kind::COMBAT_COUNTERMEASURE)
+        {
+            let (tags, name, life) = match e.string(crate::vocab::field::DECOY) {
+                Some("flare") => ("Misc+Decoy+Flare", "Flare", DEVICE_FLARE_TICKS),
+                Some("chaff") => ("Misc+Decoy+Chaff", "Chaff", DEVICE_CHAFF_TICKS),
+                _ => continue,
+            };
+            let [x, y, z] = crate::vocab::field::POSITION.map(|name| e.num(name));
+            let (Some(x), Some(y), Some(z)) = (x, y, z) else {
+                continue;
+            };
+            if ![x, y, z].iter().all(|v| v.is_finite()) {
+                continue;
+            }
+            let id = object_id(DECOY, next_decoy);
+            next_decoy += 1;
+            let mut props = vec![("Type", tags.to_owned()), ("Name", name.to_owned())];
+            if let Some(owner) = e.subject.filter(|owner| seen_aircraft.contains(owner)) {
+                props.push((
+                    "Parent",
+                    format!("{:x}", object_id(AIRCRAFT, u64::from(owner))),
+                ));
+            }
+            acmi.object(tick, id, projection.simple([x, y, z]), props)?;
+            decoys.push((tick + life, id));
         }
         let gone: Vec<u64> = acmi
             .objects

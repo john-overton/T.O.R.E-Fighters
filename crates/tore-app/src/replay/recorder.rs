@@ -22,7 +22,10 @@
 //! The reasons behind decisions live in two child modules: [`why`] turns the
 //! AI's and the flight model's write-only records into reason events and
 //! display trees, and [`journal`] turns the AI message journal and the
-//! communication journal into `comms.*` events.
+//! communication journal into `comms.*` events. A third, [`devices`], turns
+//! combat's write-only notes of released chaff and flares and the player's
+//! decoy rolls into entries a replay flies the devices from.
+mod devices;
 mod journal;
 mod why;
 
@@ -250,6 +253,9 @@ pub struct Recorder {
     infos: BTreeMap<u32, replay::AircraftInfo>,
     /// What the reason events and trees remember between ticks.
     why: why::Why,
+    /// The AI aircraft's chaff and flares left as the last tick was
+    /// recorded, for the releases its end collects.
+    dispensers: devices::Dispensers,
 }
 
 /// Comms and audio entries kept for live flight between its looks.
@@ -316,6 +322,7 @@ impl Recorder {
             trees: Vec::new(),
             infos: BTreeMap::new(),
             why: why::Why::default(),
+            dispensers: devices::Dispensers::new(),
         };
         for info in roster {
             recorder.register(info.clone());
@@ -500,7 +507,8 @@ impl Recorder {
         self.release_held();
     }
 
-    /// Cockpit messages and player commands collected since the last look.
+    /// Cockpit messages, player commands, released chaff and flares and the
+    /// player's decoy rolls collected since the last look.
     fn collect(&mut self, ui: Option<&mut flight_ui::FlightUi>, combat: &mut combat::Combat) {
         if let Some(ui) = ui {
             for (text, shown) in ui.take_notes() {
@@ -542,6 +550,7 @@ impl Recorder {
             }
             self.note(event);
         }
+        self.countermeasures(combat);
     }
 
     /// Closes the tick's frame. It is written when the next tick opens, or
@@ -631,13 +640,15 @@ impl Recorder {
     ) {
         for emission in emissions {
             let [x, y, z] = emission.position;
-            self.note(
-                Event::new(kind::AUDIO_EFFECT)
-                    .with(field::SOUND, format!("{:?}", emission.kind).to_lowercase())
-                    .with(field::X_FT, x)
-                    .with(field::Y_FT, y)
-                    .with(field::Z_FT, z),
-            );
+            let mut event = Event::new(kind::AUDIO_EFFECT)
+                .with(field::SOUND, format!("{:?}", emission.kind).to_lowercase())
+                .with(field::X_FT, x)
+                .with(field::Y_FT, y)
+                .with(field::Z_FT, z);
+            if emission.own {
+                event = event.with(field::OWN, true);
+            }
+            self.note(event);
         }
         for (sound, weapon) in releases {
             let weapon = self.weapon_id(weapon);
@@ -760,6 +771,7 @@ impl Recorder {
         let mut events = Vec::new();
         // Decoy rolls first: they explain this tick's spoofed outcomes.
         self.decoys(&tick, &frame, &mut events);
+        self.dispensers = devices::dispensers(tick.wings);
         self.weapon_events(&tick, &frame, &mut shots, &live_shots, &mut events);
         self.aircraft_events(&tick, &frame, &mut events);
         self.cue_events(&tick, player_ground, &mut events);
@@ -2049,6 +2061,113 @@ mod tests {
         );
         // Tick 0 carries the once-a-second checksum; tick 1 does not.
         assert!(frames[0].checksum.is_some() && frames[1].checksum.is_none());
+    }
+
+    #[test]
+    fn released_chaff_and_flares_are_recorded_exactly_on_their_ticks() {
+        use tore_sim::combat::countermeasures::Release;
+        let (mut recorder, receiver) = Recorder::detached(64, &[]);
+        let mut combat = fixture::combat(Vec::new(), Vec::new());
+        let player = fixture::player();
+        combat.restart_render(&player, None);
+        let snapshot = combat.render_snapshot().clone();
+        let mut ui = flight_ui::FlightUi::default();
+        (combat.state.chaff, combat.state.flares) = (2, 2);
+        tick(&mut recorder, &mut combat, &snapshot, 0, &mut ui);
+        // Between ticks the player releases chaff: its entries land on the
+        // tick on screen, the sound with the player's own flag.
+        let launcher = combat::launcher(&player);
+        combat.command(live::Command::ReleaseChaff, launcher);
+        let emissions = combat.state.take_sound_events();
+        recorder.sounds(&emissions, &[]);
+        tick(&mut recorder, &mut combat, &snapshot, 1, &mut ui);
+        // An AI aircraft's flare leaves during tick 2, and a range reset
+        // clears the devices during tick 3.
+        let flare = Release {
+            position: [100.5, 2_000.25, -300.125],
+            velocity: [1. / 3., -2., 700.],
+            basis: tore_sim::attitude::Basis::new(0.3, -0.1, 0.7),
+        };
+        for (number, change) in [(2u64, true), (3, false)] {
+            recorder.start_tick(Some(&mut ui), &mut combat);
+            if change {
+                combat
+                    .state
+                    .device_released(flare, live::EffectKind::Flare, 7);
+            } else {
+                combat.state.range_target(launcher);
+            }
+            let mut snapshot = snapshot.clone();
+            snapshot.tick = number;
+            let (world, flight) = (terrain::tests::world(), fixture::player());
+            recorder.begin(Tick {
+                snapshot: &snapshot,
+                combat: &combat,
+                flight: &flight,
+                previous: &flight,
+                pilot: &flight::PilotInput::default(),
+                wings: None,
+                world: &world,
+                events: &[],
+                outcomes: &[],
+                journal: None,
+            });
+            recorder.end(Some(&mut ui), &mut combat);
+        }
+        tick(&mut recorder, &mut combat, &snapshot, 4, &mut ui);
+        let frames = frames(&receiver);
+        let entries = |tick: u64, kind: &str| -> Vec<Event> {
+            frames
+                .iter()
+                .filter(|f| f.tick == tick)
+                .flat_map(|f| f.events.iter())
+                .filter(|e| e.kind == kind)
+                .cloned()
+                .collect()
+        };
+        let chaff = entries(0, kind::COMBAT_COUNTERMEASURE);
+        assert_eq!(chaff.len(), 1);
+        assert_eq!(
+            convert::device_release(&chaff[0]),
+            Some(convert::DeviceRelease {
+                owner: 0,
+                kind: live::EffectKind::Chaff,
+                release: Release {
+                    position: launcher.position,
+                    velocity: launcher.velocity,
+                    basis: launcher.basis,
+                },
+                number: 1,
+            })
+        );
+        assert_eq!(chaff[0].num(field::LEFT), Some(1.));
+        let sounds = entries(0, kind::AUDIO_EFFECT);
+        assert_eq!(sounds.len(), 1);
+        assert_eq!(
+            (sounds[0].string(field::SOUND), sounds[0].flag(field::OWN)),
+            (Some("chaff"), Some(true))
+        );
+        let command = entries(0, kind::PLAYER_COMMAND);
+        assert_eq!(command[0].string(field::COMMAND), Some("chaff"));
+        // The AI's flare: every number back bit for bit; its dispensers are
+        // unknown without an AI bridge, so no count is kept.
+        let ai = entries(2, kind::COMBAT_COUNTERMEASURE);
+        let back = convert::device_release(&ai[0]).unwrap();
+        assert_eq!(
+            (back.owner, back.kind, back.number),
+            (7, live::EffectKind::Flare, 2)
+        );
+        for (a, b) in [
+            (back.release.position, flare.position),
+            (back.release.velocity, flare.velocity),
+            (back.release.basis.right, flare.basis.right),
+            (back.release.basis.up, flare.basis.up),
+            (back.release.basis.forward, flare.basis.forward),
+        ] {
+            assert_eq!(a.map(f64::to_bits), b.map(f64::to_bits));
+        }
+        assert!(ai[0].get(field::LEFT).is_none());
+        assert_eq!(entries(3, kind::COMBAT_COUNTERMEASURES_CLEARED).len(), 1);
     }
 
     #[test]

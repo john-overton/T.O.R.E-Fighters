@@ -155,6 +155,52 @@ pub struct Strike {
 }
 /// Strikes kept between drains; older ones are dropped first.
 pub const MAX_STRIKES: usize = 64;
+/// What happened to the released chaff and flares, kept for a mission
+/// recording, which rebuilds the devices from it. Write-only: nothing in
+/// combat reads it back; the host drains the list with
+/// [`State::take_device_notes`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DeviceNote {
+    Released(DeviceRelease),
+    /// A range reset removed every device and restarted their numbering.
+    Cleared,
+}
+/// One chaff cartridge or flare leaving an aircraft.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeviceRelease {
+    /// The releasing aircraft: [`PLAYER_OWNER`] or an AI actor id.
+    pub owner: u32,
+    /// [`EffectKind::Chaff`] or [`EffectKind::Flare`].
+    pub kind: EffectKind,
+    pub release: super::countermeasures::Release,
+    /// The device's number among this flight's releases, from 1. It chose
+    /// the device's look.
+    pub number: u64,
+    /// The player's devices of this kind left afterwards; `None` for an AI
+    /// aircraft, whose dispensers combat does not hold.
+    pub left: Option<u8>,
+}
+/// One missile's roll against one of the player's chaff cartridges or
+/// flares, kept for a mission recording. Write-only; the host drains the
+/// list with [`State::take_decoy_rolls`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DecoyRoll {
+    pub projectile: u32,
+    /// [`EffectKind::Chaff`] or [`EffectKind::Flare`].
+    pub kind: EffectKind,
+    /// The missile's decoy susceptibility, percent.
+    pub susceptibility: u8,
+    /// The dispenser's effectiveness, percent.
+    pub effectiveness: u8,
+    /// The chance in percent: susceptibility x effectiveness / 100.
+    pub threshold: u8,
+    /// The draw, 0 to 99; below the threshold the missile follows the decoy.
+    pub roll: u16,
+    pub decoyed: bool,
+}
+/// Device notes and decoy rolls kept between drains; older ones are dropped
+/// first, so a host that never drains them still uses bounded memory.
+pub const MAX_RELEASE_RECORDS: usize = 256;
 #[derive(Clone, Debug)]
 pub struct Station {
     pub weapon: Weapon,
@@ -753,6 +799,10 @@ pub struct State {
     pub smoke: super::smoke::Smoke,
     /// Released chaff and flares, presentation only.
     pub devices: super::countermeasures::Devices,
+    /// Every release since the host last drained them, for recordings.
+    device_log: std::collections::VecDeque<DeviceNote>,
+    /// The player's decoy rolls since the last drain, for recordings.
+    decoy_log: std::collections::VecDeque<DecoyRoll>,
     pub debris: Vec<super::debris::Piece>,
     player_fragment_released: bool,
     player_explosion_reported: bool,
@@ -901,6 +951,8 @@ impl State {
             sound_events: vec![],
             smoke: super::smoke::Smoke::default(),
             devices: Default::default(),
+            device_log: Default::default(),
+            decoy_log: Default::default(),
             debris: Vec::new(),
             player_fragment_released: false,
             player_explosion_reported: false,
@@ -1325,7 +1377,7 @@ impl State {
                 basis: launcher.basis,
             },
             kind,
-            true,
+            PLAYER_OWNER,
         );
         for projectile in &mut self.projectiles {
             let weapon = projectile
@@ -1340,11 +1392,27 @@ impl State {
             if !guiding {
                 continue;
             }
-            let threshold = crate::ai::threat::decoy_threshold(
+            let (susceptibility, effectiveness) = (
                 weapon.seeker.chaff_flare_chance.min(100),
                 effectiveness.min(100),
             );
-            if draw(&mut self.rng, 100) < u16::from(threshold) {
+            let threshold = crate::ai::threat::decoy_threshold(susceptibility, effectiveness);
+            let roll = draw(&mut self.rng, 100);
+            let decoyed = roll < u16::from(threshold);
+            // Write-only: the roll as a recording tells it.
+            if self.decoy_log.len() == MAX_RELEASE_RECORDS {
+                self.decoy_log.pop_front();
+            }
+            self.decoy_log.push_back(DecoyRoll {
+                projectile: projectile.id,
+                kind,
+                susceptibility,
+                effectiveness,
+                threshold,
+                roll,
+                decoyed,
+            });
+            if decoyed {
                 self.ledger.resolve(projectile.id, Resolution::Spoofed);
                 projectile.target = None;
                 projectile.guidance = None;
@@ -1699,6 +1767,7 @@ impl State {
         self.effects.clear();
         self.smoke = super::smoke::Smoke::default();
         self.devices = Default::default();
+        self.note_devices(DeviceNote::Cleared);
         self.debris.clear();
         self.targets
             .retain(|t| self.ground_bounds.contains_key(&t.id));
@@ -1980,18 +2049,29 @@ impl State {
     /// One chaff cartridge or flare leaving an aircraft: its visible device
     /// (a flare leaves as a pair) and the original's release recording, one
     /// per device, for the player and AI alike (docs/spec/countermeasures.md).
-    /// `own` marks the player's aircraft.
+    /// `owner` is the releasing aircraft; [`PLAYER_OWNER`] is the player's own.
     pub fn device_released(
         &mut self,
         release: super::countermeasures::Release,
         kind: EffectKind,
-        own: bool,
+        owner: u32,
     ) {
         let position = release.position;
         match kind {
             EffectKind::Chaff => self.devices.release_chaff(release),
             _ => self.devices.release_flare(release),
         }
+        // Write-only: what a recording needs to rebuild the device.
+        self.note_devices(DeviceNote::Released(DeviceRelease {
+            owner,
+            kind,
+            release,
+            number: self.devices.released(),
+            left: (owner == PLAYER_OWNER).then_some(match kind {
+                EffectKind::Chaff => self.chaff,
+                _ => self.flares,
+            }),
+        }));
         self.push_sound(crate::acoustics::Emission {
             kind: match kind {
                 EffectKind::Chaff => crate::acoustics::Kind::Chaff,
@@ -1999,8 +2079,24 @@ impl State {
             },
             position,
             arrived: false,
-            own,
+            own: owner == PLAYER_OWNER,
         });
+    }
+    fn note_devices(&mut self, note: DeviceNote) {
+        if self.device_log.len() == MAX_RELEASE_RECORDS {
+            self.device_log.pop_front();
+        }
+        self.device_log.push_back(note);
+    }
+    /// Chaff and flare releases and resets since the last call, oldest
+    /// first. For mission recordings; combat never reads them.
+    pub fn take_device_notes(&mut self) -> Vec<DeviceNote> {
+        self.device_log.drain(..).collect()
+    }
+    /// The player's decoy rolls since the last call, oldest first. For
+    /// mission recordings; combat never reads them.
+    pub fn take_decoy_rolls(&mut self) -> Vec<DecoyRoll> {
+        self.decoy_log.drain(..).collect()
     }
 
     fn effect(&mut self, position: Vector, kind: EffectKind) {
@@ -4325,7 +4421,7 @@ mod tests {
                 basis: Basis::new(0., 0., 0.),
             },
             EffectKind::Chaff,
-            false,
+            4,
         );
         assert_eq!(
             heard(&mut s),
@@ -4333,6 +4429,95 @@ mod tests {
         );
         assert_eq!((s.devices.flares.len(), s.devices.chaff.len()), (2, 2));
         assert!(s.effects.is_empty());
+    }
+    #[test]
+    fn releases_resets_and_the_players_decoy_rolls_are_noted_for_recordings() {
+        let mut s = fixture(true);
+        s.config.stations[0].weapon.seeker.chaff_flare_chance = 50;
+        s.config.ecm.chaff[1] = 100;
+        (s.chaff, s.flares) = (2, 1);
+        s.command(Command::Incoming, launcher());
+        let missile = s.projectiles[0].id;
+        s.command(Command::ReleaseChaff, launcher());
+        let decoyed = s.projectiles[0].target.is_none();
+        // A flare cannot decoy the radar missile, so it rolls nothing.
+        s.command(Command::ReleaseFlare, launcher());
+        s.device_released(
+            super::super::countermeasures::Release {
+                position: [10., 20., 30.],
+                velocity: [1., 2., 3.],
+                basis: Basis::new(0.5, 0., 0.),
+            },
+            EffectKind::Flare,
+            4,
+        );
+        let l = launcher();
+        let player = super::super::countermeasures::Release {
+            position: l.position,
+            velocity: l.velocity,
+            basis: l.basis,
+        };
+        let notes = s.take_device_notes();
+        assert_eq!(
+            notes,
+            [
+                DeviceNote::Released(DeviceRelease {
+                    owner: PLAYER_OWNER,
+                    kind: EffectKind::Chaff,
+                    release: player,
+                    number: 1,
+                    left: Some(1),
+                }),
+                DeviceNote::Released(DeviceRelease {
+                    owner: PLAYER_OWNER,
+                    kind: EffectKind::Flare,
+                    release: player,
+                    number: 2,
+                    left: Some(0),
+                }),
+                DeviceNote::Released(DeviceRelease {
+                    owner: 4,
+                    kind: EffectKind::Flare,
+                    release: super::super::countermeasures::Release {
+                        position: [10., 20., 30.],
+                        velocity: [1., 2., 3.],
+                        basis: Basis::new(0.5, 0., 0.),
+                    },
+                    number: 3,
+                    left: None,
+                }),
+            ]
+        );
+        let rolls = s.take_decoy_rolls();
+        assert_eq!(rolls.len(), 1);
+        let roll = rolls[0];
+        assert_eq!(
+            (
+                roll.projectile,
+                roll.kind,
+                roll.susceptibility,
+                roll.effectiveness,
+                roll.threshold
+            ),
+            (missile, EffectKind::Chaff, 50, 100, 50)
+        );
+        assert_eq!(roll.decoyed, decoyed);
+        assert_eq!(roll.decoyed, roll.roll < 50);
+        assert!(s.take_device_notes().is_empty() && s.take_decoy_rolls().is_empty());
+        // A range reset clears the devices, and says so.
+        s.range_target(launcher());
+        assert_eq!(s.take_device_notes(), [DeviceNote::Cleared]);
+        // Bounded when nobody drains them.
+        for _ in 0..MAX_RELEASE_RECORDS + 5 {
+            s.device_released(player, EffectKind::Chaff, 4);
+        }
+        let notes = s.take_device_notes();
+        assert_eq!(notes.len(), MAX_RELEASE_RECORDS);
+        assert!(
+            matches!(notes[0], DeviceNote::Released(r) if r.number == 6),
+            "{:?}",
+            notes[0]
+        );
     }
     #[test]
     fn an_ai_round_does_not_credit_the_player_score() {

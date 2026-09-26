@@ -579,7 +579,8 @@ back into a snapshot; the draw rules that hold for a whole flight (loaded
 models, which ids draw with them) travel in the header. Everything the
 recorder reads was already computed by the tick. The few outputs it needed
 are write-only and bounded, drained by the host and never read by flight: the
-combat ledger's list of shot outcomes, the cockpit message requests in
+combat ledger's list of shot outcomes, combat's notes of released chaff and
+flares and of the player's decoy rolls, the cockpit message lines in
 `FlightUi`, the player commands in `Combat`, the AI message journal
 (`AiWings::take_ai_journal`, handed to the recorder in `Tick::journal`) and
 the communication journal (`Recorder::drain_comms`). Frames go to a writer

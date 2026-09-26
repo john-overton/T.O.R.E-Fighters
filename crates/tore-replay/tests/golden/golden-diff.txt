@@ -25,6 +25,7 @@ launches: differ (A 1, B 2), first at #2:
   A nothing (ran out)
   B 0:03.3  You launched AIM-120
 hits: same (1 each)
+chaff and flares: same (2 each)
 shot outcomes: same (2 each)
 AI decisions: same (2 each)
 comms: same (7 each)

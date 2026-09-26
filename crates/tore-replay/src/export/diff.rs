@@ -337,10 +337,14 @@ fn frame_differences(
     out
 }
 
-const CATEGORIES: [(&str, &[&str]); 8] = [
+const CATEGORIES: [(&str, &[&str]); 9] = [
     ("kills", &["combat.destroyed"]),
     ("launches", &["weapon.launch"]),
     ("hits", &["combat.hit"]),
+    (
+        "chaff and flares",
+        &["combat.countermeasure", "combat.countermeasures_cleared"],
+    ),
     ("shot outcomes", &["weapon.", "combat."]),
     ("AI decisions", &["ai."]),
     ("comms", &["comms."]),

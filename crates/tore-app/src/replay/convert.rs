@@ -418,6 +418,95 @@ fn live_effect_kind(kind: replay::EffectKind) -> Option<live::EffectKind> {
     })
 }
 
+/// One chaff cartridge or flare as a recording keeps it: the releasing
+/// aircraft, the kind, the aircraft's exact position, velocity and attitude
+/// when it left, and its number, which sets its look.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeviceRelease {
+    pub owner: u32,
+    /// [`live::EffectKind::Chaff`] or [`live::EffectKind::Flare`].
+    pub kind: live::EffectKind,
+    pub release: tore_sim::combat::countermeasures::Release,
+    pub number: u64,
+}
+
+/// `chaff` or `flare`, as the `decoy` field names them.
+pub fn decoy_name(kind: live::EffectKind) -> &'static str {
+    if kind == live::EffectKind::Chaff {
+        "chaff"
+    } else {
+        "flare"
+    }
+}
+
+/// The `combat.countermeasure` entry for a released device. Every number is
+/// kept exactly, so [`device_release`] gives back the same release and a
+/// replay flies the device as combat flew it.
+pub fn device_event(device: &DeviceRelease, left: Option<u32>) -> replay::Event {
+    use replay::vocab::field;
+    let tore_sim::combat::countermeasures::Release {
+        position,
+        velocity,
+        basis,
+    } = device.release;
+    let mut event = replay::Event::new(replay::vocab::kind::COMBAT_COUNTERMEASURE)
+        .with_subject(device.owner)
+        .with(field::DECOY, decoy_name(device.kind))
+        .with(field::NUMBER, device.number as i64);
+    if let Some(left) = left {
+        event = event.with(field::LEFT, i64::from(left));
+    }
+    let numbers = position
+        .into_iter()
+        .chain(velocity)
+        .chain(basis.right)
+        .chain(basis.up)
+        .chain(basis.forward);
+    let names = field::POSITION
+        .into_iter()
+        .chain(field::VELOCITY)
+        .chain(field::BASIS);
+    for (name, value) in names.zip(numbers) {
+        event = event.with(name, value);
+    }
+    event.with_text(format!("released {}", decoy_name(device.kind)))
+}
+
+/// A recorded `combat.countermeasure` entry back into its release; `None`
+/// when a value is missing.
+pub fn device_release(event: &replay::Event) -> Option<DeviceRelease> {
+    use replay::vocab::field;
+    if event.kind != replay::vocab::kind::COMBAT_COUNTERMEASURE {
+        return None;
+    }
+    let kind = match event.string(field::DECOY)? {
+        "chaff" => live::EffectKind::Chaff,
+        "flare" => live::EffectKind::Flare,
+        _ => return None,
+    };
+    let vector = |names: &[&str]| -> Option<[f64; 3]> {
+        Some([
+            event.num(names[0])?,
+            event.num(names[1])?,
+            event.num(names[2])?,
+        ])
+    };
+    Some(DeviceRelease {
+        owner: event.subject?,
+        kind,
+        release: tore_sim::combat::countermeasures::Release {
+            position: vector(&field::POSITION)?,
+            velocity: vector(&field::VELOCITY)?,
+            basis: tore_sim::attitude::Basis {
+                right: vector(&field::BASIS[0..3])?,
+                up: vector(&field::BASIS[3..6])?,
+                forward: vector(&field::BASIS[6..9])?,
+            },
+        },
+        number: u64::try_from(event.get(field::NUMBER)?.as_i64()?).ok()?,
+    })
+}
+
 /// A playing effect as drawn, from its recorded start.
 pub fn effect_pose(effect: &replay::LiveEffect) -> Option<EffectPose> {
     let left = u64::from(effect.duration_ticks).checked_sub(effect.age_ticks)?;

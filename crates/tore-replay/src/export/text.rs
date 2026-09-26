@@ -349,6 +349,20 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
         }
         kind::COMBAT_AIRBURST => format!("{shot} from {s} burst{}", to("near")),
         kind::COMBAT_GROUND_IMPACT => format!("{shot} from {s} hit the ground"),
+        kind::COMBAT_COUNTERMEASURE => {
+            let device = match event.string(field::DECOY) {
+                Some("chaff") => "chaff",
+                Some("flare") => "a flare",
+                _ => "a decoy",
+            };
+            let left = opt(event, field::LEFT)
+                .map(|left| format!(", {left} left"))
+                .unwrap_or_default();
+            format!("{s} released {device}{left}")
+        }
+        kind::COMBAT_COUNTERMEASURES_CLEARED => {
+            "a range reset cleared every chaff cloud and flare".into()
+        }
         kind::AIRCRAFT_CRASHED => format!("{s} crashed{}", because(event)),
         kind::AIRCRAFT_EJECTED => format!("{s} ejected{}", because(event)),
         kind::AIRCRAFT_PILOT_KILLED => format!("{s}: pilot killed{}", because(event)),

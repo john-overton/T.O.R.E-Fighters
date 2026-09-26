@@ -248,6 +248,16 @@ pub struct Devices {
     releases: u64,
 }
 impl Devices {
+    /// How many devices have been released so far. Each release's number,
+    /// and with it the device's look, follows from this count.
+    pub fn released(&self) -> u64 {
+        self.releases
+    }
+    /// Continues the numbering after `released` earlier releases, so a
+    /// device rebuilt from a mission recording looks as it did in flight.
+    pub fn continue_after(&mut self, released: u64) {
+        self.releases = released;
+    }
     fn seed(&mut self) -> u64 {
         self.releases += 1;
         mix(self.releases)

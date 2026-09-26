@@ -421,11 +421,43 @@ fn golden_frames() -> Vec<Frame> {
                     .with(field::TO, "DEFENDING")
                     .with(field::REASON, "missile inbound, 1.2 nm"),
             ),
+            // An older recording's flare effect, then released devices as
+            // recordings now keep them.
             250 => frame.new_effects.push(EffectSpawn {
                 kind: EffectKind::Flare,
                 position: enemy(250).position,
                 duration_ticks: 120,
             }),
+            255 | 256 => {
+                let (owner, state, decoy, left) = if tick == 255 {
+                    (2, enemy(tick), "flare", 5i64)
+                } else {
+                    (0, player(tick), "chaff", 3i64)
+                };
+                let mut event = Event::new(kind::COMBAT_COUNTERMEASURE)
+                    .with_subject(owner)
+                    .with(field::DECOY, decoy)
+                    .with(field::NUMBER, tick as i64 - 254)
+                    .with(field::LEFT, left);
+                let forward = state.forward();
+                let numbers = state
+                    .position
+                    .into_iter()
+                    .chain(state.velocity)
+                    .chain([forward[2], 0., -forward[0], 0., 1., 0.])
+                    .chain(forward);
+                for (name, value) in field::POSITION
+                    .into_iter()
+                    .chain(field::VELOCITY)
+                    .chain(field::BASIS)
+                    .zip(numbers)
+                {
+                    event = event.with(name, value);
+                }
+                frame
+                    .events
+                    .push(event.with_text(format!("released {decoy}")));
+            }
             300 => {
                 frame.events.push(
                     Event::new(kind::WEAPON_OUTCOME)
@@ -616,7 +648,10 @@ fn golden_acmi_and_the_roll_sign() {
     let stats = write_acmi(&recording, &AcmiOptions::default(), &mut out).unwrap();
     let text = String::from_utf8(out).unwrap();
     assert!(text.starts_with("FileType=text/acmi/tacview\nFileVersion=2.2\n"));
-    assert_eq!(stats.objects, 4, "player, enemy, missile and flare");
+    assert_eq!(
+        stats.objects, 6,
+        "player, enemy, missile, the older flare effect and two released devices"
+    );
     // The player banks right wing down in a right turn: Tacview's roll is
     // positive when rolling to the right, so every sample says +60.
     let player: Vec<Vec<&str>> = text

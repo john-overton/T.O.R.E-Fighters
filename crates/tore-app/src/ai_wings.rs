@@ -1746,7 +1746,7 @@ impl AiWings {
                     SeekerClass::Infrared => live::EffectKind::Flare,
                     SeekerClass::Radar => live::EffectKind::Chaff,
                 },
-                false,
+                event.actor,
             );
             let config = state.configuration().clone();
             for projectile in &mut state.projectiles {

@@ -50,6 +50,20 @@ pub mod kind {
     /// A weapon hit the ground. Subject: shooter. Fields: `projectile`,
     /// `weapon`.
     pub const COMBAT_GROUND_IMPACT: &str = "combat.ground_impact";
+    /// A chaff cartridge or flare left an aircraft. Subject: the aircraft.
+    /// Fields: `decoy` (Text: chaff or flare), `number` (Int: the device's
+    /// number among the flight's releases, from 1, which sets its look),
+    /// `left` (Int: the aircraft's devices of that kind left, when known),
+    /// and the aircraft as it released it: `x_ft`, `y_ft`, `z_ft`
+    /// ([`super::field::POSITION`]), its velocity
+    /// ([`super::field::VELOCITY`]) and its attitude as unit vectors
+    /// ([`super::field::BASIS`]), all exact, so a viewer can fly the device
+    /// again as combat flew it. Recorded on the tick after whose step the
+    /// device left: the tick on screen for the player's own.
+    pub const COMBAT_COUNTERMEASURE: &str = "combat.countermeasure";
+    /// A range reset removed every released chaff cloud and flare and
+    /// restarted their numbering.
+    pub const COMBAT_COUNTERMEASURES_CLEARED: &str = "combat.countermeasures_cleared";
     /// An aircraft hit the ground. Subject: the aircraft. Fields: `speed_kt`,
     /// `reason`.
     pub const AIRCRAFT_CRASHED: &str = "aircraft.crashed";
@@ -162,7 +176,8 @@ pub mod kind {
     /// hand the music the same inputs.
     pub const AUDIO_MUSIC: &str = "audio.music";
     /// A sound effect played. Subject: the source, if any. Fields: `sound`
-    /// (Text), `x_ft`, `y_ft`, `z_ft`, `volume`.
+    /// (Text), `x_ft`, `y_ft`, `z_ft`, `volume`, and `own` (Bool: released
+    /// by the player's own aircraft, so its cockpit hears it centered).
     pub const AUDIO_EFFECT: &str = "audio.effect";
     /// A weapon release sound played. Subject: the aircraft. Fields: `sound`,
     /// `weapon` (Id).
@@ -207,6 +222,8 @@ pub mod kind {
         COMBAT_DESTROYED,
         COMBAT_AIRBURST,
         COMBAT_GROUND_IMPACT,
+        COMBAT_COUNTERMEASURE,
+        COMBAT_COUNTERMEASURES_CLEARED,
         AIRCRAFT_CRASHED,
         AIRCRAFT_EJECTED,
         AIRCRAFT_PILOT_KILLED,
@@ -337,6 +354,28 @@ pub mod field {
     pub const STRENGTH: &str = "strength";
     /// A seeker tone's weapon aims at surface targets.
     pub const SURFACE: &str = "surface";
+    /// A released device's number among the flight's releases.
+    pub const NUMBER: &str = "number";
+    /// Devices of the kind released that are left.
+    pub const LEFT: &str = "left";
+    /// The player's own aircraft made the sound.
+    pub const OWN: &str = "own";
+    /// A position in feet, world axes.
+    pub const POSITION: [&str; 3] = [X_FT, Y_FT, Z_FT];
+    /// A velocity in feet per second, world axes.
+    pub const VELOCITY: [&str; 3] = ["vx_fps", "vy_fps", "vz_fps"];
+    /// An attitude as the right, up and forward unit vectors, world axes.
+    pub const BASIS: [&str; 9] = [
+        "right_x",
+        "right_y",
+        "right_z",
+        "up_x",
+        "up_y",
+        "up_z",
+        "forward_x",
+        "forward_y",
+        "forward_z",
+    ];
 }
 
 /// Seeker tone names, for the `tone` field of `audio.tone`.

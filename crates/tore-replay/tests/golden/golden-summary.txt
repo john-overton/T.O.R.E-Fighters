@@ -14,13 +14,13 @@ Aircraft
 You (F/A-18D, F18.PT; friendly wing 1-1; human)
   airborne 0:04.0 | max 2 G at 0:00.0 | min 2 G at 0:00.0 | lowest 20,000 ft MSL at 0:00.0 | lowest 18,750 ft AGL at 0:00.0
   stalls 0 | spins 0 | fuel 9,000 -> 8,990 lb (used 10 lb)
-  shots 1 | hits 1 | kills 1 | end: alive, 1,000 of 1,000 hp
+  shots 1 | hits 1 | kills 1 | chaff 1 | flares 0 | end: alive, 1,000 of 1,000 hp
 Friendly 1-2 (F/A-18D, F18.PT; friendly wing 1-2; Regular)
   not in any recorded frame
 Enemy 2-1 (MiG-29, MIG29.PT; enemy wing 2-1; Veteran)
   airborne 0:03.5 | max 1 G at 0:00.0 | min 1 G at 0:00.0 | lowest 18,000 ft MSL at 0:00.0 | lowest height above ground not recorded
   stalls 0 | spins 0 | fuel 5,000 -> 4,993 lb (used 7 lb)
-  shots 0 | hits 0 | kills 0 | end: destroyed, 0 of 800 hp
+  shots 0 | hits 0 | kills 0 | chaff 0 | flares 1 | end: destroyed, 0 of 800 hp
   AI activity: ATTACKING 1.7 s, DEFENDING 0.8 s
 
 Shots
@@ -45,6 +45,8 @@ Timeline
 --------
 0:01.0  You launched AIM-120 at Enemy 2-1 from 0.9 nm, aspect 35 deg
 0:01.2  You asked for 7.5 G against a limit of 6.8 G because low-speed ceiling, fuel and stores divide by 1.1
+0:02.1  Enemy 2-1 released a flare, 5 left
+0:02.1  You released chaff, 3 left
 0:02.1  shot 1 from You was decoyed by a flare from Enemy 2-1 (roll 12 < 14)
 0:02.5  shot 1 from You at Enemy 2-1: hit, damage 800, hp after 0
 0:02.5  You hit Enemy 2-1 with AIM-120 for 800 damage, hp now 0
@@ -69,6 +71,8 @@ Bookmarks
     0:01.2  You: Blast kick (strength 1.2) because a missile blast nearby
     0:01.2  You asked for 7.5 G against a limit of 6.8 G because low-speed ceiling, fuel and stores divide by 1.1
     0:01.6  Enemy 2-1 activity ATTACKING -> DEFENDING because missile inbound, 1.2 nm
+    0:02.1  Enemy 2-1 released a flare, 5 left
+    0:02.1  You released chaff, 3 left
     0:02.1  shot 1 from You was decoyed by a flare from Enemy 2-1 (roll 12 < 14)
     0:02.2  You: Low-speed G ceiling stopped
     0:02.5  shot 1 from You at Enemy 2-1: hit, damage 800, hp after 0

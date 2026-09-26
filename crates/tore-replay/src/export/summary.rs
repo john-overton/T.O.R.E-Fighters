@@ -50,6 +50,8 @@ struct Stats {
     shots: u32,
     hits: u32,
     kills: u32,
+    /// Chaff cartridges and flares released.
+    devices: [u32; 2],
     activity: BTreeMap<String, u64>,
     current: Option<(String, u64)>,
 }
@@ -226,6 +228,16 @@ pub fn write_summary(
                 kind::COMBAT_DESTROYED => {
                     if let Some(killer) = e.object {
                         stats.entry(killer).or_default().kills += 1;
+                    }
+                }
+                kind::COMBAT_COUNTERMEASURE => {
+                    let slot = match e.string(field::DECOY) {
+                        Some("chaff") => 0,
+                        Some("flare") => 1,
+                        _ => continue,
+                    };
+                    if let Some(id) = subject {
+                        stats.entry(id).or_default().devices[slot] += 1;
                     }
                 }
                 kind::FLIGHT_STALL if e.flag(field::ON) != Some(false) => {
@@ -459,9 +471,13 @@ pub fn write_summary(
             None => "fuel not recorded".into(),
         };
         writeln!(o, "  stalls {} | spins {} | {fuel}", st.stalls, st.spins)?;
+        let devices = match st.devices {
+            [0, 0] => String::new(),
+            [chaff, flares] => format!(" | chaff {chaff} | flares {flares}"),
+        };
         writeln!(
             o,
-            "  shots {} | hits {} | kills {} | end: {}",
+            "  shots {} | hits {} | kills {}{devices} | end: {}",
             st.shots,
             st.hits,
             st.kills,

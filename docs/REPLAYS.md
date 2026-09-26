@@ -108,13 +108,13 @@ stalling, which only a machine far busier than the game itself would cause.
 
 | Family | Events |
 | --- | --- |
-| Weapons | `weapon.launch` with range, aspect, off-boresight angle, closure, heights and speeds at release (a gun round or rocket, which has no target of its own, is aimed at the shooter's current target: the AI's, or the player's designated one); `weapon.seeker_active`, `weapon.pitbull`; `weapon.track_lost` once per shot, with the range and why (decoyed, the seeker lost it, the target is gone, or it could not hold the target); `weapon.decoyed` for each missile that followed chaff or a flare, with the roll, its threshold, and the missile's susceptibility and the device's effectiveness behind it; `weapon.outcome` (hit, missed, spoofed, jammed) for every shot the debrief ledger closes, with why (the decoy and its roll, the jammer, or a track lost earlier) and, for a guided miss, how close it came |
-| Combat | `combat.hit` from each aircraft's hit points, with the attacker, damage, hit points after and the region hit (plus damaged systems for the player); `combat.destroyed` with the killer; `combat.ground_impact` |
+| Weapons | `weapon.launch` with range, aspect, off-boresight angle, closure, heights and speeds at release (a gun round or rocket, which has no target of its own, is aimed at the shooter's current target: the AI's, or the player's designated one); `weapon.seeker_active`, `weapon.pitbull`; `weapon.track_lost` once per shot, with the range and why (decoyed, the seeker lost it, the target is gone, or it could not hold the target); `weapon.decoyed` for each missile that followed chaff or a flare, an AI aircraft's or the player's own, with the roll, its threshold, and the missile's susceptibility and the device's effectiveness behind it (a roll that failed shows in the missile's guidance tree); `weapon.outcome` (hit, missed, spoofed, jammed) for every shot the debrief ledger closes, with why (the decoy and its roll, the jammer, or a track lost earlier) and, for a guided miss, how close it came |
+| Combat | `combat.hit` from each aircraft's hit points, with the attacker, damage, hit points after and the region hit (plus damaged systems for the player); `combat.destroyed` with the killer; `combat.ground_impact`; `combat.countermeasure` for every chaff cartridge and flare that leaves an aircraft, the player's and the AI's, with how many of that kind it has left and the aircraft's exact position, velocity and attitude as it left, which the viewer flies the device again from ([below](#chaff-and-flares)); `combat.countermeasures_cleared` when a range reset removes them all |
 | Aircraft | `aircraft.crashed` (flying into the ground or a structure, or a destroyed aircraft's wreck coming down or exploding), `aircraft.ejected` with the hazard an AI pilot left for or your own ejection, `aircraft.pilot_killed`, `aircraft.took_off`, `aircraft.landed`, `aircraft.flameout`, `aircraft.fuel_out` |
 | Flight | `flight.departure` (mode changes), `flight.stall` and `flight.spin` on and off; `flight.effect` when a flight-model effect starts or stops, with what it applied and why ([below](#flight-model-effects)); `flight.g_limit` when the stick reaches its stop, with the G the envelope offers, the limit applied, the G delivered and what set the limit; `flight.structural_failure` with the section, the G and why |
 | AI | `ai.activity` (with how long the old activity lasted), `ai.target` (with priority and score), `ai.weapon_phase` (with the store and the weapon service's words), `ai.airfield_phase`, each with its reason ([below](#reasons-for-ai-decisions)); `ai.defense` when a missile defense starts, changes maneuver, releases chaff or flares, or ends, and when a launch warning arrives or is dropped; `ai.fallback` the first time each aircraft uses each fitted stand-in rule; `ai.ejection` when the ejection check finds a hazard, the pilot ejects, a go-around replaces an ejection, or the hazard passes |
 | Communication | Every entry of the [communication journal](#communication-journal) and of the AI message journal, with trigger, rolls, outcome and reason ([below](#communication-events)); and `comms.hud` for every cockpit message line: shown, a repeat that moved the line on screen to the bottom with a fresh timer, or pushed off the screen by newer lines |
-| Audio | `audio.effect` (impacts and explosions), `audio.release` (weapon release sounds), `audio.tone` (the seeker tone, its loudness and whether its weapon aims at the surface), `audio.stall_warning`, `audio.ejection` (warnings, seat, parachute, a wingman ejecting), `audio.device` (gear, flaps, hook, brake) and `audio.music` (every input of the situation music, the score they ask for, and why) |
+| Audio | `audio.effect` (impacts, explosions, and each chaff cartridge's and flare's release sound, marked `own` when the player's own aircraft released it), `audio.release` (weapon release sounds), `audio.tone` (the seeker tone, its loudness and whether its weapon aims at the surface), `audio.stall_warning`, `audio.ejection` (warnings, seat, parachute, a wingman ejecting), `audio.device` (gear, flaps, hook, brake) and `audio.music` (every input of the situation music, the score they ask for, and why) |
 | Player and system | `player.command` (combat commands and trigger releases), `player.bookmark`, `system.pause`, `system.resume`, `system.time_scale`, `system.cheat`, `system.restart` (first in a recording that follows a restart), `system.end`, `system.gap`, and `system.note` when a tick held more than the format stores or a journal overflowed |
 | Display trees | `ai.thought` for every AI aircraft, `flight.telemetry` for every aircraft that flies, `weapon.guidance` for every guided missile ([below](#display-trees)) |
 
@@ -131,6 +131,25 @@ so. What the records themselves cannot explain is listed with the
 [AI thinking record](#ai-thinking-record), the
 [telemetry record](FLIGHT-MODEL.md#telemetry-record) and the
 [communication journal](#not-visible-yet).
+
+### Chaff and flares
+
+Combat notes every chaff cartridge and flare as it leaves an aircraft, the
+player's own and the AI's, and the player's own decoy rolls, in two
+write-only lists the recorder drains (`State::take_device_notes`,
+`State::take_decoy_rolls`); the AI's rolls come from the bridge as before.
+Each release becomes one `combat.countermeasure` entry holding the
+releasing aircraft, the kind, its number among the flight's releases (which
+chooses the device's look: its flicker, sideways throw, smoke and strips)
+and the aircraft's position, velocity and right, up and forward vectors
+exactly as they were. The player's releases between ticks land on the tick
+on screen, like the key press that made them; the AI's on the tick whose AI
+step released them. How many of that kind the aircraft has left comes from
+combat for the player and from the AI's dispensers, counted back over its
+releases in the same tick, for AI aircraft. A range reset that clears every
+device is its own entry. The golden fingerprint
+`combat/player-countermeasures` was taken before these lists existed, and
+they leave it unchanged.
 
 ### Display trees
 
@@ -464,11 +483,11 @@ names them.
 A plain-English text file: the mission, conditions, result and length; each
 aircraft's airborne time, highest and lowest G, lowest height above sea
 level and above the ground (when telemetry records it), stalls, spins, fuel
-used, shots, hits, kills, final state and time in each AI activity; a table
+used, shots, hits, kills, chaff and flares released, final state and time in each AI activity; a table
 of every shot (launch geometry, time of flight, peak speed, closest approach
 to the intended target, outcome and why); the communication transcript
 with triggers, outcomes and reasons, including the music's changes; a
-timeline of key events (G-limit hits and decoys among them; AI decisions
+timeline of key events (G-limit hits, chaff and flare releases and decoys among them; AI decisions
 and effect changes stay in the log and the bookmarks); each bookmark with
 the events of the ten seconds around it and every aircraft's state at that
 moment; and the anomaly flags.
@@ -527,7 +546,7 @@ left out after an object's first line, as the format allows.
 | Aircraft | `Air+FixedWing`; `Name` is the exact display name (for example `F/A-18D`), `Pilot` and `CallSign` the label, `Group` the wing, `Coalition` and `Color` the side (friendly blue, enemy red, neutral green) |
 | Missiles, bombs, rockets | `Weapon+Missile`, `Weapon+Bomb`, `Weapon+Rocket`, with `Parent` set to the launcher |
 | Gun rounds (optional) | `Projectile+Bullet` |
-| Flares and chaff | `Misc+Decoy+Flare`, `Misc+Decoy+Chaff`, removed when they burn out |
+| Flares and chaff | `Misc+Decoy+Flare`, `Misc+Decoy+Chaff`, with `Parent` set to the releasing aircraft, where they left it, removed when a flare burns out (30 s) or chaff drifts away (20 s); an older recording's flare and chaff effects the same way without a parent |
 | Ejected pilots | `Ground+Light+Human+Air+Parachutist`, with `Parent` set to the aircraft |
 
 Object ids are hexadecimal and never zero: aircraft, projectiles, decoys and
@@ -589,8 +608,8 @@ Reports header differences, differences in registered aircraft and weapons,
 the **first second where the state checksums differ** (and the last that
 matched), the **first tick where any aircraft's state differs** and which
 aircraft, largest difference first, and, per category (kills, launches,
-hits, shot outcomes, AI decisions, comms, flight events, player and system
-events), the counts and the first event that differs or, when the events
+hits, chaff and flares, shot outcomes, AI decisions, comms, flight events,
+player and system events), the counts and the first event that differs or, when the events
 match, the first difference in timing.
 
 The checksum is FNV-1a 64 over every aircraft's exact state in id order,
