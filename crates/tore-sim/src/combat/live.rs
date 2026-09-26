@@ -1309,7 +1309,7 @@ impl State {
         if !self.cheats.unlimited_ammo {
             *count -= 1;
         }
-        self.effect(launcher.position, kind);
+        self.device_released(launcher.position, kind, true);
         for projectile in &mut self.projectiles {
             let weapon = projectile
                 .weapon
@@ -1945,13 +1945,34 @@ impl State {
     }
 
     fn emit_sound(&mut self, position: Vector, kind: crate::acoustics::Kind) {
-        if self.sound_events.len() == 256 {
-            self.sound_events.remove(0);
-        }
-        self.sound_events.push(crate::acoustics::Emission {
+        self.push_sound(crate::acoustics::Emission {
             kind,
             position,
             arrived: false,
+            own: false,
+        });
+    }
+    fn push_sound(&mut self, emission: crate::acoustics::Emission) {
+        if self.sound_events.len() == 256 {
+            self.sound_events.remove(0);
+        }
+        self.sound_events.push(emission);
+    }
+
+    /// One chaff cartridge or flare leaving an aircraft at `position`: its
+    /// burst and the original's release recording, one per device, for the
+    /// player and AI alike (docs/spec/countermeasures.md). `own` marks the
+    /// player's aircraft.
+    pub fn device_released(&mut self, position: Vector, kind: EffectKind, own: bool) {
+        self.effect(position, kind);
+        self.push_sound(crate::acoustics::Emission {
+            kind: match kind {
+                EffectKind::Chaff => crate::acoustics::Kind::Chaff,
+                _ => crate::acoustics::Kind::Flare,
+            },
+            position,
+            arrived: false,
+            own,
         });
     }
 
@@ -4240,6 +4261,41 @@ mod tests {
         s.cheats.unlimited_ammo = true;
         s.command(Command::ReleaseChaff, launcher());
         assert_eq!((s.chaff, s.projectiles[0].target), (2, None));
+    }
+    #[test]
+    fn every_released_device_sounds_once_from_its_aircraft() {
+        use crate::acoustics::Kind;
+        let heard = |s: &mut State| {
+            s.take_sound_events()
+                .into_iter()
+                .map(|e| (e.kind, e.position, e.arrived, e.own))
+                .collect::<Vec<_>>()
+        };
+        let mut s = fixture(true);
+        s.chaff = 1;
+        s.flares = 1;
+        heard(&mut s);
+        let at = launcher().position;
+        s.command(Command::ReleaseChaff, launcher());
+        s.command(Command::ReleaseFlare, launcher());
+        // Empty dispensers release nothing, so nothing is heard.
+        s.command(Command::ReleaseChaff, launcher());
+        s.command(Command::ReleaseFlare, launcher());
+        assert_eq!(
+            heard(&mut s),
+            [
+                (Kind::Chaff, at, false, true),
+                (Kind::Flare, at, false, true)
+            ]
+        );
+        // An AI release is heard from that aircraft and shows the same burst.
+        s.device_released([10., 20., 30.], EffectKind::Chaff, false);
+        assert_eq!(
+            heard(&mut s),
+            [(Kind::Chaff, [10., 20., 30.], false, false)]
+        );
+        let burst = s.effects.last().unwrap();
+        assert_eq!((burst.kind, burst.ticks), (EffectKind::Chaff, 45));
     }
     #[test]
     fn an_ai_round_does_not_credit_the_player_score() {

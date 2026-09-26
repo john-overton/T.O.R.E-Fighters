@@ -12,6 +12,8 @@ pub enum Kind {
     AircraftPass,
     MissilePass,
     SonicBoom,
+    Chaff,
+    Flare,
 }
 impl Kind {
     pub fn parameters(self) -> (f64, f64, f64) {
@@ -21,6 +23,9 @@ impl Kind {
             Self::AircraftPass => (200., 2000., 0.5),
             Self::MissilePass => (80., 1500., 0.5),
             Self::SonicBoom => (500., 13000., 0.8),
+            // The original's full-level and silent distances, at its level 200
+            // against a weapon release's 255 (docs/spec/countermeasures.md).
+            Self::Chaff | Self::Flare => (100., 4000., 0.4 * 200. / 255.),
         }
     }
 }
@@ -58,6 +63,16 @@ pub fn mix(kind: Kind, position: Vector, listener: Listener) -> Mix {
             as f32,
         pan: (dot(relative, listener.right) / distance.max(1.)).clamp(-1., 1.) as f32,
         cutoff: (12000. / (1. + distance / 3000.)).clamp(250., 12000.) as f32,
+    }
+}
+
+/// A release heard inside the releasing aircraft's own cockpit: the cue's
+/// peak level, centered and unfiltered, with no distance or travel.
+pub fn cockpit(kind: Kind) -> Mix {
+    Mix {
+        gain: kind.parameters().2 as f32,
+        pan: 0.,
+        cutoff: 12000.,
     }
 }
 
@@ -150,6 +165,9 @@ pub struct Emission {
     pub position: Vector,
     /// A Mach cone crossing is already the shock's arrival at the observer.
     pub arrived: bool,
+    /// Released by the player's own aircraft, so its cockpit hears it as
+    /// [`cockpit`] rather than through the air.
+    pub own: bool,
 }
 struct Track {
     relative: Vector,
@@ -184,6 +202,7 @@ impl Passes {
                                 kind: Kind::SonicBoom,
                                 position: source.position,
                                 arrived: false,
+                                own: false,
                             });
                         }
                         self.own_armed = Some(false);
@@ -234,6 +253,7 @@ impl Passes {
                                         scale(sub(source.position, track.position), fraction),
                                     ),
                                     arrived: false,
+                                    own: false,
                                 });
                             }
                         }
@@ -252,6 +272,7 @@ impl Passes {
                             kind: Kind::SonicBoom,
                             position: source.position,
                             arrived: true,
+                            own: false,
                         });
                         track.boom_armed = false;
                     }
@@ -347,6 +368,22 @@ mod tests {
         assert!(b.cutoff < a.cutoff);
         assert_eq!(mix(Kind::Explosion, [40000., 0., 0.], l).gain, 0.);
         assert_eq!(mix(Kind::Explosion, [-1000., 0., 0.], l).pan, -1.);
+    }
+    #[test]
+    fn releases_are_full_within_100_ft_silent_at_4000_ft_and_centered_in_own_cockpit() {
+        let l = listener();
+        // Level 200 of the original's 255, relative to a weapon release.
+        let peak = 0.4 * 200. / 255.;
+        for kind in [Kind::Chaff, Kind::Flare] {
+            assert_eq!(kind.parameters(), (100., 4000., peak));
+            assert_eq!(mix(kind, [100., 0., 0.], l).gain, peak as f32);
+            assert!(mix(kind, [101., 0., 0.], l).gain < mix(kind, [100., 0., 0.], l).gain);
+            assert!(mix(kind, [3999., 0., 0.], l).gain > 0.);
+            assert_eq!(mix(kind, [4000., 0., 0.], l).gain, 0.);
+            let own = cockpit(kind);
+            assert_eq!((own.gain, own.pan, own.cutoff), (peak as f32, 0., 12000.));
+        }
+        assert!(peak < Kind::Impact.parameters().2);
     }
     #[test]
     fn swept_pass_once_with_no_spawn_formation_or_camera_cut_noise() {

@@ -28,6 +28,10 @@ The original passing-object service selects `&AIRPASS.11K` for aircraft,
 player-aircraft branch with view-dependent eligibility. A separate projectile
 flag chooses `&BPASS.5K`; its full class mapping is unknown and is not enabled.
 
+Each chaff cartridge or flare released plays `&CHAFF.5K` or `&FLARE.5K`, for
+the player and AI alike. Its level, distances and cockpit rule are in the
+[countermeasures spec](countermeasures.md#release-sound).
+
 ## Numbers and boundaries
 
 | Component | Established value |

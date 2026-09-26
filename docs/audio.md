@@ -74,11 +74,17 @@ attack and 30 ms release ramps. The waveform's own envelope supplies the decay.
 | Missile pass | `&MPASS.5K` | 80 | 1,500 | 0.5 |
 | Sonic boom | `&SNCBOOM.11K` | 500 | 13,000 | 0.8 |
 | Player weapon release | Weapon's imported fire sound | 80 | 8,000 | 0.4 |
+| Chaff or flare release, player or AI | `&CHAFF.5K` or `&FLARE.5K` | 100 | 4,000 | 0.31 |
 
 Impact/explosion positions come from the actual combat effect producer, never
 a target's later location. Simultaneous equal recordings at different positions
 remain separate. Cockpit weapon releases stay immediate; external releases use
-travel. Cockpit avionics, radio, controls and engine loops stay local.
+travel. A chaff or flare release takes its distances and level from the
+[original](spec/countermeasures.md#release-sound); 0.31 is its level 200
+against the 255 of a weapon release. The player's own release plays in the
+cockpit at once, centered, at its peak gain, as the original does. In external
+views, and for AI releases, it travels from the release point.
+Cockpit avionics, radio, controls and engine loops stay local.
 At most 256 waves wait in flight and 16 spatial voices play; overload discards
 the oldest pending wave and replaces only a quieter active voice.
 

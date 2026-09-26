@@ -94,8 +94,10 @@ CHAFF.SH and FLARE.SH. All exist and none is in the measured weapons export.
 Their module strings name CRATERS.PIC, SMOKE.PIC, FIREA.PIC and FLARE.PIC;
 these also exist and are missing. The already-selected FIRE.PIC is different art.
 Executable sound-string candidates missing from selection include &EXPL12.5K,
-&SPLASH3.11K, &FIRE.5K, &CHAFF.5K and &FLARE.5K. Finish table/caller tracing
-before mapping sounds to effect indices. Similar names alone are insufficient.
+&SPLASH3.11K and &FIRE.5K. Finish table/caller tracing before mapping sounds to
+effect indices. Similar names alone are insufficient. &CHAFF.5K and &FLARE.5K
+are traced to device creation
+([sound notes](sound.md#countermeasure-release-sound)).
 
 FA `_PROJSpeed` (0x4c1120 through return at 0x4c1163) takes launcher speed
 shifted right eight, multiplies by unsigned JT launchRetard (+0x115), divides

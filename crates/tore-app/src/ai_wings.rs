@@ -1692,14 +1692,14 @@ impl AiWings {
             SeekerClass::Radar => effectiveness.1,
         };
         for _ in 0..event.released {
-            state.effects.push(live::Effect {
-                position: actor.flight().position,
-                kind: match event.class {
+            state.device_released(
+                actor.flight().position,
+                match event.class {
                     SeekerClass::Infrared => live::EffectKind::Flare,
                     SeekerClass::Radar => live::EffectKind::Chaff,
                 },
-                ticks: 45,
-            });
+                false,
+            );
             let config = state.configuration().clone();
             for projectile in &mut state.projectiles {
                 let weapon = projectile.weapon(&config);
@@ -3489,6 +3489,7 @@ pub(crate) mod tests {
         let mut radar = combat.projectiles[0].clone();
         radar.weapon.as_mut().unwrap().seeker.signature = 3;
         combat.projectiles.push(radar);
+        combat.take_sound_events();
         wings
             .realise_device(
                 &DeviceEvent {
@@ -3503,6 +3504,17 @@ pub(crate) mod tests {
         assert_eq!(combat.projectiles[1].target, Some(4));
         assert_eq!(combat.projectiles[2].target, Some(3));
         assert_eq!(combat.effects.last().unwrap().kind, live::EffectKind::Flare);
+        // The flare is heard from the releasing aircraft, not the player.
+        let sounds = combat.take_sound_events();
+        assert_eq!(sounds.len(), 1);
+        assert_eq!(
+            (sounds[0].kind, sounds[0].position, sounds[0].own),
+            (
+                tore_sim::acoustics::Kind::Flare,
+                wings.mission().actor(3).unwrap().flight().position,
+                false
+            )
+        );
     }
     #[test]
     fn finite_missile_depletion_is_followed_by_actor_owned_gun_fire() {

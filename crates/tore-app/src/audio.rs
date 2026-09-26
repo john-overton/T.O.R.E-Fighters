@@ -918,6 +918,7 @@ mod tests {
                     kind: Kind::Explosion,
                     position: [1., 0., 0.],
                     arrived: false,
+                    own: false,
                 }],
                 true,
             );

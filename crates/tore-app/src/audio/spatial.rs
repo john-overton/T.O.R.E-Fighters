@@ -8,6 +8,9 @@ struct SpatialVoice {
     mix: Mix,
     kind: Kind,
     position: [f64; 3],
+    /// Heard inside the releasing aircraft's own cockpit: its mix never
+    /// follows distance or direction.
+    cockpit: bool,
     filtered: f32,
     stereo_gain: [f32; 2],
     target_gain: [f32; 2],
@@ -40,7 +43,7 @@ impl Scene {
             self.voices.clear();
             return;
         }
-        for voice in &mut self.voices {
+        for voice in self.voices.iter_mut().filter(|v| !v.cockpit) {
             let mix = acoustics::mix(voice.kind, voice.position, listener);
             if mix != voice.mix {
                 voice.mix = mix;
@@ -55,15 +58,25 @@ impl Scene {
                 Kind::AircraftPass => "&AIRPASS.11K",
                 Kind::MissilePass => "&MPASS.5K",
                 Kind::SonicBoom => "&SNCBOOM.11K",
+                Kind::Chaff => "&CHAFF.5K",
+                Kind::Flare => "&FLARE.5K",
             };
             if let Some(clip) = clips.get(name) {
-                if event.arrived {
-                    self.play(Arrival {
-                        payload: clip.clone(),
-                        mix: acoustics::mix(event.kind, event.position, listener),
-                        kind: event.kind,
-                        position: event.position,
-                    });
+                let cockpit = event.own && !listener.external;
+                if event.arrived || cockpit {
+                    self.play(
+                        Arrival {
+                            payload: clip.clone(),
+                            mix: if cockpit {
+                                acoustics::cockpit(event.kind)
+                            } else {
+                                acoustics::mix(event.kind, event.position, listener)
+                            },
+                            kind: event.kind,
+                            position: event.position,
+                        },
+                        cockpit,
+                    );
                 } else {
                     self.field
                         .emit(clip.clone(), event.kind, event.position, listener);
@@ -71,13 +84,13 @@ impl Scene {
             }
         }
         for arrival in self.field.step(listener) {
-            self.play(arrival);
+            self.play(arrival, false);
         }
     }
     pub fn weapon(&mut self, clip: Arc<Clip>, position: [f64; 3], listener: Listener) {
         self.field.emit(clip, Kind::Impact, position, listener);
     }
-    fn play(&mut self, arrival: Arrival<Arc<Clip>>) {
+    fn play(&mut self, arrival: Arrival<Arc<Clip>>, cockpit: bool) {
         self.voices.retain(|v| !v.voice.finished());
         if arrival.mix.gain <= 0. {
             return;
@@ -102,6 +115,7 @@ impl Scene {
             mix: arrival.mix,
             kind: arrival.kind,
             position: arrival.position,
+            cockpit,
             filtered: 0.,
             stereo_gain: stereo_gain(arrival.mix),
             target_gain: stereo_gain(arrival.mix),
@@ -178,6 +192,7 @@ mod tests {
                 kind: Kind::Explosion,
                 position: [1115., 0., 0.],
                 arrived: false,
+                own: false,
             }],
             true,
         );
@@ -203,6 +218,7 @@ mod tests {
                 kind: Kind::Explosion,
                 position: [11150., 0., 0.],
                 arrived: false,
+                own: false,
             }],
             true,
         );
@@ -217,12 +233,15 @@ mod tests {
         let clips = clips();
         let mut scene = Scene::default();
         let mut l = listener();
-        scene.play(Arrival {
-            payload: clips["&EXPL12.5K"].clone(),
-            kind: Kind::Explosion,
-            position: [400., 0., 0.],
-            mix: acoustics::mix(Kind::Explosion, [400., 0., 0.], l),
-        });
+        scene.play(
+            Arrival {
+                payload: clips["&EXPL12.5K"].clone(),
+                kind: Kind::Explosion,
+                position: [400., 0., 0.],
+                mix: acoustics::mix(Kind::Explosion, [400., 0., 0.], l),
+            },
+            false,
+        );
         for _ in 0..800 {
             scene.sample(8000.);
         }
@@ -242,29 +261,114 @@ mod tests {
         let clips = clips();
         let mut scene = Scene::default();
         for i in 0..20 {
-            scene.play(Arrival {
-                payload: clips["&EXPL12.5K"].clone(),
-                kind: Kind::Explosion,
-                position: [0.; 3],
-                mix: Mix {
-                    gain: i as f32 / 20.,
-                    pan: 0.,
-                    cutoff: 1000.,
+            scene.play(
+                Arrival {
+                    payload: clips["&EXPL12.5K"].clone(),
+                    kind: Kind::Explosion,
+                    position: [0.; 3],
+                    mix: Mix {
+                        gain: i as f32 / 20.,
+                        pan: 0.,
+                        cutoff: 1000.,
+                    },
                 },
-            });
+                false,
+            );
         }
         assert_eq!(scene.voices.len(), 16);
         assert!(scene.voices.iter().all(|v| v.mix.gain >= 0.2));
         scene.clear();
         for x in [-10., 10.] {
-            scene.play(Arrival {
-                payload: clips["&EXPL12.5K"].clone(),
-                kind: Kind::Explosion,
-                position: [x, 0., 0.],
-                mix: acoustics::mix(Kind::Explosion, [x, 0., 0.], listener()),
-            });
+            scene.play(
+                Arrival {
+                    payload: clips["&EXPL12.5K"].clone(),
+                    kind: Kind::Explosion,
+                    position: [x, 0., 0.],
+                    mix: acoustics::mix(Kind::Explosion, [x, 0., 0.], listener()),
+                },
+                false,
+            );
         }
         assert_eq!(scene.voices.len(), 2);
         assert_ne!(scene.voices[0].mix.pan, scene.voices[1].mix.pan);
+    }
+    #[test]
+    fn own_release_is_centered_in_cockpit_travels_outside_and_far_releases_are_silent() {
+        let clips = BTreeMap::from(["&CHAFF.5K", "&FLARE.5K"].map(|name| {
+            (
+                name.to_string(),
+                Arc::new(Clip {
+                    samples: vec![192; 8000],
+                    rate: 8000.,
+                }),
+            )
+        }));
+        let release = |kind, position, own| Emission {
+            kind,
+            position,
+            arrived: false,
+            own,
+        };
+        // In the player's cockpit: at once, centered, at the cue's peak level,
+        // and never re-mixed as the aircraft flies on.
+        let mut scene = Scene::default();
+        let mut l = listener();
+        scene.tick(
+            &clips,
+            l,
+            &[],
+            &[release(Kind::Chaff, [30., 0., 0.], true)],
+            true,
+        );
+        assert_eq!(scene.voices.len(), 1);
+        assert!(Arc::ptr_eq(
+            &scene.voices[0].voice.clip,
+            &clips["&CHAFF.5K"]
+        ));
+        assert_eq!(scene.voices[0].mix, acoustics::cockpit(Kind::Chaff));
+        l.position = [3000., 0., 0.];
+        scene.tick(&clips, l, &[], &[], true);
+        assert_eq!(scene.voices[0].mix, acoustics::cockpit(Kind::Chaff));
+        let mut out = [0.; 2];
+        for _ in 0..80 {
+            out = scene.sample(8000.);
+        }
+        assert!(out[0] > 0.);
+        assert_eq!(out[0], out[1]);
+        // Outside, the player's release travels from where it was released.
+        let mut scene = Scene::default();
+        let mut l = listener();
+        l.external = true;
+        scene.tick(
+            &clips,
+            l,
+            &[],
+            &[release(Kind::Flare, [1115., 0., 0.], true)],
+            true,
+        );
+        assert!(scene.voices.is_empty());
+        for _ in 0..120 {
+            scene.tick(&clips, l, &[], &[], true);
+        }
+        assert_eq!(scene.voices.len(), 1);
+        assert!(Arc::ptr_eq(
+            &scene.voices[0].voice.clip,
+            &clips["&FLARE.5K"]
+        ));
+        assert_eq!(scene.voices[0].mix.pan, 1.);
+        // Another aircraft's release 4,000 ft away is never heard.
+        let mut scene = Scene::default();
+        let l = listener();
+        scene.tick(
+            &clips,
+            l,
+            &[],
+            &[release(Kind::Chaff, [4000., 0., 0.], false)],
+            true,
+        );
+        for _ in 0..600 {
+            scene.tick(&clips, l, &[], &[], true);
+        }
+        assert!(scene.voices.is_empty());
     }
 }

@@ -35,6 +35,22 @@ is static disassembly. Nothing was run and no retail session was observed.
   rule the AI already uses ([missile defense](ai-awareness.md#missile-awareness-and-defense),
   [missiles](missiles.md)). A decoyed missile loses its target and coasts.
 
+### Release sound
+
+- **Every device released makes one sound:** `&CHAFF.5K` for a chaff cartridge,
+  `&FLARE.5K` for a flare. The same holds for AI aircraft and for other players
+  in multiplayer. An empty dispenser releases nothing and makes no sound.
+- The chaff recording lasts 1.15 seconds and the flare recording 2.38 seconds.
+- The level is 200 on the original's 0 to 255 scale, before the effects volume
+  setting. A weapon launch plays at 255, so a release is about 2 dB quieter
+  than a shot.
+- The sound comes from the releasing aircraft and moves with it while it plays.
+  It is at full level within 100 feet of the camera and fades in a straight line
+  to silence at 4,000 feet. A release farther than 4,000 feet away is not
+  played at all. Its stereo position follows its direction from the camera.
+- In a cockpit view of the releasing aircraft, which for the player means their
+  own cockpit, it plays at full level and centered, with no distance.
+
 ## Host rules
 
 - A held key does not repeat. Nothing is released while paused, after the
@@ -43,14 +59,28 @@ is static disassembly. Nothing was run and no retail session was observed.
   for 45 ticks (0.375 seconds), shared with AI releases. `fitted`.
 - Gamepad: hold View and press D-pad left for chaff, D-pad right for flare.
   `opinionated`, agent decision 2026-09-26.
+- Each device the player or an AI aircraft releases plays its recording once.
+  The original's 100 and 4,000 feet become the reference and maximum distances
+  of T.O.R.E's [traveling sound](../audio.md#traveling-sound), and its level
+  becomes a peak gain of 0.31, against the 0.4 of a weapon release.
+  `spec-derived`.
+- In the player's own cockpit, the player's release plays at once, centered, at
+  that peak gain. In every other view it travels from where it was released.
+  `spec-derived`.
+- Known difference: the level falls with inverse distance, as every T.O.R.E
+  traveling sound does, instead of the original's straight line. At 1,000 feet
+  the original is at 77 percent of full level and T.O.R.E at 10 percent. The
+  sound also stays where the device left the aircraft instead of moving with
+  it. `opinionated`: John requested this acoustic model on 2026-09-23; using it
+  for releases is an agent decision of 2026-09-26.
 
 ## Unknown
 
-- **Release sound.** `&CHAFF.5K` and `&FLARE.5K` exist; their use is not traced.
-  T.O.R.E plays no release sound yet. Next step: trace the sound request in the
-  release routine.
 - **Dispenser damage messages.** The strings `CHAFF DISPENSER DAMAGED` and
   `FLARE DISPENSER DAMAGED` exist; when they are shown is not traced.
+- **Which views count as cockpit views** for the sound rule. The evidence points
+  to the cockpit views; which key selects each internal view case was not
+  traced ([sound evidence](../formats/sound.md#countermeasure-release-sound)).
 
 ## Source notes
 
@@ -62,3 +92,9 @@ before release. A result of zero or less prints the "Out of" string
 `0x4ee50c` or `0x4ee4e4`, unless global flag `0x4eb6f8` bit 0x8 is set, which
 keeps the count. The routine scans the player's dispenser records and creates
 one device object per call.
+
+Creating a chaff or flare device requests its recording once, with the
+releasing aircraft as the source. The AI device schedule and the network
+release message reach the same request. Addresses, the request's arguments,
+the distance and pan rules, and the recording hashes are in the
+[sound format notes](../formats/sound.md#countermeasure-release-sound).
