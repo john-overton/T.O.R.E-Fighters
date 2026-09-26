@@ -9,11 +9,35 @@ import subprocess
 import sys
 
 
+I386 = 0x014C  # IMAGE_FILE_MACHINE_I386, a 32-bit Windows executable
+
+
+def pe_machine(binary):
+    """The machine field of a Windows executable's header, or None."""
+    try:
+        with open(binary, "rb") as file:
+            dos = file.read(0x40)
+            if len(dos) < 0x40 or dos[:2] != b"MZ":
+                return None
+            file.seek(int.from_bytes(dos[0x3C:0x40], "little"))
+            header = file.read(6)
+    except OSError:
+        return None
+    if len(header) < 6 or header[:4] != b"PE\0\0":
+        return None
+    return int.from_bytes(header[4:6], "little")
+
+
 def violations(platform, output, binary, system_root=None):
     if platform == "win32":
         dependencies = re.findall(r"^\s*([\w.+-]+\.dll)\s*$", output, re.M | re.I)
         if not dependencies:
             return ["dumpbin reported no DLL dependencies"]
+        root = Path(system_root or os.environ["SystemRoot"])
+        # A 32-bit program on 64-bit Windows loads system DLLs from SysWOW64.
+        system = root / "System32"
+        if pe_machine(binary) == I386 and (root / "SysWOW64").is_dir():
+            system = root / "SysWOW64"
         errors = []
         for name in dependencies:
             lower = name.lower()
@@ -21,8 +45,7 @@ def violations(platform, output, binary, system_root=None):
                 errors.append(f"dynamic Visual C++ runtime forbidden: {name}")
             elif lower.startswith(("api-ms-win-", "ext-ms-win-")):
                 continue  # Windows API set contracts are not physical DLLs.
-            elif not ((binary.parent / name).exists() or
-                      (Path(system_root or os.environ["SystemRoot"]) / "System32" / name).exists()):
+            elif not ((binary.parent / name).exists() or (system / name).exists()):
                 errors.append(f"unresolved DLL: {name}")
         return errors
     if platform == "darwin":

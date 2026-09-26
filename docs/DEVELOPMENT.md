@@ -184,7 +184,7 @@ The release packages are built by `.github/workflows/release.yml` when a `v*`
 tag is pushed, and by the same three scripts when a developer runs them by
 hand. A push to any branch named `release-test/...` runs the build half only,
 so the packaging path can be exercised without publishing anything; download
-the four `packages-*` artifacts from that run with `gh run download`.
+the five `packages-*` artifacts from that run with `gh run download`.
 `workflow_dispatch` does the same once the workflow exists on `main`.
 
 Every script takes the version from `--version`, then from the tag the workflow
@@ -206,11 +206,16 @@ carry:
 TORE_BUILD_VERSION=0.1.1 cargo build --release --locked -p tore-app -p tore-extract
 ```
 
+For the 32-bit Windows package, run `rustup target add i686-pc-windows-msvc`
+once, add `--target i686-pc-windows-msvc` to that build, and give the packaging
+script the same target.
+
 | Platform | Command | Produces |
 | --- | --- | --- |
 | Linux | `tools/package/package-linux.sh` | `dist/*.tar.gz` and `dist/*.AppImage` |
 | macOS | `tools/package/package-macos.sh` | `dist/*.dmg` holding `T.O.R.E-Fighters.app` |
-| Windows | `pwsh tools/package/package-windows.ps1` | `dist/*.msi` |
+| Windows | `pwsh tools/package/package-windows.ps1` | `dist/*-windows-x86_64.msi` |
+| Windows 32-bit | `pwsh tools/package/package-windows.ps1 -Target i686-pc-windows-msvc` | `dist/*-windows-x86.msi` |
 
 What each package contains:
 
@@ -230,7 +235,9 @@ What each package contains:
   carrying both executables, `tore.ico` and the three text files, built with
   WiX v3 from `tools/package/tore.wxs`. Its `UpgradeCode` is permanent and
   `MajorUpgrade` replaces an older install rather than installing beside it.
-  The installer's pages and its shortcut choices are described below.
+  The 32-bit MSI installs into `%ProgramFiles(x86)%\T.O.R.E-Fighters`
+  instead; the two share the `UpgradeCode`, so installing either replaces the
+  other. The installer's pages and its shortcut choices are described below.
 
 None of these contain retail media. The app imports the player's own Fighters
 Anthology copy at runtime; see [first-run import](spec/first-run-import.md).
@@ -325,6 +332,11 @@ with WiX 3.14 on the `windows-2022` runner.
 `AllowSameVersionUpgrades`, which we want so that reinstalling the same version
 replaces the existing install instead of stacking a second copy.
 
+One `tore.wxs` builds both MSIs. The script runs `candle` with `-arch x64` or
+`-arch x86`; the 32-bit build picks Program Files (x86) and its own two fixed
+shortcut component GUIDs, because a 32-bit and a 64-bit component must never
+share a GUID.
+
 ### appimagetool
 
 `appimagetool` is published only under a moving `continuous` tag, so the script
@@ -352,9 +364,12 @@ the package layout.
 ### What CI validates, and what it does not
 
 The release workflow runs formatting, Clippy, workspace tests, Python tool
-and Windows resource-layout tests, documentation and asset checks. It builds
-release binaries with matching debug information and retains PDB, dSYM or ELF
-symbols in separate `symbols-*` workflow artifacts labelled by source commit.
+and Windows resource-layout tests, documentation and asset checks. Both it and
+`ci.yml` run a fifth job on `windows-2022` for 32-bit Windows, which sets
+`CARGO_BUILD_TARGET=i686-pc-windows-msvc` so every crate is linted, tested and
+built for that target. The release workflow builds release binaries with
+matching debug information and retains PDB, dSYM or ELF symbols in separate
+`symbols-*` workflow artifacts labelled by source commit.
 These artifacts are not added to the retail-free game packages.
 
 `tools/check_runtime_dependencies.py` rejects missing runtime libraries, dynamic

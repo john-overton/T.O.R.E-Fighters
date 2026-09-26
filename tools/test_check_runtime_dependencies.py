@@ -24,6 +24,24 @@ class RuntimeDependencyTests(unittest.TestCase):
             self.assertTrue(violations("win32", "    VCRUNTIME140.dll", binary, root))
             self.assertTrue(violations("win32", "    absent.dll", binary, root))
 
+    def test_windows_32_bit_programs_resolve_against_syswow64(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for folder, names in (("System32", ("KERNEL32.dll", "only64.dll")), ("SysWOW64", ("KERNEL32.dll",))):
+                (root / folder).mkdir()
+                for name in names:
+                    (root / folder / name).touch()
+            binary = root / "app.exe"
+            dos = bytearray(0x40)
+            dos[:2] = b"MZ"
+            dos[0x3C:0x40] = (0x40).to_bytes(4, "little")
+            binary.write_bytes(bytes(dos) + b"PE\0\0" + (0x014C).to_bytes(2, "little"))
+            self.assertFalse(violations("win32", "    KERNEL32.dll", binary, root))
+            self.assertTrue(violations("win32", "    only64.dll", binary, root))
+            # The same DLL resolves for a 64-bit program.
+            binary.write_bytes(bytes(dos) + b"PE\0\0" + (0x8664).to_bytes(2, "little"))
+            self.assertFalse(violations("win32", "    only64.dll", binary, root))
+
     def test_unrecognized_output_fails_closed(self):
         for platform in ("linux", "darwin", "win32"):
             self.assertTrue(violations(platform, "", Path("app")))

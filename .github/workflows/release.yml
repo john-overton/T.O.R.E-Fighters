@@ -20,9 +20,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The same four images as ci.yml. macos-14 is Apple Silicon;
-        # macos-15-intel is the last x86_64 macOS image GitHub will offer.
-        os: [macos-14, macos-15-intel, ubuntu-24.04, windows-2022]
+        # The same five jobs as ci.yml. macos-14 is Apple Silicon;
+        # macos-15-intel is the last x86_64 macOS image GitHub will offer. The
+        # second windows-2022 job builds the 32-bit Windows package. Every job
+        # is its own include entry: a plain os list would merge the 32-bit
+        # entry into the 64-bit Windows job instead of adding one.
+        include:
+          - os: macos-14
+          - os: macos-15-intel
+          - os: ubuntu-24.04
+          - os: windows-2022
+          - os: windows-2022
+            target: i686-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -34,6 +43,16 @@ jobs:
       - name: Install pinned Rust toolchain
         shell: bash
         run: rustup show
+      # Every cargo command below then lints, tests and builds for that
+      # target, writing to target/<target>/ instead of target/.
+      - name: Add the Rust target
+        if: matrix.target
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          rustup target add "$TARGET"
+          echo "CARGO_BUILD_TARGET=$TARGET" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
@@ -82,33 +101,36 @@ jobs:
       - name: Check release binaries
         shell: bash
         run: |
+          out="target/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}release"
           if [ "$RUNNER_OS" = "Windows" ]; then
-            python tools/check_assets.py target/release/tore-app.exe
-            python tools/check_assets.py target/release/tore-extract.exe
+            python tools/check_assets.py "$out/tore-app.exe"
+            python tools/check_assets.py "$out/tore-extract.exe"
           else
-            python tools/check_assets.py target/release/tore-app
-            python tools/check_assets.py target/release/tore-extract
+            python tools/check_assets.py "$out/tore-app"
+            python tools/check_assets.py "$out/tore-extract"
           fi
 
       - name: Enforce runtime library dependencies
         shell: bash
         run: |
+          out="target/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}release"
           suffix=""
           if [ "$RUNNER_OS" = "Windows" ]; then suffix=".exe"; fi
-          python tools/check_runtime_dependencies.py "target/release/tore-app$suffix" "target/release/tore-extract$suffix"
+          python tools/check_runtime_dependencies.py "$out/tore-app$suffix" "$out/tore-extract$suffix"
       - name: Collect matching debug symbols
         shell: bash
         run: |
+          out="target/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}release"
           mkdir -p dist/symbols
           if [ "$RUNNER_OS" = "Windows" ]; then
-            cp target/release/tore_app.pdb target/release/tore_extract.pdb dist/symbols/
+            cp "$out/tore_app.pdb" "$out/tore_extract.pdb" dist/symbols/
           elif [ "$RUNNER_OS" = "macOS" ]; then
             for binary in tore-app tore-extract; do
-              dsymutil "target/release/$binary" -o "dist/symbols/$binary.dSYM"
+              dsymutil "$out/$binary" -o "dist/symbols/$binary.dSYM"
             done
           else
             for binary in tore-app tore-extract; do
-              objcopy --only-keep-debug "target/release/$binary" "dist/symbols/$binary.debug"
+              objcopy --only-keep-debug "$out/$binary" "dist/symbols/$binary.debug"
             done
           fi
           git rev-parse HEAD > dist/symbols/commit.txt
@@ -116,7 +138,7 @@ jobs:
       - name: Upload matching debug symbols
         uses: actions/upload-artifact@v7
         with:
-          name: symbols-${{ matrix.os }}-${{ github.sha }}
+          name: symbols-${{ matrix.os }}${{ matrix.target && format('-{0}', matrix.target) || '' }}-${{ github.sha }}
           if-no-files-found: error
           path: dist/symbols/
 
@@ -127,6 +149,8 @@ jobs:
       # ImageMagick. The Windows script passes -ext WixUtilExtension to candle
       # and light for the exit dialog's launch checkbox; it ships with the
       # WiX 3.14 install on the windows-2022 image alongside WixUIExtension.
+      # It reads CARGO_BUILD_TARGET to package the 32-bit build as
+      # ...-windows-x86.msi.
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: tools/package/package-linux.sh
@@ -141,7 +165,7 @@ jobs:
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
-          name: packages-${{ matrix.os }}
+          name: packages-${{ matrix.os }}${{ matrix.target && format('-{0}', matrix.target) || '' }}
           if-no-files-found: error
           path: |
             dist/*.tar.gz

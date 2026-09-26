@@ -15,8 +15,25 @@
   tools/package/build_icons.py. The same file is embedded in tore-app.exe by
   crates/tore-app/build.rs, installed next to it, used for both shortcuts and
   shown in Settings, Installed apps.
+
+  The same source builds the 64-bit and the 32-bit MSI: package-windows.ps1
+  runs candle with -arch x64 or -arch x86, which sets sys.BUILDARCH. Both
+  share the UpgradeCode, so installing either one replaces the other. The
+  32-bit package installs under Program Files (x86), and its two fixed
+  component GUIDs differ from the 64-bit ones, because a 32-bit and a 64-bit
+  component must never share a GUID.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?if $(sys.BUILDARCH) = x86 ?>
+    <?define ProgramFilesDir = "ProgramFilesFolder" ?>
+    <?define StartMenuShortcutGuid = "F19DAAEA-126F-4F5C-81EA-0016233A1BC3" ?>
+    <?define DesktopShortcutGuid = "9288C132-E312-41C5-A848-84E77FBCD9F5" ?>
+  <?else?>
+    <?define ProgramFilesDir = "ProgramFiles64Folder" ?>
+    <?define StartMenuShortcutGuid = "82B6C67B-DD7F-4AF2-959E-2885EB80939D" ?>
+    <?define DesktopShortcutGuid = "21BF53C1-7FFE-479E-A5A6-CBE98132F2D2" ?>
+  <?endif?>
+
   <Product Id="*"
            Name="T.O.R.E-Fighters"
            Language="1033"
@@ -41,7 +58,7 @@
     <Property Id="ARPCONTACT" Value="https://github.com/john-overton/T.O.R.E-Fighters" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="ProgramFiles64Folder">
+      <Directory Id="$(var.ProgramFilesDir)">
         <Directory Id="INSTALLFOLDER" Name="T.O.R.E-Fighters">
 
           <Component Id="MainExecutable" Guid="*">
@@ -92,7 +109,7 @@
            its own icon and reinstalls on every launch. -->
       <Directory Id="ProgramMenuFolder">
         <Directory Id="ApplicationProgramsFolder" Name="T.O.R.E-Fighters">
-          <Component Id="StartMenuShortcut" Guid="82B6C67B-DD7F-4AF2-959E-2885EB80939D">
+          <Component Id="StartMenuShortcut" Guid="$(var.StartMenuShortcutGuid)">
             <Shortcut Id="StartMenuLink"
                       Name="T.O.R.E-Fighters"
                       Description="Ground-up rebuild of Jane's Fighters Anthology"
@@ -112,7 +129,7 @@
       </Directory>
 
       <Directory Id="DesktopFolder" Name="Desktop">
-        <Component Id="DesktopShortcut" Guid="21BF53C1-7FFE-479E-A5A6-CBE98132F2D2">
+        <Component Id="DesktopShortcut" Guid="$(var.DesktopShortcutGuid)">
           <Shortcut Id="DesktopLink"
                     Name="T.O.R.E-Fighters"
                     Description="Ground-up rebuild of Jane's Fighters Anthology"
