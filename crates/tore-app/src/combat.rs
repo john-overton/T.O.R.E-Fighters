@@ -1120,30 +1120,11 @@ impl Combat {
             -f64::from(camera.roll),
         );
         for e in &self.state.effects {
-            if e.kind == EffectKind::Launch {
-                continue;
-            }
-            if matches!(e.kind, EffectKind::Flare | EffectKind::Chaff) {
-                let color = if e.kind == EffectKind::Flare {
-                    [1.0, 0.8, 0.3]
-                } else {
-                    [0.7, 0.8, 0.9]
-                };
-                // Fitted presentation: a small expanding camera-facing device glint.
-                let size = 2.0 + f64::from(45 - e.ticks) * 0.15;
-                for [x, y] in [
-                    [-1., -1.],
-                    [1., -1.],
-                    [1., 1.],
-                    [-1., -1.],
-                    [1., 1.],
-                    [-1., 1.],
-                ] {
-                    let pos = std::array::from_fn(|i| {
-                        e.position[i] + basis.right[i] * x * size + basis.up[i] * y * size
-                    });
-                    vertex(&mut v, pos, color);
-                }
+            // Chaff and flares are drawn by countermeasure_renderer.
+            if matches!(
+                e.kind,
+                EffectKind::Launch | EffectKind::Flare | EffectKind::Chaff
+            ) {
                 continue;
             }
             let scale = if e.kind == EffectKind::Destroyed {

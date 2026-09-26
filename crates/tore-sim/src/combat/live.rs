@@ -751,6 +751,8 @@ pub struct State {
     /// Bounded even when a headless host never drains them.
     sound_events: Vec<crate::acoustics::Emission>,
     pub smoke: super::smoke::Smoke,
+    /// Released chaff and flares, presentation only.
+    pub devices: super::countermeasures::Devices,
     pub debris: Vec<super::debris::Piece>,
     player_fragment_released: bool,
     player_explosion_reported: bool,
@@ -892,6 +894,7 @@ impl State {
             effects: vec![],
             sound_events: vec![],
             smoke: super::smoke::Smoke::default(),
+            devices: Default::default(),
             debris: Vec::new(),
             player_fragment_released: false,
             player_explosion_reported: false,
@@ -1309,7 +1312,15 @@ impl State {
         if !self.cheats.unlimited_ammo {
             *count -= 1;
         }
-        self.device_released(launcher.position, kind, true);
+        self.device_released(
+            super::countermeasures::Release {
+                position: launcher.position,
+                velocity: launcher.velocity,
+                basis: launcher.basis,
+            },
+            kind,
+            true,
+        );
         for projectile in &mut self.projectiles {
             let weapon = projectile
                 .weapon
@@ -1681,6 +1692,7 @@ impl State {
         self.projectiles.clear();
         self.effects.clear();
         self.smoke = super::smoke::Smoke::default();
+        self.devices = Default::default();
         self.debris.clear();
         self.targets
             .retain(|t| self.ground_bounds.contains_key(&t.id));
@@ -1959,12 +1971,21 @@ impl State {
         self.sound_events.push(emission);
     }
 
-    /// One chaff cartridge or flare leaving an aircraft at `position`: its
-    /// burst and the original's release recording, one per device, for the
-    /// player and AI alike (docs/spec/countermeasures.md). `own` marks the
-    /// player's aircraft.
-    pub fn device_released(&mut self, position: Vector, kind: EffectKind, own: bool) {
-        self.effect(position, kind);
+    /// One chaff cartridge or flare leaving an aircraft: its visible device
+    /// (a flare leaves as a pair) and the original's release recording, one
+    /// per device, for the player and AI alike (docs/spec/countermeasures.md).
+    /// `own` marks the player's aircraft.
+    pub fn device_released(
+        &mut self,
+        release: super::countermeasures::Release,
+        kind: EffectKind,
+        own: bool,
+    ) {
+        let position = release.position;
+        match kind {
+            EffectKind::Chaff => self.devices.release_chaff(release),
+            _ => self.devices.release_flare(release),
+        }
         self.push_sound(crate::acoustics::Emission {
             kind: match kind {
                 EffectKind::Chaff => crate::acoustics::Kind::Chaff,
@@ -2884,6 +2905,7 @@ impl State {
             ));
         }
         self.smoke.step(sources);
+        self.devices.step(&ground);
         let mut debris_impacts = Vec::new();
         self.debris.retain_mut(|piece| {
             if let Some(mut p) = piece.step(&ground) {
@@ -4236,13 +4258,15 @@ mod tests {
         s.command(Command::ReleaseFlare, launcher());
         assert_eq!((s.chaff, s.flares), (2, 0));
         assert_eq!(s.projectiles[0].target, Some(0));
-        assert_eq!(s.effects.last().unwrap().kind, EffectKind::Flare);
+        // One flare device is shown as a pair.
+        assert_eq!((s.devices.flares.len(), s.devices.chaff.len()), (2, 0));
+        assert!(s.effects.is_empty());
         // Chaff at 100 x 100 percent always decoys the radar missile.
         s.command(Command::ReleaseChaff, launcher());
         assert_eq!(s.chaff, 1);
         assert_eq!(s.projectiles[0].target, None);
         assert!(s.projectiles[0].guidance.is_none());
-        assert_eq!(s.effects.last().unwrap().kind, EffectKind::Chaff);
+        assert_eq!((s.devices.flares.len(), s.devices.chaff.len()), (2, 1));
         // A resistant seeker keeps guiding.
         let mut s = armed(0);
         s.command(Command::ReleaseChaff, launcher());
@@ -4250,11 +4274,10 @@ mod tests {
         // An empty dispenser releases nothing.
         let mut s = armed(100);
         s.chaff = 0;
-        let effects = s.effects.len();
         s.command(Command::ReleaseChaff, launcher());
         assert_eq!(
-            (s.effects.len(), s.projectiles[0].target),
-            (effects, Some(0))
+            (s.devices.chaff.len(), s.projectiles[0].target),
+            (0, Some(0))
         );
         // Unlimited ammo releases without spending.
         let mut s = armed(100);
@@ -4288,14 +4311,22 @@ mod tests {
                 (Kind::Flare, at, false, true)
             ]
         );
-        // An AI release is heard from that aircraft and shows the same burst.
-        s.device_released([10., 20., 30.], EffectKind::Chaff, false);
+        // An AI release is heard from that aircraft and shows the same cloud.
+        s.device_released(
+            super::super::countermeasures::Release {
+                position: [10., 20., 30.],
+                velocity: [0.; 3],
+                basis: Basis::new(0., 0., 0.),
+            },
+            EffectKind::Chaff,
+            false,
+        );
         assert_eq!(
             heard(&mut s),
             [(Kind::Chaff, [10., 20., 30.], false, false)]
         );
-        let burst = s.effects.last().unwrap();
-        assert_eq!((burst.kind, burst.ticks), (EffectKind::Chaff, 45));
+        assert_eq!((s.devices.flares.len(), s.devices.chaff.len()), (2, 2));
+        assert!(s.effects.is_empty());
     }
     #[test]
     fn an_ai_round_does_not_credit_the_player_score() {
@@ -4739,6 +4770,9 @@ mod tests {
             let mut s = fixture(false);
             s.targets.push(target(7, [0., 1000., 100000.], 100, 0x8000));
             s.targets[0].hp = 50;
+            (s.chaff, s.flares) = (1, 1);
+            s.command(Command::ReleaseFlare, launcher());
+            s.command(Command::ReleaseChaff, launcher());
             let mut clock = crate::flight::Clock { remainder: 0. };
             let mut tick = 0;
             for frame in 0..fps * 4 {
@@ -4760,6 +4794,7 @@ mod tests {
                 s.effects,
                 s.shots,
                 s.smoke,
+                s.devices,
                 s.debris,
             )
         };

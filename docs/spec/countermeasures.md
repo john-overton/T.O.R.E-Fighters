@@ -55,8 +55,8 @@ is static disassembly. Nothing was run and no retail session was observed.
 
 - A held key does not repeat. Nothing is released while paused, after the
   aircraft is destroyed or after ejection.
-- The release shows the existing chaff or flare burst effect at the aircraft
-  for 45 ticks (0.375 seconds), shared with AI releases. `fitted`.
+- The release shows the flare pair or chaff cloud described under
+  [Presentation](#presentation), for the player and AI alike.
 - Gamepad: hold View and press D-pad left for chaff, D-pad right for flare.
   `opinionated`, agent decision 2026-09-26.
 - Each device the player or an AI aircraft releases plays its recording once.
@@ -74,10 +74,99 @@ is static disassembly. Nothing was run and no retail session was observed.
   it. `opinionated`: John requested this acoustic model on 2026-09-23; using it
   for releases is an agent decision of 2026-09-26.
 
+## Presentation
+
+John asked on 2026-09-26 for flares that leave in pairs, burn orange and
+yellow with a short smoke trail by day, show as a glaring ball at night and
+light the aircraft and ground around them, and for chaff that shimmers in the
+sun as many small strips. The same day he set each flare's life to 30 seconds
+from release, with a fading, flickering last 3 seconds. This is
+**opinionated** presentation. The values John gave are marked as his; every
+other number is an agent decision (`fitted`). None of it changes counts,
+messages, decoy odds or seekers.
+
+### Flares
+
+- **A flare leaves as a pair**, one thrown to each side. The pair counts as
+  one flare, so counts, messages, AI budgets and decoy odds are unchanged.
+  John chose this on 2026-09-26.
+- Both leave 15 feet behind the aircraft's reference point and 2 feet below
+  it, at the aircraft's speed, pushed 15 ft/s out of the belly.
+- Each is thrown sideways along the wings **20 to 30 feet** (John's range,
+  random per flare), 95 percent of the way within 0.75 seconds.
+- Drag slows a flare hard. Behind a 400-knot jet it is more than 250 feet
+  back after one second, and it settles toward a 100 ft/s fall.
+- **Life: 30 seconds from release, then it is gone** (John). It flickers by
+  plus or minus 15 percent while it burns. **Over the last 3 seconds it dims to
+  nothing while the flicker grows into a sputter** (John). A flare that
+  reaches the ground rests 1.5 feet above it and burns there until its 30
+  seconds are up.
+- It looks like a white-yellow core 1.5 feet across, never less than 3 pixels,
+  inside an orange-to-yellow flame 6 feet across that streams back along its
+  motion.
+- **Glare** is drawn over the finished image. By day it is a small halo about
+  three core widths across. At night it is a halo about 6 percent of the
+  screen height with four soft streaks. It weakens with distance (half at
+  3,000 feet) and with haze. It shows only while the core is in view: no glare
+  from a flare behind a hill or an aircraft, but glare from a visible flare can
+  spill across the aircraft that released it.
+- **Smoke** uses the white missile puff. A flare leaves one puff every 5 feet
+  of its path, and at least one every 0.05 seconds while slow. Each puff drifts
+  upward at 8 to 15 ft/s in a random direction **within 30 degrees of straight
+  up** (John's 30-degree cone, read as 30 degrees either side of vertical),
+  slowing over 1.5 seconds. It starts 2.5 feet in radius and grows 4 feet per
+  second. Puffs thicken over their first 0.1 seconds, so the flame stays
+  visible at the head of the trail. They are gone once the flare has moved
+  **200 feet** past them (John), or after 3 seconds, whichever comes first. A
+  burnt-out flare's remaining smoke finishes fading.
+
+### Flare light
+
+- A burning flare lights nearby aircraft, terrain, buildings, water, clouds,
+  chaff and smoke with warm white light, linear RGB (1, 0.75, 0.45).
+- It falls with the square of distance. At full strength it lights a surface
+  facing it as brightly as full sun at about 63 feet, a quarter as brightly at
+  126 feet, and not at all beyond 1,500 feet.
+- At night eyes adapt to the dark, so the same flare counts up to four times
+  as much. The boost blends in as the sun goes down.
+- Night weather darkens the art itself. Under flare light, surfaces show the
+  colors of the weather's brightest record instead, so a flare over desert
+  shows sand, not black. Water shows a fixed dark sea color and a rippled
+  reflection of each flare.
+- The 16 flares that matter most at the camera light the scene at once,
+  ranked by strength over distance squared.
+- Smoke puffs take at most one full sun's worth of flare light, so the head
+  of a trail glows without turning into a flat white sheet.
+- Known differences: flare light casts no shadows and reaches every surface
+  facing it, even through the aircraft between them. It needs the smooth
+  lighting mode; the stepped "original graphics" mode keeps its palette
+  lighting, with only the smoke glow.
+
+### Chaff
+
+- A cartridge becomes one cloud of 600 foil strips. It leaves from the same
+  point as flares at the aircraft's speed, stops relative to the air almost
+  at once (0.12-second time constant), then settles at 4 ft/s.
+- The cloud's radius grows from 3 feet to about 35 feet within 1.5 seconds,
+  then keeps spreading 1.5 feet per second. Each strip falls at its own 2 to
+  6 ft/s, flutters, and spins 2 to 8 turns per second.
+- A strip is 0.5 feet across and never drawn smaller than one pixel. Below a
+  pixel it fades instead, so a distant cloud glitters faintly rather than
+  flickering. Clouds fade out between 12,000 and 20,000 feet away.
+- Strips are dim silver. **In sunlight a strip flashes white whenever its face
+  mirrors the sun toward the camera, so the cloud shimmers.** At night strips
+  catch only moonlight and flare light.
+- A cloud lasts 20 seconds and fades over its last 5.
+- Up to 64 chaff clouds and 128 flares exist at once; the oldest go first.
+
 ## Unknown
 
 - **Dispenser damage messages.** The strings `CHAFF DISPENSER DAMAGED` and
   `FLARE DISPENSER DAMAGED` exist; when they are shown is not traced.
+- **Original device art and motion.** The original loads `CHAFF.SH`,
+  `FLARE.SH` and `FLARE.PIC` ([weapons notes](../formats/weapons.md)). How it
+  draws a device, how it moves and how long it lasts are not traced. Next
+  step: trace the device object's render and lifetime.
 - **Which views count as cockpit views** for the sound rule. The evidence points
   to the cockpit views; which key selects each internal view case was not
   traced ([sound evidence](../formats/sound.md#countermeasure-release-sound)).

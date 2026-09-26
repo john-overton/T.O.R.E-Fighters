@@ -1030,6 +1030,18 @@ or use native research flight. For motor smoke use `--live-fire --weapon-slot 2
 --capture-flight .local/motor-smoke.ppm`. Runtime smoke comes from `SMOKE.PIC`;
 `SMOKE.SH` remains unexecuted. [Fitted rules](spec/damage-smoke.md).
 
+Chaff and flare captures release a device with `--combat-command chaff` or
+`--combat-command flare` (repeat for both), then advance flight and combat
+with `--countermeasure-preview TICKS` (1 to 7200) before `--capture-flight`.
+The preview prints each flare's height above the ground. External views need
+`--flight-view 1` and an orbit such as `--flight-look 165,-8`; a positive
+orbit pitch looks down from above. Add `--weather-condition 5` for night,
+`TORE_WEATHER_TIME=13:00` for midday and `TORE_FLIGHT_AGL=120` to see flare
+light on the ground. Example: `--free-flight --combat-command flare
+--countermeasure-preview 60 --flight-view 1 --flight-look 160,-12
+--capture-flight .local/flare.ppm`. See
+[countermeasure presentation](spec/countermeasures.md#presentation).
+
 ## AI regression probes
 
 `cargo run --locked -p tore-app -- --ai-roster-probe-ticks 3600 --no-audio`

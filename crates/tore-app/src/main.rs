@@ -18,6 +18,7 @@ mod combat;
 mod combat_tape;
 mod comms;
 mod controls_editor;
+mod countermeasure_renderer;
 mod crew_voice;
 mod damage_art;
 mod debrief;
@@ -3088,6 +3089,7 @@ impl ApplicationHandler for App {
                         renderer.smoke(
                             &self.combat.smoke_art,
                             [&self.combat.state.smoke, &self.combat.contrails],
+                            &self.combat.state.devices,
                         );
                         match renderer.poll_previews() {
                             Ok(previews) => {
@@ -4981,6 +4983,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut hud_target_preview: Option<[f64; 3]> = None;
     let mut damage_preview_section = tore_sim::combat::live::DamageSection::Nose;
     let mut damage_preview_ticks = 240usize;
+    let mut countermeasure_preview = None;
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
     let mut systems_preview: Vec<usize> = Vec::new();
@@ -5122,6 +5125,11 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--damage-preview-ticks" => {
                 damage_preview_ticks = args.next().ok_or("--damage-preview-ticks needs 1..7200")?.parse()?;
                 if !(1..=7200).contains(&damage_preview_ticks) { return Err("--damage-preview-ticks needs 1..7200".into()); }
+            }
+            "--countermeasure-preview" => {
+                let ticks: usize = args.next().ok_or("--countermeasure-preview needs 1..7200")?.parse()?;
+                if !(1..=7200).contains(&ticks) { return Err("--countermeasure-preview needs 1..7200".into()); }
+                countermeasure_preview = Some(ticks);
             }
             "--damage-preview" => {
                 let fraction = args.next().ok_or("--damage-preview needs 0..1")?.parse::<f64>()?;
@@ -5506,7 +5514,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -5561,6 +5569,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             || headless_ticks.is_some())
     {
         return Err("dummy aircraft require normal desktop flight; range/research/replay/headless-flight modes have separate fixtures".into());
+    }
+    if countermeasure_preview.is_some() && capture_terrain.is_none() {
+        return Err("--countermeasure-preview requires --capture-flight".into());
     }
     if !systems_preview.is_empty() && panel_snapshot.is_none() {
         return Err("--systems-preview requires --panel-snapshot".into());
@@ -6428,7 +6439,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             || flight_controls.is_some()
             || (flight_throttle.is_some() || flight_bay.is_some())
             || flight_probe_ticks.is_some()
-            || damage_preview.is_some());
+            || damage_preview.is_some()
+            || countermeasure_preview.is_some());
     let mut flight = hornet.start(&world);
     if let Ok(value) = std::env::var("TORE_FLIGHT_AGL") {
         let agl = value.parse::<f64>()?;
@@ -6716,6 +6728,36 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     for command in combat_commands {
         combat.command(command, combat::launcher(&flight));
+    }
+    // Lets released chaff and flares develop before a capture.
+    if let Some(ticks) = countermeasure_preview {
+        for _ in 0..ticks {
+            flight.step(&tore_input::PilotInput::default(), |x, z| {
+                f64::from(world.height(x as f32, z as f32))
+            });
+            combat.step(&mut flight, &world)?;
+        }
+        let devices = &combat.state.devices;
+        println!(
+            "Countermeasure preview: ticks={ticks} flares={} burning={} puffs={} chaff={}",
+            devices.flares.len(),
+            devices.flares.iter().filter(|f| f.burning()).count(),
+            devices.puffs().count(),
+            devices.chaff.len()
+        );
+        for flare in &devices.flares {
+            let p = flare.position;
+            println!(
+                "  flare at {:.0},{:.0},{:.0}, {:.0} ft above ground; aircraft {:.0},{:.0},{:.0}",
+                p[0],
+                p[1],
+                p[2],
+                p[1] - f64::from(world.height(p[0] as f32, p[2] as f32)),
+                flight.position[0],
+                flight.position[1],
+                flight.position[2]
+            );
+        }
     }
     if let Some(ticks) = combat_probe {
         combat.command(

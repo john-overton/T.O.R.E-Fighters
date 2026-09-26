@@ -67,9 +67,14 @@ Dense weather bands attenuate sunlight along its path to the surface using the
 same band classification as atmospheric occlusion, with a 600-foot transmission
 scale. Fog reduces the surface-lighting contrast, then the existing aerial
 perspective and dense-cloud occlusion apply. Emissive engine heat, flame sheets,
-tracers, explosions, flare/chaff glints, smoke and vapor retain their own
+tracers, explosions, burning flares, chaff, smoke and vapor retain their own
 presentation rather than receiving solid diffuse shading or casting solid shadows.
 Glass receives lighting but does not cast an opaque silhouette.
+
+Burning flares add their own warm point light to every surface this pass
+lights, and to water, clouds and smoke, with no shadows. Its strength, reach,
+night boost and the daylight colors it shows at night are in
+[countermeasure presentation](countermeasures.md#flare-light).
 
 ## Geometry shadows
 

@@ -143,7 +143,8 @@ the far plane at depth 0. Using the near and far distances, the vertex shader co
 `near * (far - view_z) / (far - near)`, then perspective division yields depth.
 Depth clears to zero and nearer fragments compare greater. The existing near
 plane and 2,200,000-foot far limit remain. Aircraft, terrain, static objects,
-clouds, smoke, vapor and the spotting aid use this same mapping. The separate
+clouds, smoke, vapor, chaff, flares, flare glare and the spotting aid use
+this same mapping. The separate
 orthographic shadow maps keep their existing depth convention. This is an
 agent-selected host correction for distant surface flicker; see
 [NVIDIA's depth-precision analysis](https://developer.nvidia.com/blog/visualizing-depth-precision/).

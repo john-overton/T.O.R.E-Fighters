@@ -102,6 +102,9 @@ centers are 60 feet apart before rise. Missile/aircraft damage radii start at
 2 feet per second and linear fade from 0.65 opacity. Original timing remains
 unknown. Rendering continues at the normal frame rate.
 
+Burning flares leave their own short trail with the white missile puff; its
+rules are in [countermeasure presentation](countermeasures.md#flares).
+
 Engine contrails are an opinionated addition requested by John on 2026-09-21.
 Each engine emits 10 pale puffs per second behind its outlet, including healthy
 aircraft. As requested by John on 2026-09-21, each puff now lasts two minutes

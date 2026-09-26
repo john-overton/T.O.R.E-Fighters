@@ -95,6 +95,7 @@ pub struct SimRenderer {
     escapees: Option<AircraftBatch>,
     lens_flare: crate::lens_flare::LensFlare,
     smoke: crate::smoke_renderer::SmokeRenderer,
+    countermeasures: crate::countermeasure_renderer::Instances,
     battle: Option<(wgpu::Buffer, u32)>,
     battle_contacts: Vec<Contact>,
     airports: Option<(wgpu::Buffer, u32)>,
@@ -163,6 +164,7 @@ struct Pipelines {
     rim_dark_pipeline: wgpu::RenderPipeline,
     rim_light_pipeline: wgpu::RenderPipeline,
     rim_depth_layout: wgpu::BindGroupLayout,
+    countermeasures: crate::countermeasure_renderer::Pipelines,
 }
 impl Pipelines {
     fn new(
@@ -330,7 +332,8 @@ impl Pipelines {
             label: Some("Spotting aid world depth"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: u32::from(samples > 1),
-                visibility: wgpu::ShaderStages::FRAGMENT,
+                // Flare glare tests its core against depth per vertex.
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Depth,
                     view_dimension: wgpu::TextureViewDimension::D2,
@@ -397,6 +400,14 @@ impl Pipelines {
             "Spotting aid light rim",
             "rim_light_fragment",
             wgpu::BlendOperation::Max,
+        );
+        let countermeasures = crate::countermeasure_renderer::Pipelines::new(
+            device,
+            shader,
+            format,
+            samples,
+            &surface_layout,
+            &rim_layout,
         );
         let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Retail sky preview"),
@@ -499,6 +510,7 @@ impl Pipelines {
             rim_dark_pipeline,
             rim_light_pipeline,
             rim_depth_layout,
+            countermeasures,
         }
     }
 }
@@ -515,10 +527,11 @@ impl SimRenderer {
             label: Some("Simulation terrain"),
             source: wgpu::ShaderSource::Wgsl(
                 format!(
-                    "{}\n{}\n{}",
+                    "{}\n{}\n{}\n{}",
                     include_str!("surface_lighting.wgsl"),
                     include_str!("terrain.wgsl"),
-                    include_str!("spotting.wgsl")
+                    include_str!("spotting.wgsl"),
+                    include_str!("countermeasures.wgsl")
                 )
                 .into(),
             ),
@@ -654,9 +667,11 @@ impl SimRenderer {
         });
         let palette = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Live weather palette"),
+            // Weather palette, ten fog rows, then the daylight palette that
+            // flare light shows at night (BASE_ROW in terrain.wgsl).
             size: wgpu::Extent3d {
                 width: 256,
-                height: 11,
+                height: 12,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -730,6 +745,7 @@ impl SimRenderer {
             aircraft_visible: true,
             lens_flare: crate::lens_flare::LensFlare::new(device, format),
             smoke: crate::smoke_renderer::SmokeRenderer::new(device, format, &shader, samples),
+            countermeasures: crate::countermeasure_renderer::Instances::new(device),
             battle: None,
             battle_contacts: Vec::new(),
             airports: None,
@@ -764,6 +780,7 @@ impl SimRenderer {
         queue: &wgpu::Queue,
         art: &tore_formats::Pic,
         smoke: [&tore_sim::combat::smoke::Smoke; 2],
+        devices: &tore_sim::combat::countermeasures::Devices,
     ) {
         self.smoke.prepare(
             device,
@@ -773,6 +790,8 @@ impl SimRenderer {
             art,
             smoke,
         );
+        self.smoke.flare_smoke(devices);
+        self.countermeasures.upload(queue, devices);
     }
     pub fn combat(
         &mut self,
@@ -1393,14 +1412,18 @@ impl SimRenderer {
             queue,
             camera,
             size[0] as f32 / (size[1] as f32 * camera.view_fraction),
+            &self.countermeasures.lights,
         );
-        let mut entries = Vec::with_capacity(11 * 1024);
+        let mut entries = Vec::with_capacity(12 * 1024);
         for row in std::iter::once(&weather.palette).chain(weather.fog_palette.iter()) {
             for rgb in row {
                 entries.extend([rgb[0], rgb[1], rgb[2], 255]);
             }
         }
         entries.resize(11 * 1024, 0);
+        for rgb in world.weather.daylight_palette() {
+            entries.extend([rgb[0], rgb[1], rgb[2], 255]);
+        }
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.palette,
@@ -1412,11 +1435,11 @@ impl SimRenderer {
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(1024),
-                rows_per_image: Some(11),
+                rows_per_image: Some(12),
             },
             wgpu::Extent3d {
                 width: 256,
-                height: 11,
+                height: 12,
                 depth_or_array_layers: 1,
             },
         );
@@ -1433,7 +1456,10 @@ impl SimRenderer {
         let flare_target =
             self.lens_flare
                 .prepare(device, queue, world, camera, output, &weather.palette);
-        if self.lighting.prepare(queue, camera, world) {
+        if self
+            .lighting
+            .prepare(queue, camera, world, &self.countermeasures.lights)
+        {
             let mut objects = Vec::new();
             if let Some((buffer, count)) = &self.airports {
                 objects.push((&self.bind, buffer, *count));
@@ -1608,6 +1634,10 @@ impl SimRenderer {
             pass.draw(0..*count, 0..1);
         }
         self.smoke.draw(&mut pass);
+        pass.set_bind_group(0, &self.bind, &[]);
+        pass.set_bind_group(1, &self.lighting.bind, &[]);
+        self.countermeasures
+            .draw_world(&mut pass, &self.p.countermeasures);
         drop(pass);
         if let Some((_, bind)) = &targets.scaled {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1626,6 +1656,36 @@ impl SimRenderer {
             pass.set_pipeline(&self.resample);
             pass.set_bind_group(0, bind, &[]);
             pass.draw(0..3, 0..1);
+        }
+        // Flare glare goes over the finished image, where it can spill across
+        // the aircraft that released it while the core stays in view.
+        if self.countermeasures.has_flares() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Flare glare"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: destination,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_viewport(
+                0.,
+                0.,
+                output[0] as f32,
+                output[1] as f32 * camera.view_fraction,
+                0.,
+                1.,
+            );
+            pass.set_bind_group(0, &self.bind, &[]);
+            pass.set_bind_group(1, &self.lighting.bind, &[]);
+            pass.set_bind_group(2, &targets.rim_depth, &[]);
+            self.countermeasures
+                .draw_glare(&mut pass, &self.p.countermeasures);
         }
         // The spotting aid goes over the finished image at output resolution.
         if rim && !contacts.is_empty() {
@@ -2039,6 +2099,152 @@ mod lighting_tests {
     }
 
     // Runs the production shader, shadow maps, surface pipelines and readback.
+    // A burning flare 40 feet above a ground plane at midnight lights the
+    // ground beneath it (docs/spec/countermeasures.md).
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn gpu_burning_flare_lights_the_ground_beneath_it() {
+        use tore_sim::combat::countermeasures::{Devices, Release};
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions::default())
+                .await
+                .unwrap();
+            let (device, queue) = adapter
+                .request_device(&wgpu::DeviceDescriptor::default())
+                .await
+                .unwrap();
+            let render = |flare: bool| {
+                let mut world = crate::terrain::tests::world();
+                let mut module = tore_formats::weather::Module::parse(
+                    &tore_formats::weather::synthetic_module(1),
+                )
+                .unwrap();
+                for layer in &mut module.layers {
+                    layer.start_seconds = 0;
+                    layer.end_seconds = 86399;
+                    layer.sunrise_seconds = 6 * 3600;
+                    layer.sunset_seconds = 18 * 3600;
+                    layer.fog_near_density = 0;
+                    layer.fog_far_density = 0;
+                }
+                world.weather = tore_sim::environment::Environment::new(
+                    tore_sim::environment::Configuration::new(module, 0, 0, 0, None).unwrap(),
+                );
+                world.smooth_weather = true;
+                world.no_sun_whiteout = true;
+                world.texture_indices = vec![255; 65536];
+                world.sky_indices = vec![100; 65536];
+                world.vertices = plane(0., 400.);
+                let mut renderer = SimRenderer::new(
+                    &device,
+                    &queue,
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    &world,
+                    crate::graphics::Options::original(),
+                    1,
+                );
+                let mut devices = Devices::default();
+                if flare {
+                    devices.release_flare(Release {
+                        position: [0., 40., 15.],
+                        velocity: [0.; 3],
+                        basis: tore_sim::attitude::Basis::new(0., 0., 0.),
+                    });
+                    for _ in 0..30 {
+                        devices.step(&|_, _| 0.);
+                    }
+                }
+                renderer.countermeasures.upload(&queue, &devices);
+                let mut camera = Camera::new();
+                camera.position = [0., 200., 0.];
+                camera.pitch = -std::f32::consts::FRAC_PI_2;
+                camera.yaw = 0.;
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Flare lighting readback"),
+                    size: wgpu::Extent3d {
+                        width: 256,
+                        height: 256,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None,
+                    size: 256 * 256 * 4,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
+                let mut encoder = device.create_command_encoder(&Default::default());
+                renderer.draw(
+                    &device,
+                    &queue,
+                    &mut encoder,
+                    &texture.create_view(&Default::default()),
+                    [256, 256],
+                    &camera,
+                    &world,
+                );
+                encoder.copy_texture_to_buffer(
+                    texture.as_image_copy(),
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &buffer,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(1024),
+                            rows_per_image: Some(256),
+                        },
+                    },
+                    texture.size(),
+                );
+                queue.submit([encoder.finish()]);
+                let (tx, rx) = std::sync::mpsc::channel();
+                buffer
+                    .slice(..)
+                    .map_async(wgpu::MapMode::Read, move |result| tx.send(result).unwrap());
+                device
+                    .poll(wgpu::PollType::Wait {
+                        submission_index: None,
+                        timeout: None,
+                    })
+                    .unwrap();
+                rx.recv().unwrap().unwrap();
+                let pixels = buffer.slice(..).get_mapped_range().to_vec();
+                buffer.unmap();
+                pixels
+            };
+            let dark = render(false);
+            let lit = render(true);
+            // Ground a little away from the flare bodies, so their glow and
+            // glare are not what is measured.
+            let at = |pixels: &[u8], x: usize, y: usize| {
+                let i = (y * 256 + x) * 4;
+                u16::from(pixels[i]) + u16::from(pixels[i + 1]) + u16::from(pixels[i + 2])
+            };
+            let (near, far) = ((128, 20), (8, 128));
+            assert!(
+                at(&lit, near.0, near.1) > at(&dark, near.0, near.1) + 120,
+                "ground under the flare: lit={} dark={}",
+                at(&lit, near.0, near.1),
+                at(&dark, near.0, near.1)
+            );
+            // Warm light: red rises more than blue.
+            let i = (near.1 * 256 + near.0) * 4;
+            assert!(lit[i] > lit[i + 2]);
+            // Light falls off with distance across the plane.
+            assert!(
+                at(&lit, far.0, far.1) - at(&dark, far.0, far.1)
+                    < at(&lit, near.0, near.1) - at(&dark, near.0, near.1)
+            );
+        });
+    }
+
     // Synthetic geometry only; explicitly invoked on a GPU-capable host.
     #[test]
     #[ignore = "requires a GPU adapter"]

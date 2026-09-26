@@ -98,7 +98,9 @@ fn aerial_perspective(color:vec3<f32>,direction:vec3<f32>,altitude:f32)->vec3<f3
 }
 struct VertexOut {
  @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
- @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>, @location(7) @interpolate(flat) fog_enabled:u32, @location(8) @interpolate(flat) light_row:i32, @location(9) terrain_normal:vec3<f32>
+ @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>, @location(7) @interpolate(flat) fog_enabled:u32, @location(8) @interpolate(flat) light_row:i32, @location(9) terrain_normal:vec3<f32>,
+ // Color before the weather's shade remaps, for flare light.
+ @location(10) albedo:vec3<f32>
 }
 // Exact sRGB decoding includes the dark linear segment; source black stays zero.
 fn linear(c:vec3<f32>)->vec3<f32>{return select(pow((c+vec3<f32>(0.055))/1.055,vec3<f32>(2.4)),c/12.92,c<=vec3<f32>(0.04045));}
@@ -108,6 +110,11 @@ fn fog_row(distance:f32)->i32{
  let levels=i32(scene.forward.w);
  return 1+clamp(i32(clamp(haze(distance),0.0,1.0)*f32(levels)),0,levels-1);
 }
+// The daylight palette row: the art's colors in the weather's brightest
+// record, which flare light shows at night. Falls back to the live palette
+// where it is absent.
+const BASE_ROW:i32=11;
+fn base_row()->i32 {return select(0,BASE_ROW,i32(textureDimensions(palette).y)>BASE_ROW);}
 fn shade(index:u32,row:i32)->vec4<f32>{
  let c=textureLoad(palette,vec2<i32>(i32(index),row),0).rgb;
  return vec4<f32>(linear(c),select(1.0,0.0,index==255u));
@@ -322,7 +329,8 @@ fn world_vertex(position:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec3<f32>,index:
  out.direction=p;out.altitude=position.y;out.uv=uv;out.layer=layer;out.own_color=select(0.0,1.0,index<0.0);
  // A negative index means the vertex carries its own color; terrain carries a
  // source palette index instead, resolved per frame and then Gouraud blended.
- if index>=0.0 { var source_index=u32(index)%256u; if out.light_row>=0 {source_index=weather_index(vec2<i32>(i32(source_index),out.light_row),i32(scene.deck_a.w));} out.color=shade(source_index,0).rgb; if fog_enabled {out.color=remap_color(source_index,ray_rows(length(p),position.y));} } else { out.color=linear(color); }
+ out.albedo=linear(color);
+ if index>=0.0 { var source_index=u32(index)%256u; if out.light_row>=0 {source_index=weather_index(vec2<i32>(i32(source_index),out.light_row),i32(scene.deck_a.w));} out.albedo=shade(source_index,base_row()).rgb; out.color=shade(source_index,0).rgb; if fog_enabled {out.color=remap_color(source_index,ray_rows(length(p),position.y));} } else { out.color=linear(color); }
  out.distance=length(p);return out;
 }
 @vertex fn vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
@@ -339,13 +347,15 @@ fn world_vertex(position:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec3<f32>,index:
  let grad=vec4<f32>(dpdx(in.uv),dpdy(in.uv));
  let receiver=surface_normal(in.direction);
  let normal=select(receiver,normalize(in.terrain_normal),dot(in.terrain_normal,in.terrain_normal)>0.1 && smooth_weather());
- if in.layer<0.0 {return scenery(aerial_perspective(surface_color(in.color,in.direction,normal,false,receiver),in.direction,in.altitude));}
+ if in.layer<0.0 {return scenery(aerial_perspective(surface_color(in.color,in.direction,normal,false,receiver,in.albedo),in.direction,in.altitude));}
  var remaps=vec2<f32>(-1.0);
  if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
  let tex=filtered_tile(in.uv,grad,i32(in.layer),-1,in.light_row,remaps);
  // Fitted bilinear coverage boundary; discarded water writes no depth.
  if tex.a<0.5 {discard;}
- return scenery(aerial_perspective(surface_color(tex.rgb,in.direction,normal,false,receiver),in.direction,in.altitude));
+ var albedo=tex.rgb;
+ if flares_burning() {albedo=sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb;}
+ return scenery(aerial_perspective(surface_color(tex.rgb,in.direction,normal,false,receiver,albedo),in.direction,in.altitude));
 }
 // User-requested material. Pink is a mask; metal pixels retain their source RGB.
 fn engine_texel(at:vec2<i32>,heat:f32)->vec3<f32> {
@@ -367,19 +377,24 @@ fn engine_color(uv:vec2<f32>,heat:f32)->vec3<f32> {
 }
 fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
  var color=in.color;
- if in.layer<=-3.0 && in.layer>=-4.0 {color=engine_color(in.uv,clamp(-in.layer-3.0,0.0,1.0));}
+ var albedo=in.albedo;
+ if in.layer<=-3.0 && in.layer>=-4.0 {color=engine_color(in.uv,clamp(-in.layer-3.0,0.0,1.0));albedo=color;}
  if in.layer>=0.0 || in.layer == -2.0 || in.layer == -5.0 || in.layer == -7.0 {
   var remaps=vec2<f32>(-1.0);if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
   let tex=sample_tile(in.uv,i32(max(in.layer,0.0)),0,-1,in.light_row,remaps);
   if (in.layer == -2.0 || in.layer == -7.0) && tex.a < 0.5 { discard; }
   color=mix(color,tex.rgb,tex.a);
+  if flares_burning() {
+   let bare=sample_tile(in.uv,i32(max(in.layer,0.0)),base_row(),-1,in.light_row,vec2<f32>(-1.0));
+   albedo=mix(albedo,bare.rgb,bare.a);
+  } else {albedo=color;}
   if in.layer == -5.0 {
    let luminance=dot(color,vec3<f32>(0.2126,0.7152,0.0722));
    color=mix(color,vec3<f32>(0.95,0.45,0.08)*(0.3+0.7*luminance),0.75);
   }
  }
  if textureDimensions(palette).y<=1u || (in.own_color>0.0 && in.layer<0.0 && in.layer != -2.0 && in.layer != -5.0) { color=mix(color,linear(scene.sky.rgb),haze(in.distance)); }
- if in.layer != -6.0 && in.layer != -7.0 && !(in.layer < -3.0 && in.layer >= -4.0) {color=surface_color(color,in.direction,normal,true,normal);}
+ if in.layer != -6.0 && in.layer != -7.0 && !(in.layer < -3.0 && in.layer >= -4.0) {color=surface_color(color,in.direction,normal,true,normal,albedo);}
  if in.fog_enabled!=0u {color=aerial_perspective(color,in.direction,in.altitude);}
  else {color=cloud_occlusion(color,in.direction,in.altitude);}
  return vec4<f32>(color,1.0);
@@ -657,6 +672,23 @@ fn ocean_surface(hit:vec3<f32>,deck:vec4<f32>,distance:f32,passes:i32,core:i32)-
  let base=ocean_sample(uv,i32(deck.z),distance,passes,core);
  return vec4<f32>(mix(base.rgb,shaded,opacity),base.a);
 }
+// Burning flares light the water and leave a rippled reflection of
+// themselves, docs/spec/countermeasures.md.
+fn water_flares(color:vec3<f32>,ray:vec3<f32>,hit:vec3<f32>)->vec3<f32> {
+ if surface.sun.w<=0.0 || surface.reserved.w<1.0 {return color;}
+ let relative=hit-scene.eye.xyz;
+ let up=vec3<f32>(0.0,1.0,0.0);
+ var glint=0.0;
+ let mirror=reflect(ray,up);
+ for(var i=0;i<i32(surface.reserved.w);i++) {
+  let to=surface.flares[i].xyz-relative;
+  let d2=dot(to,to);
+  glint+=surface.flares[i].w*pow(max(dot(mirror,to*inverseSqrt(max(d2,0.000001))),0.0),80.0)/(d2+FLARE_SOFTENING);
+ }
+ // Night shade remaps leave the resolved water nearly black; a flare shows
+ // a fitted dark sea color instead.
+ return color+vec3<f32>(0.06,0.09,0.11)*flare_light(relative,up)+FLARE_COLOR*glint*0.15;
+}
 // Opinionated directional scattering approximation, docs/spec/sun-glow.md.
 fn solar_glow(color:vec3<f32>,ray:vec3<f32>)->vec3<f32> {
  if !smooth_weather() || scene.sun.w<=0.0 || celestial_occluded(ray) {return color;}
@@ -737,7 +769,7 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
   if scene.ocean[i+1]>0.0 {
    tex=ocean_surface(hit,deck,distance,passes,core);
    tex=vec4<f32>(aerial_perspective(tex.rgb,ray*distance,deck.x),tex.a);
-   tex=vec4<f32>(water_shadow(water_sun(tex.rgb,ray,hit,distance),hit),tex.a);
+   tex=vec4<f32>(water_flares(water_shadow(water_sun(tex.rgb,ray,hit,distance),hit),ray,hit),tex.a);
   } else {
   tex=weather_tile(uv,i32(deck.z),fog_row(distance),passes,core,vec2<f32>(-1.0));
   if smooth_weather() {
@@ -767,7 +799,7 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
    let distance=-scene.eye.y/ray.y;
    if distance<2000000.0 {
     let hit=scene.eye.xyz+ray*distance;
-    let reflected=water_shadow(water_sun(color,ray,hit,distance),hit);
+    let reflected=water_flares(water_shadow(water_sun(color,ray,hit,distance),hit),ray,hit);
     color=mix(reflected,color,smoothstep(1800000.0,2000000.0,distance));
    }
   }
@@ -814,11 +846,14 @@ fn cloud_lighting(color:vec3<f32>,direction:vec3<f32>,altitude:f32)->vec3<f32> {
 @fragment fn cloud_fragment(in:VertexOut)->@location(0) vec4<f32>{
  let tex=weather_tile(in.uv,i32(in.layer),0,-1,-1,ray_rows(in.distance,in.altitude));
  if tex.a<0.5 {discard;}
- return scenery(cloud_lighting(tex.rgb,in.direction,in.altitude));
+ var flares=vec3<f32>(0.0);
+ if flares_burning() {flares=weather_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb*flare_light(in.direction,vec3<f32>(0.0));}
+ return scenery(cloud_lighting(tex.rgb+flares,in.direction,in.altitude));
 }
 
-struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) opacity:f32, @location(2) distance:f32, @location(3) direction:vec3<f32>, @location(4) altitude:f32 }
-@vertex fn smoke_vertex(@builtin(vertex_index) vertex:u32,@location(0) center:vec3<f32>,@location(1) radius:f32,@location(2) cell:f32,@location(3) opacity:f32)->SmokeOut {
+// glow: light from nearby burning flares, evaluated per puff on the CPU.
+struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) opacity:f32, @location(2) distance:f32, @location(3) direction:vec3<f32>, @location(4) altitude:f32, @location(5) glow:vec3<f32> }
+@vertex fn smoke_vertex(@builtin(vertex_index) vertex:u32,@location(0) center:vec3<f32>,@location(1) radius:f32,@location(2) cell:f32,@location(3) opacity:f32,@location(4) glow:vec3<f32>)->SmokeOut {
  let corners=array<vec2<f32>,6>(vec2(0.0,0.0),vec2(1.0,0.0),vec2(1.0,1.0),vec2(0.0,0.0),vec2(1.0,1.0),vec2(0.0,1.0));
  let corner=corners[vertex];
  let offset=vec2<f32>(corner.x*2.0-1.0,1.0-corner.y*2.0)*radius;
@@ -828,12 +863,15 @@ struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, 
  let f=1.7320508*scene.up.w;
  var out:SmokeOut;
  out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,world_depth_clip(z),z);
- out.uv=uv;out.opacity=opacity;out.distance=length(p);out.direction=p;out.altitude=position.y;return out;
+ out.uv=uv;out.opacity=opacity;out.distance=length(p);out.direction=p;out.altitude=position.y;out.glow=glow;return out;
 }
 @fragment fn smoke_fragment(in:SmokeOut)->@location(0) vec4<f32> {
  let color=sample_tile(in.uv,0,0,-1,-1,ray_rows(in.distance,in.altitude));
  let alpha=color.a*in.opacity*(1.0-clamp(haze(in.distance),0.0,1.0));
- let lit=cloud_lighting(color.rgb,in.direction,in.altitude);
+ // Glow lights the puff's own undarkened art, as flare light does elsewhere.
+ var bare=color.rgb;
+ if any(in.glow>vec3<f32>(0.0)) {bare=sample_tile(in.uv,0,base_row(),-1,-1,vec2<f32>(-1.0)).rgb;}
+ let lit=cloud_lighting(color.rgb,in.direction,in.altitude)+bare*in.glow*(1.0-clamp(haze(in.distance),0.0,1.0));
  return vec4<f32>(lit*alpha,alpha);
 }
 

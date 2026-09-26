@@ -401,6 +401,25 @@ impl Environment {
         ))
     }
 
+    /// Presentation query: the untinted palette of the weather's brightest
+    /// record, by terrain color. Night records darken the art itself, so a
+    /// light source such as a flare shows these daylight colors instead.
+    pub fn daylight_palette(&self) -> [[u8; 3]; 256] {
+        let brightness = |layer: &Layer| -> u32 {
+            layer
+                .terrain
+                .iter()
+                .map(|c| u32::from(c[0]) * 2 + u32::from(c[1]) * 7 + u32::from(c[2]))
+                .sum()
+        };
+        let base = self.configuration.base_palette();
+        self.records
+            .iter()
+            .max_by_key(|layer| brightness(layer))
+            .map(|layer| tore_formats::weather::expand_effects(base, layer, 0, 0))
+            .unwrap_or_else(|| base.map(|c| c.map(|v| ((u16::from(v) * 255 + 31) / 63) as u8)))
+    }
+
     /// Effect strength across an altitude span, matching `_WRWeatherEffects`
     /// at 0x4b4720: the span minimum, capped at 100, or 100 with no active record.
     pub fn effect(&self, selector: usize, low_feet: f64, high_feet: f64) -> Result<u8> {
@@ -641,6 +660,18 @@ mod tests {
             e.step();
         }
         assert_eq!(e.seconds_of_day(), 1);
+    }
+
+    #[test]
+    fn daylight_palette_takes_the_brightest_record_untinted() {
+        let mut config = configuration(3);
+        config.module.layers[0].terrain = [[10, 10, 10]; 32];
+        config.module.layers[1].terrain = [[50, 40, 30]; 32];
+        config.module.layers[2].terrain = [[20, 20, 20]; 32];
+        config.module.layers[1].tint_scalar = 230;
+        let palette = Environment::new(config).daylight_palette();
+        assert_eq!(palette[192], [202, 162, 121]);
+        assert_eq!(palette[223], [202, 162, 121]);
     }
 
     #[test]

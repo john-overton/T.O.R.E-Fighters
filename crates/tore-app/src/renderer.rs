@@ -164,8 +164,15 @@ impl Renderer {
         self.sim.airports(&self.device, &self.queue, vertices);
         self.sim.airport_lines(&self.device, &self.queue, lines);
     }
-    pub fn smoke(&mut self, art: &tore_formats::Pic, smoke: [&tore_sim::combat::smoke::Smoke; 2]) {
-        self.sim.smoke(&self.device, &self.queue, art, smoke);
+    /// Smoke puffs, flare smoke and the released chaff and flares.
+    pub fn smoke(
+        &mut self,
+        art: &tore_formats::Pic,
+        smoke: [&tore_sim::combat::smoke::Smoke; 2],
+        devices: &tore_sim::combat::countermeasures::Devices,
+    ) {
+        self.sim
+            .smoke(&self.device, &self.queue, art, smoke, devices);
     }
     pub fn vapor(&mut self, vertices: &[f32]) {
         self.sim.vapor(&self.device, &self.queue, vertices);

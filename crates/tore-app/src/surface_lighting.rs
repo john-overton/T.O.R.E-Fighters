@@ -6,6 +6,8 @@ use wgpu::util::DeviceExt;
 pub const MAP_SIZE: u32 = 2048;
 const EXTENTS: [f32; 3] = [256., 8192., 131072.];
 const DEPTH: f32 = 262144.;
+/// Shadow projections, sun, moon and parameters, then the flare lights.
+const UNIFORM_BYTES: usize = 64 * 4 + crate::countermeasure_renderer::MAX_FLARE_LIGHTS * 16;
 
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a.into_iter().zip(b).map(|(x, y)| x * y).sum()
@@ -146,7 +148,7 @@ impl SurfaceLighting {
     ) -> Self {
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Surface light and shadow projections"),
-            contents: &[0; 256],
+            contents: &[0; UNIFORM_BYTES],
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -190,7 +192,7 @@ impl SurfaceLighting {
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,
-                min_binding_size: wgpu::BufferSize::new(256),
+                min_binding_size: wgpu::BufferSize::new(UNIFORM_BYTES as u64),
             },
             count: None,
         };
@@ -300,7 +302,13 @@ impl SurfaceLighting {
         }
     }
 
-    pub fn prepare(&self, queue: &wgpu::Queue, camera: &Camera, world: &World) -> bool {
+    pub fn prepare(
+        &self,
+        queue: &wgpu::Queue,
+        camera: &Camera,
+        world: &World,
+        flares: &[crate::countermeasure_renderer::FlareLight],
+    ) -> bool {
         let layer = world.weather.sample(f64::from(camera.position[1]));
         let sun = layer
             .as_ref()
@@ -334,7 +342,16 @@ impl SurfaceLighting {
             f32::from(world.smooth_weather),
         ]);
         values.extend([moon[0], moon[1], moon[2], 0.]);
-        values.extend([strength, sun[1], radius.tan(), 0.]);
+        let origin = camera.position.map(f64::from);
+        let flares = crate::countermeasure_renderer::nearest(flares, origin);
+        values.extend([strength, sun[1], radius.tan(), flares.len() as f32]);
+        let count = flares.len();
+        values.extend(flares.into_iter().flatten());
+        values.resize(
+            values.len() + (crate::countermeasure_renderer::MAX_FLARE_LIGHTS - count) * 4,
+            0.,
+        );
+        debug_assert_eq!(values.len() * 4, UNIFORM_BYTES);
         let bytes: Vec<_> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
         queue.write_buffer(&self.uniform, 0, &bytes);
         active

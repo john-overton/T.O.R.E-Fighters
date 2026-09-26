@@ -1,6 +1,9 @@
 // Shared surface response and geometry shadows, docs/spec/surface-lighting.md.
 struct ShadowProjection { right:vec4<f32>, up:vec4<f32>, depth:vec4<f32>, scale:vec4<f32> }
-struct SurfaceLight { maps:array<ShadowProjection,3>, origin:vec4<f32>, sun:vec4<f32>, moon:vec4<f32>, reserved:vec4<f32> }
+// reserved: visible sun fraction, sun elevation sine, tangent of the sun's
+// radius, burning flare count. flares: position relative to the view origin
+// and strength, docs/spec/countermeasures.md.
+struct SurfaceLight { maps:array<ShadowProjection,3>, origin:vec4<f32>, sun:vec4<f32>, moon:vec4<f32>, reserved:vec4<f32>, flares:array<vec4<f32>,16> }
 @group(1) @binding(0) var<uniform> surface:SurfaceLight;
 @group(1) @binding(1) var shadows:texture_depth_2d_array;
 @group(1) @binding(2) var shadow_sampler:sampler_comparison;
@@ -115,13 +118,40 @@ fn sunlight_transmission(altitude:f32)->f32 {
  }
  return exp(-path/600.0);
 }
+// Light from burning flares reaching a point, inverse square with a smooth
+// 1,500-foot cutoff and no shadows. A zero normal lights from every side.
+// At night eyes adapt to the dark, so flare light counts up to four times as
+// much against the night scene. Mirrored by countermeasure_renderer::glow
+// (daylight strength) for smoke puffs.
+const FLARE_RANGE:f32=1500.0;
+const FLARE_NIGHT_GAIN:f32=4.0;
+const FLARE_SOFTENING:f32=25.0;
+const FLARE_COLOR:vec3<f32>=vec3<f32>(1.0,0.75,0.45);
+fn flare_light(relative:vec3<f32>,normal:vec3<f32>)->vec3<f32> {
+ var total=0.0;
+ for(var i=0;i<i32(surface.reserved.w);i++) {
+  let flare=surface.flares[i];
+  let to=flare.xyz-relative;
+  let d2=dot(to,to);
+  let edge=clamp(1.0-d2*d2/(FLARE_RANGE*FLARE_RANGE*FLARE_RANGE*FLARE_RANGE),0.0,1.0);
+  var facing=1.0;
+  if dot(normal,normal)>0.0 {facing=max(dot(normal,to)*inverseSqrt(max(d2,0.000001)),0.0);}
+  total+=flare.w*facing*edge*edge/(d2+FLARE_SOFTENING);
+ }
+ let night=1.0-smoothstep(-0.104528,0.0348995,surface.reserved.y);
+ return FLARE_COLOR*total*mix(1.0,FLARE_NIGHT_GAIN,night);
+}
 // Derivatives recover triangle geometry, independent of original face flags.
 fn surface_normal(relative:vec3<f32>)->vec3<f32> {
  let n=cross(dpdx(relative),dpdy(relative));
  let unit=n*inverseSqrt(max(dot(n,n),0.00000001));
  return select(unit,-unit,dot(unit,relative)>0.0);
 }
-fn surface_color(color:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,panels:bool,receiver_normal:vec3<f32>)->vec3<f32> {
+// Any flares burning nearby. Guards the extra undarkened texture reads.
+fn flares_burning()->bool {return surface.sun.w>0.0 && surface.reserved.w>=1.0;}
+// albedo: the art's color before the weather's shade remaps. Those remaps
+// darken it at night, but a flare shows the art's own colors.
+fn surface_color(color:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,panels:bool,receiver_normal:vec3<f32>,albedo:vec3<f32>)->vec3<f32> {
  if surface.sun.w<=0.0 {return color;}
  let day=smoothstep(-0.104528,0.0348995,surface.reserved.y);
  let facing=max(dot(normal,surface.sun.xyz),0.0);
@@ -138,7 +168,7 @@ fn surface_color(color:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,panels:bool
  }
  let night=vec3<f32>(mix(0.20,0.32,skyward)+0.30*max(dot(normal,surface.moon.xyz),0.0));
  let illumination=mix(night,ambient,day)+0.90*facing*visibility*tint;
- var lit=color*illumination;
+ var lit=color*illumination+albedo*flare_light(relative,normal);
  if panels {
   let view=normalize(-relative);
   let grazing=pow(1.0-clamp(dot(normal,view),0.0,1.0),3.0);

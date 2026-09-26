@@ -1691,9 +1691,15 @@ impl AiWings {
             SeekerClass::Infrared => effectiveness.0,
             SeekerClass::Radar => effectiveness.1,
         };
+        let flight = actor.flight();
+        let release = tore_sim::combat::countermeasures::Release {
+            position: flight.position,
+            velocity: flight.velocity,
+            basis: Basis::new(flight.yaw, flight.pitch, flight.bank),
+        };
         for _ in 0..event.released {
             state.device_released(
-                actor.flight().position,
+                release,
                 match event.class {
                     SeekerClass::Infrared => live::EffectKind::Flare,
                     SeekerClass::Radar => live::EffectKind::Chaff,
@@ -3503,7 +3509,7 @@ pub(crate) mod tests {
         assert_eq!(combat.projectiles[0].target, None);
         assert_eq!(combat.projectiles[1].target, Some(4));
         assert_eq!(combat.projectiles[2].target, Some(3));
-        assert_eq!(combat.effects.last().unwrap().kind, live::EffectKind::Flare);
+        assert_eq!(combat.devices.flares.len(), 2);
         // The flare is heard from the releasing aircraft, not the player.
         let sounds = combat.take_sound_events();
         assert_eq!(sounds.len(), 1);

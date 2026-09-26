@@ -1,9 +1,24 @@
 //! Camera-facing original smoke artwork. Simulation owns emission and lifetime.
+use crate::countermeasure_renderer::{FlareLight, glow};
 use crate::terrain::Camera;
 use tore_formats::Pic;
-use tore_sim::combat::smoke::{Kind, MAX_CONTRAIL_PUFFS, MAX_PUFFS, Puff, Smoke};
-const MAX_INSTANCES: usize = MAX_PUFFS + MAX_CONTRAIL_PUFFS;
-const INSTANCE_BYTES: usize = 6 * 4;
+use tore_sim::combat::countermeasures::{Devices, MAX_FLARE_PUFFS};
+use tore_sim::combat::smoke::{Kind, MAX_CONTRAIL_PUFFS, MAX_PUFFS, Smoke};
+const MAX_INSTANCES: usize = MAX_PUFFS + MAX_CONTRAIL_PUFFS + MAX_FLARE_PUFFS;
+/// Center, radius, art cell, opacity and flare glow.
+const INSTANCE_BYTES: usize = 9 * 4;
+/// SMOKE.PIC cells: aircraft smoke, then the white missile puff.
+const AIRCRAFT_CELL: f32 = 0.;
+const MISSILE_CELL: f32 = 94.;
+
+/// One puff to draw, from any smoke family.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Sprite {
+    position: [f64; 3],
+    radius: f64,
+    cell: f32,
+    opacity: f32,
+}
 
 struct Frustum {
     view: Vec<f32>,
@@ -21,7 +36,7 @@ impl Frustum {
             near: f64::from(camera.near_clip),
         }
     }
-    fn distance(&self, puff: &Puff) -> Option<f64> {
+    fn distance(&self, puff: &Sprite) -> Option<f64> {
         let offset: [f64; 3] = std::array::from_fn(|i| puff.position[i] - f64::from(self.view[i]));
         let axis = |start: usize| {
             (0..3)
@@ -29,7 +44,7 @@ impl Frustum {
                 .sum::<f64>()
         };
         let depth = axis(12);
-        let radius = puff.radius();
+        let radius = puff.radius;
         (depth >= self.near
             && depth <= 2200000.
             && axis(4).abs() <= depth * self.horizontal + radius
@@ -41,7 +56,7 @@ pub struct SmokeRenderer {
     pipeline: wgpu::RenderPipeline,
     bind: Option<wgpu::BindGroup>,
     buffer: wgpu::Buffer,
-    puffs: Vec<Puff>,
+    puffs: Vec<Sprite>,
     count: u32,
 }
 impl SmokeRenderer {
@@ -88,7 +103,7 @@ impl SmokeRenderer {
             label: Some("Original smoke billboards"), layout: None,
             vertex: wgpu::VertexState { module: shader, entry_point: Some("smoke_vertex"), compilation_options: Default::default(), buffers: &[wgpu::VertexBufferLayout {
                 array_stride: INSTANCE_BYTES as u64, step_mode: wgpu::VertexStepMode::Instance,
-                attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32,2=>Float32,3=>Float32],
+                attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32,2=>Float32,3=>Float32,4=>Float32x3],
             }] },
             fragment: Some(wgpu::FragmentState {module:shader,entry_point:Some("smoke_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState{format,blend:Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})]}),
             primitive:wgpu::PrimitiveState { cull_mode:None,..Default::default() },
@@ -174,11 +189,41 @@ impl SmokeRenderer {
             smoke
                 .into_iter()
                 .flat_map(|s| s.puffs.iter().rev())
-                .take(MAX_INSTANCES)
-                .cloned(),
+                .map(|p| Sprite {
+                    position: p.position,
+                    radius: p.radius(),
+                    cell: match p.kind {
+                        Kind::Aircraft => AIRCRAFT_CELL,
+                        Kind::Missile | Kind::Contrail => MISSILE_CELL,
+                    },
+                    opacity: p.opacity(),
+                })
+                .take(MAX_INSTANCES),
         );
     }
-    pub fn update(&mut self, queue: &wgpu::Queue, camera: &Camera, aspect: f32) {
+    /// Adds burning flares' smoke after `prepare`, drawn with the missile puff.
+    pub fn flare_smoke(&mut self, devices: &Devices) {
+        let room = MAX_INSTANCES - self.puffs.len();
+        self.puffs.extend(
+            devices
+                .puffs()
+                .map(|p| Sprite {
+                    position: p.position,
+                    radius: p.radius(),
+                    cell: MISSILE_CELL,
+                    opacity: p.opacity(),
+                })
+                .take(room),
+        );
+    }
+    /// `flares` light the puffs near them, including a flare's own trail.
+    pub fn update(
+        &mut self,
+        queue: &wgpu::Queue,
+        camera: &Camera,
+        aspect: f32,
+        flares: &[FlareLight],
+    ) {
         let frustum = Frustum::new(camera, aspect);
         // Retain the whole history for other views and for later camera turns.
         // Only the visible instances are sorted and uploaded for this draw.
@@ -190,15 +235,13 @@ impl SmokeRenderer {
         visible.sort_by(|a, b| b.0.total_cmp(&a.0));
         let mut instances = Vec::with_capacity(visible.len() * INSTANCE_BYTES);
         for (_, p) in visible {
-            let start = match p.kind {
-                Kind::Aircraft => 0.,
-                Kind::Missile | Kind::Contrail => 94.,
-            };
-            for value in p.position.map(|v| v as f32).into_iter().chain([
-                p.radius() as f32,
-                start,
-                p.opacity(),
-            ]) {
+            for value in p
+                .position
+                .map(|v| v as f32)
+                .into_iter()
+                .chain([p.radius as f32, p.cell, p.opacity])
+                .chain(glow(flares, p.position))
+            {
                 instances.extend(value.to_le_bytes());
             }
         }
@@ -232,10 +275,12 @@ mod tests {
         camera.position = [0.; 3];
         camera.yaw = 0.;
         camera.pitch = 0.;
-        let puff = |position| Puff {
+        // A four-second contrail puff.
+        let puff = |position| Sprite {
             position,
-            kind: Kind::Contrail,
-            age: 480,
+            radius: 14.,
+            cell: MISSILE_CELL,
+            opacity: 0.65,
         };
         let view = Frustum::new(&camera, 1.);
         assert!(view.distance(&puff([0., 0., 100.])).is_some());
@@ -247,7 +292,7 @@ mod tests {
         let rear = Frustum::new(&camera, 1.);
         assert!(rear.distance(&puff([0., 0., -100.])).is_some());
         assert!(rear.distance(&puff([0., 0., 100.])).is_none());
-        assert_eq!(MAX_INSTANCES, 80192);
+        assert_eq!(MAX_INSTANCES, 80192 + 128 * 96);
     }
 
     #[test]
@@ -379,7 +424,7 @@ mod tests {
                     &art,
                     [&smoke, &Smoke::default()],
                 );
-                renderer.update(&queue, &camera, 1.);
+                renderer.update(&queue, &camera, 1., &[]);
                 // The same bound particle texture must respond to subsequent
                 // weather palette writes, including returning to daylight.
                 for rgb in [
