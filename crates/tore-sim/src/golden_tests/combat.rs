@@ -1,7 +1,8 @@
 //! Combat goldens: the live-fire adapter firing guns and bombs, radar,
 //! supported and infrared missiles with seeker activation, decoys and
 //! jamming, AI-owned shots at the player and at targets, hits, damage and the
-//! debrief ledger.
+//! debrief ledger; and the player's own chaff and flares with their decoy
+//! rolls, sounds and released devices.
 
 use std::collections::BTreeMap;
 
@@ -15,6 +16,7 @@ use crate::ai::DecisionRandom;
 use crate::ai::threat::{DecoyOutcome, GuidingMissile, SeekerClass, decoy_missile};
 use crate::attitude::Basis;
 use crate::combat::FallState;
+use crate::combat::countermeasures::Devices;
 use crate::combat::ledger::Resolution;
 use crate::combat::live::{
     ActorSupport, Command, Configuration, Event, Launcher, LocalizedDamage, PLAYER_OWNER,
@@ -27,6 +29,7 @@ use crate::sensors;
 // changing any of these.
 const GUNS_AND_DAMAGE: u64 = 0x2a30_d8f8_7ca3_93b7;
 const GUIDED_MISSILES: u64 = 0x594e_7f73_079b_4bb3;
+const PLAYER_COUNTERMEASURES: u64 = 0xdec8_bb7a_6782_b438;
 
 #[test]
 fn combat_guns_and_damage_match_recorded_fingerprint() {
@@ -67,6 +70,37 @@ fn combat_guided_missiles_match_recorded_fingerprint() {
             "PlayerDamaged",
             "SubsystemDamaged",
             "Jolt",
+        ],
+    );
+}
+
+#[test]
+fn combat_player_countermeasures_match_recorded_fingerprint() {
+    let seen = std::cell::RefCell::new(BTreeMap::new());
+    let outcome = run_twice(
+        "combat/player-countermeasures",
+        PLAYER_COUNTERMEASURES,
+        |probe| {
+            let (value, events) = player_countermeasures(probe);
+            *seen.borrow_mut() = events;
+            value
+        },
+    );
+    verify([outcome]);
+    require(
+        "combat/player-countermeasures",
+        &seen.into_inner(),
+        &[
+            "ChaffDecoyed",
+            "FlareDecoyed",
+            "Resisted",
+            "Empty",
+            "Unlimited",
+            "Disabled",
+            "FlareLanded",
+            "FlareBurnedOut",
+            "ChaffExpired",
+            "PlayerDamaged",
         ],
     );
 }
@@ -993,6 +1027,229 @@ fn guided_missiles(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         step(&mut s, held, l, &mut fp, &mut seen);
         fly(&mut l);
         if tick % 200 == 199 {
+            probe.part(format!("tick {tick}"), fp.value());
+        }
+    }
+    (fp.value(), seen)
+}
+
+// ---------------------------------------------------------------------------
+// Scenario: the player's own chaff and flares
+
+/// Every released chaff cloud and flare, through their public reads.
+fn record_devices(fp: &mut Fingerprint, devices: &Devices) {
+    fp.count(devices.flares.len());
+    for flare in &devices.flares {
+        fp.vector(flare.position);
+        fp.vector(flare.motion);
+        fp.int(flare.age);
+        fp.bool(flare.burning());
+        fp.f64(flare.intensity());
+        fp.int(flare.seed());
+        fp.count(flare.puffs.len());
+        for puff in &flare.puffs {
+            fp.vector(puff.position);
+            fp.int(puff.age);
+            fp.f64(puff.radius());
+            fp.f64(f64::from(puff.opacity()));
+        }
+    }
+    fp.count(devices.chaff.len());
+    for chaff in &devices.chaff {
+        fp.vector(chaff.position);
+        fp.int(chaff.age);
+        fp.int(chaff.seed);
+        fp.f64(chaff.seconds());
+        fp.f64(f64::from(chaff.opacity()));
+    }
+}
+
+/// One press of the chaff or flare key, and what it did: the counts, the
+/// sounds, and which missiles still guide on the player.
+fn press(
+    s: &mut State,
+    command: Command,
+    launcher: Launcher,
+    fp: &mut Fingerprint,
+    seen: &mut BTreeMap<&'static str, u32>,
+) {
+    // Guiding on the player as the dispensers see it: a seeker that holds
+    // the player, or a range fixture without guidance of its own.
+    let guiding: Vec<(u32, u8)> = s
+        .projectiles
+        .iter()
+        .filter(|p| {
+            p.target == Some(PLAYER_OWNER)
+                && p.guidance.as_ref().is_none_or(|flight| {
+                    flight.enabled && flight.seeker.acquired && flight.seeker.observation.is_some()
+                })
+        })
+        .map(|p| (p.id, p.weapon(s.configuration()).seeker.signature))
+        .collect();
+    let (chaff, flares) = (s.chaff, s.flares);
+    let devices = (s.devices.flares.len(), s.devices.chaff.len());
+    s.command(command, launcher);
+    fp.name(&command);
+    fp.int(s.chaff);
+    fp.int(s.flares);
+    for sound in s.take_sound_events() {
+        fp.name(&sound.kind);
+        fp.vector(sound.position);
+        fp.bool(sound.arrived);
+        fp.bool(sound.own);
+    }
+    let added = (s.devices.flares.len(), s.devices.chaff.len()) != devices;
+    let spent = (s.chaff, s.flares) != (chaff, flares);
+    let label = match (added, spent) {
+        (false, _) if !launcher.alive || s.player_hp <= 0 => "Disabled",
+        (false, _) => "Empty",
+        (true, false) => "Unlimited",
+        (true, true) => "Spent",
+    };
+    *seen.entry(label).or_default() += 1;
+    let signature = if command == Command::ReleaseChaff {
+        3
+    } else {
+        2
+    };
+    for (id, class) in guiding.into_iter().filter(|(_, class)| *class == signature) {
+        let still = s
+            .projectiles
+            .iter()
+            .any(|p| p.id == id && p.target == Some(PLAYER_OWNER));
+        fp.int(id);
+        fp.bool(still);
+        if added {
+            let outcome = match (still, class) {
+                (true, _) => "Resisted",
+                (false, 3) => "ChaffDecoyed",
+                (false, _) => "FlareDecoyed",
+            };
+            *seen.entry(outcome).or_default() += 1;
+        }
+    }
+}
+
+fn player_countermeasures(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
+    let mut fp = Fingerprint::default();
+    let mut seen = BTreeMap::new();
+    // Infrared missiles for the range's incoming fixture, which always and
+    // sometimes follow flares.
+    let mut config = configuration(vec![
+        (gun(), 200, true),
+        (missile("AIM9M.JT", 2, 20_000, 100), 2, false),
+        (missile("AIM9M.JT", 2, 20_000, 70), 2, false),
+    ]);
+    // The dispensers: four of each, chaff 80 and flares 60 percent effective.
+    config.ecm.chaff = [4, 80, 0, 0];
+    config.ecm.flare = [4, 60, 0, 0];
+    let mut s = State::new(config, true).expect("synthetic configuration");
+    let mut l = launcher([0., 1_200., 0.], 0., 0., 600.);
+    // Missiles at the player: radar ones that always, sometimes and never
+    // follow chaff, and infrared ones that always or sometimes follow flares.
+    let shots = [
+        (6_000, 7, missile("AIM120.JT", 3, 60_000, 100), -1_500.),
+        (6_001, 7, missile("AIM120.JT", 3, 60_000, 50), -500.),
+        (6_002, 8, missile("AIM120.JT", 3, 60_000, 0), 500.),
+        (6_003, 8, missile("AIM9M.JT", 2, 20_000, 100), 1_000.),
+        (6_004, 9, missile("AIM9M.JT", 2, 20_000, 70), 1_500.),
+    ];
+    for (id, owner, weapon, offset) in &shots {
+        let aim = l.position;
+        s.projectiles.push(owned_missile(
+            *id,
+            *owner,
+            weapon,
+            [*offset, 1_300., 16_000.],
+            PLAYER_OWNER,
+            aim,
+            0,
+        ));
+    }
+    let (mut landed, mut burned, mut chaff_seen) = (false, false, false);
+    for tick in 0..4_300u64 {
+        // The shooters keep their radars on the player.
+        s.set_actor_supports([7, 8, 9].map(|owner| ActorSupport {
+            owner,
+            observation: Some(seeker::Observation {
+                id: PLAYER_OWNER,
+                position: l.position,
+                velocity: l.velocity,
+                quality: 1.,
+                off_axis: 0.,
+                range: 16_000.,
+            }),
+            supported: true,
+            radar_position: [0., 1_300., 16_000.],
+            radar_emitting: true,
+        }));
+        if tick == 20 {
+            for station in [1, 2, 1] {
+                s.selected = station;
+                s.command(Command::Incoming, l);
+            }
+            s.selected = 0;
+        }
+        let presses: &[Command] = match tick {
+            30 => &[Command::ReleaseFlare],
+            45 => &[Command::ReleaseChaff],
+            60 => &[Command::ReleaseChaff, Command::ReleaseChaff],
+            75 => &[
+                Command::ReleaseFlare,
+                Command::ReleaseFlare,
+                Command::ReleaseFlare,
+            ],
+            90 => &[Command::ReleaseFlare, Command::ReleaseChaff],
+            100 => &[Command::ReleaseChaff, Command::ReleaseFlare],
+            110 => {
+                // Refilled with unlimited ammunition on: nothing is spent.
+                s.cheats.unlimited_ammo = true;
+                (s.chaff, s.flares) = (2, 1);
+                &[
+                    Command::ReleaseChaff,
+                    Command::ReleaseFlare,
+                    Command::ReleaseChaff,
+                ]
+            }
+            130 => {
+                l.alive = false;
+                &[Command::ReleaseFlare]
+            }
+            131 => {
+                l.alive = true;
+                &[Command::ReleaseFlare]
+            }
+            // Damage draws from the combat random stream, so the decoy
+            // rolls before it are pinned too.
+            200 | 220 | 240 | 260 => &[Command::DamagePlayer],
+            300 => &[Command::ReleaseChaff],
+            _ => &[],
+        };
+        for command in presses {
+            if *command == Command::DamagePlayer {
+                s.command(*command, l);
+                fp.name(command);
+            } else {
+                press(&mut s, *command, l, &mut fp, &mut seen);
+            }
+        }
+        step(&mut s, false, l, &mut fp, &mut seen);
+        record_devices(&mut fp, &s.devices);
+        fly(&mut l);
+        chaff_seen |= !s.devices.chaff.is_empty();
+        if chaff_seen && s.devices.chaff.is_empty() {
+            *seen.entry("ChaffExpired").or_default() += 1;
+            chaff_seen = false;
+        }
+        if !landed && s.devices.flares.iter().any(|f| f.position[1] < 2.) {
+            landed = true;
+            *seen.entry("FlareLanded").or_default() += 1;
+        }
+        if !burned && s.devices.flares.iter().any(|f| !f.burning()) {
+            burned = true;
+            *seen.entry("FlareBurnedOut").or_default() += 1;
+        }
+        if tick % 300 == 299 {
             probe.part(format!("tick {tick}"), fp.value());
         }
     }
