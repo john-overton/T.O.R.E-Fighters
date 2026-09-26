@@ -253,6 +253,9 @@ struct App {
     replay_library: Option<replay::library::Library>,
     /// The flight being recorded.
     replay_recorder: Option<replay::recorder::Recorder>,
+    /// The Replays screen, open over the main menu. It stays open while the
+    /// replay viewer plays one of its recordings.
+    replays_screen: Option<replay::screen::Replays>,
 }
 /// The AI wingmen a player's wing order addresses, for the mission
 /// recording: every living member of the player's wing, or the one wingman
@@ -781,6 +784,16 @@ impl App {
             };
             let result = editor.key(key, false);
             return self.graphics_result(result);
+        }
+        // And the Replays screen, unless the replay viewer is showing.
+        if self.screen == Screen::Main
+            && let Some(screen) = &mut self.replays_screen
+        {
+            let Some(key) = key else {
+                return Action::None;
+            };
+            let result = screen.key(key, false, false);
+            return self.replays_result(result);
         }
         if self.screen != Screen::Flight {
             return match (self.screen, key) {
@@ -1459,6 +1472,41 @@ impl App {
             }
         }
     }
+    /// Opens the Replays screen on the recordings folder. Recording may be
+    /// off for this run; the folder is still listed.
+    fn open_replays(&mut self, context: &'static str) {
+        let library = self.replay_library.clone().or_else(|| {
+            assets::data_directory()
+                .ok()
+                .map(|data| replay::library::Library::new(&data))
+        });
+        self.replays_screen = Some(replay::screen::Replays::open(library, context));
+        self.mouse_look = None;
+    }
+    /// Shows the Replays screen after the replay viewer, with the list read
+    /// again, opening it when the viewer was started from the command line.
+    /// A viewer opened by Watch comes back to the screen without it.
+    #[allow(dead_code)] // Called when the replay viewer closes (replay/host.rs).
+    fn return_to_replays(&mut self) {
+        match &mut self.replays_screen {
+            Some(screen) => screen.refresh(),
+            None => self.open_replays("Main menu"),
+        }
+    }
+    fn replays_result(&mut self, outcome: replay::screen::Outcome) -> Action {
+        use replay::screen::Outcome;
+        match outcome {
+            Outcome::None => Action::None,
+            Outcome::Changed => Action::Click,
+            // The screen stays open under the viewer, which returns to it.
+            Outcome::Watch(path) => Action::WatchReplay(path),
+            Outcome::Close => {
+                self.replays_screen = None;
+                self.menu.state.cancel();
+                Action::Click
+            }
+        }
+    }
     fn action(&mut self, event_loop: &ActiveEventLoop, action: Action) {
         if action == Action::Exit {
             self.finished = true;
@@ -1466,6 +1514,7 @@ impl App {
             return;
         }
         match action {
+            Action::Replays => self.open_replays("Main menu"),
             Action::Controls => self.open_controls("Main menu"),
             Action::Graphics => self.open_graphics("Main menu"),
             Action::WatchReplay(ref path) => self.watch_replay(path),
@@ -2261,6 +2310,9 @@ impl ApplicationHandler for App {
                 if let Some(editor) = &mut self.graphics_screen {
                     editor.cancel_press();
                 }
+                if let Some(screen) = &mut self.replays_screen {
+                    screen.cancel_press();
+                }
                 self.mouse_look = None;
                 self.pointer = None;
                 self.camera.keys.clear();
@@ -2271,7 +2323,10 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let point = renderer.viewport().point(position.x, position.y);
                 self.pointer = Some((position.x, position.y));
-                if self.controls.is_some() || self.graphics_screen.is_some() {
+                if self.controls.is_some()
+                    || self.graphics_screen.is_some()
+                    || (self.screen == Screen::Main && self.replays_screen.is_some())
+                {
                     return;
                 }
                 match self.screen {
@@ -2321,6 +2376,11 @@ impl ApplicationHandler for App {
                 } else if let Some(editor) = &mut self.graphics_screen {
                     let result = editor.wheel(notches);
                     self.graphics_result(result)
+                } else if self.screen == Screen::Main
+                    && let Some(screen) = &mut self.replays_screen
+                {
+                    let result = screen.wheel(notches);
+                    self.replays_result(result)
                 } else if self.screen == Screen::Flight && !self.flight_ui.frozen() {
                     self.input.mouse_wheel(notches);
                     Action::None
@@ -2353,6 +2413,9 @@ impl ApplicationHandler for App {
                 if let Some(editor) = &mut self.graphics_screen {
                     editor.cancel_press();
                 }
+                if let Some(screen) = &mut self.replays_screen {
+                    screen.cancel_press();
+                }
                 self.mouse_look = None;
                 self.pointer = None;
                 self.camera.keys.clear();
@@ -2384,6 +2447,20 @@ impl ApplicationHandler for App {
                     controls_editor::ResultAction::None
                 };
                 self.graphics_result(result)
+            }
+            WindowEvent::MouseInput { state, button, .. }
+                if self.screen == Screen::Main && self.replays_screen.is_some() =>
+            {
+                let point = self
+                    .pointer
+                    .and_then(|(x, y)| renderer.viewport().point(x, y));
+                let screen = self.replays_screen.as_mut().expect("guarded");
+                let result = if button == MouseButton::Left {
+                    screen.pointer(point, state == ElementState::Pressed)
+                } else {
+                    replay::screen::Outcome::None
+                };
+                self.replays_result(result)
             }
             WindowEvent::MouseInput {
                 state,
@@ -2548,6 +2625,19 @@ impl ApplicationHandler for App {
                     self.action(event_loop, action);
                     return;
                 }
+                // The Replays screen takes key presses too, except the
+                // shortcuts that quit the game.
+                if event.state == ElementState::Pressed
+                    && self.screen == Screen::Main
+                    && !((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+                        || (self.modifiers.alt_key() && name == "F4"))
+                    && let Some(screen) = &mut self.replays_screen
+                {
+                    let result = screen.key(&name, self.modifiers.shift_key(), event.repeat);
+                    let action = self.replays_result(result);
+                    self.action(event_loop, action);
+                    return;
+                }
                 if self.screen == Screen::Flight
                     && !(event.state == ElementState::Pressed
                         && self.flight_ui.map.open
@@ -2678,12 +2768,27 @@ impl ApplicationHandler for App {
                 }
                 let mut animating = match self.screen {
                     Screen::Main => {
-                        let animating = self.menu.render();
+                        // The Replays screen covers the menu, so a menu
+                        // notice shows on its status line instead.
+                        if let Some(screen) = &mut self.replays_screen {
+                            let notice = self.menu.state.toast.take().map(|(text, _)| text);
+                            // Back from the replay viewer: list again.
+                            if screen.shown(notice) {
+                                screen.refresh();
+                            }
+                        }
+                        let mut animating = self.menu.render();
                         if let Some(editor) = &self.controls {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
                         }
                         if let Some(editor) = &self.graphics_screen {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
+                        }
+                        if let Some(screen) = &mut self.replays_screen {
+                            // Exports and details are read in the
+                            // background; keep drawing until they finish.
+                            animating |= screen.poll();
+                            screen.draw(&mut self.menu.pixels, &self.hornet.font);
                         }
                         animating
                     }
@@ -3927,6 +4032,13 @@ impl ApplicationHandler for App {
         self.renderer = None;
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // The replay viewer shows instead of the Replays screen, which stays
+        // open underneath and reads the list again when it is back.
+        if self.screen != Screen::Main
+            && let Some(screen) = &mut self.replays_screen
+        {
+            screen.covered();
+        }
         let paused = self.screen != Screen::Flight || self.flight_ui.frozen();
         self.input.context(paused, self.focused);
         if Instant::now() >= self.input.next_poll {
@@ -6785,7 +6897,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display.
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, graphics, locate, locate-importing, locate-done. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, graphics, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -7701,6 +7813,19 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             for p in menu.pixels.chunks_exact(4) {
                 f.write_all(&p[..3])?;
             }
+        } else if let Some(state) = snapshot_state.strip_prefix("replays") {
+            // A synthetic list: no recordings are read or needed.
+            let mut screen = replay::screen::Replays::preview("Main menu");
+            screen.preview_state(state.trim_start_matches('-'))?;
+            menu.preview_state("normal")?;
+            menu.render();
+            screen.draw(&mut menu.pixels, &hornet.font);
+            use std::io::Write;
+            let mut f = std::fs::File::create(&path)?;
+            write!(f, "P6\n640 480\n255\n")?;
+            for p in menu.pixels.chunks_exact(4) {
+                f.write_all(&p[..3])?;
+            }
         } else {
             menu.preview_state(&snapshot_state)?;
             menu.save_ppm(&path)?;
@@ -8486,6 +8611,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         .then(|| assets::data_directory().map(|data| replay::library::Library::new(&data)))
         .transpose()?,
         replay_recorder: None,
+        replays_screen: None,
     };
     diagnostics::stage_done();
     diagnostics::stage("saved preferences");

@@ -59,8 +59,10 @@ borrows from.
 auto-delete on or off, keep the last N recordings (default 20) or delete
 those older than N days (default 30), and the recordings marked Keep. It is
 on by default with keep the last 20, so recordings never fill a disk
-unnoticed (agent decision, 2026-09-26). Cleanup runs when a recording
-finishes, and later when the Replays screen asks. It deletes only files it
+unnoticed (agent decision, 2026-09-26). The
+[Replays screen](#auto-delete-settings) changes the rules and the Keep
+marks. Cleanup runs when a recording finishes and when the Replays screen
+opens. It deletes only files it
 can prove it may: a recording's name and the format's magic bytes, not
 marked Keep, not the recording in progress, and not a `.partial` file
 written in the last ten minutes, which another running game may own.
@@ -439,7 +441,96 @@ ticks.
 
 ## Replays screen
 
-Filled in by a later milestone (M3): the list of recordings and its buttons.
+**Replays** on the main menu's top bar, after Multi, opens the Replays
+screen: every recording in the replays folder, newest first, the selected
+one's details, and buttons to watch, keep, delete and export it. It is drawn
+like the Controls screen, with the imported font, colours, title strip,
+list rows and footer buttons. The entry and the screen are an opinionated
+addition requested by John on 2026-09-26; their layout, wording and
+behaviour are agent decisions (2026-09-26). The retail "Replay Last
+Mission" button is unrelated and stays disabled.
+
+### The list
+
+| Column | Shows |
+| --- | --- |
+| Markers | A padlock when the recording is kept; a warning triangle when it did not finish (the game crashed or was closed while recording) or cannot be read |
+| Started (UTC) | The date and time the flight started, in UTC, from the file name |
+| Theater | The theater's name |
+| Aircraft | The player's aircraft by its exact name, for example F/A-18D Hornet |
+| Length | Minutes and seconds, with hours from an hour; `?` for an unfinished recording until its details are read |
+| Result | Success or Failure for a Quick Mission; Ended, Quit or Restarted for Free Flight; Incomplete or Unreadable |
+
+A second flight started in the same minute (`-2`, `-3` and so on) counts
+as the newer one. Listing reads only each file's header, seek index and
+footer. The list's title gives the number of recordings and their total
+size.
+
+### Details
+
+The panel on the right describes the selected recording: its start, the
+kind of mission, the theater, the weather and the local start time, the
+player's aircraft, the wings and aircraft on each side, the length, the
+result with how the flight ended and the pilot's fate, the player's kills,
+the bookmarks with their times into the recording, the size and file name,
+whether it finished normally, and whether it is kept. Wings, aircraft
+counts, bookmarks and an unfinished recording's length need the whole file,
+so a background thread reads them; the panel shows "Reading..." until they
+arrive. The foot of the panel names the folder, where the exports go too.
+
+### Buttons
+
+| Button | Does |
+| --- | --- |
+| Watch | Opens the recording in the [viewer](#viewer); leaving the viewer comes back to this screen, with the list read again |
+| Keep | Marks the recording kept, or not; its box is ticked while kept. Auto-delete never removes a kept recording. Saved at once in `replays-v1.conf` |
+| Delete | Asks first, then deletes the file. A kept recording can be deleted too, with a warning. Exports made from it stay |
+| Tacview | Writes `NAME.txt.acmi` beside the recording, the file `--recording-acmi` writes, and shows its path |
+| Debug log | Writes `summary.txt` and `log.jsonl` into a `NAME-log` folder beside the recording, as `--recording-log` does, and shows its path |
+| Auto-delete | Opens the auto-delete settings |
+| Back | Returns to the main menu |
+
+With no recordings, only Auto-delete and Back are available. Exports run on
+a background thread, one at a time, so the menu keeps responding: the status
+line shows "Writing ..." with the seconds so far, then the path written, or
+why it failed. A recording being exported cannot be deleted until the
+export finishes. Closing the screen lets a running export finish; the
+session log records the result.
+
+### Auto-delete settings
+
+A panel over the list, with the [auto-delete](#auto-delete) rules:
+
+- **Auto-delete:** On or Off.
+- **Rule:** Keep a number, or Delete by age.
+- **Keep the last:** 5, 10, 20, 50 or 100 recordings.
+- **Delete older than:** 7, 14, 30 or 90 days.
+
+Choosing a number also chooses its rule. A value written into the settings
+file by hand that is not one of these shows as an extra choice. Every change
+is saved at once. The panel says what the rule does and how many recordings
+the next cleanup would delete, but deletes nothing itself: cleanup runs when
+a flight ends and when this screen opens, and the status line then says how
+many recordings it removed. Kept recordings, `.partial` files written in the
+last ten minutes and files that are not recordings are never touched.
+
+### Keys and mouse
+
+| Input | Action |
+| --- | --- |
+| Up / Down | Previous or next recording; Down from the last goes to the buttons, Up from the buttons back to the list |
+| PageUp / PageDown, Home / End | A page up or down, the first or the last recording |
+| Enter, or a double-click | Watch the selected recording; on a button, press it |
+| Delete or Backspace | Delete the selected recording, after the confirmation |
+| Tab / Shift+Tab | Through the list and the available buttons |
+| Left / Right | Between the buttons, and between Delete and Cancel; in the settings panel, the previous or next choice |
+| Mouse wheel | Scroll the list three rows a notch; in the settings panel, move between rows |
+| Esc | Close the settings panel or the confirmation, otherwise back to the main menu |
+
+A held key repeats movement only, never Enter or Delete. Controller menu
+buttons act as the arrow keys, Enter and Esc. `--snapshot-state replays`,
+`replays-settings` and `replays-delete` draw the screen over a synthetic
+list, for checks without recordings.
 
 ## Viewer
 
@@ -915,8 +1006,10 @@ headless workflow.
   listings; an unfinished file peeks with no footer.
 - In the app, `replay/recorder.rs` captures a flight (`start_tick`,
   `begin`, `note` and the other noting methods, `end`, `finish`),
-  `replay/library.rs` owns the folder and auto-delete, and `replay/cli.rs`
-  the command line.
+  `replay/library.rs` owns the folder and auto-delete (`list`, `plan`,
+  `cleanup`, `order_key`), `replay/screen.rs` is the Replays screen, and
+  `replay/cli.rs` the command line, whose `log` and `acmi` the screen's
+  export buttons call on a background thread.
 - Export with `tore_replay::export` (`write_jsonl`, `write_summary`,
   `detect`, `write_acmi`, `compare`, `write_diff`).
 - Event kinds, field names, tree channels, well-known tree labels, units

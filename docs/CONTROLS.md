@@ -261,6 +261,11 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Any menu | Arrow keys, Tab, Enter, Esc | Move, select and back out |
 | Controls screen | Tab / Shift+Tab | Next / previous device |
 | Controls screen | Delete or Backspace | Clear the focused primary or secondary input |
+| Replays screen | Up / Down, PageUp / PageDown, Home / End, mouse wheel | Move through the recordings |
+| Replays screen | Enter or double-click | Watch the selected recording |
+| Replays screen | Delete or Backspace | Delete the selected recording, after a confirmation |
+| Replays screen | Tab / Shift+Tab | Move through the list and the buttons |
+| Replays screen | Esc | Close the auto-delete settings or the confirmation, otherwise back to the main menu |
 | Head tracker | opentrack UDP on port 4242 | Turns the view; Center view makes the current head position straight ahead |
 | Replay viewer | Space | Play or pause |
 | Replay viewer | J / K / L | Play backwards / pause / play forwards; J or L again doubles the speed, up to 16x |

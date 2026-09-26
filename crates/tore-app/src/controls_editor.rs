@@ -225,7 +225,7 @@ pub(crate) const PAPER: [u8; 4] = [24, 34, 45, 255];
 pub(crate) const PANEL: [u8; 4] = [36, 52, 72, 255];
 pub(crate) const TITLE: [u8; 4] = [240, 233, 194, 255];
 pub(crate) const PALE: [u8; 4] = [201, 210, 222, 255];
-const PALE_ALT: [u8; 4] = [190, 200, 214, 255];
+pub(crate) const PALE_ALT: [u8; 4] = [190, 200, 214, 255];
 const GROUP: [u8; 4] = [150, 166, 188, 255];
 pub(crate) const FOCUS: [u8; 4] = [62, 86, 118, 255];
 pub(crate) const WHITE: [u8; 4] = [247, 250, 255, 255];
@@ -317,6 +317,19 @@ pub(crate) fn title_bar(pixels: &mut [u8], font: &Font, title: &str, context: &s
 /// The bottom strip: a message line above the navigation hint. Footer
 /// buttons sit to the right of the hint.
 pub(crate) fn status_bar(pixels: &mut [u8], font: &Font, message: &str) {
+    message_bar(pixels, font, message);
+    Editor::text(
+        pixels,
+        font,
+        (8, 456, 300, 20),
+        MUTED,
+        "Arrows move, Enter selects, Esc backs out",
+        (8, 461),
+    );
+}
+/// The bottom strip with only its message line, for a screen whose footer
+/// buttons span the whole width (the Replays screen).
+pub(crate) fn message_bar(pixels: &mut [u8], font: &Font, message: &str) {
     Canvas(pixels).rect((0, 438, 640, 42), PANEL);
     Editor::text(
         pixels,
@@ -325,14 +338,6 @@ pub(crate) fn status_bar(pixels: &mut [u8], font: &Font, message: &str) {
         TITLE,
         &fit(font, message, 620),
         (8, 442),
-    );
-    Editor::text(
-        pixels,
-        font,
-        (8, 456, 300, 20),
-        MUTED,
-        "Arrows move, Enter selects, Esc backs out",
-        (8, 461),
     );
 }
 pub(crate) fn footer_button(pixels: &mut [u8], font: &Font, r: Rect, label: &str, focused: bool) {

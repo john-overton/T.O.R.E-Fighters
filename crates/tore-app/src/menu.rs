@@ -36,6 +36,8 @@ pub enum Action {
     Music(bool),
     Effects(bool),
     ReimportMedia,
+    /// The top bar's Replays entry: opens the Replays screen.
+    Replays,
     Controls,
     Graphics,
     /// Opens the mission replay viewer on a recording.
@@ -65,7 +67,18 @@ fn in_rect(point: (f64, f64), rect: (i32, i32, i32, i32)) -> bool {
         && point.0 < (rect.0 + rect.2) as f64
         && point.1 < (rect.1 + rect.3) as f64
 }
-const BARS: [(i32, i32, i32, i32); 3] = [(78, 38, 17, 19), (96, 38, 39, 19), (135, 38, 45, 19)];
+const BARS: [(i32, i32, i32, i32); 4] = [
+    (78, 38, 17, 19),
+    (96, 38, 39, 19),
+    (135, 38, 45, 19),
+    (180, 38, 66, 19),
+];
+/// Top-bar labels, in `BARS` order. "Replays" is an authored addition
+/// (requested by John on 2026-09-26): it opens the Replays screen at once
+/// and has no dropdown. The retail entries are unchanged.
+const BAR_LABELS: [&str; 4] = ["?", "Pref", "Multi", "Replays"];
+/// The top-bar index of the Replays entry.
+const REPLAYS_BAR: usize = 3;
 /// Project-owned footer art and adjacent version, clear of the activity buttons.
 const BADGE_SIZE: usize = 64;
 const VERSION_BADGE: (i32, i32) = (14, 408);
@@ -103,11 +116,13 @@ impl State {
                 format!("Music: {}", if self.music { "On" } else { "Off" }),
                 format!("Effects: {}", if self.effects { "On" } else { "Off" }),
             ],
-            _ => vec![
+            2 => vec![
                 "Host Game...".into(),
                 "Join Game...".into(),
                 "Player Setup...".into(),
             ],
+            // Replays opens its screen directly.
+            _ => vec![],
         }
     }
     fn popup_rect(&self, bar: usize) -> (i32, i32, i32, i32) {
@@ -131,7 +146,9 @@ impl State {
         }
         if let Some(bar) = self.open {
             let rect = self.popup_rect(bar);
-            if in_rect(p, rect) && p.1 >= 63.0 {
+            // Hovering Replays while a dropdown is open keeps the menu open
+            // with no list showing, as a menu bar does.
+            if !self.items(bar).is_empty() && in_rect(p, rect) && p.1 >= 63.0 {
                 let row = ((p.1 - 63.0) / 20.0) as usize;
                 if row < self.items(bar).len() {
                     return Some(Target::Item(row));
@@ -178,6 +195,10 @@ impl State {
     }
     fn activate(&mut self, target: Target) -> Action {
         match target {
+            Target::Bar(REPLAYS_BAR) => {
+                self.cancel();
+                return Action::Replays;
+            }
             Target::Bar(bar) => {
                 self.open = if self.open == Some(bar) {
                     None
@@ -252,7 +273,7 @@ impl State {
                 Action::Music(self.music)
             }
             "Enter" | " " => self.focus.map(|t| self.activate(t)).unwrap_or(Action::None),
-            "ArrowDown" | "ArrowUp" if self.open.is_some() => {
+            "ArrowDown" | "ArrowUp" if self.open.is_some_and(|bar| !self.items(bar).is_empty()) => {
                 let bar = self.open.unwrap();
                 let n = self.items(bar).len();
                 let row = match self.focus {
@@ -269,7 +290,7 @@ impl State {
                 Action::Hover
             }
             "Tab" | "ArrowDown" | "ArrowUp" | "ArrowLeft" | "ArrowRight" => {
-                let targets: Vec<_> = (0..3)
+                let targets: Vec<_> = (0..BARS.len())
                     .map(Target::Bar)
                     .chain(
                         (0..self.buttons.len())
@@ -544,7 +565,7 @@ impl Menu {
             }
         }
         let menu_font = &self.sprites["MENUFONT.PIC"];
-        for (i, label) in ["?", "Pref", "Multi"].iter().enumerate() {
+        for (i, label) in BAR_LABELS.iter().enumerate() {
             let rect = self.state.bar_rect(i);
             if self.state.open == Some(i) || self.state.highlighted(Target::Bar(i)) {
                 canvas.rect(rect, [190, 200, 215, 255]);
@@ -571,7 +592,11 @@ impl Menu {
             VERSION_LABEL.1,
             Some([246, 249, 252]),
         );
-        if let Some(bar) = self.state.open {
+        if let Some(bar) = self
+            .state
+            .open
+            .filter(|bar| !self.state.items(*bar).is_empty())
+        {
             let (x, y, w, h) = self.state.popup_rect(bar);
             canvas.rect((x + 3, y + 3, w, h), [20, 23, 26, 255]);
             canvas.rect((x, y, w, h), [207, 210, 215, 255]);
@@ -1004,6 +1029,96 @@ mod tests {
         s.pointer(Some((110.0, 70.0)));
         s.down();
         assert_eq!(s.up(), Action::Graphics);
+    }
+    #[test]
+    fn replays_opens_its_screen_on_every_background() {
+        // The three bar origins the five backgrounds use.
+        for offset in [-6, 109, 0] {
+            let mut s = state();
+            s.bar_offset = offset;
+            let (x, y, w, h) = s.bar_rect(REPLAYS_BAR);
+            assert_eq!((x, y, w, h), (180 + offset, 38, 66, 19));
+            // It starts where Multi ends.
+            assert_eq!(s.bar_rect(2).0 + s.bar_rect(2).2, x);
+            let middle = ((x + w / 2) as f64, (y + h / 2) as f64);
+            assert_eq!(s.hit(Some(middle)), Some(Target::Bar(REPLAYS_BAR)));
+            assert_eq!(s.hit(Some((x as f64, middle.1))), Some(Target::Bar(3)));
+            assert_eq!(
+                s.hit(Some(((x - 1) as f64, middle.1))),
+                Some(Target::Bar(2))
+            );
+            assert_eq!(s.hit(Some(((x + w) as f64, middle.1))), None);
+            assert_eq!(s.hit(Some((middle.0, (y + h) as f64))), None);
+            // A click opens the screen directly: no dropdown, no notice.
+            assert_eq!(s.pointer(Some(middle)), Action::Hover);
+            s.down();
+            assert_eq!(s.up(), Action::Replays);
+            assert_eq!((s.open, s.focus), (None, None));
+            assert!(s.toast.is_none());
+            assert!(s.items(REPLAYS_BAR).is_empty());
+        }
+    }
+    #[test]
+    fn keyboard_reaches_replays_after_multi() {
+        let mut s = state();
+        let order: Vec<_> = (0..5)
+            .map(|_| {
+                s.key("Tab", false);
+                s.focus.unwrap()
+            })
+            .collect();
+        assert_eq!(
+            order,
+            [
+                Target::Bar(0),
+                Target::Bar(1),
+                Target::Bar(2),
+                Target::Bar(3),
+                Target::Button(0),
+            ]
+        );
+        s.key("Tab", true);
+        assert_eq!(s.focus, Some(Target::Bar(3)));
+        assert_eq!(s.key("Enter", false), Action::Replays);
+        assert_eq!((s.open, s.focus), (None, None));
+        s.key("Tab", true);
+        s.key("Tab", true);
+        assert_eq!(
+            s.focus,
+            Some(Target::Button(7)),
+            "backwards from the start wraps"
+        );
+    }
+    #[test]
+    fn an_open_dropdown_passes_over_replays_without_a_list() {
+        let mut s = state();
+        let multi = (150.0, 44.0);
+        let replays = (200.0, 44.0);
+        s.pointer(Some(multi));
+        s.down();
+        s.up();
+        assert_eq!(s.open, Some(2));
+        // Moving along the bar keeps the menu open, with nothing to list
+        // under Replays; the activity buttons stay covered.
+        s.pointer(Some(replays));
+        assert_eq!(s.open, Some(REPLAYS_BAR));
+        assert_eq!(s.hit(Some((200.0, 70.0))), None);
+        assert_eq!(s.hit(Some((425.0, 105.0))), None);
+        s.pointer(Some(multi));
+        assert_eq!(s.open, Some(2), "back on Multi, its list returns");
+        // Arrow keys with nothing listed move along the bar instead.
+        s.pointer(Some(replays));
+        s.key("ArrowDown", false);
+        s.key("ArrowDown", false);
+        assert_eq!(s.open, None);
+        // A click on Replays itself opens the screen.
+        s.pointer(Some(multi));
+        s.down();
+        s.up();
+        s.pointer(Some(replays));
+        s.down();
+        assert_eq!(s.up(), Action::Replays);
+        assert_eq!(s.open, None);
     }
     #[test]
     fn keyboard_skips_disabled_actions_and_toggles_music() {

@@ -29,7 +29,7 @@ const MAGIC: &[u8; 8] = b"TOREREPL";
 /// second, so a live file is never older than that.
 const LIVE_PARTIAL: Duration = Duration::from_secs(10 * 60);
 /// Recordings a settings file may mark as kept.
-const MAX_KEPT: usize = 4096;
+pub const MAX_KEPT: usize = 4096;
 
 /// Which recordings auto-delete removes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,7 +67,6 @@ impl Default for Settings {
 }
 
 impl Settings {
-    #[allow(dead_code)] // Saved by the Replays screen.
     pub fn text(&self) -> String {
         let mut text = format!(
             "tore-replays 1\nauto-delete {}\nrule {}\nkeep-last {}\nolder-than-days {}\n",
@@ -202,6 +201,14 @@ fn all(text: &str, test: impl Fn(char) -> bool) -> bool {
 /// name has the recording pattern: `YYYY-MM-DD_HHMM_MAP_AIRCRAFT`, an
 /// optional `-N` collision suffix, and the extension.
 fn name_start(name: &str) -> Option<i64> {
+    order_key(name).map(|(start, _)| start)
+}
+
+/// How recordings sort, newest last: the start time a recording name holds
+/// (seconds since 1970) and its collision number, 1 for a name without a
+/// `-N` suffix, so a second flight in the same minute (`-2`) is the newer
+/// one. `None` when the name does not have the recording pattern.
+pub fn order_key(name: &str) -> Option<(i64, u32)> {
     let stem = name.strip_suffix(&format!(".{EXTENSION}"))?;
     let (stem, suffix) = match stem.rsplit_once('-') {
         Some((head, n)) if head.len() > 10 && all(n, |c| c.is_ascii_digit()) && n.len() <= 4 => {
@@ -212,6 +219,10 @@ fn name_start(name: &str) -> Option<i64> {
     if suffix.is_some_and(|n| n.starts_with('0')) {
         return None;
     }
+    let collision = match suffix {
+        Some(n) => n.parse::<u32>().ok()?,
+        None => 1,
+    };
     let mut parts = stem.split('_');
     let (date, time, map, aircraft) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
     if parts.next().is_some() {
@@ -236,7 +247,10 @@ fn name_start(name: &str) -> Option<i64> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 {
         return None;
     }
-    Some(epoch_seconds([number(year)?, month, day, hour, minute, 0]))
+    Some((
+        epoch_seconds([number(year)?, month, day, hour, minute, 0]),
+        collision,
+    ))
 }
 
 /// Whether `name` has the recording file name pattern.
@@ -245,7 +259,6 @@ pub fn is_recording_name(name: &str) -> bool {
 }
 
 /// One file in the recordings folder.
-#[allow(dead_code)] // Read by the Replays screen.
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub path: PathBuf,
@@ -304,7 +317,6 @@ impl Library {
         }
     }
 
-    #[allow(dead_code)] // Used by the Replays screen.
     pub fn save_settings(&self, settings: &Settings) -> std::io::Result<()> {
         crate::preferences::write(&self.settings_path(), &settings.text())
     }
@@ -342,15 +354,14 @@ impl Library {
         ))
     }
 
-    /// Every recording in the folder, finished or not, newest first. Files
-    /// that are not recordings are left out.
-    #[allow(dead_code)] // Used by the Replays screen.
+    /// Every recording in the folder, finished or not, newest first (see
+    /// [`order_key`]). Files that are not recordings are left out.
     pub fn list(&self) -> Vec<Entry> {
         let kept = self.settings().kept;
         let Ok(dir) = std::fs::read_dir(self.folder()) else {
             return Vec::new();
         };
-        let mut entries: Vec<(i64, Entry)> = dir
+        let mut entries: Vec<((i64, u32), Entry)> = dir
             .flatten()
             .filter_map(|file| {
                 let path = file.path();
@@ -359,7 +370,7 @@ impl Library {
                     Some(name) => (name.to_owned(), true),
                     None => (file_name, false),
                 };
-                let start = name_start(&name)?;
+                let start = order_key(&name)?;
                 if !has_magic(&path) {
                     return None;
                 }
@@ -387,11 +398,23 @@ impl Library {
     /// one being written.
     pub fn cleanup(&self, settings: &Settings, now: SystemTime, protect: &[&Path]) -> Cleanup {
         let mut result = Cleanup::default();
+        for path in self.plan(settings, now, protect) {
+            match std::fs::remove_file(&path) {
+                Ok(()) => result.deleted.push(path),
+                Err(error) => result.failed.push((path, error.to_string())),
+            }
+        }
+        result
+    }
+
+    /// The recordings [`Library::cleanup`] would delete now, deleting
+    /// nothing: the Replays screen shows how many.
+    pub fn plan(&self, settings: &Settings, now: SystemTime, protect: &[&Path]) -> Vec<PathBuf> {
         if !settings.auto_delete {
-            return result;
+            return Vec::new();
         }
         let Ok(dir) = std::fs::read_dir(self.folder()) else {
-            return result;
+            return Vec::new();
         };
         let protected: BTreeSet<PathBuf> = protect
             .iter()
@@ -400,7 +423,7 @@ impl Library {
         let now_s = now
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
-        let mut candidates: Vec<(i64, String, PathBuf)> = dir
+        let mut candidates: Vec<((i64, u32), String, PathBuf)> = dir
             .flatten()
             .filter_map(|file| {
                 let path = file.path();
@@ -409,7 +432,7 @@ impl Library {
                     Some(name) => (name.to_owned(), true),
                     None => (file_name, false),
                 };
-                let start = name_start(&name)?;
+                let start = order_key(&name)?;
                 if settings.kept.contains(&name)
                     || protected.contains(&path)
                     || !file.file_type().is_ok_and(|t| t.is_file())
@@ -433,7 +456,7 @@ impl Library {
             .collect();
         // Newest first.
         candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
-        let doomed: Vec<PathBuf> = match settings.rule {
+        match settings.rule {
             Rule::KeepLast => candidates
                 .into_iter()
                 .skip(settings.keep_last as usize)
@@ -443,18 +466,11 @@ impl Library {
                 let limit = now_s - i64::from(settings.older_than_days) * 86_400;
                 candidates
                     .into_iter()
-                    .filter(|(start, _, _)| *start < limit)
+                    .filter(|((start, _), _, _)| *start < limit)
                     .map(|(_, _, path)| path)
                     .collect()
             }
-        };
-        for path in doomed {
-            match std::fs::remove_file(&path) {
-                Ok(()) => result.deleted.push(path),
-                Err(error) => result.failed.push((path, error.to_string())),
-            }
         }
-        result
     }
 }
 
@@ -531,6 +547,23 @@ mod tests {
         ] {
             assert!(!is_recording_name(name), "{name}");
         }
+    }
+
+    #[test]
+    fn a_later_flight_in_the_same_minute_sorts_as_newer() {
+        let key = |name: &str| order_key(name).unwrap();
+        let base = key("2026-09-26_1540_UKR_F18.tore-replay");
+        assert_eq!(base.1, 1);
+        assert!(key("2026-09-26_1540_UKR_F18-2.tore-replay") > base);
+        assert!(
+            key("2026-09-26_1540_UKR_F18-10.tore-replay")
+                > key("2026-09-26_1540_UKR_F18-2.tore-replay")
+        );
+        assert!(
+            key("2026-09-26_1541_UKR_F18.tore-replay")
+                > key("2026-09-26_1540_UKR_F18-10.tore-replay")
+        );
+        assert_eq!(order_key("2026-09-26_1540_UKR_F18-0.tore-replay"), None);
     }
 
     #[test]

@@ -591,6 +591,10 @@ auto-delete settings, listing from each file's header, seek index and footer
 (`Recording::peek`), and a cleanup that deletes only proven, unkept, inactive
 recordings. `terrain::World::identity` captures the resolved world for the
 header and `World::for_identity` rebuilds it without environment variables.
+`replay/screen.rs` is the Replays screen, a main-menu overlay built from the
+Controls screen's drawing helpers that reads a recording's details and
+writes its exports on background threads the menu's redraw polls, so the
+menu never waits on a file.
 `replay/cli.rs` holds the `--recording-*` commands and the tick-by-tick
 render check. See [mission replays](REPLAYS.md).
 

@@ -106,6 +106,7 @@ fn cue(action: Action) -> Option<&'static str> {
         | Action::Click
         | Action::QuickMission
         | Action::FreeFlight
+        | Action::Replays
         | Action::Back => Some("&BUTTON.11K"),
         Action::Music(_) | Action::Effects(_) => Some("&TOGGLE1.5K"),
         Action::RockerUp => Some("&ROCKUP.11K"),
