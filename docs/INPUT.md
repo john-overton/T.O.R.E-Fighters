@@ -63,11 +63,11 @@ bridge tests without touching hardware.
 
 **Alt-Enter** switches between native borderless fullscreen and the previous
 windowed size, on every screen: the menus, the Quick Mission creator, the locate
-screen and flight. It is not rebindable and no controller button is assigned to
-it. F11 is not used, because it already opens the in-flight keyboard help. The
-game starts in borderless fullscreen; the choice is saved as `fullscreen` in
-`preferences-v1.conf` and `--windowed` starts one run in a window without
-changing it.
+screen, flight and the replay viewer. It is not rebindable and no controller
+button is assigned to it. F11 is not used, because it already opens the
+in-flight keyboard help. The game starts in borderless fullscreen; the choice is
+saved as `fullscreen` in `preferences-v1.conf` and `--windowed` starts one run
+in a window without changing it.
 
 ### The controls screen
 
@@ -486,8 +486,9 @@ loads supported default weapons. Use `--record-combat` for weapon-service tapes.
 These input tapes are separate from the mission recordings every flight makes
 ([mission replays](REPLAYS.md)), which keep what happened rather than the
 controls. `bookmark` (Ctrl+B by default, "Mark replay moment" in the Game and
-menus group) marks the moment in that recording and shows "Bookmark N saved";
-it is a debugging aid, so the printable keyboard map leaves it out.
+menus group) marks the moment in that recording and shows "Bookmark N saved".
+The printable [keyboard map](tore-keyboard-map.html#replay) shows it on the
+Replay sheet, beside the [replay viewer's keys](#replay-viewer-shortcuts).
 
 Recording requires a direct free-flight start without a capture, probe or initial control/device-pose override and stops when that flight ends/restarts. Files are create-new and flushed
 on exit. Tapes contain **pilot inputs only**, not mission saves, UI/camera commands,
@@ -981,3 +982,34 @@ binding. Unmodified view keys restore the normal reference. Missing subjects
 produce feedback without changing the requested selection's predecessor.
 Automatic views control direction; pan/orbit remains available in F1/F2/F3/F10.
 See [view behavior and fitted rules](spec/flight-views.md).
+
+## Replay viewer shortcuts
+
+The [replay viewer](REPLAYS.md#viewer) has its own built-in keys, an agent
+design from 2026-09-26. They are listed in the
+[controls master list](CONTROLS.md#built-in-controls-outside-the-tables) and on
+the Replay sheet of the [keyboard map](tore-keyboard-map.html#replay). They
+cannot be rebound yet, and profiles do not change them.
+
+- **Playback:** Space plays or pauses. J, K and L play backwards, pause and
+  play forwards, as in video editors; J or L again doubles the speed up to
+  16x. Up and Down step through 1/8x, 0.25x, 0.5x, 0.75x, 1x, 2x, 4x, 8x and
+  16x in the current direction. Left and Right jump 5 seconds, or one tick
+  while paused; with Shift, 30 seconds. Home and End go to the start and end,
+  Page Up and Page Down to the previous and next timeline marker.
+- **Cameras:** Tab and Shift+Tab pick the aircraft. F1 to F10 and F12 give the
+  flight views from it; F11 is not a view. Backquote switches to the drone,
+  which W, A, S, D, E and Q fly; Shift is four times faster.
+- **Panels and display:** I, F and G open or close the selected aircraft's AI
+  thinking, telemetry and missile guidance panels, C the Comms panel; M opens
+  its right-click menu, and X closes every panel. N, T and R switch name
+  labels, the mission timer and flight path trails; Shift+R steps the trail
+  length.
+- **Screenshots:** H hides the whole interface and the pointer while playback
+  and camera keys keep working. P saves the view without the interface as a
+  PNG. Esc shows a hidden interface, otherwise returns to the Replays screen.
+
+As in flight, letters are read by their physical key and the keypad works as
+the navigation keys whatever NumLock says. Alt+Enter, Alt+F4 and, on macOS,
+Command+Q still work. The viewer ignores every other Ctrl, Alt or Command
+combination, so Ctrl+B marks a moment only in flight.

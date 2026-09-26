@@ -99,8 +99,8 @@ over…" to choose where. Press **OK** to fly.
 Default keys follow the original game's keyboard layout. Press **F11** in
 flight for keyboard help, or **Escape** for the flight menu.
 The [interactive keyboard map](https://john-overton.github.io/T.O.R.E-Fighters/tore-keyboard-map.html)
-has Fly &amp; Fight, Comms and Cockpit &amp; View sheets and exports to PNG, ZIP
-or PDF. The [control reference](docs/FLIGHT-CONTROLS.md) lists every key, and
+has Fly &amp; Fight, Comms, Cockpit &amp; View and Replay sheets and exports to
+PNG, ZIP or PDF. The [control reference](docs/FLIGHT-CONTROLS.md) lists every key, and
 **Escape > Control** remaps keys, gamepads, joysticks and head tracking
 ([controller setup](docs/INPUT.md)).
 

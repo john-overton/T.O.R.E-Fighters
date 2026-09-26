@@ -791,7 +791,8 @@ half to the bottom, so the bar sits on the bottom edge of any window.
 ### Keys and mouse
 
 The viewer's keys are built in, listed in the
-[controls master list](CONTROLS.md#built-in-controls-outside-the-tables).
+[controls master list](CONTROLS.md#built-in-controls-outside-the-tables) and
+drawn on the Replay sheet of the [keyboard map](tore-keyboard-map.html#replay).
 They follow the video-editor convention for J, K and L. F11 is not a view,
 as in flight.
 

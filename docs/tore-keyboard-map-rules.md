@@ -16,7 +16,8 @@ remain in [AGENTS.md](../AGENTS.md).
 
 John requested on 2026-09-23 that additions cover only normal flight, comms and
 views, with no test commands. Flight includes ordinary weapons, sensors,
-instruments and navigation used during a sortie.
+instruments and navigation used during a sortie. On 2026-09-26 he asked for a
+Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
 
 - Exclude range fixtures, developer/test commands, damage injection, diagnostic
   toggles, startup command-line flags and AI tuning. Do not include a command
@@ -35,10 +36,21 @@ instruments and navigation used during a sortie.
   where T.O.R.E differs is recorded in [key placement](INPUT.md#key-placement).
   An original key whose feature T.O.R.E lacks only reports "not implemented
   yet". That is not a command, so the key stays dim.
+- The Replay sheet shows every built-in viewer key, its debug panel keys
+  included: the viewer keys are the sheet's purpose, so the diagnostic toggle
+  exclusion above covers flight only. Take them from the Replay viewer rows of
+  [the controls list](CONTROLS.md#built-in-controls-outside-the-tables) and
+  check [the viewer's key handling](../crates/tore-app/src/replay/viewer.rs)
+  and [its window routing](../crates/tore-app/src/replay/host.rs): Alt+Enter
+  and Alt+F4 reach the game, every other Ctrl or Alt combination is ignored.
+  Flight keys the viewer does not read stay dim. Ctrl+B, the flight's "Mark
+  replay moment" default, is on this sheet because its purpose is replays;
+  the sheet says it works in flight.
 - The keypad works as the navigation keys. Highlight a keypad key on the sheet
   for its command, with the same label as the key it stands for: keypad 0 and
   period (chaff, flare), 1 and 3 (rudder), 8, 2, 4 and 6 (stick) and Enter on
-  Fly & Fight; keypad 5 (center) and plus and minus (zoom) on Cockpit & View.
+  Fly & Fight; keypad 5 (center) and plus and minus (zoom) on Cockpit & View;
+  keypad 7, 8, 9, 4, 6, 1, 2 and 3 (playback) on Replay.
 - Identify context or capability limits in the key label, tooltip or callout.
   Examples include F-22 weapon bays and Home while the live map is open.
   Instrument button letters are not automatically global keyboard bindings.
@@ -49,7 +61,9 @@ instruments and navigation used during a sortie.
 
 ## Sheets and key labels
 
-Retain the three sheets: **Fly & Fight**, **Comms**, and **Cockpit & View**.
+Retain the four sheets: **Fly & Fight**, **Comms**, **Cockpit & View** and
+**Replay**. The Replay sheet's keys cannot be remapped, so its subtitle and
+footer call them built in instead of naming the controls screen.
 Place an action on the sheet for its purpose. One physical key can appear on
 several sheets with different commands. A dim key means there is no highlighted
 command on that sheet, not that it has no binding anywhere in the game.
@@ -82,12 +96,12 @@ Retain the existing palette and the legend on each sheet:
 
 | Role | Colour |
 | --- | --- |
-| Flight; instrument selection/buttons; tower | Green `#7fd08a` |
-| Systems; cockpit window toggles; formation | Cream `#efe7a6` |
+| Flight; instrument selection/buttons; tower; replay drone camera | Green `#7fd08a` |
+| Systems; cockpit window toggles; formation; replay debug panels | Cream `#efe7a6` |
 | Weapons; wing orders | Coral `#ec7a6e` |
-| Sensors/navigation; views; wing address | Blue `#7fb2e8` |
-| HUD and map | Purple `#b8a2e8` |
-| Approach-target orders; existing game/session controls | Orange `#f0a860` |
+| Sensors/navigation; views; wing address; replay views and aircraft | Blue `#7fb2e8` |
+| HUD and map; replay display and screenshots | Purple `#b8a2e8` |
+| Approach-target orders; existing game/session controls; replay playback | Orange `#f0a860` |
 
 Preserve the 1920×1080 sheet canvas, key geometry, embedded VT323 font and badge
 art. Match neighbouring row styles. Put explanations in callouts rather than
@@ -103,13 +117,16 @@ controls are document controls, not new game bindings.
 - Compare relevant normal defaults with the input catalog; check both new and
   existing entries for omissions or stale descriptions. Explicitly exclude test
   and range bindings during this comparison.
-- Check all three sheets in a browser at 1920×1080 and at a smaller viewport.
+- Check all four sheets in a browser at 1920×1080 and at a smaller viewport.
   Verify every modified key, modifier badge, callout and leader. Text must not
   overflow, overlap unrelated controls or rely on a tooltip to explain
   ejection confirmation.
 - Check tab/hash navigation and export-size selection. Confirm PNG output at
   1080p and 4K retains the new labels. Preserve ZIP, PDF and print support;
   exercise any export behaviour changed by the edit.
+- The README image, [tore-keyboard-map.png](images/tore-keyboard-map.png), is
+  a 1920×1080 capture of the Fly & Fight sheet with its tabs and toolbar.
+  Capture it again when that sheet or the tabs change.
 - Preserve embedded font/image bytes during text edits. Keep temporary captures
   in ignored `.local/`. Do not embed or commit new retail media.
 - Update this file in place when John changes these conventions. Do not append a
