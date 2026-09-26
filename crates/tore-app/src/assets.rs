@@ -83,13 +83,18 @@ pub fn data_directory() -> AppResult<PathBuf> {
     };
     Ok(root.join("T.O.R.E-Fighters"))
 }
-/// How far an import has got, for the first-run screen. `total` is the number
-/// of resources selected from the archive being read, when it is known.
+/// How far an import has got, for the first-run screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Progress {
-    pub archive: String,
-    pub done: usize,
-    pub total: Option<usize>,
+pub(crate) enum Progress {
+    /// Work before any archive is read, named in plain words for the player.
+    Preparing(&'static str),
+    /// Reading one archive. `total` is the number of resources selected from
+    /// it, when it is known.
+    Reading {
+        archive: String,
+        done: usize,
+        total: Option<usize>,
+    },
 }
 
 /// A finished import: the decoded assets and the plain-words summary the
@@ -356,6 +361,7 @@ impl Assets {
         ));
         // The build is identified before any archive is opened, so an unreviewed
         // executable never leaves a half-known data set in the cache.
+        progress(Progress::Preparing("Identifying the game build"));
         let executable = source.executable()?;
         let layout = tore_formats::executable::identify(&executable)?;
         let tables = tore_formats::ui::creator::Options::parse(&executable)?;
@@ -372,6 +378,7 @@ impl Assets {
             tore_formats::executable::sha256(&executable)
         ));
         summary.push(format!("Build read: FA.EXE {}", layout.name));
+        progress(Progress::Preparing("Finding aircraft and theaters"));
         let aircraft_libs = [source.archive("FA_1.LIB")?, source.archive("FA_2.LIB")?];
         let aircraft_names = tore_formats::aircraft::dependencies(
             &aircraft_libs.iter().collect::<Vec<_>>(),
@@ -418,14 +425,14 @@ impl Assets {
                 })
                 .cloned()
                 .collect();
-            progress(Progress {
+            progress(Progress::Reading {
                 archive: filename.to_string(),
                 done: 0,
                 total: Some(selected.len()),
             });
             for (index, name) in selected.iter().enumerate() {
                 if index > 0 && index.is_multiple_of(64) {
-                    progress(Progress {
+                    progress(Progress::Reading {
                         archive: filename.to_string(),
                         done: index,
                         total: Some(selected.len()),
@@ -444,7 +451,7 @@ impl Assets {
                 }
                 resources.insert(name.to_string(), bytes);
             }
-            progress(Progress {
+            progress(Progress::Reading {
                 archive: filename.to_string(),
                 done: selected.len(),
                 total: Some(selected.len()),
@@ -487,7 +494,7 @@ impl Assets {
                 .filter(|n| tore_formats::music::resource(n))
                 .cloned()
                 .collect();
-            progress(Progress {
+            progress(Progress::Reading {
                 archive: filename.to_string(),
                 done: 0,
                 total: Some(scores.len()),
@@ -495,7 +502,7 @@ impl Assets {
             summary.push(format!("{filename}: {} music resources read", scores.len()));
             for (index, name) in scores.iter().enumerate() {
                 if index > 0 && index.is_multiple_of(64) {
-                    progress(Progress {
+                    progress(Progress::Reading {
                         archive: filename.to_string(),
                         done: index,
                         total: Some(scores.len()),
@@ -514,7 +521,7 @@ impl Assets {
                 ));
                 resources.insert(name.clone(), bytes);
             }
-            progress(Progress {
+            progress(Progress::Reading {
                 archive: filename.to_string(),
                 done: scores.len(),
                 total: Some(scores.len()),

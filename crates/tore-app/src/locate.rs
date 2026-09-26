@@ -35,6 +35,12 @@ pub(crate) struct Candidate {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
     Idle,
+    /// The import has begun but no archive is being read yet: the worker is
+    /// identifying the build and finding what to read, which can take tens of
+    /// seconds from a disc. `step` names that work in plain words.
+    Starting {
+        step: String,
+    },
     Importing {
         archive: String,
         resources_done: usize,
@@ -96,6 +102,9 @@ const QUIT_RECT: (i32, i32, i32, i32) =
     (INNER_X + INNER_W - BUTTON_W, BUTTON_Y, BUTTON_W, BUTTON_H);
 const CONTINUE_RECT: (i32, i32, i32, i32) = IMPORT_RECT;
 const MAX_PATH_BYTES: usize = 512;
+/// Frames for the starting bar to cross once. The shell ticks about thirty
+/// times a second, so one crossing takes about a second and a half.
+const SWEEP_FRAMES: u32 = 45;
 /// Compile-time layout guard. A block of `n` text lines starting at `start`
 /// ends at `start + (n - 1) * LINE + CELL`. Nothing may reach into the block
 /// below it, the buttons must sit inside the panel, and the panel with its
@@ -202,6 +211,8 @@ pub(crate) struct Locate {
     hover: Option<Focus>,
     hover_row: Option<usize>,
     scroll: usize,
+    /// Advanced by [`Locate::tick`] while starting, so the sweeping bar moves.
+    frame: u32,
 }
 impl Locate {
     pub(crate) fn new(prefill: Option<String>, candidates: Vec<Candidate>) -> Self {
@@ -217,6 +228,7 @@ impl Locate {
             hover: None,
             hover_row: None,
             scroll: 0,
+            frame: 0,
         };
         if let Some(prefill) = prefill.filter(|p| !p.trim().is_empty()) {
             locate.set_path(prefill);
@@ -259,8 +271,18 @@ impl Locate {
     pub(crate) fn phase(&self) -> &Phase {
         &self.phase
     }
+    /// Advance the starting animation by one frame. Returns true when the
+    /// screen needs redrawing, which is only while the import is starting.
+    pub(crate) fn tick(&mut self) -> bool {
+        if matches!(self.phase, Phase::Starting { .. }) {
+            self.frame = self.frame.wrapping_add(1);
+            true
+        } else {
+            false
+        }
+    }
     fn importing(&self) -> bool {
-        matches!(self.phase, Phase::Importing { .. })
+        matches!(self.phase, Phase::Starting { .. } | Phase::Importing { .. })
     }
     fn done(&self) -> bool {
         matches!(self.phase, Phase::Done { .. })
@@ -513,6 +535,12 @@ impl Locate {
         let width = INNER_W;
         match &self.phase {
             Phase::Idle => Vec::new(),
+            Phase::Starting { step } => {
+                vec![
+                    ("Starting import...".to_owned(), None),
+                    (step.clone(), Some(DIM)),
+                ]
+            }
             Phase::Importing {
                 archive,
                 resources_done,
@@ -663,6 +691,23 @@ impl Locate {
                 ((INNER_W - 2) as i64 * (*resources_done).min(*total) as i64 / *total as i64) as i32
             };
             canvas.rect((bar.0 + 1, bar.1 + 1, filled, bar.3 - 2), BAR_FILL);
+        }
+        if let Phase::Starting { .. } = &self.phase {
+            // No count is known yet, so a block sweeps back and forth to show
+            // the import is alive.
+            let bar = (INNER_X, STATUS_Y + 2 * LINE + 4, INNER_W, 10);
+            canvas.rect(bar, FIELD_FILL);
+            canvas.outline(bar, EDGE_IDLE);
+            let block = INNER_W / 5;
+            let travel = INNER_W - 2 - block;
+            let phase = (self.frame % (2 * SWEEP_FRAMES)) as i32;
+            let step = if phase < SWEEP_FRAMES as i32 {
+                phase
+            } else {
+                2 * SWEEP_FRAMES as i32 - phase
+            };
+            let x = travel * step / SWEEP_FRAMES as i32;
+            canvas.rect((bar.0 + 1 + x, bar.1 + 1, block, bar.3 - 2), BAR_FILL);
         }
         if let Some(hint) = &self.hint {
             for (row, line) in wrap(small, hint, INNER_W)
@@ -889,6 +934,36 @@ mod tests {
         assert_eq!(l.focus, Focus::PathField);
     }
     #[test]
+    fn starting_locks_the_controls_and_animates_until_reading_begins() {
+        let mut l = Locate::new(Some("/mnt/disc1".into()), Vec::new());
+        assert!(!l.tick(), "an idle screen has nothing to animate");
+        l.set_phase(Phase::Starting {
+            step: "Identifying the game build".into(),
+        });
+        assert_eq!(l.key("Escape"), Event::None);
+        assert_eq!(l.key("Enter"), Event::None);
+        type_text(&mut l, "x");
+        assert_eq!(l.path, "/mnt/disc1");
+        let font = font();
+        let lines = l.status_lines(&font);
+        assert_eq!(lines[0].0, "Starting import...");
+        assert_eq!(lines[1].0, "Identifying the game build");
+        let mut before = vec![0u8; WIDTH * HEIGHT * 4];
+        l.draw(&mut before, &font, &font, None);
+        for _ in 0..10 {
+            assert!(l.tick());
+        }
+        let mut after = vec![0u8; WIDTH * HEIGHT * 4];
+        l.draw(&mut after, &font, &font, None);
+        assert_ne!(before, after, "the starting bar did not move");
+        l.set_phase(Phase::Importing {
+            archive: "FA_1.LIB".into(),
+            resources_done: 0,
+            resources_total: Some(100),
+        });
+        assert!(!l.tick(), "a counted import needs no animation");
+    }
+    #[test]
     fn clicking_each_button_reports_its_event() {
         let mut l = Locate::new(Some("/mnt/disc1".into()), Vec::new());
         let centre = |r: (i32, i32, i32, i32)| ((r.0 + r.2 / 2) as f64, (r.1 + r.3 / 2) as f64);
@@ -999,6 +1074,12 @@ mod tests {
         let (font, small) = (font(), font());
         let phases = [
             ("idle", Phase::Idle),
+            (
+                "starting",
+                Phase::Starting {
+                    step: "Identifying the game build".into(),
+                },
+            ),
             (
                 "importing",
                 Phase::Importing {

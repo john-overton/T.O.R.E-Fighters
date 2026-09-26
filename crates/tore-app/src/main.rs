@@ -4437,6 +4437,8 @@ struct LocateShell {
     background: Option<Vec<u8>>,
     pixels: Vec<u8>,
     worker: Option<std::sync::mpsc::Receiver<ImportMessage>>,
+    /// When the starting bar last moved, so pointer motion cannot speed it up.
+    last_tick: Instant,
     /// Last pointer position in canvas coordinates: winit reports a button
     /// press without one, so the latest motion is what a click uses.
     last_pointer: Option<(f64, f64)>,
@@ -4515,10 +4517,10 @@ impl LocateShell {
             }
         };
         self.locate.clear_hint();
-        self.locate.set_phase(locate::Phase::Importing {
-            archive: String::from("FA.EXE"),
-            resources_done: 0,
-            resources_total: None,
+        // Say so at once: the worker reads nothing countable until it has
+        // identified the build and found what to read.
+        self.locate.set_phase(locate::Phase::Starting {
+            step: String::from("Opening the game files"),
         });
         let (sender, receiver) = std::sync::mpsc::channel();
         let data = self.data.clone();
@@ -4527,8 +4529,14 @@ impl LocateShell {
             let reports = sender.clone();
             let result = Assets::import_with_progress(&source, &data, &mut |progress| {
                 // Archive changes are bounded progress checkpoints, not per-resource logging.
-                if progress.done == 0 {
-                    log::info!("Import archive: {}", progress.archive);
+                match &progress {
+                    assets::Progress::Preparing(step) => log::info!("Import step: {step}"),
+                    assets::Progress::Reading {
+                        archive, done: 0, ..
+                    } => {
+                        log::info!("Import archive: {archive}")
+                    }
+                    assets::Progress::Reading { .. } => {}
                 }
                 let _ = reports.send(ImportMessage::Progress(progress));
             });
@@ -4556,11 +4564,21 @@ impl LocateShell {
         let mut running = true;
         loop {
             match receiver.try_recv() {
-                Ok(ImportMessage::Progress(progress)) => {
+                Ok(ImportMessage::Progress(assets::Progress::Preparing(step))) => {
+                    self.locate.set_phase(locate::Phase::Starting {
+                        step: step.to_owned(),
+                    });
+                    changed = true;
+                }
+                Ok(ImportMessage::Progress(assets::Progress::Reading {
+                    archive,
+                    done,
+                    total,
+                })) => {
                     self.locate.set_phase(locate::Phase::Importing {
-                        archive: progress.archive,
-                        resources_done: progress.done,
-                        resources_total: progress.total,
+                        archive,
+                        resources_done: done,
+                        resources_total: total,
                     });
                     changed = true;
                 }
@@ -4726,7 +4744,16 @@ impl ApplicationHandler for LocateShell {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if self.poll_import(event_loop) {
+        let changed = self.poll_import(event_loop);
+        // The starting bar steps at the poll rate below, whatever else wakes
+        // the loop.
+        let animating = self.worker.is_some()
+            && self.last_tick.elapsed() >= Duration::from_millis(33)
+            && self.locate.tick();
+        if animating {
+            self.last_tick = Instant::now();
+        }
+        if changed || animating {
             self.redraw();
         }
         event_loop.set_control_flow(if self.worker.is_some() {
@@ -4790,6 +4817,7 @@ fn locate_shell(
         background: background.filter(|art| art.len() == menu::WIDTH * menu::HEIGHT * 4),
         pixels: vec![0; menu::WIDTH * menu::HEIGHT * 4],
         worker: None,
+        last_tick: Instant::now(),
         auto_import: auto.path,
         auto_continue: auto.continue_when_done,
         outcome: ShellOutcome::Quit,
@@ -4809,7 +4837,7 @@ fn locate_shell(
 }
 
 /// Headless locate-screen preview (`--snapshot PATH --snapshot-state locate`,
-/// `locate-importing` or `locate-done`). The candidate list and the import
+/// `locate-starting`, `locate-importing` or `locate-done`). The candidate list and the import
 /// figures are fixed so the layout is reviewable on any machine, with or
 /// without media. The figures are those of a disc 1 import.
 fn locate_snapshot(path: &Path, state: &str) -> AppResult<()> {
@@ -4833,6 +4861,9 @@ fn locate_snapshot(path: &Path, state: &str) -> AppResult<()> {
         "locate" => screen.set_hint(
             "Drop the mounted disc 1 folder on this window, or type the folder above.".into(),
         ),
+        "locate-starting" => screen.set_phase(locate::Phase::Starting {
+            step: "Finding aircraft and theaters".into(),
+        }),
         "locate-importing" => screen.set_phase(locate::Phase::Importing {
             archive: "FA_2.LIB".into(),
             resources_done: 1344,

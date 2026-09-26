@@ -48,7 +48,15 @@ format is in [SETUP.ESA notes](../formats/esa-installer.md).
    so a stale cache and a fresh clone both reach the menu on their own. Only a
    re-import asked for from Pref always waits, because the player opened that
    screen to change something.
-3. Import shows progress by archive and resource count, then the summary
+3. Clicking **Import** changes the screen at once to **Starting import...**
+   with the current setup step underneath ("Opening the game files",
+   "Identifying the game build", "Finding aircraft and theaters") and a block
+   sweeping along the progress bar, about one crossing every one and a half
+   seconds. Setup reads nothing countable yet and can take tens of seconds
+   from a disc, so the moving bar is what tells the player the import is
+   running (requested by John on 2026-09-26; step wording and sweep speed are
+   agent choices).
+   Import then shows progress by archive and resource count, then the summary
    already written to the import report: build read (`1.0 (disc)` or `1.02F`),
    archives read, optional parts that were missing (recorded music, radio).
    The import runs on a worker thread, so the screen keeps drawing and the
@@ -66,10 +74,11 @@ rebuilds the game from the new pack without restarting the application.
 source, continues as soon as the import finishes, presents one menu frame and
 exits, so a first run can be checked end to end in one command.
 `--snapshot PATH --snapshot-state locate` writes the screen's layout headlessly
-with a fixed candidate list, without needing any media. The `locate-importing`
-and `locate-done` states draw the same screen part way through and at the end
-of a disc 1 import, using fixed figures; the README's getting-started pictures
-come from these three states.
+with a fixed candidate list, without needing any media. The `locate-starting`,
+`locate-importing` and `locate-done` states draw the same screen as a disc 1
+import starts, part way through and at the end, using fixed figures; the
+README's getting-started pictures come from `locate`, `locate-importing` and
+`locate-done`.
 
 ## Accepted sources
 
