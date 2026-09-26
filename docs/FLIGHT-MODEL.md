@@ -356,6 +356,82 @@ The control mapping accounts for current flap lift and low-speed G authority.
 The three player adapters stay distinct. Exact input-replay validation is
 recorded in the [AI baseline](baselines/ai-research.md).
 
+## Telemetry record
+
+`State::trace()` returns a `FlightTrace` (`crates/tore-sim/src/flight/trace.rs`): what
+the last fixed step used and applied, with the inputs that caused each effect.
+It feeds the telemetry panel and replay logs, an opinionated addition requested
+by John on 2026-09-26; the record's shape is an agent choice. It is plain `Copy`
+data with no text. The step fills it with copies of values it computes anyway;
+only the drag breakdown is recomputed from the same inputs for display. Nothing
+in the simulation reads it, and it takes no part in `State` equality, so state
+comparisons and input-replay checks never see it. The golden fingerprints are
+identical with the trace read after every tick.
+
+The record is reset when `step_surface` begins and stamped with the tick when it
+ends. Turbulence, missile-blast kicks and No crashes building rebounds that the
+host applies between steps join the record of the step before them. Units are
+feet, ft/s, lb (mass), lbf (force), G, radians and rad/s; runway wind is in
+knots. Stick arrays are [pitch, roll, yaw]; rate and control-scale arrays are
+[roll, pitch, yaw].
+
+| Field | What it holds |
+| --- | --- |
+| `tick`, `path` | Tick after the step, and which code moved the aircraft: legacy, hybrid, native, the wreck component, or a stop (native fault, fatal system failure) |
+| `autopilot` | Engaged mode, the pilot's stick, the stick the flight model received, and why it let go |
+| `controls` | Stick requested and delivered by the control system, hydraulic pressure, and control-run damage (per-axis authority and bias, linkage, instability) |
+| `throttle_lock` | Jammed throttle position and the lever input it ignored |
+| `adapter.air` | Altitude, airspeed used, surface wind removed, ground speed, wheels on the ground |
+| `adapter.regional` | Left wing, right wing and tail damage, the penalties they produce, and the stick after them |
+| `adapter.runway_wind`, `parked_*` | Crosswind, tailwind and headwind against the weight-class limits, the fade-in with ground speed, the tire-grip fraction; parked attitude and position holds |
+| `adapter.devices` | Gear, flaps, airbrake and hook: switch, position, and whether no hydraulics or a jam blocked them |
+| `adapter.power` | Engine, fuel starvation, afterburner and why it stayed dark, throttle, fuel flow, Unlimited fuel, rated thrust, model thrust lapse, power available, thrust |
+| `adapter.envelope` | Clean and effective stall speed, flaps, top speed, missing 1 G envelope, authority, the envelope rows holding the speed and their G, loading and its divisor, Pull extra G, the low-speed ceiling ramp, final G limits, stick and stick G |
+| `adapter.lift` | Transonic drag percentage, flap lift, wing damage, commanded G, spin lift factor, lift target and lagged lift |
+| `adapter.departure` | Hybrid only: mode and spin direction before and after, spin drive, the spin direction rule (direction, random draw, roll rate and bank as the rule read them, entered), how a spin ended, spin rate and maximum, cleared on the ground |
+| `adapter.scaling` | Stall severity and its control and lift scaling, spin blend and control effectiveness, final control scale |
+| `adapter.rotation` | Roll law (fitted lag or the aircraft's control profile, with limits and authority), pitch targets, model trim, low-speed trim blend, trim used, alignment rate, and yaw from turn, rudder, auxiliary control, ground steering and spin |
+| `adapter.forces` | Weight, carried and payload mass, Ignore weapon weights, drag (total, before damage, before the hybrid cap, the cap, and parts: airframe, fuel and stores, G pull, gear, flaps, airbrake, slip, damage percent), achieved G, support, wheel load, speed before the 6,000 ft/s cap |
+| `contact` | Hybrid ground contact (airborne, surface dropped, lift-off, unsafe touchdown with each reason and the values checked against the landing limits, or rolling with tire grip, scrub, brake or rolling deceleration, brake hold and any graded touchdown); legacy floor crash or bounce |
+| `jolt`, `blast`, `turbulence`, `rebound` | Blast rates rotating the aircraft this step; a blast kick, turbulence or a building rebound applied after it |
+
+`FlightTrace::effects()` lists the effects that changed something this step,
+each with its factor or limit and its causes: autopilot steering and release,
+hydraulic loss, control response, throttle jam, regional damage, runway wind,
+parking holds, held devices, fuel starvation, engine off or reduced power,
+afterburner blocked, Unlimited fuel, Ignore weapon weights, a missing 1 G
+envelope, flap stall speed, low-speed authority, speed outside every envelope
+row, loaded G limits, Pull extra G, the low-speed ceiling, flap lift, wing
+damage, spin lift loss, stall scaling, spin control loss, the spin direction
+rule, spin endings, departures cleared on the ground, low-speed trim, ground
+steering, gear drag off on the wheels, scaled device drag, the drag cap, the
+speed cap, lift-off, surface drops, touchdowns and their grade, unsafe
+touchdowns, legacy floor contact, tire forces, blast kicks, jolts, turbulence and
+building rebounds. Values every step has (G limits, thrust, drag parts) stay in
+the sections. Compare `std::mem::discriminant` values to notice an effect start
+or stop.
+
+What the record cannot explain:
+
+- **Model response curves.** `AircraftModel::response` supplies the trim angle
+  of attack and the thrust lapse. The record shows their values, not why.
+- **Recovered helpers.** The transonic drag percentage, stall severity and its
+  control and lift attenuation, and the landing-limit class are shown as values
+  with their inputs, not their internal arithmetic.
+- **Fitted internals.** Spin torque, damping and airflow stability show only as
+  drive, spin rate and blend; the control profile's rate approach and powered
+  auxiliary control only as authority and rates; unstable controls only as the
+  gap between requested and delivered stick.
+- **Turbulence.** The disturbance applied is recorded; its strength, timing and
+  random draws belong to `turbulence::Turbulence` in the host.
+- **Other paths.** The restricted native adapter records only that it ran, with
+  the control response and throttle lock it received. Wreck motion, ejection and
+  system progression (temperatures, leaks, flameout timers) are outside it.
+- **Measurements are never causes.** Angle of attack, sideslip and Mach come from
+  `telemetry::AirData`, derived after the step; no effect cites them.
+
+The record adds 1,504 bytes to `State` (1,728 to 3,232 bytes on macOS aarch64).
+
 ## Creator ground initialization
 
 The player's whole wing starts on the ground. The player uses the takeoff

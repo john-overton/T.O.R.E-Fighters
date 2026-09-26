@@ -171,6 +171,10 @@ validated configuration covering mass, propulsion, envelopes, recovered departur
 `tore-sim::telemetry` exposes gauge-independent air/ground/altitude channels with
 explicit units and unavailable sensor readings; analog gauge presentation must
 remain downstream of this interface. See [model extension guide](FLIGHT-MODEL.md).
+`State::trace` keeps a write-only `FlightTrace` of the last step's values and
+applied effects with their causes, for the telemetry panel and replay logs;
+nothing in the simulation reads it and it takes no part in state equality
+([telemetry record](FLIGHT-MODEL.md#telemetry-record)).
 
 ## Shared physical input
 

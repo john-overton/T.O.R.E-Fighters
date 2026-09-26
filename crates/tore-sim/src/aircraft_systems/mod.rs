@@ -5,7 +5,7 @@ mod fluids;
 mod fuel;
 mod pilot;
 mod structure;
-pub use controls::Controls;
+pub use controls::{ControlCondition, Controls};
 pub use engine::Engine;
 pub use fluids::Fluids;
 pub use fuel::Fuel;

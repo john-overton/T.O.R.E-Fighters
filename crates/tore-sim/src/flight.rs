@@ -1,8 +1,10 @@
 //! Deterministic 120 Hz free-flight adapter. PT facts are recovered; integration is authored.
+pub mod trace;
 use crate::attitude::{Basis, cross, dot, unit};
 use crate::models::{Conditions, FlightModel};
 use tore_formats::aircraft::Aircraft;
 pub use tore_input::{PilotCommand, PilotInput, Switch};
+pub use trace::FlightTrace;
 pub const DT: f64 = 1.0 / 120.0;
 #[derive(Clone, Debug, PartialEq)]
 pub struct State {
@@ -65,6 +67,8 @@ pub struct State {
     pub cheats: crate::cheats::Cheats,
     /// Fading body [roll, pitch, yaw] rates from a missile blast, rad/s.
     pub jolt: [f64; 3],
+    /// Write-only record of the last step. Read it through [`State::trace`].
+    pub(crate) trace: trace::Slot,
 }
 impl State {
     pub fn new(a: &Aircraft, position: [f64; 3]) -> tore_formats::Result<Self> {
@@ -181,7 +185,14 @@ impl State {
             ticks: 0,
             cheats: Default::default(),
             jolt: [0.; 3],
+            trace: Default::default(),
         }
+    }
+    /// What the last step used and applied, with the inputs that caused each
+    /// effect, for the telemetry panel and replay logs. Nothing in the
+    /// simulation reads it, and it takes no part in `State` equality.
+    pub fn trace(&self) -> &FlightTrace {
+        &self.trace.0
     }
     /// Fitted creator ground start. The caller verifies the chosen runway surface.
     pub fn start_on_runway(
@@ -348,6 +359,29 @@ impl State {
             && self.burner
             && self.throttle > self.model.configuration().equipment.afterburner_throttle
             && !self.crashed
+    }
+    /// Why the afterburner is dark with its switch on, in the order
+    /// [`State::afterburner_active`] checks. For the telemetry record only.
+    fn burner_block(&self) -> Option<trace::BurnerBlock> {
+        use trace::BurnerBlock::*;
+        let c = self.model.configuration();
+        if !self.burner {
+            None
+        } else if !self.engine {
+            Some(EngineOff)
+        } else if self.systems.has(8) {
+            Some(Failed)
+        } else if self.systems.power_available() <= 0. {
+            Some(NoPower)
+        } else if c.propulsion.afterburner_thrust_lbf <= 0. {
+            Some(NotFitted)
+        } else if self.fuel + self.systems.external_lbs() <= 0. {
+            Some(NoFuel)
+        } else if self.throttle <= c.equipment.afterburner_throttle {
+            Some(ThrottleLow)
+        } else {
+            None
+        }
     }
     /// Only F-22 has a reviewed main-bay presentation.
     pub fn bay_available(&self) -> bool {
@@ -549,6 +583,11 @@ impl State {
         for (v, a) in self.velocity.iter_mut().zip(away) {
             *v += a * JOLT_PUSH_FPS * strength;
         }
+        self.trace.0.blast = Some(trace::Blast {
+            kick: kick.map(|add| add * strength),
+            push_fps: JOLT_PUSH_FPS * strength,
+            strength,
+        });
     }
     /// No crashes: bounce off the ground instead of crashing, keeping the
     /// horizontal speed. The nose kicks up if it was pointing down.
@@ -573,6 +612,7 @@ impl State {
         self.yaw += std::f64::consts::PI;
         self.speed = dot(self.velocity, self.velocity).sqrt();
         self.vertical_speed = self.velocity[1];
+        self.trace.0.rebound = true;
     }
     fn apply_jolt(&mut self) {
         if self.jolt == [0.; 3] {
@@ -582,6 +622,7 @@ impl State {
             self.jolt = [0.; 3];
             return;
         }
+        self.trace.0.jolt = Some(self.jolt);
         let [roll, pitch, yaw] = self.jolt;
         let basis = Basis::new(self.yaw, self.pitch, self.bank);
         let rotation = std::array::from_fn(|i| {
@@ -600,6 +641,7 @@ impl State {
         if self.crashed || self.native.is_some() {
             return;
         }
+        self.trace.0.turbulence = Some(d);
         let basis = Basis::new(self.yaw, self.pitch, self.bank);
         let rotation = std::array::from_fn(|i| {
             (basis.up[i] * d.yaw - basis.right[i] * d.pitch - basis.forward[i] * d.roll) * DT
@@ -608,7 +650,18 @@ impl State {
         self.position[1] += d.vertical_fps * DT;
     }
 
+    /// Advance one fixed step over `ground`. The telemetry record is reset
+    /// first and stamped with the tick afterwards.
     pub fn step_surface(
+        &mut self,
+        input: &PilotInput,
+        ground: impl Fn(f64, f64) -> crate::research::Surface,
+    ) {
+        self.trace.0 = FlightTrace::default();
+        self.step_once(input, ground);
+        self.trace.0.tick = self.ticks;
+    }
+    fn step_once(
         &mut self,
         input: &PilotInput,
         ground: impl Fn(f64, f64) -> crate::research::Surface,
@@ -620,6 +673,7 @@ impl State {
         }
         self.step_escape(|x, z| ground(x, z).height);
         if self.crashed {
+            self.trace.0.path = trace::Path::Wreck;
             self.autopilot.disengage();
             self.finish_ground_crash(ground(self.position[0], self.position[2]).height);
             if self.wreck_gone() {
@@ -687,28 +741,62 @@ impl State {
                 true
             }
         });
-        if !self.systems.autopilot_available()
-            || self.damage_regions[3..].iter().any(|v| *v > 0.)
-            || (self.systems.has(33) && self.autopilot.mode() == crate::autopilot::Mode::Waypoint)
-        {
+        use crate::autopilot::Mode;
+        let engaged = self.autopilot.mode();
+        let release = if !self.systems.autopilot_available() {
+            Some(trace::Release::SystemsDamage)
+        } else if self.damage_regions[3..].iter().any(|v| *v > 0.) {
+            Some(trace::Release::AirframeDamage)
+        } else if self.systems.has(33) && self.autopilot.mode() == Mode::Waypoint {
+            Some(trace::Release::NavigationFailed)
+        } else {
+            None
+        };
+        if release.is_some() {
             self.autopilot.disengage();
         }
+        let pilot = [input.pitch, input.roll, input.yaw];
+        let height = ground(self.position[0], self.position[2]).height;
         let mut autopilot = std::mem::take(&mut self.autopilot);
-        autopilot.apply(
-            self,
-            ground(self.position[0], self.position[2]).height,
-            &mut input,
-        );
+        autopilot.apply(self, height, &mut input);
         self.autopilot = autopilot;
+        if engaged != Mode::Off {
+            let clearance = self.model.configuration().equipment.ground_clearance_ft;
+            // `Autopilot::apply` lets go on the ground, when crashed, or when
+            // the pilot moves the stick.
+            let released = release.or_else(|| {
+                (self.autopilot.mode() == Mode::Off).then_some(
+                    if self.crashed || self.position[1] <= height + clearance {
+                        trace::Release::Ground
+                    } else {
+                        trace::Release::PilotOverride
+                    },
+                )
+            });
+            self.trace.0.autopilot = Some(trace::AutopilotTrace {
+                mode: engaged,
+                pilot,
+                commanded: [input.pitch, input.roll, input.yaw],
+                released,
+            });
+        }
         self.step_controlled(&input, &ground);
         self.apply_jolt();
         self.finish_ground_crash(ground(self.position[0], self.position[2]).height);
+        let steering = self.autopilot.mode() != Mode::Off;
         if self.crashed
             || self.position[1]
                 <= ground(self.position[0], self.position[2]).height
                     + self.model.configuration().equipment.ground_clearance_ft
         {
             self.autopilot.disengage();
+        }
+        if steering
+            && self.autopilot.mode() == Mode::Off
+            && let Some(record) = &mut self.trace.0.autopilot
+            && record.released.is_none()
+        {
+            record.released = Some(trace::Release::Ground);
         }
     }
 
@@ -717,30 +805,65 @@ impl State {
         input: &PilotInput,
         ground: impl Fn(f64, f64) -> crate::research::Surface,
     ) {
+        let stopped = |crashed: bool| {
+            trace::Path::Stopped(if crashed {
+                trace::Stop::Crashed
+            } else {
+                trace::Stop::NativeFault
+            })
+        };
         if self.crashed || self.native_fault().is_some() {
+            self.trace.0.path = stopped(self.crashed);
             return;
         }
         let mut input = input.bounded();
         self.advance_systems(ground(self.position[0], self.position[2]).height);
+        let requested = [input.pitch, input.roll, input.yaw];
         [input.pitch, input.roll, input.yaw] = self.systems.controls(
             [input.pitch, input.roll, input.yaw],
             [self.elevator, self.aileron, self.rudder],
             self.ticks,
         );
+        self.trace.0.controls = Some(trace::ControlTrace {
+            requested,
+            output: [input.pitch, input.roll, input.yaw],
+            hydraulic: self.systems.fluids.hydraulic,
+            condition: self.systems.controls.condition(),
+        });
         let regional = crate::aircraft_systems::regional_effects(self.damage_regions);
         let aero = regional.commands([input.pitch, input.roll, input.yaw]);
+        if let Some(held_at) = self.systems.controls.throttle_lock {
+            self.trace.0.throttle_lock = Some(trace::ThrottleLock {
+                held_at,
+                ignored_rate: input.throttle_rate,
+                ignored_setting: input.throttle.is_some()
+                    || input.commands.iter().any(|command| {
+                        matches!(
+                            command,
+                            PilotCommand::Throttle(_) | PilotCommand::AdjustThrottle(_)
+                        )
+                    }),
+            });
+        }
         if self.systems.controls.throttle_lock.is_some() {
             input.throttle_rate = 0.;
         }
         let input = &input;
         if self.native.is_some() {
             if self.crashed || self.native_fault().is_some() {
+                self.trace.0.path = stopped(self.crashed);
                 return;
             }
             let mut candidate = self.clone();
             match crate::native::step(&mut candidate, input, ground) {
-                Ok(()) => *self = candidate,
-                Err(e) => self.native.as_mut().unwrap().fault = Some(e.to_string()),
+                Ok(()) => {
+                    *self = candidate;
+                    self.trace.0.path = trace::Path::Native;
+                }
+                Err(e) => {
+                    self.native.as_mut().unwrap().fault = Some(e.to_string());
+                    self.trace.0.path = stopped(false);
+                }
             }
             return;
         }
@@ -754,8 +877,26 @@ impl State {
         let model = self.model.clone();
         let c = model.configuration();
         if self.crashed {
+            self.trace.0.path = stopped(true);
             return;
         }
+        self.trace.0.path = if self.research.is_some() {
+            trace::Path::Hybrid
+        } else {
+            trace::Path::Legacy
+        };
+        let mut t = trace::AdapterTrace {
+            regional: trace::RegionalTrace {
+                damage: [
+                    self.damage_regions[3],
+                    self.damage_regions[4],
+                    self.damage_regions[5],
+                ],
+                effects: regional,
+                commands: aero,
+            },
+            ..Default::default()
+        };
         // Fitted tire grip suppresses wind coupling at low ground speed. Once
         // airborne, wind remains pure advection and does not change airspeed.
         let initial_surface = ground(self.position[0], self.position[2]);
@@ -774,10 +915,17 @@ impl State {
                 self.yaw,
             )
             .expect("validated aircraft mass and surface wind");
-            assessment
+            let ground_motion = crate::runway_wind::ground_motion_fraction(horizontal_speed);
+            let fraction = assessment
                 .crosswind_fraction
                 .max(assessment.tailwind_fraction)
-                * crate::runway_wind::ground_motion_fraction(horizontal_speed)
+                * ground_motion;
+            t.runway_wind = Some(trace::RunwayWind {
+                assessment,
+                ground_motion,
+                fraction,
+            });
+            fraction
         } else {
             0.
         };
@@ -788,6 +936,14 @@ impl State {
         if self.research.is_some() {
             self.speed = dot(self.velocity, self.velocity).sqrt();
         }
+        t.air = trace::AirTrace {
+            altitude_ft: self.position[1],
+            airspeed_fps: self.speed,
+            wind_fps: air_wind,
+            ground_speed_fps: horizontal_speed,
+            on_wheels: wheel_contact,
+        };
+        t.parked_attitude = static_attitude_hold;
         self.ticks += 1;
         self.throttle = (self.throttle
             + input.throttle_rate * DT * c.equipment.throttle_rate_per_second)
@@ -816,13 +972,33 @@ impl State {
             *v = (*v + (if on { 1. } else { -1. }) * DT / c.equipment.deployment_seconds)
                 .clamp(0., 1.);
         }
+        let hydraulics = self.systems.fluids.hydraulic > 0.;
+        let device = |commanded: bool, position: f64, jammed: bool| trace::Device {
+            commanded,
+            position,
+            blocked: if !hydraulics {
+                Some(trace::Block::NoHydraulics)
+            } else if jammed {
+                Some(trace::Block::Jammed)
+            } else {
+                None
+            },
+        };
+        t.devices = trace::Devices {
+            gear: device(self.gear_down, self.gear, self.systems.has(16)),
+            flaps: device(self.flaps_down, self.flaps, self.systems.has(17)),
+            airbrake: device(self.brake_out, self.brake, self.systems.has(18)),
+            hook: device(self.hook_down, self.hook, false),
+        };
         let bay_target = f64::from(self.bay_available() && (self.bay_open || self.bay_auto_open));
         self.bay += (bay_target - self.bay).clamp(-DT, DT);
-        if self.fuel + self.systems.external_lbs() <= 0. {
+        let fuel_starved = self.fuel + self.systems.external_lbs() <= 0.;
+        if fuel_starved {
             self.engine = false;
             self.burner = false;
         }
         let ab = self.afterburner_active() && c.propulsion.afterburner_thrust_lbf > 0.;
+        let burner_blocked = if ab { None } else { self.burner_block() };
         let target = f64::from(ab);
         self.exhaust = (self.exhaust
             + (target - self.exhaust).clamp(
@@ -844,7 +1020,8 @@ impl State {
             self.consume_fuel(rate * DT);
         }
         let env = c.aerodynamics.envelopes.iter().find(|e| e.g == 1).unwrap();
-        let (clean_stall, vmax) = env.speeds(self.position[1]).unwrap_or((900., 1000.));
+        let env_speeds = env.speeds(self.position[1]);
+        let (clean_stall, vmax) = env_speeds.unwrap_or((900., 1000.));
         let stall = if self.research.is_some() {
             clean_stall * (1. - 0.25 * self.flaps)
         } else {
@@ -852,6 +1029,7 @@ impl State {
         };
         let authority = (self.speed / stall.max(1.)).powi(2).clamp(0., 1.);
         let (mut lo, mut hi) = (-1., 1.);
+        let mut rows = 0;
         for e in &c.aerodynamics.envelopes {
             if let Some((low, high)) = e.speeds(self.position[1])
                 && self.speed >= low
@@ -859,30 +1037,53 @@ impl State {
             {
                 lo = f64::min(lo, e.g as f64);
                 hi = f64::max(hi, e.g as f64);
+                rows += 1;
             }
         }
+        let envelope_g = [lo, hi];
         let loading = (self.fuel + self.carried_lbs()) / c.mass.empty_lbs;
         let load_factor = 1. + loading * c.aerodynamics.loaded_elevator_percent / 100.;
         hi /= load_factor;
         lo /= load_factor;
+        let loaded_positive_g = hi;
         // Pull extra G: 9 G whatever the load. Near stall the low-speed ceiling
         // still ramps up to it.
         let extra_g = self.cheats.extra_g;
         if extra_g {
             hi = hi.max(crate::cheats::EXTRA_G);
         }
-        if self.research.is_some()
-            && let Some(continuous) =
-                low_speed_positive_g_ceiling(c, self.position[1], self.speed, stall, extra_g)
-        {
+        let ceiling = if self.research.is_some() {
+            low_speed_ceiling(c, self.position[1], self.speed, stall, extra_g)
+        } else {
+            None
+        };
+        if let Some(ceiling) = ceiling {
             hi = if extra_g {
-                continuous
+                ceiling.limit_g
             } else {
-                continuous / load_factor
+                ceiling.limit_g / load_factor
             };
         }
         let mut command =
             (1. + aero[0] * if aero[0] > 0. { hi - 1. } else { 1. - lo }).clamp(lo, hi) * authority;
+        t.envelope = trace::EnvelopeTrace {
+            clean_stall_fps: clean_stall,
+            stall_fps: stall,
+            flaps: self.flaps,
+            top_speed_fps: vmax,
+            no_1g_envelope: env_speeds.is_none(),
+            authority,
+            rows,
+            envelope_g,
+            loading,
+            load_divisor: load_factor,
+            loaded_positive_g,
+            extra_g,
+            low_speed_ceiling: ceiling,
+            limits_g: [lo, hi],
+            stick: aero[0],
+            stick_g: command,
+        };
         let drag_percent = tore_formats::flight_model::drag_percent(
             (self.speed * 256.) as i32,
             (self.position[1] * 256.) as i32,
@@ -890,6 +1091,7 @@ impl State {
         )
         .unwrap_or_else(|_| ((self.speed / vmax.max(1.)) * 100.).round() as i32)
         .clamp(0, 100) as f64;
+        let mut flap = (1., 0.);
         if self.research.is_some() {
             let scaled_flap_lift = drag_percent * c.aerodynamics.flaps_lift_f8 / 100.;
             let flap_lift_f8 = if wheel_contact {
@@ -897,15 +1099,19 @@ impl State {
             } else {
                 c.aerodynamics.flaps_lift_f8 * (1. - self.gear) + scaled_flap_lift * self.gear
             };
-            command *= 1. + self.flaps * flap_lift_f8 / 256.;
+            let factor = 1. + self.flaps * flap_lift_f8 / 256.;
+            command *= factor;
+            flap = (factor, flap_lift_f8);
         }
-        if self.systems.has(25) {
+        let wing_damaged = self.systems.has(25);
+        if wing_damaged {
             command *= 0.5;
         }
         command *= regional.lift;
         let requested_g = command;
+        let mut spin_factor = 1.;
         if let Some(r) = &mut self.research {
-            r.advance(
+            t.departure = Some(r.advance(
                 c,
                 self.speed,
                 stall,
@@ -919,8 +1125,9 @@ impl State {
                     unit(self.velocity),
                 ),
                 !self.cheats.no_spins,
-            );
-            command *= 1. - 0.85 * r.spin_blend(c);
+            ));
+            spin_factor = 1. - 0.85 * r.spin_blend(c);
+            command *= spin_factor;
         }
         let severity = self.research.as_ref().map_or(0, |r| r.severity_f8);
         let stalled = self.research.as_ref().is_some_and(|r| r.stall_active);
@@ -941,9 +1148,29 @@ impl State {
                 ),
             )
         });
+        let stall_controls = control_scale;
         control_scale[0] *= spin_controls;
         control_scale[2] *= spin_controls;
+        t.scaling = trace::ScalingTrace {
+            stalled,
+            severity_f8: severity,
+            stall_controls,
+            stall_lift: lift_scale,
+            spin_blend: spin_fraction,
+            spin_controls,
+            controls: control_scale,
+        };
         self.lift_g += (command - self.lift_g) * (DT * 4.).min(1.);
+        t.lift = trace::LiftTrace {
+            drag_percent,
+            flap_factor: flap.0,
+            flap_lift_f8: flap.1,
+            wing_damaged,
+            commanded_g: requested_g,
+            spin_factor,
+            target_g: command,
+            lagged_g: self.lift_g,
+        };
         let basis = Basis::new(self.yaw, self.pitch, self.bank);
         let roll_limit = if self.research.is_some() {
             c.aerodynamics.roll_limit_rad_per_second.clamp(0.1, 6.)
@@ -955,6 +1182,8 @@ impl State {
         // Aircraft-owned source controls for the new ports. Existing adapters remain selected as before.
         if let Some(profile) = c.controls {
             use crate::models::handling::{approach, auxiliary_authority};
+            let roll_authority =
+                (self.speed / (2. * stall.max(1.))).clamp(0., 1.) * control_scale[0];
             self.roll_rate = approach(
                 self.roll_rate,
                 aero[1],
@@ -963,7 +1192,7 @@ impl State {
                 } else {
                     profile.roll
                 },
-                (self.speed / (2. * stall.max(1.))).clamp(0., 1.) * control_scale[0],
+                roll_authority,
                 DT,
             );
             let on_ground = self.position[1]
@@ -984,14 +1213,27 @@ impl State {
                     )
                 };
             }
+            t.rotation.roll = trace::RollLaw::Profile {
+                authority: roll_authority,
+                auxiliary: scale,
+                powered,
+                on_ground,
+            };
         } else {
             self.roll_rate += (roll_command - self.roll_rate) * (DT / tuning.roll_response_seconds);
+            t.rotation.roll = trace::RollLaw::Lag {
+                limit: roll_limit,
+                command: roll_command,
+            };
         }
         let normal_pitch =
             (requested_g - basis.up[1]) * control_scale[1] * 32.174 / self.speed.max(60.);
         let spin_pitch = 40_f64.to_radians() * aero[0] * spin_controls * authority;
         let pitch_command = normal_pitch * (1. - spin_fraction) + spin_pitch * spin_fraction;
         self.pitch_rate += (pitch_command - self.pitch_rate) * (DT / tuning.pitch_response_seconds);
+        t.rotation.normal_pitch = normal_pitch;
+        t.rotation.spin_pitch = spin_pitch;
+        t.rotation.pitch_command = pitch_command;
         // Authored trim target, not decoded gpullAOA units. Preserve a positive
         // nose/flight-path separation under load rather than aligning to zero AoA.
         let direction = unit(self.velocity);
@@ -1008,6 +1250,10 @@ impl State {
             let low_speed = (tuning.trim_degrees + 8. * self.elevator)
                 .clamp(0., 10.)
                 .to_radians();
+            t.rotation.low_speed_trim = Some(trace::LowSpeedTrim {
+                trim_rad: low_speed,
+                blend,
+            });
             low_speed + (response.trim_aoa_rad - low_speed) * blend
         } else {
             response.trim_aoa_rad
@@ -1018,27 +1264,34 @@ impl State {
         // The gravity component across aircraft-right contributes to body yaw
         // as the flight path turns. Pitch alone misses this during a banked pull.
         let turn_yaw = -basis.right[1] * 32.174 / self.speed.max(60.);
+        let rudder_yaw = (self.rudder * regional.authority[2] + regional.yaw_bias)
+            * control_scale[2]
+            * tuning.rudder_rate
+            * authority;
         let mut rotation = std::array::from_fn(|i| {
             DT * (-basis.right[i] * (self.pitch_rate + self.auxiliary_rates[1])
                 - basis.forward[i] * (self.roll_rate + self.auxiliary_rates[0])
-                + basis.up[i]
-                    * (turn_yaw
-                        + (self.rudder * regional.authority[2] + regional.yaw_bias)
-                            * control_scale[2]
-                            * tuning.rudder_rate
-                            * authority
-                        + self.auxiliary_rates[2])
+                + basis.up[i] * (turn_yaw + rudder_yaw + self.auxiliary_rates[2])
                 + alignment[i] * tuning.alignment_rate * authority)
         });
+        t.rotation.model_trim_rad = response.trim_aoa_rad;
+        t.rotation.trim_rad = alpha;
+        t.rotation.alignment = dot(alignment, alignment).sqrt() * tuning.alignment_rate * authority;
+        t.rotation.turn_yaw = turn_yaw;
+        t.rotation.rudder_yaw = rudder_yaw;
+        t.rotation.auxiliary_yaw = self.auxiliary_rates[2];
         if let Some(r) = &self.research {
             if r.on_ground {
                 for (i, v) in rotation.iter_mut().enumerate() {
                     *v += basis.up[i] * self.rudder * 0.3 * (self.speed / 40.).clamp(0., 1.) * DT;
                 }
+                t.rotation.ground_steering_yaw =
+                    self.rudder * 0.3 * (self.speed / 40.).clamp(0., 1.);
             }
             for (i, v) in rotation.iter_mut().enumerate() {
                 *v += DT * basis.up[i] * r.spin_rate;
             }
+            t.rotation.spin_yaw = r.spin_rate;
         }
         if static_attitude_hold {
             rotation = [0.; 3];
@@ -1067,7 +1320,7 @@ impl State {
             .afterburner_thrust_lbf
             .max(c.propulsion.military_thrust_lbf);
         let lapse = response.thrust_lapse;
-        let thrust = if self.engine {
+        let rated_thrust = if self.engine {
             if ab {
                 max_thrust
             } else {
@@ -1075,9 +1328,24 @@ impl State {
             }
         } else {
             0.
-        } * lapse
-            * self.systems.power_available();
-        let weight = c.mass.empty_lbs + self.fuel + self.carried_lbs();
+        };
+        let thrust = rated_thrust * lapse * self.systems.power_available();
+        t.power = trace::PowerTrace {
+            engine: self.engine,
+            fuel_starved,
+            afterburner: ab,
+            burner_blocked,
+            throttle: self.throttle,
+            afterburner_throttle: c.equipment.afterburner_throttle,
+            fuel_flow_lbs_per_second: if self.engine { rate } else { 0. },
+            unlimited_fuel: self.cheats.unlimited_fuel,
+            rated_thrust_lbf: rated_thrust,
+            lapse,
+            power_available: self.systems.power_available(),
+            thrust_lbf: thrust,
+        };
+        let carried = self.carried_lbs();
+        let weight = c.mass.empty_lbs + self.fuel + carried;
         // Drag normalized against the source 1G upper envelope. This is not the native force law.
         // Fitted symmetric slip loss, based on air-relative motion rather than
         // rudder command or the native display-slip offset. Aircraft-owned tuning.
@@ -1101,11 +1369,40 @@ impl State {
                     + c.native.drag.flaps as f64 * self.flaps * device_drag_fraction
                     + c.native.drag.airbrake as f64 * self.brake * device_drag_fraction)
                 / 256.;
+        let undamaged_drag = drag;
         let drag = drag * (1. + regional.drag_percent / 100.);
-        let drag = if self.research.is_some() {
-            drag.min(weight * self.speed / 32.174 / DT)
+        let uncapped_drag = drag;
+        let drag_cap = if self.research.is_some() {
+            Some(weight * self.speed / 32.174 / DT)
         } else {
-            drag
+            None
+        };
+        let drag = drag_cap.map_or(drag, |cap| drag.min(cap));
+        let gear_on_wheels = self.research.is_some() && wheel_contact;
+        // Display breakdown of the drag above, from the same inputs.
+        let airframe_drag = max_thrust * lapse * (self.speed / vmax.max(100.)).powi(2);
+        let drag_trace = trace::DragTrace {
+            total_lbf: drag,
+            undamaged_lbf: undamaged_drag,
+            uncapped_lbf: uncapped_drag,
+            cap_lbf: drag_cap,
+            airframe_lbf: airframe_drag,
+            load_lbf: airframe_drag * loading * c.aerodynamics.loaded_drag_percent / 100.,
+            pull_lbf: weight * c.aerodynamics.g_pull_drag_f8 * (self.lift_g.abs() - 1.).max(0.)
+                / 256.,
+            gear_lbf: weight * c.native.drag.gear as f64 * self.gear * f64::from(!gear_on_wheels)
+                / 256.,
+            flaps_lbf: weight * c.native.drag.flaps as f64 * self.flaps * device_drag_fraction
+                / 256.,
+            airbrake_lbf: weight
+                * c.native.drag.airbrake as f64
+                * self.brake
+                * device_drag_fraction
+                / 256.,
+            slip_lbf: slip_drag,
+            damage_percent: regional.drag_percent,
+            gear_on_wheels,
+            device_fraction: device_drag_fraction,
         };
         let direction = unit(self.velocity);
         let along = dot(basis.up, direction);
@@ -1122,6 +1419,18 @@ impl State {
             && self.throttle <= 0.
             && wheel_load_fraction > 0.02;
         self.maneuver.achieved_g = self.g;
+        t.parked_position = static_hold;
+        t.forces = trace::ForceTrace {
+            weight_lbs: weight,
+            carried_lbs: carried,
+            payload_lbs: self.payload_lbs,
+            ignore_weapon_weights: self.cheats.ignore_weapon_weights,
+            drag: drag_trace,
+            achieved_g: self.g,
+            support_g,
+            wheel_load: wheel_load_fraction,
+            speed_capped_from_fps: None,
+        };
         for i in 0..3 {
             self.velocity[i] += (basis.forward[i] * thrust / weight * 32.174
                 - direction[i] * drag / weight * 32.174
@@ -1131,9 +1440,11 @@ impl State {
         }
         self.speed = dot(self.velocity, self.velocity).sqrt();
         if self.speed > 6000. {
+            t.forces.speed_capped_from_fps = Some(self.speed);
             self.velocity = self.velocity.map(|v| v * 6000. / self.speed);
             self.speed = 6000.;
         }
+        self.trace.0.adapter = Some(t);
         for (v, w) in self.velocity.iter_mut().zip(air_wind) {
             *v += w;
         }
@@ -1169,8 +1480,10 @@ impl State {
         }
         let floor = surface.height + c.equipment.ground_clearance_ft;
         if self.position[1] <= floor && self.cheats.no_crashes {
+            self.trace.0.contact = Some(trace::Contact::LegacyFloor { bounced: true });
             self.ricochet(floor);
         } else if self.position[1] <= floor {
+            self.trace.0.contact = Some(trace::Contact::LegacyFloor { bounced: false });
             self.position[1] = floor;
             self.crashed = true;
             self.speed = 0.;
@@ -1199,6 +1512,19 @@ pub(crate) fn low_speed_positive_g_ceiling(
     effective_stall_fps: f64,
     extra_g: bool,
 ) -> Option<f64> {
+    low_speed_ceiling(c, altitude_ft, speed_fps, effective_stall_fps, extra_g)
+        .map(|ceiling| ceiling.limit_g)
+}
+
+/// The hybrid positive-G ramp from 1 G at the effective stall speed to the
+/// next envelope row above 1 G, with the values that place the speed on it.
+fn low_speed_ceiling(
+    c: &crate::models::config::Configuration,
+    altitude_ft: f64,
+    speed_fps: f64,
+    effective_stall_fps: f64,
+    extra_g: bool,
+) -> Option<trace::LowSpeedCeiling> {
     let next = c
         .aerodynamics
         .envelopes
@@ -1221,7 +1547,13 @@ pub(crate) fn low_speed_positive_g_ceiling(
     } else {
         f64::from(next.1)
     };
-    Some(1. + fraction * (top - 1.))
+    Some(trace::LowSpeedCeiling {
+        limit_g: 1. + fraction * (top - 1.),
+        from_fps: effective_stall_fps,
+        to_fps: next.0,
+        to_g: top,
+        fraction,
+    })
 }
 
 fn low_speed_alignment_fraction(

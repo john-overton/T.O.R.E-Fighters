@@ -2,7 +2,13 @@
 //! fitted continuous force coupling. This is not a native integer-tick emulator.
 use crate::{
     attitude::{Basis, dot},
-    flight::{DT, State},
+    flight::{
+        DT, State,
+        trace::{
+            Contact, DepartureTrace, Landing, Rolling, SpinCheck, SpinExit, Touchdown,
+            UnsafeTouchdown,
+        },
+    },
 };
 use tore_formats::{
     Result,
@@ -102,14 +108,24 @@ impl Landings {
     fn airborne(&mut self) {
         self.airborne_ticks = self.airborne_ticks.saturating_add(1);
     }
-    fn touchdown(&mut self, limits: LandingLimits, descent_fps: f64, bank_degrees: f64) {
+    /// Grade a touchdown; returns the score added, if it counted as a landing.
+    fn touchdown(
+        &mut self,
+        limits: LandingLimits,
+        descent_fps: f64,
+        bank_degrees: f64,
+    ) -> Option<u32> {
+        let mut graded = None;
         if self.airborne_ticks >= Self::FLIGHT_TICKS {
             let gentle = descent_fps <= f64::from(limits.descent_fps) / 2.
                 && bank_degrees.abs() <= f64::from(limits.roll_degrees) / 2.;
+            let score = if gentle { 100 } else { 50 };
             self.count += 1;
-            self.score += if gentle { 100 } else { 50 };
+            self.score += score;
+            graded = Some(score);
         }
         self.airborne_ticks = 0;
+        graded
     }
 }
 impl Research {
@@ -128,6 +144,7 @@ impl Research {
         })
     }
     /// Source stall warning rules with fitted soft entry and spin dynamics.
+    /// Returns a record of the update for the flight telemetry trace.
     #[allow(clippy::too_many_arguments)] // Explicit independent native inputs.
     pub fn advance(
         &mut self,
@@ -141,7 +158,13 @@ impl Research {
         roll_rate: f64,
         airflow_forward: f64,
         spins_allowed: bool,
-    ) {
+    ) -> DepartureTrace {
+        let mut trace = DepartureTrace {
+            mode_before: self.departure.mode,
+            spinning_before: self.spinning,
+            max_spin_rate: Self::maximum_spin_rate(c),
+            ..Default::default()
+        };
         let ticks = self.clock.advance(false);
         self.elapsed = self.elapsed.wrapping_add(ticks as i32);
         self.severity_f8 = 0;
@@ -150,10 +173,12 @@ impl Research {
             self.departure = StallState::default();
             self.spinning = 0;
             self.spin_rate = 0.;
-            return;
+            trace.on_ground = true;
+            return self.finish(trace);
         }
         // Warning eligibility/direction are source-derived; torque onset is fitted.
         let drive = departure_drive(speed, stall, pitch, c.native.departure.spin_entry);
+        trace.drive = drive;
         if !spins_allowed && self.spinning != 0 {
             // No spins turned on mid-spin: the rotation damps out as a stall.
             self.spinning = 0;
@@ -161,6 +186,7 @@ impl Research {
                 mode: DepartureMode::Stalled,
                 elapsed: 0,
             };
+            trace.spin_exit = Some(SpinExit::SpinsDisabled);
         }
         if spins_allowed
             && self.spinning == 0
@@ -172,12 +198,21 @@ impl Research {
         {
             let rate = (roll_rate.to_degrees() * 256.) as i32;
             let bank = (bank.to_degrees() * 65536. / 360.) as i16;
-            let random = rate == 0 && bank == 0 && self.rng.chance(50).expect("bounded generator");
+            let coin_flip = rate == 0 && bank == 0;
+            let random = coin_flip && self.rng.chance(50).expect("bounded generator");
             let direction = departure::spin_direction(rate, bank, random);
-            if rudder * f64::from(direction) > 0. {
+            let entered = rudder * f64::from(direction) > 0.;
+            if entered {
                 self.spinning = direction;
                 self.departure.mode = DepartureMode::Spinning;
             }
+            trace.spin_check = Some(SpinCheck {
+                direction,
+                coin: coin_flip.then_some(random),
+                roll_rate_units: rate,
+                bank_units: bank,
+                entered,
+            });
         }
         let q = (speed / stall.max(1.)).powi(2).clamp(0., 4.);
         let stability = forward_stability(speed, stall, airflow_forward);
@@ -208,6 +243,7 @@ impl Research {
                     },
                     elapsed: 0,
                 };
+                trace.spin_exit = Some(SpinExit::Recovered);
             }
         } else {
             self.spin_rate *= (-damping * DT).exp();
@@ -234,6 +270,16 @@ impl Research {
                     ticks,
                 )
                 .expect("positive fixed time");
+        }
+        self.finish(trace)
+    }
+    /// Complete a departure record with the state after the update.
+    fn finish(&self, trace: DepartureTrace) -> DepartureTrace {
+        DepartureTrace {
+            mode: self.departure.mode,
+            spinning: self.spinning,
+            spin_rate: self.spin_rate,
+            ..trace
         }
     }
     pub fn maximum_spin_rate(c: &crate::models::config::Configuration) -> f64 {
@@ -267,16 +313,19 @@ impl Research {
         // clearance is only a geometry tolerance, not the liftoff criterion.
         if self.on_ground && s.position[1] > floor + 0.05 {
             self.on_ground = false;
+            s.trace.0.contact = Some(Contact::SurfaceDropped);
             return;
         }
         // Fitted wheel-unloading hysteresis. Once released, contact state stays
         // authoritative until the aircraft descends back to the support plane.
         if self.on_ground && s.position[1] >= floor && wheel_load <= 0.02 && s.velocity[1] > 0.1 {
             self.on_ground = false;
+            s.trace.0.contact = Some(Contact::LiftOff { wheel_load });
             return;
         }
         if !self.on_ground && s.position[1] > floor {
             self.landings.airborne();
+            s.trace.0.contact = Some(Contact::Airborne);
             return;
         }
         let basis = Basis::new(s.yaw, s.pitch, s.bank);
@@ -290,6 +339,26 @@ impl Research {
             (side * 256.) as i32,
             s.velocity[1] as i16,
         );
+        let touchdown = Touchdown {
+            bank_deg: s.bank.to_degrees(),
+            pitch_deg: s.pitch.to_degrees(),
+            forward_fps: forward,
+            side_fps: side,
+            vertical_fps: s.velocity[1],
+            limits: c.native.landing,
+        };
+        let gear = s.gear;
+        let unsafe_touchdown = |bounced: bool| {
+            Contact::Unsafe(UnsafeTouchdown {
+                bounced,
+                water: surface.water,
+                not_landable: !surface.landable,
+                gear_up: gear < 0.99,
+                gear,
+                severity,
+                touchdown,
+            })
+        };
         if !self.on_ground
             && (surface.water
                 || !surface.landable
@@ -297,6 +366,7 @@ impl Research {
                 || severity != LandingSeverity::WithinLimits)
             && s.cheats.no_crashes
         {
+            s.trace.0.contact = Some(unsafe_touchdown(true));
             s.ricochet(floor);
             return;
         } else if !self.on_ground
@@ -305,16 +375,21 @@ impl Research {
                 || s.gear < 0.99
                 || severity != LandingSeverity::WithinLimits)
         {
+            s.trace.0.contact = Some(unsafe_touchdown(false));
             s.crashed = true;
             s.engine = false;
             s.burner = false;
             s.velocity = [0.; 3];
             s.speed = 0.;
         } else {
-            if !self.on_ground {
-                self.landings
-                    .touchdown(c.native.landing, -s.velocity[1], s.bank.to_degrees());
-            }
+            let landing = if !self.on_ground {
+                let score =
+                    self.landings
+                        .touchdown(c.native.landing, -s.velocity[1], s.bank.to_degrees());
+                Some(Landing { touchdown, score })
+            } else {
+                None
+            };
             self.on_ground = true;
             s.position[1] = floor;
             s.velocity[1] = s.velocity[1].max(0.);
@@ -338,7 +413,8 @@ impl Research {
                 // supported movement using the post-tire velocity.
                 s.position[i] = previous_position[i] + s.velocity[i] * DT;
             }
-            if s.brake_out && v <= decel * DT {
+            let brake_hold = s.brake_out && v <= decel * DT;
+            if brake_hold {
                 // Static wheel brakes hold a parked aircraft against forces
                 // accumulated during this tick.
                 for i in [0, 2] {
@@ -348,11 +424,22 @@ impl Research {
             }
             s.bank = 0.;
             s.pitch = s.pitch.clamp(0., 20f64.to_radians());
-            if s.elevator <= 0. {
+            let nose_settling = s.elevator <= 0.;
+            if nose_settling {
                 s.pitch *= 1. - (2. * DT);
             }
             let air = std::array::from_fn(|i| s.velocity[i] - surface.wind[i]);
             s.speed = dot(air, air).sqrt();
+            s.trace.0.contact = Some(Contact::Rolling(Rolling {
+                touchdown: landing,
+                wind_grip,
+                scrub,
+                brakes: s.brake_out,
+                deceleration_fps2: decel,
+                brake_hold,
+                ground_speed_fps: v,
+                nose_settling,
+            }));
         }
         s.position[1] = s.position[1].max(floor);
         s.vertical_speed = s.velocity[1];
@@ -715,6 +802,127 @@ mod tests {
                 fast.surface_effectiveness(&c, forward) < slow.surface_effectiveness(&c, forward)
             );
         }
+    }
+
+    #[test]
+    fn the_departure_record_names_the_spin_rule_and_how_spins_end() {
+        let mut c = config();
+        c.native.departure.spin_yaw = [120, 180];
+        c.tuning.rudder_rate = 0.12;
+        // Left bank picks a right spin; right rudder enters it.
+        let mut r = Research::new(1).unwrap();
+        r.departure.mode = DepartureMode::Warning;
+        let t = r.advance(&c, 190., 200., 1., 1., 0., -0.1, 0., 1., true);
+        let check = t.spin_check.unwrap();
+        assert_eq!(
+            (check.direction, check.coin, check.entered),
+            (1, None, true)
+        );
+        assert!(check.bank_units < 0 && check.roll_rate_units == 0);
+        assert_eq!(
+            (t.mode_before, t.mode, t.spinning_before, t.spinning),
+            (DepartureMode::Warning, DepartureMode::Spinning, 0, 1)
+        );
+        assert!(t.drive > 0. && t.spin_rate == r.spin_rate);
+        assert_eq!(t.max_spin_rate, Research::maximum_spin_rate(&c));
+        // Wings level with no roll: a random draw picks the direction, and only
+        // rudder the same way starts the spin.
+        let mut draws = Vec::new();
+        for seed in 1..40 {
+            let mut r = Research::new(seed).unwrap();
+            r.departure.mode = DepartureMode::Stalled;
+            let check = r
+                .advance(&c, 190., 200., 1., 1., 0., 0., 0., 1., true)
+                .spin_check
+                .unwrap();
+            let draw = check.coin.expect("a random direction");
+            assert_eq!(check.direction, if draw { -1 } else { 1 });
+            assert_eq!(check.entered, check.direction == 1);
+            assert_eq!(r.spinning != 0, check.entered);
+            draws.push(draw);
+        }
+        assert!(draws.contains(&true) && draws.contains(&false));
+        // No spins switched on mid-spin ends it as a stall.
+        let mut r = spinning(1.);
+        let t = r.advance(&c, 180., 200., 1., 1., 0., 0., 0., 1., false);
+        assert_eq!(t.spin_exit, Some(SpinExit::SpinsDisabled));
+        assert_eq!((t.spinning_before, t.spinning), (1, 0));
+        assert_eq!(t.spin_check, None);
+        // Slow rotation, aligned airflow and neutral rudder recover.
+        let mut r = spinning(0.1);
+        let t = r.advance(&c, 500., 200., 0., 0., 0., 0., 0., 1., true);
+        assert_eq!(t.spin_exit, Some(SpinExit::Recovered));
+        assert_eq!(t.mode, DepartureMode::Normal);
+        // The ground clears a spin.
+        let mut r = spinning(1.);
+        r.on_ground = true;
+        let t = r.advance(&c, 100., 200., 1., 1., 0., 0., 0., 1., true);
+        assert!(t.on_ground);
+        assert_eq!(
+            (t.mode_before, t.mode),
+            (DepartureMode::Spinning, DepartureMode::Normal)
+        );
+    }
+
+    #[test]
+    fn contact_records_touchdown_grades_and_unsafe_reasons() {
+        let c = config();
+        let touch = |airborne_ticks: u32, vertical_fps: f64, gear: f64, surface: Surface| {
+            let mut s = contact_state(&c);
+            s.gear = gear;
+            s.velocity = [300., vertical_fps, 0.];
+            s.yaw = std::f64::consts::FRAC_PI_2;
+            let mut r = Research::new(1).unwrap();
+            r.landings.airborne_ticks = airborne_ticks;
+            let previous = s.position;
+            r.contact(&mut s, surface, &c, 1., 0.25, previous);
+            (s, r)
+        };
+        // Descent within half the 30 ft/s limit after real flight scores 100.
+        let (s, r) = touch(Landings::FLIGHT_TICKS, -10., 1., Surface::runway(0.));
+        let Some(Contact::Rolling(rolling)) = s.trace().contact else {
+            panic!("landed");
+        };
+        let landing = rolling.touchdown.unwrap();
+        assert_eq!(landing.score, Some(100));
+        assert_eq!(landing.touchdown.vertical_fps, -10.);
+        assert_eq!(landing.touchdown.limits, c.native.landing);
+        assert_eq!(r.landings.grade(), Some(100));
+        assert_eq!(rolling.wind_grip, 1. - 0.5 * 0.25);
+        // A firmer touchdown within the limits scores 50; a spawn is not graded.
+        let (s, _) = touch(Landings::FLIGHT_TICKS, -20., 1., Surface::runway(0.));
+        assert!(matches!(
+            s.trace().contact,
+            Some(Contact::Rolling(Rolling {
+                touchdown: Some(Landing {
+                    score: Some(50),
+                    ..
+                }),
+                ..
+            }))
+        ));
+        let (s, _) = touch(0, -10., 1., Surface::runway(0.));
+        assert!(matches!(
+            s.trace().contact,
+            Some(Contact::Rolling(Rolling {
+                touchdown: Some(Landing { score: None, .. }),
+                ..
+            }))
+        ));
+        // Gear up on terrain crashes, naming both reasons.
+        let (s, _) = touch(Landings::FLIGHT_TICKS, -10., 0., Surface::terrain(0.));
+        let Some(Contact::Unsafe(u)) = s.trace().contact else {
+            panic!("unsafe touchdown");
+        };
+        assert!(s.crashed && !u.bounced && u.gear_up && u.not_landable && !u.water);
+        assert_eq!(u.severity, LandingSeverity::WithinLimits);
+        // Descending three times the limit is over it by more than the margin.
+        let (s, _) = touch(Landings::FLIGHT_TICKS, -90., 1., Surface::runway(0.));
+        let Some(Contact::Unsafe(u)) = s.trace().contact else {
+            panic!("unsafe touchdown");
+        };
+        assert_eq!(u.severity, LandingSeverity::Code6);
+        assert!(!u.gear_up && !u.not_landable);
     }
 
     #[test]

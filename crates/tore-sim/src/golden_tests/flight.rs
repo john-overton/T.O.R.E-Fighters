@@ -9,7 +9,8 @@ use std::cell::Cell;
 use tore_input::{PilotCommand, PilotInput, Switch};
 
 use super::{
-    Fingerprint, Outcome, Probe, fixtures, record_flight, record_input, run_twice, verify,
+    Fingerprint, Outcome, Probe, RECORDED_PLATFORM, fixtures, record_flight, record_input,
+    run_twice, verify,
 };
 use crate::attitude::Basis;
 use crate::flight::State;
@@ -64,6 +65,184 @@ fn flight_hybrid_adapter_runway_maneuvers_match_recorded_fingerprints() {
 #[test]
 fn flight_native_adapter_matches_recorded_fingerprints() {
     check(Adapter::Native, &NATIVE);
+}
+
+#[test]
+fn flight_legacy_adapter_reading_the_trace_changes_nothing() {
+    check_reading(Adapter::Legacy, &LEGACY);
+}
+
+#[test]
+fn flight_hybrid_adapter_airborne_reading_the_trace_changes_nothing() {
+    check_reading(Adapter::Hybrid, &HYBRID[..8]);
+}
+
+#[test]
+fn flight_hybrid_adapter_runway_reading_the_trace_changes_nothing() {
+    check_reading(Adapter::Hybrid, &HYBRID[8..]);
+}
+
+#[test]
+fn flight_native_adapter_reading_the_trace_changes_nothing() {
+    check_reading(Adapter::Native, &NATIVE);
+}
+
+/// Read the flight trace and its effect list after every tick, as the
+/// telemetry panel and the replay recorder do. Every recorded fingerprint
+/// must stay the same, and each maneuver's trace must show the effects its
+/// script causes, so the record is known to be filled.
+fn check_reading(adapter: Adapter, recorded: &[(&str, u64)]) {
+    use crate::flight::trace::Path;
+    for (name, value) in recorded {
+        let maneuver = MANEUVERS
+            .iter()
+            .find(|maneuver| maneuver.name == *name)
+            .expect("known maneuver");
+        let wanted = reading_expectations(adapter, name);
+        let mut found = vec![false; wanted.len()];
+        let (read, _) = fly_reading(adapter, maneuver, &Probe::default(), |state| {
+            let trace = state.trace();
+            assert_eq!(trace.tick, state.ticks);
+            assert_ne!(trace.path, Path::NotStepped);
+            assert_eq!(trace.adapter.is_some(), trace.flew());
+            for effect in trace.effects() {
+                for (seen, (_, matches)) in found.iter_mut().zip(&wanted) {
+                    *seen |= matches(&effect);
+                }
+            }
+        });
+        let unread = if RECORDED_PLATFORM {
+            *value
+        } else {
+            fly(adapter, maneuver, &Probe::default()).0
+        };
+        let label = format!("flight/{}/{name}", adapter.label());
+        assert_eq!(read, unread, "{label}: reading the trace changed behaviour");
+        for ((effect, _), seen) in wanted.iter().zip(found) {
+            assert!(seen, "{label}: the trace never showed {effect}");
+        }
+    }
+}
+
+type Expectation = (&'static str, fn(&crate::flight::trace::Effect) -> bool);
+
+/// Effects each scripted maneuver causes in at least one configuration.
+fn reading_expectations(adapter: Adapter, maneuver: &str) -> Vec<Expectation> {
+    use crate::flight::trace::{DeviceKind, Effect, Path, Release};
+    if adapter == Adapter::Native {
+        return vec![("the native path", |e| matches!(e, Effect::NativePath))];
+    }
+    let hybrid = adapter == Adapter::Hybrid;
+    let mut wanted: Vec<Expectation> = Vec::new();
+    match maneuver {
+        "stall-and-spin" => {
+            wanted.push(("low-speed authority", |e| {
+                matches!(e, Effect::LowSpeedAuthority { .. })
+            }));
+            if hybrid {
+                wanted.push((
+                    "a spin entry",
+                    |e| matches!(e, Effect::SpinCheck(check) if check.entered),
+                ));
+                wanted.push(("spin control loss", |e| {
+                    matches!(e, Effect::SpinControls { .. })
+                }));
+                wanted.push(("stall scaling", |e| {
+                    matches!(e, Effect::StallScaling { .. })
+                }));
+            }
+        }
+        "devices-and-switches" => {
+            wanted.push(("autopilot steering", |e| {
+                matches!(e, Effect::Autopilot { .. })
+            }));
+            wanted.push(("an autopilot override", |e| {
+                matches!(e, Effect::AutopilotReleased(Release::PilotOverride))
+            }));
+            wanted.push(("the engine off", |e| matches!(e, Effect::EngineOff { .. })));
+        }
+        "damage-and-disturbance" => {
+            wanted.push(("regional damage", |e| {
+                matches!(e, Effect::RegionalDamage(_))
+            }));
+            wanted.push(("damaged controls", |e| {
+                matches!(e, Effect::ControlResponse(_))
+            }));
+            wanted.push(("a jammed throttle", |e| {
+                matches!(e, Effect::ThrottleJammed(_))
+            }));
+            wanted.push(("jammed gear", |e| {
+                matches!(
+                    e,
+                    Effect::DeviceHeld {
+                        device: DeviceKind::Gear,
+                        ..
+                    }
+                )
+            }));
+            wanted.push(("reduced engine power", |e| {
+                matches!(e, Effect::EnginePowerReduced { .. })
+            }));
+            wanted.push(("wing damage", |e| matches!(e, Effect::WingDamaged)));
+            wanted.push(("a blast jolt", |e| matches!(e, Effect::Jolt { .. })));
+        }
+        "cheats-and-ricochet" => {
+            wanted.push(("Pull extra G", |e| matches!(e, Effect::ExtraG { .. })));
+            wanted.push(("Unlimited fuel", |e| {
+                matches!(e, Effect::UnlimitedFuel { .. })
+            }));
+            wanted.push(("Ignore weapon weights", |e| {
+                matches!(e, Effect::IgnoreWeaponWeights { .. })
+            }));
+            if hybrid {
+                wanted.push((
+                    "a bounced unsafe touchdown",
+                    |e| matches!(e, Effect::UnsafeTouchdown(touchdown) if touchdown.bounced),
+                ));
+            } else {
+                wanted.push(("a floor bounce", |e| {
+                    matches!(e, Effect::LegacyFloor { bounced: true })
+                }));
+            }
+        }
+        "ground-impact" => {
+            if hybrid {
+                wanted.push((
+                    "a crash touchdown",
+                    |e| matches!(e, Effect::UnsafeTouchdown(touchdown) if !touchdown.bounced),
+                ));
+            } else {
+                wanted.push(("a floor crash", |e| {
+                    matches!(e, Effect::LegacyFloor { bounced: false })
+                }));
+            }
+            wanted.push(("the wreck path", |e| {
+                matches!(e, Effect::NotFlying(Path::Wreck))
+            }));
+        }
+        "airborne-destruction" => wanted.push(("the wreck path", |e| {
+            matches!(e, Effect::NotFlying(Path::Wreck))
+        })),
+        "crosswind-takeoff" => {
+            wanted.push(("parking", |e| matches!(e, Effect::Parked { .. })));
+            wanted.push(("runway wind", |e| matches!(e, Effect::RunwayWind(_))));
+            wanted.push(("flap lift", |e| matches!(e, Effect::FlapLift { .. })));
+            wanted.push(("tire forces", |e| matches!(e, Effect::Rolling(_))));
+            wanted.push(("lift-off", |e| matches!(e, Effect::LiftOff { .. })));
+        }
+        "approach-and-landing" => {
+            wanted.push((
+                "a graded touchdown",
+                |e| matches!(e, Effect::Touchdown(landing) if landing.score.is_some()),
+            ));
+            wanted.push(("gear drag off on the wheels", |e| {
+                matches!(e, Effect::GearDragOnWheels { .. })
+            }));
+            wanted.push(("tire forces", |e| matches!(e, Effect::Rolling(_))));
+        }
+        _ => {}
+    }
+    wanted
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -256,6 +435,17 @@ fn check(adapter: Adapter, recorded: &[(&str, u64)]) {
 /// Fly one maneuver with every configuration, one fresh aircraft each, and
 /// fold every tick's input and resulting state into one fingerprint.
 fn fly(adapter: Adapter, maneuver: &Maneuver, probe: &Probe) -> (u64, Tally) {
+    fly_reading(adapter, maneuver, probe, |_| {})
+}
+
+/// [`fly`], handing the state to `read` after every tick, before it is
+/// fingerprinted.
+fn fly_reading(
+    adapter: Adapter,
+    maneuver: &Maneuver,
+    probe: &Probe,
+    mut read: impl FnMut(&State),
+) -> (u64, Tally) {
     let mut fp = Fingerprint::default();
     let mut tally = Tally::default();
     let configurations = if adapter == Adapter::Native {
@@ -279,6 +469,7 @@ fn fly(adapter: Adapter, maneuver: &Maneuver, probe: &Probe) -> (u64, Tally) {
             let input = (maneuver.script)(tick, &mut state);
             record_input(&mut fp, &input);
             state.step_surface(&input, maneuver.surface);
+            read(&state);
             record_flight(&mut fp, &state);
             let ground = (maneuver.surface)(state.position[0], state.position[2]).height;
             fp.option(state.stall_alert(ground), |fp, mode| fp.name(&mode));

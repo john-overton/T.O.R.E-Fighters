@@ -18,7 +18,38 @@ impl Default for Controls {
         }
     }
 }
+/// Read-only view of the control-run damage that shapes the stick response.
+/// Axes are [pitch, roll, yaw].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ControlCondition {
+    /// Multiplier per axis. Each hit on the elevator, ailerons or rudder
+    /// (systems 19, 21 and 23) halves its axis.
+    pub authority: [f64; 3],
+    /// Offset per axis added to the stick. A bent elevator, aileron or rudder
+    /// (systems 20, 22 and 24) sets 0.25 (-0.25 for the ailerons); a damaged
+    /// rudder (23) adds 0.1 yaw when there is no yaw offset yet.
+    pub bias: [f64; 3],
+    /// Control linkage damaged (system 27): every axis x0.3.
+    pub damaged_linkage: bool,
+    /// Flight controls unstable (system 28): every axis oscillates by up to
+    /// 0.2 at 2 Hz.
+    pub unstable: bool,
+}
+impl Default for ControlCondition {
+    fn default() -> Self {
+        Controls::default().condition()
+    }
+}
 impl Controls {
+    /// The current damage state, for telemetry. Reading it changes nothing.
+    pub fn condition(&self) -> ControlCondition {
+        ControlCondition {
+            authority: self.authority,
+            bias: self.bias,
+            damaged_linkage: self.damaged_linkage,
+            unstable: self.unstable,
+        }
+    }
     pub fn hit(&mut self, index: usize, throttle: f64) {
         match index {
             19 | 21 | 23 => {
