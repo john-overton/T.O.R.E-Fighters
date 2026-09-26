@@ -34,25 +34,26 @@ It does not emit light onto the aircraft or surrounding terrain.
 
 ## Afterburner glow
 
-Opinionated presentation requested by John on 2026-09-26: a lit afterburner
-glows like a burning flare at about a quarter of its intensity. It applies to
-the player and to AI aircraft, whenever the afterburner is actually lit (engine
+Opinionated presentation requested by John on 2026-09-26. It applies to the
+player and to AI aircraft whenever the afterburner is actually lit: engine
 running, fuel left, afterburner selected and throttle past the aircraft's
-afterburner setting).
+afterburner setting.
 
-- Each afterburning aircraft has one glow point in its plume, 10 feet behind
-  the middle of its nozzle outlets (the contrail attachment points). This
-  distance is an agent decision.
-- It lights nearby surfaces with the
-  [flare light](countermeasures.md#flare-light) rules at 25 percent of a
-  flare's strength: as bright as full sun at about 32 feet, with the same
-  warm color, 1,500-foot reach and night boost. It shares the 16 scene lights
-  with flares, ranked by strength over distance squared.
-- It has the flare's glare at 25 percent intensity, without a flare body; the
-  engine flame stays as it was. The glare shows only while the glow point is
-  in view, so it is strongest from behind and hidden by the airframe from the
-  front. Up to 64 afterburners get glare at once.
-- The glow is steady. It follows the aircraft as drawn on screen each frame.
+- **The flame is the light source.** Each engine's light sits in its flame,
+  3 feet behind its outlet (the contrail attachment point). The 3 feet is an
+  agent decision.
+- An afterburning aircraft lights nearby surfaces at **an eighth of a flare's
+  strength**, split evenly across its engines. John first asked for a quarter,
+  then halved it the same day. Together its engines light a surface facing
+  them as brightly as full sun at about 22 feet. Color, 1,500-foot reach and
+  night boost follow the [flare light](countermeasures.md#flare-light) rules,
+  and the lights share the 16 scene lights with flares.
+- **The flame looks the same at night as by day** (John). Flame surfaces keep
+  their daylight colors instead of the weather's night darkening; only
+  distance haze still applies.
+- There is no glare or halo behind an afterburner. John had the first version's
+  small star glare removed.
+- The light is steady and follows the aircraft as drawn on screen each frame.
 
 ## Assets
 

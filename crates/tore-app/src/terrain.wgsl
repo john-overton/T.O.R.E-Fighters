@@ -378,10 +378,14 @@ fn engine_color(uv:vec2<f32>,heat:f32)->vec3<f32> {
 fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
  var color=in.color;
  var albedo=in.albedo;
+ // Afterburner flames glow: they keep their daylight colors at night instead
+ // of the weather's darkening remaps (docs/spec/engine-material.md).
+ let flame=in.layer == -6.0 || in.layer == -7.0;
+ if flame {color=in.albedo;}
  if in.layer<=-3.0 && in.layer>=-4.0 {color=engine_color(in.uv,clamp(-in.layer-3.0,0.0,1.0));albedo=color;}
  if in.layer>=0.0 || in.layer == -2.0 || in.layer == -5.0 || in.layer == -7.0 {
-  var remaps=vec2<f32>(-1.0);if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
-  let tex=sample_tile(in.uv,i32(max(in.layer,0.0)),0,-1,in.light_row,remaps);
+  var remaps=vec2<f32>(-1.0);if in.fog_enabled!=0u && !flame {remaps=ray_rows(in.distance,in.altitude);}
+  let tex=sample_tile(in.uv,i32(max(in.layer,0.0)),select(0,base_row(),flame),-1,in.light_row,remaps);
   if (in.layer == -2.0 || in.layer == -7.0) && tex.a < 0.5 { discard; }
   color=mix(color,tex.rgb,tex.a);
   if flares_burning() {

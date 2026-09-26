@@ -60,18 +60,19 @@ comparisons with a running retail copy.
 
 ## Afterburner glow
 
-Added the same day at John's request. Captured with `--flight-devices
+Added the same day at John's request, then revised: the light moved into each
+engine's flame, its strength was halved, flames keep their daylight colors at
+night, and the afterburner glare was removed. Captured with `--flight-devices
 0,0,0,0,1`:
-- **Night, from behind**: a small glare at the nozzles.
-- **Night, 60 feet over desert**: a soft warm pool on the sand, clearly weaker
-  than a flare's.
-- **Day, same pose**: a faint warm tint near the aircraft.
-- **Night, from the front**: the glare peeks past the tail and is partly hidden
-  by the airframe.
+- **Night and day from behind**: the same orange-yellow flames with blue tips.
+  At night the tail picks up warm light from its own flames, and there is no
+  glare.
+- **Night, 60 feet over desert**: a faint warm pool on the sand under the
+  engines.
 
-A unit test checks that each afterburner adds a light at a quarter of a
-flare's strength and a quarter-intensity, glare-only instance. AI afterburner
-glows use the same path but were not captured.
+A unit test checks that two engines together light at an eighth of a flare's
+strength and that only flares get bodies and glare. AI afterburners use the
+same path but were not captured.
 
 ## Not run
 

@@ -13,22 +13,23 @@ pub const FLARE_STRENGTH: f64 = 4000.;
 const FLARE_RANGE: f64 = 1500.;
 const FLARE_SOFTENING: f64 = 25.;
 const FLARE_COLOR: [f64; 3] = [1.0, 0.75, 0.45];
-/// A lit afterburner glows at a quarter of a flare's strength, light and
-/// glare alike (requested by John on 2026-09-26).
-pub const AFTERBURNER_SHARE: f64 = 0.25;
-/// The glow sits in the plume this far behind the nozzle outlets.
-pub const AFTERBURNER_BEHIND_FEET: f64 = 10.;
-/// Afterburners that get glare at once; more still light the scene.
-const MAX_AFTERBURNERS: usize = 64;
+/// An afterburning aircraft lights the scene at an eighth of a flare's
+/// strength, split across its engines: John asked for a quarter on
+/// 2026-09-26, then halved it the same day.
+pub const AFTERBURNER_SHARE: f64 = 0.125;
+/// Each engine's light sits in its flame, this far behind the outlet.
+pub const AFTERBURNER_BEHIND_FEET: f64 = 3.;
 /// Foil strips drawn for each chaff cartridge.
 pub const CHAFF_STRIPS: u32 = 600;
 const FLARE_BYTES: usize = 9 * 4;
 const CHAFF_BYTES: usize = 6 * 4;
 
-/// A lit afterburner's glow point, in world feet.
+/// One lit afterburner flame as a light: its position in world feet and its
+/// share of a flare's strength.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Afterburner {
     pub position: [f64; 3],
+    pub share: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -49,7 +50,7 @@ pub fn lights(devices: &Devices, afterburners: &[Afterburner]) -> Vec<FlareLight
         })
         .chain(afterburners.iter().map(|a| FlareLight {
             position: a.position,
-            strength: FLARE_STRENGTH * AFTERBURNER_SHARE,
+            strength: FLARE_STRENGTH * a.share,
         }))
         .collect()
 }
@@ -225,14 +226,12 @@ impl Pipelines {
     }
 }
 
-/// This frame's devices and afterburner glows, uploaded once and drawn in
-/// every world view. Afterburner glows follow the flares in the flare
-/// buffer: they get glare but no flare body.
+/// This frame's devices, uploaded once and drawn in every world view, and
+/// the lights of flares and afterburners.
 pub struct Instances {
     flares: wgpu::Buffer,
     chaff: wgpu::Buffer,
     flare_count: u32,
-    glare_count: u32,
     chaff_count: u32,
     pub lights: Vec<FlareLight>,
 }
@@ -247,25 +246,17 @@ impl Instances {
             })
         };
         Self {
-            flares: buffer(
-                "Burning flare and afterburner glare instances",
-                (MAX_FLARES + MAX_AFTERBURNERS) * FLARE_BYTES,
-            ),
+            flares: buffer("Burning flare instances", MAX_FLARES * FLARE_BYTES),
             chaff: buffer("Chaff cloud instances", MAX_CHAFF * CHAFF_BYTES),
             flare_count: 0,
-            glare_count: 0,
             chaff_count: 0,
             lights: Vec::new(),
         }
     }
     pub fn upload(&mut self, queue: &wgpu::Queue, devices: &Devices, afterburners: &[Afterburner]) {
         self.lights = lights(devices, afterburners);
-        let mut flares = flare_instances(devices);
+        let flares = flare_instances(devices);
         self.flare_count = (flares.len() / FLARE_BYTES) as u32;
-        flares.extend(afterburner_instances(
-            &afterburners[..afterburners.len().min(MAX_AFTERBURNERS)],
-        ));
-        self.glare_count = (flares.len() / FLARE_BYTES) as u32;
         if !flares.is_empty() {
             queue.write_buffer(&self.flares, 0, &flares);
         }
@@ -275,8 +266,8 @@ impl Instances {
             queue.write_buffer(&self.chaff, 0, &chaff);
         }
     }
-    pub fn has_glare(&self) -> bool {
-        self.glare_count > 0
+    pub fn has_flares(&self) -> bool {
+        self.flare_count > 0
     }
     /// Chaff strips then flare bodies, inside the world pass. The caller has
     /// bound the world material (group 0) and shared lighting (group 1).
@@ -295,10 +286,10 @@ impl Instances {
     /// Glare over the resolved image. The caller has bound groups 0 and 1 and
     /// the world depth as group 2.
     pub fn draw_glare(&self, pass: &mut wgpu::RenderPass<'_>, pipelines: &Pipelines) {
-        if self.glare_count > 0 {
+        if self.flare_count > 0 {
             pass.set_pipeline(&pipelines.glare);
             pass.set_vertex_buffer(0, self.flares.slice(..));
-            pass.draw(0..6, 0..self.glare_count);
+            pass.draw(0..6, 0..self.flare_count);
         }
     }
 }
@@ -316,23 +307,6 @@ fn flare_instances(devices: &Devices) -> Vec<u8> {
             bytes.extend((value as f32).to_le_bytes());
         }
         bytes.extend(flare.seed().to_le_bytes());
-    }
-    bytes
-}
-
-/// Glare-only instances at a quarter of a flare's intensity, holding still.
-fn afterburner_instances(afterburners: &[Afterburner]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(afterburners.len() * FLARE_BYTES);
-    for glow in afterburners {
-        for value in glow
-            .position
-            .into_iter()
-            .chain([AFTERBURNER_SHARE])
-            .chain([0.; 4])
-        {
-            bytes.extend((value as f32).to_le_bytes());
-        }
-        bytes.extend(0_u32.to_le_bytes());
     }
     bytes
 }
@@ -417,27 +391,22 @@ mod tests {
     }
 
     #[test]
-    fn afterburners_glow_at_a_quarter_of_a_flare() {
+    fn afterburners_light_the_scene_without_glare() {
         let devices = released(1, 0);
-        let glow = Afterburner {
+        let flame = Afterburner {
             position: [5., 6., 7.],
+            share: AFTERBURNER_SHARE / 2.,
         };
-        let all = lights(&devices, &[glow]);
-        assert_eq!(all.len(), 3);
+        let all = lights(&devices, &[flame, flame]);
+        assert_eq!(all.len(), 4);
+        // Two engines together light at an eighth of a flare.
         assert_eq!(
-            all[2],
-            FlareLight {
-                position: [5., 6., 7.],
-                strength: FLARE_STRENGTH / 4.
-            }
+            all[2..].iter().map(|l| l.strength).sum::<f64>(),
+            FLARE_STRENGTH / 8.
         );
-        // Glare only: a quarter intensity, no motion and no flame seed.
-        let bytes = afterburner_instances(&[glow]);
-        assert_eq!(bytes.len(), FLARE_BYTES);
-        let value = |i: usize| f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap());
-        assert_eq!((value(0), value(1), value(2)), (5., 6., 7.));
-        assert_eq!(value(3), 0.25);
-        assert!((4..8).all(|i| value(i) == 0.));
+        assert_eq!(all[2].position, [5., 6., 7.]);
+        // Only flares are drawn as bodies and glare.
+        assert_eq!(flare_instances(&devices).len(), 2 * FLARE_BYTES);
     }
 
     #[test]

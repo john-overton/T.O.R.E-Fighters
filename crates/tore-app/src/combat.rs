@@ -320,30 +320,32 @@ impl Combat {
             .collect();
     }
 
-    /// One glow point just behind the nozzles of every aircraft with its
-    /// afterburner lit, at this frame's presented pose
+    /// The flame of every lit afterburner as a light source, each engine
+    /// sharing its aircraft's strength, at this frame's presented pose
     /// (docs/spec/engine-material.md#afterburner-glow).
     pub fn afterburner_glows(
         &self,
         player: &flight::State,
     ) -> Vec<crate::countermeasure_renderer::Afterburner> {
+        use crate::countermeasure_renderer::{AFTERBURNER_BEHIND_FEET, AFTERBURNER_SHARE};
         let glow = |position: Vector, basis: Basis, offsets: &[Vector]| {
-            let count = offsets.len().max(1) as f64;
-            let mean: Vector =
-                std::array::from_fn(|i| offsets.iter().map(|o| o[i]).sum::<f64>() / count);
-            crate::countermeasure_renderer::Afterburner {
-                position: std::array::from_fn(|i| {
-                    position[i]
-                        + basis.right[i] * mean[0]
-                        + basis.up[i] * mean[1]
-                        + basis.forward[i]
-                            * (mean[2] - crate::countermeasure_renderer::AFTERBURNER_BEHIND_FEET)
-                }),
-            }
+            let share = AFTERBURNER_SHARE / offsets.len().max(1) as f64;
+            offsets
+                .iter()
+                .map(|o| crate::countermeasure_renderer::Afterburner {
+                    position: std::array::from_fn(|i| {
+                        position[i]
+                            + basis.right[i] * o[0]
+                            + basis.up[i] * o[1]
+                            + basis.forward[i] * (o[2] - AFTERBURNER_BEHIND_FEET)
+                    }),
+                    share,
+                })
+                .collect::<Vec<_>>()
         };
         let mut glows = Vec::new();
         if player.afterburner_active() && player.escape.is_none() && self.state.player_hp > 0 {
-            glows.push(glow(
+            glows.extend(glow(
                 player.position,
                 Basis::new(player.yaw, player.pitch, player.bank),
                 &self.contrail_offsets,
@@ -363,7 +365,7 @@ impl Combat {
                     &self.dummy_contrail_offsets[index]
                 });
             let (position, [yaw, pitch, bank]) = self.presentation.pose(target, self.ai_poses);
-            glows.push(glow(position, Basis::new(yaw, pitch, bank), offsets));
+            glows.extend(glow(position, Basis::new(yaw, pitch, bank), offsets));
         }
         glows
     }

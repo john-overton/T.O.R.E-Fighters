@@ -71,7 +71,7 @@ tracers, explosions, burning flares, chaff, smoke and vapor retain their own
 presentation rather than receiving solid diffuse shading or casting solid shadows.
 Glass receives lighting but does not cast an opaque silhouette.
 
-Burning flares, and lit afterburners at a quarter of a flare's strength
+Burning flares, and lit afterburner flames at an eighth of a flare's strength
 ([afterburner glow](engine-material.md#afterburner-glow)), add their own warm
 point light to every surface this pass lights, and to water, clouds and
 smoke, with no shadows. Its strength, reach,

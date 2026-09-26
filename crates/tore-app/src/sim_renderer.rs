@@ -1668,7 +1668,7 @@ impl SimRenderer {
         }
         // Flare glare goes over the finished image, where it can spill across
         // the aircraft that released it while the core stays in view.
-        if self.countermeasures.has_glare() {
+        if self.countermeasures.has_flares() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Flare glare"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
