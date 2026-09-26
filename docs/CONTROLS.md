@@ -262,3 +262,21 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Controls screen | Tab / Shift+Tab | Next / previous device |
 | Controls screen | Delete or Backspace | Clear the focused primary or secondary input |
 | Head tracker | opentrack UDP on port 4242 | Turns the view; Center view makes the current head position straight ahead |
+| Replay viewer | Space | Play or pause |
+| Replay viewer | J / K / L | Play backwards / pause / play forwards; J or L again doubles the speed, up to 16x |
+| Replay viewer | Up / Down | Next faster or slower speed in the same direction: 1/8x, 0.25x, 0.5x, 0.75x, 1x, 2x, 4x, 8x, 16x |
+| Replay viewer | Left / Right | Back or forward 5 seconds; while paused, one tick; with Shift, 30 seconds |
+| Replay viewer | Home / End | Start or end of the recording |
+| Replay viewer | PageUp / PageDown | Previous or next timeline marker |
+| Replay viewer | Tab / Shift+Tab | Next or previous aircraft |
+| Replay viewer | F1 to F10, F12 | The flight views, on the selected aircraft |
+| Replay viewer | Backquote (`) | Drone camera following the selected aircraft, then flying free, then back to the flight view |
+| Replay viewer | W A S D, E / Q | Drone: move, climb / descend; hold Shift for four times the speed |
+| Replay viewer | Mouse wheel | Drone speed from 20 to 5,000 feet per second; zoom in a flight view |
+| Replay viewer | Hold right button and drag | Look around, or turn the drone |
+| Replay viewer | Left click, drag on the timeline | Transport bar buttons; jump to or scrub through a moment |
+| Replay viewer | N / T / C | Name labels / mission timer / Comms list on or off |
+| Replay viewer | R / Shift+R | Flight path trails on or off / next trail length (10, 30, 60, 120 or 300 seconds) |
+| Replay viewer | H | Hide or show the whole interface and the pointer; playback and camera keys keep working |
+| Replay viewer | P | Save the view, without the interface, as a PNG in `screenshots/` |
+| Replay viewer | Esc | Show the interface if it is hidden, otherwise back to the main menu |

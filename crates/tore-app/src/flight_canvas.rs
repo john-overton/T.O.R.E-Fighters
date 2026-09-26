@@ -169,6 +169,152 @@ impl FlightCanvas {
             ),
         );
     }
+    /// An empty, fully transparent canvas of `size`: the mission replay's
+    /// view has no instruments.
+    pub fn blank(&mut self, size: [u32; 2]) {
+        self.size = size;
+        self.pixels.clear();
+        self.pixels
+            .resize(size[0] as usize * size[1] as usize * 4, 0);
+    }
+    /// A 640x480 layer drawn in two halves at the scale `legacy_layer` uses,
+    /// centred across: the top half against the top edge and the bottom half
+    /// against the bottom edge. On a canvas at least 4:3 wide this is exactly
+    /// where `legacy_layer` puts it; on a taller one the halves part, so a
+    /// bar along the layer's bottom stays on the view's bottom edge.
+    pub fn anchored_layer(&mut self, pixels: &[u8]) {
+        let (w, h) = (self.size[0] as f64, self.size[1] as f64);
+        let scale = (w / 640.).min(h / 480.);
+        for (top, y) in [(0, 0.), (240, h - 240. * scale)] {
+            let (mut left, mut first, mut right, mut last) = (640usize, 480usize, 0usize, 0usize);
+            for row in top..top + 240 {
+                for (x, p) in pixels[row * 640 * 4..(row + 1) * 640 * 4]
+                    .chunks_exact(4)
+                    .enumerate()
+                {
+                    if p[3] != 0 {
+                        left = left.min(x);
+                        right = right.max(x + 1);
+                        first = first.min(row);
+                        last = last.max(row + 1);
+                    }
+                }
+            }
+            if right == 0 {
+                continue;
+            }
+            let (width, height) = (right - left, last - first);
+            let mut rgba = Vec::with_capacity(width * height * 4);
+            for row in first..last {
+                rgba.extend_from_slice(&pixels[(row * 640 + left) * 4..(row * 640 + right) * 4]);
+            }
+            self.scaled(
+                &Sprite {
+                    width,
+                    height,
+                    rgba,
+                    glyphs: vec![],
+                },
+                (
+                    (w - 640. * scale) / 2. + left as f64 * scale,
+                    y + (first - top) as f64 * scale,
+                    width as f64 * scale,
+                    height as f64 * scale,
+                ),
+            );
+        }
+    }
+    /// Draws `s` scaled into the rectangle by nearest pixel, the way the
+    /// menus' 640x480 canvas is scaled, blending partly transparent pixels
+    /// over what is there. Cheap enough for the replay's interface layer,
+    /// which is drawn every frame.
+    fn scaled(&mut self, s: &Sprite, (x, y, w, h): (f64, f64, f64, f64)) {
+        let dw = self.size[0] as usize;
+        let taps = |start: i32, end: i32, origin: f64, span: f64, source: usize| {
+            (start..end)
+                .map(|d| {
+                    let u = ((d as f64 + 0.5 - origin) * source as f64 / span).floor();
+                    (d as usize, u.clamp(0., (source - 1) as f64) as usize)
+                })
+                .collect::<Vec<_>>()
+        };
+        let columns = taps(
+            (x.round() as i32).max(0),
+            ((x + w).round() as i32).min(self.size[0] as i32),
+            x,
+            w,
+            s.width,
+        );
+        let rows = taps(
+            (y.round() as i32).max(0),
+            ((y + h).round() as i32).min(self.size[1] as i32),
+            y,
+            h,
+            s.height,
+        );
+        for &(yy, sy) in &rows {
+            for &(xx, sx) in &columns {
+                let from = (sy * s.width + sx) * 4;
+                let p = &s.rgba[from..from + 4];
+                let at = (yy * dw + xx) * 4;
+                if p[3] == 0 {
+                    continue;
+                }
+                if p[3] == 255 || self.pixels[at + 3] == 0 {
+                    self.pixels[at..at + 4].copy_from_slice(p);
+                    continue;
+                }
+                // Straight-alpha "over".
+                let a = f64::from(p[3]) / 255.;
+                let old = f64::from(self.pixels[at + 3]) / 255.;
+                let out = a + old * (1. - a);
+                for (c, value) in p.iter().enumerate().take(3) {
+                    self.pixels[at + c] = ((f64::from(*value) * a
+                        + f64::from(self.pixels[at + c]) * old * (1. - a))
+                        / out)
+                        .round() as u8;
+                }
+                self.pixels[at + 3] = (out * 255.).round() as u8;
+            }
+        }
+    }
+    /// The width of `text` in `font` drawn at `scale`, in canvas pixels.
+    pub fn text_width(font: &tore_formats::font::Font, text: &str, scale: f64) -> f64 {
+        text.bytes()
+            .filter_map(|c| font.glyphs.get(usize::from(c)))
+            .map(|g| g.advance as f64 * scale)
+            .sum()
+    }
+    /// `text` in `font` with its top left at (x, y), each font pixel drawn
+    /// as a `scale`-wide smoothed dot, then a dark shadow a font pixel down
+    /// and right where the text left the canvas clear, so labels read over
+    /// sky and ground alike.
+    pub fn text(
+        &mut self,
+        font: &tore_formats::font::Font,
+        text: &str,
+        [x, y]: [f64; 2],
+        scale: f64,
+        color: [u8; 3],
+    ) {
+        for (offset, color) in [(0., color), (scale, [0, 0, 0])] {
+            let mut pen = x + offset;
+            for c in text.bytes() {
+                let Some(glyph) = font.glyphs.get(usize::from(c)) else {
+                    continue;
+                };
+                for &(gx, gy) in &glyph.pixels {
+                    self.dot(
+                        pen + (gx as f64 + 0.5) * scale,
+                        y + offset + (gy as f64 + 0.5) * scale,
+                        scale,
+                        color,
+                    );
+                }
+                pen += glyph.advance as f64 * scale;
+            }
+        }
+    }
     pub fn hud_zoom(&self, zoom: f32) -> f32 {
         let [w, h] = self.size;
         zoom / HUD_SCALE as f32 * (h as f32 / (480. * (w as f32 / 640.).min(h as f32 / 480.)))
@@ -329,6 +475,86 @@ mod tests {
         for p in canvas.pixels.chunks_exact(4).filter(|p| p[3] > 0) {
             assert_eq!(p[1], 200);
         }
+    }
+    #[test]
+    fn an_anchored_layer_keeps_its_bottom_on_the_bottom_edge() {
+        let mut layer = vec![0u8; 640 * 480 * 4];
+        for (x, y) in [(15, 5), (15, 470)] {
+            layer[(y * 640 + x) * 4..][..4].copy_from_slice(&[200, 10, 10, 255]);
+        }
+        let alpha =
+            |c: &FlightCanvas, x: usize, y: usize| c.pixels[(y * c.size[0] as usize + x) * 4 + 3];
+        // 4:3 and wide: where the centred layer draws it.
+        for (size, left, scale) in [([1280, 960], 0., 2.), ([1920, 1080], 240., 2.25)] {
+            let mut canvas = FlightCanvas::default();
+            canvas.blank(size);
+            canvas.anchored_layer(&layer);
+            for y in [5., 470.] {
+                let at = |v: f64| (v * scale + scale / 2.) as usize;
+                assert_eq!(
+                    alpha(&canvas, left as usize + at(15.), at(y)),
+                    255,
+                    "{size:?}"
+                );
+            }
+        }
+        // Tall: the top half at the top, the bottom half at the bottom.
+        let mut canvas = FlightCanvas::default();
+        canvas.blank([640, 1000]);
+        canvas.anchored_layer(&layer);
+        assert_eq!(alpha(&canvas, 15, 5), 255);
+        assert_eq!(alpha(&canvas, 15, 1000 - 10), 255);
+        assert_eq!(alpha(&canvas, 15, 260 + 470), 0);
+        // Blanking clears the canvas for the next frame.
+        canvas.blank([640, 1000]);
+        assert!(canvas.pixels.iter().all(|v| *v == 0));
+    }
+    #[test]
+    fn scaled_layers_keep_hard_pixels_and_blend_translucent_ones() {
+        let sprite = Sprite {
+            width: 2,
+            height: 1,
+            rgba: vec![200, 10, 10, 255, 0, 0, 255, 128],
+            glyphs: vec![],
+        };
+        let mut canvas = FlightCanvas::default();
+        canvas.blank([9, 3]);
+        // Under the translucent pixel, an opaque white one.
+        canvas.pixels[(9 + 6) * 4..][..4].copy_from_slice(&[255; 4]);
+        canvas.scaled(&sprite, (0.5, 0., 9., 3.));
+        let at = |x: usize, y: usize| canvas.pixels[(y * 9 + x) * 4..][..4].to_vec();
+        // Each source pixel covers four and a half columns: 0.5..5 and 5..9.5.
+        assert_eq!(at(0, 0), [0; 4]);
+        assert_eq!(at(1, 1), [200, 10, 10, 255]);
+        assert_eq!(at(4, 2), [200, 10, 10, 255]);
+        assert_eq!(at(7, 0), [0, 0, 255, 128]);
+        assert_eq!(at(6, 1), [127, 127, 255, 255]);
+    }
+    #[test]
+    fn labels_draw_scaled_with_a_shadow() {
+        let font = tore_formats::font::Font {
+            height: 2,
+            glyphs: (0..256)
+                .map(|c| tore_formats::font::Glyph {
+                    advance: 3,
+                    pixels: if c == usize::from(b'A') {
+                        vec![(0, 0), (1, 1)]
+                    } else {
+                        vec![]
+                    },
+                })
+                .collect(),
+        };
+        assert_eq!(FlightCanvas::text_width(&font, "AA", 2.), 12.);
+        let mut canvas = FlightCanvas::default();
+        canvas.blank([20, 20]);
+        canvas.text(&font, "A", [4., 4.], 2., [255, 255, 255]);
+        let at = |x: usize, y: usize| &canvas.pixels[(y * 20 + x) * 4..][..4];
+        assert_eq!(at(4, 4), [255, 255, 255, 255]);
+        assert_eq!(at(7, 7), [255, 255, 255, 255]);
+        // The shadow fills in beside the text, never over it.
+        assert_eq!(at(9, 9), [0, 0, 0, 255]);
+        assert_eq!(at(6, 4), [0; 4]);
     }
     #[test]
     fn shrinking_hud_preserves_camera_projection_on_wide_and_tall_screens() {

@@ -149,6 +149,8 @@ enum Screen {
     Quick,
     Viewer,
     Flight,
+    /// The mission replay viewer; see replay/viewer.rs.
+    Replay,
 }
 struct App {
     preference_path: Option<PathBuf>,
@@ -235,6 +237,8 @@ struct App {
     controls: Option<controls_editor::Editor>,
     /// The Graphics options screen, open over the main menu.
     graphics_screen: Option<graphics_screen::Editor>,
+    /// The mission replay viewer, while `Screen::Replay` shows it.
+    replay: Option<Box<replay::host::Replay>>,
     /// Cursor position while the right button drags mouse look.
     mouse_look: Option<(f64, f64)>,
     /// Unused fraction of a smooth-scrolling wheel notch.
@@ -1464,6 +1468,7 @@ impl App {
         match action {
             Action::Controls => self.open_controls("Main menu"),
             Action::Graphics => self.open_graphics("Main menu"),
+            Action::WatchReplay(ref path) => self.watch_replay(path),
             Action::ReimportMedia => {
                 // The pack on disk is still valid here, so the menu the player
                 // is looking at becomes the locate screen's background.
@@ -2039,11 +2044,16 @@ impl App {
                     "T.O.R.E-Fighters - {} Terrain Viewer",
                     self.world.theater.name
                 ),
+                Screen::Replay => self
+                    .replay
+                    .as_ref()
+                    .map_or_else(String::new, |r| r.viewer.title()),
             });
         }
         if let Some(audio) = &self.audio {
             audio.scene(match self.screen {
-                Screen::Flight => audio::music::Scene::Score(0),
+                // A replay stays silent until replay sound arrives.
+                Screen::Flight | Screen::Replay => audio::music::Scene::Score(0),
                 Screen::Main => audio::music::Scene::Main,
                 _ => audio::music::Scene::Brief,
             });
@@ -2098,6 +2108,10 @@ impl ApplicationHandler for App {
                                 "T.O.R.E-Fighters - {} Terrain Viewer",
                                 self.world.theater.name
                             ),
+                            Screen::Replay => self
+                                .replay
+                                .as_ref()
+                                .map_or_else(String::new, |r| r.viewer.title()),
                         })
                         // Fixed-size diagnostic windows preserve requested capture aspect ratios
                         // on compositors that otherwise tile/rescale newly created windows.
@@ -2215,6 +2229,18 @@ impl ApplicationHandler for App {
         if self.finished {
             return;
         }
+        // The replay viewer takes its own input and drawing; what it leaves
+        // (resizing, focus, Alt-Enter, quitting) carries on below.
+        let event = if self.screen == Screen::Replay
+            && self.renderer.as_ref().is_some_and(|r| r.window.id() == id)
+        {
+            match self.replay_event(event_loop, event) {
+                Some(event) => event,
+                None => return,
+            }
+        } else {
+            event
+        };
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -2276,7 +2302,7 @@ impl ApplicationHandler for App {
                         }
                         Action::None
                     }
-                    Screen::Viewer => Action::None,
+                    Screen::Viewer | Screen::Replay => Action::None,
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -3795,6 +3821,8 @@ impl ApplicationHandler for App {
                         );
                         true
                     }
+                    // Drawn by the replay viewer before reaching here.
+                    Screen::Replay => return,
                 };
                 if self.screen != Screen::Flight {
                     renderer.window.set_cursor_visible(true);
@@ -6123,6 +6151,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut windowed_flag = false;
     let mut graphics_flags: Vec<(String, String)> = Vec::new();
     let mut window_size_flag = false;
+    // Mission replay viewer; see docs/REPLAYS.md.
+    let mut watch_replay: Option<PathBuf> = None;
+    let mut replay_capture: Option<PathBuf> = None;
+    let mut replay_options = replay::viewer::Options::default();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--no-controllers" => native_input = false,
@@ -6629,6 +6661,43 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 panel_snapshot = Some(args.next().ok_or("--panel-snapshot needs output path")?)
             }
             "--viewer" => initial_screen = Screen::Viewer,
+            "--watch-replay" => {
+                watch_replay = Some(PathBuf::from(
+                    args.next().ok_or("--watch-replay needs a recording")?,
+                ));
+                initial_screen = Screen::Replay;
+            }
+            "--capture-replay" => {
+                replay_capture = Some(PathBuf::from(
+                    args.next().ok_or("--capture-replay needs a .ppm or .png path")?,
+                ));
+                smoke_test = true;
+            }
+            "--replay-tick" => {
+                replay_options.tick =
+                    Some(args.next().ok_or("--replay-tick needs a tick")?.parse()?);
+            }
+            "--replay-aircraft" => {
+                replay_options.aircraft = Some(
+                    args.next()
+                        .ok_or("--replay-aircraft needs an aircraft id")?
+                        .parse()?,
+                );
+            }
+            "--replay-drone" => replay_options.drone = true,
+            "--replay-speed" => {
+                replay_options.speed = Some(
+                    args.next()
+                        .ok_or("--replay-speed needs a speed such as 16 or -2")?
+                        .parse()?,
+                );
+            }
+            "--replay-ui" => {
+                replay_options.ui = replay::viewer::Ui::parse(
+                    &args.next().ok_or("--replay-ui needs a list of parts")?,
+                )?;
+            }
+            "--replay-clean" => replay_options.ui.hidden = true,
             "--quick-mission" => initial_screen = Screen::Quick,
             "--background" => {
                 background = Some(args.next().ok_or("--background needs an asset name")?)
@@ -6706,6 +6775,9 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
+                    "Replays: --watch-replay FILE plays a mission recording (docs/REPLAYS.md). With it, --capture-replay OUT.ppm writes one GPU frame and exits (OUT.png saves the clean view as P does); --replay-tick N pauses at a tick; --flight-view 0..11 and --replay-aircraft ID choose the view; --replay-drone starts in the follow drone; --replay-speed 0.125..16 starts playing at that speed, negative for reverse; --replay-ui labels,timer,trails,comms,subtitles chooses the interface parts; --replay-clean starts with the interface hidden, as H hides it."
+                );
+                println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
                 );
                 println!(
@@ -6719,6 +6791,26 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             }
             _ => return Err(format!("Unknown argument: {arg}").into()),
         }
+    }
+    if watch_replay.is_none()
+        && (replay_capture.is_some() || replay_options != replay::viewer::Options::default())
+    {
+        return Err("--capture-replay and the --replay-* options need --watch-replay FILE".into());
+    }
+    if watch_replay.is_some()
+        && (snapshot.is_some()
+            || import_only
+            || capture_terrain.is_some()
+            || ai_probe.is_some()
+            || headless_ticks.is_some()
+            || launch_creator
+            || record_input.is_some()
+            || replay_input.is_some())
+    {
+        return Err("--watch-replay opens the replay viewer and cannot combine with other captures, probes or recordings".into());
+    }
+    if watch_replay.is_some() && std::env::args().any(|a| a == "--flight-view") {
+        replay_options.view = Some(flight_view);
     }
     if fixture_wings
         && (ai_wings_enabled || enemy_skill.is_some() || ai_mission != ai_wings::Preset::Free)
@@ -8267,6 +8359,22 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         );
     }
     diagnostics::stage_done();
+    let replay = match &watch_replay {
+        Some(path) => {
+            diagnostics::stage("replay loading");
+            let mut viewer =
+                replay::viewer::Viewer::open(path, &theater_resources, &replay_options)?;
+            let capture = replay_capture.map(|path| replay::host::Capture { path });
+            // A capture shows a finished picture: trails, fallen buildings
+            // and the weather need the whole recording read.
+            if capture.is_some() {
+                viewer.finish_tracks();
+            }
+            diagnostics::stage_done();
+            Some(Box::new(replay::host::Replay { viewer, capture }))
+        }
+        None => None,
+    };
     diagnostics::stage("controller and input initialization");
     let input = input::Input::new(input_profile.as_deref(), native_input)?;
     diagnostics::stage_done();
@@ -8362,6 +8470,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         reimport: None,
         controls: None,
         graphics_screen: None,
+        replay,
         mouse_look: None,
         wheel: 0.,
         head_look: [0.; 2],
@@ -8435,11 +8544,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     .text();
     if let Some(audio) = &app.audio {
         audio.scene(match app.screen {
-            Screen::Flight => audio::music::Scene::Score(0),
+            Screen::Flight | Screen::Replay => audio::music::Scene::Score(0),
             Screen::Main => audio::music::Scene::Main,
             _ => audio::music::Scene::Brief,
         });
         audio.preferences(app.menu.state.music, app.menu.state.effects);
+        // A replay stays silent until replay sound arrives.
+        if app.screen == Screen::Replay {
+            audio.restart_flight();
+        }
     }
     if controls_menu {
         app.flight_command(flight_ui::Command::ControlsOpen);

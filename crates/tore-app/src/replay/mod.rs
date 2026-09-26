@@ -1,12 +1,27 @@
 //! Mission recordings in the app: converting live state into the
-//! `tore_replay` model and back. Opinionated addition requested by John on
-//! 2026-09-26; see docs/REPLAYS.md. The format, reader and exports live in
-//! the dependency-free `tore-replay` crate; this module is the only place
-//! the app's own types meet it.
+//! `tore_replay` model and back, recording every flight, and the viewer
+//! that plays a recording from any viewpoint. Opinionated addition requested
+//! by John on 2026-09-26; see docs/REPLAYS.md. The format, reader and exports
+//! live in the dependency-free `tore-replay` crate; this module is the only
+//! place the app's own types meet it.
 pub mod cli;
+pub mod clock;
 pub mod convert;
+#[cfg(test)]
+mod demo;
+pub mod drone;
+#[cfg(test)]
+pub(crate) mod fixture;
+pub mod host;
 pub mod library;
+pub mod overlay;
+pub mod playback;
+pub mod png;
 pub mod recorder;
+pub mod tracks;
+pub mod trails;
+pub mod viewer;
+pub mod weather;
 
 #[cfg(test)]
 pub(crate) mod tests {

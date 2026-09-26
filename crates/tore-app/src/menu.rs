@@ -14,7 +14,7 @@ pub enum Target {
     Bar(usize),
     Item(usize),
 }
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     None,
     Hover,
@@ -38,6 +38,9 @@ pub enum Action {
     ReimportMedia,
     Controls,
     Graphics,
+    /// Opens the mission replay viewer on a recording.
+    #[allow(dead_code)] // Sent by the Replays screen's Watch button.
+    WatchReplay(std::path::PathBuf),
 }
 pub struct State {
     pub buttons: Vec<Button>,

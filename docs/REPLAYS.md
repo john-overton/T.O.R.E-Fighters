@@ -443,8 +443,214 @@ Filled in by a later milestone (M3): the list of recordings and its buttons.
 
 ## Viewer
 
-Filled in by a later milestone (M3): playback, reverse, speeds, cameras,
-hiding the interface and saving pictures.
+The viewer plays a recording back from any viewpoint. It draws the same
+picture live flight drew, through the same drawing helpers and renderer
+calls, rebuilt from the recording alone. Its interface, keys and layout are
+agent design decisions (2026-09-26); the numbers below labelled fitted are
+agent choices too.
+
+### Opening a recording
+
+- From the command line: `tore-app --watch-replay FILE`.
+- From the Replays screen (coming next): its Watch button sends
+  `Action::WatchReplay(path)`. A recording that cannot be opened leaves the
+  main menu showing why.
+- Esc leaves the viewer and returns to the main menu for now. The game's own
+  world and aircraft come back as they were.
+
+The viewer builds the recorded world (map, weather choice, time of day,
+wind and cloud deck) from the header, so a replay looks the same whatever
+the viewer's own settings are. It loads the recorded player's aircraft and a
+model for every other aircraft type the flight drew, and every weapon shape
+the recording names.
+
+### Playing
+
+Playback starts from the beginning at normal speed. The playhead can sit
+between ticks, so slow motion is smooth, and every picture depends only on
+where the playhead is: playing backwards shows exactly what playing forwards
+showed at the same moment.
+
+- **Speeds:** 1/8x, 0.25x, 0.5x, 0.75x, 1x, 2x, 4x, 8x and 16x, forwards or
+  backwards. Play starts at 1x, fast forward at 2x; pressing reverse, fast
+  forward, J or L again doubles the speed up to 16x. From slow motion they
+  go back to their starting speed.
+- **Steps and jumps:** one tick at a time while paused, 5 seconds or 30
+  seconds either way, the start, the end, and the previous or next timeline
+  marker. Playing on from either end starts over from the other.
+- **Timeline markers:** launches (yellow), kills (red), orders (blue) and
+  bookmarks (green), from the recording's events.
+
+### Transport bar
+
+Along the bottom of the view: start, step back, reverse, pause, play, fast
+forward, step forward and end; the speed; the time and the recording's
+length; the camera, which a click steps through the flight views and the
+two drone modes; the selected aircraft, which a click moves to the next one;
+and Hide. Above the buttons is the timeline: click it to jump, drag along it
+to scrub. The lit button shows what playback is doing. The bar uses the
+Controls screen's colours, font and button style in the 640x480 interface
+layer; the layer's top half is pinned to the top of the view and its bottom
+half to the bottom, so the bar sits on the bottom edge of any window.
+
+### Keys and mouse
+
+The viewer's keys are built in, listed in the
+[controls master list](CONTROLS.md#built-in-controls-outside-the-tables).
+They follow the video-editor convention for J, K and L. F11 is not a view,
+as in flight.
+
+| Input | Action |
+| --- | --- |
+| Space | Play or pause |
+| J / K / L | Play backwards / pause / play forwards; again for twice the speed |
+| Up / Down | Next faster or slower speed in the same direction |
+| Left / Right | 5 seconds back or forward; one tick while paused; with Shift, 30 seconds |
+| Home / End | Start or end |
+| PageUp / PageDown | Previous or next marker |
+| Tab / Shift+Tab | Next or previous aircraft |
+| F1 to F10, F12 | The flight views, on the selected aircraft |
+| Backquote | Drone following the selected aircraft, then flying free, then back |
+| W A S D, E / Q | Drone: move along the view and sideways, climb / descend; Shift is four times faster |
+| Mouse wheel | Drone speed, or zoom in a flight view |
+| Right-drag | Look around, or turn the drone |
+| N / T / C | Name labels / mission timer / Comms list |
+| R / Shift+R | Trails on or off / next trail length |
+| H | Hide or show the whole interface and the pointer |
+| P | Save the view without the interface as a PNG |
+| Esc | Show the interface if hidden, otherwise leave |
+
+### Cameras
+
+- **Flight views on any aircraft.** Tab picks the aircraft; F1 to F12 give
+  the same views as in flight, from that aircraft: front, back and up sit at
+  the aircraft and hide it (there is no cockpit in a replay), and track,
+  threat, wing, target, fly-by and missile views work from it. The target is
+  that aircraft's own target when the recording has its AI target changes,
+  otherwise the player's designated target, which the recording notes with
+  every command the player gives. A view that cannot be shown (no target, no
+  wingman, no missile) says why and shows the aircraft from outside; once
+  the aircraft has left the recording (a wreck that exploded), the camera
+  stays where it was. The viewer opens in the external view of the player.
+- **Drone.** Backquote switches to a drone that follows the selected
+  aircraft at a fixed offset in world axes, so the aircraft stays where it
+  was framed while the drone travels with it; Backquote again lets it fly
+  free where it is, and again returns to the flight view. The drone starts
+  where the camera was or, when that is far away, 250 feet behind, 90 feet
+  to the right of and 60 feet above the aircraft: off its path, so it does
+  not fly through the flares and smoke the aircraft leaves. W A S D move along
+  the view and sideways, E and Q climb and descend (as in the terrain
+  viewer), Shift is four times faster, and the wheel sets the speed from 20
+  to 5,000 feet per second (250 at first, 25% a notch). The drone stays 10
+  feet above the ground and moves in real time, so shots can be framed while
+  playback is paused. Speed range and offsets are fitted.
+- Right-drag looks around, at the mouse-look sensitivity set on the
+  Controls screen.
+
+### What is drawn
+
+Everything live flight draws outside the cockpit, rebuilt for the tick
+under the playhead:
+
+- Aircraft, fixtures, weapons, tracers, debris and effects from the
+  recorded frames, blended between ticks the way live flight blends its
+  last two ticks. Frames are decoded a second at a time from the nearest
+  keyframe; the eight most recently used seconds stay decoded, so playing
+  either way reads each second once.
+- Ejected pilots, with the imported ejection art.
+- Buildings and airport objects, minus those the recording shows destroyed
+  by that tick.
+- Smoke and contrails rebuilt from their release ticks with the
+  simulation's lifetimes, rise and caps; effects from their start ticks.
+- The player's wing vapor, rebuilt by stepping the vapor history over the
+  last 250 ticks of recorded poses from one of live flight's own commit
+  ticks, so it matches live flight exactly once two seconds of history
+  exist. Recordings keep attitudes, not turn rates, so the roll rate that
+  shortens the vapor is worked out from the attitudes a tick apart
+  (fitted).
+- The weather, re-stepped one tick at a time as live flight steps it, with
+  a snapshot every second (the environment's own state every ten seconds)
+  so a seek is at most a second of stepping. Live flight steps the weather
+  from the view camera; the viewer steps it from the recorded player's
+  forward view, so each tick's weather is the same however it is watched
+  (fitted: only the sun-whitening smoothing can differ from what the pilot
+  saw). The palette is then resolved for the viewer camera's height. A
+  headless probe never steps the weather, so its recordings keep the launch
+  sky.
+
+There is no cockpit, HUD, instrument panel or mirror in a replay. The
+viewer is silent for now.
+
+### Interface parts
+
+- **Name labels** (N, on at first): each aircraft's label over it in its
+  side's colour (friendly blue, enemy red, neutral green, grey when
+  unknown), drawn at the view's full resolution with a dark shadow; the
+  selected aircraft's is in brackets. Aircraft over 100 nautical miles away,
+  wrecks on the ground and the aircraft the camera sits in have none.
+- **Mission timer** (T, on at first): mission time as `mm:ss.t` and the tick.
+- **Subtitles:** radio, tower and crew lines the player could hear, and
+  cockpit messages, for four seconds from their tick, newest lowest, up to
+  three.
+- **Comms list** (C): the last 14 recorded communication entries up to the
+  playhead, calls the player could not hear marked as such. The full,
+  filterable Comms panel comes with the debug panels.
+- **Flight path trails** (R, off at first): each aircraft's and guided
+  weapon's path over the last 30 seconds (Shift+R: 10, 30, 60, 120 or 300)
+  as a thin line in its side's colour, a weapon's paler than its owner's.
+  They are drawn in the 3D view, so terrain and aircraft hide them, from
+  path samples ten times a second plus where the aircraft is drawn now.
+  Colours and lengths are fitted.
+- **Hide UI** (H or the Hide button): hides the bar, labels, subtitles,
+  timer, Comms list and the pointer; trails stay as chosen, and playback
+  and camera keys keep working. Esc brings the interface back.
+- **Screenshots** (P): the 3D view without any interface, at the view's
+  size (up to 1920x1080), saved as
+  `screenshots/<recording>-tick<tick>.png` under the app data folder. The
+  PNG writer is built in: uncompressed image data in stored deflate blocks,
+  so a full-HD picture is about 6 MB.
+
+Trails, fallen buildings and the weather need the whole recording read
+once. A background pass does that when the viewer opens, a second at a
+time; until it has reached a moment, trails there are shorter and the sky
+waits at the last moment it has reached.
+
+### Captures and timing
+
+For checking the viewer without a keyboard:
+
+```sh
+tore-app --watch-replay FILE --capture-replay OUT.ppm --replay-tick N \
+    [--flight-view 0..11] [--replay-aircraft ID] [--replay-drone] \
+    [--replay-ui labels,timer,trails,comms,subtitles] [--replay-clean]
+```
+
+The capture waits for the background pass, draws the frame at tick `N`
+with the interface as chosen, writes a PPM like `--capture-flight` and
+exits. A path ending in `.png` instead saves the 3D view without the
+interface through the same code and PNG writer as P. `--replay-clean`
+starts with the interface hidden, as H hides it.
+`--replay-speed S` starts playing at a ladder speed, negative for reverse,
+and with `TORE_PERF_FRAMES=N` the viewer reports frame timings like live
+flight.
+
+Measured on the development Mac (Apple M3, 1440x1080 view, release build,
+other work running on the machine) with a synthetic ten-minute recording of
+17 aircraft, trails and labels on: 33 ms a frame at 16x forwards, 36 ms at
+16x backwards and 39 ms at 1x, against 38 ms for live free flight measured
+at the same time. The GPU dominates: rebuilding the moment took 6 to 7 ms of
+each frame, most of it the same aircraft drawing live flight does, and the
+interface about 1 ms. While the weather snapshots are first being built,
+about 1,200 ticks a frame, frames take about 2 ms more.
+
+### Known limits
+
+- No cockpit, HUD, instruments or replay sound yet (planned with the debug
+  panels), no right-click menu, and the keys cannot be rebound.
+- Checked by eye with synthetic recordings and headless AI probe
+  recordings; a recording of a flight flown by hand has not been watched
+  yet.
+- Gun rounds have no trails.
 
 ## Debug panels
 
@@ -684,6 +890,7 @@ them again.
 | `--recording-log FILE [--out DIR] [--from S] [--to S] [--ids 0,7] [--rate HZ]` | Writes `log.jsonl` and `summary.txt` to DIR (default: a `-log` folder beside the recording). `--from` and `--to` are mission seconds, `--ids` limits the log to those aircraft, `--rate` sets aircraft samples per second (default 1) |
 | `--recording-acmi FILE [--out FILE] [--rate HZ] [--guns]` | Writes a Tacview file (default: `.txt.acmi` beside the recording), 10 samples a second by default; `--guns` adds gun rounds |
 | `--recording-diff A B` | Prints how two recordings differ: header, identities, the first second their checksums differ, the first tick any aircraft's state differs, and event counts by family |
+| `--watch-replay FILE` | Opens the [viewer](#viewer) on a recording (this one needs the game media and a display); with `--capture-replay OUT.ppm --replay-tick N` it writes one frame and exits, see [captures](#captures-and-timing) |
 | `--ai-probe-ticks N --record-mission PATH [--verify-render]` | Records a headless AI probe to PATH (never overwritten) without changing its output. `--verify-render` then rebuilds every tick from the file, compares it with the picture the probe drew, and prints one line: `AI probe verify-render: PASS ticks=... missing=0 differing=0`, or the first difference |
 
 For example, after John says "look at the replay from 3:40 pm" (15:40 UTC
@@ -728,6 +935,18 @@ headless workflow.
   header's resolved settings (layout, weather choice and layer, start time,
   wind and cloud deck) without reading `TORE_WEATHER_TIME`, `TORE_WIND` or
   `TORE_CLOUD_ALTITUDE`; `World::identity` captures them from a live world.
+- The viewer lives in `tore-app/src/replay/`: `viewer.rs` (the screen:
+  loading, cameras, keys, drawing), `host.rs` (the `Screen::Replay`
+  plumbing in the app), `playback.rs` (any tick's picture, smoke and wing
+  vapor), `clock.rs` (playhead, speeds, steps, markers), `tracks.rs` (the
+  background pass: trail samples, building hit points, the player's path
+  for the weather), `weather.rs` (weather snapshots), `drone.rs`,
+  `trails.rs`, `overlay.rs` (the interface and its pointer handling) and
+  `png.rs`. Tests use a synthetic recording (`replay/fixture.rs`); a longer
+  demonstration recording over the imported Ukraine map, for looking at the
+  viewer by eye, is written by
+  `TORE_REPLAY_DEMO=FILE cargo test --locked -p tore-app replay::demo -- --ignored`
+  (`TORE_REPLAY_DEMO_MINUTES` and `TORE_REPLAY_DEMO_AIRCRAFT` size it).
 - Tests use synthetic recordings only; golden outputs live in
   `crates/tore-replay/tests/golden` and are rewritten with
   `TORE_UPDATE_GOLDEN=1 cargo test --locked -p tore-replay`.

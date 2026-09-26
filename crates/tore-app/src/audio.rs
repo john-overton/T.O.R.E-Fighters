@@ -591,7 +591,7 @@ impl Audio {
             }
             _ => {}
         }
-        let name = cue(action);
+        let name = cue(action.clone());
         if let Some(clip) = name.and_then(|n| self.clips.get(n)) {
             mixer.play_ui(clip, action == Action::OrdnanceFuel);
         }

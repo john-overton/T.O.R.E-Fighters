@@ -593,3 +593,17 @@ recordings. `terrain::World::identity` captures the resolved world for the
 header and `World::for_identity` rebuilds it without environment variables.
 `replay/cli.rs` holds the `--recording-*` commands and the tick-by-tick
 render check. See [mission replays](REPLAYS.md).
+
+The mission replay viewer is its own screen, `Screen::Replay`, run by
+`replay/viewer.rs` and wired into the app by `replay/host.rs`, which takes the
+screen's window events before `main`'s own handling and hands back what the
+app still owns: resizing, focus, Alt-Enter and quitting. The viewer owns a
+`World` built from the recording's identity and its own airframes, so the
+Quick Mission screen's world is untouched. Entering the screen points the
+renderer at them (`set_world`, then `prepare_aircraft` for the recorded
+player, since a world rebuild discards the aircraft); leaving restores the
+game's world and ownship the same way. Each frame rebuilds the moment under
+the playhead from the recording (`replay/playback.rs`) and makes the same
+renderer calls as live flight, with the cockpit and mirrors switched off every
+frame and a blank flight canvas carrying only the viewer's interface. Nothing
+it draws feeds back into the simulation; see [replays](REPLAYS.md#viewer).
