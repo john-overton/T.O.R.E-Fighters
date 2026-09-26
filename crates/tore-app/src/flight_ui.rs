@@ -63,6 +63,16 @@ pub enum Command {
     Valkyries,
 }
 type Control = (usize, (i32, i32, i32, i32), String);
+/// Flight messages: HUD-colored text in the HUD's font and size, with no
+/// background, centered at the bottom of the view, newest at the bottom, each
+/// shown for five seconds, at most seven lines. Opinionated, requested by John
+/// on 2026-09-26 as the retail look; the original's exact timing, line count
+/// and size are untraced.
+const NOTICE_LIFETIME: Duration = Duration::from_secs(5);
+const NOTICE_LINES: usize = 7;
+/// The gap between the newest line's text and the bottom of the window, in
+/// 640x480 layer units.
+const NOTICE_MARGIN: f64 = 5.;
 /// Authored Pref row for the weapon diagnostic panel. It is not in the
 /// retail menu; opinionated, requested by John on 2026-09-23.
 pub const WEAPON_DIAGNOSTICS: &str = "Weapon diagnostics?";
@@ -98,8 +108,8 @@ pub struct FlightUi {
     pub look: [f32; 2],
     pub time_scale: f64,
     pub effects: bool,
-    pub notice: Option<(String, Instant)>,
-    pending_notices: std::collections::VecDeque<String>,
+    /// Message lines shown at the bottom of the flight view, oldest first.
+    pub notices: std::collections::VecDeque<(String, Instant)>,
     pub help: bool,
     root: usize,
     path: Vec<usize>,
@@ -123,8 +133,7 @@ impl Default for FlightUi {
             look: [0.; 2],
             time_scale: 1.,
             effects: true,
-            notice: None,
-            pending_notices: Default::default(),
+            notices: Default::default(),
             help: false,
             root: 0,
             path: vec![],
@@ -215,24 +224,11 @@ impl FlightUi {
     }
     pub fn message(&mut self, text: impl Into<String>) {
         let text = text.into();
-        if self.pending_notices.contains(&text)
-            || self
-                .notice
-                .as_ref()
-                .is_some_and(|(shown, at)| *shown == text && at.elapsed() < Duration::from_secs(4))
-        {
-            return;
-        }
-        if self
-            .notice
-            .as_ref()
-            .is_some_and(|(_, at)| at.elapsed() < Duration::from_secs(4))
-        {
-            if self.pending_notices.len() < 64 {
-                self.pending_notices.push_back(text);
-            }
-        } else {
-            self.notice = Some((text, Instant::now()));
+        // A repeated line moves to the bottom with a fresh timer.
+        self.notices.retain(|(shown, _)| *shown != text);
+        self.notices.push_back((text, Instant::now()));
+        while self.notices.len() > NOTICE_LINES {
+            self.notices.pop_front();
         }
     }
     fn unavailable(&mut self, label: &str) -> Command {
@@ -782,14 +778,6 @@ impl FlightUi {
         }
     }
     pub fn draw(&mut self, pixels: &mut [u8], font: &Font, tree: &[MenuNode]) {
-        if self
-            .notice
-            .as_ref()
-            .is_none_or(|(_, at)| at.elapsed() >= Duration::from_secs(4))
-            && let Some(text) = self.pending_notices.pop_front()
-        {
-            self.notice = Some((text, Instant::now()));
-        }
         if self.menu {
             Canvas(pixels).rect((0, 0, 640, 26), [200, 207, 219, 255]);
             if self.help {
@@ -900,45 +888,144 @@ impl FlightUi {
             }
             .text(font, "PAUSED - Ctrl-P to resume", 232, 42);
         }
-        if let Some((text, at)) = &self.notice
-            && at.elapsed() < Duration::from_secs(4)
-        {
-            let mut lines = vec![String::new()];
-            for word in text.split_whitespace() {
-                let last = lines.last_mut().unwrap();
-                let candidate = if last.is_empty() {
-                    word.to_owned()
-                } else {
-                    format!("{last} {word}")
-                };
-                let width: usize = candidate
-                    .bytes()
-                    .map(|ch| font.glyphs[ch as usize].advance)
-                    .sum();
-                if width > 600 && !last.is_empty() {
-                    lines.push(word.to_owned());
-                } else {
-                    *last = candidate;
+    }
+    /// Draw the message lines straight onto the flight view at the HUD's
+    /// on-screen scale, with smoothed edges like the HUD's filtered symbols.
+    /// Pass the HUD font. Lines are centered and grow upward from the bottom.
+    pub fn draw_notices(
+        &mut self,
+        canvas: &mut crate::flight_canvas::FlightCanvas,
+        font: &Font,
+        hud_color: [u8; 3],
+    ) {
+        self.notices
+            .retain(|(_, at)| at.elapsed() < NOTICE_LIFETIME);
+        let [w, h] = canvas.size.map(f64::from);
+        let layer = (w / 640.).min(h / 480.);
+        let scale = layer * crate::flight_canvas::HUD_SCALE;
+        let lines: Vec<String> = self
+            .notices
+            .iter()
+            .flat_map(|(text, _)| wrap(font, text, (600. * layer / scale) as usize))
+            .collect();
+        let lines = &lines[lines.len().saturating_sub(NOTICE_LINES)..];
+        if lines.is_empty() {
+            return;
+        }
+        let line_height = (font.height + 1) as f64 * scale;
+        // The last line's spacing row sits below its text, inside the margin.
+        let bottom = h - NOTICE_MARGIN * layer + scale;
+        let top = (bottom - lines.len() as f64 * line_height).round();
+        // Glyph pixels become boxes; each screen pixel takes the area covered.
+        let (columns, rows) = (canvas.size[0] as usize, (bottom - top).ceil() as usize + 1);
+        let mut cover = vec![0f64; columns * rows];
+        for (i, line) in lines.iter().enumerate() {
+            let mut x = ((w - text_width(font, line) as f64 * scale) / 2.).round();
+            let y = i as f64 * line_height;
+            for ch in line.bytes() {
+                let glyph = &font.glyphs[ch as usize];
+                for &(gx, gy) in &glyph.pixels {
+                    let (left, up) = (x + gx as f64 * scale, y + gy as f64 * scale);
+                    let (right, down) = (left + scale, up + scale);
+                    for row in up.floor() as usize..(down.ceil() as usize).min(rows) {
+                        let dy = down.min(row as f64 + 1.) - up.max(row as f64);
+                        for column in left.max(0.).floor() as usize
+                            ..(right.ceil().max(0.) as usize).min(columns)
+                        {
+                            let dx = right.min(column as f64 + 1.) - left.max(column as f64);
+                            cover[row * columns + column] += dx * dy;
+                        }
+                    }
                 }
+                x += glyph.advance as f64 * scale;
             }
-            let lines = &lines[..lines.len().min(3)];
-            let height = 10 + lines.len() as i32 * 12;
-            let top = 438 - height;
-            Canvas(pixels).rect((8, top, 624, height), [20, 30, 40, 245]);
-            let mut paint = Paint {
-                pixels,
-                clip: (12, top + 2, 616, height - 4),
-                color: [240, 233, 194, 255],
-            };
-            for (i, line) in lines.iter().enumerate() {
-                paint.text(font, line, 16, top + 7 + i as i32 * 12);
+        }
+        for (at, amount) in cover.into_iter().enumerate() {
+            if amount > 0. {
+                let (column, row) = (at % columns, at / columns);
+                canvas.blend(
+                    column as i32,
+                    top as i32 + row as i32,
+                    hud_color,
+                    amount.min(1.),
+                );
             }
         }
     }
 }
+fn text_width(font: &Font, text: &str) -> usize {
+    text.bytes()
+        .map(|ch| font.glyphs[ch as usize].advance)
+        .sum()
+}
+/// Break a message into lines no wider than `width` pixels, at spaces.
+fn wrap(font: &Font, text: &str, width: usize) -> Vec<String> {
+    let mut lines = vec![String::new()];
+    for word in text.split_whitespace() {
+        let last = lines.last_mut().unwrap();
+        let candidate = if last.is_empty() {
+            word.to_owned()
+        } else {
+            format!("{last} {word}")
+        };
+        if text_width(font, &candidate) > width && !last.is_empty() {
+            lines.push(word.to_owned());
+        } else {
+            *last = candidate;
+        }
+    }
+    lines
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn shown(ui: &FlightUi) -> Vec<&str> {
+        ui.notices.iter().map(|(text, _)| text.as_str()).collect()
+    }
+    #[test]
+    fn messages_stack_to_seven_lines_and_repeats_move_to_the_bottom() {
+        let mut ui = FlightUi::default();
+        for n in 0..9 {
+            ui.message(format!("Message {n}"));
+        }
+        assert_eq!(ui.notices.len(), NOTICE_LINES);
+        assert_eq!(shown(&ui)[0], "Message 2");
+        ui.message("Message 4");
+        assert_eq!(shown(&ui).len(), NOTICE_LINES);
+        assert_eq!(shown(&ui).last().unwrap(), &"Message 4");
+        assert_eq!(shown(&ui).iter().filter(|m| **m == "Message 4").count(), 1);
+    }
+    #[test]
+    fn messages_expire_after_five_seconds() {
+        let mut ui = FlightUi::default();
+        ui.message("Old");
+        ui.message("New");
+        ui.notices[0].1 -= NOTICE_LIFETIME;
+        let font = Font {
+            height: 8,
+            glyphs: (0..256)
+                .map(|_| tore_formats::font::Glyph {
+                    advance: 6,
+                    pixels: vec![(0, 0)],
+                })
+                .collect(),
+        };
+        let mut canvas = crate::flight_canvas::FlightCanvas::default();
+        canvas.size = [1280, 960];
+        canvas.pixels = vec![0; 1280 * 960 * 4];
+        ui.draw_notices(&mut canvas, &font, [0, 255, 0]);
+        assert_eq!(shown(&ui), ["New"]);
+        // Three one-pixel glyphs at the HUD's scale on a 2x layer: each
+        // covers 1.445 screen pixels square, in HUD green.
+        let lit: Vec<_> = canvas
+            .pixels
+            .chunks_exact(4)
+            .filter(|p| p[3] != 0)
+            .collect();
+        assert!(lit.iter().all(|p| p[..3] == [0, 255, 0]));
+        let alpha: f64 = lit.iter().map(|p| f64::from(p[3]) / 255.).sum();
+        assert!((alpha - 3. * 1.445f64.powi(2)).abs() < 0.05);
+    }
     #[test]
     fn retail_views_work_without_menu_data_and_modifiers_do_not_leak() {
         use crate::flight_views::{self, Reference};
@@ -1017,12 +1104,10 @@ mod tests {
             );
         }
         // Shift+D is FA's message history, which reports itself unavailable.
-        ui.notice = None;
-        ui.pending_notices.clear();
+        ui.notices.clear();
         ui.message("Wing order");
         ui.message("Oil leak");
-        assert_eq!(ui.notice.as_ref().unwrap().0, "Wing order");
-        assert_eq!(ui.pending_notices.front().unwrap(), "Oil leak");
+        assert_eq!(shown(&ui), ["Wing order", "Oil leak"]);
         ui.menu = true;
         assert_ne!(
             ui.key("d", false, false, false, &tree()),
@@ -1191,7 +1276,7 @@ mod tests {
         assert_eq!(ui.key("Enter", false, false, false, &t), Command::Click);
         assert!(ui.weapon_diagnostics && ui.menu);
         assert_eq!(label(&ui), format!("{WEAPON_DIAGNOSTICS}  On"));
-        assert_eq!(ui.notice.as_ref().unwrap().0, "Weapon diagnostics: on");
+        assert_eq!(*shown(&ui).last().unwrap(), "Weapon diagnostics: on");
         i.weapon_debug = ui.weapon_diagnostics_shown(0);
         let (x, y, w, h) = i.screen_rect(3, size);
         assert_eq!((x, w, h), (normal.0, normal.2, normal.3));
@@ -1204,10 +1289,7 @@ mod tests {
 
         ui.key("Enter", false, false, false, &t);
         assert!(!ui.weapon_diagnostics);
-        assert!(
-            ui.pending_notices
-                .contains(&"Weapon diagnostics: off".to_owned())
-        );
+        assert_eq!(*shown(&ui).last().unwrap(), "Weapon diagnostics: off");
         i.weapon_debug = ui.weapon_diagnostics_shown(0);
         assert_eq!(i.screen_rect(3, size), normal);
     }

@@ -92,6 +92,17 @@ Shift-1 Envelope; Shift-2 Forward View; Shift-3 Other View; Shift-4 Radar/Visual
 The scope, the exposure page and the weapons all read one shared sensor
 component. [What it models, what is authored tuning and what is deferred](radar.md).
 
+## In-flight messages
+
+Cockpit, radio and system messages print in the HUD's color, with no
+background, centered at the bottom of the window. The newest line is at the
+bottom, its text 5 pixels (at 640x480) above the window's edge; each stays five seconds and at most seven show at once, so a burst
+pushes the oldest off the top. Repeating a message that is still shown moves it
+to the bottom with a fresh timer. The text uses the HUD's own font (`HUD11.FNT`)
+at the HUD's on-screen size, with the same smoothed edges. Opinionated, requested by
+John on 2026-09-26 as the retail look; the original's own timing, line count
+and size are untraced.
+
 ## Recovered commands awaiting their systems
 
 All shortcut labels present in the supplied `FMENUD.MNU` are recognized, and the FA in-flight key table is recovered in the [keyboard spec](spec/keyboard.md). This is **not a claim that every original command or system is ported**. FA keys whose systems T.O.R.E does not have yet display a short message:

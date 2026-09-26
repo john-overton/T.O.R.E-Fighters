@@ -64,6 +64,22 @@ impl FlightCanvas {
             self.panels.insert(*page, cached);
         }
     }
+    /// Blend `color` at `alpha` over one screen pixel; outside the view is ignored.
+    pub fn blend(&mut self, x: i32, y: i32, color: [u8; 3], alpha: f64) {
+        let [width, height] = self.size.map(|n| n as i32);
+        if x < 0 || y < 0 || x >= width || y >= height {
+            return;
+        }
+        let at = (y * width + x) as usize * 4;
+        let p = &mut self.pixels[at..at + 4];
+        // Straight-alpha "over", as in `veil`.
+        let under = f64::from(p[3]) / 255. * (1. - alpha);
+        let out = alpha + under;
+        for c in 0..3 {
+            p[c] = ((f64::from(color[c]) * alpha + f64::from(p[c]) * under) / out).round() as u8;
+        }
+        p[3] = (out * 255.).round() as u8;
+    }
     /// Blend `color` over the whole flight view, `coverage(radius)` per pixel
     /// with radius 0 at the centre and 1 at the corners.
     pub fn veil(&mut self, color: [u8; 3], coverage: impl Fn(f64) -> f64) {

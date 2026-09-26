@@ -3451,6 +3451,11 @@ impl ApplicationHandler for App {
                             self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
                             self.menu.pixels.fill(0);
                         }
+                        self.flight_ui.draw_notices(
+                            &mut self.flight_canvas,
+                            &self.hornet.hud_font,
+                            self.instruments.hud_color,
+                        );
                         self.flight_ui.draw(
                             &mut self.menu.pixels,
                             &self.hornet.font,
