@@ -626,11 +626,15 @@ impl FormationVariation {
             return false;
         }
         self.offset_ft = [
-            random.range(-15, 14),
-            random.range(-50, 49),
-            random.range(-50, 49),
+            random.site("formation variation lateral").range(-15, 14),
+            random
+                .site("formation variation longitudinal")
+                .range(-50, 49),
+            random.site("formation variation vertical").range(-50, 49),
         ];
-        let seconds = random.range(VARIATION_MIN_SECONDS, VARIATION_MAX_SECONDS);
+        let seconds = random
+            .site("formation variation interval")
+            .range(VARIATION_MIN_SECONDS, VARIATION_MAX_SECONDS);
         self.next_deadline += 4 * u64::from(seconds.unsigned_abs());
         true
     }

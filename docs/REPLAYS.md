@@ -451,6 +451,96 @@ hiding the interface and saving pictures.
 Filled in by a later milestone (M4): the AI thinking, telemetry, missile and
 timer panels.
 
+### AI thinking record
+
+Every AI aircraft writes down why it did what it did, every tick, so the AI
+thinking panel, recordings and debug logs can give real reasons with real
+numbers. The record is **write-only**: no decision ever reads it. It holds
+copies of values the AI worked out anyway, plus explanations recomputed from
+the same rules. The golden behaviour fingerprints prove the AI flies exactly
+as it did before the record existed, including one test that reads every
+record and drains the journal after every tick of two full synthetic
+missions. What the record contains is an agent decision. The code lives in
+`tore_sim::ai::thought`.
+
+There are four parts.
+
+**The controller record** (`Controller::trace()`) is what one aircraft's
+decision loop considered on its latest tick. A paused or repeated tick leaves
+it as it was.
+
+| Part | What it says |
+| --- | --- |
+| Path | Whether the decision ran, or the aircraft was already destroyed. |
+| Events | Hits, targets that disappeared, and every missile warning: the delay before the aircraft notices it, the tick it takes effect, and on arrival the countermeasure roll, the devices released, the reaction and whether it made a radio call. Then the most urgent reason and whether it restarted the aircraft's plan or let it carry on. |
+| Fuel | Fuel, endurance, time to reach home, the fuel state and whether the aircraft is heading home. |
+| Target | The previous target and how the new one was chosen: weapons held, the mission's choice (with why it was refused, if it was), kept because it is inside 20,000 ft, or ranked by distance and penalties with the winning score. |
+| Geometry | Range, horizontal range and the angles to the target. |
+| Weapons | Every carried store with the first rule it breaks: switched off, needs radar that is off, needs a sensor track, wrong kind of target, empty, or outside its envelope. Outside the envelope, every reason: too close, too far, too far off the nose, outside its zone. Usable stores carry their hit chance and score. Then the store chosen, whether the lock holds and which condition failed, exactly what the weapon service was told, its phase before and after, its outcome and its next deadline. |
+| Motion | Which branch flew the aircraft: missile defense, rejoining a charge or patrol, searching along a bearing, an ordered approach or maneuver, investigating an old contact, formation (slot point, aim, speed, bank), carrying on with the current maneuver, not yet due for a new choice, or a new choice. Also the quarter-second clock and when the next choice is due. |
+| Maneuver | For a new choice: going home, a missile reaction, no target, target straight above or below, evasion or the ordinary approach; the tactical situation, the quadrant (ahead or behind, facing or not) and its experience percentages, the choice, any fitted rule that stood in for an unknown one, the last-ditch move and the motion request. |
+| Resolve | Where the pitch came from (asked for, or the fitted engagement pitch with its inputs), the speed, the pursuit offsets, steering point and regulated speed, and how the maneuver ends. |
+
+Beside it, `Controller::draws()` lists every random draw of the tick: what
+the draw decided (for example "best attack" or "countermeasure roll"), the
+source line, the value, the threshold it was compared with and whether it
+passed. `last_batch()`, `weapon_phase()`, `weapon_deadline()`,
+`active_maneuver()` and `search_contact()` show the current state.
+
+**The actor record** (`AiActor::trace()`) is what the mission decided around
+the controller on its latest tick.
+
+| Part | What it says |
+| --- | --- |
+| Path | Destroyed, a training target, a takeoff or landing sequence, or the ordinary decision. |
+| Airfield gates | Turn to go, runway free, earlier wing members down, a free parking slot, and whether a joining wingman's leader is landing. |
+| Ejection | The hazard found and seconds to impact, whether a takeoff or landing phase judged it, whether it was a catastrophe or earned a go-around, and whether the pilot ejected. |
+| Airfield | Whether a landing started, why the aircraft left a sequence (its leader stopped landing, or a missile threat), and what the sequence saw and commanded. |
+| Dropped warnings | Missile warnings thrown away while taking off or landing, or by a training target. |
+| Forgotten attacks | Remembered attacks dropped after 240 ticks without news, or because the attacker is gone. |
+| Targets and stores | What the aircraft's own sensors allowed it to target, its stores' view of the target, and which aircraft the stores were aimed at. |
+| Engagement | Whether it is holding formation, the role and stance in force, each remembered attack and why any is ignored, the choice, and a ranking of up to 16 aircraft: why any cannot be a target, its priority, its distance and penalties, and its score. |
+| Rejoin and search | An escort flying back inside its leash or a patrol returning to its region, a bearing to search along, and an old contact to investigate. |
+| Bingo | A bingo landing ordered this tick. |
+| Controls | The maneuver flown, the terrain floor, the steering adapter's whole output (the controls, its fallbacks and the attitude it asked for) and the attitude and speed the flight model delivered. |
+
+`AiActor::route_draws()` lists the draws of the private route home.
+
+**Missile defense** (`AiActor::defense_decision()`) now also explains itself:
+the maneuver the evidence calls for (notch or jink) and its heading and
+pitch even when it is not flown yet, whether a dive is safe, and each reason
+behind maneuvering or releasing chaff and flares now.
+
+**The message journal** (`AiMission::take_journal()`, or
+`AiWings::take_ai_journal()` in the app) lists the messages between
+aircraft. The host drains it once per tick; if it is never drained it keeps
+the latest 4,096 entries and counts the rest. Each entry has the tick, the
+sender, the content and every recipient's outcome with its reason.
+
+| Message | Outcomes |
+| --- | --- |
+| Attack evidence, from the aircraft that saw the attack to itself, its wing leader and its escorts | Queued for the next tick, delivered, ignored (with why: a report about someone else, an unknown reporter, a recipient that left, holding formation since a recall, or a projectile already known at the recall) and forgotten after 240 ticks. A refresh of evidence already held is not a new message. |
+| A neutral leader releasing its wing after a perceived attack | The attack that triggered it and the leader's own outcome. |
+| Wing orders over the wing channel (break, approach, spacing, formation, wing control, target assignment, land) | Each recipient's outcome: applied, rejected with the reason, accepted without motion, or motion installed. |
+| An escort's target or priority changing | Journaled once per change. |
+| Missile warnings, sent by the launcher | Due at a tick, received with the reaction, or dropped with the reason. |
+
+What cannot be explained yet:
+
+- The record explains this game's rules, not the original's. Where the
+  original's rule is unknown, the record names the fitted rule that stood in
+  for it (see [behavior provenance](behavior-provenance.md)).
+- The weapon lock is a simple host test (target ahead, not behind terrain),
+  so a lock failure can say only which of those failed.
+- The formation guidance explains itself only through its phase and trace;
+  its internal plan is not recorded.
+- The ejection monitor's own once-a-second roll is inside the ejection
+  code, so the record says the pilot ejected but not the roll.
+- Player orders, radio calls and cockpit voices belong to the
+  [communication journal](#communication-journal), not to this record.
+- The flight model's reasons are a separate record; this one stops at the
+  controls the flight model received.
+
 ## Communication journal
 
 Filled in by a later milestone (M2): how orders, reports, radio calls and

@@ -74,7 +74,7 @@ pub fn resolve_experience(
         }),
         ExperienceRequest::Editor { selected } => {
             let selected = Experience::from_level(selected)?;
-            let draw = random.percent();
+            let draw = random.site("editor experience shift").percent();
             let shift = if draw < EDITOR_DOWN_BELOW {
                 -1
             } else if draw < EDITOR_UP_FROM {

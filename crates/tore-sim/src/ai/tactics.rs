@@ -297,12 +297,13 @@ pub fn missile_reaction(
             reaction: MissileReaction::ClimbToPitch90 {
                 heading_deg: wrap_heading_deg(inputs.current_heading_deg),
             },
-            wingman_break: random.chance(INFRARED_WINGMAN_BREAK_PERCENT).then_some(
-                WingmanBreak::Offsets {
+            wingman_break: random
+                .site("infrared wingman break")
+                .chance(INFRARED_WINGMAN_BREAK_PERCENT)
+                .then_some(WingmanBreak::Offsets {
                     heading_deg: INFRARED_WINGMAN_BREAK_HEADING_DEG,
                     pitch_deg: INFRARED_WINGMAN_BREAK_PITCH_DEG,
-                },
-            ),
+                }),
         },
         MissileLaunch::Radar => {
             let reaction = if inputs.off_beam_deg <= RADAR_TURN_TOWARD_MAX_OFF_BEAM_DEG {
@@ -311,7 +312,7 @@ pub fn missile_reaction(
                 }
             } else {
                 // Draw-to-side mapping is arbitrary; both sides are equally likely.
-                let (side, turn) = match random.choose(2) {
+                let (side, turn) = match random.site("radar break side").choose(2) {
                     0 => (BreakSide::Left, -RADAR_BREAK_TURN_DEG),
                     _ => (BreakSide::Right, RADAR_BREAK_TURN_DEG),
                 };
@@ -379,10 +380,14 @@ pub fn coordinated_escape(
     situation: &TacticalSituation,
     random: &mut DecisionRandom,
 ) -> Option<CoordinatedEscape> {
-    if !coordinated_escape_eligible(situation) || random.chance(COORDINATED_ESCAPE_SKIP_PERCENT) {
+    if !coordinated_escape_eligible(situation)
+        || random
+            .site("coordinated escape skip")
+            .chance(COORDINATED_ESCAPE_SKIP_PERCENT)
+    {
         return None;
     }
-    Some(CoordinatedEscape::ALL[random.choose(3) as usize])
+    Some(CoordinatedEscape::ALL[random.site("coordinated escape choice").choose(3) as usize])
 }
 
 /// B11: last-ditch entry needs the target behind, facing, within 5000 feet
@@ -495,10 +500,14 @@ pub fn special_approach(
     situation: &TacticalSituation,
     random: &mut DecisionRandom,
 ) -> Option<SpecialApproach> {
-    if !special_approach_eligible(situation) || !random.chance(SPECIAL_APPROACH_ENTRY_PERCENT) {
+    if !special_approach_eligible(situation)
+        || !random
+            .site("special approach entry")
+            .chance(SPECIAL_APPROACH_ENTRY_PERCENT)
+    {
         return None;
     }
-    Some(match random.choose(2) {
+    Some(match random.site("special approach pass").choose(2) {
         0 => SpecialApproach::OffsetPass,
         _ => SpecialApproach::OverheadPass,
     })
@@ -513,7 +522,11 @@ pub fn best_attack(situation: &TacticalSituation, random: &mut DecisionRandom) -
         && situation.facing
         && situation.spatial_distance_ft <= BEST_ATTACK_LAST_DITCH_MAX_DISTANCE_FT
         && situation.heading_difference_deg <= BEST_ATTACK_LAST_DITCH_MAX_HEADING_DIFF_DEG;
-    if last_ditch_geometry && random.chance(BEST_ATTACK_LAST_DITCH_PERCENT) {
+    if last_ditch_geometry
+        && random
+            .site("best-attack last ditch")
+            .chance(BEST_ATTACK_LAST_DITCH_PERCENT)
+    {
         BehaviorChoice::LastDitch
     } else {
         BehaviorChoice::Pursuit
@@ -526,7 +539,10 @@ pub fn random_tactic(
     thresholds: &TacticalThresholds,
     random: &mut DecisionRandom,
 ) -> Result<BehaviorChoice> {
-    if random.chance(thresholds.straight_on_random_menu_percent) {
+    if random
+        .site("random-tactic straight flight")
+        .chance(thresholds.straight_on_random_menu_percent)
+    {
         return Ok(BehaviorChoice::Straight);
     }
     Err(AiError::UnspecifiedRule(
@@ -556,15 +572,20 @@ pub fn approach_choice(
     let quadrant = situation.quadrant();
     if experience == Experience::Novice
         && quadrant == Quadrant::BehindFacing
-        && random.chance(NOVICE_BEHIND_FACING_STRAIGHT_PERCENT)
+        && random
+            .site("novice straight flight")
+            .chance(NOVICE_BEHIND_FACING_STRAIGHT_PERCENT)
     {
         return Ok(BehaviorChoice::Straight);
     }
     let row = thresholds.for_quadrant(quadrant);
-    if random.chance(row.best_attack_percent) {
+    if random.site("best attack").chance(row.best_attack_percent) {
         return Ok(best_attack(situation, random));
     }
-    if random.chance(row.random_tactic_percent) {
+    if random
+        .site("random tactic")
+        .chance(row.random_tactic_percent)
+    {
         return random_tactic(thresholds, random);
     }
     Err(AiError::UnspecifiedRule(
@@ -611,17 +632,23 @@ pub fn pursuit_offsets(
     } else {
         PURSUIT_DURATION_FAR_S
     };
-    let draw = |random: &mut DecisionRandom| random.below(thresholds.pursuit_offset_bound) as i32;
+    let draw = |random: &mut DecisionRandom, site: &'static str| {
+        random.site(site).below(thresholds.pursuit_offset_bound) as i32
+    };
     let (lateral_ft, longitudinal_ft, mut vertical_ft) = match condition {
         PursuitCondition::HeadOn => (0, 0, 0),
-        PursuitCondition::Ordinary | PursuitCondition::Chased => {
-            (draw(random), draw(random), draw(random))
-        }
+        PursuitCondition::Ordinary | PursuitCondition::Chased => (
+            draw(random, "pursuit offset lateral"),
+            draw(random, "pursuit offset longitudinal"),
+            draw(random, "pursuit offset vertical"),
+        ),
     };
     if condition == PursuitCondition::Chased
-        && random.chance(thresholds.chased_vertical_displacement_percent)
+        && random
+            .site("chased vertical displacement")
+            .chance(thresholds.chased_vertical_displacement_percent)
     {
-        vertical_ft = match random.choose(2) {
+        vertical_ft = match random.site("chased vertical side").choose(2) {
             0 => CHASED_VERTICAL_OFFSET_FT,
             _ => -CHASED_VERTICAL_OFFSET_FT,
         };
@@ -729,17 +756,20 @@ pub fn surface_attack_choice(
     situation: &SurfaceAttackSituation,
     random: &mut DecisionRandom,
 ) -> SurfaceAttack {
-    if !random.chance(SURFACE_ALTERNATIVE_PERCENT) {
+    if !random
+        .site("surface alternative attack")
+        .chance(SURFACE_ALTERNATIVE_PERCENT)
+    {
         return SurfaceAttack::StraightRun;
     }
     let min_distance = dive_bomb_min_distance_ft(situation.turn_radius_ft);
     if situation.altitude_ft >= min_distance
         && situation.horizontal_distance_ft >= min_distance
-        && random.chance(DIVE_BOMB_PERCENT)
+        && random.site("dive bomb").chance(DIVE_BOMB_PERCENT)
     {
         return SurfaceAttack::DiveBomb;
     }
-    if random.choose(FAST_HIGH_PASS_ONE_IN) == 0 {
+    if random.site("fast high pass").choose(FAST_HIGH_PASS_ONE_IN) == 0 {
         SurfaceAttack::FastHighPass
     } else {
         SurfaceAttack::PopUp

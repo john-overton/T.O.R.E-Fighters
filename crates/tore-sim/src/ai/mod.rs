@@ -36,6 +36,7 @@ pub mod steering;
 pub mod steering_adapter;
 pub mod tactics;
 pub mod targeting;
+pub mod thought;
 pub mod threat;
 pub mod weapon_service;
 pub mod wing;
@@ -125,13 +126,27 @@ pub struct SpeedLimits {
 /// Deterministic, caller-owned draw state for AI decisions. This is a host
 /// generator (SplitMix64), deliberately not the retail generator: the specs
 /// give draw thresholds, not sequences.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// Every draw is also written to a bounded [`DrawLog`], a write-only record
+/// for the replay debug panels that no decision reads. Equality compares the
+/// generator state only, so the log never makes two generators differ.
+#[derive(Clone, Debug)]
 pub struct DecisionRandom {
     state: u64,
+    log: DrawLog,
 }
+impl PartialEq for DecisionRandom {
+    fn eq(&self, other: &Self) -> bool {
+        self.state == other.state
+    }
+}
+impl Eq for DecisionRandom {}
 impl DecisionRandom {
     pub fn seeded(seed: u64) -> Self {
-        Self { state: seed }
+        Self {
+            state: seed,
+            log: DrawLog::default(),
+        }
     }
     fn next_u64(&mut self) -> u64 {
         self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -140,30 +155,138 @@ impl DecisionRandom {
         z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         z ^ (z >> 31)
     }
-    /// Uniform draw in `0..bound`; a zero bound returns zero without a draw.
-    pub fn below(&mut self, bound: u32) -> u32 {
+    /// One uniform draw in `0..bound`, written to the log. A zero bound
+    /// returns zero without a draw and without a log entry.
+    #[track_caller]
+    fn logged(&mut self, bound: u32, threshold: Option<u32>, offset: i32) -> u32 {
+        let site = self.log.pending_site.take();
         if bound == 0 {
             return 0;
         }
-        (self.next_u64() % u64::from(bound)) as u32
+        let value = (self.next_u64() % u64::from(bound)) as u32;
+        self.log.push(Draw {
+            site,
+            location: std::panic::Location::caller(),
+            bound,
+            value,
+            offset,
+            threshold,
+        });
+        value
+    }
+    /// Uniform draw in `0..bound`; a zero bound returns zero without a draw.
+    #[track_caller]
+    pub fn below(&mut self, bound: u32) -> u32 {
+        self.logged(bound, None, 0)
     }
     /// Uniform draw in `0..=99`, the domain of every recovered percentage rule.
+    #[track_caller]
     pub fn percent(&mut self) -> u8 {
         self.below(100) as u8
     }
     /// True for exactly `threshold` of 100 draws (`draw < threshold`). Spell
     /// inclusive source comparisons such as `random 100 > 75` as 76 explicitly.
+    #[track_caller]
     pub fn chance(&mut self, threshold: u8) -> bool {
-        self.percent() < threshold
+        (self.logged(100, Some(u32::from(threshold)), 0) as u8) < threshold
     }
     /// Equal-probability choice of one of `n` outcomes, 0-based.
+    #[track_caller]
     pub fn choose(&mut self, n: u32) -> u32 {
         self.below(n)
     }
     /// Signed draw in `low..=high`.
+    #[track_caller]
     pub fn range(&mut self, low: i32, high: i32) -> i32 {
         debug_assert!(low <= high);
-        low + self.below((high - low + 1) as u32) as i32
+        low + self.logged((high - low + 1) as u32, None, low) as i32
+    }
+    /// Name what the next draw decides, for the draw log only. The label is
+    /// consumed by that draw; it never changes a value.
+    pub fn site(&mut self, label: &'static str) -> &mut Self {
+        self.log.pending_site = Some(label);
+        self
+    }
+    /// The draws since the log was last cleared, oldest first.
+    pub fn log(&self) -> &DrawLog {
+        &self.log
+    }
+    /// Forget the logged draws. Owners call this at the start of each
+    /// advancing tick; it never touches the generator state.
+    pub fn clear_log(&mut self) {
+        self.log.clear();
+    }
+}
+
+/// The most draws one [`DrawLog`] keeps. A generator whose owner never clears
+/// its log keeps its latest draws and counts the older ones it dropped.
+pub const DRAW_LOG_LIMIT: usize = 64;
+
+/// One logged draw. The draw passes a percentage roll when `value` is below
+/// `threshold`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Draw {
+    /// What the draw decided, when the caller named it.
+    pub site: Option<&'static str>,
+    /// The source line that made the draw.
+    pub location: &'static std::panic::Location<'static>,
+    /// The draw is uniform in `0..bound` (100 for a percentage roll).
+    pub bound: u32,
+    /// The raw draw, in `0..bound`.
+    pub value: u32,
+    /// Added to `value` before the caller used it (the low end of a signed
+    /// range, otherwise 0).
+    pub offset: i32,
+    /// The percentage the draw was compared with, when the caller said.
+    pub threshold: Option<u32>,
+}
+
+impl Draw {
+    /// The number the caller received.
+    pub fn result(&self) -> i64 {
+        i64::from(self.offset) + i64::from(self.value)
+    }
+    /// For a percentage roll, whether it passed.
+    pub fn passed(&self) -> Option<bool> {
+        self.threshold.map(|threshold| self.value < threshold)
+    }
+}
+
+/// Write-only record of the draws a [`DecisionRandom`] made since its owner
+/// last cleared it.
+#[derive(Clone, Debug, Default)]
+pub struct DrawLog {
+    draws: std::collections::VecDeque<Draw>,
+    dropped: u64,
+    pending_site: Option<&'static str>,
+}
+
+impl DrawLog {
+    fn push(&mut self, draw: Draw) {
+        if self.draws.len() == DRAW_LOG_LIMIT {
+            self.draws.pop_front();
+            self.dropped = self.dropped.saturating_add(1);
+        }
+        self.draws.push_back(draw);
+    }
+    fn clear(&mut self) {
+        self.draws.clear();
+        self.dropped = 0;
+        self.pending_site = None;
+    }
+    /// The logged draws, oldest first.
+    pub fn draws(&self) -> impl Iterator<Item = &Draw> {
+        self.draws.iter()
+    }
+    pub fn len(&self) -> usize {
+        self.draws.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.draws.is_empty()
+    }
+    /// Older draws discarded because the log was full.
+    pub fn dropped(&self) -> u64 {
+        self.dropped
     }
 }
 

@@ -169,7 +169,11 @@ pub fn route_command(inputs: &RouteInputs, random: &mut DecisionRandom) -> Resul
     }
     let mut altitude_ft = waypoint.altitude_ft;
     if inputs.wing_leader && waypoint.distance_ft >= ALTITUDE_VARIATION_MIN_DISTANCE_FT {
-        altitude_ft += f64::from(random.range(-ALTITUDE_VARIATION_FT, ALTITUDE_VARIATION_FT));
+        altitude_ft += f64::from(
+            random
+                .site("waypoint altitude variation")
+                .range(-ALTITUDE_VARIATION_FT, ALTITUDE_VARIATION_FT),
+        );
     }
     if waypoint.landing {
         altitude_ft = altitude_ft.max(LANDING_MIN_ALTITUDE_FT);
@@ -299,7 +303,10 @@ pub fn bingo_route(
     }
     Some(PrivateRoute {
         destination: home_airport,
-        altitude_ft: BINGO_ROUTE_MIN_ALTITUDE_FT + random.below(BINGO_ROUTE_ALTITUDE_SPAN_FT),
+        altitude_ft: BINGO_ROUTE_MIN_ALTITUDE_FT
+            + random
+                .site("bingo route altitude")
+                .below(BINGO_ROUTE_ALTITUDE_SPAN_FT),
         speed: cruise_speed(limits),
         landing: true,
     })

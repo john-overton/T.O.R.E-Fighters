@@ -228,7 +228,7 @@ pub fn turn_around(
     frame: ManeuverFrame,
     random: &mut super::DecisionRandom,
 ) -> (BreakSide, MotionRequest) {
-    match random.choose(2) {
+    match random.site("turnaround side").choose(2) {
         0 => (BreakSide::Left, break_left(frame)),
         _ => (BreakSide::Right, break_right(frame)),
     }

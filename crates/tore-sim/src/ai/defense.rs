@@ -63,11 +63,34 @@ impl BurstRequest {
     };
 }
 
+/// Write-only explanation of one defense decision. No decision reads it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DefenseDebug {
     pub estimated_threat_time_s: Option<f64>,
     pub estimated_maneuver_time_s: f64,
     pub margin_s: f64,
+    /// The maneuver the evidence calls for (notch with a radar bearing from
+    /// electronic evidence, otherwise jink), flown or not.
+    pub preferred: Maneuver,
+    /// Its heading and flight-path pitch, degrees.
+    pub heading_deg: f64,
+    pub flight_path_pitch_deg: f64,
+    /// A 20 degree dive keeps 1000 ft of clearance for 5 s.
+    pub dive_safe: bool,
+    /// The selected threat changed this tick.
+    pub new_threat: bool,
+    /// The reasons behind maneuvering now: only a bearing is known, a
+    /// directed radar with no closing estimate, too little time, or stale
+    /// evidence. A Novice always maneuvers.
+    pub bearing_only: bool,
+    pub uncertain_directed_radar: bool,
+    pub insufficient_time: bool,
+    pub stale: bool,
+    pub maneuver_now: bool,
+    /// Devices may be released: none in the last 2 s.
+    pub may_burst: bool,
+    /// The evidence calls for devices now.
+    pub release_now: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -128,7 +151,8 @@ where
         (Maneuver::Notch, Some(bearing)) => notch_heading(own.heading_deg, bearing),
         _ => jink_heading(tick, own.heading_deg, selected.missile_id, changed, state),
     };
-    let pitch = if dive_is_safe(own, heading, &mut ground_elevation_ft) {
+    let dive_safe = dive_is_safe(own, heading, &mut ground_elevation_ft);
+    let pitch = if dive_safe {
         DIVE_PITCH_DEG
     } else {
         own.flight_path_pitch_deg.max(0.0)
@@ -177,6 +201,18 @@ where
             estimated_threat_time_s: time,
             estimated_maneuver_time_s: maneuver_time,
             margin_s: margin,
+            preferred,
+            heading_deg: heading,
+            flight_path_pitch_deg: pitch,
+            dive_safe,
+            new_threat: changed,
+            bearing_only,
+            uncertain_directed_radar,
+            insufficient_time,
+            stale: selected.stale,
+            maneuver_now,
+            may_burst,
+            release_now,
         },
     })
 }
@@ -367,6 +403,50 @@ mod tests {
         assert_eq!(motion.maneuver, Maneuver::Notch);
         assert_eq!(motion.heading_deg, 300.0);
         assert_eq!(decision.burst, Some(BurstRequest::RADAR));
+    }
+
+    #[test]
+    fn debug_names_the_preferred_maneuver_and_why() {
+        let mut contact = threat(
+            EvidenceSource::ElectronicSupported,
+            Some(GuidanceClass::Radar),
+        );
+        contact.radar_bearing_deg = Some(30.0);
+        let decision = decide(
+            0,
+            Experience::Average,
+            own(),
+            &[contact],
+            &mut DefenseState::default(),
+            |_| 0.0,
+        )
+        .unwrap();
+        let debug = decision.debug;
+        let motion = decision.motion.unwrap();
+        assert_eq!(debug.preferred, Maneuver::Notch);
+        assert_eq!(debug.heading_deg, motion.heading_deg);
+        assert_eq!(debug.flight_path_pitch_deg, motion.flight_path_pitch_deg);
+        assert!(debug.dive_safe && debug.new_threat && debug.maneuver_now);
+        assert!(debug.may_burst && debug.release_now && !debug.insufficient_time);
+
+        // A distant, reliably tracked threat over high ground: the jink it
+        // would fly, held for now, with no room to dive.
+        let mut far = threat(EvidenceSource::Visual, None);
+        far.position = Some([0.0, 5_000.0, 30_000.0]);
+        let decision = decide(
+            1,
+            Experience::Average,
+            own(),
+            &[far],
+            &mut DefenseState::default(),
+            |_| 4_000.0,
+        )
+        .unwrap();
+        assert_eq!(decision.motion, None);
+        let debug = decision.debug;
+        assert_eq!(debug.preferred, Maneuver::Jink);
+        assert!(!debug.maneuver_now && !debug.dive_safe && !debug.release_now);
+        assert!(!debug.bearing_only && !debug.uncertain_directed_radar && !debug.stale);
     }
 
     #[test]

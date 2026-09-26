@@ -128,6 +128,89 @@ pub struct Selection {
     pub priority: Priority,
 }
 
+/// The most observed aircraft one [`Explanation`] lists.
+pub const EXPLANATION_LIMIT: usize = 16;
+
+/// Why an observed aircraft could not be a mission target at all. Every
+/// reason that applies is set; none set means it was eligible.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Ineligibility {
+    pub own: bool,
+    pub same_side: bool,
+    /// Destroyed or otherwise no longer valid.
+    pub invalid: bool,
+    pub not_aircraft: bool,
+    pub type_not_allowed: bool,
+    /// No carried store can engage it.
+    pub no_usable_weapon: bool,
+}
+
+impl Ineligibility {
+    fn of(own_id: u32, own_side: targeting::Side, target: &TargetView) -> Self {
+        Self {
+            own: target.id == own_id,
+            same_side: target.side == own_side,
+            invalid: !target.valid,
+            not_aircraft: !target.is_aircraft,
+            type_not_allowed: !target.type_allowed,
+            no_usable_weapon: !target.seeker_eligible,
+        }
+    }
+
+    /// Whether any reason applies.
+    pub fn any(&self) -> bool {
+        self.own
+            || self.same_side
+            || self.invalid
+            || self.not_aircraft
+            || self.type_not_allowed
+            || self.no_usable_weapon
+    }
+}
+
+/// One observed aircraft in an [`Explanation`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CandidateExplanation {
+    pub id: u32,
+    pub ineligible: Ineligibility,
+    /// Its mission priority; `None` when it was ineligible, weapons were
+    /// held, or the assignment gives it none.
+    pub priority: Option<Priority>,
+    /// B41 score parts: the distance, plus 10,000 ft for each penalty.
+    pub distance_ft: f64,
+    pub not_aircraft_penalty: bool,
+    /// A wing member already attacks it.
+    pub wing_attacking_penalty: bool,
+    /// Its wing attackers already fill the allowance.
+    pub wing_full_penalty: bool,
+    /// The B41 score, feet; the lowest wins among the best priority.
+    pub score_ft: f64,
+    pub chosen: bool,
+}
+
+/// Why the engagement policy chose what it did on one tick.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Explanation {
+    /// Weapons hold: no target at all.
+    pub weapons_hold: bool,
+    /// Self-defense stance, disengage role or an escort beyond its leash:
+    /// only the aircraft's own attackers can be targets.
+    pub own_defense_only: bool,
+    pub escort_outside_leash: bool,
+    /// Identified attackers of this aircraft.
+    pub own_attackers: Vec<u32>,
+    /// Identified attackers of the aircraft it protects.
+    pub protected_attackers: Vec<u32>,
+    pub best_priority: Option<Priority>,
+    /// The current target shares the best priority, so it is kept.
+    pub kept_current: bool,
+    pub chosen: Option<Selection>,
+    /// Observed aircraft, best first.
+    pub candidates: Vec<CandidateExplanation>,
+    /// Observed aircraft left out because the list was full.
+    pub omitted: usize,
+}
+
 /// Per-aircraft policy state. The only persistence is escort-leash hysteresis.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Policy {
@@ -215,16 +298,13 @@ impl Policy {
             if !eligible(own_id, own_side, target) {
                 continue;
             }
-            let priority = if own_attackers.contains(&target.id) {
-                Some(Priority::OwnDefense)
-            } else if assignment.stance == Stance::SelfDefense
-                || assignment.role == Role::Disengage
-                || self.escort_outside_leash
-            {
-                None
-            } else {
-                self.mission_priority(assignment, target, protected, &protected_attackers)
-            };
+            let priority = self.target_priority(
+                assignment,
+                target,
+                protected,
+                &own_attackers,
+                &protected_attackers,
+            );
             if let Some(priority) = priority {
                 candidates.push((target, priority));
             }
@@ -246,17 +326,7 @@ impl Policy {
             .into_iter()
             .filter(|(_, priority)| *priority == best_priority)
             .map(|(target, priority)| {
-                let distance = spatial_distance(own_position, target.position);
-                let candidate = targeting::CandidateTarget {
-                    id: targeting::ObjectId(target.id),
-                    side: target.side,
-                    valid: target.valid,
-                    type_allowed: target.type_allowed,
-                    is_aircraft: target.is_aircraft,
-                    seeker_eligible: target.seeker_eligible,
-                    spatial_distance_feet: distance,
-                    wing_attackers: target.wing_attackers,
-                };
+                let candidate = ranking_candidate(own_position, target);
                 (
                     Selection {
                         id: target.id,
@@ -269,6 +339,145 @@ impl Policy {
                 a_score.total_cmp(b_score).then_with(|| a.id.cmp(&b.id))
             })
             .map(|(selection, _)| selection)
+    }
+
+    /// Why [`Self::select`] chose what it did, for the replay debug panels.
+    /// Call it after `select` with the same inputs: `select` updates the
+    /// escort leash first, and this reads that state without changing
+    /// anything. It reuses the same eligibility, priority and B41 score, and
+    /// lists every observed aircraft (up to [`EXPLANATION_LIMIT`]), best
+    /// first: the best priority by score, then the other priorities, then
+    /// aircraft that were not candidates.
+    #[allow(clippy::too_many_arguments)]
+    pub fn explain(
+        &self,
+        own_id: u32,
+        own_side: targeting::Side,
+        own_position: [f64; 3],
+        assignment: &Assignment,
+        targets: &[TargetView],
+        protected: &[ProtectedView],
+        reports: &[ThreatReport],
+        current_target: Option<u32>,
+        assignment_allowance: u32,
+    ) -> Explanation {
+        let weapons_hold = assignment.stance == Stance::WeaponsHold;
+        let own_attackers = known_attackers(reports, own_id);
+        let protected_attackers: Vec<u32> = reports
+            .iter()
+            .filter(|report| assignment.protected_ids.contains(&report.defended_id))
+            .filter_map(|report| report.attacker_id)
+            .collect();
+        let mut candidates: Vec<CandidateExplanation> = targets
+            .iter()
+            .map(|target| {
+                let priority = (!weapons_hold && eligible(own_id, own_side, target))
+                    .then(|| {
+                        self.target_priority(
+                            assignment,
+                            target,
+                            protected,
+                            &own_attackers,
+                            &protected_attackers,
+                        )
+                    })
+                    .flatten();
+                let candidate = ranking_candidate(own_position, target);
+                CandidateExplanation {
+                    id: target.id,
+                    ineligible: Ineligibility::of(own_id, own_side, target),
+                    priority,
+                    distance_ft: candidate.spatial_distance_feet,
+                    not_aircraft_penalty: !candidate.is_aircraft,
+                    wing_attacking_penalty: candidate.wing_attackers >= 1,
+                    wing_full_penalty: candidate.wing_attackers >= assignment_allowance,
+                    score_ft: targeting::candidate_score(&candidate, assignment_allowance),
+                    chosen: false,
+                }
+            })
+            .collect();
+
+        let best_priority = candidates.iter().filter_map(|c| c.priority).min();
+        let kept_current = best_priority.is_some_and(|best| {
+            current_target.is_some_and(|id| {
+                candidates
+                    .iter()
+                    .any(|c| c.id == id && c.priority == Some(best))
+            })
+        });
+        let chosen = best_priority.and_then(|best| {
+            if kept_current {
+                current_target.map(|id| Selection { id, priority: best })
+            } else {
+                candidates
+                    .iter()
+                    .filter(|c| c.priority == Some(best))
+                    .min_by(|a, b| {
+                        a.score_ft
+                            .total_cmp(&b.score_ft)
+                            .then_with(|| a.id.cmp(&b.id))
+                    })
+                    .map(|c| Selection {
+                        id: c.id,
+                        priority: best,
+                    })
+            }
+        });
+        if let Some(selection) = chosen
+            && let Some(entry) = candidates.iter_mut().find(|c| c.id == selection.id)
+        {
+            entry.chosen = true;
+        }
+        // Candidates first, best priority first, then by score; the rest
+        // keep their observed order.
+        candidates.sort_by(|a, b| match (a.priority, b.priority) {
+            (Some(pa), Some(pb)) => pa
+                .cmp(&pb)
+                .then_with(|| a.score_ft.total_cmp(&b.score_ft))
+                .then_with(|| a.id.cmp(&b.id)),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        });
+        let omitted = candidates.len().saturating_sub(EXPLANATION_LIMIT);
+        candidates.truncate(EXPLANATION_LIMIT);
+        Explanation {
+            weapons_hold,
+            own_defense_only: assignment.stance == Stance::SelfDefense
+                || assignment.role == Role::Disengage
+                || self.escort_outside_leash,
+            escort_outside_leash: self.escort_outside_leash,
+            own_attackers,
+            protected_attackers,
+            best_priority,
+            kept_current,
+            chosen,
+            candidates,
+            omitted,
+        }
+    }
+
+    /// The mission priority of one eligible target: the aircraft's own
+    /// attackers first, then the assignment's priorities unless only
+    /// self-defense applies.
+    fn target_priority(
+        &self,
+        assignment: &Assignment,
+        target: &TargetView,
+        protected: &[ProtectedView],
+        own_attackers: &[u32],
+        protected_attackers: &[u32],
+    ) -> Option<Priority> {
+        if own_attackers.contains(&target.id) {
+            Some(Priority::OwnDefense)
+        } else if assignment.stance == Stance::SelfDefense
+            || assignment.role == Role::Disengage
+            || self.escort_outside_leash
+        {
+            None
+        } else {
+            self.mission_priority(assignment, target, protected, protected_attackers)
+        }
     }
 
     fn mission_priority(
@@ -386,6 +595,21 @@ fn known_attackers(reports: &[ThreatReport], defended_id: u32) -> Vec<u32> {
         .filter(|report| report.defended_id == defended_id)
         .filter_map(|report| report.attacker_id)
         .collect()
+}
+
+/// The B41 ranking view of one observed aircraft.
+fn ranking_candidate(own_position: [f64; 3], target: &TargetView) -> targeting::CandidateTarget {
+    let distance = spatial_distance(own_position, target.position);
+    targeting::CandidateTarget {
+        id: targeting::ObjectId(target.id),
+        side: target.side,
+        valid: target.valid,
+        type_allowed: target.type_allowed,
+        is_aircraft: target.is_aircraft,
+        seeker_eligible: target.seeker_eligible,
+        spatial_distance_feet: distance,
+        wing_attackers: target.wing_attackers,
+    }
 }
 
 fn eligible(own_id: u32, own_side: targeting::Side, target: &TargetView) -> bool {

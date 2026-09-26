@@ -24,6 +24,7 @@ use crate::ai::experience::{ExperienceOrigin, ResolvedExperience};
 use crate::ai::mission::{ActorSetup, AiActor, AiMission, MissionOutput, StationSpec, WorldObject};
 use crate::ai::route::Position;
 use crate::ai::targeting::Side;
+use crate::ai::thought::{Message, Outcome};
 use crate::ai::threat::{
     DecoyOutcome, DispenserStore, FlightState, GuidingMissile, SeekerClass, TimeOfDay,
 };
@@ -92,6 +93,147 @@ fn ai_airfield_matches_recorded_fingerprint() {
     });
     verify([outcome]);
     coverage.into_inner().require_airfield();
+}
+
+/// Reading every AI record and draining the message journal after every
+/// step, as the replay recorder and the debug panels will, leaves both
+/// scenarios exactly as a run that never looks: the same fingerprint, so the
+/// recorded values above hold for both.
+#[test]
+fn reading_every_ai_record_changes_no_behaviour() {
+    let mut seen = RecordCoverage::default();
+    let (plain, _) = mission_engagement(&Probe::default());
+    let (read, _) =
+        mission_engagement_observed(&Probe::default(), &mut |mission| seen.read(mission));
+    assert_eq!(
+        read, plain,
+        "reading the AI records changed the engagement scenario"
+    );
+    let (plain, _) = airfield(&Probe::default());
+    let (read, _) = airfield_observed(&Probe::default(), &mut |mission| seen.read(mission));
+    assert_eq!(
+        read, plain,
+        "reading the AI records changed the airfield scenario"
+    );
+    seen.require();
+}
+
+/// What the records said across the two scenarios, so the neutrality test
+/// cannot pass by reading records that stayed empty.
+#[derive(Default)]
+struct RecordCoverage {
+    messages: BTreeSet<&'static str>,
+    outcomes: BTreeSet<&'static str>,
+    actor_paths: BTreeSet<String>,
+    branches: BTreeSet<String>,
+    draw_sites: BTreeSet<&'static str>,
+    text_bytes: usize,
+}
+
+impl RecordCoverage {
+    fn read(&mut self, mission: &mut AiMission) {
+        for actor in mission.actors() {
+            let controller = actor.controller();
+            // Debug text reads every field of every record.
+            self.text_bytes += format!(
+                "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}",
+                actor.trace(),
+                controller.trace(),
+                controller.draws(),
+                actor.route_draws(),
+                controller.last_batch(),
+                controller.weapon_phase(),
+                controller.weapon_deadline(),
+                controller.active_maneuver(),
+                controller.search_contact(),
+                actor.defense_decision(),
+            )
+            .len();
+            self.actor_paths.insert(format!("{:?}", actor.trace().path));
+            let branch = format!("{:?}", controller.trace().motion.branch);
+            self.branches.insert(
+                branch
+                    .split(['(', ' ', '{'])
+                    .next()
+                    .unwrap_or_default()
+                    .to_string(),
+            );
+            self.draw_sites
+                .extend(controller.draws().draws().filter_map(|draw| draw.site));
+        }
+        let journal = mission.take_journal();
+        assert_eq!(journal.dropped, 0, "the journal overflowed within one tick");
+        self.text_bytes += format!("{journal:?}").len();
+        for entry in &journal.entries {
+            self.messages.insert(match entry.message {
+                Message::AttackEvidence(_) => "attack evidence",
+                Message::FreeSelection { .. } => "free selection",
+                Message::WingRequest(_) => "wing request",
+                Message::EscortPriority { .. } => "escort priority",
+                Message::MissileWarning(_) => "missile warning",
+            });
+            for receipt in &entry.receipts {
+                self.outcomes.insert(match receipt.outcome {
+                    Outcome::Queued => "queued",
+                    Outcome::Delivered => "delivered",
+                    Outcome::Ignored(_) => "ignored",
+                    Outcome::Expired(_) => "expired",
+                    Outcome::Order(_) => "order",
+                    Outcome::WarningDue { .. } => "warning due",
+                    Outcome::WarningReceived { .. } => "warning received",
+                    Outcome::WarningDropped(_) => "warning dropped",
+                });
+            }
+        }
+    }
+
+    fn require(&self) {
+        let summary = format!(
+            "messages {:?}, outcomes {:?}, paths {:?}, branches {:?}, draw sites {:?}",
+            self.messages, self.outcomes, self.actor_paths, self.branches, self.draw_sites
+        );
+        if std::env::var_os("TORE_GOLDEN_VERBOSE").is_some() {
+            eprintln!("records seen: {summary}");
+        }
+        assert!(self.text_bytes > 0);
+        // Queued and delivered attack reports and a leader's release are
+        // covered by the targeted tests in `ai/thought_tests.rs`; these
+        // scenarios never produce them.
+        for (what, set, required) in [
+            (
+                "message",
+                self.messages.iter().copied().collect::<Vec<_>>(),
+                &[
+                    "attack evidence",
+                    "wing request",
+                    "escort priority",
+                    "missile warning",
+                ][..],
+            ),
+            (
+                "outcome",
+                self.outcomes.iter().copied().collect(),
+                &["expired", "order", "warning due", "warning received"][..],
+            ),
+        ] {
+            for kind in required {
+                assert!(set.contains(kind), "no {what} {kind}: {summary}");
+            }
+        }
+        for path in ["Controller", "Airfield", "Destroyed", "Dummy"] {
+            assert!(
+                self.actor_paths.contains(path),
+                "no actor path {path}: {summary}"
+            );
+        }
+        for branch in ["Formation", "NewManeuver", "MissileDefense"] {
+            assert!(
+                self.branches.contains(branch),
+                "no motion branch {branch}: {summary}"
+            );
+        }
+        assert!(!self.draw_sites.is_empty(), "no labelled draw: {summary}");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1932,6 +2074,15 @@ impl Host {
 }
 
 fn mission_engagement(probe: &Probe) -> (u64, Coverage) {
+    mission_engagement_observed(probe, &mut |_| {})
+}
+
+/// The engagement scenario with `observe` called on the mission right after
+/// every step, before the host acts on the output.
+fn mission_engagement_observed(
+    probe: &Probe,
+    observe: &mut dyn FnMut(&mut AiMission),
+) -> (u64, Coverage) {
     let pilot = |id, side, wing, member, aircraft, level, position, heading_deg| Pilot {
         id,
         side,
@@ -2078,6 +2229,7 @@ fn mission_engagement(probe: &Probe) -> (u64, Coverage) {
             .mission
             .step_with_surface(&world, &terrain, &surface, TimeOfDay(tick))
             .expect("mission step");
+        observe(&mut host.mission);
         record_output(&mut fp, &output);
         host.coverage.wing_requests += output.wing.len() as u32;
         host.realise_launches(&output, tick, &mut fp);
@@ -2173,6 +2325,12 @@ fn human_leader(t: f64, release_s: f64) -> WorldObject {
 }
 
 fn airfield(probe: &Probe) -> (u64, Coverage) {
+    airfield_observed(probe, &mut |_| {})
+}
+
+/// The airfield scenario with `observe` called on the mission right after
+/// every step.
+fn airfield_observed(probe: &Probe, observe: &mut dyn FnMut(&mut AiMission)) -> (u64, Coverage) {
     let mut fp = Fingerprint::default();
     let mut coverage = Coverage::default();
     let terrain = |x: f64, z: f64| fixtures::runway_surface(x, z).height;
@@ -2222,6 +2380,7 @@ fn airfield(probe: &Probe) -> (u64, Coverage) {
         let output = mission
             .step_with_surface(&world, &terrain, &fixtures::runway_surface, TimeOfDay(tick))
             .expect("mission step");
+        observe(&mut mission);
         record_output(&mut fp, &output);
         for actor in mission.actors() {
             record_actor(&mut fp, actor);
@@ -2261,6 +2420,7 @@ fn airfield(probe: &Probe) -> (u64, Coverage) {
         let output = mission
             .step_with_surface(&world, &terrain, &fixtures::runway_surface, TimeOfDay(tick))
             .expect("mission step");
+        observe(&mut mission);
         record_output(&mut fp, &output);
         for actor in mission.actors() {
             record_actor(&mut fp, actor);

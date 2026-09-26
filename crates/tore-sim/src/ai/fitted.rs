@@ -285,7 +285,9 @@ pub fn last_ditch_candidate(
     if suitable.is_empty() {
         return LastDitchCandidate::VerticalJink;
     }
-    let index = random.choose(suitable.len() as u32) as usize;
+    let index = random
+        .site("last-ditch candidate")
+        .choose(suitable.len() as u32) as usize;
     suitable[index]
 }
 
@@ -307,7 +309,10 @@ pub fn random_tactic_menu(
     own_agl_ft: f64,
     random: &mut DecisionRandom,
 ) -> MotionRequest {
-    match random.choose(RANDOM_TACTIC_MENU_SIZE) {
+    match random
+        .site("random-tactic menu")
+        .choose(RANDOM_TACTIC_MENU_SIZE)
+    {
         0 => super::motion::straight_climb(frame, can_climb),
         1 => super::motion::straight_dive(frame, own_agl_ft),
         2 => super::motion::break_left(frame),
@@ -388,7 +393,7 @@ pub fn straight_flight(frame: ManeuverFrame) -> MotionRequest {
 
 /// A break side chosen with equal probability, for the fitted menu's reuse.
 pub fn break_side(random: &mut DecisionRandom) -> BreakSide {
-    if random.chance(50) {
+    if random.site("break side left").chance(50) {
         BreakSide::Left
     } else {
         BreakSide::Right

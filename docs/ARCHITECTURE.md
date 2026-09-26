@@ -362,6 +362,7 @@ advances, so iteration order cannot grant approach priority. Its trace hook is
 read-only; optional host CSV logging is described in
 [development diagnostics](DEVELOPMENT.md#formation-flight-traces). The formation
 choice and placement are specified in [mission wings](spec/quick-mission-menu.md#mission-wings).
+`ai::thought` holds the write-only [AI thinking record](REPLAYS.md#ai-thinking-record): controller and actor traces of each tick, a log of random draws, and a message journal the host drains once per tick through `AiWings::take_ai_journal`; no decision reads them, and golden fingerprints prove the AI behaves exactly as without them.
 Rendering groups targets by imported airframe, with a cached
 texture binding per identity and vertex buffers that grow to fit the formation.
 The player's atlas is never substituted for another type. Fixed-step timing and

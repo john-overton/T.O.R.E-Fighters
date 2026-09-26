@@ -40,6 +40,11 @@ use super::controller::{
 use super::experience::ResolvedExperience;
 use super::fitted::Fallback;
 use super::steering_adapter::{ControlAdapter, ai_g_limits};
+use super::thought::{
+    self, ActorPath, ActorTrace, AirfieldExit, DropReason, EjectionTrace, EngagementTrace,
+    ExpiryReason, FlyTrace, IgnoreReason, JournalEntry, Message, Outcome, Receipt, RejoinReason,
+    RejoinTrace, ReportTrace, WarningStep,
+};
 use super::threat::{DispenserStore, FlightState, SeekerClass, TimeOfDay};
 use super::weapon_service::{
     self, Delay, ProjectilePacing, Rounds, StationId, StoreCapability, StoreState,
@@ -155,14 +160,22 @@ pub struct MissionOutput {
     pub launch_calls: Vec<(u32, u32)>,
 }
 
-/// The mission's airfield decisions for one actor this tick.
+/// The mission's airfield decisions for one actor this tick (see
+/// docs/spec/ai-airfield.md). Read-only outside the mission.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct AirfieldClearance {
-    turn: bool,
-    runway_free: bool,
-    wing_landed: bool,
-    free_slot: Option<u32>,
-    leader_landing: bool,
+pub struct AirfieldClearance {
+    /// Turn gate: every earlier wing member is past its first taxiway leg,
+    /// and a human leader is airborne.
+    pub turn: bool,
+    /// Nothing else is using the runway and the player holds no landing
+    /// priority there.
+    pub runway_free: bool,
+    /// Every earlier wing member landing here is on the ground.
+    pub wing_landed: bool,
+    /// The parking slot this aircraft may hold.
+    pub free_slot: Option<u32>,
+    /// A joining wingman's leader is landing or on the ground.
+    pub leader_landing: bool,
 }
 
 /// Everything needed to build one AI aircraft.
@@ -238,6 +251,18 @@ pub struct AiActor {
     alive: bool,
     dummy: bool,
     escape_monitor: crate::ejection::Monitor,
+    /// Write-only record of the latest mission step. No decision reads it.
+    trace: ActorTrace,
+    /// Write-only memory of what the journal already said about this actor.
+    journal_memory: JournalMemory,
+}
+
+/// What the journal already said about one actor, so a state that holds for
+/// many ticks is journaled once. Never read by a decision.
+#[derive(Clone, Copy, Debug, Default)]
+struct JournalMemory {
+    /// The escort selection last journaled; `None` before the first.
+    escort_selection: Option<Option<engagement::Selection>>,
 }
 
 impl AiActor {
@@ -285,7 +310,21 @@ impl AiActor {
             ),
             alive: true,
             dummy: false,
+            trace: ActorTrace::default(),
+            journal_memory: JournalMemory::default(),
         })
+    }
+
+    /// What the mission decided for this actor on its latest step. A
+    /// write-only record: no decision reads it. The controller's own record
+    /// is [`Controller::trace`].
+    pub fn trace(&self) -> &ActorTrace {
+        &self.trace
+    }
+
+    /// Draws for the private return route on the latest step.
+    pub fn route_draws(&self) -> &super::DrawLog {
+        self.route_random.log()
     }
 
     /// Begin the mission parked on `start.runway`. The flight model must
@@ -438,6 +477,41 @@ impl AiActor {
                 && attack
                     .event_id
                     .is_none_or(|id| !self.ignored_attack_ids.contains(&id)))
+    }
+
+    /// Why this actor does not act on `attack`, or `None` when it does. The
+    /// same tests as [`Self::permits_attack_response`], for explanation only.
+    fn attack_ignore_reason(&self, attack: &ObservedAttack) -> Option<IgnoreReason> {
+        if !self.neutral {
+            return None;
+        }
+        if let Some(recalled_at) = self.formation_order_tick
+            && attack.observed_tick <= recalled_at
+        {
+            return Some(IgnoreReason::SeenBeforeRecall { recalled_at });
+        }
+        attack
+            .event_id
+            .filter(|id| self.ignored_attack_ids.contains(id))
+            .map(|event_id| IgnoreReason::KnownAtRecall { event_id })
+    }
+
+    /// Whether this actor already remembers this evidence (same report and
+    /// projectile), so a new copy only refreshes it.
+    fn holds_attack(&self, attack: &ObservedAttack) -> bool {
+        self.observed_attacks
+            .iter()
+            .any(|held| held.report == attack.report && held.event_id == attack.event_id)
+    }
+
+    /// The attitude and speed the flight model delivered, for the trace.
+    fn achieved(&self) -> thought::Achieved {
+        thought::Achieved {
+            heading_deg: self.flight.yaw.to_degrees(),
+            flight_path_pitch_deg: self.flight_path_pitch_deg(),
+            bank_deg: self.flight.bank.to_degrees(),
+            speed_fps: self.flight.speed,
+        }
     }
 
     fn remember_attack(&mut self, attack: ObservedAttack) {
@@ -734,12 +808,14 @@ impl AiActor {
         use super::airfield::{Control, LandingReason, Phase, Situation};
         let defending = self.last_defense.is_some_and(|d| d.motion.is_some());
         let warned = self.pending_threats.iter().any(|r| !r.launcher_same_side);
+        let mut trace = thought::AirfieldTrace::default();
         if self.airfield.is_none()
             && let Some(order) = self.landing_order
             && !defending
             && !warned
         {
             self.begin_landing(order, own, surface);
+            trace.began_landing = self.airfield.is_some();
         }
         let Some(phase) = self.airfield.as_ref().map(|s| s.phase()) else {
             return Ok(false);
@@ -753,6 +829,8 @@ impl AiActor {
             // Retail wing abort: gear and flaps up, free flight.
             self.landing_order = None;
             self.leave_airfield();
+            trace.left = Some(AirfieldExit::WingAbort);
+            self.trace.airfield = Some(trace);
             return Ok(false);
         }
         match phase.flight_state() {
@@ -761,10 +839,17 @@ impl AiActor {
             // Free flight on the inbound route reacts like any other flight.
             FlightState::EarlyApproach | FlightState::Free if defending || warned => {
                 self.leave_airfield();
+                trace.left = Some(AirfieldExit::MissileThreat { defending, warned });
+                self.trace.airfield = Some(trace);
                 return Ok(false);
             }
             // B47: warnings are ignored while taking off and landing.
             _ => {
+                self.trace.dropped_warnings.extend(
+                    self.pending_threats
+                        .iter()
+                        .map(|report| (*report, DropReason::Airfield { phase })),
+                );
                 self.pending_threats.clear();
                 self.pending_events.clear();
             }
@@ -805,12 +890,21 @@ impl AiActor {
         };
         let sequence = self.airfield.as_mut().expect("phase read above");
         let step = sequence.step(&situation);
+        trace.situation = Some(situation);
+        trace.step = Some(step);
+        self.trace.airfield = Some(trace);
         if step.complete {
             self.airfield = None;
         }
         let command = step.command;
         self.activity = command.activity;
         output.activities.push((self.id(), command.activity));
+        let mut fly = FlyTrace {
+            intent: None,
+            terrain_floor_deg: None,
+            adapter: None,
+            achieved: thought::Achieved::default(),
+        };
         let mut input = match command.control {
             Control::Ground {
                 throttle,
@@ -859,19 +953,20 @@ impl AiActor {
                 } else {
                     None
                 };
-                let mut input = self
-                    .adapter
-                    .controls(
-                        &self.flight,
-                        &intent,
-                        &own.limits,
-                        own.g_limit,
-                        own.roll_limit_deg_per_s,
-                        own.maximum_bank_deg,
-                        floor,
-                        flight::DT,
-                    )?
-                    .input;
+                let adapter = self.adapter.controls(
+                    &self.flight,
+                    &intent,
+                    &own.limits,
+                    own.g_limit,
+                    own.roll_limit_deg_per_s,
+                    own.maximum_bank_deg,
+                    floor,
+                    flight::DT,
+                )?;
+                let mut input = adapter.input.clone();
+                fly.intent = Some(intent);
+                fly.terrain_floor_deg = floor;
+                fly.adapter = Some(adapter);
                 if guidance.full_power {
                     input.throttle = Some(1.0);
                 }
@@ -885,6 +980,8 @@ impl AiActor {
             tore_input::PilotCommand::Set(tore_input::Switch::Airbrake, command.brakes),
         ];
         self.fly_input(input, ground, surface);
+        fly.achieved = self.achieved();
+        self.trace.fly = Some(fly);
         Ok(true)
     }
 
@@ -928,6 +1025,9 @@ pub struct AiMission {
     priority_landing: Option<u32>,
     /// External leaders seen airborne, so a later touchdown reads as landing.
     airborne_seen: Vec<u32>,
+    /// Write-only journal of messages between aircraft. No decision reads
+    /// it; the host drains it with [`Self::take_journal`].
+    journal: thought::Journal,
 }
 
 impl Default for AiMission {
@@ -952,7 +1052,21 @@ impl AiMission {
             pending_attack_reports: Vec::new(),
             priority_landing: None,
             airborne_seen: Vec::new(),
+            journal: thought::Journal::default(),
         }
+    }
+
+    /// Drain the message journal: attack reports, wing orders, escort
+    /// priorities and missile warnings since the last drain, oldest first.
+    /// Hosts call this once per tick after [`Self::step`]; an undrained
+    /// journal keeps its latest [`thought::JOURNAL_LIMIT`] entries.
+    pub fn take_journal(&mut self) -> thought::JournalBatch {
+        self.journal.take()
+    }
+
+    /// The journal entries not yet drained.
+    pub fn journal(&self) -> &thought::Journal {
+        &self.journal
     }
 
     /// The human player is landing at this airport (retail: gear down, below
@@ -1019,7 +1133,24 @@ impl AiMission {
         bearing_world_deg: Option<f64>,
         event_id: Option<u32>,
     ) {
+        let attack = ObservedAttack {
+            report,
+            bearing_world_deg,
+            observed_tick: self.tick,
+            event_id,
+        };
+        let ignored = |reason| JournalEntry {
+            tick: attack.observed_tick,
+            sender: Some(receiver),
+            message: Message::AttackEvidence(attack),
+            receipts: vec![Receipt {
+                actor: receiver,
+                outcome: Outcome::Ignored(reason),
+            }],
+        };
         if report.defended_id != receiver {
+            self.journal
+                .push(ignored(IgnoreReason::NotTheDefendedAircraft));
             return;
         }
         let identity = self
@@ -1032,14 +1163,12 @@ impl AiMission {
                     .map(|(side, wing, _)| (*side, *wing))
             });
         let Some((side, wing)) = identity else {
+            self.journal.push(ignored(IgnoreReason::UnknownReporter));
             return;
         };
-        let attack = ObservedAttack {
-            report,
-            bearing_world_deg,
-            observed_tick: self.tick,
-            event_id,
-        };
+        // Journal only evidence a recipient does not already hold or await;
+        // a refresh of known evidence is not a new message.
+        let mut receipts = Vec::new();
         for actor in &self.actors {
             if actor.alive()
                 && actor.identity.side == side
@@ -1049,9 +1178,29 @@ impl AiMission {
             {
                 let key = (actor.id(), attack);
                 if !self.pending_attack_reports.contains(&key) {
+                    let new = !actor.holds_attack(&attack)
+                        && !self.pending_attack_reports.iter().any(|(id, pending)| {
+                            *id == actor.id()
+                                && pending.report == attack.report
+                                && pending.event_id == attack.event_id
+                        });
                     self.pending_attack_reports.push(key);
+                    if new {
+                        receipts.push(Receipt {
+                            actor: actor.id(),
+                            outcome: Outcome::Queued,
+                        });
+                    }
                 }
             }
+        }
+        if !receipts.is_empty() {
+            self.journal.push(JournalEntry {
+                tick: attack.observed_tick,
+                sender: Some(receiver),
+                message: Message::AttackEvidence(attack),
+                receipts,
+            });
         }
     }
 
@@ -1128,10 +1277,35 @@ impl AiMission {
         now: TimeOfDay,
     ) -> Result<MissionOutput> {
         let mut output = MissionOutput::default();
+        let mut delivered = Vec::new();
         for (receiver, report) in std::mem::take(&mut self.pending_attack_reports) {
             if let Some(actor) = self.actor_mut(receiver) {
+                let new = !actor.holds_attack(&report);
                 actor.remember_attack(report);
+                if new {
+                    let outcome = actor
+                        .attack_ignore_reason(&report)
+                        .map_or(Outcome::Delivered, Outcome::Ignored);
+                    delivered.push((receiver, report, outcome));
+                }
+            } else {
+                delivered.push((
+                    receiver,
+                    report,
+                    Outcome::Ignored(IgnoreReason::RecipientGone),
+                ));
             }
+        }
+        for (receiver, attack, outcome) in delivered {
+            self.journal.push(JournalEntry {
+                tick: self.tick,
+                sender: Some(attack.report.defended_id),
+                message: Message::AttackEvidence(attack),
+                receipts: vec![Receipt {
+                    actor: receiver,
+                    outcome,
+                }],
+            });
         }
         let tick = self.tick;
         self.track_airborne(world);
@@ -1168,6 +1342,7 @@ impl AiMission {
                 tick,
                 &mut output,
             )?;
+            self.journal_actor(index, tick);
         }
 
         // Share only evidence produced this tick, after all controllers have
@@ -1196,6 +1371,7 @@ impl AiMission {
 
         // Neutral AI leaders respond to an actual perceived attack, never to
         // mere contact acquisition. Orders take effect after all decisions.
+        // The first qualifying attack is kept as the release's trigger.
         let releases: Vec<_> = self
             .actors
             .iter()
@@ -1207,7 +1383,12 @@ impl AiMission {
                     && !self.external_leaders.iter().any(|(side, wing, _)| {
                         *side == leader.identity.side && *wing == leader.identity.wing
                     })
-                    && leader.observed_attacks.iter().any(|attack| {
+            })
+            .filter_map(|leader| {
+                leader
+                    .observed_attacks
+                    .iter()
+                    .find(|attack| {
                         leader.permits_attack_response(attack)
                             && (leader
                                 .assignment
@@ -1219,14 +1400,23 @@ impl AiMission {
                                         && member.identity.wing == leader.identity.wing
                                 }))
                     })
+                    .map(|attack| (leader.id(), *attack))
             })
-            .map(AiActor::id)
             .collect();
-        for leader in releases {
+        for (leader, trigger) in releases {
             let request =
                 super::wing::WingRequest::TargetAssignment(super::wing::TargetOrder::FreeSelection);
-            self.order(leader, request).expect("live leader")?;
+            let outcome = self.order(leader, request).expect("live leader")?;
             output.wing.push((leader, request));
+            self.journal.push(JournalEntry {
+                tick,
+                sender: Some(leader),
+                message: Message::FreeSelection { trigger },
+                receipts: vec![Receipt {
+                    actor: leader,
+                    outcome: Outcome::Order(outcome),
+                }],
+            });
         }
 
         // Deliver after all actors have decided, so iteration order cannot
@@ -1287,17 +1477,30 @@ impl AiMission {
             .filter_map(|a| a.controller.target())
             .collect();
         let actor = &mut self.actors[index];
+        // Write-only records start afresh on every mission step.
+        actor.trace = ActorTrace::begin(tick);
+        actor.trace.clearance = clearance;
+        actor.route_random.clear_log();
         actor.controller.set_formation_observation(traffic.to_vec());
         if !actor.dummy {
             if actor.flight.escape.is_some() {
                 actor.flight.step_escape(ground);
+                actor.trace.ejection = Some(EjectionTrace {
+                    escape_running: true,
+                    ..EjectionTrace::default()
+                });
             } else {
                 let mut assessment = crate::ejection::assess(&actor.flight, ground);
+                let mut ejection = EjectionTrace {
+                    assessment,
+                    ..EjectionTrace::default()
+                };
                 // Opinionated (John, 2026-09-23): taking off or landing, only
                 // a catastrophe ejects; any other hazard aborts the landing.
                 if let (Some(found), Some(sequence)) = (assessment, actor.airfield.as_mut())
                     && sequence.guards_ejection()
                 {
+                    ejection.guarded_phase = Some(sequence.phase());
                     let [x, y, z] = actor.flight.position;
                     let below = surface(x, z);
                     let landing = sequence.landing_point();
@@ -1306,7 +1509,9 @@ impl AiMission {
                         landable_below: below.landable,
                         landing_distance_ft: (landing[0] - x).hypot(landing[2] - z),
                     };
-                    if !crate::ejection::catastrophic(&actor.flight, found, field) {
+                    let catastrophic = crate::ejection::catastrophic(&actor.flight, found, field);
+                    ejection.catastrophic = Some(catastrophic);
+                    if !catastrophic {
                         // Normal landing geometry (a low, sinking final over
                         // the runway) needs nothing; a final that would touch
                         // down off the runway or gear up goes around; any
@@ -1331,6 +1536,7 @@ impl AiMission {
                             }
                             _ => false,
                         };
+                        ejection.go_around = Some(abort);
                         if abort {
                             sequence.request_go_around();
                         }
@@ -1339,7 +1545,9 @@ impl AiMission {
                 }
                 if actor.escape_monitor.step(assessment).is_some() {
                     actor.flight.eject();
+                    ejection.ejected = true;
                 }
+                actor.trace.ejection = Some(ejection);
             }
         }
 
@@ -1349,6 +1557,7 @@ impl AiMission {
             actor.controller.set_search_contact(None);
             actor.activity = Activity::Destroyed;
             output.activities.push((actor_id, Activity::Destroyed));
+            actor.trace.path = ActorPath::Destroyed;
             return Ok(());
         }
 
@@ -1357,10 +1566,16 @@ impl AiMission {
                 actor.flight.position[i] += actor.flight.velocity[i] * flight::DT;
             }
             actor.flight.ticks += 1;
+            actor.trace.dropped_warnings = actor
+                .pending_threats
+                .iter()
+                .map(|report| (*report, DropReason::TrainingTarget))
+                .collect();
             actor.pending_threats.clear();
             actor.pending_events.clear();
             actor.activity = Activity::Idle;
             output.activities.push((actor_id, Activity::Idle));
+            actor.trace.path = ActorPath::Dummy;
             return Ok(());
         }
 
@@ -1376,10 +1591,13 @@ impl AiMission {
             && let Some(order) = join
         {
             actor.landing_order = Some(order);
+            actor.trace.join_landing = Some(order);
         }
         if actor.airfield_tick(&clearance, &own, tick, ground, surface, output)? {
+            actor.trace.path = ActorPath::Airfield;
             return Ok(());
         }
+        actor.trace.path = ActorPath::Controller;
 
         // 3. The frame.
         let events = actor.drain_events(tick);
@@ -1392,13 +1610,30 @@ impl AiMission {
                 })
                 .is_some();
         }
+        let mut expired = Vec::new();
         actor.observed_attacks.retain(|attack| {
-            tick.saturating_sub(attack.observed_tick) < 240
+            let keep = tick.saturating_sub(attack.observed_tick) < 240
                 && attack
                     .report
                     .attacker_id
-                    .is_none_or(|id| world.iter().any(|o| o.id == id && o.alive && !o.destroyed))
+                    .is_none_or(|id| world.iter().any(|o| o.id == id && o.alive && !o.destroyed));
+            if !keep {
+                expired.push(*attack);
+            }
+            keep
         });
+        actor.trace.expired_attacks = expired
+            .into_iter()
+            .map(|attack| {
+                let age = tick.saturating_sub(attack.observed_tick);
+                let reason = if age >= 240 {
+                    ExpiryReason::Age { ticks: age }
+                } else {
+                    ExpiryReason::AttackerGone
+                };
+                (attack, reason)
+            })
+            .collect();
         let emitter_ids: Vec<_> = actor
             .received_emitters
             .iter()
@@ -1482,11 +1717,40 @@ impl AiMission {
             actor.controller.target(),
             2,
         );
+        // The explanation reads the leash state `select` just updated.
+        let explanation = actor.mission_policy.explain(
+            actor_id,
+            identity.side,
+            own.position,
+            permission,
+            &targets,
+            &protected,
+            &reports,
+            actor.controller.target(),
+            2,
+        );
+        let must_rejoin = actor.mission_policy.must_rejoin();
+        actor.trace.engagement = Some(EngagementTrace {
+            neutral: actor.neutral,
+            role: permission.role,
+            stance: permission.stance,
+            reports: actor
+                .observed_attacks
+                .iter()
+                .map(|attack| ReportTrace {
+                    attack: *attack,
+                    ignored: actor.attack_ignore_reason(attack),
+                })
+                .collect(),
+            selection,
+            must_rejoin,
+            explanation,
+        });
         actor
             .controller
             .set_mission_hold_fire(actor.assignment.stance == engagement::Stance::WeaponsHold);
         actor.controller.set_mission_target(selection.map(|s| s.id));
-        let rejoin = if actor.mission_policy.must_rejoin() {
+        let rejoin = if must_rejoin {
             protected
                 .iter()
                 .filter(|p| p.alive)
@@ -1505,6 +1769,14 @@ impl AiMission {
             None
         };
         actor.controller.set_mission_rejoin(rejoin);
+        actor.trace.rejoin = rejoin.map(|point| RejoinTrace {
+            point,
+            reason: if must_rejoin {
+                RejoinReason::EscortLeash
+            } else {
+                RejoinReason::OutsidePatrol
+            },
+        });
         let cue = (rejoin.is_none()
             && selection.is_none()
             && !actor.neutral
@@ -1525,8 +1797,10 @@ impl AiMission {
             })
             .flatten();
         actor.controller.set_mission_search_bearing(cue);
+        actor.trace.search_cue_deg = cue;
         actor.update_search_contact(&protected);
         let stations = actor.station_views(&targets, &own);
+        actor.trace.station_aim = actor.station_aim(&targets, &own).map(|t| t.id);
         let wing = WingView {
             control: self.wing_control,
             formation: self.formation,
@@ -1576,6 +1850,9 @@ impl AiMission {
             };
             actor.controller.step(&frame)?
         };
+        // The frame is gone; keep what the controller saw.
+        actor.trace.targets = targets;
+        actor.trace.stations = stations;
 
         // B48 bingo: with a known home runway the aircraft now lands there.
         // Leaders and singletons use the same fitted rule.
@@ -1585,10 +1862,12 @@ impl AiMission {
         ) && actor.landing_order.is_none()
             && let Some(runway) = actor.home_runway
         {
-            actor.landing_order = Some(super::airfield::LandingOrder {
+            let order = super::airfield::LandingOrder {
                 runway,
                 reason: super::airfield::LandingReason::Fuel,
-            });
+            };
+            actor.landing_order = Some(order);
+            actor.trace.bingo_landing = Some(order);
         }
 
         // Choosing a currently visible target is the only way to fill or
@@ -1685,6 +1964,75 @@ impl AiMission {
         // 6. Motion through the adapter and this actor's own flight model.
         actor.fly(batch.motion.as_ref(), &own, ground, surface)?;
         Ok(())
+    }
+
+    /// Journal one actor's messages of this step from its records: launch
+    /// warnings dropped, queued or received, remembered attacks forgotten,
+    /// and a changed escort selection. Reads records only; decides nothing.
+    fn journal_actor(&mut self, index: usize, tick: u64) {
+        let actor = &mut self.actors[index];
+        let id = actor.id();
+        let receipt = |outcome| vec![Receipt { actor: id, outcome }];
+        let mut entries = Vec::new();
+        for (report, reason) in &actor.trace.dropped_warnings {
+            entries.push(JournalEntry {
+                tick,
+                sender: Some(report.launcher_id),
+                message: Message::MissileWarning(*report),
+                receipts: receipt(Outcome::WarningDropped(*reason)),
+            });
+        }
+        let decided = actor.controller.trace();
+        if decided.tick == Some(tick) {
+            for warning in &decided.events.warnings {
+                let outcome = match warning.step {
+                    WarningStep::NotWarned => Outcome::WarningDropped(DropReason::NotWarned),
+                    WarningStep::Queued { already_queued } => Outcome::WarningDue {
+                        due_tick: warning.due_tick.unwrap_or(tick),
+                        already_queued,
+                    },
+                    WarningStep::Received {
+                        outcome,
+                        launch_call,
+                        ..
+                    } => Outcome::WarningReceived {
+                        outcome,
+                        launch_call,
+                    },
+                };
+                entries.push(JournalEntry {
+                    tick,
+                    sender: Some(warning.report.launcher_id),
+                    message: Message::MissileWarning(warning.report),
+                    receipts: receipt(outcome),
+                });
+            }
+        }
+        for (attack, reason) in &actor.trace.expired_attacks {
+            entries.push(JournalEntry {
+                tick,
+                sender: Some(attack.report.defended_id),
+                message: Message::AttackEvidence(*attack),
+                receipts: receipt(Outcome::Expired(*reason)),
+            });
+        }
+        if !actor.assignment.protected_ids.is_empty()
+            && let Some(engagement) = &actor.trace.engagement
+            && actor.journal_memory.escort_selection != Some(engagement.selection)
+        {
+            actor.journal_memory.escort_selection = Some(engagement.selection);
+            entries.push(JournalEntry {
+                tick,
+                sender: Some(id),
+                message: Message::EscortPriority {
+                    selection: engagement.selection,
+                },
+                receipts: Vec::new(),
+            });
+        }
+        for entry in entries {
+            self.journal.push(entry);
+        }
     }
 
     /// The leader's pose for a wingman, taken from the leader actor itself.
@@ -2041,6 +2389,18 @@ impl AiMission {
         for id in recipients {
             outcomes.push((id, self.order(id, request).expect("validated recipient")?));
         }
+        self.journal.push(JournalEntry {
+            tick: self.tick,
+            sender,
+            message: Message::WingRequest(Box::new(request)),
+            receipts: outcomes
+                .iter()
+                .map(|&(actor, outcome)| Receipt {
+                    actor,
+                    outcome: Outcome::Order(outcome),
+                })
+                .collect(),
+        });
         Ok(outcomes)
     }
 
@@ -2225,12 +2585,13 @@ impl AiActor {
                 })
             });
         self.search_target = snapshot.map(|s| s.target.id);
-        self.controller
-            .set_search_contact(snapshot.map(|s| SearchContact {
-                id: s.target.id,
-                position: s.target.position,
-                observed_tick: s.last_observed_tick,
-            }));
+        let contact = snapshot.map(|s| SearchContact {
+            id: s.target.id,
+            position: s.target.position,
+            observed_tick: s.last_observed_tick,
+        });
+        self.controller.set_search_contact(contact);
+        self.trace.search_contact = contact;
     }
 
     fn update_missile_defense(
@@ -2504,7 +2865,8 @@ impl AiActor {
         })
     }
 
-    fn station_views(&self, targets: &[TargetView], own: &OwnState) -> Vec<StationView> {
+    /// The target the stores are pointed at when their envelopes are judged.
+    fn station_aim<'a>(&self, targets: &'a [TargetView], own: &OwnState) -> Option<&'a TargetView> {
         // Point the stores at the target this actor is actually holding, not
         // at whichever object happens to come first in the world list. The
         // retained target is last tick's; the controller re-selects inside
@@ -2512,7 +2874,7 @@ impl AiActor {
         // aiming at the wrong aircraft. With nothing retained, the nearest
         // permitted candidate is the best available guess.
         let retained = self.controller.target();
-        let target = retained
+        retained
             .and_then(|id| targets.iter().find(|t| t.id == id))
             .or_else(|| {
                 targets.iter().min_by(|a, b| {
@@ -2520,7 +2882,11 @@ impl AiActor {
                         .partial_cmp(&distance(own.position, b.position))
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
-            });
+            })
+    }
+
+    fn station_views(&self, targets: &[TargetView], own: &OwnState) -> Vec<StationView> {
+        let target = self.station_aim(targets, own);
         self.stations
             .iter()
             .map(|s| {
@@ -2634,6 +3000,12 @@ impl AiActor {
         ground: &dyn Fn(f64, f64) -> f64,
         surface: &dyn Fn(f64, f64) -> Surface,
     ) -> Result<()> {
+        let mut fly = FlyTrace {
+            intent: intent.copied(),
+            terrain_floor_deg: None,
+            adapter: None,
+            achieved: thought::Achieved::default(),
+        };
         let input = match intent {
             Some(intent) => {
                 let floor = self.controller.terrain_floor(&dummy_frame(own))?;
@@ -2647,11 +3019,16 @@ impl AiActor {
                     floor,
                     flight::DT,
                 )?;
-                output.input
+                let input = output.input.clone();
+                fly.terrain_floor_deg = floor;
+                fly.adapter = Some(output);
+                input
             }
             None => PilotInput::default(),
         };
         self.fly_input(input, ground, surface);
+        fly.achieved = self.achieved();
+        self.trace.fly = Some(fly);
         Ok(())
     }
 
@@ -4841,3 +5218,7 @@ mod engagement_integration_tests;
 #[cfg(test)]
 #[path = "airfield_integration_tests.rs"]
 mod airfield_integration_tests;
+
+#[cfg(test)]
+#[path = "thought_tests.rs"]
+mod thought_tests;

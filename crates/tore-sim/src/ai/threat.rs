@@ -250,11 +250,16 @@ pub fn countermeasure_gate(
     seeker: SeekerClass,
     random: &mut DecisionRandom,
 ) -> Option<DeviceRelease> {
-    if !random.chance(COUNTERMEASURE_THRESHOLDS[experience.index()]) {
+    if !random
+        .site("countermeasure roll")
+        .chance(COUNTERMEASURE_THRESHOLDS[experience.index()])
+    {
         return None;
     }
-    let count =
-        MIN_DEVICE_COUNT + random.below(u32::from(MAX_DEVICE_COUNT - MIN_DEVICE_COUNT) + 1) as u8;
+    let count = MIN_DEVICE_COUNT
+        + random
+            .site("countermeasure count")
+            .below(u32::from(MAX_DEVICE_COUNT - MIN_DEVICE_COUNT) + 1) as u8;
     Some(DeviceRelease {
         count,
         class: seeker,
@@ -300,7 +305,7 @@ pub fn decoy_roll(
     if susceptibility_percent > 100 || effectiveness_percent > 100 {
         return Err(AiError::InvalidInput("decoy percentages exceed 100"));
     }
-    Ok(random.chance(decoy_threshold(
+    Ok(random.site("decoy roll").chance(decoy_threshold(
         susceptibility_percent,
         effectiveness_percent,
     )))
@@ -366,7 +371,7 @@ pub fn script_fallback_reversal(
     limits: &SpeedLimits,
     random: &mut DecisionRandom,
 ) -> CourseReversal {
-    let heading_offset_degrees = if random.choose(2) == 0 {
+    let heading_offset_degrees = if random.site("course reversal side").choose(2) == 0 {
         COURSE_REVERSAL_DEGREES
     } else {
         -COURSE_REVERSAL_DEGREES

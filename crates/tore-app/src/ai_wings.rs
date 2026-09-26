@@ -324,6 +324,9 @@ pub struct AiWings {
     /// The player took off and has not yet lined up on an approach, so its
     /// gear-down climb-out does not claim landing priority.
     player_departing: bool,
+    /// What the latest [`Self::step`] produced, kept for the replay recorder
+    /// and debug panels. Nothing reads it back into a decision.
+    last_output: tore_sim::ai::mission::MissionOutput,
 }
 
 struct PendingGun {
@@ -788,6 +791,7 @@ impl AiWings {
             mission_skill: BTreeMap::new(),
             guns_only: false,
             player_departing: false,
+            last_output: tore_sim::ai::mission::MissionOutput::default(),
         })
     }
 
@@ -810,6 +814,34 @@ impl AiWings {
     /// Recent B47 deliveries, newest last, as (receiving actor, missile id).
     pub fn threat_reports(&self) -> &[(u32, u32)] {
         &self.threat_reports
+    }
+
+    /// What the latest [`Self::step`] produced: launches, device releases,
+    /// activities, fallbacks, wing requests and launch calls.
+    #[allow(dead_code)] // Read by the mission recorder.
+    pub fn last_output(&self) -> &tore_sim::ai::mission::MissionOutput {
+        &self.last_output
+    }
+
+    /// Drain the AI message journal (attack reports, wing orders, escort
+    /// priorities, missile warnings). The recorder calls this once per tick.
+    #[allow(dead_code)] // Called by the mission recorder.
+    pub fn take_ai_journal(&mut self) -> tore_sim::ai::thought::JournalBatch {
+        self.mission.take_journal()
+    }
+
+    /// One AI aircraft's controller record of its latest tick.
+    #[allow(dead_code)] // Read by the mission recorder and debug panels.
+    pub fn controller_trace(&self, id: u32) -> Option<&tore_sim::ai::thought::ControllerTrace> {
+        self.mission
+            .actor(id)
+            .map(|actor| actor.controller().trace())
+    }
+
+    /// One AI aircraft's mission record of its latest tick.
+    #[allow(dead_code)] // Read by the mission recorder and debug panels.
+    pub fn actor_trace(&self, id: u32) -> Option<&tore_sim::ai::thought::ActorTrace> {
+        self.mission.actor(id).map(AiActor::trace)
     }
 
     pub fn slot(&self, id: u32) -> Option<&Slot> {
@@ -1075,6 +1107,7 @@ impl AiWings {
                 .collect();
         }
         self.report_perceived_attacks(state, player, &ground);
+        self.last_output = output;
         Ok(())
     }
 
@@ -3845,5 +3878,37 @@ pub(crate) mod tests {
                 (None, None, None)
             );
         }
+    }
+
+    #[test]
+    fn the_bridge_keeps_its_last_output_and_hands_over_the_ai_records() {
+        let (mut wings, targets) = build(None);
+        let mut combat = combat_fixture(false);
+        combat.targets = targets;
+        let player = flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
+        assert!(wings.last_output().activities.is_empty());
+        for _ in 0..3 {
+            wings.step(&mut combat, &player, &world()).unwrap();
+        }
+        let last_tick = wings.mission.tick() - 1;
+        assert_eq!(wings.last_output().activities.len(), wings.mission.len());
+        for slot in wings.slots() {
+            assert_eq!(
+                wings.actor_trace(slot.id).unwrap().tick,
+                Some(last_tick),
+                "{}",
+                slot.label()
+            );
+            assert_eq!(
+                wings.controller_trace(slot.id).unwrap().tick,
+                Some(last_tick)
+            );
+        }
+        assert!(wings.actor_trace(PLAYER_ID).is_none());
+        assert_eq!(wings.take_ai_journal().dropped, 0);
+        assert!(
+            wings.take_ai_journal().entries.is_empty(),
+            "a drained journal starts empty"
+        );
     }
 }

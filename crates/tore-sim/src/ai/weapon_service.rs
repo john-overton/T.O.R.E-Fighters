@@ -331,7 +331,7 @@ impl WeaponService {
 
     /// Chosen pre-firing delay with B42's 10% half-second addition.
     fn gated(delay: Delay, random: &mut DecisionRandom) -> Delay {
-        if random.chance(HALF_SECOND_GATE) {
+        if random.site("half-second delay").chance(HALF_SECOND_GATE) {
             delay.plus(Delay::HALF_SECOND)
         } else {
             delay
