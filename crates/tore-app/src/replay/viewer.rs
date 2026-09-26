@@ -13,8 +13,10 @@ use crate::flight_views::{self, Body, Reference, Rig, Scene, Shot};
 use crate::render_snapshot::{self, AircraftPose, CombatArt, RenderSnapshot};
 use crate::renderer::Renderer;
 use crate::replay::clock::{self, Clock, Direction};
+use crate::replay::context_menu::{self, Action, Menu, Outcome, Pickable, RightClick, Target};
 use crate::replay::drone::{Drone, Mode};
 use crate::replay::overlay::{self, Control, Marker, MarkerKind, Model, Placement};
+use crate::replay::panels::{self, Data, Kind, Panels, RecordedTrees};
 use crate::replay::playback::Playback;
 use crate::replay::sound::{self, ReplaySound};
 use crate::replay::tracks::{Scanner, Tracks};
@@ -27,15 +29,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tore_formats::aircraft::AircraftId;
-use tore_replay::{AircraftInfo, Event, Recording, Side, TimedEvent, vocab};
+use tore_replay::{
+    AircraftInfo, Event, Recording, Side, TimedEvent, TreeSample, WeaponClass, vocab,
+};
 
 /// Weather snapshots built ahead of the playhead each frame, in ticks:
 /// a ten-minute recording is ready in about a second.
 const WEATHER_BUDGET: u64 = 1_200;
 /// How long a subtitle stays up, in ticks: about four seconds.
 const SUBTITLE_TICKS: u64 = 480;
-/// Lines the Comms list shows.
-const COMMS_LINES: usize = 14;
 /// Messages at the top of the view last this long.
 const TOAST: Duration = Duration::from_secs(3);
 /// Labels further away than this are left out, feet (100 nautical miles).
@@ -50,6 +52,7 @@ pub struct Ui {
     pub hidden: bool,
     pub labels: bool,
     pub timer: bool,
+    /// The Comms panel is open.
     pub comms: bool,
     pub subtitles: bool,
     pub trails: bool,
@@ -100,6 +103,42 @@ impl Default for Ui {
     }
 }
 
+/// A debug panel or the right-click menu to open when the viewer starts,
+/// from `--replay-panels`, for captures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Request {
+    /// AI thinking of the selected aircraft.
+    Thought,
+    /// Telemetry of the selected aircraft.
+    Telemetry,
+    /// Guidance of the selected aircraft's newest missile in flight.
+    Guidance,
+    Comms,
+    /// The right-click menu on the selected aircraft.
+    Menu,
+}
+
+impl Request {
+    /// The panels named in a comma-separated list: thought, telemetry,
+    /// guidance, comms and menu.
+    pub fn parse(list: &str) -> Result<Vec<Self>, String> {
+        list.split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(|part| match part {
+                "thought" => Ok(Self::Thought),
+                "telemetry" => Ok(Self::Telemetry),
+                "guidance" => Ok(Self::Guidance),
+                "comms" => Ok(Self::Comms),
+                "menu" => Ok(Self::Menu),
+                other => Err(format!(
+                    "unknown replay panel {other:?}: use thought, telemetry, guidance, comms or menu"
+                )),
+            })
+            .collect()
+    }
+}
+
 /// How the viewer starts, from the command line or the Replays screen.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Options {
@@ -114,6 +153,8 @@ pub struct Options {
     /// Start playing at this speed, backwards when negative.
     pub speed: Option<f64>,
     pub ui: Ui,
+    /// Debug panels to open on the first frame.
+    pub panels: Vec<Request>,
 }
 
 /// How long one frame's parts took, in milliseconds, for the
@@ -217,37 +258,217 @@ pub fn roll_rate(before: [f64; 3], after: [f64; 3]) -> f64 {
 }
 
 /// A name label over an aircraft: its text, the top left of the text on
-/// the view, and its colour.
+/// the view, its size there and its colour.
 #[derive(Clone, Debug, PartialEq)]
-struct Label {
-    text: String,
-    at: [f64; 2],
-    color: [u8; 3],
+pub struct Label {
+    pub id: u32,
+    pub text: String,
+    pub at: [f64; 2],
+    pub size: [f64; 2],
+    pub color: [u8; 3],
+}
+
+impl Label {
+    /// Where it is drawn, as a right-click picks it: left, top, width and
+    /// height in view pixels.
+    pub fn rect(&self) -> [f64; 4] {
+        [self.at[0], self.at[1], self.size[0], self.size[1]]
+    }
+}
+
+/// Name labels over `poses` for a view of `size` through `camera`: each
+/// aircraft's label in its side's colour, `selected` in brackets. Aircraft
+/// over 100 nautical miles away, wrecks on the ground and the aircraft the
+/// camera sits in have none. `who` gives an aircraft's label and side.
+pub fn name_labels<'a>(
+    poses: impl Iterator<Item = &'a crate::render_snapshot::AircraftPose>,
+    camera: &Camera,
+    size: [u32; 2],
+    font: &tore_formats::font::Font,
+    selected: Option<u32>,
+    who: &dyn Fn(u32) -> (String, Side),
+) -> Vec<Label> {
+    let scale = Placement::new(size).scale();
+    let eye = camera.position.map(f64::from);
+    let mut out = Vec::new();
+    for pose in poses {
+        if Some(pose.id) == camera.hidden_target || (!pose.airborne && pose.crashed) {
+            continue;
+        }
+        let distance = (0..3)
+            .map(|i| (pose.position[i] - eye[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        if distance > LABEL_REACH {
+            continue;
+        }
+        let Some([x, y]) = camera.project(size, pose.position) else {
+            continue;
+        };
+        let (mut text, side) = who(pose.id);
+        text = crate::replay::panels::ascii(&text);
+        if Some(pose.id) == selected {
+            text = format!("[{text}]");
+        }
+        let width = FlightCanvas::text_width(font, &text, scale);
+        out.push(Label {
+            id: pose.id,
+            at: [x - width / 2., y - (font.height as f64 + 8.) * scale],
+            size: [width, (font.height as f64 + 1.) * scale],
+            text,
+            color: trails::side_color(side),
+        });
+    }
+    out
+}
+
+/// The debug panels and the right-click menu, drawn in their own 640x480
+/// layer, with where each is.
+struct PanelLayer<'a> {
+    pixels: &'a [u8],
+    panels: &'a [crate::controls_editor::Rect],
+    menu: Option<crate::controls_editor::Rect>,
+}
+
+/// Everything drawn over the 3D view in one frame.
+struct Interface<'a> {
+    hidden: bool,
+    labels: &'a [Label],
+    model: &'a Model,
+    panels: PanelLayer<'a>,
 }
 
 /// Draws the interface over a blank view of `size`: the labels at the
-/// view's own resolution, then the 640x480 layer. While the interface is
-/// hidden the view is left clear, so only the 3D picture shows.
+/// view's own resolution, the debug panels, the 640x480 interface layer,
+/// then the right-click menu over everything. While the interface is hidden
+/// the view is left clear, so only the 3D picture shows.
 fn compose(
     canvas: &mut FlightCanvas,
     size: [u32; 2],
-    hidden: bool,
-    labels: &[Label],
-    model: &Model,
     font: &tore_formats::font::Font,
     layer: &mut [u8],
+    interface: &Interface,
 ) {
     canvas.blank(size);
-    if hidden {
+    if interface.hidden {
         return;
     }
     let scale = Placement::new(size).scale();
-    for label in labels {
+    for label in interface.labels {
         canvas.text(font, &label.text, label.at, scale, label.color);
     }
+    let panels = &interface.panels;
+    canvas.centered_rects(panels.pixels, panels.panels);
     layer.fill(0);
-    overlay::draw(layer, font, model);
+    overlay::draw(layer, font, interface.model);
     canvas.anchored_layer(layer);
+    if let Some(menu) = panels.menu {
+        canvas.centered_rects(panels.pixels, &[menu]);
+    }
+}
+
+/// An aircraft's label for people: its label, else its type, else its id.
+fn label_of(info: &BTreeMap<u32, AircraftInfo>, id: u32) -> String {
+    info.get(&id).map_or_else(
+        || format!("Aircraft {id}"),
+        |a| {
+            if !a.label.is_empty() {
+                a.label.clone()
+            } else if !a.name.is_empty() {
+                a.name.clone()
+            } else {
+                format!("Aircraft {id}")
+            }
+        },
+    )
+}
+
+/// Each missile's shooter and weapon name, from the launch events.
+fn missiles(recording: &Recording) -> BTreeMap<u32, (u32, String)> {
+    recording
+        .events()
+        .iter()
+        .filter(|e| e.event.kind == vocab::kind::WEAPON_LAUNCH)
+        .filter_map(|e| {
+            let projectile = e.event.id(vocab::field::PROJECTILE)?;
+            let shooter = e.event.subject?;
+            let weapon = e
+                .event
+                .id(vocab::field::WEAPON)
+                .and_then(|w| recording.weapon_info(w))
+                .filter(|w| !w.name.is_empty())
+                .map_or_else(|| "Missile".to_owned(), |w| w.name.clone());
+            Some((projectile, (shooter, weapon)))
+        })
+        .collect()
+}
+
+/// What a replay lends the debug panels: the recording at the playhead.
+struct ReplayData<'a> {
+    recording: &'a Recording,
+    trees: &'a mut RecordedTrees,
+    info: &'a BTreeMap<u32, AircraftInfo>,
+    missiles: &'a BTreeMap<u32, (u32, String)>,
+    comms: &'a [TimedEvent],
+    now: u64,
+}
+
+impl Data for ReplayData<'_> {
+    fn now(&self) -> u64 {
+        self.now
+    }
+
+    fn tree(&mut self, subject: u32, channel: &str) -> Option<(u64, TreeSample)> {
+        self.trees.tree(self.recording, subject, channel, self.now)
+    }
+
+    fn name(&self, id: u32) -> String {
+        label_of(self.info, id)
+    }
+
+    fn title(&self, kind: Kind, subject: u32) -> String {
+        match kind {
+            Kind::Guidance => match self.missiles.get(&subject) {
+                Some((owner, weapon)) => format!("{weapon} from {}", self.name(*owner)),
+                None => format!("missile {subject}"),
+            },
+            Kind::Thought | Kind::Telemetry => match self.info.get(&subject) {
+                Some(a) if !a.name.is_empty() && !a.label.is_empty() => {
+                    format!("{}  {}", a.label, a.name)
+                }
+                _ => self.name(subject),
+            },
+        }
+    }
+
+    fn missing(&self, kind: Kind, subject: u32) -> String {
+        let who = self.name(subject);
+        match kind {
+            Kind::Thought if subject == 0 || self.info.get(&subject).is_some_and(|a| a.human) => {
+                format!("{who} is flown by a person, so there is no AI thinking to show.")
+            }
+            Kind::Thought => format!("No AI thinking recorded for {who} up to this moment."),
+            Kind::Telemetry => format!("No telemetry recorded for {who} up to this moment."),
+            Kind::Guidance => "No guidance recorded for this missile up to this moment.".into(),
+        }
+    }
+
+    fn comms(&self) -> (&[TimedEvent], usize) {
+        let end = self.comms.partition_point(|e| e.tick <= self.now);
+        (self.comms, end)
+    }
+
+    fn aircraft(&self) -> Vec<u32> {
+        self.info.keys().copied().collect()
+    }
+}
+
+/// What took the left button's press, so its release goes there too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Owner {
+    Menu,
+    Panels,
+    Bar,
 }
 
 /// Where a screenshot of `recording` at `tick` goes in `folder`: the
@@ -339,8 +560,27 @@ pub struct Viewer {
     /// Unique marker ticks, for PageUp and PageDown.
     marker_ticks: Vec<u64>,
     targets: BTreeMap<u32, Vec<(u64, Option<u32>)>>,
-    /// Indices into the recording's events of every comms entry.
-    comms: Vec<usize>,
+    /// Every comms and audio entry, in time order, for the Comms panel.
+    comms: Vec<TimedEvent>,
+    /// Each missile's shooter and weapon name.
+    missiles: BTreeMap<u32, (u32, String)>,
+    panels: Panels,
+    trees: RecordedTrees,
+    menu: Option<Menu>,
+    /// A right-button press being watched for a click, and where it went
+    /// down in view pixels.
+    right_click: Option<(RightClick, [f64; 2])>,
+    /// Where the pointer is in the panel layer, while the interface shows.
+    point: Option<(f64, f64)>,
+    left_owner: Option<Owner>,
+    /// What the last frame drew that a right-click can pick.
+    pickables: Vec<Pickable>,
+    /// The debug panels' and menu's own layer.
+    panel_layer: Vec<u8>,
+    /// Panels asked for at start, opened on the first frame.
+    requests: Vec<Request>,
+    /// The view's size in the last frame.
+    size: [u32; 2],
     view: u8,
     drone: Option<Drone>,
     /// Where the selected aircraft was last drawn, so a follow drone holds
@@ -430,9 +670,8 @@ impl Viewer {
         marker_ticks.dedup();
         let comms = events
             .iter()
-            .enumerate()
-            .filter(|(_, e)| e.event.kind.starts_with("comms."))
-            .map(|(i, _)| i)
+            .filter(|e| panels::Channel::of(&e.event.kind).is_some())
+            .cloned()
             .collect();
         let mut clock = Clock::new(first, last);
         if let Some(speed) = options.speed {
@@ -479,6 +718,7 @@ impl Viewer {
                 std::iter::once(&ownship.profile).chain(models.iter().map(|m| &m.profile)),
             ),
             targets: targets(events),
+            missiles: missiles(&recording),
             recording,
             world,
             scratch: template.clone(),
@@ -492,6 +732,16 @@ impl Viewer {
             markers,
             marker_ticks,
             comms,
+            panels: Panels::default(),
+            trees: RecordedTrees::default(),
+            menu: None,
+            right_click: None,
+            point: None,
+            left_owner: None,
+            pickables: Vec::new(),
+            panel_layer: vec![0; overlay::WIDTH * overlay::HEIGHT * 4],
+            requests: options.panels.clone(),
+            size: [overlay::WIDTH as u32, overlay::HEIGHT as u32],
             view: options.view.unwrap_or(EXTERNAL),
             drone: None,
             anchor: None,
@@ -514,6 +764,9 @@ impl Viewer {
         };
         if options.drone {
             viewer.drone_mode(Some(Mode::Follow));
+        }
+        if options.ui.comms {
+            viewer.panels.open_comms(None);
         }
         Ok(viewer)
     }
@@ -560,18 +813,7 @@ impl Viewer {
     }
 
     fn label(&self, id: u32) -> String {
-        self.info.get(&id).map_or_else(
-            || format!("Aircraft {id}"),
-            |a| {
-                if !a.label.is_empty() {
-                    a.label.clone()
-                } else if !a.name.is_empty() {
-                    a.name.clone()
-                } else {
-                    format!("Aircraft {id}")
-                }
-            },
-        )
+        label_of(&self.info, id)
     }
 
     fn side(&self, id: u32) -> Side {
@@ -621,6 +863,7 @@ impl Viewer {
             self.rig.select(Reference::Aircraft(id));
             self.camera_error = None;
             self.look = [0.; 2];
+            self.panels.follow(id);
         }
     }
 
@@ -706,6 +949,22 @@ impl Viewer {
         if !pressed {
             return Command::None;
         }
+        // An open right-click menu takes its keys first, held ones too.
+        if let Some(menu) = &mut self.menu {
+            match menu.key(name, shift) {
+                Outcome::Ignored => {}
+                Outcome::Handled => return Command::None,
+                Outcome::Close => {
+                    self.menu = None;
+                    return Command::None;
+                }
+                Outcome::Chosen(action) => {
+                    self.menu = None;
+                    self.perform(action);
+                    return Command::None;
+                }
+            }
+        }
         // Stepping and jumping repeat while held; switches do not.
         match name {
             "ArrowLeft" | "ArrowRight" => {
@@ -735,10 +994,30 @@ impl Viewer {
             }
             "Tab" => self.cycle_aircraft(!shift),
             "`" => self.drone_mode(None),
-            "h" => self.ui.hidden = !self.ui.hidden,
+            "h" => {
+                self.ui.hidden = !self.ui.hidden;
+                self.menu = None;
+            }
             "n" => self.ui.labels = !self.ui.labels,
             "t" => self.ui.timer = !self.ui.timer,
-            "c" => self.ui.comms = !self.ui.comms,
+            "c" => {
+                self.panels.toggle_comms();
+                self.ui.comms = self.panels.comms_open();
+            }
+            "i" => self.toggle_panel(Kind::Thought, self.selected),
+            "f" => self.toggle_panel(Kind::Telemetry, self.selected),
+            "g" => match self.newest_missile(self.selected) {
+                Some(id) => self.toggle_panel(Kind::Guidance, id),
+                None => {
+                    let who = self.label(self.selected);
+                    self.toast(format!("{who} has no missile in flight"));
+                }
+            },
+            "x" => {
+                self.panels.close_all();
+                self.ui.comms = false;
+            }
+            "m" => self.menu_on_selected(),
             "r" if shift => {
                 self.ui.trails = true;
                 self.ui.trail_length = (self.ui.trail_length + 1) % trails::LENGTHS.len();
@@ -774,12 +1053,17 @@ impl Viewer {
     pub fn pointer_left(&mut self) {
         self.bar.hover = None;
         self.dragging = None;
+        self.right_click = None;
+        self.point = None;
+        self.panels.hover = None;
     }
 
     /// Lets go of every held key and drag, when the window loses focus.
     pub fn release(&mut self) {
         self.held.clear();
         self.dragging = None;
+        self.right_click = None;
+        self.left_owner = None;
         self.bar = overlay::Pointer::default();
     }
 
@@ -788,6 +1072,14 @@ impl Viewer {
         point
             .filter(|_| !self.ui.hidden)
             .and_then(|p| Placement::new(size).layer(p))
+    }
+
+    /// The point in the panels' layer under a view point, when the
+    /// interface shows.
+    fn panel_point(&self, point: Option<[f64; 2]>, size: [u32; 2]) -> Option<(f64, f64)> {
+        point
+            .filter(|_| !self.ui.hidden)
+            .map(|p| Placement::new(size).centered(p))
     }
 
     /// The pointer moved to `point` in view pixels (`None` off the window);
@@ -800,8 +1092,25 @@ impl Viewer {
         size: [u32; 2],
         radians: [f64; 2],
     ) {
+        if let Some((click, _)) = &mut self.right_click {
+            click.moved(window);
+        }
         let layer = self.layer_point(point, size);
-        self.bar.moved(layer, &mut self.clock);
+        let at = self.panel_point(point, size);
+        self.point = at;
+        let over_menu = match &mut self.menu {
+            Some(menu) => {
+                menu.pointer(at);
+                at.is_some_and(|at| menu.contains(at))
+            }
+            None => false,
+        };
+        self.panels
+            .pointer(panels::REPLAY, at.filter(|_| !over_menu));
+        self.bar.moved(
+            layer.filter(|_| !over_menu || self.bar.scrubbing),
+            &mut self.clock,
+        );
         if let Some(last) = self.dragging {
             let delta = [
                 (window[0] - last[0]) * radians[0],
@@ -817,12 +1126,50 @@ impl Viewer {
         }
     }
 
-    /// The left button went down or up at `point` in view pixels.
+    /// The left button went down or up at `point` in view pixels: the
+    /// right-click menu takes it while open (a press outside closes it),
+    /// then the debug panels, then the transport bar.
     pub fn left(&mut self, pressed: bool, point: Option<[f64; 2]>, size: [u32; 2]) {
         let layer = self.layer_point(point, size);
+        let at = self.panel_point(point, size);
         if pressed {
-            self.bar.down(layer, &mut self.clock);
+            let owner = if let Some(menu) = &mut self.menu {
+                if !menu.down(at) {
+                    self.menu = None;
+                }
+                Owner::Menu
+            } else if self.panels.down(panels::REPLAY, at) {
+                Owner::Panels
+            } else {
+                self.bar.down(layer, &mut self.clock);
+                Owner::Bar
+            };
+            self.left_owner = Some(owner);
             return;
+        }
+        match self.left_owner.take() {
+            Some(Owner::Menu) => {
+                let chosen = self.menu.as_mut().map(|menu| menu.up(at));
+                if let Some(Outcome::Chosen(action)) = chosen {
+                    self.menu = None;
+                    self.perform(action);
+                }
+                return;
+            }
+            Some(Owner::Panels) => {
+                let data = ReplayData {
+                    recording: &self.recording,
+                    trees: &mut self.trees,
+                    info: &self.info,
+                    missiles: &self.missiles,
+                    comms: &self.comms,
+                    now: self.clock.tick(),
+                };
+                self.panels.up(panels::REPLAY, at, &data);
+                self.ui.comms = self.panels.comms_open();
+                return;
+            }
+            Some(Owner::Bar) | None => {}
         }
         let Some(control) = self.bar.up(layer) else {
             return;
@@ -837,14 +1184,54 @@ impl Viewer {
         }
     }
 
-    /// The right button went down or up at `window`, in window pixels:
-    /// dragging with it turns the view.
-    pub fn right(&mut self, pressed: bool, window: [f64; 2]) {
-        self.dragging = pressed.then_some(window);
+    /// The right button went down or up at `window`, in window pixels, and
+    /// at `point` in the view's own pixels on a view of `size`: dragging
+    /// with it turns the view, and a click (released within `slop` window
+    /// pixels, never having strayed further) opens the right-click menu.
+    pub fn right(
+        &mut self,
+        pressed: bool,
+        window: [f64; 2],
+        point: Option<[f64; 2]>,
+        size: [u32; 2],
+        slop: f64,
+    ) {
+        if pressed {
+            self.dragging = Some(window);
+            self.right_click = point.map(|p| (RightClick::press(window, slop), p));
+            return;
+        }
+        self.dragging = None;
+        if let Some((click, at)) = self.right_click.take()
+            && click.release(window)
+        {
+            self.open_menu(at, size);
+        }
     }
 
-    /// Mouse wheel notches: the drone's speed, or zoom in a flight view.
+    /// Mouse wheel notches: a menu or panel under the pointer scrolls,
+    /// otherwise the drone's speed, or zoom in a flight view.
     pub fn wheel(&mut self, notches: i32) {
+        if let Some(menu) = &mut self.menu
+            && self.point.is_some_and(|at| menu.contains(at))
+        {
+            menu.wheel(notches);
+            return;
+        }
+        let data = ReplayData {
+            recording: &self.recording,
+            trees: &mut self.trees,
+            info: &self.info,
+            missiles: &self.missiles,
+            comms: &self.comms,
+            now: self.clock.tick(),
+        };
+        if self
+            .panels
+            .wheel(panels::REPLAY, self.point, notches, &data)
+        {
+            return;
+        }
         match &mut self.drone {
             Some(drone) => {
                 drone.wheel(notches);
@@ -853,6 +1240,225 @@ impl Viewer {
             }
             None => self.zoom = (self.zoom * 1.1f32.powi(notches)).clamp(0.5, 4.),
         }
+    }
+
+    fn open_panel(&mut self, kind: Kind, subject: u32) {
+        if let Err(reason) = self.panels.open(kind, subject) {
+            self.toast(reason);
+        }
+    }
+
+    fn toggle_panel(&mut self, kind: Kind, subject: u32) {
+        if let Err(reason) = self.panels.toggle(kind, subject) {
+            self.toast(reason);
+        }
+    }
+
+    /// The newest missile `owner` has in flight at the playhead.
+    fn newest_missile(&mut self, owner: u32) -> Option<u32> {
+        let (frames, at) = self.playback.frame(self.clock.tick())?;
+        frames[at]
+            .projectiles
+            .iter()
+            .filter(|p| {
+                p.owner == owner
+                    && self
+                        .recording
+                        .weapon_info(p.weapon)
+                        .is_none_or(|w| w.class == WeaponClass::Missile)
+            })
+            .min_by_key(|p| p.age)
+            .map(|p| p.id)
+    }
+
+    /// An aircraft as the menus list it.
+    fn menu_entry(&self, id: u32) -> context_menu::Aircraft {
+        let info = self.info.get(&id);
+        context_menu::Aircraft {
+            id,
+            label: self.label(id),
+            name: info.map(|a| a.name.clone()).unwrap_or_default(),
+            side: self.side(id),
+            wing: info.map_or(0, |a| a.wing),
+            member: info.map_or(0, |a| a.member),
+            ai: id != 0 && info.is_some_and(|a| !a.human),
+        }
+    }
+
+    /// The right-click menu for `target`, opened at layer point `at`.
+    fn build_menu(&mut self, target: Target, at: (f64, f64)) -> Menu {
+        let options = context_menu::Options {
+            live: false,
+            labels: self.ui.labels,
+            trails: self.ui.trails,
+        };
+        let (title, items) = match target {
+            Target::Aircraft(id) => {
+                let entry = self.menu_entry(id);
+                (entry.title(), context_menu::aircraft_items(&entry, options))
+            }
+            Target::Missile(id) => {
+                let (owner, title) = match self.missiles.get(&id) {
+                    Some((owner, weapon)) => (
+                        Some(*owner),
+                        format!("{weapon} from {}", self.label(*owner)),
+                    ),
+                    None => (None, format!("Missile {id}")),
+                };
+                let owner = owner.map(|o| self.menu_entry(o));
+                (
+                    title,
+                    context_menu::missile_items(id, owner.as_ref(), options),
+                )
+            }
+            Target::Nothing => {
+                let entries: Vec<_> = self
+                    .present()
+                    .into_iter()
+                    .map(|id| self.menu_entry(id))
+                    .collect();
+                (
+                    "Jump to an aircraft".to_owned(),
+                    context_menu::jump_items(&entries, options),
+                )
+            }
+        };
+        Menu::new(target, title, items, at, &self.ownship.font)
+    }
+
+    /// A right-click at `at` in view pixels on a view of `size`: the menu
+    /// for a panel's aircraft or missile when on a panel, otherwise for the
+    /// aircraft or missile drawn nearest the pointer, otherwise the list of
+    /// aircraft. Nothing opens while the interface is hidden.
+    fn open_menu(&mut self, at: [f64; 2], size: [u32; 2]) {
+        if self.ui.hidden {
+            return;
+        }
+        let placement = Placement::new(size);
+        let layer = placement.centered(at);
+        let on_panel = match self.panels.hit(panels::REPLAY, layer) {
+            Some(panels::Hit::Body(side) | panels::Hit::Pin(side) | panels::Hit::Close(side)) => {
+                self.panels.slot(side).map(|p| match p.kind {
+                    Kind::Guidance => Target::Missile(p.subject),
+                    Kind::Thought | Kind::Telemetry => Target::Aircraft(p.subject),
+                })
+            }
+            _ => None,
+        };
+        let target = on_panel.unwrap_or_else(|| {
+            context_menu::pick(
+                at,
+                size,
+                &self.camera,
+                &self.pickables,
+                context_menu::PICK_RADIUS * placement.scale(),
+            )
+        });
+        self.menu = Some(self.build_menu(target, layer));
+    }
+
+    /// M: the right-click menu on the selected aircraft, where the last
+    /// frame drew it or else in the middle of the view.
+    fn menu_on_selected(&mut self) {
+        let camera = copy(&self.camera);
+        self.menu_at_selected(&camera);
+    }
+
+    /// The right-click menu on the selected aircraft, where `camera` shows
+    /// it or else in the middle of the view.
+    fn menu_at_selected(&mut self, camera: &Camera) {
+        if self.ui.hidden {
+            return;
+        }
+        let size = self.size;
+        let at = self
+            .pickables
+            .iter()
+            .find(|p| p.target == Target::Aircraft(self.selected))
+            .and_then(|p| camera.project(size, p.position))
+            .unwrap_or([f64::from(size[0]) / 2., f64::from(size[1]) / 2.]);
+        let layer = Placement::new(size).centered(at);
+        self.menu = Some(self.build_menu(Target::Aircraft(self.selected), layer));
+    }
+
+    /// Does what a menu item says.
+    fn perform(&mut self, action: Action) {
+        match action {
+            Action::Follow(id) => {
+                self.select(id);
+                self.set_view(EXTERNAL);
+            }
+            Action::Cockpit(id) => {
+                self.select(id);
+                self.set_view(0);
+            }
+            Action::Drone(id) => {
+                self.select(id);
+                match self.playback.aircraft(self.clock.tick(), id) {
+                    Some(a) => {
+                        self.drone = Some(Drone::beside(Mode::Follow, a.position, a.attitude[0]));
+                        self.camera_error = None;
+                    }
+                    None => self.toast("That aircraft is not in the recording now"),
+                }
+            }
+            Action::DroneMissile(id) => {
+                let found = self
+                    .playback
+                    .frame(self.clock.tick())
+                    .and_then(|(frames, at)| {
+                        frames[at]
+                            .projectiles
+                            .iter()
+                            .find(|p| p.id == id)
+                            .map(|p| (p.position, p.direction[0].atan2(p.direction[2])))
+                    });
+                match found {
+                    Some((position, heading)) => {
+                        self.drone = Some(Drone::beside(Mode::Free, position, heading));
+                        self.camera_error = None;
+                    }
+                    None => self.toast("That missile is not in the recording now"),
+                }
+            }
+            Action::Thought(id) => self.open_panel(Kind::Thought, id),
+            Action::Telemetry(id) => self.open_panel(Kind::Telemetry, id),
+            Action::Guidance(id) => self.open_panel(Kind::Guidance, id),
+            Action::Comms(id) => self.panels.open_comms(Some(id)),
+            Action::Labels => self.ui.labels = !self.ui.labels,
+            Action::Trails => self.ui.trails = !self.ui.trails,
+            Action::Jump(id) => self.select(id),
+        }
+        self.ui.comms = self.panels.comms_open();
+    }
+
+    /// What a right-click can pick in `picture`: every recorded aircraft,
+    /// with its name label when one is drawn, and every weapon but gun
+    /// rounds.
+    fn pickables_for(picture: &RenderSnapshot, labels: &[Label]) -> Vec<Pickable> {
+        let labels: Vec<(u32, [f64; 4])> = labels.iter().map(|l| (l.id, l.rect())).collect();
+        context_menu::pickables(picture, &labels, |_| true)
+    }
+
+    /// The panels and menu asked for at start, once the first picture is
+    /// known and `camera` shows it.
+    fn open_requests(&mut self, camera: &Camera) {
+        for request in std::mem::take(&mut self.requests) {
+            match request {
+                Request::Thought => self.open_panel(Kind::Thought, self.selected),
+                Request::Telemetry => self.open_panel(Kind::Telemetry, self.selected),
+                Request::Guidance => match self.newest_missile(self.selected) {
+                    Some(id) => self.open_panel(Kind::Guidance, id),
+                    None => {
+                        let who = self.label(self.selected);
+                        self.toast(format!("{who} has no missile in flight"));
+                    }
+                },
+                Request::Comms => self.panels.open_comms(None),
+                Request::Menu => self.menu_at_selected(camera),
+            }
+        }
+        self.ui.comms = self.panels.comms_open();
     }
 
     /// The UI covers the view: the pointer shows.
@@ -1032,36 +1638,14 @@ impl Viewer {
     /// placed for a view of `size` pixels. The selected aircraft's label is
     /// bracketed; an aircraft the camera sits inside has none.
     fn labels(&self, picture: &RenderSnapshot, camera: &Camera, size: [u32; 2]) -> Vec<Label> {
-        let font = &self.ownship.font;
-        let scale = Placement::new(size).scale();
-        let eye = camera.position.map(f64::from);
-        let mut out = Vec::new();
-        for pose in std::iter::once(&picture.player).chain(&picture.targets) {
-            if Some(pose.id) == camera.hidden_target || (!pose.airborne && pose.crashed) {
-                continue;
-            }
-            let distance = (0..3)
-                .map(|i| (pose.position[i] - eye[i]).powi(2))
-                .sum::<f64>()
-                .sqrt();
-            if distance > LABEL_REACH {
-                continue;
-            }
-            let Some([x, y]) = camera.project(size, pose.position) else {
-                continue;
-            };
-            let mut text = self.label(pose.id);
-            if pose.id == self.selected {
-                text = format!("[{text}]");
-            }
-            let width = FlightCanvas::text_width(font, &text, scale);
-            out.push(Label {
-                at: [x - width / 2., y - (font.height as f64 + 8.) * scale],
-                text,
-                color: trails::side_color(self.side(pose.id)),
-            });
-        }
-        out
+        name_labels(
+            std::iter::once(&picture.player).chain(&picture.targets),
+            camera,
+            size,
+            &self.ownship.font,
+            Some(self.selected),
+            &|id| (self.label(id), self.side(id)),
+        )
     }
 
     /// Radio, tower, crew and cockpit lines heard in the last four seconds.
@@ -1102,47 +1686,6 @@ impl Viewer {
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
-            .collect()
-    }
-
-    /// The Comms list: the latest recorded comms entries up to `tick`. The
-    /// full, filterable Comms panel comes with the debug panels.
-    fn comms_lines(&self, tick: u64) -> Vec<String> {
-        let events = self.recording.events();
-        let end = self.comms.partition_point(|&i| events[i].tick <= tick);
-        self.comms[end.saturating_sub(COMMS_LINES)..end]
-            .iter()
-            .map(|&i| {
-                let TimedEvent { tick, event } = &events[i];
-                let kind = event
-                    .kind
-                    .strip_prefix("comms.")
-                    .unwrap_or(&event.kind)
-                    .to_ascii_uppercase();
-                let who = event
-                    .string(vocab::field::SPEAKER)
-                    .map(str::to_owned)
-                    .or_else(|| event.subject.map(|id| self.label(id)))
-                    .unwrap_or_default();
-                let what = if !event.text.is_empty() {
-                    event.text.clone()
-                } else {
-                    [vocab::field::ORDER, vocab::field::OUTCOME]
-                        .iter()
-                        .find_map(|f| event.string(f))
-                        .unwrap_or("")
-                        .to_owned()
-                };
-                let unheard = if event.flag(vocab::field::HEARD) == Some(false) {
-                    " (not heard)"
-                } else {
-                    ""
-                };
-                format!(
-                    "{} {kind} {who}: {what}{unheard}",
-                    clock::timestamp(*tick as f64)
-                )
-            })
             .collect()
     }
 
@@ -1191,12 +1734,13 @@ impl Viewer {
                 .as_ref()
                 .filter(|(_, at)| at.elapsed() < TOAST)
                 .map(|(text, _)| text.clone()),
-            subtitles: if self.ui.subtitles {
+            // The Comms panel lists every line, where the subtitles would
+            // sit over it.
+            subtitles: if self.ui.subtitles && !self.panels.comms_open() {
                 self.subtitles(tick)
             } else {
                 Vec::new()
             },
-            comms: self.ui.comms.then(|| self.comms_lines(tick)),
         }
     }
 
@@ -1334,8 +1878,9 @@ impl Viewer {
         })
     }
 
-    /// Draws the interface over the view: labels and the layer, or nothing
-    /// while it is hidden.
+    /// Draws the interface over the view: labels, the debug panels, the
+    /// layer and the right-click menu, or nothing while it is hidden. Notes
+    /// what a right-click can pick in this picture.
     fn overlay(
         &mut self,
         picture: &RenderSnapshot,
@@ -1344,24 +1889,56 @@ impl Viewer {
         size: [u32; 2],
         canvas: &mut FlightCanvas,
     ) {
-        let (labels, model) = if self.ui.hidden {
-            (Vec::new(), Model::default())
+        let labels = if self.ui.labels && !self.ui.hidden {
+            self.labels(picture, camera, size)
         } else {
-            let labels = if self.ui.labels {
-                self.labels(picture, camera, size)
-            } else {
-                Vec::new()
+            Vec::new()
+        };
+        self.size = size;
+        self.pickables = Self::pickables_for(picture, &labels);
+        if !self.requests.is_empty() {
+            self.open_requests(camera);
+        }
+        let mut panel_rects = Vec::new();
+        let mut menu_rect = None;
+        let model = if self.ui.hidden {
+            Model::default()
+        } else {
+            self.panel_layer.fill(0);
+            let font = &self.ownship.font;
+            let mut data = ReplayData {
+                recording: &self.recording,
+                trees: &mut self.trees,
+                info: &self.info,
+                missiles: &self.missiles,
+                comms: &self.comms,
+                now: tick,
             };
-            (labels, self.model(tick))
+            panel_rects = self
+                .panels
+                .draw(&mut self.panel_layer, font, panels::REPLAY, &mut data);
+            if let Some(menu) = &self.menu {
+                menu.draw(&mut self.panel_layer, font);
+                menu_rect = Some(menu.rect());
+            }
+            self.ui.comms = self.panels.comms_open();
+            self.model(tick)
         };
         compose(
             canvas,
             size,
-            self.ui.hidden,
-            &labels,
-            &model,
             &self.ownship.font,
             &mut self.layer,
+            &Interface {
+                hidden: self.ui.hidden,
+                labels: &labels,
+                model: &model,
+                panels: PanelLayer {
+                    pixels: &self.panel_layer,
+                    panels: &panel_rects,
+                    menu: menu_rect,
+                },
+            },
         );
     }
 
@@ -1413,8 +1990,10 @@ mod tests {
                 .collect(),
         };
         let labels = [Label {
+            id: 0,
             text: "[YOU]".into(),
-            at: [400., 300.],
+            at: [800., 300.],
+            size: [20., 6.],
             color: [110, 170, 255],
         }];
         let model = Model {
@@ -1424,32 +2003,43 @@ mod tests {
             subtitles: vec!["You: 'Fox two'".into()],
             ..Default::default()
         };
+        // A panel on the left and a menu over the bar's corner.
+        let mut panel_pixels = vec![0; overlay::WIDTH * overlay::HEIGHT * 4];
+        let panel = (6, 28, 254, 398);
+        let menu = (500, 400, 100, 60);
+        for (x, y, w, h) in [panel, menu] {
+            for yy in y..y + h {
+                for xx in x..x + w {
+                    panel_pixels[(yy * 640 + xx) as usize * 4..][..4]
+                        .copy_from_slice(&[1, 2, 3, 255]);
+                }
+            }
+        }
+        let mut interface = Interface {
+            hidden: false,
+            labels: &labels,
+            model: &model,
+            panels: PanelLayer {
+                pixels: &panel_pixels,
+                panels: &[panel],
+                menu: Some(menu),
+            },
+        };
         let mut canvas = FlightCanvas::default();
         let mut layer = vec![0; overlay::WIDTH * overlay::HEIGHT * 4];
-        compose(
-            &mut canvas,
-            [1280, 720],
-            false,
-            &labels,
-            &model,
-            &font,
-            &mut layer,
-        );
+        compose(&mut canvas, [1280, 720], &font, &mut layer, &interface);
         let covered = |c: &FlightCanvas| c.pixels.chunks_exact(4).filter(|p| p[3] != 0).count();
         assert!(covered(&canvas) > 10_000);
         let at =
             |c: &FlightCanvas, x: usize, y: usize| c.pixels[(y * 1280 + x) * 4..][..4].to_vec();
-        assert_eq!(at(&canvas, 400, 300), [110, 170, 255, 255]);
-        // Hidden, even with a stale layer, nothing is drawn.
-        compose(
-            &mut canvas,
-            [1280, 720],
-            true,
-            &labels,
-            &model,
-            &font,
-            &mut layer,
-        );
+        assert_eq!(at(&canvas, 800, 300), [110, 170, 255, 255]);
+        // The layer is 960 wide on this view, 160 in from the left: the
+        // panel, and the menu drawn over the transport bar.
+        assert_eq!(at(&canvas, 160 + 100, 300), [1, 2, 3, 255]);
+        assert_eq!(at(&canvas, 160 + 825, 670), [1, 2, 3, 255]);
+        // Hidden, even with stale layers, nothing is drawn.
+        interface.hidden = true;
+        compose(&mut canvas, [1280, 720], &font, &mut layer, &interface);
         assert_eq!(canvas.size, [1280, 720]);
         assert_eq!(covered(&canvas), 0);
     }
@@ -1463,11 +2053,14 @@ mod tests {
         let n = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let recording = Arc::new(f::recording(dir.path(), &format!("viewer-{n}")));
         let art = CombatArt::synthetic(BTreeMap::new(), vec![Vec::new(); 12], vec![Vec::new(); 12]);
+        let mut ownship = crate::combat::render_hash_tests::hornet_airframe(true);
+        // Menus measure their text, so the font needs its glyphs.
+        ownship.font = crate::replay::panels::tests::font();
         Viewer::assemble(
             Path::new("/x/test.tore-replay"),
             recording,
             crate::terrain::tests::world(),
-            crate::combat::render_hash_tests::hornet_airframe(true),
+            ownship,
             Vec::new(),
             art,
             options,
@@ -1641,14 +2234,15 @@ mod tests {
         click(&mut v, Control::Play);
         click(&mut v, Control::Pause);
         assert_eq!(v.clock.paused(), paused);
-        // Right-drag turns the view.
+        // Right-drag turns the view, and opens no menu.
         v.ui.hidden = false;
-        v.right(true, [100., 100.]);
+        v.right(true, [100., 100.], Some([100., 100.]), size, 4.);
         v.pointer(None, [150., 80.], size, [0.01, 0.01]);
         assert!((v.look[0] - 0.5).abs() < 1e-6 && (v.look[1] - 0.2).abs() < 1e-6);
-        v.right(false, [150., 80.]);
+        v.right(false, [150., 80.], Some([150., 80.]), size, 4.);
         v.pointer(None, [400., 80.], size, [0.01, 0.01]);
         assert!((v.look[0] - 0.5).abs() < 1e-6);
+        assert!(v.menu.is_none());
     }
 
     #[test]
@@ -1704,25 +2298,268 @@ mod tests {
         assert_eq!(own.color, trails::side_color(Side::Enemy));
     }
 
+    /// The panels' view of the recording at `now`.
+    fn data(v: &mut Viewer, now: u64) -> ReplayData<'_> {
+        ReplayData {
+            recording: &v.recording,
+            trees: &mut v.trees,
+            info: &v.info,
+            missiles: &v.missiles,
+            comms: &v.comms,
+            now,
+        }
+    }
+
+    /// The Comms panel's rows at `now`, unfiltered, as time, kind and words.
+    fn comms_rows(v: &mut Viewer, now: u64) -> Vec<String> {
+        let data = data(v, now);
+        let (events, end) = data.comms();
+        let rows = panels::rows_before(events, end, &panels::CommsPanel::default(), 20);
+        rows.iter()
+            .map(|row| {
+                let e = panels::entry(events, row, &|id| data.name(id));
+                let outcome = e
+                    .outcome
+                    .map(|(o, _)| format!(" [{o}]"))
+                    .unwrap_or_default();
+                format!("{} {} {}{outcome}", e.time, e.kind, e.main)
+            })
+            .collect()
+    }
+
     #[test]
-    fn subtitles_and_the_comms_list_follow_the_playhead() {
+    fn subtitles_and_the_comms_panel_follow_the_playhead() {
         let dir = TempDir::new("viewer-comms");
-        let v = viewer(&dir, &Options::default());
+        let mut v = viewer(&dir, &Options::default());
         assert_eq!(v.subtitles(f::HEARD + 20), ["Enemy 1-1: Fox two"]);
         // The unheard call makes no subtitle; the heard one lasts four seconds.
         assert_eq!(v.subtitles(f::UNHEARD + 5), ["Enemy 1-1: Fox two"]);
         assert!(v.subtitles(f::HEARD + SUBTITLE_TICKS).is_empty());
         assert!(v.subtitles(f::HEARD - 1).is_empty());
-        let lines = v.comms_lines(f::LAST);
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0], "00:00.4 ORDER You: Engage my target");
-        assert!(lines[2].ends_with("Enemy 1-2: Contact (not heard)"));
-        assert_eq!(v.comms_lines(f::ORDER - 1), Vec::<String>::new());
+        assert_eq!(
+            comms_rows(&mut v, f::LAST),
+            [
+                "00:00.4 ORDER You: Engage my target",
+                "00:01.1 RADIO Enemy 1-1: Fox two [heard by you]",
+                "00:01.2 RADIO Enemy 1-2: Contact [not heard]",
+            ]
+        );
+        // Playing backwards shows exactly what playing forwards showed.
+        assert_eq!(comms_rows(&mut v, f::HEARD).len(), 2);
+        assert!(comms_rows(&mut v, f::ORDER - 1).is_empty());
         let model = v.model(f::LAUNCH);
         assert_eq!(model.active, Some(Control::Play));
         assert_eq!(model.markers.len(), 4);
         assert_eq!(model.aircraft, "You F/A-18D");
         assert_eq!(model.camera, "F10 External");
+        // C opens the Comms panel, which takes the subtitles' place.
+        press(&mut v, "c");
+        assert!(v.ui.comms && v.panels.comms_open());
+        assert!(v.model(f::HEARD + 20).subtitles.is_empty());
+        press(&mut v, "c");
+        assert!(!v.ui.comms && !v.panels.comms_open());
+        assert_eq!(v.model(f::HEARD + 20).subtitles.len(), 1);
+    }
+
+    #[test]
+    fn panels_read_the_trees_at_the_playhead_in_either_direction() {
+        let dir = TempDir::new("viewer-trees");
+        let mut v = viewer(&dir, &Options::default());
+        let channel = vocab::channel::AI_THOUGHT;
+        for tick in [200, 900, 199, 181, 179, f::GAP.0 + 20, 30] {
+            let (at, tree) = data(&mut v, tick).tree(1, channel).unwrap();
+            // Inside the gap the last sample before it answers.
+            let last = if (f::GAP.0..=f::GAP.1).contains(&tick) {
+                f::GAP.0 - 1
+            } else {
+                tick
+            };
+            let expected = last / f::THOUGHT_EVERY * f::THOUGHT_EVERY;
+            assert_eq!(at, expected, "{tick}");
+            assert_eq!(tree.nodes, f::thought(expected));
+        }
+        assert!(data(&mut v, f::FIRST).tree(1, channel).is_none());
+        let d = data(&mut v, 300);
+        assert_eq!(d.title(Kind::Thought, 1), "Enemy 1-1  MiG-29");
+        assert_eq!(
+            d.title(Kind::Guidance, f::MISSILE),
+            "Missile from Enemy 1-1"
+        );
+        assert!(d.missing(Kind::Thought, 0).contains("flown by a person"));
+        assert!(
+            d.missing(Kind::Thought, 2)
+                .starts_with("No AI thinking recorded")
+        );
+    }
+
+    /// A camera 3,000 feet south of and level with aircraft `id` at `tick`,
+    /// looking at it.
+    fn camera_on(id: u32, tick: u64) -> Camera {
+        let at = f::position(id, tick);
+        Drone::looking(Mode::Free, [at[0], at[1], at[2] - 3_000.], at, None).camera(None, |_, _| 0.)
+    }
+
+    /// The last frame showed `tick` through `camera` on a view of `size`.
+    fn shown(v: &mut Viewer, tick: u64, camera: Camera, size: [u32; 2]) {
+        v.clock.seek(tick as f64);
+        let picture = v.playback.picture(tick, 1.);
+        v.pickables = Viewer::pickables_for(&picture, &[]);
+        v.camera = camera;
+        v.size = size;
+    }
+
+    fn right_click(v: &mut Viewer, at: [f64; 2], size: [u32; 2]) {
+        v.right(true, at, Some(at), size, 4.);
+        v.right(false, [at[0] + 2., at[1] - 1.], Some(at), size, 4.);
+    }
+
+    #[test]
+    fn right_clicks_pick_what_is_drawn_and_the_menu_acts_on_it() {
+        let dir = TempDir::new("viewer-menu");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.pause();
+        for size in [[1280, 960], [1920, 1080], [800, 1200]] {
+            shown(&mut v, 300, camera_on(1, 300), size);
+            let middle = [f64::from(size[0]) / 2., f64::from(size[1]) / 2.];
+            right_click(&mut v, [middle[0] + 4., middle[1] - 3.], size);
+            let menu = v.menu.take().unwrap();
+            assert_eq!(menu.target, Target::Aircraft(1), "{size:?}");
+            assert_eq!(menu.title, "Enemy 1-1  MiG-29");
+            // The menu opens beside the click in the centred panel layer.
+            let layer = Placement::new(size).centered(middle);
+            let (x, y, _, _) = menu.rect();
+            assert!((f64::from(x) - layer.0).abs() < 12. && (f64::from(y) - layer.1).abs() < 12.);
+        }
+        let size = [1280, 960];
+        shown(&mut v, 300, camera_on(1, 300), size);
+        // A drag opens nothing.
+        v.right(true, [640., 480.], Some([640., 480.]), size, 4.);
+        v.pointer(Some([700., 480.]), [700., 480.], size, [0.; 2]);
+        v.right(false, [700., 480.], Some([640., 480.]), size, 4.);
+        assert!(v.menu.is_none());
+        // Keys move through the menu and choose: AI thinking.
+        right_click(&mut v, [640., 480.], size);
+        for _ in 0..3 {
+            assert_eq!(press(&mut v, "ArrowDown"), Command::None);
+        }
+        assert_eq!(press(&mut v, "Enter"), Command::None);
+        assert!(v.menu.is_none());
+        let panel = v.panels.slot(panels::Side::Left).unwrap();
+        assert_eq!((panel.kind, panel.subject), (Kind::Thought, 1));
+        // Esc closes the menu, not the viewer.
+        right_click(&mut v, [640., 480.], size);
+        assert_eq!(press(&mut v, "Escape"), Command::None);
+        assert!(v.menu.is_none());
+        // Follow, cockpit and drone switch the camera to the aircraft.
+        for (action, check) in [
+            (Action::Follow(1), (1, EXTERNAL, false)),
+            (Action::Cockpit(2), (2, 0, false)),
+            (Action::Drone(1), (1, 0, true)),
+        ] {
+            v.perform(action);
+            assert_eq!((v.selected, v.view, v.drone.is_some()), check, "{action:?}");
+        }
+        // Empty space lists the aircraft recorded now; a pick jumps to one.
+        v.drone = None;
+        right_click(&mut v, [20., 20.], size);
+        let menu = v.menu.as_ref().unwrap();
+        assert_eq!(menu.target, Target::Nothing);
+        let jumps: Vec<_> = menu.items.iter().filter_map(|i| i.action).collect();
+        assert!(jumps.contains(&Action::Jump(3)) && jumps.contains(&Action::Jump(0)));
+        press(&mut v, "Home");
+        press(&mut v, "Enter");
+        assert_eq!(v.selected, 0);
+        // A left click outside the menu closes it and does nothing else.
+        right_click(&mut v, [20., 20.], size);
+        let paused = v.clock.paused();
+        let play = overlay::rect(Control::Play);
+        let on_play = Some([f64::from(play.0 * 2 + 4), f64::from(play.1 * 2 + 4)]);
+        v.left(true, on_play, size);
+        v.left(false, on_play, size);
+        assert!(v.menu.is_none());
+        assert_eq!(v.clock.paused(), paused);
+        // A missile in flight: its guidance.
+        let tick = f::LAUNCH + 40;
+        let missile = f::position(1, f::LAUNCH);
+        let eye = [missile[0] + 400., missile[1] + 100., missile[2] - 3_000.];
+        let at = v.playback.picture(tick, 1.).projectiles[0].position;
+        let camera = Drone::looking(Mode::Free, eye, at, None).camera(None, |_, _| 0.);
+        shown(&mut v, tick, camera, size);
+        right_click(&mut v, [640., 480.], size);
+        let menu = v.menu.as_ref().unwrap();
+        assert_eq!(menu.target, Target::Missile(f::MISSILE));
+        assert_eq!(menu.title, "Missile from Enemy 1-1");
+        press(&mut v, "Enter");
+        assert!(v.panels.find(Kind::Guidance, f::MISSILE).is_some());
+        // Hidden, a right-click opens nothing.
+        press(&mut v, "h");
+        right_click(&mut v, [640., 480.], size);
+        assert!(v.menu.is_none());
+    }
+
+    #[test]
+    fn panel_keys_open_follow_and_close() {
+        let dir = TempDir::new("viewer-panel-keys");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.pause();
+        v.clock.seek((f::LAUNCH + 40) as f64);
+        press(&mut v, "i");
+        press(&mut v, "f");
+        let kinds = |v: &Viewer| {
+            [panels::Side::Left, panels::Side::Right]
+                .map(|side| v.panels.slot(side).map(|p| (p.kind, p.subject)))
+        };
+        assert_eq!(
+            kinds(&v),
+            [Some((Kind::Thought, 0)), Some((Kind::Telemetry, 0))]
+        );
+        // Unpinned panels follow the selected aircraft.
+        press(&mut v, "Tab");
+        assert_eq!(
+            kinds(&v),
+            [Some((Kind::Thought, 1)), Some((Kind::Telemetry, 1))]
+        );
+        // Pressing the key again closes that panel.
+        press(&mut v, "f");
+        assert_eq!(kinds(&v)[1], None);
+        // G: the selected aircraft's missile in flight, or why not.
+        press(&mut v, "g");
+        assert_eq!(kinds(&v)[1], Some((Kind::Guidance, f::MISSILE)));
+        press(&mut v, "Tab");
+        press(&mut v, "g");
+        assert!(
+            v.toast
+                .as_ref()
+                .unwrap()
+                .0
+                .contains("has no missile in flight")
+        );
+        // The wheel over a panel scrolls it rather than zooming.
+        let size = [1280, 960];
+        v.pointer(Some([100., 400.]), [100., 400.], size, [0.; 2]);
+        let zoom = v.zoom;
+        v.wheel(-1);
+        assert_eq!(v.zoom, zoom);
+        v.pointer(Some([640., 400.]), [640., 400.], size, [0.; 2]);
+        v.wheel(-1);
+        assert!(v.zoom < zoom);
+        // M opens the menu on the selected aircraft; X closes every panel.
+        press(&mut v, "m");
+        assert_eq!(v.menu.as_ref().unwrap().target, Target::Aircraft(2));
+        press(&mut v, "Escape");
+        press(&mut v, "c");
+        press(&mut v, "x");
+        assert!(v.panels.is_empty() && !v.ui.comms);
+        // Clicking a panel's close button closes it.
+        press(&mut v, "i");
+        let placement = Placement::new(size);
+        let close = [
+            (6. + 254. - 9.) * placement.scale(),
+            (28. + 6.) * placement.scale(),
+        ];
+        v.left(true, Some(close), size);
+        v.left(false, Some(close), size);
+        assert!(v.panels.is_empty());
     }
 
     #[test]
@@ -1750,8 +2587,16 @@ mod tests {
             drone: true,
             speed: Some(-4.),
             ui: Ui::parse("trails,comms").unwrap(),
+            panels: Request::parse("thought, telemetry,menu").unwrap(),
         };
-        let v = viewer(&dir, &options);
+        let mut v = viewer(&dir, &options);
+        assert!(v.panels.comms_open());
+        v.open_requests(&camera_on(2, 300));
+        assert_eq!(v.panels.find(Kind::Thought, 2), Some(panels::Side::Left));
+        assert_eq!(v.panels.find(Kind::Telemetry, 2), Some(panels::Side::Right));
+        assert_eq!(v.menu.as_ref().unwrap().target, Target::Aircraft(2));
+        assert!(Request::parse("thought,sparkles").is_err());
+        assert_eq!(Request::parse("").unwrap(), []);
         assert_eq!(v.clock.position(), 300.);
         assert_eq!(
             (v.clock.direction(), v.clock.speed(), v.clock.paused()),

@@ -224,6 +224,44 @@ impl FlightCanvas {
             );
         }
     }
+    /// Rectangles of a 640x480 layer, placed where `legacy_layer` puts the
+    /// whole layer (centred and scaled to fit the view) but drawn by nearest
+    /// pixel like `anchored_layer`, so small text stays crisp. Only those
+    /// rectangles are read: the debug panels and menus know where they drew.
+    pub fn centered_rects(&mut self, pixels: &[u8], rects: &[(i32, i32, i32, i32)]) {
+        let (w, h) = (self.size[0] as f64, self.size[1] as f64);
+        let scale = (w / 640.).min(h / 480.);
+        let (left, top) = ((w - 640. * scale) / 2., (h - 480. * scale) / 2.);
+        for &(x, y, rw, rh) in rects {
+            let (x0, y0) = (x.clamp(0, 640) as usize, y.clamp(0, 480) as usize);
+            let (x1, y1) = (
+                (x + rw).clamp(0, 640) as usize,
+                (y + rh).clamp(0, 480) as usize,
+            );
+            if x1 <= x0 || y1 <= y0 {
+                continue;
+            }
+            let (width, height) = (x1 - x0, y1 - y0);
+            let mut rgba = Vec::with_capacity(width * height * 4);
+            for row in y0..y1 {
+                rgba.extend_from_slice(&pixels[(row * 640 + x0) * 4..(row * 640 + x1) * 4]);
+            }
+            self.scaled(
+                &Sprite {
+                    width,
+                    height,
+                    rgba,
+                    glyphs: vec![],
+                },
+                (
+                    left + x0 as f64 * scale,
+                    top + y0 as f64 * scale,
+                    width as f64 * scale,
+                    height as f64 * scale,
+                ),
+            );
+        }
+    }
     /// Draws `s` scaled into the rectangle by nearest pixel, the way the
     /// menus' 640x480 canvas is scaled, blending partly transparent pixels
     /// over what is there. Cheap enough for the replay's interface layer,
@@ -508,6 +546,35 @@ mod tests {
         // Blanking clears the canvas for the next frame.
         canvas.blank([640, 1000]);
         assert!(canvas.pixels.iter().all(|v| *v == 0));
+    }
+    #[test]
+    fn centered_rects_draw_only_their_part_of_the_layer_centred() {
+        let mut layer = vec![0u8; 640 * 480 * 4];
+        for (x, y) in [(20, 30), (20, 400), (600, 30)] {
+            layer[(y * 640 + x) * 4..][..4].copy_from_slice(&[200, 10, 10, 255]);
+        }
+        let alpha =
+            |c: &FlightCanvas, x: usize, y: usize| c.pixels[(y * c.size[0] as usize + x) * 4 + 3];
+        // Wide: centred across; tall: centred up and down, unlike the
+        // anchored layer, so a tall panel never parts in the middle.
+        for (size, left, top, scale) in [
+            ([1920, 1080], 240., 0., 2.25),
+            ([640, 1000], 0., 260., 1.),
+            ([1280, 960], 0., 0., 2.),
+        ] {
+            let mut canvas = FlightCanvas::default();
+            canvas.blank(size);
+            canvas.centered_rects(&layer, &[(10, 20, 100, 400), (-5, -5, 2, 2)]);
+            let at = |v: f64, origin: f64| (origin + v * scale + scale / 2.) as usize;
+            assert_eq!(alpha(&canvas, at(20., left), at(30., top)), 255, "{size:?}");
+            assert_eq!(
+                alpha(&canvas, at(20., left), at(400., top)),
+                255,
+                "{size:?}"
+            );
+            // Outside the rectangles nothing is drawn.
+            assert_eq!(alpha(&canvas, at(600., left), at(30., top)), 0, "{size:?}");
+        }
     }
     #[test]
     fn scaled_layers_keep_hard_pixels_and_blend_translucent_ones() {

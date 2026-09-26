@@ -78,6 +78,9 @@ pub struct Preferences {
     pub ladder: bool,
     /// The upper-right weapon diagnostic panel, off by default.
     pub weapon_diagnostics: bool,
+    /// The mission timer, right-click menu and debug panels in flight, off
+    /// by default.
+    pub debug_panels: bool,
     pub brightness: i16,
     pub music: bool,
     pub effects: bool,
@@ -108,6 +111,7 @@ impl Preferences {
             hud: ui.hud,
             ladder: ui.ladder,
             weapon_diagnostics: ui.weapon_diagnostics,
+            debug_panels: ui.debug_panels,
             brightness: ui.brightness,
             music: m.music,
             effects: m.effects,
@@ -137,6 +141,7 @@ impl Preferences {
         ui.hud = self.hud;
         ui.ladder = self.ladder;
         ui.weapon_diagnostics = self.weapon_diagnostics;
+        ui.debug_panels = self.debug_panels;
         ui.brightness = self.brightness;
         ui.effects = self.effects;
         m.music = self.music;
@@ -151,7 +156,7 @@ impl Preferences {
             }
         }
         format!(
-            "tore-preferences 5\nzoom {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nweapon-diagnostics {}\nbrightness {}\nmusic {}\neffects {}\nfullscreen {}\n",
+            "tore-preferences 6\nzoom {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nweapon-diagnostics {}\ndebug-panels {}\nbrightness {}\nmusic {}\neffects {}\nfullscreen {}\n",
             self.zoom,
             self.radar_range,
             self.rcs_range,
@@ -165,6 +170,7 @@ impl Preferences {
             self.hud,
             self.ladder,
             self.weapon_diagnostics,
+            self.debug_panels,
             self.brightness,
             self.music,
             self.effects,
@@ -183,6 +189,7 @@ impl Preferences {
             Some("tore-preferences 3") => 3,
             Some("tore-preferences 4") => 4,
             Some("tore-preferences 5") => 5,
+            Some("tore-preferences 6") => 6,
             _ => return Err("unsupported preferences version".into()),
         };
         for line in lines {
@@ -214,14 +221,18 @@ impl Preferences {
             }
             Ok(p)
         };
-        // Version 5 is unreleased; a file written before the diagnostics
-        // field was added still loads, with the panel hidden.
-        let diagnostics_saved = version >= 5 && values.contains_key("weapon-diagnostics");
+        // Version 5 was never released; a file written before its
+        // diagnostics field was added still loads, with the panel hidden.
+        // Version 6 always saves both diagnostics switches; older files load
+        // with the debug panels off.
+        let diagnostics_saved =
+            version >= 6 || (version == 5 && values.contains_key("weapon-diagnostics"));
         let expected = match version {
             1 | 2 => 14,
             3 => 16,
             4 => 17,
-            _ => 16 + usize::from(diagnostics_saved),
+            5 => 16 + usize::from(diagnostics_saved),
+            _ => 18,
         };
         if values.len() != expected {
             return Err("unknown preference".into());
@@ -300,6 +311,7 @@ impl Preferences {
             hud: boolean("hud")?,
             ladder: boolean("ladder")?,
             weapon_diagnostics: diagnostics_saved && boolean("weapon-diagnostics")?,
+            debug_panels: version >= 6 && boolean("debug-panels")?,
             brightness,
             music: boolean("music")?,
             effects: boolean("effects")?,
@@ -323,6 +335,7 @@ mod tests {
         let mut menu = State::new(vec![], true);
         ui.cockpit = false;
         ui.weapon_diagnostics = true;
+        ui.debug_panels = true;
         ui.zoom = 1.7;
         menu.effects = false;
         i.pages = vec![9, 5];
@@ -341,10 +354,10 @@ mod tests {
         let loaded = Preferences::parse(&read(&path).unwrap()).unwrap();
         std::fs::remove_file(path).unwrap();
         ui = FlightUi::default();
-        assert!(!ui.weapon_diagnostics);
+        assert!(!ui.weapon_diagnostics && !ui.debug_panels);
         i = Instruments::default();
         loaded.apply(&mut ui, &mut i, &mut menu);
-        assert!(ui.weapon_diagnostics);
+        assert!(ui.weapon_diagnostics && ui.debug_panels);
         assert_eq!(i.pages, vec![9, 5]);
         i.toggle_layout();
         assert_eq!(i.pages, vec![7, 8, 4]);
@@ -369,31 +382,57 @@ mod tests {
             hud: true,
             ladder: false,
             weapon_diagnostics: true,
+            debug_panels: true,
             brightness: 3,
             music: false,
             effects: true,
             fullscreen: false,
         };
         assert_eq!(Preferences::parse(&p.text()).unwrap(), p);
-        assert!(p.text().starts_with("tore-preferences 5\n"));
+        assert!(p.text().starts_with("tore-preferences 6\n"));
         assert!(!p.text().contains("rwr-range"));
-        assert!(p.text().contains("\nweapon-diagnostics true\n"));
-        let hidden = Preferences {
-            weapon_diagnostics: false,
+        assert!(
+            p.text()
+                .contains("\nweapon-diagnostics true\ndebug-panels true\n")
+        );
+        // Version 6 needs both switches, spelled out.
+        for broken in [
+            p.text().replace("debug-panels true\n", ""),
+            p.text().replace("weapon-diagnostics true\n", ""),
+            p.text().replace("debug-panels true", "debug-panels 1"),
+        ] {
+            assert!(Preferences::parse(&broken).is_err(), "{broken}");
+        }
+        // A version 5 file predates the debug panels: they load off.
+        let five = p
+            .text()
+            .replace("tore-preferences 6", "tore-preferences 5")
+            .replace("debug-panels true\n", "");
+        let off = Preferences {
+            debug_panels: false,
             ..p.clone()
         };
-        assert_eq!(Preferences::parse(&hidden.text()).unwrap(), hidden);
+        assert_eq!(Preferences::parse(&five).unwrap(), off);
+        assert!(Preferences::parse(&(five.clone() + "debug-panels true\n")).is_err());
+        let hidden = Preferences {
+            weapon_diagnostics: false,
+            ..off.clone()
+        };
         assert!(
-            Preferences::parse(
-                &p.text()
-                    .replace("weapon-diagnostics true", "weapon-diagnostics 1")
-            )
-            .is_err()
+            Preferences::parse(&five.replace("weapon-diagnostics true", "weapon-diagnostics 1"))
+                .is_err()
         );
         // An unreleased version 5 file written before the field existed loads
         // with the panel hidden.
-        let early = p.text().replace("weapon-diagnostics true\n", "");
+        let early = five.replace("weapon-diagnostics true\n", "");
         assert_eq!(Preferences::parse(&early).unwrap(), hidden);
+        // Saving writes version 6 again, with both switches off.
+        assert!(
+            hidden
+                .text()
+                .contains("\nweapon-diagnostics false\ndebug-panels false\n")
+        );
+        assert_eq!(Preferences::parse(&hidden.text()).unwrap(), hidden);
         // A version 4 file still carries the retired RWR range, which is
         // validated and dropped, and predates the diagnostics field.
         let four = early

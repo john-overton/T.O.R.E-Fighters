@@ -39,8 +39,10 @@ fn key_name(event: &KeyEvent) -> String {
     crate::flight_key(event.physical_key, &name)
 }
 
-/// A window point in the view's own pixels, and the view's size.
-fn view_point(renderer: &Renderer, [x, y]: [f64; 2]) -> ([f64; 2], [u32; 2]) {
+/// A window point in the view's own pixels, and the view's size. The view
+/// fills the window at up to 1920x1080, so a fullscreen window on a large
+/// display scales down to it.
+pub(crate) fn view_point(renderer: &Renderer, [x, y]: [f64; 2]) -> ([f64; 2], [u32; 2]) {
     let window = renderer.window.inner_size();
     let size = renderer.flight_size();
     (
@@ -208,7 +210,13 @@ impl App {
                         }
                         MouseButton::Right => {
                             if let Some(window) = window {
-                                replay.viewer.right(pressed, window);
+                                let (point, size) = view_point(renderer, window);
+                                // A click may stray a few logical pixels.
+                                let slop = crate::replay::context_menu::CLICK_SLOP
+                                    * renderer.window.scale_factor();
+                                replay
+                                    .viewer
+                                    .right(pressed, window, Some(point), size, slop);
                             }
                         }
                         _ => {}

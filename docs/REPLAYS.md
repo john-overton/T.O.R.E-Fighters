@@ -764,9 +764,12 @@ as in flight.
 | F1 to F10, F12 | The flight views, on the selected aircraft |
 | Backquote | Drone following the selected aircraft, then flying free, then back |
 | W A S D, E / Q | Drone: move along the view and sideways, climb / descend; Shift is four times faster |
-| Mouse wheel | Drone speed, or zoom in a flight view |
+| Mouse wheel | Scrolls a panel or menu under the pointer; otherwise drone speed, or zoom in a flight view |
 | Right-drag | Look around, or turn the drone |
-| N / T / C | Name labels / mission timer / Comms list |
+| N / T / C | Name labels / mission timer / [Comms panel](#the-comms-panel) |
+| I / F / G | [AI thinking / telemetry](#debug-panels) of the selected aircraft / guidance of its newest missile in flight; again to close |
+| M / X | The [right-click menu](#the-right-click-menu) on the selected aircraft / close every panel |
+| Right-click | The right-click menu on the aircraft or missile under the pointer |
 | R / Shift+R | Trails on or off / next trail length |
 | H | Hide or show the whole interface and the pointer |
 | P | Save the view without the interface as a PNG |
@@ -843,11 +846,10 @@ There is no cockpit, HUD, instrument panel or mirror in a replay.
 - **Subtitles:** radio, tower and crew lines the player heard, each once
   from its delivery, and the cockpit messages the HUD showed or queued, for
   four seconds from their tick, newest lowest, up to three.
-- **Comms list** (C): the last 14 recorded communication entries up to the
-  playhead, calls the player could not hear marked as such. Every entry is
-  listed, so a line that waited in the queue appears when it was queued and
-  again when it was delivered. The full, filterable Comms panel comes with
-  the debug panels.
+- **Comms panel** (C): every recorded comms and audio entry up to the
+  playhead, each line once with its final outcome, filtered by kind and
+  aircraft; see [the Comms panel](#the-comms-panel). While it is open the
+  subtitles are not drawn, since it lists the same lines.
 - **Flight path trails** (R, off at first): each aircraft's and guided
   weapon's path over the last 30 seconds (Shift+R: 10, 30, 60, 120 or 300)
   as a thin line in its side's colour, a weapon's paler than its owner's.
@@ -855,8 +857,9 @@ There is no cockpit, HUD, instrument panel or mirror in a replay.
   path samples ten times a second plus where the aircraft is drawn now.
   Colours and lengths are fitted.
 - **Hide UI** (H or the Hide button): hides the bar, labels, subtitles,
-  timer, Comms list and the pointer; trails stay as chosen, and playback
-  and camera keys keep working. Esc brings the interface back.
+  timer, debug panels, the right-click menu and the pointer; trails stay as
+  chosen, and playback and camera keys keep working. Esc brings the
+  interface back.
 - **Screenshots** (P): the 3D view without any interface, at the view's
   size (up to 1920x1080), saved as
   `screenshots/<recording>-tick<tick>.png` under the app data folder. The
@@ -981,7 +984,9 @@ interface through the same code and PNG writer as P. `--replay-clean`
 starts with the interface hidden, as H hides it.
 `--replay-speed S` starts playing at a ladder speed, negative for reverse,
 and with `TORE_PERF_FRAMES=N` the viewer reports frame timings like live
-flight.
+flight. `--replay-panels thought,telemetry,guidance,comms,menu` opens
+[debug panels](#debug-panels), or the right-click menu, on the selected
+aircraft for the capture.
 
 Measured on the development Mac (Apple M3, 1440x1080 view, release build,
 other work running on the machine) with a synthetic ten-minute recording of
@@ -994,8 +999,8 @@ about 1,200 ticks a frame, frames take about 2 ms more.
 
 ### Known limits
 
-- No cockpit, HUD or instruments, no music, no right-click menu yet, and
-  the keys cannot be rebound. Replay sound has not been checked by ear.
+- No cockpit, HUD or instruments and no music yet, and the keys cannot be
+  rebound. Replay sound has not been checked by ear.
 - Checked by eye with synthetic recordings and headless AI probe
   recordings; a recording of a flight flown by hand has not been watched
   yet.
@@ -1003,9 +1008,157 @@ about 1,200 ticks a frame, frames take about 2 ms more.
 
 ## Debug panels
 
-Filled in by a later milestone (M4): the AI thinking, telemetry, missile and
-timer panels. They draw the [display trees](#display-trees), which
-recordings already carry.
+Right-click an aircraft or a missile, in a replay or in live flight, to see
+why it does what it does: an AI aircraft's thinking, any aircraft's
+flight-model telemetry, a missile's guidance, and every radio call, order
+and sound with its outcome and reason. This is an **opinionated addition
+requested by John on 2026-09-26**. The panels' layout, keys, colours and
+wording, the menu's items and the pick distance are agent decisions
+(2026-09-26).
+
+### Opening them
+
+- **In a replay:** right-click an aircraft, a missile or a name label: press
+  and release the right button without moving more than 4 pixels. Dragging
+  with it still looks around. Keys act on the selected aircraft: I its AI
+  thinking, F its telemetry, G the guidance of its newest missile in flight
+  (each again to close), C the Comms panel, M the right-click menu, X closes
+  every panel.
+- **In live flight:** Escape, then Pref, then **Debug panels?** (off by
+  default, saved with the other flight preferences). While it is on, the
+  mission timer shows at the top of the view and a right-click without
+  dragging opens the same menu; a right-drag is still mouse look when mouse
+  look is on (Controls, Mouse tab). With mouse look off and the right button
+  bound to an action, the button keeps its binding and the menu does not
+  open from the mouse. Letter keys stay flight keys, so the panels open from
+  the menu. The flight carries on while the menu is open: the menu's keys
+  (the arrows, Tab, Home, End, PageUp, PageDown, Enter, Space and Esc) work
+  it until it closes, and every other key still flies. Opening the Escape
+  menu closes it.
+
+### The right-click menu
+
+The menu picks through the camera that drew the frame: the aircraft or
+missile drawn nearest the pointer, within 14 interface pixels scaled with
+the view (about 32 pixels on a 1080-line view), or the aircraft whose name
+label is under the pointer. It is the same on any window shape, windowed,
+fullscreen or letterboxed. On a panel it is the panel's aircraft or
+missile.
+
+| Right-click on | Items |
+| --- | --- |
+| An aircraft | Follow (chase view): F10 on it. Cockpit view: the front view from it, the player's own cockpit in live flight. Drone here (replay): the follow drone beside it. AI thinking (aircraft the AI flies). Telemetry. Comms for this aircraft. Name labels. Flight path trails (replay) |
+| A missile | Guidance. Drone here (replay): a free drone beside it. Go to the shooter. Name labels. Flight path trails (replay) |
+| Empty space | Every aircraft in the picture, grouped by side and wing, to jump to: a replay selects it, live flight puts the chase view on it. Then the switches |
+
+Up, Down and Tab (Shift+Tab back), Home, End, PageUp and PageDown move;
+Enter, Space or Right choose; Esc or Left close. The pointer moves the
+highlight, a press and release on the same item chooses it, a press outside
+closes the menu, and the wheel scrolls a long list.
+
+### The panels
+
+Up to two panels show at once, one on each side, plus the Comms panel along
+the bottom. A new panel takes a free side, or the side whose unpinned panel
+is older; with both pinned it says so and opens nothing. Each has **Pin**
+and a close button (x) in its title. An unpinned AI thinking or Telemetry
+panel follows the selected aircraft (in live flight, the aircraft the
+camera is on); a pinned one stays on its aircraft; a Guidance panel always
+stays on its missile. The mouse wheel over a panel scrolls it.
+
+A tree panel draws one display tree as an indented list: each label, its
+value with its unit in a column beside it, and the value's "because" line
+beneath in grey. Numbers read to the precision a pilot would use: whole
+feet, pounds and knots with thousands separators, tenths of a mile, degree
+and percent, hundredths of a G, a second and a ratio (`x0.84`). Aircraft
+named in a tree read as their labels. The line under the title says when
+the sample was taken; in a replay it is the latest one at or before the
+playhead, and one older than 2 seconds (an aircraft that has gone) shows in
+amber.
+
+| Panel | Tree | Shows |
+| --- | --- | --- |
+| AI thinking | `ai.thought` | What an AI aircraft considered: mission, activity, target and why, geometry, weapon and whether it may fire, defense, motion, steering, controls and fuel. See the [AI thinking record](#ai-thinking-record) |
+| Telemetry | `flight.telemetry` | Air data, load, power, drag, and each effect the flight model applied with its because line |
+| Guidance | `weapon.guidance` | A guided weapon's seeker and steering |
+
+### The Comms panel
+
+Every comms and audio entry up to the playhead, newest at the bottom, whole
+rows only. Entries that share a message number make one row, shown once
+with its latest outcome: a line queued and then delivered, dropped or cut
+off, or an order, request or report and each recipient's answer. A row
+sits where its newest entry is, so a line that waited in the queue appears
+when it was said, and before that moment it reads as queued. Each row
+gives the time, the kind (RADIO, CREW, TOWER, HUD, ORDER, REQUEST, REPORT,
+ANSWER, TONE, STALL, MUSIC, EFFECT, RELEASE, EJECT, DEVICE), who said what
+to whom, and the outcome in brackets: green when it went out or was acted
+on, amber while it waits or when some recipients took it and some did not,
+red when it was held back, dropped, refused or cut off, grey when there was
+nothing to act on (a check that found nothing to say, or a line said on a
+radio the player does not hear). Beneath come the reasons, the trigger,
+the rolls, the wait, the line's earlier states with their times, anything
+else recorded with it, and one line per recipient with its answer and
+why. The same sound repeated within half a second, such as a gun burst's
+release sounds, is one row with its count. An entry without a message
+number, such as a cockpit message or a tone, is a row of its own.
+
+The chips filter by kind: **Radio**; **Orders** (orders, requests, reports
+and each recipient's answer); **Tower**; **Crew** (crew remarks and cockpit
+messages); **Tones** (seeker tones, warnings, music and sound effects). The
+aircraft chip steps through the aircraft, keeping the entries it sent,
+received or is named in; "Comms for this aircraft" sets it. The filters are
+kept when the panel closes. The list follows the playhead in either
+direction at any speed; the wheel scrolls back, a note says so, and wheeling
+down to the newest entry follows again.
+
+### Where the data comes from
+
+- **A replay** reads trees and entries from the recording at the playhead.
+  Trees are decoded one chunk (a second) at a time and the last six chunks
+  stay decoded, so playing either way decodes each second once. Everything
+  shown depends only on the playhead, so playing backwards shows what
+  playing forwards showed.
+- **Live flight** shows what the mission recording writes, as it writes it:
+  while the panels show, the recorder hands them each display tree it
+  builds and every comms and audio entry (the newest 512). The trees come
+  from the same builders, fed with the same records at the same moments,
+  including the history a tree reads (when an activity began and why, the
+  recent changes, a missile's closest approach), so a live panel shows
+  exactly what a replay of the flight will show, a tenth of a second or so
+  behind for an AI aircraft's thinking. Names come from the roster a
+  recording registers. With recording off (`TORE_RECORD_MISSIONS=0`, and
+  captures, which do not record unless it is `1`) the panels say so and
+  stay empty.
+- A recording made before display trees were recorded has none, and its
+  panels say that nothing was recorded.
+
+The panels only read. Behaviour probes give identical output with the
+panels' code in place, and nothing a panel or the menu does reaches the
+simulation: the menu moves the camera and opens panels.
+
+### Captures
+
+`--replay-panels thought,telemetry,guidance,comms,menu` opens panels, or the
+menu, on the selected aircraft for `--capture-replay` with a `.ppm` path (a
+`.png` capture is the clean view, without any interface). For flight,
+`--debug-panels` turns the Pref row on for one run and `--flight-panels`
+with the same list also opens them for `--capture-flight`: AI thinking and
+the menu on the first aircraft the AI flies, telemetry on the player,
+guidance on the newest missile in flight, and the Comms panel. Captures do
+not record, so they show trees and entries only with
+`TORE_RECORD_MISSIONS=1`, and a capture's single frame comes before the
+first tick has been recorded.
+
+### Known limits
+
+- The panels sit in the 640x480 interface layer, centred and scaled with the
+  view, so on a wide window the sides of the view stay free.
+- Live flight shows no drone or trails, and the panels open from the menu
+  only.
+- Radio calls in recordings made before the communication journal was
+  recorded name AI speakers by their words, not their aircraft, so the
+  aircraft filter misses them.
 
 ### AI thinking record
 
@@ -1312,7 +1465,9 @@ headless workflow.
   `TORE_CLOUD_ALTITUDE`; `World::identity` captures them from a live world.
 - The viewer lives in `tore-app/src/replay/`: `viewer.rs` (the screen:
   loading, cameras, keys, drawing), `host.rs` (the `Screen::Replay`
-  plumbing in the app), `playback.rs` (any tick's picture, smoke and wing
+  plumbing in the app), `panels.rs` (the debug panels and the chunk cache
+  of recorded trees), `context_menu.rs` (the right-click menu, picking and
+  the click-or-drag rule), `live.rs` (the panels and menu in live flight), `playback.rs` (any tick's picture, smoke and wing
   vapor), `clock.rs` (playhead, speeds, steps, markers), `tracks.rs` (the
   background pass: trail samples, building hit points, the player's path
   for the weather), `weather.rs` (weather snapshots), `sound.rs` (which

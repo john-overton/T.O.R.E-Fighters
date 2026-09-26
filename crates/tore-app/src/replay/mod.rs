@@ -7,6 +7,7 @@
 //! place the app's own types meet it.
 pub mod cli;
 pub mod clock;
+pub mod context_menu;
 pub mod convert;
 #[cfg(test)]
 mod demo;
@@ -15,7 +16,9 @@ pub mod drone;
 pub(crate) mod fixture;
 pub mod host;
 pub mod library;
+pub mod live;
 pub mod overlay;
+pub mod panels;
 pub mod playback;
 pub mod png;
 pub mod recorder;

@@ -1,12 +1,13 @@
 //! A synthetic recording for the viewer's tests: four aircraft on smooth
 //! paths, one of them appearing late, a missile and a gun round, smoke,
 //! contrails and effects, a building hit twice, a gap where the recorder fell
-//! behind, and the events the timeline and subtitles read. No retail data.
+//! behind, the events the timeline, subtitles and Comms panel read, and
+//! display trees for the debug panels. No retail data.
 use std::path::Path;
 use tore_replay::{
     self as replay, AircraftFlags, AircraftInfo, AircraftState, EffectKind, EffectSpawn, Event,
-    Frame, ProjectileState, PuffKind, PuffSpawn, Recording, Side, WeaponClass, WeaponInfo,
-    WriterOptions, vocab,
+    Frame, Node, ProjectileState, PuffKind, PuffSpawn, Recording, Side, TreeSample, Value,
+    WeaponClass, WeaponInfo, WriterOptions, vocab,
 };
 
 pub const FIRST: u64 = 5;
@@ -27,6 +28,45 @@ pub const BOOKMARK: u64 = 600;
 pub const ORDER: u64 = 50;
 pub const HEARD: u64 = 140;
 pub const UNHEARD: u64 = 150;
+/// Aircraft 1's thinking is sampled this often, the player's telemetry
+/// every 10 ticks and the missile's guidance every 20 while it flies.
+pub const THOUGHT_EVERY: u64 = 30;
+
+/// Aircraft 1's thinking at `tick`: its activity changes at the launch.
+pub fn thought(tick: u64) -> Vec<Node> {
+    let activity = if tick < LAUNCH {
+        "FORMATION"
+    } else {
+        "ATTACKING"
+    };
+    vec![
+        Node::new(0, "Activity", activity).with_note("leader released the wing"),
+        Node::new(0, "Target", Value::Id(0))
+            .with_note("priority Assigned, score 18,400 (next: Enemy 1-2, 26,100)"),
+        Node::new(1, "Range", 6. - tick as f64 / 1_000.).with_unit(vocab::unit::NM),
+        Node::new(1, "Aspect", 35.).with_unit(vocab::unit::DEG),
+        Node::new(0, "Fuel", 2_140.).with_unit(vocab::unit::LB),
+    ]
+}
+
+/// The player's telemetry at `tick`.
+pub fn telemetry(tick: u64) -> Vec<Node> {
+    vec![
+        Node::new(0, vocab::node::TAS, 480.).with_unit(vocab::unit::KT),
+        Node::new(0, vocab::node::LOAD, 6.5).with_unit(vocab::unit::G),
+        Node::new(0, "Effects applied this tick", Value::None),
+        Node::new(1, "Low-speed G ceiling", "limit 6.8 G")
+            .with_note(format!("speed near stall speed {} kt", 140 + tick % 3)),
+    ]
+}
+
+/// The missile's guidance at `tick`.
+pub fn guidance(tick: u64) -> Vec<Node> {
+    vec![
+        Node::new(0, "Seeker", "tracking"),
+        Node::new(0, "Time of flight", (tick - LAUNCH) as f64 / 120.).with_unit(vocab::unit::S),
+    ]
+}
 
 /// Where aircraft `id` is at `tick`: a gentle climbing turn.
 pub fn position(id: u32, tick: u64) -> [f64; 3] {
@@ -146,6 +186,28 @@ fn frame(tick: u64) -> Frame {
             let hp = if when == SURFACE[0].0 { 50 } else { 0 };
             frame.surface_hp.push((id, hp));
         }
+    }
+    let tree = |subject, channel: &str, nodes| TreeSample {
+        subject,
+        channel: channel.into(),
+        nodes,
+    };
+    if tick.is_multiple_of(THOUGHT_EVERY) {
+        frame
+            .trees
+            .push(tree(1, vocab::channel::AI_THOUGHT, thought(tick)));
+    }
+    if tick.is_multiple_of(10) {
+        frame
+            .trees
+            .push(tree(0, vocab::channel::FLIGHT_TELEMETRY, telemetry(tick)));
+    }
+    if (LAUNCH..IMPACT).contains(&tick) && tick.is_multiple_of(20) {
+        frame.trees.push(tree(
+            MISSILE,
+            vocab::channel::WEAPON_GUIDANCE,
+            guidance(tick),
+        ));
     }
     let event = |kind: &str| Event::new(kind);
     frame.events = match tick {

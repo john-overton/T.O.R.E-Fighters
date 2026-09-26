@@ -253,6 +253,9 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | --- | --- | --- |
 | Flight | Left click | Operate instrument buttons, designate a scope contact, click the seeker label or RELEASE LOCK in the weapon diagnostic panel when Pref → Weapon diagnostics? shows it |
 | Flight | Hold right button and drag | Mouse look, when enabled on the Mouse tab |
+| Flight, Pref → Debug panels? on | Right-click without dragging | The debug menu on the aircraft or missile under the pointer, or a list of aircraft; not while mouse look is off and the right button is bound |
+| Flight, debug menu open | Up / Down / Tab, Home / End, PageUp / PageDown, Enter / Space / Right, Esc / Left | Move, choose, close; other keys still fly |
+| Flight, debug panels shown | Left click, mouse wheel | Pin, close and filter buttons; scroll the panel under the pointer |
 | Flight | macOS Command+Q | Exit to desktop |
 | Live map open | + / - | Zoom the map |
 | Live map open | Arrow keys | Pan the map |
@@ -277,10 +280,14 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Replay viewer | F1 to F10, F12 | The flight views, on the selected aircraft |
 | Replay viewer | Backquote (`) | Drone camera following the selected aircraft, then flying free, then back to the flight view |
 | Replay viewer | W A S D, E / Q | Drone: move, climb / descend; hold Shift for four times the speed |
-| Replay viewer | Mouse wheel | Drone speed from 20 to 5,000 feet per second; zoom in a flight view |
+| Replay viewer | Mouse wheel | Scroll a debug panel or menu under the pointer; otherwise drone speed from 20 to 5,000 feet per second, or zoom in a flight view |
 | Replay viewer | Hold right button and drag | Look around, or turn the drone |
 | Replay viewer | Left click, drag on the timeline | Transport bar buttons; jump to or scrub through a moment |
-| Replay viewer | N / T / C | Name labels / mission timer / Comms list on or off |
+| Replay viewer | Right-click without dragging | The debug menu on the aircraft or missile under the pointer, or a list of aircraft to jump to |
+| Replay viewer, debug menu open | Up / Down / Tab, Home / End, PageUp / PageDown, Enter / Space / Right, Esc / Left | Move, choose, close |
+| Replay viewer | N / T / C | Name labels / mission timer / Comms panel on or off |
+| Replay viewer | I / F / G | AI thinking / telemetry panel of the selected aircraft / guidance panel of its newest missile in flight, on or off |
+| Replay viewer | M / X | Debug menu on the selected aircraft / close every debug panel |
 | Replay viewer | R / Shift+R | Flight path trails on or off / next trail length (10, 30, 60, 120 or 300 seconds) |
 | Replay viewer | H | Hide or show the whole interface and the pointer; playback and camera keys keep working |
 | Replay viewer | P | Save the view, without the interface, as a PNG in `screenshots/` |

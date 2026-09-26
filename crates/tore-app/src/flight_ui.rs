@@ -93,20 +93,25 @@ const MAX_NOTES: usize = 256;
 /// Authored Pref row for the weapon diagnostic panel. It is not in the
 /// retail menu; opinionated, requested by John on 2026-09-23.
 pub const WEAPON_DIAGNOSTICS: &str = "Weapon diagnostics?";
+/// Authored Pref row for the debug panels in flight: the mission timer, the
+/// right-click menu and the AI thinking, Telemetry, Guidance and Comms
+/// panels. Not in the retail menu; opinionated, requested by John on
+/// 2026-09-26 (the label is an agent choice).
+pub const DEBUG_PANELS: &str = "Debug panels?";
 /// Append the authored rows to the imported menu tree. The retail rows and
 /// their order are unchanged.
 pub fn add_authored_rows(tree: &mut [MenuNode]) {
-    if let Some(pref) = tree.iter_mut().find(|node| node.label == "Pref")
-        && !pref
-            .children
-            .iter()
-            .any(|row| row.label == WEAPON_DIAGNOSTICS)
-    {
-        pref.children.push(MenuNode {
-            label: WEAPON_DIAGNOSTICS.into(),
-            shortcut: String::new(),
-            children: vec![],
-        });
+    let Some(pref) = tree.iter_mut().find(|node| node.label == "Pref") else {
+        return;
+    };
+    for label in [WEAPON_DIAGNOSTICS, DEBUG_PANELS] {
+        if !pref.children.iter().any(|row| row.label == label) {
+            pref.children.push(MenuNode {
+                label: label.into(),
+                shortcut: String::new(),
+                children: vec![],
+            });
+        }
     }
 }
 pub struct FlightUi {
@@ -118,6 +123,9 @@ pub struct FlightUi {
     pub ladder: bool,
     /// The upper-right weapon diagnostic panel; hidden unless chosen in Pref.
     pub weapon_diagnostics: bool,
+    /// The mission timer, right-click menu and debug panels; off unless
+    /// chosen in Pref.
+    pub debug_panels: bool,
     /// Session-only cheats; they survive Restart but are not saved.
     pub cheats: tore_sim::cheats::Cheats,
     pub brightness: i16,
@@ -146,6 +154,7 @@ impl Default for FlightUi {
             hud: true,
             ladder: true,
             weapon_diagnostics: false,
+            debug_panels: false,
             cheats: Default::default(),
             brightness: 0,
             zoom: 1.,
@@ -200,12 +209,13 @@ impl FlightUi {
             && self.hud
             && matches!(flight_view, 0 | 3 | 4 | crate::flight_views::TRACK)
     }
-    /// On/Off for a working cheat row or the authored diagnostics row; the
+    /// On/Off for a working cheat row or an authored diagnostics row; the
     /// selected Damage choice reads On.
     fn cheat_state(&self, label: &str) -> Option<&'static str> {
         let mut cheats = self.cheats;
         let on = match label {
             WEAPON_DIAGNOSTICS => self.weapon_diagnostics,
+            DEBUG_PANELS => self.debug_panels,
             "Invulnerable" => cheats.invulnerable,
             "Normal" => !cheats.invulnerable,
             "Novice" => cheats.enemy_ai == Some(tore_sim::ai::Experience::Novice),
@@ -368,6 +378,15 @@ impl FlightUi {
                     "Weapon diagnostics: on"
                 } else {
                     "Weapon diagnostics: off"
+                });
+                Command::Click
+            }
+            DEBUG_PANELS => {
+                self.debug_panels = !self.debug_panels;
+                self.message(if self.debug_panels {
+                    "Debug panels: on (right-click an aircraft)"
+                } else {
+                    "Debug panels: off"
                 });
                 Command::Click
             }
@@ -1326,7 +1345,10 @@ mod tests {
         add_authored_rows(&mut t);
         add_authored_rows(&mut t);
         let rows: Vec<_> = t[1].children.iter().map(|n| n.label.as_str()).collect();
-        assert_eq!(rows, ["HUD pitch ladder?", WEAPON_DIAGNOSTICS]);
+        assert_eq!(
+            rows,
+            ["HUD pitch ladder?", WEAPON_DIAGNOSTICS, DEBUG_PANELS]
+        );
         // Other roots are untouched.
         assert_eq!(t[0].children.len(), 1);
 
@@ -1369,6 +1391,37 @@ mod tests {
         assert_eq!(*shown(&ui).last().unwrap(), "Weapon diagnostics: off");
         i.weapon_debug = ui.weapon_diagnostics_shown(0);
         assert_eq!(i.screen_rect(3, size), normal);
+    }
+
+    #[test]
+    fn debug_panels_row_is_off_by_default_and_toggles_with_a_message() {
+        let mut t = tree();
+        t.push(MenuNode {
+            label: "Pref".into(),
+            shortcut: String::new(),
+            children: vec![],
+        });
+        add_authored_rows(&mut t);
+        let mut ui = FlightUi::default();
+        assert!(!ui.debug_panels);
+        assert_eq!(ui.cheat_state(DEBUG_PANELS), Some("Off"));
+        // Escape, Right to Pref, Down to the second authored row, Enter.
+        ui.key("Escape", false, false, false, &t);
+        ui.key("ArrowRight", false, false, false, &t);
+        ui.key("ArrowDown", false, false, false, &t);
+        assert_eq!(ui.key("Enter", false, false, false, &t), Command::Click);
+        assert!(ui.debug_panels && !ui.weapon_diagnostics);
+        assert_eq!(ui.cheat_state(DEBUG_PANELS), Some("On"));
+        assert_eq!(
+            *shown(&ui).last().unwrap(),
+            "Debug panels: on (right-click an aircraft)"
+        );
+        ui.activate(DEBUG_PANELS, "");
+        assert!(!ui.debug_panels);
+        // A new flight keeps the choice only through the saved preferences.
+        ui.debug_panels = true;
+        ui.reset_for_flight();
+        assert!(!ui.debug_panels);
     }
 
     #[test]

@@ -1,12 +1,13 @@
 //! The replay viewer's interface, drawn in the 640x480 overlay layer with
 //! the Controls screen's colours, font and button style: the transport bar
 //! with its timeline along the bottom, the mission timer and messages along
-//! the top, subtitles above the bar and the Comms list on the left. The
+//! the top and subtitles above the bar. The debug panels and the right-click
+//! menu draw in a layer of their own (`panels.rs`, `context_menu.rs`). The
 //! layer's top half is pinned to the top of the view and its bottom half to
 //! the bottom, so the bar sits on the bottom edge of any window shape.
 //! Layout and wording are agent design (2026-09-26).
 use crate::controls_editor::{
-    Editor, FOCUS, INK, MUTED, PALE, Rect, TITLE, WHITE, fit, inside, text_width,
+    Editor, FOCUS, INK, PALE, Rect, TITLE, WHITE, fit, inside, text_width,
 };
 use crate::menu::Canvas;
 use crate::replay::clock::Clock;
@@ -186,6 +187,15 @@ impl Placement {
         self.scale
     }
 
+    /// The point of the debug panels' layer under a view point. That layer
+    /// is centred on the view whole (`FlightCanvas::centered_rects`), so on
+    /// a view taller than 4:3 it differs from [`Placement::layer`]. Points
+    /// outside the layer come back outside 640x480.
+    pub fn centered(&self, [x, y]: [f64; 2]) -> (f64, f64) {
+        let top = (self.bottom - HEIGHT as f64 / 2. * self.scale) / 2.;
+        ((x - self.left) / self.scale, (y - top) / self.scale)
+    }
+
     /// The layer point under a view point, if the layer covers it.
     pub fn layer(&self, [x, y]: [f64; 2]) -> Option<(f64, f64)> {
         let lx = (x - self.left) / self.scale;
@@ -246,7 +256,6 @@ pub struct Model {
     pub timer: Option<String>,
     pub toast: Option<String>,
     pub subtitles: Vec<String>,
-    pub comms: Option<Vec<String>>,
 }
 
 fn text(pixels: &mut [u8], font: &Font, color: [u8; 4], text: &str, at: (i32, i32)) {
@@ -392,24 +401,6 @@ pub fn draw(pixels: &mut [u8], font: &Font, model: &Model) {
     }
     if let Some(toast) = &model.toast {
         caption(pixels, font, &fit(font, toast, 420), 320, 12, TITLE);
-    }
-    if let Some(lines) = &model.comms {
-        let top = 30;
-        let height = (lines.len().max(1) as i32) * 12 + 22;
-        Canvas(pixels).rect((6, top, 372, height), [0, 0, 0, 170]);
-        text(pixels, font, TITLE, "COMMS", (12, top + 4));
-        if lines.is_empty() {
-            text(pixels, font, MUTED, "Nothing said yet", (12, top + 18));
-        }
-        for (i, line) in lines.iter().enumerate() {
-            text(
-                pixels,
-                font,
-                PALE,
-                &fit(font, line, 356),
-                (12, top + 18 + i as i32 * 12),
-            );
-        }
     }
 }
 
@@ -583,6 +574,30 @@ mod tests {
     }
 
     #[test]
+    fn the_panel_layer_is_centred_whole() {
+        // Wide and 4:3 views: the same point as the anchored layer.
+        for size in [[1280, 960], [1920, 1080]] {
+            let p = Placement::new(size);
+            for view in [[300., 20.], [960., 700.], [1270., 950.]] {
+                if let Some(layer) = p.layer(view) {
+                    let centred = p.centered(view);
+                    assert!(
+                        (centred.0 - layer.0).abs() < 1e-9 && (centred.1 - layer.1).abs() < 1e-9
+                    );
+                }
+            }
+        }
+        // Tall: centred up and down, and points in the bands come back
+        // outside the layer.
+        let p = Placement::new([640, 1000]);
+        assert_eq!(p.centered([10., 260.]), (10., 0.));
+        assert_eq!(p.centered([10., 500.]), (10., 240.));
+        assert_eq!(p.centered([10., 100.]), (10., -160.));
+        let wide = Placement::new([1920, 1080]);
+        assert_eq!(wide.centered([0., 0.]), (-240. / 2.25, 0.));
+    }
+
+    #[test]
     fn the_interface_draws_its_parts() {
         let model = Model {
             first: 0,
@@ -606,7 +621,6 @@ mod tests {
             timer: Some("00:50.0  tick 6,000".into()),
             toast: Some("Saved".into()),
             subtitles: vec!["Enemy 1-1: 'Fox two'".into()],
-            comms: Some(vec!["00:01.2 RADIO Enemy 1-1: Fox two".into()]),
             ..Default::default()
         };
         let mut pixels = vec![0; WIDTH * HEIGHT * 4];
@@ -622,10 +636,11 @@ mod tests {
         assert_eq!(at(play.0 as usize + 1, play.1 as usize + 1), FOCUS);
         let pause = rect(Control::Pause);
         assert_eq!(at(pause.0 as usize + 1, pause.1 as usize + 1), PALE);
-        // Above the bar, only captions and panels cover the view.
+        // Above the bar, only the timer, messages and subtitles cover the
+        // view.
         assert_eq!(at(620, 300), [0; 4]);
         assert_ne!(at(8, 8), [0; 4]);
-        assert_ne!(at(100, 40), [0; 4]);
+        assert_eq!(at(100, 40), [0; 4]);
         assert_eq!(at(100, 100), [0; 4]);
     }
 }

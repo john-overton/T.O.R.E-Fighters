@@ -488,7 +488,7 @@ The full-height cockpit and live HUD can be captured with `--capture-flight .loc
 
 Flight UI now adapts to drawable aspect ratio independently of menu letterboxing. Use `--window-size 1280x720` (or resize normally) to inspect widescreen behavior. `--capture-flight` preserves the current aspect and writes at the flight overlay resolution, capped proportionally at 1920×1080. The original `--capture-terrain` remains 960×720. Small instruments resample directly from their native rasters; HUD readouts have transparent backgrounds. See [responsive-flight checks](baselines/responsive-flight-ui.md).
 
-A mission replay frame is captured the same way with `--watch-replay FILE --capture-replay OUT.ppm --replay-tick N`, optionally with `--flight-view`, `--replay-aircraft`, `--replay-drone`, `--replay-ui` and `--replay-clean`; `--replay-speed` with `TORE_PERF_FRAMES` times playback. See [replay captures](REPLAYS.md#captures-and-timing).
+A mission replay frame is captured the same way with `--watch-replay FILE --capture-replay OUT.ppm --replay-tick N`, optionally with `--flight-view`, `--replay-aircraft`, `--replay-drone`, `--replay-ui`, `--replay-panels` and `--replay-clean`; `--replay-speed` with `TORE_PERF_FRAMES` times playback. See [replay captures](REPLAYS.md#captures-and-timing). `--debug-panels` and `--flight-panels thought,telemetry,guidance,comms,menu` show the [debug panels](REPLAYS.md#captures) in a `--capture-flight` capture.
 
 ## Headless development
 

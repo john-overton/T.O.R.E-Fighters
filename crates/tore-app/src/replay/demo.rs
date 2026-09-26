@@ -1,9 +1,10 @@
 //! A demonstration recording for looking at the viewer by eye before real
 //! recordings exist: a minute over the imported Ukraine map with the
 //! player's F/A-18D circling, three MiG-29s in trail, a missile shot and a
-//! kill, smoke, contrails, effects, radio lines and a bookmark. The flight
-//! paths are synthetic; only the world comes from the player's imported
-//! media, read at run time. `TORE_REPLAY_DEMO_MINUTES` makes it longer and
+//! kill, smoke, contrails, effects, radio lines, orders and a bookmark, and
+//! display trees for the debug panels. The flight paths, trees and messages
+//! are synthetic (made-up values shaped like the real ones); only the world
+//! comes from the player's imported media, read at run time. `TORE_REPLAY_DEMO_MINUTES` makes it longer and
 //! `TORE_REPLAY_DEMO_AIRCRAFT` (4 to 17) busier, for timing the viewer.
 //! Run it by hand:
 //!
@@ -15,8 +16,8 @@ use crate::replay::convert::Presentation;
 use tore_formats::aircraft::AircraftId;
 use tore_replay::{
     self as replay, AircraftFlags, AircraftInfo, AircraftState, DebrisState, EffectKind,
-    EffectSpawn, EscapeeState, Event, Frame, ProjectileState, PuffKind, PuffSpawn, Side,
-    WeaponClass, WeaponInfo, vocab,
+    EffectSpawn, EscapeeState, Event, Frame, Node, ProjectileState, PuffKind, PuffSpawn, Side,
+    TreeSample, Value, WeaponClass, WeaponInfo, vocab,
 };
 
 const LAUNCH: u64 = 120 * 12;
@@ -86,6 +87,201 @@ fn aircraft(id: u32, path: &Path, tick: u64, alive: bool) -> AircraftState {
         hp: if alive { 100 } else { 0 },
         max_hp: 100,
         ..Default::default()
+    }
+}
+
+/// An AI aircraft's thinking, shaped like the real tree.
+fn thought(id: u32, tick: u64) -> Vec<Node> {
+    use vocab::unit as u;
+    let t = tick as f64 / 120.;
+    let range = 6.4 - t * 0.02 + f64::from(id) * 0.3;
+    let attacking = tick >= 240;
+    vec![
+        Node::new(0, "Mission", "Free engagement").with_note("stance: engage assigned"),
+        Node::new(
+            0,
+            "Activity",
+            if attacking { "ATTACKING" } else { "FORMATION" },
+        )
+        .with_note(if attacking {
+            "leader released the wing after an attack report"
+        } else {
+            "holding the leader's formation"
+        }),
+        Node::new(1, "Since", if attacking { t - 2. } else { t }).with_unit(u::S),
+        Node::new(0, "Target", Value::Id(0))
+            .with_note("priority Assigned, score 18,400 (next: Enemy 2-2, 26,100)"),
+        Node::new(1, "Range", range).with_unit(u::NM),
+        Node::new(1, "Aspect", 35. + t).with_unit(u::DEG),
+        Node::new(1, "Off nose", 12.).with_unit(u::DEG),
+        Node::new(1, "Closure", 820.).with_unit(u::KT),
+        Node::new(1, "Height", -2_300.).with_unit(u::FT),
+        Node::new(0, "Weapon", "AA-10 on station 3"),
+        Node::new(1, "Phase", "Tracking"),
+        Node::new(1, "Fire?", "not yet")
+            .with_note(format!("outside max range ({range:.1} nm > 5.8 nm)")),
+        Node::new(0, "Defense", "none").with_note("no missile inbound"),
+        Node::new(0, "Motion", "tactics")
+            .with_note("choice Pursuit (roll 37 < 50), situation offensive"),
+        Node::new(0, "Steering", Value::None),
+        Node::new(1, "Heading", 132.).with_unit(u::DEG),
+        Node::new(1, "G asked", 6.4).with_unit(u::G),
+        Node::new(1, "G delivered", 5.9)
+            .with_unit(u::G)
+            .with_note("the structural limit"),
+        Node::new(0, "Controls", Value::None),
+        Node::new(1, "Pitch", 0.62),
+        Node::new(1, "Roll", -0.4),
+        Node::new(1, "Rudder", 0.),
+        Node::new(1, "Throttle", 0.95),
+        Node::new(0, "Fuel", 2_140. - t * 3.)
+            .with_unit(u::LB)
+            .with_note("state normal"),
+    ]
+}
+
+/// The player's flight-model telemetry, shaped like the real tree.
+fn telemetry(tick: u64) -> Vec<Node> {
+    use vocab::{node as n, unit as u};
+    let t = tick as f64 / 120.;
+    vec![
+        Node::new(0, "Air", Value::None),
+        Node::new(1, n::TAS, 480. + (t * 0.3).sin() * 20.).with_unit(u::KT),
+        Node::new(1, n::MACH, 0.78),
+        Node::new(1, n::AOA, 12.3).with_unit(u::DEG),
+        Node::new(1, n::SIDESLIP, 0.4).with_unit(u::DEG),
+        Node::new(1, "Dynamic pressure", 610.)
+            .with_unit(u::LB_FT2)
+            .with_note("measured, not a cause"),
+        Node::new(1, n::AGL, 11_200.).with_unit(u::FT),
+        Node::new(0, "Load", Value::None),
+        Node::new(1, n::LOAD, 5.4).with_unit(u::G),
+        Node::new(1, "G asked", 7.1).with_unit(u::G),
+        Node::new(1, n::G_LIMIT, 7.5).with_unit(u::G),
+        Node::new(0, "Power", Value::None),
+        Node::new(1, "Thrust", 16_200.).with_unit(u::LB),
+        Node::new(1, "Altitude lapse", 0.84).with_unit(u::RATIO),
+        Node::new(1, "Fuel", 8_120. - t * 4.).with_unit(u::LB),
+        Node::new(0, "Drag", 9_300.).with_unit(u::LB),
+        Node::new(1, "Stores", 1_100.).with_unit(u::LB),
+        Node::new(1, "Pull", 2_600.).with_unit(u::LB),
+        Node::new(1, "Slip", 400.).with_unit(u::LB),
+        Node::new(0, "Effects applied this tick", Value::None),
+        Node::new(1, "Low-speed G ceiling", "limit 6.8 G")
+            .with_note("speed near stall speed 142 kt"),
+        Node::new(1, "Regional damage", "lift -6%, roll authority x0.88")
+            .with_note("left wing 35%"),
+        Node::new(1, "Stall scaling", "lift x0.72, controls x0.60")
+            .with_note("departure mode Stalled"),
+    ]
+}
+
+/// The missile's guidance, shaped like the real tree.
+fn guidance(tick: u64) -> Vec<Node> {
+    use vocab::unit as u;
+    let flown = (tick - LAUNCH) as f64 / 120.;
+    vec![
+        Node::new(0, "Weapon", "AIM-9M"),
+        Node::new(0, "Seeker", "tracking")
+            .with_note("infrared, the target inside the 25 deg gimbal"),
+        Node::new(1, "Target", Value::Id(3)),
+        Node::new(1, "Lock quality", 0.86),
+        Node::new(0, "Range", 9_000. - flown * 1_400.).with_unit(u::FT),
+        Node::new(0, "Closing", 1_150.).with_unit(u::KT),
+        Node::new(0, "Steering", "proportional navigation").with_note("navigation gain 4"),
+        Node::new(1, "Commanded", 18.2).with_unit(u::G),
+        Node::new(1, "Limit", 30.).with_unit(u::G),
+        Node::new(0, "Time of flight", flown).with_unit(u::S),
+    ]
+}
+
+/// Display trees at their rates, and message traffic between the
+/// aircraft, for the debug panels.
+fn debug_samples(frame: &mut Frame, tick: u64, count: u32) {
+    let tree = |subject, channel: &str, nodes| TreeSample {
+        subject,
+        channel: channel.into(),
+        nodes,
+    };
+    if tick.is_multiple_of(12) {
+        for id in 1..count.min(4) {
+            frame
+                .trees
+                .push(tree(id, vocab::channel::AI_THOUGHT, thought(id, tick)));
+        }
+    }
+    if tick.is_multiple_of(4) {
+        frame
+            .trees
+            .push(tree(0, vocab::channel::FLIGHT_TELEMETRY, telemetry(tick)));
+    }
+    if (LAUNCH..IMPACT).contains(&tick) && tick.is_multiple_of(12) {
+        frame.trees.push(tree(
+            MISSILE,
+            vocab::channel::WEAPON_GUIDANCE,
+            guidance(tick),
+        ));
+    }
+    let event = |kind: &str| Event::new(kind);
+    let events = &mut frame.events;
+    match tick {
+        250 => {
+            events.push(
+                event(vocab::kind::COMMS_DELIVERY)
+                    .with_subject(2)
+                    .with_object(1)
+                    .with("outcome", "applied"),
+            );
+            events.push(
+                event(vocab::kind::COMMS_DELIVERY)
+                    .with_subject(3)
+                    .with_object(1)
+                    .with("outcome", "rejected")
+                    .with("reason", "holding formation since a recall"),
+            );
+        }
+        260 => events.push(
+            event(vocab::kind::COMMS_REPORT)
+                .with_subject(2)
+                .with("recipients", vec![1u32])
+                .with("about", Value::Id(0))
+                .with("kept_s", 2.)
+                .with("outcome", "delivered")
+                .with_text("attack on Enemy 2-2 by You"),
+        ),
+        t if t == 120 * 8 => events.push(
+            event(vocab::kind::AUDIO_MUSIC)
+                .with("from", "cruise")
+                .with("to", "air combat")
+                .with("reason", "designated enemy inside 40,000 ft"),
+        ),
+        t if t == 120 * 9 => events.push(
+            event(vocab::kind::COMMS_HUD)
+                .with("outcome", "delivered")
+                .with_text("Radar missile selected"),
+        ),
+        t if t == LAUNCH - 60 => events.push(
+            event(vocab::kind::AUDIO_TONE)
+                .with_subject(0)
+                .with("tone", "seeker lock")
+                .with("on", true)
+                .with("reason", "infrared missile selected, bore target tracked"),
+        ),
+        t if t == 120 * 14 => events.push(
+            event(vocab::kind::COMMS_RADIO)
+                .with_subject(2)
+                .with("speaker", "Enemy 2-2")
+                .with("heard", false)
+                .with("outcome", "suppressed")
+                .with("reason", "same-shooter limit (8 s)")
+                .with_text("Fox one"),
+        ),
+        t if (120 * 20..120 * 21).contains(&t) && t.is_multiple_of(6) => events.push(
+            event(vocab::kind::AUDIO_RELEASE)
+                .with_subject(0)
+                .with("sound", "&GUN.5K"),
+        ),
+        _ => {}
     }
 }
 
@@ -292,7 +488,10 @@ fn demo() {
             240 => frame.events.push(
                 event(vocab::kind::COMMS_ORDER)
                     .with_subject(1)
+                    .with("recipients", vec![2u32, 3])
                     .with("order", "free selection")
+                    .with("outcome", "applied")
+                    .with("reason", "leader perceived an attack (missile from You)")
                     .with_text("Enemy 2-1 releases the wing"),
             ),
             600 => frame.events.push(
@@ -300,6 +499,8 @@ fn demo() {
                     .with_subject(1)
                     .with("speaker", "Enemy 2-1")
                     .with("heard", false)
+                    .with("outcome", "delivered")
+                    .with("reason", "speaker not in your flight")
                     .with_text("Contact, bandit north"),
             ),
             LAUNCH => {
@@ -314,6 +515,9 @@ fn demo() {
                         .with_subject(0)
                         .with("speaker", "You")
                         .with("heard", true)
+                        .with("outcome", "delivered")
+                        .with("trigger", "infrared missile release at Enemy 2-3")
+                        .with("wait_s", 0.4)
                         .with_text("Fox two"),
                 );
                 frame
@@ -352,6 +556,7 @@ fn demo() {
                 .events
                 .push(event(vocab::kind::AI_TARGET).with_subject(1).with_object(0));
         }
+        debug_samples(&mut frame, tick, count);
         writer.push(&frame).unwrap();
     }
     let path = writer

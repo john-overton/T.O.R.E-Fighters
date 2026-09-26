@@ -238,11 +238,24 @@ pub struct Recorder {
     bookmarks: u32,
     frames: u64,
     last_tick: Option<u64>,
+    /// Copies of the comms and audio entries written, for live flight's
+    /// Comms panel, until it takes them.
+    comms: Vec<replay::TimedEvent>,
+    /// Live flight's debug panels are showing: the display trees written
+    /// are copied for them too.
+    live: bool,
+    /// Copies of the display trees written while `live`, until taken.
+    trees: Vec<(u64, replay::TreeSample)>,
     /// Every registered identity, for names in reasons and trees.
     infos: BTreeMap<u32, replay::AircraftInfo>,
     /// What the reason events and trees remember between ticks.
     why: why::Why,
 }
+
+/// Comms and audio entries kept for live flight between its looks.
+const COMMS_TAP: usize = 1_024;
+/// Display trees kept for live flight between its looks.
+const TREES_TAP: usize = 4_096;
 
 impl Recorder {
     /// Starts writing a recording to `path`, which must not exist yet.
@@ -298,6 +311,9 @@ impl Recorder {
             bookmarks: 0,
             frames: 0,
             last_tick: None,
+            comms: Vec::new(),
+            live: false,
+            trees: Vec::new(),
             infos: BTreeMap::new(),
             why: why::Why::default(),
         };
@@ -405,6 +421,30 @@ impl Recorder {
             return;
         };
         let (tick, events) = (frame.tick, frame.events.len());
+        // Live flight's Comms panel lists what the recording holds, even
+        // when the writer falls behind.
+        self.comms.extend(
+            frame
+                .events
+                .iter()
+                .filter(|e| crate::replay::panels::Channel::of(&e.kind).is_some())
+                .map(|e| replay::TimedEvent {
+                    tick,
+                    event: e.clone(),
+                }),
+        );
+        if self.comms.len() > COMMS_TAP {
+            self.comms.drain(..self.comms.len() - COMMS_TAP);
+        }
+        // Its display trees too while the panels show, so a live panel
+        // shows the very tree the recording keeps.
+        if self.live {
+            self.trees
+                .extend(frame.trees.iter().map(|tree| (tick, tree.clone())));
+            if self.trees.len() > TREES_TAP {
+                self.trees.drain(..self.trees.len() - TREES_TAP);
+            }
+        }
         self.mark_gap(&mut frame);
         fit(&mut frame);
         if self.send(Message::Frame(Box::new(frame))) {
@@ -413,6 +453,27 @@ impl Recorder {
             let (from, _, lost) = self.gap.unwrap_or((tick, tick, 0));
             self.gap = Some((from, tick, lost + events));
         }
+    }
+
+    /// The comms and audio entries written since the last call, oldest
+    /// first, for live flight's Comms panel. Only the newest 1,024 wait.
+    pub fn take_comms(&mut self) -> Vec<replay::TimedEvent> {
+        std::mem::take(&mut self.comms)
+    }
+
+    /// Whether live flight's debug panels are showing, so the display trees
+    /// written are kept for them.
+    pub fn set_live(&mut self, live: bool) {
+        self.live = live;
+        if !live {
+            self.trees.clear();
+        }
+    }
+
+    /// The display trees written since the last call while live, oldest
+    /// first, each with its tick.
+    pub fn take_trees(&mut self) -> Vec<(u64, replay::TreeSample)> {
+        std::mem::take(&mut self.trees)
     }
 
     /// Adds an event: to the tick being recorded, or between ticks to the
@@ -1764,6 +1825,67 @@ mod tests {
         )
         .unwrap();
         writer.push(&frame).unwrap();
+    }
+
+    #[test]
+    fn written_comms_and_audio_entries_are_handed_to_live_flight() {
+        let (mut recorder, _receiver) = Recorder::detached(64, &[]);
+        recorder.note(Event::new(kind::COMMS_RADIO).with_text("Fox two"));
+        recorder.note(Event::new(kind::WEAPON_LAUNCH));
+        recorder.note(Event::new(kind::AUDIO_TONE));
+        recorder.release_held();
+        assert!(recorder.take_comms().is_empty());
+        recorder.held = Some(Frame {
+            tick: 7,
+            events: std::mem::take(&mut recorder.early),
+            ..Default::default()
+        });
+        recorder.release_held();
+        let taken = recorder.take_comms();
+        let kinds: Vec<_> = taken
+            .iter()
+            .map(|e| (e.tick, e.event.kind.as_str()))
+            .collect();
+        assert_eq!(kinds, [(7, kind::COMMS_RADIO), (7, kind::AUDIO_TONE)]);
+        assert!(recorder.take_comms().is_empty());
+        // Only the newest wait when nobody looks.
+        for tick in 0..(COMMS_TAP as u64 + 5) {
+            recorder.held = Some(Frame {
+                tick,
+                events: vec![Event::new(kind::COMMS_HUD)],
+                ..Default::default()
+            });
+            recorder.release_held();
+        }
+        let taken = recorder.take_comms();
+        assert_eq!(taken.len(), COMMS_TAP);
+        assert_eq!(taken[0].tick, 5);
+    }
+
+    #[test]
+    fn display_trees_are_handed_to_live_flight_only_while_it_shows_them() {
+        let (mut recorder, _receiver) = Recorder::detached(64, &[]);
+        let tree = |subject| replay::TreeSample {
+            subject,
+            channel: tore_replay::vocab::channel::AI_THOUGHT.into(),
+            nodes: vec![replay::Node::new(0, "Activity", "ATTACKING")],
+        };
+        let frame = |tick, subject| Frame {
+            tick,
+            trees: vec![tree(subject)],
+            ..Default::default()
+        };
+        recorder.held = Some(frame(1, 3));
+        recorder.release_held();
+        assert!(recorder.take_trees().is_empty());
+        recorder.set_live(true);
+        recorder.held = Some(frame(2, 4));
+        recorder.release_held();
+        assert_eq!(recorder.take_trees(), [(2, tree(4))]);
+        recorder.held = Some(frame(3, 5));
+        recorder.release_held();
+        recorder.set_live(false);
+        assert!(recorder.take_trees().is_empty());
     }
 
     #[test]

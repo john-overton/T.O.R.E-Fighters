@@ -161,6 +161,13 @@ Turn mouse look off to bind the right button to an action instead. The middle,
 back and forward buttons and the wheel are bindable. The wheel zooms by default.
 The left button always operates instruments and the HUD.
 
+With Pref → Debug panels? on, a right-click that does not drag (released within
+4 pixels of where it was pressed) opens the
+[debug menu](REPLAYS.md#the-right-click-menu), and dragging is still mouse
+look. A right button bound to an action, with mouse look off, keeps its
+binding and never opens the menu. The left button and the wheel operate the
+debug panels and menu when the pointer is on them.
+
 ### Head tracking and TrackIR
 
 The game listens for head poses on loopback UDP port 4242 in opentrack's "UDP

@@ -135,7 +135,20 @@ The menu pauses flight and engine loops. Focus loss pauses and clears held contr
 
 **Escape → Pref → Weapon diagnostics?** shows or hides the upper-right weapon diagnostic panel: launch mode, seeker status, RELEASE LOCK, range, closure, estimated flight time, target aspect and the three most recent guided shots. It is off by default, reads On or Off beside the row, shows a short "Weapon diagnostics: on/off" message and is saved with the other flight preferences. With it off, the large layout's top-right instrument sits in its normal corner and the panel's click areas do nothing. The row is an authored addition after the retail Pref rows, not part of `FMENUD.MNU`; opinionated, requested by John on 2026-09-23 (the label and On/Off readout are agent choices). `--weapon-diagnostics` starts a launch with it shown, including captures.
 
-Working menu actions include views, instrument windows, time/pause, cockpit, pitch ladder, weapon diagnostics, HUD brightness, ending flight and exiting. Sound currently toggles effects; the original volume mixer is not implemented. Working cheats are listed under [cheats](#cheats). Other preferences, cheats, multiplayer and position commands are navigable placeholders with feedback. The bottom Resume / Restart / Keyboard Shortcuts actions are documented development additions. Menus do not silently enable unsupported cheats or alter the aircraft when an unrelated modifier shortcut is pressed.
+**Escape → Pref → Debug panels?** turns on the debugging aids of the
+[mission replays](REPLAYS.md#debug-panels) in flight: the mission timer at the
+top of the view, a right-click menu on any aircraft or missile (a right-drag
+stays mouse look), and the AI thinking, Telemetry, Guidance and Comms panels
+it opens, drawn from the flight as it happens. It is off by default, reads On
+or Off beside the row, shows a short "Debug panels: on (right-click an
+aircraft)" or "Debug panels: off" message and is saved with the other flight
+preferences. It changes nothing about how anything flies. The row is an
+authored addition after Weapon diagnostics?, not part of `FMENUD.MNU`;
+opinionated, requested by John on 2026-09-26 (the label and messages are agent
+choices). `--debug-panels` starts a launch with it on, and `--flight-panels
+thought,telemetry,guidance,comms,menu` also opens those panels, for captures.
+
+Working menu actions include views, instrument windows, time/pause, cockpit, pitch ladder, weapon diagnostics, debug panels, HUD brightness, ending flight and exiting. Sound currently toggles effects; the original volume mixer is not implemented. Working cheats are listed under [cheats](#cheats). Other preferences, cheats, multiplayer and position commands are navigable placeholders with feedback. The bottom Resume / Restart / Keyboard Shortcuts actions are documented development additions. Menus do not silently enable unsupported cheats or alter the aircraft when an unrelated modifier shortcut is pressed.
 
 ## HUD and presentation limits
 

@@ -77,6 +77,20 @@ impl Drone {
         drone
     }
 
+    /// A drone behind, to the right of and above `anchor`, looking at it,
+    /// for something heading `heading` radians: where a follow drone starts
+    /// when it is far away, and where the right-click menu's "Drone here"
+    /// puts it. In free mode it stays there.
+    pub fn beside(mode: Mode, anchor: [f64; 3], heading: f64) -> Self {
+        let (s, c) = heading.sin_cos();
+        let eye = [
+            anchor[0] - s * BEHIND + c * BESIDE,
+            anchor[1] + ABOVE,
+            anchor[2] - c * BEHIND - s * BESIDE,
+        ];
+        Self::looking(mode, eye, anchor, Some(anchor))
+    }
+
     /// A drone where `camera` is, keeping its view direction. A follow drone
     /// starting far from its aircraft is placed behind, to the right of and
     /// above it, `heading` being the aircraft's heading in radians: off the
@@ -97,13 +111,7 @@ impl Drone {
                 .sqrt()
                 > FOLLOW_REACH
         {
-            let (s, c) = heading.sin_cos();
-            let eye = [
-                anchor[0] - s * BEHIND + c * BESIDE,
-                anchor[1] + ABOVE,
-                anchor[2] - c * BEHIND - s * BESIDE,
-            ];
-            return Self::looking(mode, eye, anchor, Some(anchor));
+            return Self::beside(mode, anchor, heading);
         }
         let mut drone = Self {
             mode: Mode::Free,

@@ -626,3 +626,15 @@ with the viewer's camera as the listener, and cancels them on a seek; see
 [replay sound](REPLAYS.md#sound). The names it acts on (tone names, routes,
 the two tower triggers, and `vocab::heard` for which entry of a line was
 heard) live in `tore_replay::vocab`, which the recorder writes with.
+
+The [debug panels](REPLAYS.md#debug-panels) are one code path for both hosts.
+`replay/panels.rs` draws any display tree and the Comms panel in a 640x480
+layer from a `Data` source: the replay's reads the recording at the playhead
+through a per-chunk cache of decoded trees, live flight's (`replay/live.rs`)
+keeps the latest of each tree and the comms and audio entries the recorder
+writes (`Recorder::take_trees`, `Recorder::take_comms`), so a live panel
+shows exactly what the recording holds. `replay/context_menu.rs` holds the
+right-click menu, picking through the drawn camera's projection, and the
+click-or-drag rule. The layer is composited centred on the view, only where a
+panel or the menu drew (`FlightCanvas::centered_rects`). In flight the panels
+only read: the menu's camera changes go through the ordinary view commands.

@@ -253,6 +253,9 @@ struct App {
     replay_library: Option<replay::library::Library>,
     /// The flight being recorded.
     replay_recorder: Option<replay::recorder::Recorder>,
+    /// The mission timer, right-click menu and debug panels in flight,
+    /// shown when Pref > Debug panels? is on. See docs/REPLAYS.md.
+    live_debug: replay::live::Live,
     /// The Replays screen, open over the main menu. It stays open while the
     /// replay viewer plays one of its recordings.
     replays_screen: Option<replay::screen::Replays>,
@@ -932,6 +935,20 @@ impl App {
             _ => Command::None,
         };
         self.flight_command(command)
+    }
+
+    /// A camera change the debug menu asked for: the chase view or the
+    /// front view on an aircraft, the player's own cockpit for the player.
+    fn live_view(&mut self, view: replay::live::View) -> Action {
+        let (view, id) = match view {
+            replay::live::View::Follow(id) => (1, id),
+            replay::live::View::Cockpit(id) => (0, id),
+        };
+        self.flight_command(if id == 0 {
+            flight_ui::Command::View(view)
+        } else {
+            flight_ui::Command::ViewRelative(view, flight_views::Reference::Aircraft(id))
+        })
     }
 
     fn flight_command(&mut self, command: flight_ui::Command) -> Action {
@@ -1995,6 +2012,7 @@ impl App {
                     self.fullscreen_preference,
                 );
                 self.flight_ui.reset_for_flight();
+                self.live_debug.reset();
                 saved.apply(
                     &mut self.flight_ui,
                     &mut self.instruments,
@@ -2295,6 +2313,7 @@ impl ApplicationHandler for App {
                 }
                 self.mouse_look = None;
                 self.pointer = None;
+                self.live_debug.release();
                 self.camera.keys.clear();
                 self.combat.cancel();
                 self.modifiers = ModifiersState::empty();
@@ -2335,6 +2354,11 @@ impl ApplicationHandler for App {
                             self.mouse_look = Some((position.x, position.y));
                             renderer.window.request_redraw();
                         }
+                        if self.flight_ui.debug_panels {
+                            let window = [position.x, position.y];
+                            let (point, size) = replay::host::view_point(renderer, window);
+                            self.live_debug.pointer(Some(point), window, size);
+                        }
                         Action::None
                     }
                     Screen::Viewer | Screen::Replay => Action::None,
@@ -2356,6 +2380,12 @@ impl ApplicationHandler for App {
                 } else if let Some(editor) = &mut self.graphics_screen {
                     let result = editor.wheel(notches);
                     self.graphics_result(result)
+                } else if self.screen == Screen::Flight
+                    && self.flight_ui.debug_panels
+                    && !self.flight_ui.menu
+                    && self.live_debug.wheel(notches, self.combat.state.tick())
+                {
+                    Action::None
                 } else if self.screen == Screen::Main
                     && let Some(screen) = &mut self.replays_screen
                 {
@@ -2370,6 +2400,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorLeft { .. } => {
                 self.pointer = None;
+                self.live_debug.release();
                 self.quick.pointer(None);
                 self.menu.state.pointer(None)
             }
@@ -2398,6 +2429,7 @@ impl ApplicationHandler for App {
                 }
                 self.mouse_look = None;
                 self.pointer = None;
+                self.live_debug.release();
                 self.camera.keys.clear();
                 self.combat.cancel();
                 self.modifiers = ModifiersState::empty();
@@ -2456,6 +2488,30 @@ impl ApplicationHandler for App {
                 } else if let Some(control) = mouse_control(button) {
                     self.input.mouse_button(control, pressed);
                 }
+                // With the debug panels on, a right-click (no drag) opens
+                // their menu. A right button bound to something else, with
+                // mouse look off, keeps its binding alone.
+                if button == MouseButton::Right
+                    && self.flight_ui.debug_panels
+                    && !self.flight_ui.menu
+                    && let Some((x, y)) = self.pointer
+                {
+                    let profile = &self.input.resolver.profile;
+                    let allowed = profile.mouse_look
+                        || !profile
+                            .bindings
+                            .iter()
+                            .any(|b| b.device == "mouse" && b.control == "button:right");
+                    let (point, size) = replay::host::view_point(renderer, [x, y]);
+                    let slop = replay::context_menu::CLICK_SLOP * renderer.window.scale_factor();
+                    if let Some(at) =
+                        self.live_debug
+                            .right(pressed, [x, y], Some(point), slop, allowed)
+                    {
+                        self.live_debug
+                            .open_menu(at, size, &self.camera, &self.hornet.font);
+                    }
+                }
                 Action::None
             }
             WindowEvent::MouseInput {
@@ -2463,7 +2519,29 @@ impl ApplicationHandler for App {
                 button: MouseButton::Left,
                 ..
             } => {
-                if self.screen == Screen::Flight && self.flight_ui.map.open && !self.flight_ui.menu
+                let live = if self.screen == Screen::Flight
+                    && self.flight_ui.debug_panels
+                    && !self.flight_ui.menu
+                    && !self.flight_ui.map.open
+                {
+                    let (point, size) = self
+                        .pointer
+                        .map(|(x, y)| replay::host::view_point(renderer, [x, y]))
+                        .map_or((None, renderer.flight_size()), |(p, s)| (Some(p), s));
+                    self.live_debug.left(
+                        state == ElementState::Pressed,
+                        point,
+                        size,
+                        self.combat.state.tick(),
+                    )
+                } else {
+                    None
+                };
+                if let Some(view) = live {
+                    view.map_or(Action::None, |view| self.live_view(view))
+                } else if self.screen == Screen::Flight
+                    && self.flight_ui.map.open
+                    && !self.flight_ui.menu
                 {
                     self.flight_ui.map.pointer(
                         self.pointer
@@ -2616,6 +2694,18 @@ impl ApplicationHandler for App {
                     let result = screen.key(&name, self.modifiers.shift_key(), event.repeat);
                     let action = self.replays_result(result);
                     self.action(event_loop, action);
+                    return;
+                }
+                if self.screen == Screen::Flight
+                    && event.state == ElementState::Pressed
+                    && self.flight_ui.debug_panels
+                    && !self.flight_ui.menu
+                    && let Some(view) = self.live_debug.key(&name, self.modifiers.shift_key())
+                {
+                    if let Some(view) = view {
+                        let action = self.live_view(view);
+                        self.action(event_loop, action);
+                    }
                     return;
                 }
                 if self.screen == Screen::Flight
@@ -3706,14 +3796,18 @@ impl ApplicationHandler for App {
                         let window = renderer.window.inner_size();
                         self.instruments.weapon_debug = self.view_rig.cockpit(self.flight_view)
                             && self.flight_ui.weapon_diagnostics_shown(self.flight_view);
+                        // A debug panel or menu over an instrument takes the
+                        // pointer, so the scope's crosshair stays away.
+                        let covered = self.flight_ui.debug_panels && self.live_debug.covers();
                         self.instruments.hover(
-                            self.pointer,
+                            self.pointer.filter(|_| !covered),
                             [f64::from(window.width), f64::from(window.height)],
                         );
                         renderer.window.set_cursor_visible(
                             self.instruments.crosshair.is_none()
                                 || self.flight_ui.menu
-                                || self.flight_ui.map.open,
+                                || self.flight_ui.map.open
+                                || self.live_debug.menu.is_some(),
                         );
                         let cockpit_palette = self.hornet.cockpit_palette(
                             &self.world,
@@ -3863,6 +3957,37 @@ impl ApplicationHandler for App {
                             }
                             self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
                             self.menu.pixels.fill(0);
+                        }
+                        // The debug panels show what the recording writes:
+                        // its comms entries and, while they show, its trees.
+                        self.live_debug.recording = self.replay_recorder.is_some();
+                        if let Some(recording) = &mut self.replay_recorder {
+                            recording.set_live(self.flight_ui.debug_panels);
+                            if self.flight_ui.debug_panels {
+                                for entry in recording.take_comms() {
+                                    self.live_debug.note(entry.tick, entry.event);
+                                }
+                                for (tick, tree) in recording.take_trees() {
+                                    self.live_debug.sample(tick, tree);
+                                }
+                            }
+                        }
+                        if self.flight_ui.debug_panels && !self.flight_ui.menu {
+                            self.live_debug.frame(
+                                &mut self.flight_canvas,
+                                &replay::live::Flight {
+                                    frame: &frame,
+                                    airframe: &self.hornet,
+                                    mission: self.mission.is_some(),
+                                    wings: self.ai_wings.as_ref(),
+                                    combat: &self.combat,
+                                    reference: self.view_rig.reference,
+                                    cockpit: self.view_rig.cockpit(self.flight_view),
+                                    camera: &self.camera,
+                                },
+                            );
+                        } else if !self.live_debug.idle() {
+                            self.live_debug.reset();
                         }
                         self.flight_ui.draw_notices(
                             &mut self.flight_canvas,
@@ -6213,6 +6338,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut flight_menu = false;
     let mut flight_map = false;
     let mut weapon_diagnostics = false;
+    let mut debug_panels = false;
+    let mut flight_panels = Vec::new();
     let mut controls_menu = false;
     let mut flight_mode_arg = None;
     let mut native_tables_path: Option<PathBuf> = None;
@@ -6655,6 +6782,13 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--flight-map" => { flight_map = true; initial_screen = Screen::Flight; }
             "--weapon-diagnostics" => weapon_diagnostics = true,
+            "--debug-panels" => debug_panels = true,
+            "--flight-panels" => {
+                flight_panels = replay::viewer::Request::parse(
+                    &args.next().ok_or("--flight-panels needs a list of panels")?,
+                )?;
+                debug_panels = true;
+            }
             "--ejection-preview" => {
                 let phase = args.next().ok_or("--ejection-preview needs seat, freefall or chute")?;
                 if !matches!(phase.as_str(), "seat" | "freefall" | "chute") { return Err("--ejection-preview needs seat, freefall or chute".into()); }
@@ -6803,6 +6937,11 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 )?;
             }
             "--replay-clean" => replay_options.ui.hidden = true,
+            "--replay-panels" => {
+                replay_options.panels = replay::viewer::Request::parse(
+                    &args.next().ok_or("--replay-panels needs a list of panels")?,
+                )?;
+            }
             "--quick-mission" => initial_screen = Screen::Quick,
             "--background" => {
                 background = Some(args.next().ok_or("--background needs an asset name")?)
@@ -6880,7 +7019,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
-                    "Replays: --watch-replay FILE plays a mission recording (docs/REPLAYS.md). With it, --capture-replay OUT.ppm writes one GPU frame and exits (OUT.png saves the clean view as P does); --replay-tick N pauses at a tick; --flight-view 0..11 and --replay-aircraft ID choose the view; --replay-drone starts in the follow drone; --replay-speed 0.125..16 starts playing at that speed, negative for reverse; --replay-ui labels,timer,trails,comms,subtitles chooses the interface parts; --replay-clean starts with the interface hidden, as H hides it."
+                    "Replays: --watch-replay FILE plays a mission recording (docs/REPLAYS.md). With it, --capture-replay OUT.ppm writes one GPU frame and exits (OUT.png saves the clean view as P does); --replay-tick N pauses at a tick; --flight-view 0..11 and --replay-aircraft ID choose the view; --replay-drone starts in the follow drone; --replay-speed 0.125..16 starts playing at that speed, negative for reverse; --replay-ui labels,timer,trails,comms,subtitles chooses the interface parts; --replay-panels thought,telemetry,guidance,comms,menu opens debug panels, or the right-click menu, on the selected aircraft; --replay-clean starts with the interface hidden, as H hides it."
                 );
                 println!(
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
@@ -6890,7 +7029,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display.
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, graphics, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, graphics, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -8553,6 +8692,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             ui.menu = flight_menu;
             ui.map.open = flight_map;
             ui.weapon_diagnostics = weapon_diagnostics;
+            ui.debug_panels = debug_panels;
             ui.paused = animation_capture || combat_probe.is_some() || ejection_preview.is_some();
             ui.look = flight_look.map(f32::to_radians);
             ui.zoom = flight_zoom;
@@ -8604,8 +8744,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         .then(|| assets::data_directory().map(|data| replay::library::Library::new(&data)))
         .transpose()?,
         replay_recorder: None,
+        live_debug: Default::default(),
         replays_screen: None,
     };
+    app.live_debug.requests = flight_panels;
     diagnostics::stage_done();
     diagnostics::stage("saved preferences");
     if let Some(path) = app.preference_path.clone() {
@@ -8637,6 +8779,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     }
                     if weapon_diagnostics {
                         app.flight_ui.weapon_diagnostics = true;
+                    }
+                    if debug_panels {
+                        app.flight_ui.debug_panels = true;
                     }
                 }
                 Err(e) => {
