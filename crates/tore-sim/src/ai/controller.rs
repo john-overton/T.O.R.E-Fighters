@@ -2599,6 +2599,15 @@ fn wrap_signed(value: f64) -> f64 {
 }
 
 #[cfg(test)]
+impl Controller {
+    /// Raw state of the decision generator, for the golden behaviour tests:
+    /// recording code must never consume a draw. Test builds only.
+    pub(crate) fn decision_draw_state(&self) -> u64 {
+        self.random.state
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::ai::Experience;

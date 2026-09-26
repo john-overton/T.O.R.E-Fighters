@@ -24,3 +24,6 @@ pub mod clouds;
 
 pub mod native;
 pub mod native_objects;
+
+#[cfg(test)]
+mod golden_tests;
