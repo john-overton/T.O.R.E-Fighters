@@ -469,9 +469,13 @@ pub fn compare(a: &Recording, b: &Recording, options: &CompareOptions) -> Result
             {
                 fb.next();
             }
+            if matches!(fb.peek(), Some(Err(_)))
+                && let Some(Err(error)) = fb.next()
+            {
+                return Err(error);
+            }
             let frame_b = match fb.peek() {
                 Some(Ok(f)) if f.tick == frame_a.tick => f,
-                Some(Err(_)) => return Err(fb.next().expect("peeked").expect_err("peeked error")),
                 _ => continue,
             };
             let differences = frame_differences(&frame_a, frame_b, options, &names);

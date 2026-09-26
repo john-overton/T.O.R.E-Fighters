@@ -36,3 +36,17 @@ pub use writer::{Writer, WriterOptions, partial_path};
 
 /// The format version this build writes, and the newest it reads.
 pub const FORMAT_VERSION: u16 = 1;
+
+#[cfg(test)]
+mod tests {
+    /// The app writes on its own thread and the viewer decodes on others.
+    #[test]
+    fn writer_and_recording_cross_threads() {
+        fn send<T: Send>() {}
+        fn share<T: Send + Sync>() {}
+        send::<crate::Writer>();
+        share::<crate::Recording>();
+        share::<crate::Frame>();
+        share::<crate::Header>();
+    }
+}

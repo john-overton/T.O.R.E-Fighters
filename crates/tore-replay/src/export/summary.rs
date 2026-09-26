@@ -534,7 +534,10 @@ pub fn write_summary(
         let flight = match shot.last_seen {
             Some(last) => {
                 let mut parts = vec![
-                    format!("time of flight {}", seconds(last + 1 - shot.tick)),
+                    format!(
+                        "time of flight {}",
+                        seconds((last + 1).saturating_sub(shot.tick))
+                    ),
                     format!("peak speed {} kt", thousands(shot.peak_fps / FPS_PER_KT)),
                 ];
                 if let Some((d, t)) = shot.closest {

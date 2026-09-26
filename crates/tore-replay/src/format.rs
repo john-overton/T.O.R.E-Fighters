@@ -417,7 +417,9 @@ pub(crate) fn decode_index(body: &[u8], max_entries: usize) -> Result<(u64, Vec<
     let mut input = In::new(body);
     let footer_offset = input.uv()?;
     let n = input.count(max_entries, "index entries")?;
-    let mut entries = Vec::with_capacity(n);
+    // Each entry takes at least three bytes, so the count cannot promise
+    // more entries than the bytes that remain.
+    let mut entries = Vec::with_capacity(n.min(input.remaining() / 3));
     let (mut offset, mut tick) = (0u64, 0u64);
     for _ in 0..n {
         offset = offset

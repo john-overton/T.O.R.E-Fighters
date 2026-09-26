@@ -56,7 +56,9 @@ pub struct ChunkInfo {
 
 impl ChunkInfo {
     pub fn last_tick(&self) -> u64 {
-        self.first_tick + u64::from(self.frames) - 1
+        self.first_tick
+            .saturating_add(u64::from(self.frames))
+            .saturating_sub(1)
     }
 
     pub fn contains(&self, tick: u64) -> bool {

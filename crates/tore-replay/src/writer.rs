@@ -319,7 +319,7 @@ impl Writer {
         if self.unsynced_ticks >= self.options.sync_ticks {
             self.unsynced_ticks = 0;
             if let Some(file) = &self.file
-                && let Err(error) = file.sync_data()
+                && let Err(error) = file.sync_all()
             {
                 self.stopped = Some(Stop::Failed(format!("syncing failed: {error}")));
                 return Err(error.into());
@@ -355,7 +355,10 @@ impl Writer {
         ));
         tail.extend_from_slice(&trailer(index_offset));
         self.write(&tail)?;
-        let file = self.file.take().expect("file open until finish");
+        let file = self
+            .file
+            .take()
+            .ok_or_else(|| Error::Stopped("the file is closed".into()))?;
         file.sync_all()?;
         drop(file);
         std::fs::rename(&self.partial, &self.final_path)?;
@@ -382,7 +385,7 @@ impl Drop for Writer {
         if self.file.is_some() && self.stopped.is_none() {
             let _ = self.flush_chunk();
             if let Some(file) = &self.file {
-                let _ = file.sync_data();
+                let _ = file.sync_all();
             }
         }
     }
