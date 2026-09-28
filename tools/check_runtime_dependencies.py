@@ -28,7 +28,15 @@ def pe_machine(binary):
     return int.from_bytes(header[4:6], "little")
 
 
-def violations(platform, output, binary, system_root=None):
+def glibc_versions(binary):
+    """The glibc symbol versions an ELF binary asks for, as sorted tuples."""
+    data = Path(binary).read_bytes()
+    found = {tuple(int(part) for part in match.split(b"."))
+             for match in re.findall(rb"GLIBC_(\d+(?:\.\d+)+)", data)}
+    return sorted(found)
+
+
+def violations(platform, output, binary, system_root=None, max_glibc=None):
     if platform == "win32":
         dependencies = re.findall(r"^\s*([\w.+-]+\.dll)\s*$", output, re.M | re.I)
         if not dependencies:
@@ -61,6 +69,15 @@ def violations(platform, output, binary, system_root=None):
         return [line.strip() for line in output.splitlines() if "not found" in line]
     if not re.search(r"=>|ld-linux|statically linked", output):
         return ["ldd did not report recognizable dependencies"]
+    # The binary uses the player's own C library, so a build host with a newer
+    # glibc than the oldest supported distribution produces a program that
+    # exits at load time there.
+    if max_glibc:
+        ceiling = tuple(int(part) for part in max_glibc.split("."))
+        newer = [version for version in glibc_versions(binary) if version > ceiling]
+        if newer:
+            wanted = ".".join(str(part) for part in newer[-1])
+            return [f"requires glibc {wanted}, newer than the {max_glibc} release floor"]
     return []
 
 
@@ -79,13 +96,15 @@ def dumpbin():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binaries", nargs="+", type=Path)
+    parser.add_argument("--max-glibc", metavar="VERSION",
+                        help="Linux only: fail when a binary needs a newer glibc, e.g. 2.35")
     args = parser.parse_args()
     command = [dumpbin(), "-dependents"] if sys.platform == "win32" else (["otool", "-L"] if sys.platform == "darwin" else ["ldd"])
     for binary in args.binaries:
         binary = binary.resolve(strict=True)
         result = subprocess.run([*command, str(binary)], capture_output=True, text=True, check=True)
         print(result.stdout)
-        errors = violations(sys.platform, result.stdout, binary)
+        errors = violations(sys.platform, result.stdout, binary, max_glibc=args.max_glibc)
         if errors:
             raise RuntimeError(f"{binary}: " + "; ".join(errors))
     print("Runtime dependencies passed.")

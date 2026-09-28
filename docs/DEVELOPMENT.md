@@ -115,7 +115,10 @@ needs this step. A single push can skip the hook with `git push --no-verify`.
 
 The hook runs everything the CI job runs that a single machine can run. Other
 platforms stay in CI, which builds and tests four targets on every push:
-Ubuntu 24.04, Windows 2022, macOS 14 on Apple Silicon, and macOS 15 on Intel.
+Ubuntu 22.04, Windows 2022, macOS 14 on Apple Silicon, and macOS 15 on Intel.
+Linux stays on the oldest supported Ubuntu LTS because the binary uses the
+player's own glibc; a newer build host makes a program that will not start on
+older distributions.
 The `macos-15-intel` image is the last x86_64 macOS runner GitHub will offer and
 retires in August 2027; after that, Intel coverage means cross-compiling
 `x86_64-apple-darwin` from an Apple Silicon runner.
@@ -374,7 +377,9 @@ These artifacts are not added to the retail-free game packages.
 
 `tools/check_runtime_dependencies.py` rejects missing runtime libraries, dynamic
 Windows Visual C++ runtime imports and non-system macOS libraries that are not
-bundled. It checks the build host, not every supported OS installation.
+bundled. With `--max-glibc 2.35`, which CI and the release workflow pass on
+Linux, it also rejects a binary that needs a newer glibc than Ubuntu 22.04
+ships. It checks the build host, not every supported OS installation.
 `tools/check_startup_diagnostics.py EXECUTABLE` exercises success, returned
 errors and main/worker panics without media, using isolated paths with spaces.
 Packaging runs it on staged binaries and on the actual payload recovered from

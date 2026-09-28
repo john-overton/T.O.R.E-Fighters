@@ -54,6 +54,9 @@ version=$(tore_resolve_version "$explicit")
 target="$root/target/release"
 dist="$root/dist"
 name="T.O.R.E-Fighters-$version-linux-x86_64"
+# AppImages are Linux-only by definition, and the AppImage catalog rejects a
+# name that says "linux", so the AppImage drops it while the tar.gz keeps it.
+appimage_name="T.O.R.E-Fighters-$version-x86_64"
 stage="$dist/stage/linux/$name"
 appdir="$dist/stage/linux/AppDir"
 
@@ -141,7 +144,7 @@ elif command -v curl >/dev/null 2>&1; then
     fi
 fi
 
-appimage="$dist/$name.AppImage"
+appimage="$dist/$appimage_name.AppImage"
 if [ -n "$appimagetool" ]; then
     rm -f "$appimage"
     # appimagetool is itself an AppImage and needs FUSE. Where FUSE is absent,

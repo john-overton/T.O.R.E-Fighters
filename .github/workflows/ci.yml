@@ -17,11 +17,12 @@ jobs:
         # means cross-compiling x86_64-apple-darwin from an arm64 runner. The
         # second windows-2022 job checks the 32-bit Windows build. Every job is
         # its own include entry: a plain os list would merge the 32-bit entry
-        # into the 64-bit Windows job instead of adding one.
+        # into the 64-bit Windows job instead of adding one. Linux builds on
+        # ubuntu-22.04, the release floor, so CI tests what ships.
         include:
           - os: macos-14
           - os: macos-15-intel
-          - os: ubuntu-24.04
+          - os: ubuntu-22.04
           - os: windows-2022
           - os: windows-2022
             target: i686-pc-windows-msvc
@@ -79,6 +80,9 @@ jobs:
         run: |
           out="target/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug"
           suffix=""
+          floor=()
           if [ "$RUNNER_OS" = "Windows" ]; then suffix=".exe"; fi
+          # Ubuntu 22.04's glibc, the release floor for Linux.
+          if [ "$RUNNER_OS" = "Linux" ]; then floor=(--max-glibc 2.35); fi
           python tools/check_startup_diagnostics.py "$out/tore-app$suffix"
-          python tools/check_runtime_dependencies.py "$out/tore-app$suffix" "$out/tore-extract$suffix"
+          python tools/check_runtime_dependencies.py "${floor[@]}" "$out/tore-app$suffix" "$out/tore-extract$suffix"

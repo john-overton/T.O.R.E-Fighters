@@ -22,13 +22,16 @@ jobs:
       matrix:
         # The same five jobs as ci.yml. macos-14 is Apple Silicon;
         # macos-15-intel is the last x86_64 macOS image GitHub will offer. The
-        # second windows-2022 job builds the 32-bit Windows package. Every job
-        # is its own include entry: a plain os list would merge the 32-bit
-        # entry into the 64-bit Windows job instead of adding one.
+        # Linux build uses the player's own glibc, so it runs on the oldest
+        # supported Ubuntu LTS: a newer host makes a binary that will not start
+        # on older distributions. The second windows-2022 job builds the
+        # 32-bit Windows package. Every job is its own include entry: a plain
+        # os list would merge the 32-bit entry into the 64-bit Windows job
+        # instead of adding one.
         include:
           - os: macos-14
           - os: macos-15-intel
-          - os: ubuntu-24.04
+          - os: ubuntu-22.04
           - os: windows-2022
           - os: windows-2022
             target: i686-pc-windows-msvc
@@ -115,8 +118,11 @@ jobs:
         run: |
           out="target/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}release"
           suffix=""
+          floor=()
           if [ "$RUNNER_OS" = "Windows" ]; then suffix=".exe"; fi
-          python tools/check_runtime_dependencies.py "$out/tore-app$suffix" "$out/tore-extract$suffix"
+          # Ubuntu 22.04's glibc, the release floor for Linux.
+          if [ "$RUNNER_OS" = "Linux" ]; then floor=(--max-glibc 2.35); fi
+          python tools/check_runtime_dependencies.py "${floor[@]}" "$out/tore-app$suffix" "$out/tore-extract$suffix"
       - name: Collect matching debug symbols
         shell: bash
         run: |

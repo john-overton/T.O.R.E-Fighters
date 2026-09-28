@@ -10,6 +10,17 @@ class RuntimeDependencyTests(unittest.TestCase):
         self.assertTrue(violations("linux", "libasound.so.2 => not found", Path("app")))
         self.assertFalse(violations("linux", "libc.so.6 => /lib/libc.so.6", Path("app")))
 
+    def test_linux_glibc_newer_than_the_floor_fails(self):
+        ldd = "libc.so.6 => /lib/libc.so.6"
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "app"
+            binary.write_bytes(b"\0GLIBC_2.2.5\0GLIBC_2.34\0GLIBC_PRIVATE\0")
+            self.assertFalse(violations("linux", ldd, binary, max_glibc="2.35"))
+            binary.write_bytes(b"\0GLIBC_2.2.5\0GLIBC_2.39\0")
+            self.assertTrue(violations("linux", ldd, binary, max_glibc="2.35"))
+            # Without a floor, a local build on a newer distribution still passes.
+            self.assertFalse(violations("linux", ldd, binary))
+
     def test_macos_developer_library_fails(self):
         self.assertTrue(violations("darwin", "\t/opt/homebrew/lib/libthing.dylib (compatibility version 1.0.0)", Path("app")))
         self.assertFalse(violations("darwin", "\t/System/Library/Frameworks/AppKit.framework/AppKit (compatibility version 1.0.0)", Path("app")))

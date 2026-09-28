@@ -61,7 +61,7 @@ names emitted by `tools/package/`:
 | Windows 32-bit | `-windows-x86.msi` | Additional link on the Windows card, shown only when present |
 | macOS Apple Silicon | `-macos-arm64.dmg` | DMG |
 | macOS Intel | `-macos-x86_64.dmg` | DMG |
-| Linux Intel/AMD 64-bit | `-linux-x86_64.AppImage` | AppImage |
+| Linux Intel/AMD 64-bit | `-x86_64.AppImage` (also matches the older `-linux-x86_64.AppImage`) | AppImage |
 | Linux archive | `-linux-x86_64.tar.gz` | Additional link, or primary when AppImage is absent |
 
 Each filename must start with `T.O.R.E-Fighters-`. Empty or unfinished assets

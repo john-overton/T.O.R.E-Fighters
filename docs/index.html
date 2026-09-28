@@ -462,7 +462,8 @@
         { id: 'windows', label: 'Windows 64-bit', suffix: '-windows-x86_64.msi', format: 'MSI' },
         { id: 'macos-arm', label: 'macOS Apple Silicon', suffix: '-macos-arm64.dmg', format: 'DMG' },
         { id: 'macos-intel', label: 'macOS Intel', suffix: '-macos-x86_64.dmg', format: 'DMG' },
-        { id: 'linux', label: 'Linux 64-bit', suffix: '-linux-x86_64.AppImage', format: 'AppImage' }
+        // Also matches the older -linux-x86_64.AppImage name.
+        { id: 'linux', label: 'Linux 64-bit', suffix: '-x86_64.AppImage', format: 'AppImage' }
       ];
 
       function releaseURL(value, kind) {
