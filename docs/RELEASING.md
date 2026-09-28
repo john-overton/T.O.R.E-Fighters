@@ -28,7 +28,16 @@ sed -i '' 's/^version = "0.1.0"/version = "0.1.1"/' crates/*/Cargo.toml
 
 On Linux, drop the `''` after `-i`.
 
-## 2. Refresh the lock file and check
+## 2. Write the release notes
+
+Add `docs/release/v0.1.1.md` and list it at the top of
+`docs/release/releases.json`, following the
+[release notes guide](release/README.md). The notes appear on the website's
+[releases page](https://john-overton.github.io/T.O.R.E-Fighters/releases.html),
+and the release workflow publishes the same file as the GitHub release title
+and description.
+
+## 3. Refresh the lock file and check
 
 ```sh
 cargo build --workspace
@@ -54,7 +63,7 @@ rises only for a format change older builds could not read past, never for a
 release. Then run the
 [everyday checks](DEVELOPMENT.md#everyday-checks).
 
-## 3. Commit, tag and push
+## 4. Commit, tag and push
 
 ```sh
 git commit -am "Release 0.1.1"
@@ -68,3 +77,11 @@ installers. It refuses a tag that does not match `crates/tore-app/Cargo.toml`,
 so the version must be changed before tagging. The app's menu label and
 `--version` take their version from the tag, as described in
 [packaging](DEVELOPMENT.md#packaging).
+
+The workflow only writes the notes when it creates the release. To change them
+after the tag is pushed, edit the file, commit it, and run:
+
+```sh
+python3 tools/release_notes.py docs/release/v0.1.1.md --body --ref v0.1.1 \
+  | gh release edit v0.1.1 --notes-file -
+```

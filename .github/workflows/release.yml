@@ -216,10 +216,23 @@ jobs:
           TAG: ${{ github.ref_name }}
         shell: bash
         run: |
+          # The tag's notes in docs/release/ become the release title and
+          # description, with relative links made absolute. Without a notes
+          # file, a short generic note.
+          notes="docs/release/$TAG.md"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" \
-              --title "$TAG" \
-              --prerelease \
-              --notes "Unsigned pre-release builds. On macOS the first launch is right-click, Open. On Windows SmartScreen, choose More info, then Run anyway. No retail media is included: point the app at your own Fighters Anthology copy on first run."
+            if [ -f "$notes" ]; then
+              title=$(python tools/release_notes.py "$notes" --title)
+              python tools/release_notes.py "$notes" --body --ref "$TAG" > "$RUNNER_TEMP/release-notes.md"
+              gh release create "$TAG" \
+                --title "$title" \
+                --prerelease \
+                --notes-file "$RUNNER_TEMP/release-notes.md"
+            else
+              gh release create "$TAG" \
+                --title "$TAG" \
+                --prerelease \
+                --notes "Unsigned pre-release builds. On macOS the first launch is right-click, Open. On Windows SmartScreen, choose More info, then Run anyway. No retail media is included: point the app at your own Fighters Anthology copy on first run."
+            fi
           fi
           gh release upload "$TAG" dist/* --clobber

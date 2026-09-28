@@ -1,8 +1,12 @@
-"""Documentation header guard. Uses only the Python standard library.
+"""Documentation header and release-notes guard. Uses only the Python standard library.
 
 Every Markdown file in the covered directories carries the T.O.R.E header
 directly under its title. `--check` (the default, and what CI runs) reports
 files that are missing it or carrying an older revision. `--fix` writes it.
+
+The release notes in docs/release/ are checked too: every `vX.Y.Z.md` file is
+listed in releases.json, newest first, with a matching title and no em or en
+dashes. `--fix` never touches them; the rules are in docs/release/README.md.
 
 The header text lives in HEADER below. To reword it, edit HEADER, raise
 HEADER_REVISION, and run `python3 tools/check_docs.py --fix`: the old block is
@@ -11,7 +15,9 @@ is safe, because detection matches the prefix rather than the whole line.
 """
 
 import argparse
+import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -53,6 +59,14 @@ EXEMPT = {
     "AGENTS.md",
     "docs/doc-realignment-2026-09-15.md",
 }
+
+
+RELEASE_DIRECTORY = Path("docs/release")
+RELEASE_INDEX = "releases.json"
+RELEASE_FILE = re.compile(r"v(\d+)\.(\d+)\.(\d+)\.md")
+# Em and en dashes. The release notes are player-facing, so the no-dash rule in
+# AGENTS.md is enforced here rather than only asked for.
+FORBIDDEN_DASHES = {"\u2014": "em dash", "\u2013": "en dash"}
 
 
 def covered(relative):
@@ -109,6 +123,51 @@ def tracked_documents():
     return [relative for relative in listed if covered(relative)]
 
 
+def release_problems(directory=RELEASE_DIRECTORY):
+    """Return a list of problems with the release notes in `directory`."""
+    if not directory.is_dir():
+        return []
+    problems = []
+    index_path = directory / RELEASE_INDEX
+    try:
+        listed = json.loads(index_path.read_text(encoding="utf-8"))["releases"]
+        if not isinstance(listed, list) or not all(isinstance(name, str) for name in listed):
+            raise ValueError("releases must be a list of file names")
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return [f"{index_path}: unreadable release index ({error})"]
+
+    present = {path.name for path in directory.glob("v*.md")}
+    for name in sorted(present - set(listed)):
+        problems.append(f"{directory / name}: not listed in {RELEASE_INDEX}")
+    for name in listed:
+        if name not in present:
+            problems.append(f"{index_path}: lists {name}, which does not exist")
+    if len(set(listed)) != len(listed):
+        problems.append(f"{index_path}: lists a release more than once")
+
+    versions = []
+    for name in listed:
+        match = RELEASE_FILE.fullmatch(name)
+        if not match:
+            problems.append(f"{index_path}: {name} is not named vX.Y.Z.md")
+            continue
+        versions.append(tuple(int(part) for part in match.groups()))
+        path = directory / name
+        if path.exists():
+            title = path.read_text(encoding="utf-8").split("\n", 1)[0]
+            if not title.startswith(f"# {name[:-3]}: "):
+                problems.append(f"{path}: first line must be '# {name[:-3]}: <name>'")
+    if versions != sorted(versions, reverse=True):
+        problems.append(f"{index_path}: releases must be listed newest first")
+
+    for path in sorted(directory.glob("*.md")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+            for dash, label in FORBIDDEN_DASHES.items():
+                if dash in line:
+                    problems.append(f"{path}:{number}: {label}; use a comma, a colon or a new sentence")
+    return problems
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -144,14 +203,18 @@ def main():
         else:
             stale.append(f"{relative}: missing or outdated T.O.R.E header")
 
-    if stale:
-        print("Documentation header check failed:\n" + "\n".join(stale), file=sys.stderr)
-        print(f"\nRun `python3 {Path(__file__).name}` with --fix to write them.", file=sys.stderr)
+    releases = release_problems()
+    if stale or releases:
+        print("Documentation check failed:\n" + "\n".join(stale + releases), file=sys.stderr)
+        if stale:
+            print(f"\nRun `python3 {Path(__file__).name}` with --fix to write the headers.", file=sys.stderr)
+        if releases:
+            print(f"\nRelease note rules: {RELEASE_DIRECTORY / 'README.md'}", file=sys.stderr)
         return 1
     if arguments.fix:
-        print(f"Documentation header check passed ({checked} files, {fixed} updated).")
+        print(f"Documentation check passed ({checked} files, {fixed} updated).")
     else:
-        print(f"Documentation header check passed ({checked} files).")
+        print(f"Documentation check passed ({checked} files).")
     return 0
 
 

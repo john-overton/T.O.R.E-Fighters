@@ -289,6 +289,7 @@
       <a href="#features">Features</a>
       <a href="#in-flight">In flight</a>
       <a href="#roadmap">Roadmap</a>
+      <a href="releases.html">Releases</a>
       <a class="source-link" id="github-link" href="https://github.com/john-overton/T.O.R.E-Fighters" aria-label="View T.O.R.E Fighters on GitHub">GitHub <span class="github-stars" aria-hidden="true">★ <span id="github-star-count">Star</span></span></a>
     </nav>
   </header>
@@ -356,7 +357,7 @@
       </div>
       <div class="download-footer">
         <p>Bring your own Fighters Anthology files. Builds are unsigned; the <a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/DEVELOPMENT.md#packaging">installation guide</a> covers setup and first launch.</p>
-        <div class="download-links"><a id="release-notes" href="https://github.com/john-overton/T.O.R.E-Fighters/releases">All releases</a><a href="https://github.com/john-overton/T.O.R.E-Fighters#run-locally">Build from source</a></div>
+        <div class="download-links"><a id="release-notes" href="releases.html">Release notes</a><a id="release-page" href="https://github.com/john-overton/T.O.R.E-Fighters/releases">All releases on GitHub</a><a href="https://github.com/john-overton/T.O.R.E-Fighters#run-locally">Build from source</a></div>
       </div>
     </section>
 
@@ -440,7 +441,7 @@
         <li class="milestone"><div class="milestone-label"><strong>06</strong><span>Planned</span></div><h3><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md#milestone-6-persistent-campaigns">A persistent war</a></h3><p>A shared, lasting campaign with air and ground operations. Choose roles, support the wider battle, and return to a world that carries on.</p></li>
         <li class="milestone"><div class="milestone-label"><strong>07</strong><span>Planned</span></div><h3><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md#milestone-7-custom-maps-and-community-theaters">Beyond the original maps</a></h3><p>Tools for custom terrain, shareable community theaters, and new aircraft and objects built through the creator tools.</p></li>
       </ol>
-      <div class="roadmap-link"><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md">Read the full development roadmap <span aria-hidden="true">↗</span></a><span>OUTLINE UPDATED 23 SEP 2026 · PLANS MAY EVOLVE</span></div>
+      <div class="roadmap-link"><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md">Read the full development roadmap <span aria-hidden="true">↗</span></a><a href="releases.html">What changed in each release</a><span>OUTLINE UPDATED 23 SEP 2026 · PLANS MAY EVOLVE</span></div>
     </section>
 
     <section class="join" aria-labelledby="join-title">
@@ -490,9 +491,14 @@
         const date = new Date(release.published_at).toLocaleDateString('en-US', {
           year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC'
         });
-        const notes = document.getElementById('release-notes');
-        notes.href = notesURL;
-        notes.textContent = 'Release notes';
+        // The notes page shows the latest notes, with a pointer to GitHub, if
+        // this tag has no file in docs/release/ yet.
+        if (/^v\d+\.\d+\.\d+$/.test(release.tag_name)) {
+          document.getElementById('release-notes').href = 'releases.html#' + release.tag_name;
+        }
+        const page = document.getElementById('release-page');
+        page.href = notesURL;
+        page.textContent = release.tag_name + ' on GitHub';
         badge.textContent = release.prerelease ? 'Pre-release' : 'Release';
         status.textContent = '';
         const version = document.createElement('strong');

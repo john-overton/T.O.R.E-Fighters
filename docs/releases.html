@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#20251e">
+  <meta name="description" content="Release notes for T.O.R.E - Fighters, the ground-up Rust rebuild of Jane's Fighters Anthology. What changed in each build, newest first.">
+  <meta property="og:title" content="T.O.R.E - Fighters release notes">
+  <meta property="og:description" content="What changed in each build of the Fighters Anthology rebuild, newest first.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://john-overton.github.io/T.O.R.E-Fighters/images/homepage/squadron-patch.webp">
+  <title>Release notes | T.O.R.E - Fighters</title>
+  <link rel="icon" type="image/png" href="images/homepage/favicon.png">
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #171c18;
+      --paper: #ede9da;
+      --muted: #b9bdab;
+      --olive: #aaa779;
+      --red: #b53e31;
+      --line: #454a3b;
+      --paper-ink: #485042;
+      --paper-line: #b7b8a5;
+      --display: Impact, "Arial Narrow", "Nimbus Sans Narrow", "Helvetica Neue", sans-serif;
+      --mono: "Courier New", monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+    body {
+      margin: 0;
+      color: var(--paper);
+      background: #20251e;
+      background-image: repeating-linear-gradient(0deg, #ffffff02 0, #ffffff02 1px, transparent 1px, transparent 4px);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    a { color: inherit; text-underline-offset: 4px; }
+    a:hover { text-decoration-thickness: 2px; }
+    a:focus-visible, button:focus-visible { outline: 3px solid #e2b86a; outline-offset: 4px; }
+    img { display: block; max-width: 100%; height: auto; }
+    h1, h2, h3, p { margin: 0; }
+    .wrap { width: min(1180px, calc(100% - 64px)); margin-inline: auto; }
+    .eyebrow { font: 700 11px/1.5 var(--mono); letter-spacing: .16em; text-transform: uppercase; }
+    .skip-link { position: absolute; top: -100px; left: 20px; z-index: 10; padding: 12px 20px; background: var(--paper); color: var(--ink); }
+    .skip-link:focus { top: 12px; }
+    .masthead { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-block: 24px; }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+    .brand img { width: 52px; height: 52px; }
+    .brand strong { display: block; font-size: 16px; letter-spacing: .13em; line-height: 1.2; }
+    .brand span { display: block; font: 10px/1.8 var(--mono); letter-spacing: .22em; color: var(--muted); }
+    .nav { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; }
+    .nav a { font-size: 12px; font-weight: bold; text-decoration: none; }
+    .nav a:hover { color: #d7c78e; }
+    .nav a[aria-current="page"] { color: #d7c78e; box-shadow: inset 0 -2px #b53e31; }
+    .nav .source-link { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; border: 1px solid #737860; padding: 9px 15px; }
+
+    .page-head { display: flex; justify-content: space-between; align-items: end; gap: 40px; padding: 34px 0 30px; border-top: 1px solid var(--line); }
+    .page-head h1 { font: 700 clamp(44px, 6vw, 76px)/1 var(--display); text-transform: uppercase; letter-spacing: .01em; margin-top: 10px; }
+    .page-head > p { max-width: 380px; color: var(--muted); font-size: 13px; }
+
+    .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 34px; align-items: start; padding-bottom: 60px; }
+    .release-list { position: sticky; top: 24px; }
+    .release-list h2 { color: var(--muted); padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+    .release-list ol { list-style: none; margin: 0; padding: 0; max-height: calc(100vh - 140px); overflow-y: auto; }
+    .release-list li { border-bottom: 1px solid var(--line); }
+    .release-list a { display: block; padding: 14px 12px 14px 14px; text-decoration: none; border-left: 3px solid transparent; }
+    .release-list a:hover { background: #292f24; }
+    .release-list a[aria-current="true"] { background: #343b2c; border-left-color: #bcb884; }
+    .release-version { display: flex; justify-content: space-between; gap: 8px; font: 700 11px/1.5 var(--mono); letter-spacing: .08em; color: #d7c78e; }
+    .release-version span { color: var(--muted); font-weight: normal; letter-spacing: 0; }
+    .release-name { display: block; margin-top: 3px; font-size: 13px; line-height: 1.35; }
+    .release-list .list-note { padding: 14px 0; color: var(--muted); font-size: 12px; }
+
+    .notes { min-width: 0; background: var(--paper); color: var(--ink); border-top: 5px solid var(--red); padding: 42px 48px 46px; box-shadow: 5px 5px 0 #10140f, 6px 6px 0 #656951; }
+    .notes-status { color: var(--paper-ink); font-size: 14px; }
+    .notes-status a { font-weight: bold; }
+    .notice { margin-bottom: 26px; padding: 12px 16px; border: 1px solid #c9b58a; background: #f6eed3; color: #5b4a22; font-size: 13px; }
+    .notice[hidden] { display: none; }
+
+    .markdown { font-size: 15px; color: #2b3228; }
+    .markdown > * + * { margin-top: 14px; }
+    .markdown .release-version-tag { color: var(--red); }
+    .markdown h1 { font: 700 clamp(34px, 4.4vw, 52px)/1.02 var(--display); text-transform: uppercase; letter-spacing: .01em; color: var(--ink); margin-top: 8px; text-wrap: balance; }
+    .markdown .release-meta { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 18px 0 26px; padding: 11px 0; border-block: 1px solid var(--paper-line); font: 11px/1.6 var(--mono); letter-spacing: .04em; color: #535b4d; }
+    .markdown .release-meta strong { color: var(--ink); text-transform: uppercase; letter-spacing: .1em; margin-right: 6px; }
+    .markdown h2 { font: 700 30px/1.1 var(--display); text-transform: uppercase; letter-spacing: .01em; color: var(--ink); margin-top: 38px; padding-top: 18px; border-top: 1px solid var(--paper-line); text-wrap: balance; }
+    .markdown h3 { font-size: 15px; color: var(--ink); margin-top: 24px; }
+    .markdown h3::before { content: "+"; color: #a1392c; margin-right: 8px; }
+    .markdown h2 + *, .markdown h3 + * { margin-top: 10px; }
+    .markdown p, .markdown li { line-height: 1.65; }
+    .markdown strong { color: var(--ink); }
+    .markdown a { color: #7d2a20; font-weight: bold; }
+    .markdown a:hover { color: var(--red); }
+    .markdown ul, .markdown ol { padding-left: 22px; }
+    .markdown ul { list-style: none; padding-left: 0; }
+    .markdown ul > li { position: relative; padding-left: 20px; }
+    .markdown ul > li::before { content: ""; position: absolute; left: 3px; top: .66em; width: 6px; height: 6px; background: var(--olive); }
+    .markdown li + li { margin-top: 7px; }
+    .markdown ol > li::marker { font: 700 13px var(--mono); color: #a1392c; }
+    .markdown blockquote { margin: 22px 0; padding: 14px 18px; border-left: 4px solid var(--red); background: #e2ddc8; color: #3a4136; }
+    .markdown blockquote > * + * { margin-top: 8px; }
+    .markdown code { font: 13px var(--mono); background: #dcd7c2; padding: 1px 5px; border: 1px solid #c8c3ab; overflow-wrap: anywhere; }
+    .markdown pre { overflow-x: auto; padding: 14px 16px; background: #1c211b; color: var(--paper); border: 1px solid #454a3b; }
+    .markdown pre code { background: none; border: 0; padding: 0; color: inherit; overflow-wrap: normal; }
+    .markdown .table-scroll { overflow-x: auto; margin: 20px 0; }
+    .markdown table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .markdown th { text-align: left; font: 700 10px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: #535b4d; border-bottom: 2px solid var(--ink); padding: 8px 12px 8px 0; }
+    .markdown td { vertical-align: top; border-bottom: 1px solid var(--paper-line); padding: 10px 12px 10px 0; }
+    .markdown hr { border: 0; border-top: 1px solid var(--paper-line); margin: 30px 0; }
+    .markdown img { border: 1px solid #838878; padding: 4px; background: #d6d4c2; margin: 16px 0; }
+    .markdown :is(h2, h3) a.anchor { margin-left: 8px; color: #9ca08a; font-weight: normal; text-decoration: none; opacity: 0; }
+    .markdown :is(h2, h3):hover a.anchor, .markdown a.anchor:focus { opacity: 1; }
+    .markdown pre.raw { white-space: pre-wrap; }
+
+    .pager { display: flex; justify-content: space-between; gap: 20px; margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--paper-line); }
+    .pager[hidden] { display: none; }
+    .pager a { display: block; max-width: 48%; text-decoration: none; }
+    .pager a:hover strong { text-decoration: underline; }
+    .pager a.next { margin-left: auto; text-align: right; }
+    .pager span { display: block; font: 700 10px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: #6c7361; }
+    .pager strong { display: block; font-size: 14px; color: var(--ink); }
+    .source-note { margin-top: 18px; font: 10px/1.6 var(--mono); color: #6c7361; }
+    .source-note a { color: inherit; }
+
+    .footer { border-top: 1px solid var(--line); padding-block: 25px 35px; display: flex; justify-content: space-between; align-items: start; gap: 35px; }
+    .footer-brand { display: flex; gap: 12px; align-items: center; flex-shrink: 0; }
+    .footer-brand img { width: 44px; height: 44px; }
+    .footer-brand strong { font-size: 12px; letter-spacing: .08em; }
+    .footer-brand span { display: block; color: var(--muted); font: 9px/1.5 var(--mono); }
+    .footer p { max-width: 610px; font-size: 10px; color: #a9b19c; line-height: 1.7; }
+
+    @media (min-width: 1500px) { .wrap { width: min(1280px, calc(100% - 100px)); } }
+    @media (max-width: 1000px) {
+      .layout { grid-template-columns: 200px minmax(0, 1fr); gap: 24px; }
+      .notes { padding: 32px; }
+    }
+    @media (max-width: 760px) {
+      .wrap { width: calc(100% - 32px); }
+      .masthead { flex-direction: column; align-items: start; gap: 18px; padding-block: 20px; }
+      .nav { gap: 12px; width: 100%; justify-content: space-between; }
+      .nav a { font-size: 11px; }
+      .nav .source-link { padding: 6px 10px; }
+      .page-head { display: block; padding: 26px 0 22px; }
+      .page-head > p { margin-top: 12px; max-width: none; }
+      .layout { grid-template-columns: 1fr; gap: 22px; padding-bottom: 40px; }
+      .release-list { position: static; }
+      .release-list ol { max-height: 232px; }
+      .notes { padding: 26px 20px 30px; box-shadow: 4px 4px 0 #10140f, 5px 5px 0 #656951; }
+      .markdown { font-size: 14px; }
+      .markdown h2 { font-size: 26px; }
+      .markdown .release-meta { font-size: 10px; }
+      .pager { flex-direction: column; }
+      .pager a { max-width: none; }
+      .footer { flex-direction: column; gap: 18px; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media print {
+      body { background: white; color: black; }
+      .wrap { width: 100%; }
+      .nav, .skip-link, .release-list, .pager { display: none; }
+      .layout { display: block; }
+      .notes { box-shadow: none; border-top-width: 2px; padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#notes">Skip to release notes</a>
+  <header class="masthead wrap">
+    <a class="brand" href="index.html" aria-label="T.O.R.E Fighters home">
+      <img src="images/homepage/squadron-patch.webp" width="52" height="52" alt="">
+      <div><strong>T.O.R.E - FIGHTERS</strong><span>THE NEXT SORTIE</span></div>
+    </a>
+    <nav class="nav" aria-label="Main navigation">
+      <a href="index.html#downloads">Downloads</a>
+      <a href="index.html#features">Features</a>
+      <a href="index.html#roadmap">Roadmap</a>
+      <a href="releases.html" aria-current="page">Releases</a>
+      <a class="source-link" href="https://github.com/john-overton/T.O.R.E-Fighters">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <div class="page-head">
+      <div><p class="eyebrow">Dispatches from the flight line</p><h1>Release notes.</h1></div>
+      <p>What changed in each build, newest first. Downloads for the latest build are on the <a href="index.html#downloads">home page</a>.</p>
+    </div>
+
+    <div class="layout">
+      <nav class="release-list" aria-labelledby="release-list-title">
+        <h2 id="release-list-title" class="eyebrow">All releases</h2>
+        <ol id="release-list">
+          <li class="list-note">Loading releases…</li>
+        </ol>
+      </nav>
+
+      <article id="notes" class="notes" tabindex="-1">
+        <p id="notice" class="notice" role="status" hidden></p>
+        <div id="release-body" class="markdown">
+          <p class="notes-status">Loading release notes…</p>
+          <noscript>
+            <p class="notes-status">The notes are drawn by a script. Read them as Markdown in the <a href="https://github.com/john-overton/T.O.R.E-Fighters/tree/main/docs/release">release folder on GitHub</a>, or on the <a href="https://github.com/john-overton/T.O.R.E-Fighters/releases">GitHub releases page</a>.</p>
+          </noscript>
+        </div>
+        <nav id="pager" class="pager" aria-label="Older and newer releases" hidden></nav>
+        <p id="source-note" class="source-note" hidden></p>
+      </article>
+    </div>
+  </main>
+
+  <footer class="footer wrap">
+    <div class="footer-brand"><img src="images/homepage/squadron-patch.webp" width="44" height="44" loading="lazy" alt=""><div><strong>T.O.R.E - FIGHTERS</strong><span>TASTEFUL OPINIONATED REVERSE ENGINEERED</span></div></div>
+    <p>An independent, open-source rebuild of Jane’s Fighters Anthology. Not an official release or an endorsed product. Original game names and assets belong to their respective owners. Engine code: <a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/LICENSE">GPL-3.0</a>. <a href="index.html">Home</a> · <a href="#notes">Back to top ↑</a></p>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@18.0.14/lib/marked.umd.js" integrity="sha384-2vpGtuKqJvFlwJqYnf/wUMuzUfhUnYBt9oay0e2yaFcq0Dh6/aEbQ8YAOeKGzlYo" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js" integrity="sha384-a7SzOxErzJ3ZpQz0zJ32d67dSitNzPcbfybc/ykU9KJhMgZkwqfSxlhhdJRS+XGL" crossorigin="anonymous"></script>
+  <script>
+    // Release notes live in release/ as one Markdown file per version, listed
+    // newest first in release/releases.json (a static site cannot list a folder).
+    // Rules for the files: release/README.md.
+    (() => {
+      const REPO = 'https://github.com/john-overton/T.O.R.E-Fighters';
+      const FOLDER = new URL('release/', location.href);
+      const GITHUB_FOLDER = REPO + '/blob/main/docs/release/';
+      const FILE = /^v(\d+)\.(\d+)\.(\d+)\.md$/;
+
+      const list = document.getElementById('release-list');
+      const body = document.getElementById('release-body');
+      const notice = document.getElementById('notice');
+      const pager = document.getElementById('pager');
+      const sourceNote = document.getElementById('source-note');
+      let releases = [];
+
+      function element(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      }
+
+      // GitHub's heading anchors: lower case, punctuation dropped, spaces to hyphens.
+      function slug(text) {
+        return text.trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s/g, '-');
+      }
+
+      function parse(file, text) {
+        const version = file.slice(0, -3);
+        const first = text.split('\n', 1)[0];
+        const title = first.startsWith('# ') ? first.slice(2).trim() : version;
+        const name = title.startsWith(version + ': ') ? title.slice(version.length + 2) : title;
+        const date = (text.match(/\*\*Released:\*\*\s*(\d{4}-\d{2}-\d{2})/) || [])[1] || '';
+        return { file, version, name, date, text };
+      }
+
+      async function fetchText(url) {
+        const response = await fetch(url, { cache: 'no-cache' });
+        if (!response.ok) throw new Error(url + ': ' + response.status);
+        return response.text();
+      }
+
+      async function load() {
+        const index = JSON.parse(await fetchText(new URL('releases.json', FOLDER)));
+        const files = Array.isArray(index.releases) ? index.releases.filter(file => FILE.test(file)) : [];
+        const texts = await Promise.allSettled(files.map(file => fetchText(new URL(file, FOLDER))));
+        return files.map((file, i) => texts[i].status === 'fulfilled' ? parse(file, texts[i].value) : null)
+          .filter(Boolean);
+      }
+
+      function formatDate(date) {
+        if (!date) return '';
+        return new Date(date + 'T00:00:00Z').toLocaleDateString('en-US', {
+          year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC'
+        });
+      }
+
+      function drawList(current) {
+        list.textContent = '';
+        for (const release of releases) {
+          const item = element('li');
+          const link = element('a');
+          link.href = '#' + release.version;
+          if (release === current) link.setAttribute('aria-current', 'true');
+          const top = element('span', 'release-version', release.version);
+          top.append(element('span', '', formatDate(release.date)));
+          link.append(top, element('span', 'release-name', release.name));
+          item.append(link);
+          list.append(item);
+        }
+      }
+
+      // Point links at what they mean here: other releases open on this page,
+      // repository files open on GitHub, in-page anchors stay in this release.
+      function fixLinks(root, release) {
+        for (const link of root.querySelectorAll('a[href]')) {
+          const href = link.getAttribute('href');
+          if (href.startsWith('#')) {
+            link.href = '#' + release.version + '/' + href.slice(1);
+            continue;
+          }
+          let url;
+          try { url = new URL(href, GITHUB_FOLDER); } catch { link.removeAttribute('href'); continue; }
+          const other = url.href.startsWith(GITHUB_FOLDER) && url.pathname.split('/').pop().match(FILE);
+          if (other) {
+            const version = other[0].slice(0, -3);
+            link.href = '#' + version + (url.hash ? '/' + url.hash.slice(1) : '');
+          } else {
+            link.href = url.href;
+          }
+        }
+        for (const image of root.querySelectorAll('img[src]')) {
+          image.src = new URL(image.getAttribute('src'), FOLDER).href;
+          image.loading = 'lazy';
+        }
+      }
+
+      function decorate(root, release) {
+        const title = root.querySelector('h1');
+        if (title) {
+          title.textContent = release.name;
+          title.before(element('p', 'eyebrow release-version-tag', release.version));
+          const meta = title.nextElementSibling;
+          if (meta && meta.tagName === 'P' && meta.firstElementChild?.tagName === 'STRONG' &&
+              meta.firstElementChild.textContent.trim() === 'Released:') {
+            meta.className = 'release-meta';
+            // Split "A · B · C" into one span per field so they wrap cleanly.
+            const fields = [element('span')];
+            for (const node of [...meta.childNodes]) {
+              if (node.nodeType === Node.TEXT_NODE && node.textContent.includes('·')) {
+                const parts = node.textContent.split('·');
+                parts.forEach((part, i) => {
+                  if (i > 0) fields.push(element('span'));
+                  if (part.trim()) fields[fields.length - 1].append(part.trim());
+                });
+              } else {
+                fields[fields.length - 1].append(node);
+              }
+            }
+            meta.textContent = '';
+            meta.append(...fields.filter(field => field.childNodes.length));
+          }
+        }
+        const used = new Set();
+        for (const heading of root.querySelectorAll('h2, h3')) {
+          let id = slug(heading.textContent);
+          for (let n = 1; used.has(id); n++) id = slug(heading.textContent) + '-' + n;
+          used.add(id);
+          heading.id = release.version + '/' + id;
+          const anchor = element('a', 'anchor', '#');
+          anchor.href = '#' + heading.id;
+          anchor.setAttribute('aria-label', 'Link to ' + heading.textContent);
+          heading.append(anchor);
+        }
+        for (const table of root.querySelectorAll('table')) {
+          const scroll = element('div', 'table-scroll');
+          table.before(scroll);
+          scroll.append(table);
+        }
+      }
+
+      function render(release) {
+        body.textContent = '';
+        if (window.marked && window.DOMPurify) {
+          const html = window.marked.parse(release.text, { gfm: true });
+          body.append(DOMPurify.sanitize(html, { RETURN_DOM_FRAGMENT: true }));
+          fixLinks(body, release);
+          decorate(body, release);
+        } else {
+          // The renderer did not load (offline or blocked): show the Markdown as text.
+          body.append(element('pre', 'raw', release.text));
+        }
+
+        const at = releases.indexOf(release);
+        pager.textContent = '';
+        const newer = releases[at - 1];
+        const older = releases[at + 1];
+        for (const [other, label, className] of [[older, 'Older release', 'prev'], [newer, 'Newer release', 'next']]) {
+          if (!other) continue;
+          const link = element('a', className);
+          link.href = '#' + other.version;
+          link.append(element('span', '', label), element('strong', '', other.version + ': ' + other.name));
+          pager.append(link);
+        }
+        pager.hidden = !pager.childElementCount;
+
+        sourceNote.textContent = '';
+        const source = element('a', '', 'Read this file on GitHub');
+        source.href = GITHUB_FOLDER + release.file;
+        const tag = element('a', '', 'download ' + release.version);
+        tag.href = REPO + '/releases/tag/' + release.version;
+        sourceNote.append(source, ' · ', tag);
+        sourceNote.hidden = false;
+
+        document.title = release.version + ': ' + release.name + ' | T.O.R.E - Fighters release notes';
+        drawList(release);
+      }
+
+      let shown = null;
+      function route() {
+        const [version, section] = decodeURIComponent(location.hash.slice(1)).split('/');
+        let release = releases.find(item => item.version === version);
+        notice.hidden = true;
+        if (!release) {
+          release = releases[0];
+          if (/^v\d+\.\d+\.\d+$/.test(version)) {
+            notice.textContent = '';
+            const link = element('a', '', 'GitHub release page');
+            link.href = REPO + '/releases/tag/' + version;
+            notice.append('Notes for ' + version + ' are not on this page yet. Showing the latest notes; see the ', link, ' for ' + version + '.');
+            notice.hidden = false;
+          }
+        }
+        if (release !== shown) {
+          render(release);
+          shown = release;
+        }
+        const target = section && document.getElementById(release.version + '/' + section);
+        if (target) {
+          target.scrollIntoView();
+        } else if (location.hash) {
+          const notes = document.getElementById('notes');
+          if (notes.getBoundingClientRect().top < 0) notes.scrollIntoView();
+        }
+      }
+
+      load().then(found => {
+        releases = found;
+        if (!releases.length) throw new Error('No release notes found');
+        window.addEventListener('hashchange', route);
+        route();
+      }).catch(() => {
+        list.textContent = '';
+        list.append(element('li', 'list-note', 'Release list unavailable.'));
+        body.textContent = '';
+        const message = element('p', 'notes-status');
+        const folder = element('a', '', 'release folder on GitHub');
+        folder.href = REPO + '/tree/main/docs/release';
+        message.append('The release notes could not be loaded here. Read them in the ', folder,
+          '. If you opened this file from disk, serve the docs folder instead, as described in docs/WEBSITE.md.');
+        body.append(message);
+      });
+    })();
+  </script>
+</body>
+</html>

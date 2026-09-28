@@ -1,6 +1,16 @@
+import json
+from pathlib import Path
+import tempfile
 import unittest
 
-from check_docs import HEADER, HEADER_MARKER, HEADER_PREFIX, apply_header, covered
+from check_docs import (
+    HEADER,
+    HEADER_MARKER,
+    HEADER_PREFIX,
+    apply_header,
+    covered,
+    release_problems,
+)
 
 
 TITLE = "# Example document\n"
@@ -72,6 +82,65 @@ class DocumentHeaderTests(unittest.TestCase):
         self.assertFalse(covered("docs/doc-realignment-2026-09-15.md"))
         self.assertFalse(covered("docs/images/notes.txt"))
         self.assertFalse(covered("USNF-ATF/Docs/progress.md"))
+        self.assertFalse(covered("docs/release/v0.1.0.md"))
+
+
+class ReleaseNotesTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.directory = Path(self.temporary.name)
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def write(self, listed, files):
+        (self.directory / "releases.json").write_text(json.dumps({"releases": listed}))
+        for name, text in files.items():
+            (self.directory / name).write_text(text, encoding="utf-8")
+
+    def test_listed_releases_newest_first_pass(self):
+        self.write(
+            ["v0.10.0.md", "v0.2.0.md"],
+            {
+                "v0.10.0.md": "# v0.10.0: Later\n",
+                "v0.2.0.md": "# v0.2.0: Earlier\n",
+                "README.md": "# Release notes\n",
+            },
+        )
+        self.assertEqual(release_problems(self.directory), [])
+
+    def test_unlisted_and_missing_files_are_reported(self):
+        self.write(["v0.2.0.md"], {"v0.1.0.md": "# v0.1.0: First\n"})
+        problems = "\n".join(release_problems(self.directory))
+        self.assertIn("v0.1.0.md: not listed", problems)
+        self.assertIn("lists v0.2.0.md, which does not exist", problems)
+
+    def test_oldest_first_order_is_reported(self):
+        self.write(
+            ["v0.1.0.md", "v0.1.1.md"],
+            {"v0.1.0.md": "# v0.1.0: A\n", "v0.1.1.md": "# v0.1.1: B\n"},
+        )
+        self.assertIn("newest first", "\n".join(release_problems(self.directory)))
+
+    def test_title_must_name_the_file_version(self):
+        self.write(["v0.1.1.md"], {"v0.1.1.md": "# v0.1.0: Wrong version\n"})
+        self.assertIn("first line must be", "\n".join(release_problems(self.directory)))
+
+    def test_em_and_en_dashes_are_reported_with_line_numbers(self):
+        self.write(
+            ["v0.1.0.md"],
+            {"v0.1.0.md": "# v0.1.0: First\n\nFast \u2014 and 1\u20135.\n"},
+        )
+        problems = release_problems(self.directory)
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(all(":3:" in problem for problem in problems))
+
+    def test_unreadable_index_is_reported(self):
+        (self.directory / "releases.json").write_text("{not json")
+        self.assertIn("unreadable", release_problems(self.directory)[0])
+
+    def test_missing_directory_has_no_problems(self):
+        self.assertEqual(release_problems(self.directory / "absent"), [])
 
 
 if __name__ == "__main__":
