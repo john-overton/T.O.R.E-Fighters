@@ -214,11 +214,76 @@ pub fn closure(position: Vector, velocity: Vector, target: Vector, target_veloci
     dot(sub(velocity, target_velocity), unit(sub(target, position)))
 }
 
+/// Record flag: the weapon sags under gravity while its motor is unlit.
+pub const SAG_FLAG: u32 = 0x4;
+/// Record flag: the release ejects the weapon downward.
+pub const EJECT_FLAG: u32 = 0x8;
+/// Record flag: the weapon flies the record's cruise altitude profile.
+pub const CRUISE_FLAG: u32 = 0x20;
+/// Sag acceleration and cap, and the ejection kick, feet per second.
+pub const SAG_FPS2: f64 = 32.;
+pub const SAG_MAX_FPS: f64 = 80.;
+pub const EJECT_FPS: f64 = 32.;
+/// Record cruise distances and altitudes count 256-foot steps.
+pub const CRUISE_UNIT_FT: f64 = 256.;
+/// Fitted: an air-to-air lob climbs toward its cruise altitude over this
+/// much horizontal distance, 2 nmi, instead of pointing straight at it.
+pub const LOB_LOOKAHEAD_FT: f64 = 2. * NMI;
+
+/// The record's cruise altitude profile: two distance stages, each holding
+/// an altitude above the target, then direct homing. docs/spec/missiles.md#drop-launch-sag-and-cruise-profile
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cruise {
+    /// Each stage's horizontal distance from the target and altitude above
+    /// it, feet, outer stage first. Inside the inner distance it homes direct.
+    pub stages: [(f64, f64); 2],
+    /// Air-to-air lob: climb to the cruise altitude rather than aim at it.
+    pub lob: bool,
+}
+impl Cruise {
+    pub fn for_weapon(w: &Weapon) -> Option<Self> {
+        let [d1, a1, d2, a2] = w.movement.cruise.map(|v| f64::from(v) * CRUISE_UNIT_FT);
+        (w.flags & CRUISE_FLAG != 0 && d1.max(d2) > 0.).then(|| Self {
+            stages: [(d1, a1), (d2, a2)],
+            lob: Profile::for_weapon(w).is_some_and(|p| p.role == TargetRole::Aircraft),
+        })
+    }
+    /// Where a missile at `position` steers for `intercept`.
+    pub fn aim(self, position: Vector, intercept: Vector) -> Vector {
+        let horizontal = [intercept[0] - position[0], 0., intercept[2] - position[2]];
+        let distance = length(horizontal);
+        let [(outer, outer_above), (inner, inner_above)] = self.stages;
+        if distance < inner {
+            return intercept;
+        }
+        let above = if distance < outer {
+            inner_above
+        } else {
+            outer_above
+        };
+        let altitude = intercept[1] + above;
+        if !self.lob || distance < 1. {
+            return [intercept[0], altitude, intercept[2]];
+        }
+        let reach = distance.min(LOB_LOOKAHEAD_FT) / distance;
+        [
+            position[0] + horizontal[0] * reach,
+            altitude,
+            position[2] + horizontal[2] * reach,
+        ]
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Motion {
     pub velocity: Vector,
     pub gain: f64,
     pub budget: f64,
+    /// Downward sag while the motor is unlit, feet per second, applied to
+    /// position apart from the flight path. Lighting the motor clears it.
+    pub sink: f64,
+    pub sags: bool,
+    pub cruise: Option<Cruise>,
 }
 impl Motion {
     pub fn new(m: &Movement, velocity: Vector, altitude: f64) -> Self {
@@ -232,7 +297,28 @@ impl Motion {
             velocity,
             gain: 0.,
             budget: (f64::from(maximum) - f64::from(m.initial_speed)).max(0.),
+            sink: 0.,
+            sags: false,
+            cruise: None,
         }
+    }
+    /// A release of `w`: the record's ejection, sag and cruise profile.
+    pub fn launch(w: &Weapon, velocity: Vector, altitude: f64) -> Self {
+        Self {
+            sink: if w.flags & EJECT_FLAG != 0 {
+                EJECT_FPS
+            } else {
+                0.
+            },
+            sags: w.flags & SAG_FLAG != 0,
+            cruise: Cruise::for_weapon(w),
+            ..Self::new(&w.movement, velocity, altitude)
+        }
+    }
+    /// Where the missile steers for `intercept`.
+    pub fn aim(&self, position: Vector, intercept: Vector) -> Vector {
+        self.cruise
+            .map_or(intercept, |c| c.aim(position, intercept))
     }
     /// Steering rotates inherited velocity and applies fitted maneuver loss. No change of rail direction
     /// means full inherited climb/side-slip survives the unsteered boost.
@@ -275,7 +361,14 @@ impl Motion {
             }
             EnginePhase::BeforeIgnition => {}
         }
-        self.velocity.map(|v| v * DT)
+        let mut delta = self.velocity.map(|v| v * DT);
+        if phase(m, age) == EnginePhase::Powered {
+            self.sink = 0.;
+        } else if self.sags {
+            self.sink = (self.sink + SAG_FPS2 * DT).min(SAG_MAX_FPS);
+        }
+        delta[1] -= self.sink * DT;
+        delta
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -351,10 +444,11 @@ pub fn commanded_heading(forward: Vector, velocity: Vector, desired: Vector) -> 
 /// Same exact angular limit in prediction and live guidance.
 pub fn steer(m: &Movement, age: u64, forward: Vector, desired: Vector) -> Vector {
     let angle = dot(forward, desired).clamp(-1., 1.).acos();
-    let rate = if phase(m, age) == EnginePhase::Powered {
-        m.powered_turn_rate
-    } else {
-        m.unpowered_turn_rate
+    // Fins are locked until the motor lights.
+    let rate = match phase(m, age) {
+        EnginePhase::BeforeIgnition => 0,
+        EnginePhase::Powered => m.powered_turn_rate,
+        EnginePhase::Coast => m.unpowered_turn_rate,
     };
     let step = (f64::from(rate.max(0)) * std::f64::consts::TAU / 65520. * DT).min(angle);
     if angle < 1e-12 || step <= 0. {
@@ -397,7 +491,11 @@ pub fn intercept(
             aim = lead(position, length(motion.velocity), target, velocity).point;
         }
         let previous = sub(target, position);
-        let desired = commanded_heading(forward, motion.velocity, unit(sub(aim, position)));
+        let desired = commanded_heading(
+            forward,
+            motion.velocity,
+            unit(sub(motion.aim(position, aim), position)),
+        );
         let next = steer(m, tick, forward, desired);
         motion.turn(forward, next);
         forward = next;
@@ -440,7 +538,7 @@ pub fn maximum_range(
     lifetime: u64,
 ) -> f64 {
     let minimum = f64::from(w.seeker.zones[1].minimum_range.max(0));
-    let motion = Motion::new(&w.movement, velocity, position[1]);
+    let motion = Motion::launch(w, velocity, position[1]);
     let seconds = lifetime.min(u64::from(w.movement.remove_t) * 30) as f64 * DT;
     // A conservative search ceiling: both objects' maximum possible travel.
     // It is only a bound for the solve, never the displayed range itself.
@@ -458,7 +556,7 @@ pub fn maximum_range(
     let reaches = |range| {
         intercept(
             &w.movement,
-            Motion::new(&w.movement, velocity, position[1]),
+            Motion::launch(w, velocity, position[1]),
             position,
             forward,
             std::array::from_fn(|i| position[i] + bearing[i] * range),
@@ -526,7 +624,7 @@ pub fn firing_band(
         let solution = if geometry(&launch_geometry(w), position, basis, target, None) {
             intercept(
                 &w.movement,
-                Motion::new(&w.movement, velocity, position[1]),
+                Motion::launch(w, velocity, position[1]),
                 position,
                 basis.forward,
                 target,
@@ -609,6 +707,150 @@ mod tests {
         assert_eq!(phase(&m, 360), EnginePhase::Coast);
         motion.step(&m, 360, [0., 0., 1.]);
         assert!(length(motion.velocity) < length([40., 60., 1600.]));
+    }
+    /// The AIM54C.JT motor and turn numbers, with the retail release flags.
+    fn phoenix() -> (Movement, Motion) {
+        let m = Movement {
+            maximum_speed: 5866,
+            acceleration: 733,
+            deceleration: 146,
+            final_speed: 1026,
+            ignite_t: 8,
+            fuel_t: 564,
+            remove_t: 1132,
+            powered_turn_rate: 10920,
+            unpowered_turn_rate: 8190,
+            performance_at_0: 75,
+            cruise: [78, 20, 78, 20],
+            ..movement()
+        };
+        let motion = Motion {
+            sink: EJECT_FPS,
+            sags: true,
+            cruise: Some(Cruise {
+                stages: [(78. * 256., 20. * 256.); 2],
+                lob: true,
+            }),
+            ..Motion::new(&m, [0., 0., 900.], 20000.)
+        };
+        (m, motion)
+    }
+    #[test]
+    fn drop_falls_unsteered_until_the_motor_lights() {
+        let (m, mut motion) = phoenix();
+        let mut position = [0., 20000., 0.];
+        let forward = [0., 0., 1.];
+        // A target up and to the side cannot turn the unlit missile.
+        assert_eq!(steer(&m, 0, forward, unit([1., 1., 1.])), forward);
+        for age in 0..240 {
+            let delta = motion.step(&m, age, forward);
+            for i in 0..3 {
+                position[i] += delta[i];
+            }
+        }
+        // 32 ft/s kick, 32 ft/s² sag capped at 80 ft/s: about 124 ft in 2 s.
+        assert!((20000. - position[1] - 124.).abs() < 1., "{}", position[1]);
+        assert_eq!(motion.sink, SAG_MAX_FPS);
+        assert_eq!(motion.velocity, [0., 0., 900.]);
+        // Lighting the motor ends the sag at once and frees the fins.
+        let delta = motion.step(&m, 240, forward);
+        assert_eq!(motion.sink, 0.);
+        assert!(delta[1].abs() < 1e-12);
+        assert_ne!(steer(&m, 240, forward, unit([1., 1., 1.])), forward);
+        // A rail missile's kick is gone on its first powered step.
+        let mut rail = Motion {
+            sink: EJECT_FPS,
+            sags: true,
+            ..Motion::new(&movement(), [0., 0., 900.], 0.)
+        };
+        rail.step(
+            &Movement {
+                ignite_t: 0,
+                ..movement()
+            },
+            0,
+            forward,
+        );
+        assert_eq!(rail.sink, 0.);
+        // Burnout brings the sag back.
+        let mut coast = Motion {
+            sags: true,
+            ..Motion::new(&m, [0., 0., 900.], 0.)
+        };
+        coast.step(&m, 564 * 30, forward);
+        assert!((coast.sink - SAG_FPS2 * DT).abs() < 1e-12);
+    }
+    #[test]
+    fn cruise_stages_hold_altitude_above_the_target_then_home_direct() {
+        let harpoon = Cruise {
+            stages: [(78. * 256., 4. * 256.), (20. * 256., 12. * 256.)],
+            lob: false,
+        };
+        let target = [0., 0., 0.];
+        let aim = |z: f64| harpoon.aim([0., 500., z], target);
+        assert_eq!(aim(30000.), [0., 1024., 0.]);
+        assert_eq!(aim(10000.), [0., 3072., 0.]);
+        assert_eq!(aim(5000.), target);
+        // Distance is horizontal only.
+        assert_eq!(harpoon.aim([0., 90000., 19968.], target), [0., 1024., 0.]);
+        // A lob climbs over the look-ahead, not along the whole distance.
+        let lob = Cruise {
+            lob: true,
+            ..harpoon
+        };
+        let point = lob.aim([0., 0., 60760.], target);
+        assert!((point[2] - (60760. - LOB_LOOKAHEAD_FT)).abs() < 1e-9);
+        assert_eq!(point[1], 1024.);
+        assert_eq!(lob.aim([0., 0., 5000.], target), target);
+    }
+    #[test]
+    fn phoenix_lob_climbs_cruises_and_dives_onto_the_target() {
+        let (m, mut motion) = phoenix();
+        let target = [0., 20000., 30. * NMI];
+        let mut position = [0., 20000., 0.];
+        let mut forward = [0., 0., 1.];
+        let mut highest: f64 = 0.;
+        let mut lowest_drop: f64 = position[1];
+        for age in 0..u64::from(m.remove_t) * 30 {
+            let desired = commanded_heading(
+                forward,
+                motion.velocity,
+                unit(sub(motion.aim(position, target), position)),
+            );
+            let next = steer(&m, age, forward, desired);
+            motion.turn(forward, next);
+            forward = next;
+            let delta = motion.step(&m, age, forward);
+            for i in 0..3 {
+                position[i] += delta[i];
+            }
+            if age < 240 {
+                lowest_drop = lowest_drop.min(position[1]);
+            }
+            highest = highest.max(position[1]);
+            if length(sub(target, position)) < 100. {
+                break;
+            }
+        }
+        assert!(lowest_drop < 19880.);
+        // It levels near 5,120 ft above the target and still arrives.
+        assert!((24900. ..25400.).contains(&highest), "{highest}");
+        assert!(length(sub(target, position)) < 100.);
+        // The climbing prediction reaches the same target.
+        let (m, motion) = phoenix();
+        assert!(
+            intercept(
+                &m,
+                motion,
+                [0., 20000., 0.],
+                [0., 0., 1.],
+                target,
+                [0.; 3],
+                0,
+                1132 * 30
+            )
+            .is_some()
+        );
     }
     #[test]
     fn prediction_leads_crossing_and_bounds_impossible_shots() {

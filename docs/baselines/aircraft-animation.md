@@ -25,8 +25,13 @@ and continuous brakes. MiG-21 and MiG-23 brakes split fitted strips from their
 own source skin. MiG-29 and Su-25 upper/lower brakes use separate closing
 angles about their forward edges. F-14's existing brake branch now hinges
 continuously too. Existing applicable carrier hooks remain supported.
-F-22 main bays support manual O (Shift+O before 2026-09-26), recorded/rebound input, and the documented
-manual-combat request. Its exterior glazing retains the amber grade at 75% opacity, with a clear
+F-22 main bays support manual O (Shift+O before 2026-09-26), recorded/rebound input, and, since
+2026-09-28, open only for a release: the trigger opens them, the weapon leaves when they are open and
+they close 1 second later. `bay_safe_empty_and_failed_gates_survive_uncued_mode` covers the press,
+the delayed release, the 1-second hold and the 3-second lapse. The 2026-09-28 bay cleanup
+(four doors over a lined recess) is covered by `bay_doors_open_downward_on_their_edge_hinges_and_preserve_skin_area`
+and `bay_walls_line_a_closed_recess_and_the_interior_becomes_its_ceiling`; local GPU captures of
+F-22A, F-22N and F/A-XX at half and full open replaced the doubled doors and flat panel John reported. Its exterior glazing retains the amber grade at 75% opacity, with a clear
 cockpit view. The nearest glazing surface blends once over the opaque scene.
 
 Validation on Linux, NVIDIA RTX 4070, Vulkan:
@@ -56,7 +61,7 @@ shared upper/lower rotation with independent clamshell angles.
 ## Limits
 
 Hinges, motion mixing and continuous schedules are fitted. Original linkage,
-F-22 side bays, launch sequencing, damage/LOD variants and retail comparison
+F-22 side bays, original launch sequencing, damage/LOD variants and retail comparison
 are not established. No flight-force, weapon launch eligibility or autonomous
 behavior changes were made. Windows/macOS display execution and live physical
 controller operation were not run in this pass.

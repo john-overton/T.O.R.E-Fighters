@@ -1921,7 +1921,7 @@ impl AiWings {
                 owner: event.actor,
                 weapon: Some(weapon.clone()),
                 guidance: guidance.clone(),
-                motion: profile.map(|_| Motion::new(&weapon.movement, launch_velocity, origin[1])),
+                motion: profile.map(|_| Motion::launch(weapon, launch_velocity, origin[1])),
                 guidance_ticks: profile.map(|p| p.guidance_ticks),
                 age: 0,
                 incoming,

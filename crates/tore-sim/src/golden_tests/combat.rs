@@ -754,7 +754,7 @@ fn owned_missile(
             },
             origin,
         )),
-        motion: Some(Motion::new(&weapon.movement, velocity, origin[1])),
+        motion: Some(Motion::launch(weapon, velocity, origin[1])),
         guidance_ticks: Some(profile.guidance_ticks),
         age: 0,
         incoming: target == PLAYER_OWNER,

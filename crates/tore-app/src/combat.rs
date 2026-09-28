@@ -946,16 +946,8 @@ impl Combat {
         self.contrails.step([]);
         self.contrails.contrails(outlets);
         s.set_payload((self.state.payload_lbs() - s.systems.used_external_lbs()).max(0.))?;
-        s.bay_auto_open = s.bay_available()
-            && self.state.armed
-            && (self.state.designated().is_some()
-                || self.state.launch_mode == tore_sim::combat::missiles::LaunchMode::Boresight)
-            && self.state.rounds(self.state.selected) > 0
-            && self.state.configuration().stations[self.state.selected]
-                .weapon
-                .seeker
-                .signature
-                != 0;
+        // The bays stay shut until a release asks for them.
+        s.bay_auto_open = s.bay_available() && self.state.bay_demand();
         if self.state.radar_failed {
             s.radar = false;
         }

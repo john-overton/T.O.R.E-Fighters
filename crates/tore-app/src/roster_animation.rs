@@ -415,15 +415,34 @@ pub fn brake(id: Id, f: &mut Face, fraction: f64) {
         _ => {}
     }
 }
+/// F-22 main bays either side of the keel, as the source's open-bay walls
+/// place them: each bay's edges carry the hinges of its two doors.
+const BAYS: [(f32, f32); 2] = [(-8., -2.), (2., 7.)];
+const BAY_AFT: f32 = 7.;
+const BAY_FORE: f32 = 51.;
+const BELLY: f32 = -9.;
+/// The source's open-bay walls hang this far below the belly; the fitted bay
+/// recess is as deep, and the doors close over it.
+const BAY_DEPTH: f32 = 3.;
+
 fn bay_doors(f: &Face, fraction: f64) -> Vec<Face> {
     let mut remaining = vec![f.clone()];
     let mut result = Vec::new();
-    for (left, right, hinge, angle) in [(-8., -2., -8., 1.), (2., 7., 7., -1.)] {
+    // Two doors per bay, each half its width, hinged at the bay's edges.
+    let doors = BAYS.into_iter().flat_map(|(left, right)| {
+        let middle = (left + right) / 2.;
+        [(left, middle, left, 1.), (middle, right, right, -1.)]
+    });
+    for (left, right, hinge, angle) in doors {
         let mut next = Vec::new();
         for candidate in remaining {
             let mut inside = vec![candidate];
-            for (axis, bound, sign) in [(0, left, -1.), (0, right, 1.), (1, 7., -1.), (1, 51., 1.)]
-            {
+            for (axis, bound, sign) in [
+                (0, left, -1.),
+                (0, right, 1.),
+                (1, BAY_AFT, -1.),
+                (1, BAY_FORE, 1.),
+            ] {
                 let mut clipped = Vec::new();
                 for polygon in inside {
                     for part in split_surface(&polygon, [0.; 3], [1., 0., 0.], 0., |p| {
@@ -447,7 +466,7 @@ fn bay_doors(f: &Face, fraction: f64) -> Vec<Face> {
             for mut door in inside {
                 turn(
                     &mut door,
-                    [hinge, 7., -9.],
+                    [hinge, BAY_AFT, BELLY],
                     [0., 1., 0.],
                     angle * std::f64::consts::FRAC_PI_2 * fraction,
                 );
@@ -458,6 +477,101 @@ fn bay_doors(f: &Face, fraction: f64) -> Vec<Face> {
     }
     result.extend(remaining);
     result
+}
+
+/// The source's open-bay pose, recast as the lining of a recess behind the
+/// animated doors (fitted, agent choice 2026-09-28). The source hangs a
+/// two-sided wall at each door hinge and, on F-22A, a textured bay interior
+/// just below the belly; drawn as they are, they read as a second set of open
+/// doors over a flat panel. Each wall's bay-facing side is raised into the
+/// fuselage as a side of the recess and closes its half of the recess ends; the
+/// interior becomes the recess ceiling. F-22N has no interior, and its texture
+/// repaints that art, so its walls also roof the recess in their own grey.
+pub fn bay_lining(id: Id, f: &Face) -> Vec<Face> {
+    let count = f.positions.len() as f32;
+    let x = f.positions.iter().map(|p| p[0]).sum::<f32>() / count;
+    let Some((left, right)) = BAYS
+        .into_iter()
+        .find(|(left, right)| (left - 0.5..=right + 0.5).contains(&x))
+    else {
+        return Vec::new();
+    };
+    let top = BELLY + BAY_DEPTH;
+    // Normal storage is right/up/forward.
+    let Some(normal) = f.normal else {
+        return Vec::new();
+    };
+    if normal[1].abs() > normal[0].abs() {
+        let mut ceiling = f.clone();
+        for p in &mut ceiling.positions {
+            p[0] = if (p[0] - left).abs() < (p[0] - right).abs() {
+                left
+            } else {
+                right
+            };
+            p[1] = if p[1] < (BAY_AFT + BAY_FORE) / 2. {
+                BAY_AFT
+            } else {
+                BAY_FORE
+            };
+            p[2] = top;
+        }
+        return vec![ceiling];
+    }
+    let middle = (left + right) / 2.;
+    // Only the side facing into the bay lines the recess.
+    if normal[0].signum() != (middle - x).signum() {
+        return Vec::new();
+    }
+    let panel = |positions: [[f32; 3]; 4], normal: [f32; 3]| {
+        let mut panel = f.clone();
+        panel.colors = vec![f.colors[0]; 4];
+        panel.uv = vec![f.uv.first().copied().unwrap_or_default(); 4];
+        panel.positions = positions.to_vec();
+        panel.normal = Some(normal);
+        panel
+    };
+    let mut lining = vec![
+        panel(
+            [
+                [x, BAY_AFT, BELLY],
+                [x, BAY_FORE, BELLY],
+                [x, BAY_FORE, top],
+                [x, BAY_AFT, top],
+            ],
+            normal,
+        ),
+        panel(
+            [
+                [x, BAY_AFT, BELLY],
+                [x, BAY_AFT, top],
+                [middle, BAY_AFT, top],
+                [middle, BAY_AFT, BELLY],
+            ],
+            [0., 0., 32765.],
+        ),
+        panel(
+            [
+                [x, BAY_FORE, BELLY],
+                [middle, BAY_FORE, BELLY],
+                [middle, BAY_FORE, top],
+                [x, BAY_FORE, top],
+            ],
+            [0., 0., -32765.],
+        ),
+    ];
+    if id == Id::F22n {
+        lining.push(panel(
+            [
+                [x, BAY_AFT, top],
+                [x, BAY_FORE, top],
+                [middle, BAY_FORE, top],
+                [middle, BAY_AFT, top],
+            ],
+            [0., -32765., 0.],
+        ));
+    }
+    lining
 }
 
 fn band(f: &Face, rear: f32, front: f32, pivot: [f32; 3], axis: [f32; 3], angle: f64) -> Vec<Face> {
@@ -579,7 +693,7 @@ mod tests {
         }
     }
     #[test]
-    fn bay_doors_open_downward_keep_outer_hinges_and_preserve_skin_area() {
+    fn bay_doors_open_downward_on_their_edge_hinges_and_preserve_skin_area() {
         let source = face(
             0x35d7,
             vec![
@@ -614,7 +728,7 @@ mod tests {
                     .flat_map(|f| &f.positions)
                     .all(|p| p[2] <= -9. + 1e-5)
             );
-            for hinge in [-8., 7.] {
+            for hinge in [-8., -2., 2., 7.] {
                 assert!(
                     pieces
                         .iter()
@@ -632,6 +746,53 @@ mod tests {
                 );
             }
         }
+    }
+    #[test]
+    fn bay_walls_line_a_closed_recess_and_the_interior_becomes_its_ceiling() {
+        let wall = |x: f32, normal: f32| Face {
+            normal: Some([normal, 0., 0.]),
+            ..face(
+                0x4bcb,
+                vec![[x, 51., -9.], [x, 51., -12.], [x, 7., -12.], [x, 7., -9.]],
+            )
+        };
+        // Facing the bay: side wall, both end-wall halves, and the F-22N roof.
+        let inward = bay_lining(Id::F22, &wall(-8., 32765.));
+        assert_eq!(inward.len(), 3);
+        assert_eq!(bay_lining(Id::F22n, &wall(-8., 32765.)).len(), 4);
+        assert!(
+            inward
+                .iter()
+                .flat_map(|f| &f.positions)
+                .all(|p| (-9. ..=-6.).contains(&p[2]) && (-8. ..=-5.).contains(&p[0]))
+        );
+        // The side facing away would sit inside the fuselage.
+        assert!(bay_lining(Id::F22, &wall(-8., -32765.)).is_empty());
+        assert!(bay_lining(Id::F22, &wall(7., 32765.)).is_empty());
+        assert_eq!(bay_lining(Id::F22, &wall(7., -32765.)).len(), 3);
+        let interior = Face {
+            normal: Some([0., -32765., 0.]),
+            ..face(
+                0x49da,
+                vec![
+                    [-3., 8., -10.],
+                    [-3., 52., -10.],
+                    [-8., 52., -10.],
+                    [-8., 8., -10.],
+                ],
+            )
+        };
+        let ceiling = bay_lining(Id::F22, &interior);
+        assert_eq!(
+            ceiling[0].positions,
+            vec![
+                [-2., 7., -6.],
+                [-2., 51., -6.],
+                [-8., 51., -6.],
+                [-8., 7., -6.]
+            ]
+        );
+        assert_eq!(ceiling[0].uv, interior.uv);
     }
     #[test]
     fn rudder_keeps_forward_skin_fixed_and_sweep_uses_documented_schedule() {

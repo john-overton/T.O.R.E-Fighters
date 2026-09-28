@@ -91,19 +91,36 @@ smooth rendering; that difference from the original's culling is unchanged.
 
 ## F-22 main weapon bays
 
-Add a manually controlled main-bay presentation with 1-second travel and
-90-degree outward-opening doors. O, FA's bomb-bay key, toggles the bays, and the input action
-`bay` can be rebound and recorded. Aircraft without the reviewed F-22 bay rig
-ignore the command. On F-22, the existing manual weapon service also requests
-open bays while an armed, loaded guided weapon has a designated target. Clearing
-the designation, disarming or exhausting the selected station releases that
-automatic request; a manual open request remains independent. No launch timing,
-weapon eligibility, mass, drag or damage rule changes.
+Add a main-bay presentation with 1-second travel and 90-degree
+outward-opening doors. O, FA's bomb-bay key, toggles the bays open and shut, and
+the input action `bay` can be rebound and recorded. Aircraft without the
+reviewed F-22 bay rig ignore the command.
+
+The bays stay shut until a weapon is released (**opinionated, requested by John
+on 2026-09-28**). Pressing the trigger for a bay weapon whose shot is otherwise
+ready opens the doors; the weapon leaves as soon as they are open, about one
+second later, and the doors close 1 second after the release. One press
+commits the shot, so the trigger need not be held. While the doors open the
+HUD shows `OPENING BAY`. The press lapses, and the doors close, if the shot
+stops being ready (disarm, a new selection, a lost target) or the doors are not
+open within 3 seconds. Doors the pilot opened with O stay open, and a release
+through them is immediate. The gun is not behind the doors. The 1-second hold
+and 3-second lapse are **fitted**. Designating a target no longer opens the
+bays. No weapon eligibility, mass, drag or damage rule changes.
 
 Clip the imported belly panels over the two reviewed source bay rectangles,
-retaining surrounding fuselage and the original material on moving doors. The
-source switched belly details are visible only while open. This is a fitted
-main-bay presentation, not recovered original door sequencing or side-bay parity.
+retaining surrounding fuselage and the original material on moving doors. Each
+bay has two doors, each half its width, hinged at the bay's outboard and inboard
+edges and swinging 90 degrees down; fully open they hang where the source's
+open-bay walls hang. Behind them is a recess 3 source units deep (**fitted,
+agent choice 2026-09-28**). The source's open-bay pose, which the shape switches
+on while the bays are open, lines it: each wall's bay-facing side becomes a
+side of the recess and closes its half of the recess ends, and the F-22A's
+textured bay interior becomes the recess ceiling. F-22N and F/A-XX have no
+interior art (their texture repaints it), so their walls also roof the recess
+in the walls' grey. Drawn unmodified, that pose read as a second, instant set of
+open doors over a flat panel below the belly. This is a fitted main-bay
+presentation, not recovered original door sequencing or side-bay parity.
 `--flight-bay 0..1` provides an explicit inspection pose, rejected on other planes.
 
 ## F-22 canopy

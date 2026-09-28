@@ -31,6 +31,10 @@ pub const MAX_PROJECTILES: usize = 256;
 pub const PLAYER_OWNER: u32 = 0;
 pub const MAX_EFFECTS: usize = 64;
 pub const MAX_HIT_RECORDS: usize = 128;
+/// Fitted: a trigger press waits this long, 3 seconds, for the bay to open.
+const BAY_RELEASE_TICKS: u64 = 360;
+/// Fitted: the bay stays open 1 second after a release so the weapon clears.
+const BAY_HOLD_TICKS: u64 = 120;
 
 /// Exact category switch at FA 0x411470; category is not a bitmask here.
 pub fn damage_class(category: u16) -> usize {
@@ -921,6 +925,11 @@ pub struct State {
     service_remainder: u16,
     triggers: Vec<PlayerTrigger>,
     gun_cadence: Vec<GunCadence>,
+    /// A trigger press waiting for the weapon bay to open: the station and
+    /// the tick it was pressed.
+    bay_release: Option<(usize, u64)>,
+    /// The bay stays open until this tick after a bay release.
+    bay_hold_until: u64,
     /// Player session cheats, including the Damage setting.
     pub cheats: crate::cheats::Cheats,
 }
@@ -1054,10 +1063,22 @@ impl State {
             service_remainder: 0,
             triggers,
             gun_cadence,
+            bay_release: None,
+            bay_hold_until: 0,
             cheats: Default::default(),
         })
     }
+    /// Whether the selected weapon sits behind bay doors that are not open yet.
+    fn bay_waits(&self, launcher: Launcher) -> bool {
+        !launcher.bay_ready && !self.config.stations[self.selected].internal
+    }
+    /// The automatic bay request: a trigger press waiting on the doors, or the
+    /// brief hold open after a bay release so the weapon clears them.
+    pub fn bay_demand(&self) -> bool {
+        self.bay_release.is_some() || self.tick < self.bay_hold_until
+    }
     pub fn release(&mut self) {
+        self.bay_release = None;
         for t in &mut self.triggers {
             t.release();
         }
@@ -1688,10 +1709,13 @@ impl State {
         if self.projectiles.len() >= MAX_PROJECTILES {
             return Readiness::Capacity;
         }
-        if !launcher.bay_ready && !self.config.stations[self.selected].internal {
+        let solution = self.launch_solution(launcher);
+        // A closed bay only delays a shot: the trigger opens it, so the
+        // closed bay shows while a release waits on the doors.
+        if solution == Readiness::Ready && self.bay_waits(launcher) && self.bay_release.is_some() {
             return Readiness::BayClosed;
         }
-        self.launch_solution(launcher)
+        solution
     }
     fn launch_solution(&self, launcher: Launcher) -> Readiness {
         let w = &self.config.stations[self.selected].weapon;
@@ -2069,7 +2093,7 @@ impl State {
                         None,
                     ) && missiles::intercept(
                         &w.movement,
-                        Motion::new(&w.movement, launcher.velocity, launcher.position[1]),
+                        Motion::launch(w, launcher.velocity, launcher.position[1]),
                         launcher.position,
                         launcher.basis.forward,
                         o.position,
@@ -2113,7 +2137,7 @@ impl State {
         let observed = self.weapon_observation(launcher)?;
         missiles::intercept(
             &w.movement,
-            Motion::new(&w.movement, launcher.velocity, launcher.position[1]),
+            Motion::launch(w, launcher.velocity, launcher.position[1]),
             launcher.position,
             launcher.basis.forward,
             observed.position,
@@ -2568,13 +2592,36 @@ impl State {
             self.range_estimate = None;
         }
         self.release_readiness = self.readiness(launcher);
-        let allowed = self.release_readiness == Readiness::Ready;
+        let bay_waits = self.bay_waits(launcher);
+        // A pending bay release lapses if the shot is no longer wanted or the
+        // doors never open.
+        if self.bay_release.is_some_and(|(station, pressed)| {
+            station != index
+                || self.tick.saturating_sub(pressed) > BAY_RELEASE_TICKS
+                || !matches!(
+                    self.release_readiness,
+                    Readiness::Ready | Readiness::BayClosed
+                )
+        }) {
+            self.bay_release = None;
+        }
+        let allowed = self.release_readiness == Readiness::Ready && !bay_waits;
         let station = &self.config.stations[index];
         let w = &station.weapon;
         let guided = w.seeker.signature != 0;
         let gun = is_gun(w);
         let pressed = held && launcher.alive && !self.triggers[index].was_held;
-        let due = self.triggers[index].poll(held && launcher.alive, w.flags, w.burst.game_burst_t, now)
+        let polled =
+            self.triggers[index].poll(held && launcher.alive, w.flags, w.burst.game_burst_t, now);
+        if polled && bay_waits && self.release_readiness == Readiness::Ready {
+            self.bay_release = Some((index, self.tick));
+            self.release_readiness = Readiness::BayClosed;
+        }
+        let bay_open = self.bay_release.is_some() && !bay_waits;
+        if bay_open {
+            self.bay_release = None;
+        }
+        let due = polled || bay_open
                 // A gun repress uses the retained physical-round deadline,
                 // not the old representative burst's quarter-second deadline.
                 || (gun && pressed);
@@ -2684,7 +2731,7 @@ impl State {
                         .flatten(),
                     motion: (self.weapon_rules == Rules::Spec
                         && missiles::Profile::for_weapon(w).is_some())
-                    .then(|| Motion::new(&w.movement, launcher.velocity, position[1])),
+                    .then(|| Motion::launch(w, launcher.velocity, position[1])),
                     age: 0,
                     incoming: false,
                     station: index,
@@ -2722,6 +2769,9 @@ impl State {
             }
         }
         if events.iter().any(|e| matches!(e, Event::Fired(_))) {
+            if !station.internal && !gun {
+                self.bay_hold_until = self.tick + BAY_HOLD_TICKS;
+            }
             self.effect(launcher.position, EffectKind::Launch);
             self.bore_observation = None;
             self.mounted = Seeker::default();
@@ -6429,8 +6479,9 @@ fn guide_owned(
     // full guidance lifetime, per John's 2026-09-17 revision.
     let can_steer = profile.guidance != Guidance::Supported || supported.is_some();
     if can_steer && let Some(point) = flight.last_intercept {
-        let desired = unit(sub(point, p.position));
-        let heading = missiles::commanded_heading(p.direction, p.motion.unwrap().velocity, desired);
+        let motion = p.motion.unwrap();
+        let desired = unit(sub(motion.aim(p.position, point), p.position));
+        let heading = missiles::commanded_heading(p.direction, motion.velocity, desired);
         p.direction = missiles::steer(&w.movement, p.age, p.direction, heading);
     }
 }

@@ -313,7 +313,7 @@ and search until acquisition or guidance expiry. Keep normal station, bay, trigg
 and ammunition gates. Missing target data cannot produce a fake range inhibit:
 omit `IN RNG` for an uncued release. A known bore candidate inside imported `zone1.minimum_range` inhibits release
 with MIN RANGE. Other envelope cues still warn without blocking uncued release.
-Internal-bay opening must work without a cockpit designation.
+The trigger opens an internal bay, with or without a cockpit designation ([F-22 bays](aircraft-animation.md#f-22-main-weapon-bays)).
 
 The fitted bore is a **5-degree circular half-angle** for independent seekers,
 limited by the imported seeker volume. John requested a smaller bore on 2026-09-17; the latest "5%" wording is
@@ -548,6 +548,56 @@ range. Report hits, misses and expiry, not a fabricated universal effective rang
 For SA14 and SA6, imported removal precedes motor cutoff. Preserve that
 compatibility behavior and report it; do not silently fix the source data.
 The long burn values in the table are likewise the current game's timing choice.
+
+## Drop launch, sag and cruise profile
+
+**Spec-derived, 2026-09-28.** John asked for missiles that drop before their
+motor lights, and for the lob, to behave as they do in the game. The original's
+behaviour comes from three record flags and two record fields; the evidence and
+addresses are in [the missile format notes](../formats/missiles.md#release-sag-and-cruise-profile).
+
+- **Ejection.** Air-launched missiles (record flag 0x8) leave with a 32 ft/s
+  downward push, added to the inherited aircraft velocity.
+- **Sag.** While the motor is unlit, before ignition and after burnout, a
+  missile with record flag 0x4 sinks. The sink grows at 32 ft/s² to at most
+  80 ft/s and moves the missile straight down, apart from its flight path; the
+  nose does not follow it. Lighting the motor stops the sink at once. A missile
+  whose motor lights on the rail therefore loses its push immediately.
+- **No steering before ignition.** Until the motor lights, fins are locked:
+  the missile keeps the launch rail's direction and inherited speed, whatever
+  its target does.
+- **Cruise profile** (record flag 0x20). While it has a target, the missile aims
+  at a point above the target, chosen by its horizontal distance from the target:
+  at or beyond `cruise1Dist` it aims `cruise1Alt` above the target; from
+  `cruise2Dist` to `cruise1Dist`, `cruise2Alt`; inside `cruise2Dist` it homes
+  directly. Distances and altitudes are 256-foot steps. The height is above the
+  target (or its predicted intercept), not above the ground or the launch point.
+
+What a player sees, from the retail records:
+
+| Missile | Motor lights | Drop before it lights | Cruise profile |
+| --- | ---: | ---: | --- |
+| AIM-54, AA-9, AIM-7, PL-10 | 2 s | about 124 ft | AIM-54 and PL-10: 5,120 ft above the target until 3.3 nmi, then dive in |
+| AA-6, AIM-7E | 1 s | about 48 ft | none |
+| AAM-L (Su-35) | on the rail | none | 5,120 ft above the target until 3.3 nmi, then dive in |
+| AIM-120, AIM-9, MICA, R-550, AA-11, AA-12 | on the rail | none | none |
+| AGM-84 (catalog) | 2 s | about 124 ft | 1,024 ft above the target, pop up to 3,072 ft inside 3.3 nmi, direct inside 5,120 ft |
+| AM-39 (catalog) | 2 s | about 124 ft | 1,024 ft, 256 ft inside 3.3 nmi, direct inside 5,120 ft |
+| AGM-65, AS-7 | 1 s | about 48 ft | 1,024 ft above the target, direct inside 7,424 ft |
+
+AAM-L, the Su-35's long-range anti-AWACS missile, lights its motor on the rail
+in the retail record, so it lobs but does not drop. It keeps that retail timing.
+
+How the original steers toward the cruise point is unresolved: it may point at
+it or climb to its height. **Fitted, requested by John as the lob:** an
+air-to-air missile climbs toward the cruise height over a 2 nmi horizontal
+look-ahead, so a long shot pitches up about 23 degrees, levels 5,120 ft above
+the target and dives in from 3.3 nmi, about 14 degrees. Surface missiles aim at
+the cruise point itself. The same motion drives the HUD reach and intercept
+estimates, so they include the drop, sag and climb. The sag's time base follows
+the documented 120 Hz service; the original's tick unit is inferred. Whether an
+unlit missile loses speed is unknown; it keeps its speed here. The lob gains no
+thinner-air benefit, since the fitted motion has no altitude drag law.
 
 ## What exists today and what changes
 

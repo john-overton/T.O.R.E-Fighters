@@ -61,13 +61,47 @@ The [new velocity/intercept specification](../spec/missiles.md#launch-velocity-a
 changes that behavior deliberately. Its additive boost budget reinterprets
 source numbers as fitted inputs and must not be attributed to the reviewed
 consumer. Compatibility retains the current rule. CUED readiness requires designation. BORESIGHT permits independent-seeker
-release without one, opens an available bay and retains normal release gates.
+release without one and retains normal release gates; a bay opens on the trigger.
 
 The [manual-supported behavior](../spec/missiles.md#manual-supported-behavior)
 is separate evidence from this build's static records. Its presentation and
 weapon-family prose must not silently override per-record signatures, timers or
 support flags. Exact HUD geometry, sample mapping and any conflicting family
 classification require a focused resource/consumer review during implementation.
+
+## Release, sag and cruise profile
+
+Research mode, 2026-09-28, static review of the objdump listing of FA.EXE
+(sha256 prefix e31560c2, 1,319,424 bytes). The current JT is copied to `_cpt`
+0x50d268, so fields read at absolute addresses: flags 0x50d30e, igniteT
+0x50d367, fuelT 0x50d369, cruise bytes 0x50d373..0x50d376. Positions are 1/256
+ft; the projectile clock 0x5528c8 counts quarter seconds. Behaviour is in
+[the spec](../spec/missiles.md#drop-launch-sag-and-cruise-profile).
+
+| Evidence | Finding |
+| --- | --- |
+| Motor state 0x4c1170 | Before igniteT: unlit. Before fuelT: powered. Then burnt out. fuelT counts from launch, so burn is fuelT − igniteT. |
+| Turn rate 0x478101..0x478139 | Zero while unlit, poweredTurnRate while powered, unpoweredTurnRate after burnout. |
+| Sag 0x4c14cf..0x4c1569 (`FallState` in `combat.rs`) | Flag 0x4 and motor not powered: a sink subtracted from altitude apart from the flight path, growing 32 ft/s² to a 0x5000 fixed8 (80 ft/s) cap. Powered resets it to zero. The 32 ft/s² assumes fixed8-second service ticks; that unit is inferred. |
+| Ejection `_PROJAdd` 0x4c0e08..0x4c0e27 | Flag 0x8 starts the sink at 0x2000 fixed8, a 32 ft/s downward kick. All 0x…4f and 0x…6f air-launched records carry it; SEA_SPAR (0x45) and SSN9 (0x65) have 0x4 without 0x8. |
+| Cruise caller 0x4c147f..0x4c148f | Runs only while the projectile has a target. Flag 0x20 selects 0x4c1660; otherwise 0x4c1630 homes on the target directly. |
+| Cruise 0x4c1660 | Horizontal distance only (target copied with the missile's own altitude, 0x4c66cc, `shr 16`: 256-ft steps). Below cruise2Dist: direct. From cruise2Dist to cruise1Dist: cruise2Alt. At or beyond cruise1Dist: cruise1Alt. The aim point is directly over the target at target altitude + Alt × 256 ft, issued every service through 0x463a20 (flags 8, mode 2). |
+| Speed, flag 0x40 (0x4c1494..) | Unlit holds speed, powered heads for maximum speed, burnt out heads for finalSpeed. |
+| Motor smoke 0x4c123f..0x4c12c9 | Starts at ignition and lasts fuelT − igniteT. |
+| Removal 0x4c1215..0x4c122c | At removeT or above 100,000 ft. |
+
+Cruise bytes in the retail catalog are nonzero exactly where flag 0x20 is set:
+AIM54C, AAML and PL10 [78,20,78,20]; AGM84A/E [78,4,20,12]; AM39 [78,4,20,1];
+AGM65A/G, AS7, AS14, AS15, AS16, AS30, AT2, AT12 [29,4,29,4]; SSN9 [59,8,10,1].
+igniteT is 8 (2 s) for AIM54C, AA9, AIM7, PL10, AGM84A/E and AM39; 4 (1 s) for
+AA6, AIM7E, AGM65A/G and the AS set; 12 (3 s) for AT12; zero for AAML, AIM9 and
+AIM120. launchRetard is 100 in every record.
+
+Unresolved: how movement steers to the 0x463a20 point (points at it, or climbs
+to its height); whether an unlit missile loses speed to drag; the service tick
+time unit behind 32 ft/s²; the random launch-distance percentage that flags
+0x1000 and 0x2000 set at 0x4c0e48..0x4c0eb5; any launch position offset. Next
+step: trace 0x463a20's mode-2 consumer in projectile movement.
 
 ## Exceptions that must survive classification
 

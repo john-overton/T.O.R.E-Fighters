@@ -330,10 +330,37 @@ fn bay_safe_empty_and_failed_gates_survive_uncued_mode() {
         bay_ready: false,
         controls: Default::default(),
     };
-    assert_eq!(s.readiness(l), Readiness::BayClosed);
+    // A closed bay is not an inhibit: the trigger opens it.
+    assert_eq!(s.readiness(l), Readiness::Ready);
+    assert!(!s.bay_demand());
     let ammo = s.ammo.clone();
+    let mut probe = s.clone();
     s.step(true, l, |_, _| 0.);
     assert_eq!(s.ammo, ammo);
+    assert_eq!(s.release_readiness, Readiness::BayClosed);
+    assert!(s.bay_demand());
+    // The press alone commits the shot; it fires when the doors are open.
+    s.step(false, l, |_, _| 0.);
+    assert_eq!(s.ammo, ammo);
+    l.bay_ready = true;
+    let events = s.step(false, l, |_, _| 0.);
+    assert!(events.iter().any(|e| matches!(e, Event::Fired(0))));
+    assert!(s.rounds(0) < ammo[0] & 0x7fff);
+    assert!(s.bay_demand());
+    let mut held_open = 0;
+    while s.bay_demand() && held_open < 1000 {
+        s.step(false, l, |_, _| 0.);
+        held_open += 1;
+    }
+    assert_eq!(held_open, 120);
+    // A request that never sees the doors open lapses after 3 seconds.
+    l.bay_ready = false;
+    probe.step(true, l, |_, _| 0.);
+    for _ in 0..361 {
+        probe.step(false, l, |_, _| 0.);
+    }
+    assert!(!probe.bay_demand());
+    assert_eq!(probe.ammo, ammo);
     l.bay_ready = true;
     s.armed = false;
     assert_eq!(s.readiness(l), Readiness::Safe);

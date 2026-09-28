@@ -16,6 +16,24 @@ not revalidation of the new motion model. Remaining limits are listed below.
 [field interpretation](../formats/missiles.md),
 [implementation milestones](../missile-update-plan.md).
 
+## Drop, sag and cruise lob validation
+
+Implementation mode, 2026-09-28, branch `weapons-pass` from `e4997ca`, Linux.
+[Behaviour](../spec/missiles.md#drop-launch-sag-and-cruise-profile) and
+[evidence](../formats/missiles.md#release-sag-and-cruise-profile).
+`missiles::tests` checks, with the AIM-54 record's motor and turn numbers, a
+124 ft unsteered drop over the 2-second unlit phase, the sink clearing on
+ignition and returning after burnout, the retail cruise stage order, and a
+30 nmi level shot at 20,000 ft that levels 4,900 to 5,400 ft above the target
+and still arrives, with the shared predictor agreeing. Workspace tests, Clippy,
+formatting, build, Python tests, asset and document checks passed.
+
+`--missile-acceptance` for the F-14D and Su-35, old build against new, over the
+rows both finished before a 15-minute cutoff (300 ft/s level launches): every
+AIM-54 and AAM-L shot at 25 to 100% of the launch maximum hit before and after.
+Times of flight grew 0.3 to 0.5 seconds from the climb. No GPU capture or
+in-cockpit playtest was run for this pass.
+
 ## Current trajectory and estimated-range validation
 
 Implementation mode, 2026-09-17. The working tree builds on checkpoint `2f8d967`.
