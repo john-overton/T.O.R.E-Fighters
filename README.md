@@ -12,7 +12,7 @@
   <a href="rust-toolchain.toml"><img alt="Rust 1.91.1 pinned" src="https://img.shields.io/badge/rust-1.91.1-b7410e?logo=rust&logoColor=white"></a>
   <a href="docs/DEVELOPMENT.md"><img alt="Linux, Windows and macOS" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-2f6f9f"></a>
   <a href="LICENSE"><img alt="GNU General Public License v3.0" src="https://img.shields.io/badge/license-GPL--3.0-1f6feb"></a>
-  <a href="docs/ROADMAP.md"><img alt="Milestone 1 released as v0.1.1, multiplayer next" src="https://img.shields.io/badge/milestone-M1%20released%2C%20M2%20next-orange"></a>
+  <a href="docs/ROADMAP.md"><img alt="Milestone 1 released as v0.1.2, multiplayer next" src="https://img.shields.io/badge/milestone-M1%20released%2C%20M2%20next-orange"></a>
 </p>
 
 <p align="center">
@@ -126,7 +126,7 @@ recovered yet, T.O.R.E uses a documented approximation labelled *fitted*. See
 
 ## What works today
 
-Version 0.1.1 completes most of [Milestone 1](docs/ROADMAP.md#milestone-1-faithful-quick-fight):
+Version 0.1.2 completes most of [Milestone 1](docs/ROADMAP.md#milestone-1-faithful-quick-fight):
 a quick fight from the original main menu, through Quick Mission setup and
 flight, to the debrief.
 
