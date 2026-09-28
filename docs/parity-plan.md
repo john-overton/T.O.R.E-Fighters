@@ -147,6 +147,15 @@ ported aircraft at all four resolved skills. Surface AI and other behavior
 families remain outside this scope. `--fixture-wings` and all three flight paths
 remain available.
 
+**Next AI repair: visual contact and incoming fire.** The
+[F-22/Su-27 investigation](baselines/visual-awareness-under-fire.md) found shared
+neutral-engagement, rear-lookout and gun/hit-defense gaps across all selectable
+opponents. Research and the [proposed contract](spec/visual-awareness-under-fire.md)
+are complete; gameplay fixes are not implemented. The
+[delivery plan](ROADMAP.md#visual-contact-and-incoming-fire-repair) starts with
+reproducible traces and defense without an offensive target, then safe jinks,
+lookout and explicit leader-policy changes. Radar stealth remains intact.
+
 1. **Missile tuning and remaining evidence.** Stages 1 through 5 shipped for
    current stores, with controlled emitter fixtures. Four guidance types, silent
    active flight, same-target reacquisition through guidance expiry, inherited

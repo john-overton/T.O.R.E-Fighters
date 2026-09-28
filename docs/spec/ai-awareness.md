@@ -22,6 +22,11 @@ The requirements are **opinionated** gameplay behavior. Existing equipment,
 flight limits and missile guidance contracts retain their documented provenance.
 This specification does not establish original-game parity.
 
+The [visual-contact and incoming-fire investigation](../baselines/visual-awareness-under-fire.md)
+found shared limits in neutral leader release, rear lookout and gun/hit defense.
+Its [proposed repair contract](visual-awareness-under-fire.md) is not implemented;
+the current rules below remain the shipped behavior.
+
 ### Component provenance
 
 | Component | Provenance |
