@@ -1,6 +1,6 @@
 //! The replay viewer's Escape menu: flight's paused menu (`pause_menu.rs`)
 //! over a tree built from the imported `FMENUD.MNU` rows that mean
-//! something in a replay, plus four authored rows. Opening it pauses
+//! something in a replay (`?`, Control and Pref), plus four authored rows. Opening it pauses
 //! playback; closing it plays on as before. Opinionated addition requested
 //! by John on 2026-09-28; the authored row labels, the title and the help
 //! text are agent choices (2026-09-28). See docs/REPLAYS.md.
@@ -19,6 +19,8 @@ pub const NAME_LABELS: &str = "Name labels?";
 pub const MISSION_TIMER: &str = "Mission timer?";
 pub const TRAILS: &str = "Flight path trails?";
 pub const COMMS: &str = "Comms panel?";
+/// The retail tab that opens the controls screen, as it does in flight.
+pub const CONTROL: &str = "Control";
 /// The retail Pref rows a replay keeps, in retail order.
 const PREF_ROWS: [&str; 3] = ["Graphics...", "Sound...", "Time"];
 /// The retail Time rows a replay keeps, in retail order.
@@ -75,7 +77,8 @@ fn row(label: &str, shortcut: &str) -> MenuNode {
 }
 
 /// The replay's menu tree from the imported flight menu: its `?` tab with
-/// End Replay and Exit to Windows, and its Pref tab with Graphics...,
+/// End Replay and Exit to Windows, its Control tab, which opens the
+/// controls screen instead of showing rows, and its Pref tab with Graphics...,
 /// Sound... and Time (Paused to 8x), then the four authored rows. Retail
 /// labels come from `imported`; any it lacks are authored, so an empty
 /// tree gives the whole menu. Shortcuts are dropped except Alt-F4, since a
@@ -116,6 +119,11 @@ pub fn tree(imported: &[MenuNode]) -> Vec<MenuNode> {
             children: vec![row(END_REPLAY, ""), exit],
         },
         MenuNode {
+            label: tab(CONTROL).map_or(CONTROL, |n| &n.label).into(),
+            shortcut: String::new(),
+            children: Vec::new(),
+        },
+        MenuNode {
             label: pref.map_or("Pref", |n| &n.label).into(),
             shortcut: String::new(),
             children: prefs,
@@ -149,6 +157,8 @@ pub enum Start {
     Graphics,
     /// Pref > Sound..., with the app opening that screen.
     Sound,
+    /// The Control tab, with the app opening the controls screen.
+    Controls,
 }
 
 impl Start {
@@ -160,9 +170,10 @@ impl Start {
             "help" => Self::Help,
             "graphics" => Self::Graphics,
             "sound" => Self::Sound,
+            "controls" => Self::Controls,
             other => {
                 return Err(format!(
-                    "unknown replay menu page {other:?}: use ?, pref, time, help, graphics or sound"
+                    "unknown replay menu page {other:?}: use ?, pref, time, help, graphics, sound or controls"
                 ));
             }
         })
@@ -190,6 +201,8 @@ pub enum Choice {
     Exit,
     Graphics,
     Sound,
+    /// Open the controls screen.
+    Controls,
     /// Switch an interface part.
     Toggle(Part),
 }
@@ -227,17 +240,20 @@ impl Menu {
     /// Opens the menu at `start`, for captures.
     pub fn open_at(&mut self, start: Start, clock: &mut Clock) {
         self.open(clock);
+        let pref = self.tree.len() - 1;
+        debug_assert!(self.is_control(pref - 1));
         match start {
             Start::Question => self.widget.show_tab(0),
             Start::Help => self.widget.open_help(),
+            Start::Controls => self.widget.show_tab(0),
             Start::Pref | Start::Time | Start::Graphics | Start::Sound => {
-                self.widget.show_tab(1);
+                self.widget.show_tab(pref);
                 let row = match start {
                     Start::Time => "Time",
                     Start::Sound => "Sound...",
                     _ => "Graphics...",
                 };
-                if let Some(at) = self.tree[1].children.iter().position(|n| n.label == row) {
+                if let Some(at) = self.tree[pref].children.iter().position(|n| n.label == row) {
                     self.widget.focus_row(&self.tree, at);
                     if start == Start::Time {
                         self.widget.enter(at);
@@ -266,8 +282,22 @@ impl Menu {
             }
             return Choice::None;
         }
+        let before = self.widget.root;
         match self.widget.key(name, &self.tree) {
             Event::Select(index) => self.select(index, clock),
+            Event::Switched(index) if self.is_control(index) => {
+                // The arrows step past Control to the next tab the same
+                // way, so the menu is there when the controls screen closes
+                // and the next arrow does not open it again.
+                let n = self.tree.len();
+                let right = index == (before + 1) % n;
+                self.widget.show_tab(if right {
+                    (index + 1) % n
+                } else {
+                    (index + n - 1) % n
+                });
+                Choice::Controls
+            }
             _ => Choice::None,
         }
     }
@@ -277,6 +307,7 @@ impl Menu {
         match self.widget.pointer(&self.tree, &LOOK, point, down) {
             Event::None | Event::Switched(_) => Choice::None,
             Event::Click => Choice::Click,
+            Event::Tab(index) if self.is_control(index) => Choice::Controls,
             Event::Tab(index) => {
                 self.widget.show_tab(index);
                 Choice::Click
@@ -284,6 +315,13 @@ impl Menu {
             Event::Select(index) => self.select(index, clock),
             Event::Button(index) => self.activate(BUTTONS[index], clock),
         }
+    }
+
+    /// Whether tab `index` is Control, which opens the controls screen.
+    fn is_control(&self, index: usize) -> bool {
+        self.tree
+            .get(index)
+            .is_some_and(|tab| tab.children.is_empty())
     }
 
     fn select(&mut self, index: usize, clock: &mut Clock) -> Choice {
@@ -407,8 +445,12 @@ mod tests {
         };
         assert_eq!(
             labels(&t),
-            ["?|", "Pref|"].map(String::from).to_vec(),
-            "only the two tabs, in retail order"
+            ["?|", "Control|", "Pref|"].map(String::from).to_vec(),
+            "only these three tabs, in retail order"
+        );
+        assert!(
+            t[1].children.is_empty(),
+            "Control opens the controls screen"
         );
         assert_eq!(
             labels(&t[0].children),
@@ -417,7 +459,7 @@ mod tests {
                 .to_vec()
         );
         assert_eq!(
-            labels(&t[1].children),
+            labels(&t[2].children),
             [
                 "Graphics...|",
                 "Sound...|",
@@ -431,7 +473,7 @@ mod tests {
             .to_vec()
         );
         assert_eq!(
-            labels(&t[1].children[2].children),
+            labels(&t[2].children[2].children),
             ["Paused|", "Slow-motion|", "1x|", "2x|", "4x|", "8x|"]
                 .map(String::from)
                 .to_vec()
@@ -441,9 +483,28 @@ mod tests {
     }
 
     #[test]
+    fn control_opens_the_controls_screen_and_the_arrows_step_past_it() {
+        let mut clock = Clock::new(0, 1_000);
+        let mut m = Menu::new(&[]);
+        m.open(&mut clock);
+        // Right from ? opens it and leaves the menu on Pref; Left from Pref
+        // opens it and leaves the menu on ?.
+        assert_eq!(m.key("ArrowRight", &mut clock), Choice::Controls);
+        assert_eq!(m.widget.root, 2);
+        assert_eq!(m.key("ArrowLeft", &mut clock), Choice::Controls);
+        assert_eq!(m.widget.root, 0);
+        // Rows still work on either side.
+        m.key("ArrowLeft", &mut clock);
+        assert_eq!(m.widget.root, 2);
+        assert_eq!(m.key("Enter", &mut clock), Choice::Graphics);
+        assert!(m.is_open());
+    }
+
+    #[test]
     fn start_pages_parse() {
         assert_eq!(Start::parse("?"), Ok(Start::Question));
         assert_eq!(Start::parse("time"), Ok(Start::Time));
+        assert_eq!(Start::parse("controls"), Ok(Start::Controls));
         assert!(Start::parse("cheat").is_err());
     }
 }

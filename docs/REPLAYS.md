@@ -855,6 +855,7 @@ imported tree the same rows are authored.
 | --- | --- |
 | ? > End Replay | Back to the Replays screen, as Esc used to be |
 | ? > Exit to Desktop (Alt-F4) | Quits the game, as in flight |
+| Control | The controls screen over the paused replay, as the Control tab opens it in flight; key, mouse, controller and head-tracking changes save and apply as they do there. The arrows step past the tab to the next one, so the menu is on ? or Pref when the screen closes and the next arrow does not open it again |
 | Pref > Graphics... | The Graphics options screen over the paused replay; changes apply to the view at once |
 | Pref > Sound... | The Sound/Music Prefs screen over the paused replay, as in flight |
 | Pref > Time > Paused | Closes the menu, leaving the replay paused if it was playing and playing if it was paused |
@@ -863,9 +864,12 @@ imported tree the same rows are authored.
 | Resume replay | Closes the menu |
 | Keyboard shortcuts | The replay's keys, as in the table above |
 
-Closing Graphics or Sound returns to the menu. The title reads REPLAY
+Closing Graphics, Sound or the controls screen returns to the menu. The
+replay's own keys are built in, so the controls screen changes the flight
+controls, not the viewer's keys. The title reads REPLAY
 PAUSED. The pause menu is opinionated, requested by John on 2026-09-28,
-who chose the End Replay and Exit to Desktop labels; the four switch rows'
+who chose the End Replay and Exit to Desktop labels and asked for the
+controls screen in it; the four switch rows'
 labels, the title, the help text, hiding the bar and what the Time rows do
 are agent choices (2026-09-28).
 
@@ -1134,7 +1138,7 @@ tore-app --watch-replay FILE --capture-replay OUT.ppm --replay-tick N \
     [--flight-view 0..11] [--replay-aircraft ID] [--replay-drone] \
     [--replay-look-at aircraft:ID|ground:ID|weapon:ID] \
     [--replay-ui labels,timer,trails,comms,subtitles] [--replay-clean] \
-    [--replay-menu '?'|pref|time|help|graphics|sound]
+    [--replay-menu '?'|pref|time|help|graphics|sound|controls]
 ```
 
 The capture waits for the background pass, draws the frame at tick `N`
@@ -1151,7 +1155,7 @@ flight. `--replay-panels thought,telemetry,guidance,comms,menu` opens
 [debug panels](#debug-panels), or the right-click menu, on the selected
 aircraft for the capture. `--replay-menu PAGE` opens the
 [pause menu](#pause-menu) at its `?` tab, Pref, Pref > Time or the keyboard
-help, or opens Graphics or Sound over it; `?` needs quoting in most shells.
+help, or opens Graphics, Sound or the controls screen over it; `?` needs quoting in most shells.
 
 Measured on the development Mac (Apple M3, 1440x1080 view, release build,
 other work running on the machine) with a synthetic ten-minute recording of

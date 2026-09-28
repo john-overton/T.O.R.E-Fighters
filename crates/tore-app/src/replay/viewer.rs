@@ -213,6 +213,8 @@ pub enum Command {
     Graphics,
     /// Open the Sound/Music Prefs screen over the paused replay.
     Sound,
+    /// Open the controls screen over the paused replay.
+    Controls,
     /// Save the frame as a PNG.
     Screenshot,
 }
@@ -1343,6 +1345,7 @@ impl Viewer {
             Choice::Exit => Command::Exit,
             Choice::Graphics => Command::Graphics,
             Choice::Sound => Command::Sound,
+            Choice::Controls => Command::Controls,
             Choice::Toggle(part) => {
                 match part {
                     Part::Labels => self.ui.labels = !self.ui.labels,
@@ -2829,7 +2832,10 @@ mod tests {
 
     /// Where the Escape menu's tabs, rows and bottom buttons are drawn.
     const QUESTION_TAB: (f64, f64) = (10., 10.);
-    const PREF_TAB: (f64, f64) = (40., 10.);
+    // Tabs are 7 layer pixels a letter plus 16 wide, from x = 4: ? spans
+    // 4 to 27, Control 27 to 92 and Pref 92 to 136.
+    const CONTROL_TAB: (f64, f64) = (40., 10.);
+    const PREF_TAB: (f64, f64) = (110., 10.);
     const RESUME: (f64, f64) = (100., 455.);
     fn menu_row(index: usize) -> (f64, f64) {
         (200., 55. + 19. * index as f64)
@@ -2886,6 +2892,9 @@ mod tests {
         assert_eq!(click(&mut v, menu_row(1)), Command::Exit);
         press(&mut v, "ArrowUp");
         assert_eq!(press(&mut v, "Enter"), Command::Leave);
+        // The Control tab opens the controls screen and stays on ?.
+        assert_eq!(click(&mut v, CONTROL_TAB), Command::Controls);
+        assert_eq!(click(&mut v, menu_row(0)), Command::Leave);
         // Pref > Graphics... and Sound... open those screens.
         assert_eq!(click(&mut v, PREF_TAB), Command::Click);
         assert_eq!(click(&mut v, menu_row(0)), Command::Graphics);

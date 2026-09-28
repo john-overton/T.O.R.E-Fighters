@@ -71,7 +71,7 @@ in a window without changing it.
 
 ### The controls screen
 
-Open **Pref → Controls...** on the main menu or **Escape → Control** in flight.
+Open **Pref → Controls...** on the main menu, **Escape → Control** in flight, or **Escape → Control** in the replay viewer.
 Both open the same input configuration screen; in flight the game stays paused.
 The layout follows John's 2026-09-22 mockup; its details are an opinionated agent
 design drawn with the imported raster font. Every default is listed in the

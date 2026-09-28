@@ -124,10 +124,12 @@ impl PauseMenu {
         }
         let len = self.rows(tree).len();
         match key {
+            // A tab without rows has nothing to move through or choose.
+            "ArrowDown" | "ArrowUp" | "Tab" | "Enter" | "Space" if len == 0 => {}
             "ArrowDown" | "Tab" => self.focus = (self.focus + 1) % len,
             "ArrowUp" => self.focus = (self.focus + len - 1) % len,
             "ArrowRight" => {
-                if !self.rows(tree)[self.focus].children.is_empty() {
+                if len > 0 && !self.rows(tree)[self.focus].children.is_empty() {
                     return Event::Select(self.focus);
                 }
                 self.show_tab((self.root + 1) % tree.len());

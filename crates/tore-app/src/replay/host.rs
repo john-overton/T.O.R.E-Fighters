@@ -127,6 +127,10 @@ impl App {
                 self.open_sound(true);
                 self.action(event_loop, Action::Click);
             }
+            Command::Controls => {
+                self.open_controls("Replay paused");
+                self.action(event_loop, Action::Click);
+            }
             Command::Screenshot => {
                 let (Some(replay), Some(renderer)) = (self.replay.as_mut(), self.renderer.as_mut())
                 else {
@@ -155,9 +159,10 @@ impl App {
         if self.replay.is_none() {
             return Some(event);
         }
-        // The Graphics or Sound screen opened from the Escape menu takes the
-        // keys, pointer and wheel, through the app's own handlers for it.
-        if self.sound_screen.is_some() || self.graphics_screen.is_some() {
+        // The Graphics, Sound or controls screen opened from the Escape menu
+        // takes the keys, pointer and wheel, through the app's own handlers.
+        if self.sound_screen.is_some() || self.graphics_screen.is_some() || self.controls.is_some()
+        {
             match &event {
                 WindowEvent::RedrawRequested => {
                     self.replay_redraw(event_loop);
@@ -296,8 +301,14 @@ impl App {
         let start = Instant::now();
         // A screen opened from the Escape menu draws over the replay in the
         // menu's 640x480 layer, as it does over the paused flight.
-        let screen = if self.graphics_screen.is_some() || self.sound_screen.is_some() {
+        let screen = if self.graphics_screen.is_some()
+            || self.sound_screen.is_some()
+            || self.controls.is_some()
+        {
             self.menu.pixels.fill(0);
+            if let Some(editor) = &self.controls {
+                editor.draw(&mut self.menu.pixels, &self.hornet.font);
+            }
             if let Some(editor) = &self.graphics_screen {
                 editor.draw(&mut self.menu.pixels, &self.hornet.font);
             }
