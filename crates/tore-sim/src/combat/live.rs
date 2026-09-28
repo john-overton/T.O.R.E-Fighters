@@ -530,7 +530,58 @@ pub struct Target {
     pub fragment_offsets: [Vector; 2],
     pub fragment_released: bool,
     pub localized_damage: LocalizedDamage,
+    /// System faults hits have caused; always Realistic, whatever the
+    /// player's Damage cheat says.
+    pub faults: SystemFaults,
     pub category: u16,
+}
+
+/// An aircraft target's system faults, rolled on each hit by the same rules
+/// as the player's. The host hands the counts to the aircraft's own systems.
+/// A target without a fault table, such as a ground object, never rolls.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SystemFaults {
+    table: [u8; 45],
+    afterburner_available: bool,
+    /// Damage taken, not capped at the hit points.
+    damage: i32,
+    pub counts: [u8; 45],
+}
+impl Default for SystemFaults {
+    fn default() -> Self {
+        Self {
+            table: [0; 45],
+            afterburner_available: false,
+            damage: 0,
+            counts: [0; 45],
+        }
+    }
+}
+impl SystemFaults {
+    pub fn new(config: &Configuration) -> Self {
+        Self {
+            table: config.system_damage,
+            afterburner_available: config.afterburner_available,
+            ..Self::default()
+        }
+    }
+    fn hit(&mut self, amount: i32, capacity: i32, roll: impl FnMut(u16) -> u16) {
+        if self.table.iter().all(|entry| entry & 15 == 0) {
+            return;
+        }
+        self.damage = self.damage.saturating_add(amount.max(0));
+        for index in super::systems::hit_faults(
+            &self.table,
+            &self.counts,
+            self.damage,
+            capacity,
+            amount,
+            self.afterburner_available,
+            roll,
+        ) {
+            self.counts[index] = self.counts[index].saturating_add(1);
+        }
+    }
 }
 
 pub const DAMAGE_SECTIONS: usize = 6;
@@ -1459,66 +1510,46 @@ impl State {
     /// Realistic damage: a hit may fault a subsystem, and accumulated
     /// damage brings on the faults the aircraft's thresholds call for.
     fn damage_systems(&mut self, amount: i32, events: &mut Vec<Event>) {
-        let chance = super::systems::subsystem_chance(
-            self.player_damage,
-            self.config.damage_capacity,
-            amount,
-        );
-        if chance > 0
-            && i32::from(draw(&mut self.rng, 100)) < chance
-            && let Some(index) = super::systems::select(
-                &self.config.system_damage,
-                &self.subsystem_counts,
-                self.player_damage,
-                self.config.damage_capacity,
-                self.config.afterburner_available,
-                |n| draw(&mut self.rng, n),
-            )
-        {
-            self.subsystem_counts[index] += 1;
-            self.last_subsystem = Some(index);
-            events.push(Event::SubsystemDamaged(index));
-            if let Some(h) = index.checked_sub(36) {
-                if let Some(Some(slot)) = self.config.hardpoint_slots.get(h) {
-                    if self.rounds(*slot) > 0 {
-                        self.ammo[*slot] |= 0x8000;
-                    }
-                } else if h == self.config.radar_hardpoint {
-                    self.radar_failed = true;
-                } else if h == self.config.visual_hardpoint {
-                    self.visual_failed = true;
-                } else if Some(h) == self.config.infrared_hardpoint {
-                    self.infrared_failed = true;
-                } else if Some(h) == self.config.rwr_hardpoint {
-                    self.rwr_failed = true;
-                } else if h == self.config.ecm_hardpoint {
-                    for _ in 0..10 {
-                        let roll = draw(&mut self.rng, 100);
-                        if roll < 25 && self.config.ecm.mode_flags & 0x110 != 0 {
-                            self.ecm_failed = true;
-                            self.chaff = 0;
-                            self.flares = 0;
-                            break;
-                        } else if (25..65).contains(&roll) && self.config.ecm.chaff[0] != 0 {
-                            self.chaff = 0;
-                            break;
-                        } else if roll >= 65 && self.config.ecm.flare[0] != 0 {
-                            self.flares = 0;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        for index in super::systems::accumulated_faults(
+        for index in super::systems::hit_faults(
             &self.config.system_damage,
             &self.subsystem_counts,
             self.player_damage,
             self.config.damage_capacity,
+            amount,
+            self.config.afterburner_available,
+            |n| draw(&mut self.rng, n),
         ) {
             self.subsystem_counts[index] += 1;
             self.last_subsystem = Some(index);
             events.push(Event::SubsystemDamaged(index));
+            let Some(h) = index.checked_sub(36) else {
+                continue;
+            };
+            if let Some(Some(slot)) = self.config.hardpoint_slots.get(h) {
+                if self.rounds(*slot) > 0 {
+                    self.ammo[*slot] |= 0x8000;
+                }
+            } else if h == self.config.radar_hardpoint {
+                self.radar_failed = true;
+            } else if h == self.config.visual_hardpoint {
+                self.visual_failed = true;
+            } else if Some(h) == self.config.infrared_hardpoint {
+                self.infrared_failed = true;
+            } else if Some(h) == self.config.rwr_hardpoint {
+                self.rwr_failed = true;
+            } else if h == self.config.ecm_hardpoint {
+                use super::systems::EcmLoss;
+                match super::systems::ecm_loss(&self.config.ecm, |n| draw(&mut self.rng, n)) {
+                    Some(EcmLoss::Everything) => {
+                        self.ecm_failed = true;
+                        self.chaff = 0;
+                        self.flares = 0;
+                    }
+                    Some(EcmLoss::Chaff) => self.chaff = 0,
+                    Some(EcmLoss::Flares) => self.flares = 0,
+                    None => {}
+                }
+            }
         }
     }
     /// Ownship subsystem lifecycle reached a fatal outcome outside a projectile hit.
@@ -1717,6 +1748,7 @@ impl State {
             wreck_power: config.wreck_power,
             fragment_released: false,
             localized_damage: LocalizedDamage::default(),
+            faults: SystemFaults::new(config),
             category: config.target_category,
         });
     }
@@ -1777,6 +1809,7 @@ impl State {
             wreck_power: crate::wreck::Power::default(),
             fragment_released: false,
             localized_damage: LocalizedDamage::default(),
+            faults: Default::default(),
             category,
         });
         self.ground_bounds.insert(id, bounds);
@@ -1834,6 +1867,7 @@ impl State {
             wreck_power: self.config.wreck_power,
             fragment_released: false,
             localized_damage: LocalizedDamage::default(),
+            faults: Default::default(),
         });
         self.sensors.clear_selection();
         self.hud_selection = None;
@@ -2623,6 +2657,7 @@ impl State {
             wreck_power: crate::wreck::Power::default(),
             fragment_released: self.player_fragment_released,
             localized_damage: self.player_localized_damage.clone(),
+            faults: Default::default(),
             category: self.config.target_category,
         };
         let mut player_hits = Vec::new();
@@ -2940,6 +2975,10 @@ impl State {
                     t.hp -= applied;
                     if t.role == TargetRole::Aircraft {
                         t.localized_damage.record(section, scaled, t.initial_hp);
+                        if t.hp > 0 {
+                            t.faults
+                                .hit(scaled, t.initial_hp, |n| draw(&mut self.rng, n));
+                        }
                     }
                     if self.history.len() == MAX_HIT_RECORDS {
                         self.history.remove(0);
@@ -4793,6 +4832,7 @@ mod tests {
             wreck_power: crate::wreck::Power::default(),
             fragment_released: false,
             localized_damage: LocalizedDamage::default(),
+            faults: Default::default(),
             category,
         }
     }
@@ -5010,6 +5050,26 @@ mod tests {
             e,
             Event::Jolt(Jolt { target: Some(7), strength, .. }) if (*strength - 0.1).abs() < 1e-9
         )));
+    }
+    #[test]
+    fn an_aircraft_target_rolls_system_faults_whatever_the_player_damage_cheat() {
+        let mut s = fixture(false);
+        assert_eq!(s.cheats.damage, crate::cheats::Damage::Normal);
+        let mut t = target(7, [0., 1000., 150.], 200, 0x80);
+        t.faults = SystemFaults::new(&s.config);
+        t.faults.table = [0x1f; 45];
+        s.targets.push(t);
+        for _ in 0..600 {
+            s.step(true, launcher(), |_, _| 0.);
+            if s.targets[0].hp <= 150 {
+                break;
+            }
+        }
+        let t = &s.targets[0];
+        assert!(t.hp > 0 && t.hp <= 150, "hp {}", t.hp);
+        // A quarter of the hit points gone guarantees a control fault.
+        assert!(t.faults.counts.iter().any(|n| *n > 0));
+        assert_eq!(s.subsystem_counts, [0; 45]);
     }
     #[test]
     fn easy_aiming_missile_turns_faster_with_a_wider_cone() {

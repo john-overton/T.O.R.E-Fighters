@@ -58,9 +58,10 @@ takes the same hit points and adds the system faults (John, 2026-09-28).
 they are not hit-point damage: a direct gun hit on the cockpit kills the pilot,
 and a direct gun hit on the core worth at least half the aircraft's hit points
 destroys it. Under Normal those hits take their own damage like any other.
-Damage, like every cheat, covers the player only; AI aircraft are unchanged.
-Damage smoke, the damaged look and breakup on destruction follow hit points and
-appear under both.
+Damage covers the player only. AI aircraft, friendly and enemy, always take
+Realistic damage whatever the setting (John, 2026-09-28); see
+[AI aircraft](systems-damage.md#ai-aircraft). Damage smoke, the damaged look
+and breakup on destruction follow hit points and appear under both.
 
 **Unlimited ammo.** Gun rounds and stores never run out. **Proposed:** applies to
 the player only.

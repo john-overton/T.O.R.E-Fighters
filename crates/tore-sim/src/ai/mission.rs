@@ -205,6 +205,16 @@ pub struct ObservedAttack {
     pub event_id: Option<u32>,
 }
 
+/// Damaged avionics on an AI aircraft, from system faults on its hardpoints.
+/// A failed sensor sees nothing; a failed RWR gives no missile warning.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EquipmentFaults {
+    pub radar: bool,
+    pub infrared: bool,
+    pub visual: bool,
+    pub rwr: bool,
+}
+
 /// One AI-flown aircraft and everything it owns.
 pub struct AiActor {
     identity: ActorIdentity,
@@ -224,6 +234,7 @@ pub struct AiActor {
     formation_order_tick: Option<u64>,
     ignored_attack_ids: Vec<u32>,
     received_emitters: Vec<sensors::passive::Emitter>,
+    equipment: EquipmentFaults,
     stations: Vec<StationSpec>,
     dispensers: Vec<DispenserStore>,
     wing_slot: u8,
@@ -289,6 +300,7 @@ impl AiActor {
             formation_order_tick: None,
             ignored_attack_ids: Vec::new(),
             received_emitters: Vec::new(),
+            equipment: EquipmentFaults::default(),
             stations: setup.stations,
             dispensers: setup.dispensers,
             wing_slot: setup.wing_slot,
@@ -378,6 +390,22 @@ impl AiActor {
     /// The running takeoff or landing sequence, for diagnostics.
     pub fn airfield(&self) -> Option<&super::airfield::Sequence> {
         self.airfield.as_ref()
+    }
+
+    pub fn equipment(&self) -> EquipmentFaults {
+        self.equipment
+    }
+
+    /// Record avionics the host found damaged. A failed radar also stops
+    /// transmitting. Faults are permanent for the flight.
+    pub fn fail_equipment(&mut self, faults: EquipmentFaults) {
+        self.equipment.radar |= faults.radar;
+        self.equipment.infrared |= faults.infrared;
+        self.equipment.visual |= faults.visual;
+        self.equipment.rwr |= faults.rwr;
+        if self.equipment.radar {
+            self.flight.radar = false;
+        }
     }
 
     /// Opinionated training target requested on 2026-09-21.
@@ -2446,9 +2474,9 @@ impl AiActor {
                 self.flight.bank,
             ),
             radar_powered: self.flight.radar,
-            radar_failed: false,
-            infrared_failed: false,
-            visual_failed: false,
+            radar_failed: self.equipment.radar,
+            infrared_failed: self.equipment.infrared,
+            visual_failed: self.equipment.visual,
         };
         let contacts = if let Some(sensors) = self.sensors.as_mut() {
             let observables: Vec<Observable> = world
@@ -2610,8 +2638,8 @@ impl AiActor {
                 heading_deg: own.heading_deg,
                 pitch_deg: own.body_pitch_deg(),
                 skill: self.controller.experience().level,
-                rwr_operating: self.flight.systems.counts[32] <= 1,
-                visual_operating: true,
+                rwr_operating: self.flight.systems.counts[32] <= 1 && !self.equipment.rwr,
+                visual_operating: !self.equipment.visual,
                 visibility_limit_ft: None,
             },
             missiles,

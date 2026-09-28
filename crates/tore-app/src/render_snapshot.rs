@@ -962,6 +962,7 @@ mod tests {
                 wreck_power: Default::default(),
                 fragment_released: false,
                 localized_damage: Default::default(),
+                faults: Default::default(),
                 category: 0,
             };
             t.localized_damage.amounts = amounts;

@@ -34,7 +34,8 @@ limits remain in use; the player-visible progression below is fitted.
 
 The player's aircraft takes these faults only with the Cheat menu's Damage
 set to Realistic; Normal takes hit points only. See the
-[cheats specification](cheats.md#behaviour-of-each-cheat).
+[cheats specification](cheats.md#behaviour-of-each-cheat). AI aircraft always
+take them, as described under [AI aircraft](#ai-aircraft).
 
 ## Component ownership
 
@@ -116,8 +117,40 @@ serious, compressor, first shutdown, second shutdown; hydraulics use a leak;
 oil uses pump then lines. Never invent a disabled source event. All milestones
 crossed by one large hit are evaluated; dividing the same damage into many small
 hits cannot bypass them. Repeated hits after a milestone do not repeat its fault.
-This supplements ownship damage only; autonomous aircraft behavior is unchanged.
-Faults continue to reach the normal sim log and D report.
+The milestones apply to AI aircraft too, measured against their own hit
+points. Faults continue to reach the normal sim log and D report.
+
+## AI aircraft
+
+John asked on 2026-09-28 for AI aircraft, friendly and enemy, to take the
+same Realistic damage as the player, whatever the player's Damage cheat says.
+Each hit on an AI aircraft rolls faults from that aircraft's own PT fault
+table with the rules above: the chance fault, then the accumulated-damage
+milestones. The totals are measured against the AI aircraft's hit points. An
+aircraft already destroyed by the hit rolls nothing. Straight-flight fixture
+aircraft and Quick Mission [dummy aircraft](dummy-aircraft.md) roll too, but
+fly a fixed course, so their faults change nothing; they are lost only when
+their hit points run out.
+
+- Engine, fuel, fluid, control, structure and pilot faults act on the AI
+  aircraft's flight exactly as on the player's, with the same fitted numbers.
+- A station fault stops the AI firing that store, and it stays out if Air
+  combat guns only is turned on and off. An external fuel tank fault empties
+  the tank.
+- A radar, infrared or visual fault blinds that sensor, and a failed radar
+  stops transmitting. An RWR fault stops missile warnings from the RWR.
+- An ECM fault loses the jammer, chaff or flares by the player's roll, drawn
+  from a separate generator so it cannot shift decoy rolls.
+- An AI aircraft killed by its own systems, for example a destroyed wing,
+  failed structure, fire or a dead pilot, or one that crashes, is lost. It falls
+  as a wreck, and the kill goes to its last attacker as the
+  [debrief](debrief.md#kills) describes.
+
+**Agent decisions, fitted:** AI pilots do not yet react to their faults. A
+wounded AI pilot does not head home, and an AI aircraft does not throttle back
+for a damaged compressor or oil pump. That is AI behaviour work for a later
+task. An AI aircraft's fault thresholds use its hit points, while the player's
+use twice the hit points, following the existing damage capacities.
 
 ## Regional structural damage
 

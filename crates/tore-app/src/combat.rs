@@ -1929,6 +1929,7 @@ mod ai_pose_tests {
             wreck_power: tore_sim::wreck::Power::default(),
             fragment_released: false,
             localized_damage: live::LocalizedDamage::default(),
+            faults: Default::default(),
             category: 0,
         }
     }
@@ -2365,6 +2366,7 @@ pub(crate) mod render_hash_tests {
             wreck_power: tore_sim::wreck::Power::default(),
             fragment_released: false,
             localized_damage: LocalizedDamage::default(),
+            faults: Default::default(),
             category: 0,
         }
     }

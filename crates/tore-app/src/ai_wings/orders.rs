@@ -1279,6 +1279,7 @@ mod landing_tests {
             wreck_power: tore_sim::wreck::Power::default(),
             fragment_released: false,
             localized_damage: live::LocalizedDamage::default(),
+            faults: Default::default(),
             category: 0,
         }
     }

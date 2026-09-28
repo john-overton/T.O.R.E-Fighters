@@ -367,7 +367,7 @@ are not saved to disk. Behaviour: [cheats specification](spec/cheats.md).
 
 | Entry | Effect |
 | --- | --- |
-| Damage → Invulnerable / Normal / Realistic | Invulnerable: weapon hits do no damage, no system faults and no pilot kill, and a midair collision does not kill you. Crashes into the ground still kill. Normal, the starting choice, takes hit points only: no system faults and no one-shot cockpit or core gun kills. Realistic takes hit points plus system faults (engine, fuel, hydraulics, controls, avionics, weapons) and the one-shot gun kills. |
+| Damage → Invulnerable / Normal / Realistic | Invulnerable: weapon hits do no damage, no system faults and no pilot kill, and a midair collision does not kill you. Crashes into the ground still kill. Normal, the starting choice, takes hit points only: no system faults and no one-shot cockpit or core gun kills. Realistic takes hit points plus system faults (engine, fuel, hydraulics, controls, avionics, weapons) and the one-shot gun kills. AI aircraft always take Realistic damage. |
 | Unlimited ammo? | The player's rounds and stores never run out. |
 | Unlimited fuel? | The player's fuel never drops, including from damage leaks. |
 | No spins? | No spin entry; a spin in progress damps out as a stall. |

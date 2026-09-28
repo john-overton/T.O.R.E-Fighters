@@ -45,8 +45,8 @@ use tore_sim::{
         },
         launch::{self, WingLaunch},
         mission::{
-            ActorSetup, AiActor, AiMission, LaunchEvent, WorldObject, simple_dispensers,
-            simple_stations,
+            ActorSetup, AiActor, AiMission, EquipmentFaults, LaunchEvent, WorldObject,
+            simple_dispensers, simple_stations,
         },
         route,
         targeting::Side,
@@ -292,6 +292,13 @@ pub struct AiWings {
     weapons: BTreeMap<(u32, u8), tore_formats::weapons::Weapon>,
     device_random: tore_sim::ai::DecisionRandom,
     device_effectiveness: BTreeMap<u32, (u8, u8)>,
+    /// Each actor's combat configuration, for what its hardpoints carry.
+    configs: BTreeMap<u32, live::Configuration>,
+    /// Stations a system fault has put out of action; they stay out when
+    /// Air combat guns only is turned off.
+    damaged_stations: std::collections::BTreeSet<(u32, u8)>,
+    /// Draws for what a damaged ECM suite loses, apart from the decoy rolls.
+    fault_random: tore_sim::ai::DecisionRandom,
     /// Projectile ids already turned into threat reports.
     seen_projectiles: Vec<u32>,
     /// Projectile id to the actor that fired it, for B47 attribution. The
@@ -593,6 +600,7 @@ impl AiWings {
             bridge
                 .device_effectiveness
                 .insert(actor.id(), (config.ecm.flare[1], config.ecm.chaff[1]));
+            bridge.configs.insert(actor.id(), config);
         }
         Ok(bridge)
     }
@@ -776,6 +784,9 @@ impl AiWings {
             weapons: BTreeMap::new(),
             device_random: tore_sim::ai::DecisionRandom::seeded(0xdec0),
             device_effectiveness: BTreeMap::new(),
+            configs: BTreeMap::new(),
+            damaged_stations: Default::default(),
+            fault_random: tore_sim::ai::DecisionRandom::seeded(0xfa17),
             seen_projectiles: Vec::new(),
             ai_shots: BTreeMap::new(),
             ejection_events: Vec::new(),
@@ -896,7 +907,8 @@ impl AiWings {
                     .get(&(slot.id, spec.station.0))
                     .is_some_and(|w| w.source == slot.aircraft.gun());
                 if !gun {
-                    spec.store.inhibited = on;
+                    spec.store.inhibited =
+                        on || self.damaged_stations.contains(&(slot.id, spec.station.0));
                 }
             }
         }
@@ -1359,6 +1371,18 @@ impl AiWings {
                     target.jammer_active = false;
                 }
             }
+            // An aircraft whose own flight has ended, in a crash or a fatal
+            // system failure such as a dead pilot or failed structure, is
+            // lost; combat takes over its wreck and its last attacker gets
+            // the kill.
+            if actor.flight().crashed
+                && let Some(target) = targets.iter_mut().find(|t| t.id == slot.id)
+                && target.hp > 0
+            {
+                target.hp = 0;
+                target.radar_emitting = false;
+                target.jammer_active = false;
+            }
         }
         self.record_formation_trace();
         self.formation_reports();
@@ -1485,7 +1509,7 @@ impl AiWings {
     /// Damage and death flow from the combat world into the actors: an actor
     /// whose target row lost hit points is told it was hit, and one whose row
     /// reached zero stops flying.
-    fn mirror_damage_in(&mut self, targets: &[live::Target]) {
+    fn mirror_damage_in(&mut self, targets: &mut [live::Target]) {
         for slot in &self.slots {
             let Some(target) = targets.iter().find(|t| t.id == slot.id) else {
                 continue;
@@ -1531,6 +1555,83 @@ impl AiWings {
                 }
             }
         }
+        for target in targets.iter_mut().filter(|t| t.hp > 0) {
+            self.deliver_faults(target);
+        }
+    }
+
+    /// Hand an AI aircraft the system faults its hits caused, always as
+    /// Realistic damage whatever the player's Damage cheat says. Its flight
+    /// systems take each fault, and a hardpoint fault takes out what that
+    /// hardpoint carries, as on the player's aircraft.
+    fn deliver_faults(&mut self, target: &mut live::Target) {
+        use tore_sim::combat::systems::EcmLoss;
+        let Some(actor) = self.mission.actor_mut(target.id) else {
+            return;
+        };
+        let mut hardpoints = Vec::new();
+        {
+            let flight = actor.flight_mut();
+            for (index, &count) in target.faults.counts.iter().enumerate() {
+                while flight.systems.counts[index] < count {
+                    flight.systems.hit(index, flight.throttle);
+                    hardpoints.extend(index.checked_sub(36));
+                }
+            }
+        }
+        let Some(config) = self.configs.get(&target.id) else {
+            return;
+        };
+        let mut equipment = EquipmentFaults::default();
+        for h in hardpoints {
+            if config.external_fuel_lbs[h] > 0. {
+                actor.flight_mut().systems.fuel.external[h] = 0.;
+            } else if let Some(&Some(station)) = config.hardpoint_slots.get(h) {
+                let station = station as u8;
+                self.damaged_stations.insert((target.id, station));
+                for spec in actor.stations_mut() {
+                    if spec.station.0 == station {
+                        spec.store.inhibited = true;
+                    }
+                }
+            } else if h == config.radar_hardpoint {
+                equipment.radar = true;
+            } else if h == config.visual_hardpoint {
+                equipment.visual = true;
+            } else if Some(h) == config.infrared_hardpoint {
+                equipment.infrared = true;
+            } else if Some(h) == config.rwr_hardpoint {
+                equipment.rwr = true;
+            } else if h == config.ecm_hardpoint {
+                let random = &mut self.fault_random;
+                let lost = match tore_sim::combat::systems::ecm_loss(&config.ecm, |n| {
+                    random.below(u32::from(n)) as u16
+                }) {
+                    Some(EcmLoss::Everything) => {
+                        target.jammer = None;
+                        target.jammer_active = false;
+                        None
+                    }
+                    Some(EcmLoss::Chaff) => Some(SeekerClass::Radar),
+                    Some(EcmLoss::Flares) => Some(SeekerClass::Infrared),
+                    None => continue,
+                };
+                let dispensers = actor
+                    .dispensers()
+                    .iter()
+                    .map(|d| tore_sim::ai::threat::DispenserStore {
+                        class: d.class,
+                        count: if lost.is_none_or(|class| class == d.class) {
+                            0
+                        } else {
+                            d.count
+                        },
+                    })
+                    .collect();
+                actor.set_dispensers(dispensers);
+            }
+        }
+        actor.fail_equipment(equipment);
     }
 
     /// One world snapshot: the player first, then every AI aircraft.
@@ -2338,6 +2439,7 @@ pub(crate) mod tests {
             wreck_power: tore_sim::wreck::Power::default(),
             fragment_released: false,
             localized_damage: live::LocalizedDamage::default(),
+            faults: Default::default(),
             category: 0,
         }
     }
@@ -3212,6 +3314,54 @@ pub(crate) mod tests {
         let resting = wings.mission().actor(3).unwrap().flight().position;
         run(&mut wings, &mut targets, 60);
         assert_eq!(wings.mission().actor(3).unwrap().flight().position, resting);
+    }
+
+    /// AI aircraft always take Realistic damage: the faults combat rolled on
+    /// a target reach the aircraft's flight systems, a station fault keeps
+    /// that store out through Air combat guns only, a radar fault blinds it,
+    /// and a fatal failure loses the aircraft to combat.
+    #[test]
+    fn system_faults_reach_the_ai_aircraft_and_a_fatal_one_loses_it() {
+        let (mut wings, mut targets) = build(None);
+        run(&mut wings, &mut targets, 1);
+        let id = targets[2].id;
+        let config = combat_fixture(false).configuration().clone();
+        wings.configs.insert(id, config);
+        let actor = wings.mission.actor_mut(id).unwrap();
+        let mut stations = simple_stations(4, 0, AI_STORE_SPEED);
+        stations[0].station = tore_sim::ai::weapon_service::StationId(0);
+        actor.set_stations(stations);
+        assert!(actor.flight().radar || actor.sensors().is_none());
+        targets[2].faults.counts[5] = 1; // engine power reduced
+        targets[2].faults.counts[36] = 1; // hardpoint 0: station 0
+        targets[2].faults.counts[37] = 1; // hardpoint 1: radar
+        run(&mut wings, &mut targets, 1);
+        let actor = wings.mission.actor(id).unwrap();
+        assert_eq!(actor.flight().systems.counts[5], 1);
+        assert!(actor.flight().systems.power_available() < 1.);
+        assert!(actor.equipment().radar);
+        assert!(!actor.flight().radar);
+        assert!(actor.stations()[0].store.inhibited);
+        wings.set_guns_only(true);
+        wings.set_guns_only(false);
+        assert!(
+            wings.mission.actor(id).unwrap().stations()[0]
+                .store
+                .inhibited
+        );
+        // Delivered once: the counts do not grow on later ticks.
+        run(&mut wings, &mut targets, 2);
+        assert_eq!(
+            wings.mission.actor(id).unwrap().flight().systems.counts[5],
+            1
+        );
+        assert!(targets[2].hp > 0);
+        targets[2].faults.counts[26] = 1; // wing destroyed
+        run(&mut wings, &mut targets, 2);
+        assert_eq!(targets[2].hp, 0);
+        assert!(!wings.mission.actor(id).unwrap().alive());
+        // Other aircraft fly on.
+        assert!(targets.iter().filter(|t| t.hp > 0).count() > 0);
     }
 
     /// B47: the report goes to the aircraft the missile is aimed at and to

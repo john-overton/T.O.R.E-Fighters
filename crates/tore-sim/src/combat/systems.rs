@@ -96,6 +96,63 @@ pub fn select(
     None
 }
 
+/// The faults one hit brings on, in order: at most one chance fault, then the
+/// accumulated-damage milestones. `total` already includes this hit. The same
+/// rules serve the player's aircraft and every AI aircraft.
+pub fn hit_faults(
+    table: &[u8; 45],
+    counts: &[u8; 45],
+    total: i32,
+    capacity: i32,
+    hit: i32,
+    afterburner_available: bool,
+    mut roll: impl FnMut(u16) -> u16,
+) -> Vec<usize> {
+    let mut counts = *counts;
+    let mut faults = Vec::new();
+    let chance = subsystem_chance(total, capacity, hit);
+    if chance > 0
+        && i32::from(roll(100)) < chance
+        && let Some(index) = select(
+            table,
+            &counts,
+            total,
+            capacity,
+            afterburner_available,
+            &mut roll,
+        )
+    {
+        counts[index] += 1;
+        faults.push(index);
+    }
+    faults.extend(accumulated_faults(table, &counts, total, capacity));
+    faults
+}
+
+/// What a damaged ECM suite loses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EcmLoss {
+    /// The jammer, chaff and flares.
+    Everything,
+    Chaff,
+    Flares,
+}
+/// Up to ten rolls of 100; none when every roll lands on something the
+/// aircraft does not carry.
+pub fn ecm_loss(ecm: &Countermeasures, mut roll: impl FnMut(u16) -> u16) -> Option<EcmLoss> {
+    for _ in 0..10 {
+        let r = roll(100);
+        if r < 25 && ecm.mode_flags & 0x110 != 0 {
+            return Some(EcmLoss::Everything);
+        } else if (25..65).contains(&r) && ecm.chaff[0] != 0 {
+            return Some(EcmLoss::Chaff);
+        } else if r >= 65 && ecm.flare[0] != 0 {
+            return Some(EcmLoss::Flares);
+        }
+    }
+    None
+}
+
 /// Fitted cumulative ownship damage milestones, see docs/spec/systems-damage.md.
 /// Returns additional source-eligible faults without changing the chance selector.
 pub fn accumulated_faults(
@@ -155,6 +212,57 @@ mod tests {
         table[21] = 0x11;
         assert_eq!(accumulated_faults(&table, &[0; 45], 25, 100), [21]);
         assert!(accumulated_faults(&[0; 45], &[0; 45], 99, 100).is_empty());
+    }
+    #[test]
+    fn a_hit_rolls_one_chance_fault_then_the_milestones() {
+        let mut table = [0; 45];
+        for index in [19, 36] {
+            table[index] = 0x11;
+        }
+        // Below a third of capacity: no chance roll, no milestone.
+        let mut rolls = 0;
+        let faults = hit_faults(&table, &[0; 45], 20, 100, 20, true, |_| {
+            rolls += 1;
+            0
+        });
+        assert!(faults.is_empty());
+        assert_eq!(rolls, 0);
+        // The chance fault comes first, and a milestone never repeats it.
+        let faults = hit_faults(&table, &[0; 45], 40, 100, 20, true, |n| u16::from(n != 100));
+        assert_eq!(faults, [36, 19]);
+        assert_eq!(hit_faults(&table, &[0; 45], 40, 100, 20, true, |_| 0), [19]);
+        // A failed chance roll leaves only the milestone.
+        assert_eq!(
+            hit_faults(&table, &[0; 45], 40, 100, 20, true, |_| 99),
+            [19]
+        );
+    }
+    #[test]
+    fn a_damaged_ecm_suite_loses_only_what_it_carries() {
+        let mut ecm = Countermeasures {
+            weight: 0,
+            flags: 0,
+            mode_flags: 0,
+            chaff: [0; 4],
+            flare: [0; 4],
+            radar_deception_chance: 0,
+            radar_signature_add: 0,
+            radar_noise_range: [0; 2],
+            infrared_deception_chance: 0,
+            infrared_signature_add: 0,
+            infrared_lose_lock_time: 0,
+        };
+        assert_eq!(ecm_loss(&ecm, |_| 10), None);
+        ecm.flare[0] = 30;
+        let mut rolls = [10, 40, 70].into_iter();
+        assert_eq!(
+            ecm_loss(&ecm, |_| rolls.next().unwrap_or(0)),
+            Some(EcmLoss::Flares)
+        );
+        ecm.chaff[0] = 30;
+        assert_eq!(ecm_loss(&ecm, |_| 40), Some(EcmLoss::Chaff));
+        ecm.mode_flags = 0x10;
+        assert_eq!(ecm_loss(&ecm, |_| 10), Some(EcmLoss::Everything));
     }
     #[test]
     fn native_integer_damage_and_selection_boundaries() {

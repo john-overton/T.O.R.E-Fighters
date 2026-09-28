@@ -652,6 +652,7 @@ fn aircraft_target(id: u32, position: [f64; 3], velocity: [f64; 3], hp: i32) -> 
         wreck_power: crate::wreck::Power::symmetric(2, 20., 30.),
         fragment_released: false,
         localized_damage: LocalizedDamage::default(),
+        faults: Default::default(),
         category: 0x80,
     }
 }
