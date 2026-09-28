@@ -25,8 +25,10 @@ A successful roll creates the existing aircraft explosion effect and sound at
 the wreck's location, removes the entire aircraft model and associated detached
 parts, and stops further wreck motion and rolls. It does not award another kill
 or damage unrelated aircraft. A failed roll leaves the wreck falling. Ground
-impact stops the wreck and all polling. For the player aircraft, ground impact
-also causes a guaranteed explosion, removing the model and its detached pieces.
+impact stops the wreck and all polling. As John requested on 2026-09-28, every
+aircraft's ground impact now explodes and, on land, leaves a 15-minute crash
+site ([explosions](explosions.md)); before that only the player's did. For the
+player aircraft, ground impact also removes the model and its detached pieces.
 This applies both to a falling wreck and a direct fatal ground collision, never
 a safe landing. An earlier airburst prevents a second impact explosion.
 The player wreck continues emitting aircraft damage smoke while falling, even
@@ -92,6 +94,8 @@ Destroyed target orientation comes from the wreck basis, including straight-flig
 fixtures. Ownship continues fixed-tick motion after its destroyed flag is set.
 Airbursts hide ownship exterior, cockpit and mirrors, but leave the existing
 instruments/log available. Destroyed targets remain observable only until they
-hit the ground or explode. Explosions use the existing retail effect assets
+hit the ground or explode. Explosions use the original explosion types, and a
+wreck or aircraft that reaches land leaves a burning crash site
+([explosions](explosions.md)). They use the retail effect assets
 loaded at runtime. Damage before destruction and the current visual-damage gate
 remain as specified in [airframe damage](damage-smoke.md).

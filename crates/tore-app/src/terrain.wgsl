@@ -890,6 +890,47 @@ struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, 
  return vec4<f32>(lit*alpha,alpha);
 }
 
+// Original explosion, fire and crater sheets (effect_renderer.rs). Mode 0
+// faces the camera centered on its point, mode 1 faces the camera with its
+// base on its point, mode 2 lies flat on the ground. Explosions and fire glow in their unlit colors; craters take
+// the scene's light. Craters are drawn pulled a little toward the eye along
+// the view ray, which keeps them on screen where they lie but above uneven
+// terrain.
+struct EffectOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) opacity:f32, @location(2) distance:f32, @location(3) direction:vec3<f32>, @location(4) altitude:f32, @location(5) @interpolate(flat) layer:i32, @location(6) emissive:f32 }
+@vertex fn effect_vertex(@builtin(vertex_index) vertex:u32,@location(0) offset:vec3<f32>,@location(1) extent:vec2<f32>,@location(2) mode:f32,@location(3) cell:vec4<f32>,@location(4) layer:f32,@location(5) opacity:f32,@location(6) emissive:f32)->EffectOut {
+ let corners=array<vec2<f32>,6>(vec2(0.0,0.0),vec2(1.0,0.0),vec2(1.0,1.0),vec2(0.0,0.0),vec2(1.0,1.0),vec2(0.0,1.0));
+ let corner=corners[vertex];
+ let across=(corner.x*2.0-1.0)*extent.x;
+ // `offset` is the sprite's point relative to the eye.
+ var p=offset;
+ if mode<0.5 {
+  p=offset+scene.right.xyz*across+scene.up.xyz*(1.0-corner.y*2.0)*extent.y;
+ } else if mode<1.5 {
+  p=offset+scene.right.xyz*across+scene.up.xyz*(1.0-corner.y)*extent.y;
+ } else {
+  p=offset+vec3<f32>(across,0.0,(corner.y*2.0-1.0)*extent.y);
+  let d=length(p);p=p*(1.0-min(0.02,20.0/max(d,1.0)));
+ }
+ let size=vec2<f32>(textureDimensions(tiles).xy);
+ let uv=(cell.xy+vec2<f32>(0.5)+corner*(cell.zw-vec2<f32>(1.0)))/size;
+ let z=dot(p,scene.forward.xyz);
+ let f=1.7320508*scene.up.w;
+ var out:EffectOut;
+ out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,world_depth_clip(z),z);
+ out.uv=uv;out.opacity=opacity;out.distance=length(p);out.direction=p;out.altitude=p.y+scene.eye.y;out.layer=i32(layer);out.emissive=emissive;return out;
+}
+@fragment fn effect_fragment(in:EffectOut)->@location(0) vec4<f32> {
+ let clear=1.0-clamp(haze(in.distance),0.0,1.0);
+ if in.emissive>0.5 {
+  let color=sample_tile(in.uv,in.layer,base_row(),-1,-1,vec2<f32>(-1.0));
+  let alpha=color.a*in.opacity*clear;
+  return vec4<f32>(color.rgb*alpha,alpha);
+ }
+ let color=sample_tile(in.uv,in.layer,0,-1,-1,ray_rows(in.distance,in.altitude));
+ let alpha=color.a*in.opacity*clear;
+ return vec4<f32>(aerial_perspective(color.rgb,in.direction,in.altitude)*alpha,alpha);
+}
+
 // Source scenery lines are one-pixel strokes with the shared live palette/haze.
 @fragment fn scenery_line_fragment(in:VertexOut)->@location(0) vec4<f32> {
  return scenery(aerial_perspective(in.color,in.direction,in.altitude));

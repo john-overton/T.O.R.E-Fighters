@@ -4,7 +4,7 @@ use crate::{
     aircraft::Airframe,
     flight,
     render_snapshot::{
-        AircraftPose, CombatArt, Damage, DebrisPose, Draw, EffectPose, Engine, PilotPose,
+        AircraftPose, CombatArt, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
         ProjectilePose, RenderSnapshot,
     },
     sim_renderer::Contact,
@@ -237,7 +237,7 @@ impl Combat {
         config: live::Configuration,
         initial_ammo: Option<Vec<u16>>,
     ) -> AppResult<Self> {
-        let mut art = CombatArt::load(data, &h.palette)?;
+        let mut art = CombatArt::load(data)?;
         art.add_weapon_shapes(&config, data);
         Ok(Self {
             art,
@@ -427,7 +427,14 @@ impl Combat {
                     kind: e.kind,
                     position: e.position,
                     ticks: e.ticks,
+                    blast: e.blast,
                 })
+                .collect(),
+            marks: self
+                .state
+                .marks
+                .iter()
+                .map(|m| MarkPose::of(m, self.state.tick()))
                 .collect(),
             debris: self
                 .state
@@ -540,8 +547,72 @@ impl Combat {
         let current = self.snapshot(player, wings);
         self.render.set_current(current);
     }
+    /// An AI aircraft that flew into the ground with hit points left gets a
+    /// crash site where it hit, as a shot-down wreck does when it lands.
+    /// Presentation only; call after each AI step.
+    pub fn ai_crashes(&mut self, wings: &crate::ai_wings::AiWings, world: &World) {
+        let crashed: Vec<_> = wings
+            .mission()
+            .actors()
+            .iter()
+            .filter(|actor| actor.flight().crashed && actor.flight().escape.is_none())
+            .filter(|actor| {
+                self.state
+                    .targets
+                    .iter()
+                    .any(|t| t.id == actor.id() && t.hp > 0)
+            })
+            .map(|actor| (actor.id(), actor.flight().position))
+            .collect();
+        for (id, position) in crashed {
+            let water = world.over_water(position[0], position[2]);
+            self.state.aircraft_crashed(id, position, water);
+        }
+    }
+    /// Developer preview (`TORE_EFFECT_PREVIEW=1`): every explosion type
+    /// 15 to 38 halfway through its animation in a row 2,500 feet ahead,
+    /// surface types on the ground, and a burning crash site with its
+    /// column and three weapon craters on the ground 4,000 feet ahead.
+    pub fn preview_effects(&mut self, s: &flight::State, world: &World) {
+        use tore_sim::combat::{blast, smoke};
+        let (sin, cos) = s.yaw.sin_cos();
+        let (forward, right) = ([sin, 0., cos], [cos, 0., -sin]);
+        let at = |ahead: f64, across: f64| -> Vector {
+            let x = s.position[0] + forward[0] * ahead + right[0] * across;
+            let z = s.position[2] + forward[2] * ahead + right[2] * across;
+            [x, f64::from(world.height(x as f32, z as f32)), z]
+        };
+        for kind in blast::FIRST..=blast::LAST {
+            let row = blast::explosion(kind).expect("table type");
+            let mut position = at(2500., (f64::from(kind) - 26.5) * 120.);
+            if !row.surface {
+                position[1] = s.position[1];
+            }
+            self.state.effects.push(live::Effect {
+                position,
+                kind: live::EffectKind::Destroyed,
+                ticks: u16::from(row.seconds) * 60,
+                blast: Some(kind),
+            });
+        }
+        let site = at(4000., 0.);
+        self.state.aircraft_crashed(u32::MAX, site, false);
+        for (across, size) in [(-900., 3), (-600., 9), (900., 18)] {
+            self.state.marks.push(blast::Mark {
+                position: at(4000., across),
+                kind: blast::MarkKind::Crater(size),
+                ticks: blast::FOREVER,
+                born: 0,
+                serial: u64::MAX - size as u64,
+            });
+        }
+        for _ in 0..1200 {
+            self.state
+                .smoke
+                .step([([site[0], site[1] + 20., site[2]], smoke::Kind::Burning)]);
+        }
+    }
     /// The latest tick's snapshot, uninterpolated.
-    #[allow(dead_code)] // Read by the mission recorder.
     pub fn render_snapshot(&self) -> &RenderSnapshot {
         &self.render.current
     }
@@ -762,17 +833,22 @@ impl Combat {
             events.push(event);
         }
         if s.ground_impact()
-            && let Some(event) = self.state.player_ground_impact(s.position)
+            && let Some(event) = self
+                .state
+                .player_ground_impact(s.position, world.over_water(s.position[0], s.position[2]))
         {
             events.push(event);
         }
+        self.state.smoke.wind = world.wind();
+        self.state.devices.wind = world.wind();
+        self.contrails.wind = world.wind();
         // Stop wreck emissions before advancing smoke on the impact/airburst tick.
-        events.extend(
-            self.state
-                .step(self.input.held || self.controller.held, l, |x, z| {
-                    f64::from(world.height(x as f32, z as f32))
-                }),
-        );
+        events.extend(self.state.step_surface(
+            self.input.held || self.controller.held,
+            l,
+            |x, z| f64::from(world.height(x as f32, z as f32)),
+            |x, z| world.over_water(x, z),
+        ));
         for index in 0..45 {
             while s.systems.counts[index] < self.state.subsystem_counts[index] {
                 s.systems.hit(index, s.throttle);
@@ -2061,8 +2137,8 @@ pub(crate) mod render_hash_tests {
     /// beside loaded models, camera poses and ejected pilots.
     const HASHES: [u64; 5] = [
         0xd383_5c36_01f2_ee53,
-        0x512b_90ca_288a_4dfd,
-        0x8f02_bfe4_efe7_7fb5,
+        0xdd1a_67a0_c439_7ced,
+        0x2f6c_0a1c_b3b7_f4e5,
         0x7ddb_79bb_1315_bf69,
         0x7e3f_dcdd_a149_201d,
     ];
@@ -2275,21 +2351,6 @@ pub(crate) mod render_hash_tests {
             face(0x30 + seed, [2., 0., 0.], 3, "", 0x20),
         ])
     }
-    /// Twelve synthetic effect frames, a different cell count per frame.
-    fn frames(seed: usize) -> Vec<Vec<([f32; 2], [f32; 3])>> {
-        (0..12)
-            .map(|frame| {
-                (0..=(frame + seed) % 4)
-                    .map(|cell| {
-                        (
-                            [cell as f32 / 20. - 0.5, 0.5 - frame as f32 / 20.],
-                            [frame as f32 / 12., cell as f32 / 4., seed as f32 / 8.],
-                        )
-                    })
-                    .collect()
-            })
-            .collect()
-    }
     /// The player's gun and one missile station with a loaded shape.
     fn state() -> live::State {
         let mut config = crate::ai_wings::tests::combat_fixture(false)
@@ -2305,14 +2366,10 @@ pub(crate) mod render_hash_tests {
     pub(crate) fn combat(models: Vec<Airframe>, dummies: Vec<(usize, Vector)>) -> Combat {
         Combat {
             state: state(),
-            art: CombatArt::synthetic(
-                BTreeMap::from([
-                    ("SYNMSL.SH".to_string(), missile_shape(0)),
-                    ("AIMSL.SH".to_string(), missile_shape(1)),
-                ]),
-                frames(1),
-                frames(2),
-            ),
+            art: CombatArt::synthetic(BTreeMap::from([
+                ("SYNMSL.SH".to_string(), missile_shape(0)),
+                ("AIMSL.SH".to_string(), missile_shape(1)),
+            ])),
             contrail_offsets: Vec::new(),
             contrail_sortie: 0,
             contrails: Default::default(),
@@ -2642,6 +2699,7 @@ pub(crate) mod render_hash_tests {
             position,
             kind,
             ticks,
+            blast: None,
         };
         let effects = vec![
             effect(EffectKind::Flare, [10., 5050., 500.], 45),

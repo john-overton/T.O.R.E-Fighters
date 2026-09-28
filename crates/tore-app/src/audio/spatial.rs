@@ -19,15 +19,161 @@ struct SpatialVoice {
     gain_smoothing: f32,
 }
 
+/// A steady sound heard from a place: an engine or a fire. Gain, stereo
+/// and treble follow its mix smoothly, and its pitch its Doppler ratio.
+pub(super) struct Placed {
+    gain: [f32; 2],
+    target: [f32; 2],
+    cutoff: f32,
+    filtered: f32,
+    pitch: f64,
+    target_pitch: f64,
+}
+impl Placed {
+    /// Heard from inside the aircraft: centered, full and unfiltered.
+    pub fn inside() -> Self {
+        Self {
+            gain: [1.; 2],
+            target: [1.; 2],
+            cutoff: 12000.,
+            filtered: 0.,
+            pitch: 1.,
+            target_pitch: 1.,
+        }
+    }
+    pub fn aim(&mut self, mix: Option<Mix>, pitch: f64) {
+        match mix {
+            Some(mix) => {
+                self.target = stereo_gain(mix);
+                self.cutoff = mix.cutoff;
+            }
+            None => {
+                self.target = [1.; 2];
+                self.cutoff = 12000.;
+            }
+        }
+        self.target_pitch = pitch;
+    }
+    /// The playback rate divisor for the pitch now.
+    pub fn pitch(&self) -> f64 {
+        self.pitch
+    }
+    pub fn silent(&self) -> bool {
+        self.gain.iter().chain(&self.target).all(|g| g.abs() < 1e-4)
+    }
+    /// One sample placed in stereo. Gains glide over about 50 ms, so a view
+    /// change crossfades instead of stepping, and pitch over 100 ms.
+    pub fn apply(&mut self, sample: f32, rate: f64) -> [f32; 2] {
+        let glide = 1. - (-1. / (0.05 * rate)).exp() as f32;
+        for (gain, target) in self.gain.iter_mut().zip(self.target) {
+            *gain += glide * (target - *gain);
+        }
+        self.pitch += (1. - (-1. / (0.1 * rate)).exp()) * (self.target_pitch - self.pitch);
+        let value = if self.cutoff >= 12000. {
+            sample
+        } else {
+            let alpha = 1. - (-std::f64::consts::TAU * f64::from(self.cutoff) / rate).exp() as f32;
+            self.filtered += alpha * (sample - self.filtered);
+            self.filtered
+        };
+        [value * self.gain[0], value * self.gain[1]]
+    }
+}
+
+struct LoopVoice {
+    voice: Voice,
+    placed: Placed,
+    gain: f32,
+    heard: bool,
+}
+
+/// Loops played at once, loudest first.
+const MAX_LOOPS: usize = 10;
+
 #[derive(Default)]
 pub(super) struct Scene {
     field: Field<Arc<Clip>>,
     passes: Passes,
     voices: Vec<SpatialVoice>,
+    loops: BTreeMap<(u8, u64), LoopVoice>,
 }
 impl Scene {
     pub fn clear(&mut self) {
         *self = Self::default();
+    }
+    /// This tick's fires and engines, heard from `listener` moving at
+    /// `listener_velocity`. The loudest play; the rest, and any that ended,
+    /// fade out.
+    pub fn loops(
+        &mut self,
+        clips: &BTreeMap<String, Arc<Clip>>,
+        listener: Listener,
+        listener_velocity: [f64; 3],
+        sources: &[super::LoopSource],
+        enabled: bool,
+    ) {
+        for voice in self.loops.values_mut() {
+            voice.heard = false;
+        }
+        if enabled {
+            let mut heard: Vec<_> = sources
+                .iter()
+                .map(|s| {
+                    let mix = acoustics::loop_mix(
+                        s.position,
+                        listener,
+                        s.reference,
+                        s.maximum,
+                        f64::from(s.gain),
+                    );
+                    (mix, s)
+                })
+                .filter(|(mix, _)| mix.gain > 0.)
+                .collect();
+            heard.sort_by(|a, b| b.0.gain.total_cmp(&a.0.gain));
+            for (mix, source) in heard.into_iter().take(MAX_LOOPS) {
+                let Some(clip) = clips.get(&source.clip) else {
+                    continue;
+                };
+                let pitch = acoustics::doppler(
+                    source.position,
+                    source.velocity,
+                    listener.position,
+                    listener_velocity,
+                    super::DOPPLER_LIMITS,
+                );
+                let voice = self.loops.entry(source.key).or_insert_with(|| LoopVoice {
+                    voice: Voice {
+                        clip: clip.clone(),
+                        // Start each loop somewhere different so two fires
+                        // or two jets never sound in step.
+                        position: (source.key.1 % 997) as f64 / 997. * clip.samples.len() as f64,
+                    },
+                    placed: {
+                        let mut placed = Placed::inside();
+                        placed.gain = [0.; 2];
+                        placed.pitch = pitch;
+                        placed
+                    },
+                    gain: 0.,
+                    heard: true,
+                });
+                voice.placed.aim(Some(mix), pitch);
+                voice.gain = mix.gain;
+                voice.heard = true;
+            }
+        }
+        for voice in self.loops.values_mut().filter(|v| !v.heard) {
+            voice.placed.aim(
+                Some(Mix {
+                    gain: 0.,
+                    pan: 0.,
+                    cutoff: voice.placed.cutoff,
+                }),
+                voice.placed.target_pitch,
+            );
+        }
+        self.loops.retain(|_, v| v.heard || !v.placed.silent());
     }
     pub fn tick(
         &mut self,
@@ -53,6 +199,12 @@ impl Scene {
         }
         for event in emissions.iter().chain(&passes) {
             let name = match event.kind {
+                Kind::Blast(kind) => {
+                    match tore_sim::combat::blast::recording(kind, event.position) {
+                        Some(name) => name,
+                        None => continue,
+                    }
+                }
                 Kind::Impact => "&EXPL3.5K",
                 Kind::Explosion => "&EXPL12.5K",
                 Kind::AircraftPass => "&AIRPASS.11K",
@@ -149,6 +301,12 @@ impl Scene {
             out[0] += value * v.stereo_gain[0];
             out[1] += value * v.stereo_gain[1];
         }
+        for v in self.loops.values_mut() {
+            let sample = v.voice.next(rate / v.placed.pitch(), true);
+            let [left, right] = v.placed.apply(sample, rate);
+            out[0] += left;
+            out[1] += right;
+        }
         out
     }
 }
@@ -162,6 +320,7 @@ fn stereo_gain(mix: Mix) -> [f32; 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    const COCKPIT: f32 = acoustics::COCKPIT_GAIN;
     fn listener() -> Listener {
         Listener {
             position: [0.; 3],
@@ -179,6 +338,56 @@ mod tests {
             }),
         )])
     }
+    #[test]
+    fn fires_loop_nearby_through_the_canopy_and_fade_out_when_gone() {
+        let clips = BTreeMap::from([(
+            "&FIRE.5K".to_string(),
+            Arc::new(Clip {
+                samples: vec![192; 8000],
+                rate: 8000.,
+            }),
+        )]);
+        let fire = |x: f64| super::super::LoopSource {
+            key: (0, 1),
+            clip: "&FIRE.5K".into(),
+            position: [x, 0., 0.],
+            velocity: [0.; 3],
+            gain: 0.3,
+            reference: 100.,
+            maximum: 2000.,
+        };
+        let level = |external, x| {
+            let mut scene = Scene::default();
+            let l = Listener {
+                external,
+                ..listener()
+            };
+            scene.loops(&clips, l, [0.; 3], &[fire(x)], true);
+            let mut out = [0.; 2];
+            for _ in 0..4000 {
+                out = scene.sample(8000.);
+            }
+            (scene, out[1])
+        };
+        let (_, near) = level(true, 50.);
+        let (_, inside) = level(false, 50.);
+        let (_, far) = level(true, 1000.);
+        let (beyond, silent) = level(true, 2500.);
+        assert!(near > 0.05, "{near}");
+        assert!((inside / near - COCKPIT).abs() < 0.02, "{inside} {near}");
+        assert!(far > 0. && far < near / 5.);
+        assert_eq!(silent, 0.);
+        assert!(beyond.loops.is_empty());
+        // A fire that goes out fades, then its loop is dropped.
+        let (mut scene, _) = level(true, 50.);
+        scene.loops(&clips, listener(), [0.; 3], &[], true);
+        for _ in 0..8000 {
+            scene.sample(8000.);
+        }
+        scene.loops(&clips, listener(), [0.; 3], &[], true);
+        assert!(scene.loops.is_empty());
+    }
+
     #[test]
     fn arrivals_are_stereo_faded_and_mute_drops_pending_and_active() {
         let clips = clips();

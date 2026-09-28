@@ -784,6 +784,10 @@ pub struct Effect {
     pub position: Vector,
     pub kind: EffectKind,
     pub ticks: u16,
+    /// The original explosion type drawn and heard, after its variety
+    /// roll; `None` for launches, decoys, debris landing and effects from
+    /// recordings older than explosion types.
+    pub blast: Option<u8>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -867,6 +871,12 @@ pub struct State {
     /// Ground contact volumes keyed by stable target ID. Aircraft remain spheres.
     ground_bounds: BTreeMap<u32, crate::airport::OrientedBox>,
     pub effects: Vec<Effect>,
+    /// Craters and crash-site fires, oldest first. Presentation only.
+    pub marks: Vec<super::blast::Mark>,
+    /// Aircraft already given a crash site, so a crash is marked once.
+    crashed: std::collections::BTreeSet<u32>,
+    marks_made: u64,
+    blast_rolls: super::blast::Rolls,
     /// Presentation events retain emission positions independently of visual life.
     /// Bounded even when a headless host never drains them.
     sound_events: Vec<crate::acoustics::Emission>,
@@ -1023,6 +1033,10 @@ impl State {
             missile_threats: super::threats::ThreatService::new(PLAYER_OWNER),
             ground_bounds: BTreeMap::new(),
             effects: vec![],
+            marks: vec![],
+            crashed: Default::default(),
+            marks_made: 0,
+            blast_rolls: Default::default(),
             sound_events: vec![],
             smoke: super::smoke::Smoke::default(),
             devices: Default::default(),
@@ -1579,19 +1593,81 @@ impl State {
         Some(Event::PlayerDestroyed)
     }
     pub fn player_airburst(&mut self, position: Vector) -> Option<Event> {
-        self.player_explosion(position, Event::Airburst(0))
-    }
-    pub fn player_ground_impact(&mut self, position: Vector) -> Option<Event> {
-        self.player_explosion(position, Event::PlayerGroundImpact)
-    }
-    fn player_explosion(&mut self, position: Vector, event: Event) -> Option<Event> {
-        if self.player_explosion_reported {
+        if !self.player_explosion() {
             return None;
+        }
+        self.blast(position, EffectKind::Destroyed, super::blast::AIRCRAFT);
+        Some(Event::Airburst(0))
+    }
+    /// The player's aircraft hit land or, with `water`, the sea.
+    pub fn player_ground_impact(&mut self, position: Vector, water: bool) -> Option<Event> {
+        if !self.player_explosion() {
+            return None;
+        }
+        self.aircraft_crashed(PLAYER_OWNER, position, water);
+        Some(Event::PlayerGroundImpact)
+    }
+    fn player_explosion(&mut self) -> bool {
+        if self.player_explosion_reported {
+            return false;
         }
         self.player_explosion_reported = true;
         self.debris.retain(|piece| piece.owner != 0);
-        self.effect(position, EffectKind::Destroyed);
-        Some(event)
+        true
+    }
+    /// An aircraft reached the ground: a crash explosion, and on land a
+    /// crater with a fire and a smoke column for 15 minutes. Once per
+    /// aircraft; presentation only (docs/spec/explosions.md).
+    pub fn aircraft_crashed(&mut self, id: u32, position: Vector, water: bool) {
+        use super::blast::{self, MarkKind};
+        if !self.crashed.insert(id) {
+            return;
+        }
+        if water {
+            self.blast(position, EffectKind::Destroyed, blast::CRASH_WATER);
+            return;
+        }
+        self.blast(position, EffectKind::Destroyed, blast::CRASH_LAND);
+        self.crater(position, blast::CRASH_CRATER, blast::CRASH_TICKS);
+        if self
+            .marks
+            .iter()
+            .filter(|m| m.kind == MarkKind::Fire)
+            .count()
+            == blast::MAX_FIRES
+        {
+            let oldest = self.marks.iter().position(|m| m.kind == MarkKind::Fire);
+            self.marks.remove(oldest.unwrap());
+        }
+        self.mark(position, MarkKind::Fire, blast::CRASH_TICKS);
+    }
+    fn mark(&mut self, position: Vector, kind: super::blast::MarkKind, ticks: u32) {
+        self.marks.push(super::blast::Mark {
+            position,
+            kind,
+            ticks,
+            born: self.tick,
+            serial: self.marks_made,
+        });
+        self.marks_made += 1;
+    }
+    fn crater(&mut self, position: Vector, size: u8, ticks: u32) {
+        use super::blast::{MAX_CRATERS, MarkKind};
+        if size == 0 {
+            return;
+        }
+        let craters = self
+            .marks
+            .iter()
+            .filter(|m| matches!(m.kind, MarkKind::Crater(_)));
+        if craters.count() == MAX_CRATERS {
+            let oldest = self
+                .marks
+                .iter()
+                .position(|m| matches!(m.kind, MarkKind::Crater(_)));
+            self.marks.remove(oldest.unwrap());
+        }
+        self.mark(position, MarkKind::Crater(size), ticks);
     }
     pub fn rounds(&self, station: usize) -> u16 {
         self.ammo[station] & 0x7fff
@@ -2180,27 +2256,46 @@ impl State {
         self.decoy_log.drain(..).collect()
     }
 
+    /// A launch flash or a piece of debris landing: no explosion type.
     fn effect(&mut self, position: Vector, kind: EffectKind) {
-        let sound = match kind {
-            EffectKind::Hit | EffectKind::Ground => Some(crate::acoustics::Kind::Impact),
-            EffectKind::Destroyed => Some(crate::acoustics::Kind::Explosion),
-            _ => None,
+        self.push_effect(Effect {
+            position,
+            kind,
+            ticks: 45,
+            blast: None,
+        });
+    }
+    /// One original explosion: its type after the variety roll sets what is
+    /// drawn, for how long, and what is heard.
+    fn blast(&mut self, position: Vector, kind: EffectKind, explosion: u8) {
+        // A weapon without a reviewed type (synthetic fixtures) keeps the
+        // family its effect kind implies (fitted).
+        let explosion = if super::blast::explosion(explosion).is_some() {
+            explosion
+        } else {
+            match kind {
+                EffectKind::Hit => 18,
+                EffectKind::Ground => 15,
+                _ => super::blast::AIRCRAFT,
+            }
         };
-        if let Some(kind) = sound {
-            self.emit_sound(position, kind);
-        }
+        let explosion = super::blast::vary(explosion, &mut self.blast_rolls);
+        let Some(row) = super::blast::explosion(explosion) else {
+            return;
+        };
+        self.emit_sound(position, crate::acoustics::Kind::Blast(explosion));
+        self.push_effect(Effect {
+            position,
+            kind,
+            ticks: u16::from(row.seconds) * 120,
+            blast: Some(explosion),
+        });
+    }
+    fn push_effect(&mut self, effect: Effect) {
         if self.effects.len() == MAX_EFFECTS {
             self.effects.remove(0);
         }
-        self.effects.push(Effect {
-            position,
-            kind,
-            ticks: if kind == EffectKind::Destroyed {
-                240
-            } else {
-                45
-            },
-        });
+        self.effects.push(effect);
     }
     /// Exactly one host 120 Hz tick. Pausing means NOT calling this method.
     /// The host-to-native time conversion and stage ordering are authored here.
@@ -2209,6 +2304,17 @@ impl State {
         held: bool,
         launcher: Launcher,
         ground: impl Fn(f64, f64) -> f64,
+    ) -> Vec<Event> {
+        self.step_surface(held, launcher, ground, |_, _| false)
+    }
+    /// [`Self::step`] where `water` says whether a point lies over the sea,
+    /// which picks water explosions and leaves no crater there.
+    pub fn step_surface(
+        &mut self,
+        held: bool,
+        launcher: Launcher,
+        ground: impl Fn(f64, f64) -> f64,
+        water: impl Fn(f64, f64) -> bool,
     ) -> Vec<Event> {
         let mut events = Vec::new();
         self.enforce_guns_only();
@@ -2240,6 +2346,12 @@ impl State {
             e.ticks = e.ticks.saturating_sub(1);
         }
         self.effects.retain(|e| e.ticks > 0);
+        for m in &mut self.marks {
+            if m.ticks != super::blast::FOREVER {
+                m.ticks -= 1;
+            }
+        }
+        self.marks.retain(|m| m.ticks > 0);
         // Shared observations are produced before this tick's firing decision,
         // so the scope, the target view and weapon support all agree.
         self.sensors.controls = launcher.controls;
@@ -2618,6 +2730,7 @@ impl State {
         // Living target poses remain owned by their existing flight service.
         let old_targets: Vec<_> = self.targets.iter().map(|t| t.position).collect();
         let mut airbursts = Vec::new();
+        let mut crashes = Vec::new();
         for t in &mut self.targets {
             if t.hp > 0 {
                 for i in 0..3 {
@@ -2637,14 +2750,19 @@ impl State {
                     t.airborne = false;
                     if phase == crate::wreck::Phase::Exploded {
                         airbursts.push((t.id, t.position));
+                    } else {
+                        crashes.push((t.id, t.position));
                     }
                 }
             }
         }
         for (id, position) in airbursts {
             self.debris.retain(|piece| piece.owner != id);
-            self.effect(position, EffectKind::Destroyed);
+            self.blast(position, EffectKind::Destroyed, super::blast::AIRCRAFT);
             events.push(Event::Airburst(id));
+        }
+        for (id, position) in crashes {
+            self.aircraft_crashed(id, position, water(position[0], position[2]));
         }
         let previous_player = self
             .previous_player_position
@@ -2949,7 +3067,7 @@ impl State {
                         let section =
                             LocalizedDamage::section_segment(previous, p.position, &player);
                         player_hits.push((amount, section, is_gun(w), p.owner, w.flags));
-                        impacts.push((position, EffectKind::Hit));
+                        impacts.push((position, EffectKind::Hit, w.effects.object_explosion, 0));
                         if !is_gun(w) {
                             events.push(Event::Jolt(Jolt {
                                 target: None,
@@ -3043,18 +3161,32 @@ impl State {
                         self.ledger.kill(credit);
                         events.push(Event::Destroyed(t.id));
                     }
-                    impacts.push((
-                        position,
-                        if t.hp == 0 {
-                            EffectKind::Destroyed
-                        } else {
-                            EffectKind::Hit
-                        },
-                    ));
+                    impacts.push((position, EffectKind::Hit, w.effects.object_explosion, 0));
+                    if t.hp == 0 {
+                        impacts.push((
+                            position,
+                            EffectKind::Destroyed,
+                            if t.role == TargetRole::Aircraft {
+                                super::blast::AIRCRAFT
+                            } else {
+                                super::blast::GROUND_OBJECT
+                            },
+                            0,
+                        ));
+                    }
                 } else {
                     self.ledger.resolve(p.id, Resolution::Missed);
                     events.push(Event::Ground);
-                    impacts.push((position, EffectKind::Ground));
+                    if water(position[0], position[2]) {
+                        impacts.push((position, EffectKind::Ground, w.effects.water_explosion, 0));
+                    } else {
+                        impacts.push((
+                            position,
+                            EffectKind::Ground,
+                            w.effects.land_explosion,
+                            w.effects.crater_size,
+                        ));
+                    }
                 }
                 return false;
             }
@@ -3096,8 +3228,9 @@ impl State {
                 });
             }
         }
-        for (p, kind) in impacts {
-            self.effect(p, kind);
+        for (p, kind, explosion, crater) in impacts {
+            self.blast(p, kind, explosion);
+            self.crater(p, crater, super::blast::FOREVER);
         }
         use super::smoke::Kind;
         for t in self
@@ -3121,6 +3254,22 @@ impl State {
                 Kind::Aircraft,
             ));
         }
+        // A burning crash site's column rises from just above its fire.
+        sources.extend(
+            self.marks
+                .iter()
+                .filter(|m| m.kind == super::blast::MarkKind::Fire)
+                .map(|m| {
+                    (
+                        [
+                            m.position[0],
+                            m.position[1] + super::smoke::BURNING_SOURCE_FT,
+                            m.position[2],
+                        ],
+                        Kind::Burning,
+                    )
+                }),
+        );
         self.smoke.step(sources);
         self.devices.step(&ground);
         let mut debris_impacts = Vec::new();
@@ -3261,7 +3410,7 @@ impl State {
             }
         }
         for blast in blasts {
-            self.effect(blast, EffectKind::Destroyed);
+            self.blast(blast, EffectKind::Destroyed, super::blast::AIRCRAFT);
         }
     }
 }
@@ -3605,19 +3754,37 @@ mod tests {
         assert!(s.smoke.puffs.iter().all(|p| p.kind == Kind::Aircraft));
         let mut airburst = s.clone();
         airburst.player_airburst(l.position);
-        s.player_ground_impact([l.position[0], 0., l.position[2]]);
+        s.player_ground_impact([l.position[0], 0., l.position[2]], false);
         for _ in 0..120 {
             s.step(false, l, |_, _| 0.);
             airburst.step(false, l, |_, _| 0.);
         }
+        let wreck_puffs = |state: &State| {
+            state
+                .smoke
+                .puffs
+                .iter()
+                .filter(|p| p.kind == Kind::Aircraft)
+                .count()
+        };
         for state in [&s, &airburst] {
-            assert_eq!(state.smoke.puffs.len(), 10);
-            assert!(state.smoke.puffs.iter().all(|p| p.age >= 120));
+            assert_eq!(wreck_puffs(state), 10);
+            assert!(
+                state
+                    .smoke
+                    .puffs
+                    .iter()
+                    .filter(|p| p.kind == Kind::Aircraft)
+                    .all(|p| p.age >= 120)
+            );
         }
+        // Only the crash on the ground leaves a burning site behind.
+        assert!(s.smoke.puffs.iter().any(|p| p.kind == Kind::Burning));
+        assert!(airburst.smoke.puffs.iter().all(|p| p.kind != Kind::Burning));
         for _ in 0..960 {
             s.step(false, l, |_, _| 0.);
         }
-        assert!(s.smoke.puffs.is_empty());
+        assert_eq!(wreck_puffs(&s), 0);
         let mut grounded = fixture(false);
         grounded.player_hp = 0;
         l.position[1] = 0.;
@@ -3631,21 +3798,25 @@ mod tests {
     fn sound_emissions_retain_exact_impact_positions_and_are_consumed_once() {
         use crate::acoustics::Kind;
         let mut s = fixture(false);
-        s.effect([100., 200., 300.], EffectKind::Ground);
-        s.effect([-100., 400., 900.], EffectKind::Destroyed);
-        s.effect([100., 200., 300.], EffectKind::Ground);
+        s.blast([100., 200., 300.], EffectKind::Ground, 17);
+        s.blast([-100., 400., 900.], EffectKind::Destroyed, 34);
+        s.blast([100., 200., 300.], EffectKind::Ground, 17);
+        // Launch flashes and debris landing are silent.
+        s.effect([0.; 3], EffectKind::Launch);
         let sounds = s.take_sound_events();
         assert_eq!(sounds.len(), 3);
         assert_eq!(sounds[0].position, [100., 200., 300.]);
-        assert_eq!(sounds[0].kind, Kind::Impact);
+        assert_eq!(sounds[0].kind, Kind::Blast(17));
         assert_eq!(sounds[1].position, [-100., 400., 900.]);
-        assert_eq!(sounds[1].kind, Kind::Explosion);
+        assert_eq!(sounds[1].kind, Kind::Blast(34));
+        assert_eq!(s.effects[1].blast, Some(34));
+        assert_eq!(s.effects[1].ticks, 240);
         assert!(s.take_sound_events().is_empty());
         // Clearing short-lived visuals cannot erase an already emitted wave.
         s.effects.clear();
         assert_eq!(sounds.len(), 3);
         for _ in 0..1000 {
-            s.effect([0.; 3], EffectKind::Hit);
+            s.blast([0.; 3], EffectKind::Hit, 18);
         }
         assert_eq!(s.take_sound_events().len(), 256);
     }
@@ -3730,6 +3901,60 @@ mod tests {
         assert!(state.player_hp < before);
     }
 
+    #[test]
+    fn a_crash_on_land_burns_for_15_minutes_once_and_the_sea_leaves_nothing() {
+        use super::super::blast::{self, MarkKind};
+        use super::super::smoke::Kind;
+        let mut s = fixture(false);
+        s.aircraft_crashed(9, [100., 0., 200.], false);
+        s.aircraft_crashed(9, [100., 0., 200.], false);
+        s.aircraft_crashed(10, [900., 0., 200.], true);
+        let kinds: Vec<_> = s.marks.iter().map(|m| m.kind).collect();
+        assert_eq!(
+            kinds,
+            [MarkKind::Crater(blast::CRASH_CRATER), MarkKind::Fire]
+        );
+        assert!(s.marks.iter().all(|m| m.ticks == blast::CRASH_TICKS));
+        // Two crash explosions: one on land, one in the water.
+        let explosions: Vec<_> = s.effects.iter().filter_map(|e| e.blast).collect();
+        assert_eq!(explosions.len(), 2);
+        assert!([35, 36, 37].contains(&explosions[0]));
+        assert_eq!(explosions[1], blast::CRASH_WATER);
+        let l = launcher();
+        for _ in 0..600 {
+            s.step(false, l, |_, _| 0.);
+        }
+        let column: Vec<_> = s
+            .smoke
+            .puffs
+            .iter()
+            .filter(|p| p.kind == Kind::Burning)
+            .collect();
+        assert_eq!(column.len(), 50);
+        assert!(column.iter().all(|p| p.position[1] >= 20.));
+        for _ in 600..blast::CRASH_TICKS {
+            s.step(false, l, |_, _| 0.);
+        }
+        assert!(s.marks.is_empty());
+    }
+    #[test]
+    fn weapon_craters_stay_for_the_mission_and_the_oldest_goes_past_256() {
+        use super::super::blast::{FOREVER, MAX_CRATERS, MarkKind};
+        let mut s = fixture(false);
+        s.crater([0.; 3], 0, FOREVER);
+        assert!(s.marks.is_empty());
+        for i in 0..=MAX_CRATERS {
+            s.crater([i as f64, 0., 0.], 9, FOREVER);
+        }
+        assert_eq!(s.marks.len(), MAX_CRATERS);
+        assert_eq!(s.marks[0].position[0], 1.);
+        for _ in 0..1000 {
+            s.step(false, launcher(), |_, _| 0.);
+        }
+        assert_eq!(s.marks.len(), MAX_CRATERS);
+        assert!(s.marks.iter().all(|m| m.kind == MarkKind::Crater(9)));
+    }
+
     /// A gun round fired into the player's cockpit, stepped until it lands
     /// or the player is destroyed.
     fn cockpit_gun_hit(damage: crate::cheats::Damage) -> (State, Vec<Event>) {
@@ -3781,7 +4006,7 @@ mod tests {
             [0.; 3],
         ));
         assert_eq!(
-            s.player_ground_impact([0., 0., 0.]),
+            s.player_ground_impact([0., 0., 0.], false),
             Some(Event::PlayerGroundImpact)
         );
         assert!(s.debris.is_empty());
@@ -3792,7 +4017,7 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(s.player_ground_impact([0., 0., 0.]), None);
+        assert_eq!(s.player_ground_impact([0., 0., 0.], false), None);
         assert_eq!(s.player_airburst([0., 0., 0.]), None);
     }
     #[test]
@@ -3824,18 +4049,22 @@ mod tests {
             [0.; 3],
         ));
         let mut bursts = 0;
+        let mut exploded = false;
         for _ in 0..240 {
             bursts += s
                 .step(false, launcher(), |_, _| 0.)
                 .iter()
                 .filter(|e| **e == Event::Airburst(77))
                 .count();
+            exploded |= s.effects.iter().any(|e| e.kind == EffectKind::Destroyed);
         }
         assert_eq!(bursts, 1);
         assert!(!s.targets[0].airborne);
         assert_eq!(s.kills, 0);
         assert!(s.debris.iter().all(|p| p.owner != 77));
-        assert!(s.effects.iter().any(|e| e.kind == EffectKind::Destroyed));
+        assert!(exploded);
+        // An airburst leaves no crash site.
+        assert!(s.marks.is_empty());
         assert_eq!(s.player_airburst([0., 5000., 0.]), Some(Event::Airburst(0)));
         assert_eq!(s.player_airburst([0., 5000., 0.]), None);
     }
@@ -5109,15 +5338,22 @@ mod tests {
         let mut s = fixture(false);
         s.targets.push(target(7, [0., 1000., 150.], 20, 0x80));
         let mut kills = 0;
+        let mut exploded = false;
         for _ in 0..180 {
             for e in s.step(true, launcher(), |_, _| 0.) {
                 if matches!(e, Event::Destroyed(7)) {
                     kills += 1;
                 }
             }
+            // The victim's own aircraft explosion, one second long.
+            exploded |= s.effects.iter().any(|e| {
+                e.kind == EffectKind::Destroyed
+                    && e.blast
+                        .is_some_and(|b| super::super::blast::explosion(b).is_some())
+            });
         }
         assert_eq!((s.hits, s.kills, kills, s.targets[0].hp), (2, 1, 1, 0));
-        assert!(s.effects.iter().any(|e| e.kind == EffectKind::Destroyed));
+        assert!(exploded);
         // The debrief ledger saw the same rounds, hits, damage and kill.
         let fired = s.ledger.total(|k| k.owner == PLAYER_OWNER);
         assert_eq!(fired.launched, s.shots);

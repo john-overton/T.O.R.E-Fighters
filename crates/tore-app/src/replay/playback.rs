@@ -65,6 +65,8 @@ pub struct Playback {
     smoke: Option<(u64, [Smoke; 2])>,
     vapor: Option<(u64, Option<Vapor>)>,
     commits: Vec<u64>,
+    /// Every crater and fire the recording started.
+    marks: Vec<(u64, tore_replay::EffectSpawn)>,
 }
 
 impl Playback {
@@ -75,6 +77,7 @@ impl Playback {
             presentation: Presentation::from_header(recording.header()),
             identities: Identities::of(&recording),
             commits: commit_ticks(last),
+            marks: convert::recorded_marks(&recording),
             recording,
             first,
             last,
@@ -142,12 +145,14 @@ impl Playback {
         } else {
             Vec::new()
         };
-        Some(convert::snapshot(
-            frame,
-            &playing,
-            &self.presentation,
-            &self.identities,
-        ))
+        let mut snapshot = convert::snapshot(frame, &playing, &self.presentation, &self.identities);
+        snapshot.marks = convert::marks_at(&self.marks, frame.tick);
+        Some(snapshot)
+    }
+
+    /// The craters and fires alive at `tick`.
+    pub fn marks_at(&self, tick: u64) -> Vec<crate::render_snapshot::MarkPose> {
+        convert::marks_at(&self.marks, tick)
     }
 
     /// The picture at `alpha` of the way from the tick before `tick` to
@@ -171,18 +176,37 @@ impl Playback {
     pub fn smoke(&mut self, tick: u64) -> &[Smoke; 2] {
         if self.smoke.as_ref().is_none_or(|(at, _)| *at != tick) {
             let mut layers = [Smoke::default(), Smoke::default()];
+            for layer in &mut layers {
+                layer.wind = self.recording.header().world.wind_fps;
+            }
             for puff in self.recording.live_puffs(tick).unwrap_or_default() {
                 let kind = match puff.kind {
                     PuffKind::Missile => Kind::Missile,
                     PuffKind::Aircraft => Kind::Aircraft,
                     PuffKind::Contrail => Kind::Contrail,
+                    PuffKind::Burning => Kind::Burning,
                     PuffKind::Other(_) => continue,
                 };
+                // Every puff drifts with the recorded wind, and a crash-site
+                // column also in its cone, as flight drifts them.
+                let seconds = puff.age_ticks as f64 / 120.;
+                let wind = self.recording.header().world.wind_fps;
+                let mut drift = [wind[0], wind[2]];
+                if kind == Kind::Burning {
+                    let mut release = puff.position;
+                    release[1] -= Kind::Burning.rise() * seconds;
+                    let cone = tore_sim::combat::smoke::burning_drift(release);
+                    drift = [drift[0] + cone[0], drift[1] + cone[1]];
+                }
+                let mut position = puff.position;
+                position[0] += drift[0] * seconds;
+                position[2] += drift[1] * seconds;
                 layers[usize::from(puff.layer == LAYER_CONTRAILS)]
                     .puffs
                     .push_back(Puff {
-                        position: puff.position,
+                        position,
                         kind,
+                        drift,
                         age: u16::try_from(puff.age_ticks).unwrap_or(u16::MAX),
                     });
             }
@@ -245,6 +269,16 @@ mod tests {
 
     fn playback(dir: &TempDir, name: &str) -> Playback {
         Playback::new(Arc::new(fixture::recording(dir.path(), name)))
+    }
+
+    #[test]
+    fn a_replayed_crash_column_ages_as_flight_ages_it() {
+        use tore_sim::combat::smoke;
+        assert_eq!(
+            PuffKind::Burning.lifetime_ticks(),
+            Some(u64::from(smoke::BURNING_LIFETIME_TICKS))
+        );
+        assert_eq!(PuffKind::Burning.rise_fps(), smoke::Kind::Burning.rise());
     }
 
     #[test]

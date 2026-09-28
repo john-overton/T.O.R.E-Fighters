@@ -194,7 +194,8 @@ Implemented in the separate retail-terrain worktree:
 
 Remaining original-behavior research: exact generic land-plane scale/projection,
 class-dependent visual rules, distance-dependent shape/terrain presentation,
-dynamic and destroyed scenery appearances, runtime decals, and live campaign
+dynamic and destroyed scenery appearances, runtime decals other than the
+weapon and crash craters ([explosions](spec/explosions.md)), and live campaign
 progression/destruction persistence. The selectable variants are static source
 layouts, not a campaign engine. Missing TREE1/TREE2 resources do not authorize
 invented vegetation. These boundaries are explicit in the behavior spec.

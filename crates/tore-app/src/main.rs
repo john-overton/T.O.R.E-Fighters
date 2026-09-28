@@ -23,6 +23,7 @@ mod crew_voice;
 mod damage_art;
 mod debrief;
 mod diagnostics;
+mod effect_renderer;
 mod ejection_art;
 mod engine_material;
 mod flight;
@@ -3288,6 +3289,7 @@ impl ApplicationHandler for App {
                                 bridge.report_weapon_hits(&events);
                                 let stepped =
                                     bridge.step(&mut self.combat.state, &self.flight, &self.world);
+                                self.combat.ai_crashes(&bridge, &self.world);
                                 for (id, message, friendly) in bridge.ejection_events.drain(..) {
                                     if let Some(recording) = &mut self.replay_recorder {
                                         recording.wing_ejection(id, &message, friendly);
@@ -3478,6 +3480,22 @@ impl ApplicationHandler for App {
                                         .map(|(name, _)| name.as_str())
                                         .collect::<Vec<_>>(),
                                     self.flight.position,
+                                    Some((self.flight.position, self.flight.velocity)),
+                                    &audio::loop_sources(
+                                        self.combat.render_snapshot(),
+                                        &self
+                                            .combat
+                                            .models()
+                                            .iter()
+                                            .chain([&self.hornet])
+                                            .map(|model| {
+                                                (
+                                                    model.profile.id,
+                                                    audio::EngineSounds::of(&model.profile),
+                                                )
+                                            })
+                                            .collect::<Vec<_>>(),
+                                    ),
                                 );
                             }
                             if let Some(recording) = &mut self.replay_recorder {
@@ -3601,6 +3619,12 @@ impl ApplicationHandler for App {
                             &self.combat.art.smoke,
                             [&self.combat.state.smoke, &self.combat.contrails],
                             &self.combat.state.devices,
+                        );
+                        let picture = self.combat.render_snapshot();
+                        renderer.effects(
+                            &self.combat.art.effects,
+                            &picture.effects,
+                            &picture.marks,
                         );
                         renderer.emitters(
                             &self.combat.state.devices,
@@ -5756,6 +5780,7 @@ fn ai_probe_run(
                 );
             }
         }
+        combat.ai_crashes(&bridge, world);
         if let Some(recording) = &mut recording {
             for (id, message, friendly) in bridge.ejection_events.iter().skip(noted_ejections) {
                 recording.wing_ejection(*id, message, *friendly);
@@ -8776,6 +8801,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         flight.bay_open = value > 0.;
     }
 
+    if std::env::var_os("TORE_EFFECT_PREVIEW").is_some() {
+        combat.preview_effects(&flight, &world);
+        combat.refresh_render(&flight, None);
+    }
     if let Some(weapon_slot) = weapon_slot {
         if weapon_slot == 0 || weapon_slot > combat.state.ammo.len() {
             return Err("weapon slot outside this aircraft's PT loadout".into());

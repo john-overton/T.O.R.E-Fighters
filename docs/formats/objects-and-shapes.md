@@ -475,10 +475,11 @@ The local FA manual describes effects of damage but does not supply these smoke
 or mesh thresholds. [Implementation rules](../spec/damage-smoke.md) keep tuning
 separate from this resource evidence.
 
-`GRDLRGA.PIC` was also decoded and visually inspected: 256x252, twelve apparent
-ground-explosion frames in three columns and four rows. The host samples 80x63
-cells and scales this down for debris contact. This is a reviewed original asset
-with fitted use; no claim is made that retail bullets selected this sheet.
+`GRDLRGA.PIC` was also decoded and visually inspected: 256x252, twelve
+ground-explosion frames in three columns and four rows. `EXP.SH` gives its
+exact layout and those of the other explosion, crater and fire sheets, and
+names it for explosion type 37 ([explosion resources](explosions.md)). The host
+also uses it, scaled down, for debris contact; that use is fitted.
 
 Opaque imported world geometry participates in the shared
 [surface lighting and shadow pass](../spec/surface-lighting.md). Smooth mode

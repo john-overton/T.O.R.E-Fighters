@@ -56,20 +56,28 @@ before playback begins. An explosion 11,150 ft away at sea level arrives after
 shortens the delay; moving away extends it. Pause freezes propagation and PCM;
 restart, leaving flight and effects-off clear pending and active spatial sound.
 
-Amplitude follows inverse distance beyond a near-field reference, then a smooth
-fade over the final 20 percent of the maximum range. It is zero at the maximum.
-This models free-field pressure falloff with fitted audibility limits, without
-claiming absolute sound-pressure calibration. During playback, distance and
-stereo direction follow the listener relative to the retained emission position.
-Gain changes use a 20 ms smoothing time constant to avoid steps when the listener
-moves or turns. The treble cutoff is
-`12000 / (1 + distance/3000)` Hz, clamped to 250..12000 Hz. One-shots have 5 ms
-attack and 30 ms release ramps. The waveform's own envelope supplies the decay.
+Explosions follow the original: full level within the type's full-level
+distance, then a straight-line fade to nothing at its silent distance, and no
+sound at all past 20,000 feet, where the original refuses a request. Each
+explosion type names its own recordings and distances in the
+[explosion specification](spec/explosions.md); a type 30 missile kill is at
+full level out to 2,000 feet and still at about a fifth of it at 20,000 feet.
+Other one-shots keep an agent-fitted law: inverse distance beyond a near-field
+reference, then a smooth fade over the final 20 percent of the maximum range,
+zero at the maximum. Neither claims absolute sound-pressure calibration. During
+playback, distance and stereo direction follow the listener relative to the
+retained emission position. Gain changes use a 20 ms smoothing time constant to
+avoid steps when the listener moves or turns. The treble cutoff is
+`12000 / (1 + distance/6000)` Hz, clamped to 250..12000 Hz (agent choice,
+2026-09-28, halving the earlier loss so distant sound carries). One-shots have
+5 ms attack and 30 ms release ramps. The waveform's own envelope supplies the
+decay.
 
 | Cue | Recording | Reference distance | Maximum distance | Peak gain |
 | --- | --- | ---: | ---: | ---: |
-| Impact | Existing `&EXPL3.5K` | 80 | 8,000 | 0.4 |
-| Explosion | Existing `&EXPL12.5K` | 400 | 40,000 | 0.65 |
+| Explosion type 15 to 38 | The type's recordings, one drawn | Full-level distance, 100 to 3,000 | Silent distance, 10,000 to 25,000; none past 20,000 | 0.4 |
+| Impact, recordings made before explosion types | `&EXPL3.5K` | 80 | 8,000 | 0.4 |
+| Explosion, recordings made before explosion types | `&EXPL12.5K` | 400 | 40,000 | 0.65 |
 | Aircraft pass | `&AIRPASS.11K` | 200 | 2,000 | 0.5 |
 | Missile pass | `&MPASS.5K` | 80 | 1,500 | 0.5 |
 | Sonic boom | `&SNCBOOM.11K` | 500 | 13,000 | 0.8 |
@@ -84,9 +92,40 @@ travel. A chaff or flare release takes its distances and level from the
 against the 255 of a weapon release. The player's own release plays in the
 cockpit at once, centered, at its peak gain, as the original does. In external
 views, and for AI releases, it travels from the release point.
-Cockpit avionics, radio, controls and engine loops stay local.
+Cockpit avionics, radio and controls stay local; engine loops follow the view
+(see below).
 At most 256 waves wait in flight and 16 spatial voices play; overload discards
 the oldest pending wave and replaces only a quieter active voice.
+
+## Cockpit and external views
+
+John asked on 2026-09-28 for sound to travel better and be louder outside than
+in the cockpit, starting with outside sound at 40 percent in the cockpit.
+
+From a cockpit view, every sound from outside the aircraft (explosions, passes,
+booms, other aircraft's releases, fires and other engines) plays at 40 percent
+of its level with everything above 2 kHz removed, as heard through the canopy.
+The player's own engine, releases, warnings, radio and avionics are inside the
+aircraft and stay as they were. The original plays sounds from the viewed
+aircraft centered at full level and does not muffle outside sound; the canopy
+filter is opinionated.
+
+From an external view the player's engine and afterburner are heard from the
+aircraft: full within 150 feet, falling with distance to nothing at the 15,000
+feet every FA aircraft file gives its engine loop, panned by direction, at
+twice the cockpit level (opinionated). Other aircraft's engines, and crash-site
+fires, play the same way from where they are in every view: another aircraft's
+loop at its engine's 75 percent throttle level (fitted), its afterburner loop
+added while lit, and a fire at 0.3 within 100 feet, silent at 2,000. The ten
+loudest loops play; the rest fade out. The engine loops of the aircraft a
+replay watches play as that aircraft's engine.
+
+Loops and the player's engine outside take a Doppler pitch from the source's
+and the camera's motion along the line between them at the local speed of
+sound, held between half and double pitch (fitted). A camera flying with its
+aircraft hears no shift; a fly-by camera hears the pitch drop as the aircraft
+passes. Their gain glides over 50 ms and their pitch over 100 ms, so switching
+views crossfades rather than stepping.
 
 ## Passing objects and booms
 
@@ -169,7 +208,11 @@ through the same plain-data calls as flight: `speech`, `airport_speech`,
 `wingman_ejected`, and `spatial_tick` once per recorded tick with the replay
 camera as the listener and sources from `snapshot_sources`, which builds
 them from a drawn snapshot exactly as `spatial_sources` builds them from
-live state. A recorded chaff or flare release keeps its own-aircraft mark,
+live state. The same tick carries the watched aircraft's position and
+velocity for its engine, and `loop_sources` built from the snapshot, with the
+recording's craters and fires, as live flight builds them. A recording names
+an explosion's sound by its type (`blast30`); recordings made before
+explosion types keep `impact` and `explosion`. A recorded chaff or flare release keeps its own-aircraft mark,
 so the player's plays centered while the replay camera sits in the
 player's aircraft, as in the cockpit. Three calls exist only for replays. `replay_loops` stands in for
 `flight`: it sets the watched aircraft's engine and afterburner loops and

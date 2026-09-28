@@ -193,7 +193,7 @@ impl SmokeRenderer {
                     position: p.position,
                     radius: p.radius(),
                     cell: match p.kind {
-                        Kind::Aircraft => AIRCRAFT_CELL,
+                        Kind::Aircraft | Kind::Burning => AIRCRAFT_CELL,
                         Kind::Missile | Kind::Contrail => MISSILE_CELL,
                     },
                     opacity: p.opacity(),

@@ -688,7 +688,7 @@ impl Viewer {
                 models.push(Airframe::load(resources, *id)?);
             }
         }
-        let mut art = CombatArt::load(resources, &ownship.palette)?;
+        let mut art = CombatArt::load(resources)?;
         art.add_shapes(
             recording.weapons().filter_map(|w| w.shape.as_deref()),
             resources,
@@ -1858,6 +1858,7 @@ impl Viewer {
         // the scene with every lit afterburner, as live flight draws them.
         let devices = self.devices.at(tick, &self.world);
         renderer.smoke(&self.art.smoke, [smoke, contrails], devices);
+        renderer.effects(&self.art.effects, &picture.effects, &picture.marks);
         let (player_outlets, model_outlets) = &self.outlets;
         let mut glows = Vec::new();
         if picture.player.engine.flame {
@@ -2152,7 +2153,7 @@ mod tests {
         static MADE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let recording = Arc::new(f::recording(dir.path(), &format!("viewer-{n}")));
-        let art = CombatArt::synthetic(BTreeMap::new(), vec![Vec::new(); 12], vec![Vec::new(); 12]);
+        let art = CombatArt::synthetic(BTreeMap::new());
         let mut ownship = crate::combat::render_hash_tests::hornet_airframe(true);
         // Menus measure their text, so the font needs its glyphs.
         ownship.font = crate::replay::panels::tests::font();
@@ -2754,7 +2755,7 @@ mod tests {
             ..Default::default()
         };
         let recording = Arc::new(f::recording(dir.path(), "bad-speed"));
-        let art = CombatArt::synthetic(BTreeMap::new(), Vec::new(), Vec::new());
+        let art = CombatArt::synthetic(BTreeMap::new());
         assert!(
             Viewer::assemble(
                 Path::new("x"),

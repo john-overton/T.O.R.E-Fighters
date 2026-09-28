@@ -110,6 +110,11 @@ pub struct SpatialTick {
     pub releases: Vec<String>,
     /// Where the player's aircraft is, where its releases sound from.
     pub player: [f64; 3],
+    /// Where the watched aircraft is and how fast it moves: its engine is
+    /// heard from there in an external view.
+    pub engine: Option<([f64; 3], [f64; 3])>,
+    /// Fires and other aircraft's engines.
+    pub loops: Vec<audio::LoopSource>,
 }
 
 impl Cue {
@@ -136,6 +141,8 @@ impl Cue {
                 &tick.emissions,
                 &tick.releases.iter().map(String::as_str).collect::<Vec<_>>(),
                 tick.player,
+                tick.engine,
+                &tick.loops,
             ),
             Self::Loops { engine, stall } => audio.replay_loops(engine.as_ref(), *stall),
         }
@@ -395,7 +402,7 @@ impl ReplaySound {
                 while events.get(at).is_some_and(|e| e.tick == tick) {
                     at += 1;
                 }
-                self.tick(tick, &events[begin..at], listener, cues);
+                self.tick(tick, &events[begin..at], listener, selected, cues);
             }
         }
         self.steady(last, selected, cues);
@@ -408,6 +415,7 @@ impl ReplaySound {
         tick: u64,
         events: &[TimedEvent],
         listener: Listener,
+        selected: u32,
         cues: &mut Vec<(u64, Cue)>,
     ) {
         // Inside a gap the last frame before it holds.
@@ -437,12 +445,20 @@ impl ReplaySound {
         let Some(frame) = frame else {
             return;
         };
-        let snapshot = convert::snapshot(
+        let mut snapshot = convert::snapshot(
             frame,
             &[],
             &self.playback.presentation,
             &self.playback.identities,
         );
+        snapshot.marks = self.playback.marks_at(tick);
+        let engine = frame
+            .aircraft
+            .iter()
+            .find(|a| a.id == selected)
+            .map(|a| (a.position, a.velocity));
+        // The watched aircraft's engine plays as the engine loops.
+        snapshot.targets.retain(|pose| pose.id != selected);
         cues.push((
             tick,
             Cue::Tick(Box::new(SpatialTick {
@@ -451,6 +467,8 @@ impl ReplaySound {
                 emissions,
                 releases,
                 player: snapshot.player.position,
+                engine,
+                loops: audio::loop_sources(&snapshot, &self.engines),
             })),
         ));
     }
@@ -580,19 +598,8 @@ fn order_voiced(event: &Event) -> bool {
 /// while the camera sits in the player's aircraft, as in its cockpit.
 fn emission(event: &Event) -> Option<Emission> {
     use vocab::field;
-    let name = event.string(field::SOUND)?;
     // Named as the recorder names them.
-    let kind = [
-        Kind::Impact,
-        Kind::Explosion,
-        Kind::AircraftPass,
-        Kind::MissilePass,
-        Kind::SonicBoom,
-        Kind::Chaff,
-        Kind::Flare,
-    ]
-    .into_iter()
-    .find(|kind| format!("{kind:?}").to_lowercase() == name)?;
+    let kind = Kind::from_name(event.string(field::SOUND)?)?;
     Some(Emission {
         kind,
         position: [

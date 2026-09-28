@@ -49,6 +49,12 @@ struct Mixer {
     ejection_warning: bool,
     engine_gain: f32,
     burner_gain: f32,
+    /// Where the engine and afterburner loops are heard from: inside the
+    /// cockpit, or from the aircraft in an external view.
+    engine_place: spatial::Placed,
+    /// The listener at the previous tick, for its velocity; a view change
+    /// starts again.
+    last_listener: Option<(u8, [f64; 3])>,
     voices: Vec<Voice>,
     ui_voices: Vec<Voice>,
     radio: VecDeque<RadioVoice>,
@@ -61,6 +67,89 @@ pub struct Audio {
     clips: BTreeMap<String, Arc<Clip>>,
     radio_phrases: BTreeMap<String, String>,
 }
+/// A looping sound heard from where it is: a burning crash site or another
+/// aircraft's engine. Presentation only (docs/audio.md).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoopSource {
+    /// Which loop this is from tick to tick: a kind and an identity.
+    pub key: (u8, u64),
+    pub clip: String,
+    pub position: [f64; 3],
+    pub velocity: [f64; 3],
+    /// Level within `reference` feet; it falls with distance and is silent
+    /// at `maximum`.
+    pub gain: f32,
+    pub reference: f64,
+    pub maximum: f64,
+}
+/// Lowest and highest Doppler pitch ratio (fitted).
+pub const DOPPLER_LIMITS: (f64, f64) = (0.5, 2.0);
+/// An aircraft engine is heard out to the 15,000 feet every FA aircraft
+/// file gives its engine loop, at full level within 150 feet (fitted).
+const ENGINE_REFERENCE_FT: f64 = 150.;
+const ENGINE_MAXIMUM_FT: f64 = 15000.;
+/// Heard from outside, an engine is this much louder than from its cockpit
+/// (opinionated, John 2026-09-28: sound outside is louder).
+const ENGINE_OUTSIDE: f64 = 2.;
+/// A crash-site fire's loop level (fitted) and full-level distance; the
+/// original's own fire loop reaches 2,000 feet.
+const FIRE_LEVEL: f32 = 0.3;
+const FIRE_REFERENCE_FT: f64 = 100.;
+/// Another aircraft's engine plays at this throttle's level (fitted: an AI
+/// throttle is not observed here).
+const OTHER_THROTTLE: f64 = 0.75;
+
+/// The fires and other aircraft's engines in a picture, as loops. `engines`
+/// names each aircraft type's engine recordings.
+pub fn loop_sources(
+    snapshot: &crate::render_snapshot::RenderSnapshot,
+    engines: &[(tore_formats::aircraft::AircraftId, EngineSounds)],
+) -> Vec<LoopSource> {
+    use tore_sim::combat::blast::{self, MarkKind};
+    let mut out: Vec<LoopSource> = snapshot
+        .marks
+        .iter()
+        .filter(|m| m.kind == MarkKind::Fire && m.strength > 0.)
+        .map(|m| LoopSource {
+            key: (0, blast::pick(m.position, 4, u16::MAX).into()),
+            clip: blast::FIRE_SOUND.into(),
+            position: m.position,
+            velocity: [0.; 3],
+            gain: FIRE_LEVEL * m.strength,
+            reference: FIRE_REFERENCE_FT,
+            maximum: blast::FIRE_SOUND_FT,
+        })
+        .collect();
+    for pose in &snapshot.targets {
+        let Some(sounds) = pose
+            .aircraft
+            .and_then(|id| engines.iter().find(|(known, _)| *known == id))
+            .map(|(_, sounds)| sounds)
+        else {
+            continue;
+        };
+        if !pose.airborne || pose.crashed || !pose.engine.lit {
+            continue;
+        }
+        let place = |key: u8, clip: &Option<String>, gain: f32| {
+            clip.as_ref().map(|clip| LoopSource {
+                key: (key, u64::from(pose.id)),
+                clip: clip.clone(),
+                position: pose.position,
+                velocity: pose.velocity,
+                gain,
+                reference: ENGINE_REFERENCE_FT,
+                maximum: ENGINE_MAXIMUM_FT,
+            })
+        };
+        out.extend(place(1, &sounds.engine, engine_gain(OTHER_THROTTLE)));
+        if pose.engine.afterburner {
+            out.extend(place(2, &sounds.burner, BURNER_GAIN));
+        }
+    }
+    out
+}
+
 /// Presentation-only observations. No aircraft or missile control is changed.
 pub fn spatial_sources(
     combat: &tore_sim::combat::live::State,
@@ -280,6 +369,8 @@ impl Audio {
             ejection_warning: false,
             engine_gain: 0.,
             burner_gain: 0.,
+            engine_place: spatial::Placed::inside(),
+            last_listener: None,
             voices: Vec::with_capacity(8),
             ui_voices: Vec::with_capacity(8),
             radio: VecDeque::new(),
@@ -473,6 +564,9 @@ impl Audio {
         }
     }
     /// Exactly one simulation tick, independent of rendering and the device clock.
+    /// `engine` is where the engine loops' aircraft is and how fast it
+    /// moves; `loops` are this tick's fires and other engines.
+    #[allow(clippy::too_many_arguments)]
     pub fn spatial_tick(
         &self,
         listener: tore_sim::acoustics::Listener,
@@ -480,31 +574,20 @@ impl Audio {
         emissions: &[tore_sim::acoustics::Emission],
         releases: &[&str],
         player_position: [f64; 3],
+        engine: Option<([f64; 3], [f64; 3])>,
+        loops: &[LoopSource],
     ) {
         if let Ok(mut mixer) = self.mixer.lock() {
-            if mixer.flight_paused {
-                return;
-            }
-            let enabled = mixer.effects_on;
-            if enabled {
-                for name in releases {
-                    if let Some(clip) = self.clips.get(*name) {
-                        if listener.external {
-                            mixer
-                                .spatial
-                                .weapon(clip.clone(), player_position, listener);
-                        } else if mixer.voices.len() < 8 {
-                            mixer.voices.push(Voice {
-                                clip: clip.clone(),
-                                position: 0.,
-                            });
-                        }
-                    }
-                }
-            }
-            mixer
-                .spatial
-                .tick(&self.clips, listener, sources, emissions, enabled);
+            mixer.spatial_tick(
+                &self.clips,
+                listener,
+                sources,
+                emissions,
+                releases,
+                player_position,
+                engine,
+                loops,
+            );
         }
     }
     pub fn controls(&self, before: &crate::flight::State, after: &crate::flight::State) {
@@ -546,6 +629,8 @@ impl Audio {
             m.burner_gain = 0.;
             m.voices.clear();
             m.radio.clear();
+            m.engine_place = spatial::Placed::inside();
+            m.last_listener = None;
             m.flight_paused = false;
             m.ejection_warning = false;
         }
@@ -968,17 +1053,98 @@ impl Mixer {
             self.radio.extend(voices);
         }
     }
+    /// One simulation tick of traveling sound, loops and the engine's place
+    /// ([`Audio::spatial_tick`]).
+    #[allow(clippy::too_many_arguments)]
+    fn spatial_tick(
+        &mut self,
+        clips: &BTreeMap<String, Arc<Clip>>,
+        listener: tore_sim::acoustics::Listener,
+        sources: &[tore_sim::acoustics::Source],
+        emissions: &[tore_sim::acoustics::Emission],
+        releases: &[&str],
+        player_position: [f64; 3],
+        engine: Option<([f64; 3], [f64; 3])>,
+        loops: &[LoopSource],
+    ) {
+        if self.flight_paused {
+            return;
+        }
+        let enabled = self.effects_on;
+        let velocity = match self.last_listener {
+            Some((view, last)) if view == listener.view => {
+                std::array::from_fn(|i| (listener.position[i] - last[i]) * 120.)
+            }
+            _ => [0.; 3],
+        };
+        self.last_listener = Some((listener.view, listener.position));
+        match engine.filter(|_| listener.external) {
+            Some((position, moving)) => {
+                let mix = tore_sim::acoustics::loop_mix(
+                    position,
+                    listener,
+                    ENGINE_REFERENCE_FT,
+                    ENGINE_MAXIMUM_FT,
+                    ENGINE_OUTSIDE,
+                );
+                let pitch = tore_sim::acoustics::doppler(
+                    position,
+                    moving,
+                    listener.position,
+                    velocity,
+                    DOPPLER_LIMITS,
+                );
+                self.engine_place.aim(Some(mix), pitch);
+            }
+            None => self.engine_place.aim(None, 1.),
+        }
+        self.spatial
+            .loops(clips, listener, velocity, loops, enabled);
+        if enabled {
+            for name in releases {
+                if let Some(clip) = clips.get(*name) {
+                    if listener.external {
+                        self.spatial.weapon(clip.clone(), player_position, listener);
+                    } else if self.voices.len() < 8 {
+                        self.voices.push(Voice {
+                            clip: clip.clone(),
+                            position: 0.,
+                        });
+                    }
+                }
+            }
+        }
+        self.spatial
+            .tick(clips, listener, sources, emissions, enabled);
+    }
     fn cancel_radio(&mut self, source: RadioSource) {
         self.radio.retain(|voice| voice.source != source);
     }
     fn frame(&mut self, rate: f64) -> [f32; 2] {
         let local = self.sample(rate);
-        let spatial = if self.effects_on && self.flight_on && !self.flight_paused {
+        let mut spatial = if self.effects_on && self.flight_on && !self.flight_paused {
             self.spatial.sample(rate)
         } else {
             [0.; 2]
         };
-        spatial.map(|v| (local + v).clamp(-1., 1.))
+        if self.flight_on && !self.flight_paused && self.effects_on {
+            // The engine and afterburner, from the cockpit or the aircraft.
+            let pitch = self.engine_place.pitch();
+            let mut engine = 0.;
+            if let Some(v) = &mut self.engine {
+                engine += v.next(rate / pitch, true) * self.engine_gain;
+            }
+            if let Some(v) = &mut self.burner {
+                engine += v.next(rate / pitch, true) * self.burner_gain;
+            }
+            let [left, right] = self.engine_place.apply(engine, rate);
+            spatial[0] += left;
+            spatial[1] += right;
+        }
+        [
+            (local + spatial[0]).clamp(-1., 1.),
+            (local + spatial[1]).clamp(-1., 1.),
+        ]
     }
     fn sample(&mut self, rate: f64) -> f32 {
         let mut value = self.seeker.sample(
@@ -995,16 +1161,12 @@ impl Mixer {
         if self.music_on && !(self.flight_on && self.flight_paused) {
             value += self.music.next(rate) * 0.16;
         }
-        if self.flight_on && !self.flight_paused && self.effects_on {
-            if let Some(v) = &mut self.stall {
-                value += v.next(rate, true) * 0.4;
-            }
-            if let Some(v) = &mut self.engine {
-                value += v.next(rate, true) * self.engine_gain;
-            }
-            if let Some(v) = &mut self.burner {
-                value += v.next(rate, true) * self.burner_gain;
-            }
+        if self.flight_on
+            && !self.flight_paused
+            && self.effects_on
+            && let Some(v) = &mut self.stall
+        {
+            value += v.next(rate, true) * 0.4;
         }
         if self.effects_on && !(self.flight_on && self.flight_paused) {
             for voice in &mut self.voices {
@@ -1100,6 +1262,134 @@ mod tests {
             assert_eq!(paused.frame(8000.), reference.frame(8000.));
         }
     }
+    #[test]
+    fn the_engine_leaves_the_cockpit_in_external_views_louder_panned_and_doppler_shifted() {
+        use tore_sim::acoustics::Listener;
+        let flat = |value: u8| {
+            Arc::new(Clip {
+                samples: vec![value; 8000],
+                rate: 8000.,
+            })
+        };
+        let listener = |external| Listener {
+            position: [0.; 3],
+            right: [1., 0., 0.],
+            view: if external { 1 } else { 0 },
+            external,
+        };
+        let settled = |m: &mut Mixer| {
+            let mut out = [0.; 2];
+            for _ in 0..8000 {
+                out = m.frame(8000.);
+            }
+            out
+        };
+        let clips = BTreeMap::new();
+        let mut m = test_mixer();
+        m.stall = None;
+        m.engine = Some(Voice {
+            clip: flat(192),
+            position: 0.,
+        });
+        m.engine_gain = 0.2;
+        // In the cockpit: centered at the engine's own level, wherever the
+        // aircraft is.
+        let aircraft = ([100., 0., 0.], [0.; 3]);
+        m.spatial_tick(
+            &clips,
+            listener(false),
+            &[],
+            &[],
+            &[],
+            [0.; 3],
+            Some(aircraft),
+            &[],
+        );
+        let inside = settled(&mut m);
+        assert!((inside[0] - 0.1).abs() < 1e-4 && (inside[1] - 0.1).abs() < 1e-4);
+        // Outside, 100 feet to the right: louder, and all in the right ear.
+        m.spatial_tick(
+            &clips,
+            listener(true),
+            &[],
+            &[],
+            &[],
+            [0.; 3],
+            Some(aircraft),
+            &[],
+        );
+        let outside = settled(&mut m);
+        assert!(outside[0].abs() < 1e-4, "{outside:?}");
+        assert!(outside[1] > inside[1] * 1.9, "{outside:?}");
+        // Flying past a still camera: higher approaching, lower leaving.
+        let tick = |m: &mut Mixer, x: f64| {
+            m.spatial_tick(
+                &clips,
+                listener(true),
+                &[],
+                &[],
+                &[],
+                [0.; 3],
+                Some(([x, 0., 50.], [600., 0., 0.])),
+                &[],
+            );
+            for _ in 0..2400 {
+                m.frame(8000.);
+            }
+            m.engine_place.pitch()
+        };
+        assert!(tick(&mut m, -2000.) > 1.3);
+        assert!(tick(&mut m, 2000.) < 0.8);
+    }
+
+    #[test]
+    fn explosion_types_play_their_own_recordings_quieter_from_the_cockpit() {
+        use tore_sim::acoustics::{Emission, Kind, Listener};
+        let clips: BTreeMap<String, Arc<Clip>> = tore_sim::combat::blast::recordings()
+            .map(|name| {
+                (
+                    name.to_string(),
+                    Arc::new(Clip {
+                        samples: vec![192; 8000],
+                        rate: 8000.,
+                    }),
+                )
+            })
+            .collect();
+        let heard = |external| {
+            let mut m = test_mixer();
+            m.stall = None;
+            m.spatial_tick(
+                &clips,
+                Listener {
+                    position: [0.; 3],
+                    right: [1., 0., 0.],
+                    view: 0,
+                    external,
+                },
+                &[],
+                &[Emission {
+                    kind: Kind::Blast(30),
+                    position: [0., 0., 10.],
+                    arrived: true,
+                    own: false,
+                }],
+                &[],
+                [0.; 3],
+                None,
+                &[],
+            );
+            let mut out = [0.; 2];
+            for _ in 0..400 {
+                out = m.frame(8000.);
+            }
+            out[0]
+        };
+        let (outside, inside) = (heard(true), heard(false));
+        assert!(outside > 0.1, "{outside}");
+        assert!((inside / outside - tore_sim::acoustics::COCKPIT_GAIN).abs() < 0.02);
+    }
+
     #[test]
     fn ir_recording_keeps_playhead_on_lock_and_volume_tracks_hud_percent() {
         use tore_sim::combat::live::SeekerTone;
@@ -1217,6 +1507,8 @@ mod tests {
             ejection_warning: false,
             engine_gain: 0.,
             burner_gain: 0.,
+            engine_place: spatial::Placed::inside(),
+            last_listener: None,
             voices: Vec::new(),
             ui_voices: Vec::new(),
             radio: VecDeque::new(),

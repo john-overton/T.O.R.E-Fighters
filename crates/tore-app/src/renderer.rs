@@ -174,6 +174,16 @@ impl Renderer {
         self.sim
             .smoke(&self.device, &self.queue, art, smoke, devices);
     }
+    /// Explosions, craters and crash-site fires.
+    pub fn effects(
+        &mut self,
+        art: &crate::effect_renderer::Art,
+        effects: &[crate::render_snapshot::EffectPose],
+        marks: &[crate::render_snapshot::MarkPose],
+    ) {
+        self.sim
+            .effects(&self.device, &self.queue, art, effects, marks);
+    }
     /// Burning flares, chaff and lit afterburners, which light the scene.
     pub fn emitters(
         &mut self,

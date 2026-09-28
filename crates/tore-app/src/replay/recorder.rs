@@ -226,6 +226,8 @@ pub struct Recorder {
     registered: BTreeSet<u32>,
     weapons: BTreeMap<String, u32>,
     effects: EffectWatch,
+    /// Serial of the next crater or fire to record.
+    marks: u64,
     surface: BTreeMap<u32, i32>,
     watches: BTreeMap<u32, Watch>,
     shots: BTreeMap<u32, Shot>,
@@ -305,6 +307,7 @@ impl Recorder {
             registered: BTreeSet::new(),
             weapons: BTreeMap::new(),
             effects: EffectWatch::default(),
+            marks: 0,
             surface: BTreeMap::new(),
             watches: BTreeMap::new(),
             shots: BTreeMap::new(),
@@ -641,7 +644,7 @@ impl Recorder {
         for emission in emissions {
             let [x, y, z] = emission.position;
             let mut event = Event::new(kind::AUDIO_EFFECT)
-                .with(field::SOUND, format!("{:?}", emission.kind).to_lowercase())
+                .with(field::SOUND, emission.kind.name())
                 .with(field::X_FT, x)
                 .with(field::Y_FT, y)
                 .with(field::Z_FT, z);
@@ -766,6 +769,12 @@ impl Recorder {
         frame.debris = convert::debris_states(&snapshot.debris);
         frame.escapees = snapshot.pilots.iter().map(convert::escapee_state).collect();
         frame.new_effects = self.effects.started(&snapshot.effects);
+        for mark in &tick.combat.state.marks {
+            if mark.serial >= self.marks {
+                frame.new_effects.push(convert::mark_spawn(mark));
+                self.marks = mark.serial + 1;
+            }
+        }
         frame.new_puffs = new_puffs(tick.combat);
 
         let mut events = Vec::new();
@@ -1649,6 +1658,7 @@ fn new_puffs(combat: &combat::Combat) -> Vec<replay::PuffSpawn> {
                     Kind::Missile => replay::PuffKind::Missile,
                     Kind::Aircraft => replay::PuffKind::Aircraft,
                     Kind::Contrail => replay::PuffKind::Contrail,
+                    Kind::Burning => replay::PuffKind::Burning,
                 },
                 position: puff.position,
             });

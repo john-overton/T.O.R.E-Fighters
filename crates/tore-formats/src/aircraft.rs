@@ -599,6 +599,49 @@ pub const COMBAT_RESOURCES: &[&str] = &[
     "&EXPL10.5K",
     "&EXPL12.5K",
     "&SPLASH3.11K",
+    // The explosion table's recordings (docs/spec/explosions.md).
+    "&MEDEXP1.5K",
+    "&MEDEXP2.5K",
+    "&AIREXP1.11K",
+    "&AIREXP2.11K",
+    "&AIREXP3.11K",
+    "&AIREXP4.11K",
+    "&AIREXP5.11K",
+    "&BIGEXP1.5K",
+    "&BIGEXP2.5K",
+    "&WTREXP1.5K",
+    "&WTREXP2.5K",
+    "&BULLTS1.5K",
+    "&BULLTS2.8K",
+    "&BULLTS3.5K",
+    "&BULLTS4.5K",
+    "&EMPEXP.11K",
+    // Explosion, crater and fire art (EXP.SH, CRATER.SH, FIRE.SH).
+    "AIRSML.PIC",
+    "AIRMED.PIC",
+    "AIRMED2.PIC",
+    "AIRMED3.PIC",
+    "AIRLRG.PIC",
+    "GRNDSML.PIC",
+    "GRNDMED.PIC",
+    "GRNDMED3.PIC",
+    "GRNDLRG.PIC",
+    "GRNDLRG2.PIC",
+    "WATSML.PIC",
+    "WATLRG.PIC",
+    "FLAKA.PIC",
+    "FLAKB.PIC",
+    "FLAKC.PIC",
+    "EMPEX.PIC",
+    "AIRLRGAG.PIC",
+    "AIRLRGC.PIC",
+    "AIRLRGD.PIC",
+    "AIRSMLA.PIC",
+    "AIRSMLB2.PIC",
+    "GRDLRGA.PIC",
+    "DIRTEXP.PIC",
+    "CRATERS.PIC",
+    "FIREA.PIC",
     "&FIRE.5K",
     "&CHAFF.5K",
     "&FLARE.5K",
@@ -1168,23 +1211,24 @@ mod dependency_tests {
     #[test]
     fn combat_roots_follow_textures_and_missing_art_fails() {
         let mut r = resources();
-        r.insert("FIRE.SH".into(), b"FIREA.PIC\0".to_vec());
+        // A texture the shape names that is not itself a combat root.
+        r.insert("FIRE.SH".into(), b"FIREB.PIC\0".to_vec());
         let missing = archive(r.clone(), None);
         assert!(
             dependency_report(&[&missing], &[], true)
                 .unwrap_err()
                 .to_string()
-                .contains("FIREA.PIC")
+                .contains("FIREB.PIC")
         );
-        r.insert("FIREA.PIC".into(), vec![0]);
+        r.insert("FIREB.PIC".into(), vec![0]);
         let a = archive(r, None);
         let report = dependency_report(&[&a], &[], true).unwrap();
-        assert!(report.resources.contains("FIREA.PIC"));
+        assert!(report.resources.contains("FIREB.PIC"));
         assert!(
             report
                 .edges
                 .iter()
-                .any(|e| e.source == "FIRE.SH" && e.target == "FIREA.PIC")
+                .any(|e| e.source == "FIRE.SH" && e.target == "FIREB.PIC")
         );
     }
 

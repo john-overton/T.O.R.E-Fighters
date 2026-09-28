@@ -533,7 +533,7 @@ fn validate(frame: &Frame) -> Result<usize> {
     )?;
     for effect in &frame.new_effects {
         if let EffectKind::Other(code) = effect.kind
-            && code < EffectKind::FIRST_OTHER
+            && EffectKind::from_code(code) != effect.kind
         {
             return Err(invalid(format!(
                 "effect code {code} belongs to a named effect kind"

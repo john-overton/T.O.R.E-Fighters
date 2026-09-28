@@ -13,14 +13,17 @@
 // The recorder uses the recording half and the replay viewer the rest.
 #![allow(dead_code)]
 use crate::render_snapshot::{
-    AircraftPose, DEVICES, Damage, DebrisPose, Draw, EffectPose, Engine, PilotPose, ProjectilePose,
-    RenderSnapshot,
+    AircraftPose, DEVICES, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
+    ProjectilePose, RenderSnapshot,
 };
 use std::collections::BTreeMap;
 use tore_formats::aircraft::AircraftId;
 use tore_replay as replay;
 use tore_sim::{
-    combat::live::{self, DamageSection},
+    combat::{
+        blast,
+        live::{self, DamageSection},
+    },
     ejection, wreck,
 };
 
@@ -395,7 +398,21 @@ pub fn pilot_pose(state: &replay::EscapeeState) -> PilotPose {
     }
 }
 
-pub fn effect_kind(kind: live::EffectKind) -> replay::EffectKind {
+/// A live effect as a recording keeps it: a hit, kill or ground strike
+/// with a reviewed explosion type keeps that type.
+pub fn effect_kind(kind: live::EffectKind, blast: Option<u8>) -> replay::EffectKind {
+    let on = match kind {
+        live::EffectKind::Hit => Some(replay::Strike::Hit),
+        live::EffectKind::Destroyed => Some(replay::Strike::Destroyed),
+        live::EffectKind::Ground => Some(replay::Strike::Ground),
+        _ => None,
+    };
+    if let (Some(on), Some(explosion)) = (
+        on,
+        blast.filter(|b| tore_sim::combat::blast::explosion(*b).is_some()),
+    ) {
+        return replay::EffectKind::Blast { on, explosion };
+    }
     match kind {
         live::EffectKind::Flare => replay::EffectKind::Flare,
         live::EffectKind::Chaff => replay::EffectKind::Chaff,
@@ -407,17 +424,105 @@ pub fn effect_kind(kind: live::EffectKind) -> replay::EffectKind {
     }
 }
 
-fn live_effect_kind(kind: replay::EffectKind) -> Option<live::EffectKind> {
+/// A recorded effect's live kind and explosion type. Craters and fires are
+/// marks, not effects.
+fn live_effect_kind(kind: replay::EffectKind) -> Option<(live::EffectKind, Option<u8>)> {
     Some(match kind {
-        replay::EffectKind::Flare => live::EffectKind::Flare,
-        replay::EffectKind::Chaff => live::EffectKind::Chaff,
-        replay::EffectKind::Launch => live::EffectKind::Launch,
-        replay::EffectKind::Hit => live::EffectKind::Hit,
-        replay::EffectKind::Destroyed => live::EffectKind::Destroyed,
-        replay::EffectKind::Ground => live::EffectKind::Ground,
-        replay::EffectKind::DebrisImpact => live::EffectKind::DebrisImpact,
-        replay::EffectKind::Other(_) => return None,
+        replay::EffectKind::Flare => (live::EffectKind::Flare, None),
+        replay::EffectKind::Chaff => (live::EffectKind::Chaff, None),
+        replay::EffectKind::Launch => (live::EffectKind::Launch, None),
+        replay::EffectKind::Hit => (live::EffectKind::Hit, None),
+        replay::EffectKind::Destroyed => (live::EffectKind::Destroyed, None),
+        replay::EffectKind::Ground => (live::EffectKind::Ground, None),
+        replay::EffectKind::DebrisImpact => (live::EffectKind::DebrisImpact, None),
+        replay::EffectKind::Blast { on, explosion } => (
+            match on {
+                replay::Strike::Hit => live::EffectKind::Hit,
+                replay::Strike::Destroyed => live::EffectKind::Destroyed,
+                replay::Strike::Ground => live::EffectKind::Ground,
+            },
+            Some(explosion),
+        ),
+        replay::EffectKind::Crater(_) | replay::EffectKind::Fire | replay::EffectKind::Other(_) => {
+            return None;
+        }
     })
+}
+
+/// A crater or crash-site fire as a recording keeps it: a spawn lasting
+/// the ticks it has left, or for good.
+pub fn mark_spawn(mark: &blast::Mark) -> replay::EffectSpawn {
+    replay::EffectSpawn {
+        kind: match mark.kind {
+            blast::MarkKind::Crater(size) => replay::EffectKind::Crater(size),
+            blast::MarkKind::Fire => replay::EffectKind::Fire,
+        },
+        position: mark.position,
+        duration_ticks: mark.ticks,
+    }
+}
+
+/// Every crater and fire a recording started, read once, since they can
+/// last the whole mission.
+pub fn recorded_marks(recording: &replay::Recording) -> Vec<(u64, replay::EffectSpawn)> {
+    recording
+        .spawns(0, u64::MAX)
+        .map(|spawns| {
+            spawns
+                .effects
+                .into_iter()
+                .filter(|(_, e)| {
+                    matches!(
+                        e.kind,
+                        replay::EffectKind::Crater(_) | replay::EffectKind::Fire
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The craters and fires alive at `tick`, keeping only the newest up to the
+/// simulation's caps.
+pub fn marks_at(marks: &[(u64, replay::EffectSpawn)], tick: u64) -> Vec<MarkPose> {
+    let mut alive: Vec<MarkPose> = marks
+        .iter()
+        .filter(|(start, e)| *start <= tick && tick - start < u64::from(e.duration_ticks))
+        .map(|(start, e)| {
+            let ticks = if e.duration_ticks == blast::FOREVER {
+                blast::FOREVER
+            } else {
+                e.duration_ticks - (tick - start) as u32
+            };
+            let mark = blast::Mark {
+                position: e.position,
+                kind: match e.kind {
+                    replay::EffectKind::Crater(size) => blast::MarkKind::Crater(size),
+                    _ => blast::MarkKind::Fire,
+                },
+                ticks,
+                born: *start,
+                serial: 0,
+            };
+            MarkPose::of(&mark, tick)
+        })
+        .collect();
+    for (fire, cap) in [(false, blast::MAX_CRATERS), (true, blast::MAX_FIRES)] {
+        let count = alive
+            .iter()
+            .filter(|m| (m.kind == blast::MarkKind::Fire) == fire)
+            .count();
+        let mut drop = count.saturating_sub(cap);
+        alive.retain(|m| {
+            if drop > 0 && (m.kind == blast::MarkKind::Fire) == fire {
+                drop -= 1;
+                false
+            } else {
+                true
+            }
+        });
+    }
+    alive
 }
 
 /// One chaff cartridge or flare as a recording keeps it: the releasing
@@ -520,10 +625,12 @@ pub fn device_release(event: &replay::Event, tick: u64) -> Option<DeviceRelease>
 /// A playing effect as drawn, from its recorded start.
 pub fn effect_pose(effect: &replay::LiveEffect) -> Option<EffectPose> {
     let left = u64::from(effect.duration_ticks).checked_sub(effect.age_ticks)?;
+    let (kind, blast) = live_effect_kind(effect.kind)?;
     Some(EffectPose {
-        kind: live_effect_kind(effect.kind)?,
+        kind,
         position: effect.position,
         ticks: u16::try_from(left).ok().filter(|left| *left > 0)?,
+        blast,
     })
 }
 
@@ -552,6 +659,7 @@ impl EffectWatch {
             .collect();
         let same = |a: &EffectPose, b: &EffectPose| {
             a.kind == b.kind
+                && a.blast == b.blast
                 && a.ticks == b.ticks
                 && a.position.map(f64::to_bits) == b.position.map(f64::to_bits)
         };
@@ -565,7 +673,7 @@ impl EffectWatch {
         current[kept..]
             .iter()
             .map(|effect| replay::EffectSpawn {
-                kind: effect_kind(effect.kind),
+                kind: effect_kind(effect.kind, effect.blast),
                 position: effect.position,
                 duration_ticks: u32::from(effect.ticks),
             })
@@ -649,6 +757,7 @@ pub fn snapshot(
             .map(|p| projectile_pose(p, identities.weapons.get(&p.weapon)))
             .collect(),
         effects,
+        marks: Vec::new(),
         debris: frame
             .debris
             .iter()
@@ -857,10 +966,26 @@ pub fn difference(live: &RenderSnapshot, replayed: &RenderSnapshot) -> Option<St
     }
     for (a, b) in live.effects.iter().zip(&replayed.effects) {
         if a.kind != b.kind
+            || a.blast != b.blast
             || a.ticks != b.ticks
             || far(a.position, b.position, tolerance::POSITION)
         {
             return Some(format!("effect differs: live {a:?}, recorded {b:?}"));
+        }
+    }
+    if live.marks.len() != replayed.marks.len() {
+        return Some(format!(
+            "{} craters and fires live, {} recorded",
+            live.marks.len(),
+            replayed.marks.len()
+        ));
+    }
+    for (a, b) in live.marks.iter().zip(&replayed.marks) {
+        if a.kind != b.kind
+            || far(a.position, b.position, tolerance::POSITION)
+            || (a.strength - b.strength).abs() > 0.01
+        {
+            return Some(format!("mark differs: live {a:?}, recorded {b:?}"));
         }
     }
     if live.debris.len() != replayed.debris.len() {
@@ -955,7 +1080,77 @@ mod tests {
             kind,
             position: [x, 5000., 0.],
             ticks,
+            blast: None,
         }
+    }
+
+    #[test]
+    fn explosion_types_survive_recording_and_marks_rebuild_with_their_caps() {
+        use live::EffectKind::{Destroyed, Ground, Launch};
+        let pose = |kind, blast| EffectPose {
+            kind,
+            position: [1., 2., 3.],
+            ticks: 100,
+            blast,
+        };
+        for (kind, blast) in [
+            (Destroyed, Some(33)),
+            (Ground, Some(15)),
+            (Destroyed, None),
+            (Launch, None),
+        ] {
+            let recorded = replay::LiveEffect {
+                spawn_tick: 0,
+                age_ticks: 0,
+                kind: effect_kind(kind, blast),
+                position: [1., 2., 3.],
+                duration_ticks: 100,
+            };
+            assert_eq!(effect_pose(&recorded), Some(pose(kind, blast)));
+        }
+        // A type outside the table is recorded as its plain kind.
+        assert_eq!(
+            effect_kind(Destroyed, Some(99)),
+            replay::EffectKind::Destroyed
+        );
+        let fire = blast::Mark {
+            position: [5., 0., 5.],
+            kind: blast::MarkKind::Fire,
+            ticks: 1000,
+            born: 10,
+            serial: 0,
+        };
+        let mut marks = vec![(11, mark_spawn(&fire))];
+        for i in 0..=blast::MAX_CRATERS as u64 {
+            let crater = blast::Mark {
+                position: [i as f64, 0., 0.],
+                kind: blast::MarkKind::Crater(9),
+                ticks: blast::FOREVER,
+                born: i,
+                serial: i,
+            };
+            marks.push((i, mark_spawn(&crater)));
+        }
+        let at = marks_at(&marks, 500);
+        let fires: Vec<_> = at
+            .iter()
+            .filter(|m| m.kind == blast::MarkKind::Fire)
+            .collect();
+        assert_eq!(fires.len(), 1);
+        assert_eq!(fires[0].age, 489);
+        assert_eq!(at.len(), blast::MAX_CRATERS + 1);
+        // The oldest crater went when the 257th was dug.
+        assert!(
+            at.iter()
+                .all(|m| m.position[0] != 0. || m.kind == blast::MarkKind::Fire)
+        );
+        // The fire is out 1,000 ticks after it was recorded.
+        assert!(
+            marks_at(&marks, 1011)
+                .iter()
+                .all(|m| m.kind != blast::MarkKind::Fire)
+        );
+        assert!(marks_at(&marks, 5).len() == 6);
     }
 
     #[test]

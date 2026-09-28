@@ -303,6 +303,8 @@ mod tests {
             ejection_warning: false,
             engine_gain: 0.,
             burner_gain: 0.,
+            engine_place: super::super::spatial::Placed::inside(),
+            last_listener: None,
             voices: Vec::new(),
             ui_voices: Vec::new(),
             radio: std::collections::VecDeque::new(),

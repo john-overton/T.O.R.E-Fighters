@@ -134,6 +134,8 @@ impl DeviceTrack {
         };
         while at < tick {
             at += 1;
+            // Flare smoke drifts with the mission wind, as in flight.
+            devices.wind = world.wind();
             devices.step(&ground);
             self.apply(at, &mut devices);
             if at.is_multiple_of(KEY_TICKS) && !self.keys.contains_key(&at) {
@@ -218,6 +220,7 @@ mod tests {
         let mut states = Vec::new();
         for tick in 0..=last {
             if tick > 0 {
+                devices.wind = world.wind();
                 devices.step(&ground);
             }
             for entry in entries.iter().filter(|e| e.tick == tick) {

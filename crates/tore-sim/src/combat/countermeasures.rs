@@ -132,7 +132,7 @@ impl Flare {
     pub fn seed(&self) -> u32 {
         self.seed as u32
     }
-    fn step(&mut self, ground: &impl Fn(f64, f64) -> f64) {
+    fn step(&mut self, ground: &impl Fn(f64, f64) -> f64, wind: Vector) {
         let before = self.position;
         if !self.resting {
             let speed = dot(self.velocity, self.velocity).sqrt();
@@ -160,9 +160,12 @@ impl Flare {
         self.age = self.age.saturating_add(1);
         for puff in &mut self.puffs {
             let slow = (-TICK / PUFF_DRIFT_SECONDS).exp();
-            for i in 0..3 {
-                puff.position[i] += puff.velocity[i] * TICK;
-                puff.velocity[i] *= slow;
+            // The puff's own push dies away; the wind keeps carrying it.
+            for ((position, velocity), wind) in
+                puff.position.iter_mut().zip(&mut puff.velocity).zip(wind)
+            {
+                *position += (*velocity + wind) * TICK;
+                *velocity *= slow;
             }
             puff.age = puff.age.saturating_add(1);
             let aged = 1. - f64::from(puff.age) / f64::from(PUFF_LIFETIME_TICKS);
@@ -245,6 +248,9 @@ impl Chaff {
 pub struct Devices {
     pub flares: VecDeque<Flare>,
     pub chaff: VecDeque<Chaff>,
+    /// The mission wind, world feet per second, set by the host; flare smoke
+    /// drifts with it.
+    pub wind: Vector,
     releases: u64,
 }
 impl Devices {
@@ -303,7 +309,7 @@ impl Devices {
     /// Exactly one 120 Hz combat tick.
     pub fn step(&mut self, ground: &impl Fn(f64, f64) -> f64) {
         for flare in &mut self.flares {
-            flare.step(ground);
+            flare.step(ground, self.wind);
         }
         self.flares.retain(|f| !f.finished());
         for chaff in &mut self.chaff {
@@ -430,6 +436,31 @@ mod tests {
         assert!(trail < PUFF_TRAIL_FEET);
         // Early, fast flight leaves a puff every eight feet of path.
         assert!(flare.puffs.len() >= 20);
+    }
+
+    #[test]
+    fn flare_smoke_is_carried_by_the_wind() {
+        let mut still = Devices::default();
+        let mut windy = Devices {
+            wind: [0., 0., 30.],
+            ..Devices::default()
+        };
+        for devices in [&mut still, &mut windy] {
+            devices.release_flare(level(675.));
+            for _ in 0..240 {
+                devices.step(&|_, _| 0.);
+            }
+        }
+        // Same flare, same puffs; each windy puff 30 ft/s farther downwind.
+        for (a, b) in still.puffs().zip(windy.puffs()) {
+            let seconds = f64::from(a.age) / 120.;
+            assert!((b.position[2] - a.position[2] - 30. * seconds).abs() < 1e-6);
+            assert_eq!(
+                (a.position[0], a.position[1]),
+                (b.position[0], b.position[1])
+            );
+        }
+        assert!(windy.puffs().count() > 10);
     }
 
     #[test]

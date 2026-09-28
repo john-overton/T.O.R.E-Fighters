@@ -38,6 +38,8 @@ pub struct RenderSnapshot {
     pub targets: Vec<AircraftPose>,
     pub projectiles: Vec<ProjectilePose>,
     pub effects: Vec<EffectPose>,
+    /// Craters and crash-site fires.
+    pub marks: Vec<MarkPose>,
     pub debris: Vec<DebrisPose>,
     /// Ejected pilots: the player's first, then AI aircraft in roster order.
     pub pilots: Vec<PilotPose>,
@@ -233,6 +235,29 @@ pub struct EffectPose {
     pub position: Vector,
     /// Ticks the effect has left.
     pub ticks: u16,
+    /// The original explosion type it shows, when it has one.
+    pub blast: Option<u8>,
+}
+
+/// One crater or crash-site fire.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MarkPose {
+    pub kind: tore_sim::combat::blast::MarkKind,
+    pub position: Vector,
+    /// Ticks since it started, which sets a fire's frame.
+    pub age: u64,
+    /// A fire's strength, 1 until it fades in its last minute.
+    pub strength: f32,
+}
+impl MarkPose {
+    pub fn of(mark: &tore_sim::combat::blast::Mark, tick: u64) -> Self {
+        Self {
+            kind: mark.kind,
+            position: mark.position,
+            age: tick.saturating_sub(mark.born),
+            strength: mark.strength(),
+        }
+    }
 }
 
 /// One detached piece of a destroyed aircraft.
@@ -308,6 +333,7 @@ pub fn interpolate(
             .collect(),
         projectiles: current.projectiles.clone(),
         effects: current.effects.clone(),
+        marks: current.marks.clone(),
         debris: current.debris.clone(),
         pilots: current.pilots.clone(),
         models: current.models.clone(),
@@ -560,87 +586,25 @@ pub fn combat_geometry(
             }
         }
     }
-    let basis = Basis::new(
-        f64::from(camera.yaw),
-        f64::from(camera.pitch),
-        -f64::from(camera.roll),
-    );
-    for e in &snapshot.effects {
-        // Chaff and flares are drawn by countermeasure_renderer.
-        if matches!(
-            e.kind,
-            EffectKind::Launch | EffectKind::Flare | EffectKind::Chaff
-        ) {
-            continue;
-        }
-        let scale = if e.kind == EffectKind::Destroyed {
-            75.
-        } else {
-            15.
-        };
-        let duration = if e.kind == EffectKind::Destroyed {
-            240
-        } else {
-            45
-        };
-        let frame = (usize::from(duration - e.ticks) * 12 / usize::from(duration)).min(11);
-        let frames = if e.kind == EffectKind::DebrisImpact {
-            &art.ground_impacts
-        } else {
-            &art.explosions
-        };
-        for (xy, color) in &frames[frame] {
-            for d in [
-                [0., 0.],
-                [1. / 20., 0.],
-                [0., 1. / 20.],
-                [0., 1. / 20.],
-                [1. / 20., 0.],
-                [1. / 20., 1. / 20.],
-            ] {
-                let at = local(e.position);
-                let pos: Vector = std::array::from_fn(|i| {
-                    at[i]
-                        + basis.right[i] * f64::from(xy[0] + d[0]) * scale
-                        + basis.up[i] * f64::from(xy[1] + d[1]) * scale
-                });
-                vertex(&mut v, pos, *color);
-            }
-        }
-    }
+    // Explosions, fires and craters are drawn by effect_renderer.
     CombatGeometry {
         vertices: v,
         contacts,
     }
 }
 
-/// Combat effect and weapon art: explosion and ground-impact frames, the smoke
-/// sheet, weapon shapes by name and ejected-pilot poses.
+/// Combat effect and weapon art: the explosion, fire and crater sheets, the
+/// smoke sheet, weapon shapes by name and ejected-pilot poses.
 pub struct CombatArt {
     pub smoke: Pic,
     shapes: BTreeMap<String, Shape>,
-    explosions: Vec<Vec<([f32; 2], [f32; 3])>>,
-    ground_impacts: Vec<Vec<([f32; 2], [f32; 3])>>,
+    pub effects: crate::effect_renderer::Art,
     pub escape: Option<crate::ejection_art::Art>,
 }
 impl CombatArt {
     /// Loads the sampled original effect art. `palette` supplies the colours
     /// the effect sheets do not carry themselves.
-    pub fn load(data: &BTreeMap<String, Vec<u8>>, palette: &[[u8; 3]; 256]) -> AppResult<Self> {
-        let pic = Pic::parse(
-            data.get("AIRLRG.PIC")
-                .ok_or("missing AIRLRG.PIC combat art")?,
-        )?;
-        if pic.width != 256 || pic.height != 232 {
-            return Err("unreviewed AIRLRG frame sheet".into());
-        }
-        // Fitted 3x4 frame layout over visually reviewed original effect art.
-        let explosions = effect_frames(&pic, palette, 58);
-        let impact = Pic::parse(data.get("GRDLRGA.PIC").ok_or("missing GRDLRGA.PIC")?)?;
-        if impact.width != 256 || impact.height != 252 {
-            return Err("unreviewed ground impact sheet".into());
-        }
-        let ground_impacts = effect_frames(&impact, palette, 63);
+    pub fn load(data: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
         let smoke = Pic::parse(data.get("SMOKE.PIC").ok_or("missing SMOKE.PIC")?)?;
         if smoke.width != 256 || smoke.height != 43 {
             return Err("unreviewed smoke sheet dimensions".into());
@@ -648,8 +612,7 @@ impl CombatArt {
         Ok(Self {
             smoke,
             shapes: BTreeMap::new(),
-            explosions,
-            ground_impacts,
+            effects: crate::effect_renderer::Art::load(data),
             escape: match crate::ejection_art::Art::load(data) {
                 Ok(art) => Some(art),
                 Err(error) => {
@@ -696,11 +659,7 @@ impl CombatArt {
     }
     /// Synthetic art for drawing tests without retail media.
     #[cfg(test)]
-    pub(crate) fn synthetic(
-        shapes: BTreeMap<String, Shape>,
-        explosions: Vec<Vec<([f32; 2], [f32; 3])>>,
-        ground_impacts: Vec<Vec<([f32; 2], [f32; 3])>>,
-    ) -> Self {
+    pub(crate) fn synthetic(shapes: BTreeMap<String, Shape>) -> Self {
         Self {
             smoke: Pic {
                 width: 1,
@@ -711,41 +670,12 @@ impl CombatArt {
                 glyphs: Vec::new(),
             },
             shapes,
-            explosions,
-            ground_impacts,
+            effects: crate::effect_renderer::Art::empty(),
             escape: None,
         }
     }
 }
 
-fn effect_frames(
-    pic: &Pic,
-    base: &[[u8; 3]; 256],
-    cell_height: usize,
-) -> Vec<Vec<([f32; 2], [f32; 3])>> {
-    let mut palette = *base;
-    palette[..pic.palette.len()].copy_from_slice(&pic.palette);
-    (0..12)
-        .map(|frame| {
-            let mut cells = Vec::new();
-            for y in 0..20 {
-                for x in 0..20 {
-                    let index = pic.pixels[(frame / 3 * cell_height + y * cell_height / 20)
-                        * pic.width
-                        + frame % 3 * 80
-                        + x * 80 / 20];
-                    if index != 255 {
-                        cells.push((
-                            [x as f32 / 20. - 0.5, 0.5 - y as f32 / 20.],
-                            palette[index as usize].map(|v| f32::from(v) / 255.),
-                        ));
-                    }
-                }
-            }
-            cells
-        })
-        .collect()
-}
 fn mesh(
     out: &mut Vec<f32>,
     shape: &Shape,

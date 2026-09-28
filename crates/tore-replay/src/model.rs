@@ -535,17 +535,41 @@ pub enum EffectKind {
     Flare,
     Chaff,
     Launch,
+    /// A hit, kill or ground strike from a recording made before explosion
+    /// types; [`Self::Blast`] replaces them.
     Hit,
     Destroyed,
     Ground,
     DebrisImpact,
-    /// A kind this build does not know. Codes 0 to 6 belong to the named kinds.
+    /// A hit, kill or ground strike and the original explosion type (15 to
+    /// 38) it showed.
+    Blast {
+        on: Strike,
+        explosion: u8,
+    },
+    /// A crater and its original crater size (0 to 63).
+    Crater(u8),
+    /// A crash-site fire.
+    Fire,
+    /// A kind this build does not know: any code [`Self::from_code`] does
+    /// not name.
     Other(u8),
 }
 
+/// What an explosion marks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Strike {
+    Hit,
+    Destroyed,
+    Ground,
+}
+
 impl EffectKind {
-    /// First code free for `Other`.
-    pub const FIRST_OTHER: u8 = 7;
+    /// Codes 0 to 7 are the plain kinds; explosions take 64 to 87 (hit),
+    /// 96 to 119 (kill) and 128 to 151 (ground), their type less 15 added;
+    /// craters take 160 plus their size.
+    const BLAST: u8 = 64;
+    const CRATER: u8 = 160;
 
     pub fn code(self) -> u8 {
         match self {
@@ -556,11 +580,22 @@ impl EffectKind {
             Self::Destroyed => 4,
             Self::Ground => 5,
             Self::DebrisImpact => 6,
+            Self::Fire => 7,
+            Self::Blast { on, explosion } => {
+                Self::BLAST + 32 * on as u8 + explosion.clamp(15, 38) - 15
+            }
+            Self::Crater(size) => Self::CRATER + size.min(63),
             Self::Other(code) => code,
         }
     }
 
     pub fn from_code(code: u8) -> Self {
+        let strike = |row| match row {
+            0 => Some(Strike::Hit),
+            1 => Some(Strike::Destroyed),
+            2 => Some(Strike::Ground),
+            _ => None,
+        };
         match code {
             0 => Self::Flare,
             1 => Self::Chaff,
@@ -569,6 +604,17 @@ impl EffectKind {
             4 => Self::Destroyed,
             5 => Self::Ground,
             6 => Self::DebrisImpact,
+            7 => Self::Fire,
+            Self::BLAST..Self::CRATER if (code - Self::BLAST) % 32 < 24 => {
+                match strike((code - Self::BLAST) / 32) {
+                    Some(on) => Self::Blast {
+                        on,
+                        explosion: (code - Self::BLAST) % 32 + 15,
+                    },
+                    None => Self::Other(code),
+                }
+            }
+            Self::CRATER..=223 => Self::Crater(code - Self::CRATER),
             other => Self::Other(other),
         }
     }
@@ -578,11 +624,31 @@ impl EffectKind {
             Self::Flare => "flare",
             Self::Chaff => "chaff",
             Self::Launch => "launch",
-            Self::Hit => "hit",
-            Self::Destroyed => "destroyed",
-            Self::Ground => "ground",
+            Self::Hit
+            | Self::Blast {
+                on: Strike::Hit, ..
+            } => "hit",
+            Self::Destroyed
+            | Self::Blast {
+                on: Strike::Destroyed,
+                ..
+            } => "destroyed",
+            Self::Ground
+            | Self::Blast {
+                on: Strike::Ground, ..
+            } => "ground",
             Self::DebrisImpact => "debris_impact",
+            Self::Crater(_) => "crater",
+            Self::Fire => "fire",
             Self::Other(_) => "other",
+        }
+    }
+
+    /// The explosion type, for a kind that has one.
+    pub fn explosion(self) -> Option<u8> {
+        match self {
+            Self::Blast { explosion, .. } => Some(explosion),
+            _ => None,
         }
     }
 }
@@ -602,19 +668,25 @@ pub enum PuffKind {
     Missile,
     Aircraft,
     Contrail,
-    /// A kind this build does not know. Codes 0 to 2 belong to the named kinds.
+    /// The column over a burning crash site.
+    Burning,
+    /// A kind this build does not know. Codes 0 to 3 belong to the named kinds.
     Other(u8),
 }
 
 impl PuffKind {
+    /// Codes below this fit in a puff's two kind bits; the rest are stored
+    /// in a byte of their own.
+    pub const SHORT_CODES: u8 = 3;
     /// First code free for `Other`.
-    pub const FIRST_OTHER: u8 = 3;
+    pub const FIRST_OTHER: u8 = 4;
 
     pub fn code(self) -> u8 {
         match self {
             Self::Missile => 0,
             Self::Aircraft => 1,
             Self::Contrail => 2,
+            Self::Burning => 3,
             Self::Other(code) => code,
         }
     }
@@ -624,6 +696,7 @@ impl PuffKind {
             0 => Self::Missile,
             1 => Self::Aircraft,
             2 => Self::Contrail,
+            3 => Self::Burning,
             other => Self::Other(other),
         }
     }
@@ -633,17 +706,20 @@ impl PuffKind {
             Self::Missile => "missile",
             Self::Aircraft => "aircraft",
             Self::Contrail => "contrail",
+            Self::Burning => "burning",
             Self::Other(_) => "other",
         }
     }
 
     /// How long a puff of this kind lives, matching the simulation's smoke:
-    /// 480 ticks for missile smoke, 960 for aircraft smoke, 14,400 for
-    /// contrails. Unknown kinds have no known lifetime.
+    /// 480 ticks for missile smoke, 960 for aircraft smoke, 5,262 for a
+    /// crash-site column, 14,400 for contrails. Unknown kinds have no known
+    /// lifetime.
     pub fn lifetime_ticks(self) -> Option<u64> {
         match self {
             Self::Missile => Some(480),
             Self::Aircraft => Some(960),
+            Self::Burning => Some(5_262),
             Self::Contrail => Some(14_400),
             Self::Other(_) => None,
         }
@@ -653,6 +729,8 @@ impl PuffKind {
     pub fn rise_fps(self) -> f64 {
         match self {
             Self::Contrail => 0.,
+            // 20 knots, as the simulation's crash-site column rises.
+            Self::Burning => 20. * 6076.12 / 3600.,
             _ => 2.,
         }
     }

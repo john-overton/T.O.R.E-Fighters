@@ -25,6 +25,8 @@ pub enum Kind {
     Missile,
     Aircraft,
     Contrail,
+    /// The column over a burning crash site (docs/spec/explosions.md).
+    Burning,
 }
 impl Kind {
     pub fn lifetime(self) -> u16 {
@@ -32,20 +34,60 @@ impl Kind {
             Self::Missile => 480,
             Self::Aircraft => 960,
             Self::Contrail => CONTRAIL_LIFETIME_TICKS,
+            Self::Burning => BURNING_LIFETIME_TICKS,
+        }
+    }
+    /// How fast a puff drifts upward, in feet per second.
+    pub fn rise(self) -> f64 {
+        match self {
+            Self::Contrail => 0.,
+            Self::Burning => BURNING_RISE_FPS,
+            Self::Missile | Self::Aircraft => 2.,
         }
     }
 }
+/// A crash-site column (John, 2026-09-28): ten puffs a second from 20 feet
+/// above the fire, each rising at 20 knots within 5 degrees of straight up
+/// and carried by the wind, full until 1,300 feet above the ground and gone
+/// at 1,500.
+pub const BURNING_RISE_FPS: f64 = 20. * 6076.12 / 3600.;
+pub const BURNING_SPREAD_DEGREES: f64 = 5.;
+pub const BURNING_SOURCE_FT: f64 = 20.;
+const BURNING_FADE_FT: [f64; 2] = [1300. - BURNING_SOURCE_FT, 1500. - BURNING_SOURCE_FT];
+pub const BURNING_LIFETIME_TICKS: u16 = (BURNING_FADE_FT[1] / BURNING_RISE_FPS * 120.) as u16 + 1;
+
+/// A column puff's sideways drift in feet per second: a direction within
+/// [`BURNING_SPREAD_DEGREES`] of vertical, drawn from its exact release
+/// point (to the 1/32 foot a recording keeps) so a replay drifts it the same.
+pub fn burning_drift(release: Vector) -> [f64; 2] {
+    let mut value = 0x51_7cc1_b727_220a_u64;
+    for axis in release {
+        value = (value ^ ((axis * 32.).round() as i64 as u64)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        value ^= value >> 29;
+    }
+    let unit = |bits: u64| (bits >> 11) as f64 / (1_u64 << 53) as f64;
+    let spread = BURNING_SPREAD_DEGREES.to_radians().tan() * BURNING_RISE_FPS;
+    // Evenly over the cone's circle, not bunched at its center.
+    let reach = spread * unit(value).sqrt();
+    let (sin, cos) =
+        (std::f64::consts::TAU * unit(value.wrapping_mul(0x9e37_79b9_7f4a_7c15))).sin_cos();
+    [reach * cos, reach * sin]
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Puff {
     pub position: Vector,
     pub kind: Kind,
     pub age: u16,
+    /// Sideways drift, feet per second; only a crash-site column drifts.
+    pub drift: [f64; 2],
 }
 impl Puff {
     pub fn radius(&self) -> f64 {
         let (initial, growth) = match self.kind {
             Kind::Missile | Kind::Contrail => (2., 3.),
             Kind::Aircraft => (8., 8.),
+            Kind::Burning => (8., 3.),
         };
         let seconds = f64::from(self.age) / 120.;
         initial
@@ -63,12 +105,20 @@ impl Puff {
                     / f32::from(CONTRAIL_LIFETIME_TICKS - CONTRAIL_FADE_START_TICKS))
                 .clamp(0., 1.);
         }
+        if self.kind == Kind::Burning {
+            let risen = f64::from(self.age) / 120. * BURNING_RISE_FPS;
+            let [start, end] = BURNING_FADE_FT;
+            return 0.5 * ((end - risen) / (end - start)).clamp(0., 1.) as f32;
+        }
         0.65 * (1. - f32::from(self.age) / f32::from(self.kind.lifetime()))
     }
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Smoke {
     pub puffs: VecDeque<Puff>,
+    /// The mission wind, world feet per second, set by the host. Every puff
+    /// and contrail puff is carried with it (John, 2026-09-28).
+    pub wind: Vector,
     ticks: u64,
     outlets: BTreeMap<u64, Vector>,
 }
@@ -78,9 +128,9 @@ impl Smoke {
         self.ticks += 1;
         for puff in &mut self.puffs {
             puff.age = puff.age.saturating_add(1);
-            if puff.kind != Kind::Contrail {
-                puff.position[1] += 2. / 120.;
-            }
+            puff.position[1] += puff.kind.rise() / 120.;
+            puff.position[0] += puff.drift[0] / 120.;
+            puff.position[2] += puff.drift[1] / 120.;
         }
         self.puffs.retain(|p| p.age < p.kind.lifetime());
         for (position, kind) in sources {
@@ -93,10 +143,25 @@ impl Smoke {
             if self.puffs.len() == MAX_PUFFS {
                 self.puffs.pop_front();
             }
+            let wind = [self.wind[0], self.wind[2]];
+            let (position, drift) = if kind == Kind::Burning {
+                // Each release a little apart, so each draws its own drift.
+                let n = self.ticks as f64;
+                let release = [
+                    position[0] + ((n * 0.618_034).fract() - 0.5) * 4.,
+                    position[1],
+                    position[2] + ((n * 0.414_214).fract() - 0.5) * 4.,
+                ];
+                let cone = burning_drift(release);
+                (release, [cone[0] + wind[0], cone[1] + wind[1]])
+            } else {
+                (position, wind)
+            };
             self.puffs.push_back(Puff {
                 position,
                 kind,
                 age: 0,
+                drift,
             });
         }
     }
@@ -120,6 +185,7 @@ impl Smoke {
                     position,
                     kind: Kind::Contrail,
                     age: 0,
+                    drift: [self.wind[0], self.wind[2]],
                 });
             }
         }
@@ -146,11 +212,84 @@ mod tests {
     }
 
     #[test]
+    fn a_crash_column_rises_at_20_knots_in_a_5_degree_cone_with_the_wind_and_fades_by_1500_ft() {
+        let fire = [1000., 500., 2000.];
+        let source = [fire[0], fire[1] + BURNING_SOURCE_FT, fire[2]];
+        let mut smoke = Smoke::default();
+        for _ in 0..6000 {
+            smoke.step([(source, Kind::Burning)]);
+        }
+        // Ten a second, each gone by 1,500 feet above the ground.
+        assert_eq!(
+            smoke.puffs.len(),
+            usize::from(BURNING_LIFETIME_TICKS).div_ceil(12)
+        );
+        assert!((BURNING_RISE_FPS - 33.756).abs() < 0.001);
+        let cone = BURNING_SPREAD_DEGREES.to_radians().tan();
+        let mut widest: f64 = 0.;
+        for puff in &smoke.puffs {
+            let risen = puff.position[1] - source[1];
+            assert!((risen - f64::from(puff.age) / 120. * BURNING_RISE_FPS).abs() < 1e-6);
+            let side = (puff.position[0] - source[0]).hypot(puff.position[2] - source[2]);
+            assert!(side <= risen * cone + 2.9, "{side} {risen}");
+            widest = widest.max(side / risen.max(1.));
+            let above_ground = puff.position[1] - fire[1];
+            let expected = 0.5 * ((1500. - above_ground) / 200.).clamp(0., 1.) as f32;
+            assert!((puff.opacity() - expected).abs() < 1e-3, "{above_ground}");
+        }
+        assert!(widest > cone * 0.6, "puffs spread through the cone");
+        assert!(smoke.puffs.iter().all(|p| p.position[1] - fire[1] < 1500.));
+        assert!(smoke.puffs.iter().any(|p| p.position[1] - fire[1] > 1400.));
+        // The wind carries every puff downwind at its own speed.
+        let mut windy = Smoke {
+            wind: [30., 0., -10.],
+            ..Smoke::default()
+        };
+        for _ in 0..600 {
+            windy.step([(source, Kind::Burning)]);
+        }
+        let oldest = windy.puffs.front().unwrap();
+        let seconds = f64::from(oldest.age) / 120.;
+        let x = oldest.position[0] - source[0];
+        assert!((x - 30. * seconds).abs() <= seconds * BURNING_RISE_FPS * cone + 2.1);
+        // A replay can recover a puff's cone from where it was released.
+        let release = [1234.5, 520., -77.25];
+        assert_eq!(burning_drift(release), burning_drift(release));
+    }
+
+    #[test]
+    fn all_smoke_and_contrails_drift_with_the_wind() {
+        let mut smoke = Smoke {
+            wind: [20., 0., -5.],
+            ..Smoke::default()
+        };
+        for _ in 0..240 {
+            smoke.step([
+                ([0., 1000., 0.], Kind::Aircraft),
+                ([0., 2000., 0.], Kind::Missile),
+            ]);
+            smoke.contrails([(0, [0., 30000., smoke.ticks as f64])]);
+        }
+        for puff in &smoke.puffs {
+            let seconds = f64::from(puff.age) / 120.;
+            assert!((puff.position[0] - 20. * seconds).abs() < 1e-6, "{puff:?}");
+            assert_eq!(puff.drift, [20., -5.]);
+        }
+        let kinds: std::collections::BTreeSet<_> = smoke
+            .puffs
+            .iter()
+            .map(|p| format!("{:?}", p.kind))
+            .collect();
+        assert_eq!(kinds.len(), 3);
+    }
+
+    #[test]
     fn missile_size_is_halved_at_birth_and_during_growth() {
         let mut puff = Puff {
             position: [0.; 3],
             kind: Kind::Missile,
             age: 0,
+            drift: [0.; 2],
         };
         assert_eq!(puff.radius(), 2.);
         puff.age = 240;
@@ -197,6 +336,7 @@ mod tests {
             position: [0.; 3],
             kind: Kind::Contrail,
             age: 7201,
+            drift: [0.; 2],
         };
         assert!(puff.opacity() < 0.65 && puff.opacity() > 0.64);
         puff.age = 14400;
@@ -213,6 +353,7 @@ mod tests {
                 position: [0.; 3],
                 kind: Kind::Contrail,
                 age: 7200,
+                drift: [0.; 2],
             },
         );
         smoke.ticks = 11;
@@ -228,6 +369,7 @@ mod tests {
                 position: [0.; 3],
                 kind: Kind::Contrail,
                 age: 14399,
+                drift: [0.; 2],
             },
         );
         smoke.step([]);

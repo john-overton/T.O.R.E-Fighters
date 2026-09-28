@@ -764,9 +764,10 @@ impl Recording {
     }
 
     /// Every smoke and contrail puff alive at `tick`, rebuilt from release
-    /// times the way the simulation ages them: smoke rises 2 feet per second,
-    /// contrails stay put, missile smoke lasts 480 ticks, aircraft smoke 960
-    /// and contrails 14,400, and each layer keeps only its newest puffs up to
+    /// times the way the simulation ages them: smoke rises 2 feet per second
+    /// and a crash-site column at 20 knots, contrails stay put, missile smoke
+    /// lasts 480 ticks, aircraft smoke 960, a column 5,262 and contrails 14,400,
+    /// and each layer keeps only its newest puffs up to
     /// the simulation's caps. Kinds with no known lifetime are left out.
     pub fn live_puffs(&self, tick: u64) -> Result<Vec<LivePuff>> {
         let spawns = self.spawns(tick.saturating_sub(LONGEST_PUFF_TICKS - 1), tick)?;

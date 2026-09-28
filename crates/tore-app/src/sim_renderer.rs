@@ -95,6 +95,7 @@ pub struct SimRenderer {
     escapees: Option<AircraftBatch>,
     lens_flare: crate::lens_flare::LensFlare,
     smoke: crate::smoke_renderer::SmokeRenderer,
+    effects: crate::effect_renderer::EffectRenderer,
     countermeasures: crate::countermeasure_renderer::Instances,
     battle: Option<(wgpu::Buffer, u32)>,
     battle_contacts: Vec<Contact>,
@@ -750,6 +751,7 @@ impl SimRenderer {
             aircraft_visible: true,
             lens_flare: crate::lens_flare::LensFlare::new(device, format),
             smoke: crate::smoke_renderer::SmokeRenderer::new(device, format, &shader, samples),
+            effects: crate::effect_renderer::EffectRenderer::new(device, format, &shader, samples),
             countermeasures: crate::countermeasure_renderer::Instances::new(device),
             battle: None,
             battle_contacts: Vec::new(),
@@ -796,6 +798,25 @@ impl SimRenderer {
             smoke,
         );
         self.smoke.flare_smoke(devices);
+    }
+    /// This frame's explosions, craters and crash-site fires.
+    pub fn effects(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        art: &crate::effect_renderer::Art,
+        effects: &[crate::render_snapshot::EffectPose],
+        marks: &[crate::render_snapshot::MarkPose],
+    ) {
+        self.effects.prepare(
+            device,
+            queue,
+            &self.uniform,
+            (&self.palette, &self.weather_tiles),
+            art,
+            effects,
+            marks,
+        );
     }
     /// This frame's light and glare sources: burning flares, chaff and lit
     /// afterburners. Call before drawing, after `smoke`.
@@ -1149,6 +1170,8 @@ impl SimRenderer {
         });
         self.smoke
             .set_samples(device, self.format, &self.shader, samples);
+        self.effects
+            .set_samples(device, self.format, &self.shader, samples);
         self.targets.clear();
     }
     fn spot_buffer(device: &wgpu::Device, contacts: u64) -> wgpu::Buffer {
@@ -1425,6 +1448,7 @@ impl SimRenderer {
         uniform.extend([x, y, z, 0., ex, ey, ez, 0.]);
         debug_assert_eq!(uniform.len() * 4, UNIFORM_BYTES as usize);
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
+        self.effects.update(queue, camera);
         self.smoke.update(
             queue,
             camera,
@@ -1650,6 +1674,7 @@ impl SimRenderer {
             pass.set_vertex_buffer(0, buffer.slice(..));
             pass.draw(0..*count, 0..1);
         }
+        self.effects.draw(&mut pass);
         self.smoke.draw(&mut pass);
         pass.set_bind_group(0, &self.bind, &[]);
         pass.set_bind_group(1, &self.lighting.bind, &[]);

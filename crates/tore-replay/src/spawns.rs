@@ -245,7 +245,7 @@ pub(crate) fn get_spawns(section: &[u8], frames: u32) -> Result<Vec<FrameSpawns>
             let kind = match head & 3 {
                 3 => {
                     let code = input.u8()?;
-                    if code < PuffKind::FIRST_OTHER {
+                    if code < PuffKind::SHORT_CODES {
                         return Err(corrupt("a puff kind is stored the long way"));
                     }
                     code

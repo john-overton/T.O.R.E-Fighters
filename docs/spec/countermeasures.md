@@ -114,7 +114,8 @@ messages, decoy odds or seekers.
   of its path, and at least one every 0.05 seconds while slow. Each puff drifts
   upward at 8 to 15 ft/s in a random direction **within 30 degrees of straight
   up** (John's 30-degree cone, read as 30 degrees either side of vertical),
-  slowing over 1.5 seconds. It starts 2.5 feet in radius and grows 4 feet per
+  slowing over 1.5 seconds, and the mission wind carries it the whole time
+  (John, 2026-09-28). It starts 2.5 feet in radius and grows 4 feet per
   second. Puffs thicken over their first 0.1 seconds, so the flame stays
   visible at the head of the trail. They are gone once the flare has moved
   **200 feet** past them (John), or after 3 seconds, whichever comes first. A

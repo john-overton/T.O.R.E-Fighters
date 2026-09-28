@@ -392,7 +392,7 @@ is positive right wing down.
 | Aircraft | Position, attitude, velocity, airspeed, G, the 11 animated devices, engine heat, flags (engine, afterburner, airborne, on the ground, crashed, wreck gone, alive, ejected, and animated: whether anything moves the devices, since straight-flight fixtures keep the model's neutral pose), wreck phase, fuel, pilot controls, the auxiliary body rates that thrust-vectoring paddles and plumes follow, hit points, regional damage and the failed structural section |
 | Projectiles | Owner, weapon, target, position, previous position, direction, speed, tracer, inbound on the player, age, and the seeker's state |
 | Debris and ejected pilots | Position and attitude or heading |
-| Effects and puffs | Only those released this tick; the viewer ages them itself |
+| Effects and puffs | Only those released this tick; the viewer ages them itself. A hit, kill or ground strike stores its [explosion type](spec/explosions.md) in its effect code (64 to 87 hit, 96 to 119 kill, 128 to 151 ground, the type less 15 added); a crater is 160 plus its size and lasts for good; a crash-site fire is code 7; the crash-site column is puff kind 3, stored in its own byte; the viewer drifts every puff with the recorded wind, and each column puff also by the cone its release point gives it; replayed flare smoke drifts with the wind as in flight. Older builds read these codes as unknown kinds and skip them; recordings made before explosion types draw and sound their plain hit, kill or ground effect |
 | Surface objects | Hit points, when they change |
 | Events and display trees | See [the vocabulary](../crates/tore-replay/src/vocab.rs) |
 | Checksum | Once per second: a hash of every aircraft's exact state |
@@ -869,6 +869,8 @@ under the playhead:
   by that tick.
 - Smoke and contrails rebuilt from their release ticks with the
   simulation's lifetimes, rise and caps; effects from their start ticks.
+  Craters and crash-site fires, which can last the whole mission, are read
+  once when the recording opens and kept to the simulation's caps.
 - Chaff clouds and burning flares with their smoke trails and glare,
   flown again from their recorded releases
   ([chaff and flares](#chaff-and-flares)), and the light that flares and

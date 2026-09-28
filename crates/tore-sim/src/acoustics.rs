@@ -5,10 +5,24 @@ pub type Vector = [f64; 3];
 const DT: f64 = 1. / 120.;
 const MAX_WAVES: usize = 256;
 
+/// The original's level 255 on the mixer's scale.
+pub const FULL_LEVEL: f64 = 0.4;
+/// The original refuses any sound request farther away than this.
+pub const REFUSED_BEYOND_FT: f64 = 20000.;
+/// Heard from inside a cockpit, a sound from outside the aircraft plays at
+/// this share of its level with its treble above this cutoff removed
+/// (opinionated, John 2026-09-28).
+pub const COCKPIT_GAIN: f32 = 0.4;
+pub const COCKPIT_CUTOFF_HZ: f32 = 2000.;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
+    /// Recordings made before explosion types: a generic hit.
     Impact,
+    /// Recordings made before explosion types: a generic kill.
     Explosion,
+    /// One original explosion type (docs/spec/explosions.md).
+    Blast(u8),
     AircraftPass,
     MissilePass,
     SonicBoom,
@@ -16,8 +30,37 @@ pub enum Kind {
     Flare,
 }
 impl Kind {
+    /// The name a recording stores for this sound.
+    pub fn name(self) -> String {
+        match self {
+            Self::Blast(kind) => format!("blast{kind}"),
+            other => format!("{other:?}").to_lowercase(),
+        }
+    }
+    pub fn from_name(name: &str) -> Option<Self> {
+        if let Some(kind) = name.strip_prefix("blast") {
+            return Some(Self::Blast(kind.parse().ok()?));
+        }
+        [
+            Self::Impact,
+            Self::Explosion,
+            Self::AircraftPass,
+            Self::MissilePass,
+            Self::SonicBoom,
+            Self::Chaff,
+            Self::Flare,
+        ]
+        .into_iter()
+        .find(|kind| kind.name() == name)
+    }
+    /// Reference distance, maximum distance and peak gain. An explosion
+    /// type's pair is its full-level and silent distances.
     pub fn parameters(self) -> (f64, f64, f64) {
         match self {
+            Self::Blast(kind) => crate::combat::blast::explosion(kind)
+                .map_or((1000., REFUSED_BEYOND_FT, FULL_LEVEL), |e| {
+                    (f64::from(e.full_ft), f64::from(e.silent_ft), FULL_LEVEL)
+                }),
             Self::Impact => (80., 8000., 0.4),
             Self::Explosion => (400., 40000., 0.65),
             Self::AircraftPass => (200., 2000., 0.5),
@@ -57,13 +100,85 @@ pub fn mix(kind: Kind, position: Vector, listener: Listener) -> Mix {
     let relative = sub(position, listener.position);
     let distance = length(relative);
     let (reference, maximum, peak) = kind.parameters();
-    let fade = ((maximum - distance) / (0.2 * maximum)).clamp(0., 1.);
-    Mix {
-        gain: (peak * (reference / distance.max(reference)) * fade * fade * (3. - 2. * fade))
-            as f32,
-        pan: (dot(relative, listener.right) / distance.max(1.)).clamp(-1., 1.) as f32,
-        cutoff: (12000. / (1. + distance / 3000.)).clamp(250., 12000.) as f32,
+    let gain = if let Kind::Blast(_) = kind {
+        // The original's straight-line fade from full to silent.
+        if distance > REFUSED_BEYOND_FT {
+            0.
+        } else {
+            peak * ((maximum - distance) / (maximum - reference)).clamp(0., 1.)
+        }
+    } else {
+        let fade = ((maximum - distance) / (0.2 * maximum)).clamp(0., 1.);
+        peak * (reference / distance.max(reference)) * fade * fade * (3. - 2. * fade)
+    };
+    outside(
+        Mix {
+            gain: gain as f32,
+            pan: (dot(relative, listener.right) / distance.max(1.)).clamp(-1., 1.) as f32,
+            cutoff: (12000. / (1. + distance / 6000.)).clamp(250., 12000.) as f32,
+        },
+        listener,
+    )
+}
+
+/// A sound from outside the aircraft as the listener hears it: through
+/// the canopy from a cockpit, unchanged in an external view.
+pub fn outside(mix: Mix, listener: Listener) -> Mix {
+    if listener.external {
+        mix
+    } else {
+        Mix {
+            gain: mix.gain * COCKPIT_GAIN,
+            cutoff: mix.cutoff.min(COCKPIT_CUTOFF_HZ),
+            ..mix
+        }
     }
+}
+
+/// A looping source such as an engine or a fire: inverse distance beyond
+/// `reference`, fading to nothing at `maximum`, with the same stereo and
+/// treble rules as one-shot sounds.
+pub fn loop_mix(
+    position: Vector,
+    listener: Listener,
+    reference: f64,
+    maximum: f64,
+    peak: f64,
+) -> Mix {
+    let relative = sub(position, listener.position);
+    let distance = length(relative);
+    let fade = ((maximum - distance) / (0.2 * maximum)).clamp(0., 1.);
+    outside(
+        Mix {
+            gain: (peak * (reference / distance.max(reference)) * fade * fade * (3. - 2. * fade))
+                as f32,
+            pan: (dot(relative, listener.right) / distance.max(1.)).clamp(-1., 1.) as f32,
+            cutoff: (12000. / (1. + distance / 6000.)).clamp(250., 12000.) as f32,
+        },
+        listener,
+    )
+}
+
+/// The Doppler pitch ratio of a source moving at `velocity` heard by a
+/// listener moving at `listener_velocity`, at the local speed of sound,
+/// held within `limits` (lowest, highest).
+pub fn doppler(
+    position: Vector,
+    velocity: Vector,
+    listener: Vector,
+    listener_velocity: Vector,
+    limits: (f64, f64),
+) -> f64 {
+    let toward = sub(listener, position);
+    let distance = length(toward);
+    if distance < 1. {
+        return 1.;
+    }
+    let axis = scale(toward, 1. / distance);
+    let c = speed_of_sound((position[1] + listener[1]) * 0.5);
+    let source = dot(velocity, axis).min(0.95 * c);
+    let observer = dot(listener_velocity, axis);
+    ((c - observer) / (c - source)).clamp(limits.0, limits.1)
 }
 
 /// A release heard inside the releasing aircraft's own cockpit: the cue's
@@ -359,19 +474,25 @@ mod tests {
     }
     #[test]
     fn distance_pressure_fade_and_atmospheric_speed() {
-        let l = listener();
+        let l = Listener {
+            external: true,
+            ..listener()
+        };
         assert_eq!(speed_of_sound(0.), 1115.);
         assert_eq!(speed_of_sound(50000.), 967.);
         let a = mix(Kind::Explosion, [1000., 0., 0.], l);
-        let b = mix(Kind::Explosion, [2000., 0., 0.], l);
-        assert!((a.gain / b.gain - 2.).abs() < 1e-6);
+        let b = mix(Kind::Explosion, [8000., 0., 0.], l);
+        assert!((a.gain / b.gain - 8.).abs() < 1e-5);
         assert!(b.cutoff < a.cutoff);
         assert_eq!(mix(Kind::Explosion, [40000., 0., 0.], l).gain, 0.);
         assert_eq!(mix(Kind::Explosion, [-1000., 0., 0.], l).pan, -1.);
     }
     #[test]
     fn releases_are_full_within_100_ft_silent_at_4000_ft_and_centered_in_own_cockpit() {
-        let l = listener();
+        let l = Listener {
+            external: true,
+            ..listener()
+        };
         // Level 200 of the original's 255, relative to a weapon release.
         let peak = 0.4 * 200. / 255.;
         for kind in [Kind::Chaff, Kind::Flare] {
@@ -384,6 +505,68 @@ mod tests {
             assert_eq!((own.gain, own.pan, own.cutoff), (peak as f32, 0., 12000.));
         }
         assert!(peak < Kind::Impact.parameters().2);
+    }
+    #[test]
+    fn explosion_types_fade_in_a_straight_line_and_are_refused_past_20000_ft() {
+        let l = Listener {
+            external: true,
+            ..listener()
+        };
+        // Type 30: full within 2,000 ft, silent at 25,000.
+        let at = |x: f64| mix(Kind::Blast(30), [x, 0., 0.], l).gain;
+        assert_eq!(at(10.), FULL_LEVEL as f32);
+        assert_eq!(at(2000.), FULL_LEVEL as f32);
+        let half = (2000. + 25000.) / 2.;
+        assert!((at(half) - FULL_LEVEL as f32 / 2.).abs() < 1e-6);
+        assert!(at(19999.) > 0.08);
+        assert_eq!(at(20001.), 0.);
+        // A gun strike on dirt: full within 100 ft, silent at 10,000.
+        let dirt = mix(Kind::Blast(15), [5050., 0., 0.], l).gain;
+        assert!((dirt - FULL_LEVEL as f32 / 2.).abs() < 1e-6);
+        assert_eq!(Kind::Blast(30).parameters(), (2000., 25000., FULL_LEVEL));
+    }
+    #[test]
+    fn cockpit_hears_outside_sounds_at_40_percent_without_treble() {
+        let outside_view = Listener {
+            external: true,
+            ..listener()
+        };
+        let cockpit_view = listener();
+        for kind in [Kind::Blast(35), Kind::AircraftPass, Kind::Flare] {
+            let out = mix(kind, [300., 0., 0.], outside_view);
+            let inside = mix(kind, [300., 0., 0.], cockpit_view);
+            assert!((inside.gain - out.gain * COCKPIT_GAIN).abs() < 1e-6);
+            assert_eq!(inside.cutoff, COCKPIT_CUTOFF_HZ);
+            assert_eq!(inside.pan, out.pan);
+        }
+        // The player's own release is not outside the cockpit.
+        assert_eq!(cockpit(Kind::Chaff).gain, Kind::Chaff.parameters().2 as f32);
+        let engine = loop_mix([400., 0., 0.], outside_view, 200., 15000., 0.2);
+        assert!((engine.gain - 0.1).abs() < 1e-6);
+        let muffled = loop_mix([400., 0., 0.], cockpit_view, 200., 15000., 0.2);
+        assert!((muffled.gain - 0.04).abs() < 1e-6);
+    }
+    #[test]
+    fn recorded_names_round_trip_and_doppler_rises_toward_and_falls_away() {
+        for kind in [Kind::Impact, Kind::Explosion, Kind::Blast(30), Kind::Flare] {
+            assert_eq!(Kind::from_name(&kind.name()), Some(kind));
+        }
+        assert_eq!(Kind::Blast(17).name(), "blast17");
+        assert_eq!(Kind::Impact.name(), "impact");
+        assert_eq!(Kind::from_name("blast"), None);
+        let limits = (0.5, 2.);
+        let toward = doppler([-1000., 0., 0.], [500., 0., 0.], [0.; 3], [0.; 3], limits);
+        let away = doppler([1000., 0., 0.], [500., 0., 0.], [0.; 3], [0.; 3], limits);
+        assert!((toward - 1115. / 615.).abs() < 1e-9);
+        assert!((away - 1115. / 1615.).abs() < 1e-9);
+        assert_eq!(
+            doppler([-1000., 0., 0.], [5000., 0., 0.], [0.; 3], [0.; 3], limits),
+            2.
+        );
+        assert_eq!(
+            doppler([0.; 3], [500., 0., 0.], [0.; 3], [0.; 3], limits),
+            1.
+        );
     }
     #[test]
     fn swept_pass_once_with_no_spawn_formation_or_camera_cut_noise() {

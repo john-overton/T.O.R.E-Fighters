@@ -931,3 +931,86 @@ fn size_per_aircraft_tick_on_a_realistic_mission() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Explosion types, craters, fires and crash-site smoke survive a round trip,
+/// and codes a build does not name stay `Other`.
+#[test]
+fn explosion_crater_and_fire_kinds_round_trip() {
+    for code in 0..=255u8 {
+        assert_eq!(EffectKind::from_code(code).code(), code);
+    }
+    assert_eq!(EffectKind::from_code(3), EffectKind::Hit);
+    assert_eq!(
+        EffectKind::from_code(64 + 32 + 15),
+        EffectKind::Blast {
+            on: Strike::Destroyed,
+            explosion: 30
+        }
+    );
+    assert_eq!(EffectKind::from_code(64 + 24), EffectKind::Other(88));
+    assert_eq!(EffectKind::from_code(64 + 96), EffectKind::Crater(0));
+    assert_eq!(EffectKind::from_code(224), EffectKind::Other(224));
+    let dir = temp_dir("blasts");
+    let path = dir.join("blasts.tore-replay");
+    let mut writer = Writer::create(&path, &header("UKR")).unwrap();
+    let kinds = [
+        EffectKind::Blast {
+            on: Strike::Hit,
+            explosion: 18,
+        },
+        EffectKind::Blast {
+            on: Strike::Ground,
+            explosion: 38,
+        },
+        EffectKind::Crater(18),
+        EffectKind::Fire,
+    ];
+    writer
+        .push(&Frame {
+            tick: 5,
+            new_effects: kinds
+                .iter()
+                .map(|&kind| EffectSpawn {
+                    kind,
+                    position: [10., 20., 30.],
+                    duration_ticks: if kind == EffectKind::Fire {
+                        108_000
+                    } else {
+                        u32::MAX
+                    },
+                })
+                .collect(),
+            new_puffs: vec![PuffSpawn {
+                layer: LAYER_SMOKE,
+                kind: PuffKind::Burning,
+                position: [10., 40., 30.],
+            }],
+            ..Frame::default()
+        })
+        .unwrap();
+    assert!(
+        writer
+            .push(&Frame {
+                tick: 6,
+                new_effects: vec![EffectSpawn {
+                    kind: EffectKind::Other(7),
+                    position: [0.; 3],
+                    duration_ticks: 1,
+                }],
+                ..Frame::default()
+            })
+            .is_err()
+    );
+    let recording = Recording::open(writer.finish(&Footer::default()).unwrap()).unwrap();
+    let effects = recording.live_effects(4_805, 4_805).unwrap();
+    let read: Vec<_> = effects.iter().map(|e| e.kind).collect();
+    assert_eq!(read, kinds);
+    let puffs = recording.live_puffs(125).unwrap();
+    assert_eq!(puffs.len(), 1);
+    assert_eq!(puffs[0].kind, PuffKind::Burning);
+    let risen = 40. + 20. * 6076.12 / 3600.;
+    assert!((puffs[0].position[1] - risen).abs() <= POSITION_FT / 2. + 1e-9);
+    assert_eq!(recording.live_puffs(5_266).unwrap().len(), 1);
+    assert!(recording.live_puffs(5_267).unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}

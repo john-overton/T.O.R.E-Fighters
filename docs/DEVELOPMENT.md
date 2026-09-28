@@ -1270,6 +1270,23 @@ Pilot tapes accept `eject` as a one-shot command. Two entries within the documen
 confirmation interval exercise the complete headless escape path; replay prints
 phase, pilot survival and position. See [validation](baselines/ejection.md).
 
+## Explosion inspection
+
+`TORE_EFFECT_PREVIEW=1` puts every [explosion type](spec/explosions.md) 15 to
+38 halfway through its animation in a row 2,500 feet ahead of a free flight,
+surface types on the ground, and a burning crash site with its smoke column and
+three weapon craters (sizes 3, 9 and 18) on the ground 4,000 feet ahead. It
+only changes what is drawn. From the default 5,000-foot start, look down to
+see the ground row:
+
+```sh
+TORE_DATA_DIR=.local/effects-data TORE_EFFECT_PREVIEW=1 target/debug/tore-app --free-flight --capture-flight .local/effects/row.ppm --flight-view 1 --no-audio
+TORE_DATA_DIR=.local/effects-data TORE_EFFECT_PREVIEW=1 target/debug/tore-app --free-flight --capture-flight .local/effects/ground.ppm --flight-view 1 --flight-look 0,40 --flight-zoom 2.5 --no-audio
+```
+
+A cache made before the explosion sounds and sheets were added re-imports on
+first start, as any stale cache does. See [the evidence](baselines/explosions.md).
+
 ## Flight view inspection
 
 `--flight-view 0..11` preserves 0 front, 1 external, 2 oblique, 3 back and 4 up.

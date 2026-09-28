@@ -93,9 +93,9 @@ silently prefer a patch/disc variant or imply every variant was reviewed.
 CHAFF.SH and FLARE.SH. All exist and none is in the measured weapons export.
 Their module strings name CRATERS.PIC, SMOKE.PIC, FIREA.PIC and FLARE.PIC;
 these also exist and are missing. The already-selected FIRE.PIC is different art.
-Executable sound-string candidates missing from selection include &EXPL12.5K,
-&SPLASH3.11K and &FIRE.5K. Finish table/caller tracing before mapping sounds to
-effect indices. Similar names alone are insufficient. &CHAFF.5K and &FLARE.5K
+The explosion table, the crater and fire routines and the shapes' own
+selection of these pictures and recordings are now traced
+([explosion resources](explosions.md)). &CHAFF.5K and &FLARE.5K
 are traced to device creation
 ([sound notes](sound.md#countermeasure-release-sound)).
 

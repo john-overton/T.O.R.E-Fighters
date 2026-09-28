@@ -99,8 +99,9 @@ throughout its life. Missile/aircraft damage puffs last 4/8 seconds. At 1,200
 feet/second missile centers are 80 feet apart; at 600 feet/second aircraft damage
 centers are 60 feet apart before rise. Missile/aircraft damage radii start at
 2/8 feet and grow by 3/8 feet per second. These retain fitted lifetimes, rise of
-2 feet per second and linear fade from 0.65 opacity. Original timing remains
-unknown. Rendering continues at the normal frame rate.
+2 feet per second and linear fade from 0.65 opacity. As John requested on
+2026-09-28, every smoke puff and contrail puff also drifts with the mission
+wind from the moment it is released. Original timing remains unknown. Rendering continues at the normal frame rate.
 
 Burning flares leave their own short trail with the white missile puff; its
 rules are in [countermeasure presentation](countermeasures.md#flares).
@@ -112,7 +113,8 @@ aircraft. As requested by John on 2026-09-21, each puff now lasts two minutes
 ticks), then fades linearly to zero over the final minute. At 1:30 its opacity
 is 0.325; at 2:00 it is removed. This replaces the distance-based trail limit.
 Speed, turns and distance from the aircraft do not affect puff opacity or life.
-Pausing freezes puff age. Puffs remain at their emitted world positions.
+Pausing freezes puff age. Puffs drift from their emitted world positions only
+with the mission wind.
 Contrails use the reduced missile radius and growth, capped at 14 feet after
 four seconds, an agent-selected fit.
 
@@ -246,8 +248,9 @@ fragment's own original geometry and texture, without intact-aircraft animation.
 
 The first swept terrain contact removes the piece immediately and creates one
 15-foot, 0.375-second ground-hit animation from `GRDLRGA.PIC`. The animation uses
-12 frames in a 3x4 grid of 80x63 source cells, keyed with palette index 255. Its
-center is 6 feet above the contact so terrain does not hide it. This small use of
+its 12 frames of 76x62 in three columns, as `EXP.SH` lays the sheet out
+([format notes](../formats/explosions.md#expsh)), keyed with palette index 255.
+It is silent. Its base is 6 feet above the contact so terrain does not hide it. This small use of
 the original ground-explosion art is an agent-selected fit, not a recovered
 bullet-impact mapping. There is no resting wreck part or collision obstacle.
 Further hits cannot respawn the same piece. Reset clears detached pieces and
