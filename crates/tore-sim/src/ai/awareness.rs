@@ -14,6 +14,109 @@ use super::{Experience, controller::TargetView, experience::ResolvedExperience, 
 pub const VISUAL_CONE_HALF_ANGLE_DEG: f64 = 60.0;
 pub const FEET_PER_NAUTICAL_MILE: f64 = crate::sensors::FEET_PER_NAUTICAL_MILE;
 
+/// Six body-relative directions cover the sphere in 240 ticks. The forward
+/// cone stays available while scanning; attention uses only a frozen measured
+/// position, never a target's hidden world pose. Opinionated lookout geometry,
+/// specified in docs/spec/visual-awareness-under-fire.md.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lookout {
+    pub position: [f64; 3],
+    pub forward: [f64; 3],
+    pub scan: [f64; 3],
+    pub attention: Option<[f64; 3]>,
+    pub sector: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VisualResult {
+    Visible,
+    OutOfRange,
+    Terrain,
+    OutsideLookout,
+}
+
+impl VisualResult {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Visible => "visually observed",
+            Self::OutOfRange => "outside visual range",
+            Self::Terrain => "terrain blocks sight",
+            Self::OutsideLookout => "outside current lookout and attention",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VisualTrace {
+    pub id: u32,
+    pub distance_ft: f64,
+    pub result: VisualResult,
+}
+
+impl Lookout {
+    pub fn new(
+        tick: u64,
+        position: [f64; 3],
+        basis: crate::attitude::Basis,
+        attention: Option<[f64; 3]>,
+    ) -> Self {
+        let sector = ((tick / 40) % 6) as usize;
+        let direction = [
+            basis.forward,
+            basis.right,
+            basis.forward.map(|v| -v),
+            basis.right.map(|v| -v),
+            basis.up,
+            basis.up.map(|v| -v),
+        ][sector];
+        Self {
+            position,
+            forward: basis.forward,
+            scan: direction,
+            attention,
+            sector,
+        }
+    }
+
+    pub fn check(
+        self,
+        skill: Experience,
+        target: [f64; 3],
+        visibility_limit_ft: Option<f64>,
+        terrain_clear: bool,
+    ) -> VisualResult {
+        let delta: [f64; 3] = std::array::from_fn(|i| target[i] - self.position[i]);
+        let distance = crate::attitude::dot(delta, delta).sqrt();
+        let limit = visibility_limit_ft.unwrap_or(f64::INFINITY);
+        if !distance.is_finite()
+            || limit.is_nan()
+            || distance > visual_range_feet(skill).min(limit.max(0.))
+        {
+            return VisualResult::OutOfRange;
+        }
+        if !terrain_clear {
+            return VisualResult::Terrain;
+        }
+        let in_cone = |axis: [f64; 3]| {
+            let length = crate::attitude::dot(axis, axis).sqrt();
+            length > 0.
+                && crate::attitude::dot(axis, delta) / length + f64::EPSILON
+                    >= distance * VISUAL_CONE_HALF_ANGLE_DEG.to_radians().cos()
+        };
+        if distance == 0.
+            || in_cone(self.forward)
+            || in_cone(self.scan)
+            || self
+                .attention
+                .is_some_and(|p| in_cone(std::array::from_fn(|i| p[i] - self.position[i])))
+        {
+            VisualResult::Visible
+        } else {
+            VisualResult::OutsideLookout
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObservationSource {
     Visual,
@@ -313,6 +416,61 @@ mod tests {
             velocity: [1.0, 2.0, 3.0],
             source,
         }
+    }
+
+    #[test]
+    fn lookout_covers_front_rear_sides_and_vertical_including_inverted_flight() {
+        use crate::attitude::Basis;
+        for bank in [0., std::f64::consts::PI] {
+            let basis = Basis::new(0., 0., bank);
+            for direction in [
+                [0., 0., 1.],
+                [0., 0., -1.],
+                [1., 0., 0.],
+                [-1., 0., 0.],
+                [0., 1., 0.],
+                [0., -1., 0.],
+                [1., 1., 1.],
+            ] {
+                let position = direction.map(|v| v * 5000.);
+                assert!(
+                    (0..240).any(|tick| Lookout::new(tick, [0.; 3], basis, None).check(
+                        Experience::Novice,
+                        position,
+                        None,
+                        true
+                    ) == VisualResult::Visible)
+                );
+            }
+        }
+        let lookout = Lookout::new(80, [0.; 3], Basis::new(0., 0., 0.), None);
+        assert_eq!(
+            lookout.check(Experience::Novice, [0., 0., -5000.], None, false),
+            VisualResult::Terrain
+        );
+        assert_eq!(
+            lookout.check(
+                Experience::Novice,
+                [0., 0., -visual_range_feet(Experience::Novice) - 1.],
+                None,
+                true
+            ),
+            VisualResult::OutOfRange
+        );
+    }
+
+    #[test]
+    fn attention_uses_last_measured_point_and_does_not_follow_hidden_turns() {
+        let basis = crate::attitude::Basis::new(0., 0., 0.);
+        let looking = Lookout::new(0, [0.; 3], basis, Some([0., 0., -5000.]));
+        assert_eq!(
+            looking.check(Experience::Ace, [0., 0., -5100.], None, true),
+            VisualResult::Visible
+        );
+        assert_eq!(
+            looking.check(Experience::Ace, [5000., 0., 0.], None, true),
+            VisualResult::OutsideLookout
+        );
     }
 
     #[test]

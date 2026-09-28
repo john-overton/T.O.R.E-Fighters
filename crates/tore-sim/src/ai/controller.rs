@@ -214,8 +214,15 @@ pub struct SearchContact {
 
 /// Perceived missile defense resolved by the shared defensive policy. It
 /// contains no hidden target or launcher information.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DefenseSource {
+    Missile,
+    IncomingFire,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MissileDefense {
+pub struct DefenseMotion {
+    pub source: DefenseSource,
     pub heading_deg: f64,
     pub pitch_deg: f64,
 }
@@ -734,7 +741,7 @@ pub struct Controller {
     search_started_tick: Option<u64>,
     search_orbit_altitude_ft: Option<f64>,
     completed_search: Option<SearchContact>,
-    missile_defense: Option<MissileDefense>,
+    defense_motion: Option<DefenseMotion>,
     defense_motion_id: Option<u64>,
     mission_target: Option<Option<u32>>,
     mission_rejoin: Option<[f64; 3]>,
@@ -805,11 +812,11 @@ impl Controller {
         self.mission_rejoin = point;
     }
 
-    /// Survival maneuvers are driven by perceived missile records. Entering
+    /// Survival maneuvers are driven by perceived missile or incoming-fire evidence. Entering
     /// or leaving defense invalidates a previous tactic, without losing the
     /// independently observed offensive target or the aircraft's memory.
-    pub fn set_missile_defense(&mut self, defense: Option<MissileDefense>) {
-        if self.missile_defense.is_some() != defense.is_some() {
+    pub fn set_defense_motion(&mut self, defense: Option<DefenseMotion>) {
+        if self.defense_motion.is_some() != defense.is_some() {
             self.active = None;
             self.pursuit = None;
             self.search_started_tick = None;
@@ -817,7 +824,7 @@ impl Controller {
             self.defense_motion_id = None;
             self.next_choice_quarters = 0;
         }
-        self.missile_defense = defense;
+        self.defense_motion = defense;
     }
 
     /// Supply the remembered contact to investigate. This record is frozen:
@@ -918,7 +925,7 @@ impl Controller {
             search_started_tick: None,
             search_orbit_altitude_ft: None,
             completed_search: None,
-            missile_defense: None,
+            defense_motion: None,
             defense_motion_id: None,
             mission_target: None,
             mission_rejoin: None,
@@ -1097,7 +1104,7 @@ impl Controller {
         // 6. Motion. An active maneuver runs to its completion rule before a
         //    new tactic is chosen (B13), except when a higher reason restarts
         //    the script.
-        if let Some(defense) = self.missile_defense {
+        if let Some(defense) = self.defense_motion {
             let id = *self.defense_motion_id.get_or_insert_with(|| {
                 let id = self.next_motion_id;
                 self.next_motion_id += 1;
@@ -1126,9 +1133,16 @@ impl Controller {
                 afterburner: false,
             });
             batch.activity = Some(Activity::Defending);
-            self.trace.0.motion.branch = MotionBranch::MissileDefense {
-                heading_deg: defense.heading_deg,
-                pitch_deg: defense.pitch_deg,
+            self.trace.0.motion.branch = if defense.source == DefenseSource::IncomingFire {
+                MotionBranch::IncomingFire {
+                    heading_deg: defense.heading_deg,
+                    pitch_deg: defense.pitch_deg,
+                }
+            } else {
+                MotionBranch::MissileDefense {
+                    heading_deg: defense.heading_deg,
+                    pitch_deg: defense.pitch_deg,
+                }
             };
         } else if let Some(point) = self.mission_rejoin.filter(|_| !recovering) {
             let delta = std::array::from_fn::<_, 3, _>(|i| point[i] - frame.own.position[i]);

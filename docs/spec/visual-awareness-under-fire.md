@@ -10,25 +10,22 @@
 
 ## Status and provenance
 
-Research mode, 2026-09-28. **Proposed behavior, not implemented.** John requested
-investigation and a repair plan for F-22 visual detection, including the Su-27
-and all aircraft variants, and aircraft reactions to air and ground fire.
-The [validation pass](../baselines/visual-awareness-under-fire.md) measures the
-current rebuild. It does not establish original Fighters Anthology behavior.
+Implementation mode, 2026-09-28. **Implemented from the authored repair plan.**
+John requested the investigation, the all-variant check and then implementation
+in a separate worktree. The [original investigation](../baselines/visual-awareness-under-fire.md)
+measures the earlier rebuild. The [implementation validation](../baselines/incoming-fire-implementation.md)
+records the new tests and remaining limits. Neither establishes retail parity.
 
-The required outcome is that a visible hostile can prompt an appropriate
-mission response, and perceived incoming fire can prompt self-preservation
-without an identified attacker. The rules and new constants below are
-**opinionated agent proposals**, not values requested by John or recovered from
-the executable. Original lookout timing and gunfire evasion thresholds remain
-**unknown**. Next research step, if needed for parity: recover the visual
-attention and hit/near-miss behavior into a prose contract, using the build
-provenance in the [AI research baseline](../baselines/ai-research.md).
+The player-visible requirements and numeric tuning are opinionated agent
+choices. Gameplay code is **spec-derived** from this contract. The 100-foot
+anonymous proximity cue is a **fitted** awareness allowance. Original lookout
+timing and gunfire evasion thresholds remain **unknown**; recovered visual
+attention and hit/near-miss behavior would be the next parity research step.
+Executable provenance remains in the [AI research baseline](../baselines/ai-research.md).
 
-The existing [awareness specification](ai-awareness.md) remains the description
-of shipped behavior. This proposal explicitly changes its nose-only lookout
-and attack-only automatic leader release. It does not silently redefine them.
-Delivery order lives in the [roadmap](../ROADMAP.md#visual-contact-and-incoming-fire-repair).
+The [awareness specification](ai-awareness.md) retains the shared range, memory,
+mission and missile contracts. This contract owns the extended lookout and
+incoming-fire rules. [Delivery status](../ROADMAP.md#visual-contact-and-incoming-fire-repair).
 
 ## Seeing an aircraft and choosing to engage
 
@@ -39,18 +36,28 @@ Apply the same visual rules to every aircraft, including the exact F22.PT,
 F22N.PT and the opinionated F/A-XX identity. Do not tune radar or infrared
 signatures to compensate for a visual or engagement defect.
 
-Add a pilot lookout independent of the aircraft's nose direction. Proposed
+The pilot lookout operates independently of the aircraft's nose direction. Its
 acceptance bound: in clear, unobstructed flight, a continuously visible aircraft
 inside the skill range is noticed within **2 seconds**, including side and rear
 approaches. A scan must actually sample the relevant direction; do not grant
 continuous tracking of unseen objects. An acquired threat receives attention,
 while lost contacts retain only their last measured state. Scan phase and
-refresh use simulation ticks. Aircraft directly above/below, sustained inverted
-flight and cockpit blind sectors need explicit fixtures before accepting the
-lookout implementation. Complete cloud/night visibility remains a separate gap.
+refresh use simulation ticks. Six body-relative directions are sampled in order:
+forward, right, rear, left, above and below, **40 ticks per direction**. Each
+sample uses the existing 60-degree half-angle cone. The forward cone remains
+available during a scan. Attention also follows the selected target's last
+measurement, or a currently observed hostile if none is selected. That frozen
+point can direct a look, but cannot move itself to follow an unseen aircraft.
+Imported visual contacts obey the same attention gate; radar and infrared keep
+their own hardware geometry. The lookout also supplies the visual geometry for
+AI missile and tracer observations. Player sensor and RWR geometry is unchanged.
 
-Keep neutral formation startup. Proposed change to the automatic AI leader:
-a currently observed, positively hostile aircraft may trigger an engagement
+This is an abstract pilot lookout, with no modeled canopy/fuselage blind sectors.
+Above, below and inverted cases have synthetic fixtures; aircraft-specific
+cockpit obstruction and complete cloud/night visibility remain open.
+
+Quick Mission retains neutral formation startup. The automatic AI leader may
+respond to a currently observed, positively hostile aircraft may trigger an engagement
 order when the assigned duty permits it. Free fire, intercept, CAP and escort
 must still apply their own eligibility, patrol and protection rules. Detection
 does not automatically make every contact an enemy. Self-defense and weapons
@@ -58,11 +65,11 @@ hold retain their restrictions. Human-led wingmen still require an accepted
 order. Explicit recall remains effective until a new order or newly perceived
 attack; do not immediately undo a recall just because its old contact is visible.
 
-This extends the earlier agent-authored attack-only leader interpretation in
-[formation and leader authorization](ai-awareness.md#formation-and-leader-authorization).
-It is a mission-policy change, not an F-22 sensor repair. Before implementation,
-update that contract and its tests together rather than changing only the UI or
-claiming the current neutral policy is a sensor fault.
+The automatic release is delivered after the tick's decisions and applies only
+to members still neutral. It cannot cancel an individual's accepted target
+assignment. This extends the earlier agent-authored attack-only interpretation;
+[formation and leader authorization](ai-awareness.md#formation-and-leader-authorization)
+and its tests describe the same rule.
 
 ## Perceiving incoming fire
 
@@ -71,7 +78,7 @@ surface origin does not change the victim's right to defend itself. A threat
 with no identified source cannot supply a target identity, position, radar lock
 or permission to fire at a guessed attacker.
 
-Proposed initial gunfire rules:
+Incoming gunfire rules:
 
 - A visible tracer with two measured positions is threatening when its relative
   trajectory predicts closest approach within **250 feet in the next 2 seconds**.
@@ -81,9 +88,10 @@ Proposed initial gunfire rules:
   cue even outside the visual scan. This is a fitted awareness allowance for a
   close pass, not recovered sound or cockpit visibility behavior. It gives no
   shooter position and expires like other fire cues.
-- A combat damage event supplies an immediate anonymous hit cue, including from
-  behind or below. Distinguish weapon damage from terrain contact and ordinary
-  flight damage where the producer knows the cause.
+- A combat weapon-hit event supplies an immediate anonymous hit cue, including
+  from behind or below. The app forwards the victim's `Event::Hit`; an arbitrary
+  hit-point reduction retains the old damage event but does not invent a gunfire
+  cue. Terrain contact and ordinary flight damage therefore stay separate.
 - Keep a fire cue for **2 seconds** after its last observation or close pass.
   Coalesce a burst into one defensive episode. New valid evidence refreshes it;
   forwarding, hidden projectile motion and a remembered shooter do not.
@@ -109,15 +117,21 @@ the existing missile notch and skill-dependent missile timing. Gun-only danger
 does not dispense chaff or flares. Terrain avoidance and controllable flight
 remain mandatory; a low-altitude aircraft must not dive into the ground.
 
-Arbitrate simultaneous threats into one maneuver using observed time to danger,
-with conservative treatment of an anonymous hit. A burst must not restart the
-turn every round. After the cue expires, resume the permitted mission or search
+Simultaneous threats yield one maneuver. An anonymous hit or close pass has
+zero time to danger; otherwise use measured time to closest approach. Compare
+that with the missile assessment's time, treating unknown missile timing as
+immediate and retaining missile motion on a tie. A more urgent gun/hit cue
+can take motion priority while a valid missile warning still requests devices.
+Each defensive burst keeps its original heading and jink phase across later
+rounds. The first break turns away from a measured bearing; an anonymous hit
+chooses left for odd actor IDs and right for even IDs. No shared random draw
+is added. After the cue expires, resume the permitted mission or search
 from legitimately remembered information. Do not require finding or killing the
 shooter before ending defense. No maneuver guarantees survival.
 
 ## Observable acceptance
 
-Expose separate replay reasons for contact source, lookout direction, denied
+The replay exposes separate reasons for contact source, lookout direction, denied
 visual acquisition, mission permission, incoming-fire evidence, shooter
 identification, chosen break and return to duty. A blank offensive target is
 not proof that an aircraft has seen nothing. Record the anonymous hit/proximity

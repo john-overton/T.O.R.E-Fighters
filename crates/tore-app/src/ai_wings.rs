@@ -824,6 +824,30 @@ impl AiWings {
         &self.slots
     }
 
+    /// Explicit headless-probe setup; normal mission adapter defaults are unchanged.
+    pub fn configure_probe(
+        &mut self,
+        researched: bool,
+        enemy_heading: Option<f64>,
+        wind: Vector,
+    ) -> AppResult<()> {
+        for actor in self.mission.actors_mut() {
+            let id = actor.id();
+            if actor.identity().side == ENEMY_SIDE
+                && let Some(heading) = enemy_heading
+            {
+                let flight = actor.flight_mut();
+                flight.yaw = heading;
+                let forward = Basis::new(heading, flight.pitch, flight.bank).forward;
+                flight.velocity = std::array::from_fn(|i| forward[i] * flight.speed + wind[i]);
+            }
+            if researched && actor.flight().research.is_none() {
+                actor.flight_mut().enable_research(1 + id as i32)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn mission(&self) -> &AiMission {
         &self.mission
     }
@@ -954,6 +978,20 @@ impl AiWings {
             } else {
                 Vec::new()
             });
+        self.mission.set_gun_rounds(
+            state
+                .projectiles
+                .iter()
+                .filter(|p| live::is_gun(p.weapon(state.configuration())))
+                .map(|p| tore_sim::ai::incoming_fire::Round {
+                    id: p.id,
+                    owner: p.owner,
+                    position: p.position,
+                    previous: p.previous,
+                    tracer: p.tracer,
+                })
+                .collect(),
+        );
         let object = self.player_object(player, state.player_hp, state.configuration());
         // Aircraft on the researched flight model roll on runways and feel
         // the wind; legacy airborne actors keep the terrain-only surface.
@@ -1244,28 +1282,22 @@ impl AiWings {
                             }),
                         )
                     };
-                if !awareness::visual_eligible(
-                    skill,
-                    position,
-                    heading,
-                    pitch,
-                    projectile.position,
-                    None,
-                    terrain_visible(position, projectile.position, ground),
-                ) {
+                let pilot_sees = |point| {
+                    let clear = terrain_visible(position, point, ground);
+                    if let Some(lookout) = self.mission.actor(receiver).and_then(AiActor::lookout) {
+                        lookout.check(skill, point, None, clear) == awareness::VisualResult::Visible
+                    } else {
+                        awareness::visual_eligible(
+                            skill, position, heading, pitch, point, None, clear,
+                        )
+                    }
+                };
+                if !pilot_sees(projectile.position) {
                     continue;
                 }
                 let mut launch_sources = possible_shooters.into_iter().filter(|(_, shooter)| {
                     missiles::length(missiles::sub(*shooter, projectile.previous)) <= 1000.
-                        && awareness::visual_eligible(
-                            skill,
-                            position,
-                            heading,
-                            pitch,
-                            *shooter,
-                            None,
-                            terrain_visible(position, *shooter, ground),
-                        )
+                        && pilot_sees(*shooter)
                 });
                 let Some((shooter, _)) = launch_sources.next() else {
                     continue;
@@ -1273,7 +1305,15 @@ impl AiWings {
                 if launch_sources.next().is_some() {
                     continue;
                 }
-                let gun_incoming = if gun {
+                let gun_incoming = if gun && receiver != PLAYER_ID {
+                    self.mission
+                        .actor(receiver)
+                        .and_then(AiActor::incoming_fire_cue)
+                        .is_some_and(|cue| {
+                            cue.round == Some(projectile.id)
+                                && cue.observed_tick + 1 == self.mission.tick()
+                        })
+                } else if gun {
                     let delta = missiles::sub(projectile.position, position);
                     let movement = std::array::from_fn::<_, 3, _>(|i| {
                         (projectile.position[i] - projectile.previous[i]) * 120. - velocity[i]
@@ -1506,6 +1546,18 @@ impl AiWings {
         }
     }
 
+    /// Victim-only evidence from combat, before the AI step. Terrain and
+    /// ordinary flight damage must not manufacture a gunfire cue.
+    pub fn report_weapon_hits(&mut self, events: &[live::Event]) {
+        for event in events {
+            if let live::Event::Hit(id) = event
+                && let Some(actor) = self.mission.actor_mut(*id)
+            {
+                actor.report_hit();
+            }
+        }
+    }
+
     /// Damage and death flow from the combat world into the actors: an actor
     /// whose target row lost hit points is told it was hit, and one whose row
     /// reached zero stops flying.
@@ -1543,7 +1595,7 @@ impl AiWings {
             if target.hp < previous
                 && let Some(actor) = self.mission.actor_mut(slot.id)
             {
-                actor.report_hit();
+                actor.report_damage();
             }
             self.last_hp.insert(slot.id, target.hp);
             if target.hp <= 0 && was_alive {
@@ -2915,8 +2967,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn both_sides_start_neutral_with_free_fire_objectives() {
+    fn startup_is_neutral_but_only_ai_led_wings_release_on_permitted_contact() {
         let (mut wings, mut targets) = build(None);
+        let human_wing = wings.mission.actor(1).unwrap().identity().wing;
+        wings
+            .mission
+            .set_external_leader(FRIENDLY_SIDE, human_wing, PLAYER_ID);
         wings.apply_mission_preset(Preset::Free, [0., 20000., 0.]);
         wings.apply_group_objectives(&[GroupObjective::Inherit; 6], [0., 20000., 0.]);
         assert!(wings.mission.actors().iter().all(AiActor::is_neutral));
@@ -2930,7 +2986,9 @@ pub(crate) mod tests {
                 .unwrap();
             assert!(output.launches.is_empty());
         }
-        assert!(wings.mission.actors().iter().all(AiActor::is_neutral));
+        for actor in wings.mission.actors() {
+            assert_eq!(actor.is_neutral(), actor.identity().side == FRIENDLY_SIDE);
+        }
     }
 
     pub(super) fn player_object(position: Vector) -> WorldObject {

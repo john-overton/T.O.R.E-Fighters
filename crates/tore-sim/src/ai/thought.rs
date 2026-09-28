@@ -313,11 +313,22 @@ pub enum MotionBranch {
     #[default]
     None,
     /// The shared missile-defense policy is flying the aircraft.
-    MissileDefense { heading_deg: f64, pitch_deg: f64 },
+    MissileDefense {
+        heading_deg: f64,
+        pitch_deg: f64,
+    },
+    IncomingFire {
+        heading_deg: f64,
+        pitch_deg: f64,
+    },
     /// Flying back toward an escorted aircraft or a patrol region.
-    MissionRejoin { point: [f64; 3] },
+    MissionRejoin {
+        point: [f64; 3],
+    },
     /// Searching along a bearing an escort was given.
-    SearchBearing { bearing_deg: f64 },
+    SearchBearing {
+        bearing_deg: f64,
+    },
     /// An ordered approach is still closing on its target.
     OrderedApproach {
         target: u32,
@@ -334,7 +345,9 @@ pub enum MotionBranch {
         orbiting: bool,
     },
     /// An Ace gave up a search after two minutes.
-    SearchAbandoned { contact: SearchContact },
+    SearchAbandoned {
+        contact: SearchContact,
+    },
     /// Flying the formation slot.
     Formation(FormationTrace),
     /// The running maneuver continues until its completion rule fires.
@@ -471,6 +484,10 @@ pub struct ActiveManeuverView {
 /// What the mission runtime decided for one actor on its latest step.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ActorTrace {
+    pub lookout: Option<super::awareness::Lookout>,
+    pub visual: Vec<super::awareness::VisualTrace>,
+    pub observation_sources: Vec<(u32, super::awareness::SourceTimestamps)>,
+    pub fire: super::incoming_fire::Trace,
     /// The mission tick this record describes; `None` before the first step.
     pub tick: Option<u64>,
     pub path: ActorPath,
@@ -665,6 +682,8 @@ pub enum Message {
     /// A neutral AI leader released itself to free target selection after a
     /// perceived attack on its wing or a charge.
     FreeSelection { trigger: ObservedAttack },
+    /// A current hostile contact permitted by the leader's mission.
+    ContactSelection { target: u32 },
     /// A wing command over the wing channel (B43, B46). Boxed: a landing
     /// order carries the airport's anchor points.
     WingRequest(Box<WingRequest>),

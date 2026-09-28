@@ -504,6 +504,15 @@ pub fn motion_branch(
             "missile defense",
             format!("heading {:.0}, pitch {:.0}", heading_deg, pitch_deg),
         ),
+        MotionBranch::IncomingFire {
+            heading_deg,
+            pitch_deg,
+        } => (
+            "incoming fire defense",
+            format!(
+                "heading {heading_deg:.0}, pitch {pitch_deg:.0}; shooter identity not required"
+            ),
+        ),
         MotionBranch::MissionRejoin { .. } => (
             "rejoining",
             match actor.rejoin.map(|r| r.reason) {
@@ -569,6 +578,7 @@ pub fn branch_code(controller: &ControllerTrace, actor: &ActorTrace) -> u8 {
     match controller.motion.branch {
         MotionBranch::None => 1,
         MotionBranch::MissileDefense { .. } => 2,
+        MotionBranch::IncomingFire { .. } => 11,
         MotionBranch::MissionRejoin { .. } => 3,
         MotionBranch::SearchBearing { .. } => 4,
         MotionBranch::OrderedApproach { .. } => 5,
@@ -797,6 +807,49 @@ fn experience_note(experience: ResolvedExperience) -> &'static str {
     }
 }
 
+fn thought_perception(tree: &mut Tree, t: &Thought) {
+    if let Some(lookout) = t.actor.lookout {
+        tree.text(
+            0,
+            "Lookout",
+            ["forward", "right", "rear", "left", "above", "below"][lookout.sector],
+            "body-relative scan; forward and measured attention also available",
+        );
+        for sight in &t.actor.visual {
+            tree.text(
+                1,
+                &(t.who)(sight.id),
+                format!("{:.1} nm", sight.distance_ft / 6076.),
+                sight.result.label(),
+            );
+        }
+    }
+    if !t.actor.observation_sources.is_empty() {
+        tree.text(
+            0,
+            "Current observations",
+            "sensor sources",
+            "current measured contacts, separate from target permission",
+        );
+        for (id, sources) in &t.actor.observation_sources {
+            let mut names = Vec::new();
+            if sources.visual.is_some() {
+                names.push("visual");
+            }
+            if sources.radar.is_some() {
+                names.push("radar");
+            }
+            if sources.infrared.is_some() {
+                names.push("infrared");
+            }
+            if sources.fixture.is_some() {
+                names.push("fixture");
+            }
+            tree.text(1, &(t.who)(*id), names.join(", "), "");
+        }
+    }
+}
+
 /// Builds an AI aircraft's thought tree. See docs/REPLAYS.md for the layout.
 pub fn ai_thought(t: &Thought) -> Vec<Node> {
     let mut tree = Tree::default();
@@ -806,6 +859,31 @@ pub fn ai_thought(t: &Thought) -> Vec<Node> {
     // A clock time rather than a running count, so the line stays the same
     // from sample to sample; a panel shows the time in it from the two.
     tree.text(1, "Since", clock(t.activity_since), "");
+    if let Some(cue) = t.actor.fire.cue {
+        tree.text(
+            0,
+            "Incoming fire",
+            cue.evidence.label(),
+            "no shooter identity granted",
+        );
+        tree.text(
+            1,
+            "Observed",
+            clock(cue.observed_tick),
+            "expires after 2 seconds without new evidence",
+        );
+        tree.text(
+            1,
+            "Response",
+            if t.actor.fire.selected {
+                "jink"
+            } else {
+                "missile defense takes priority"
+            },
+            "gun-only danger consumes no devices",
+        );
+    }
+
     let fresh = t.fresh();
     thought_target(&mut tree, t, fresh);
     if fresh {
@@ -821,6 +899,7 @@ pub fn ai_thought(t: &Thought) -> Vec<Node> {
     thought_defense(&mut tree, t);
     thought_motion(&mut tree, t, fresh);
     thought_steering(&mut tree, t);
+    thought_perception(&mut tree, t);
     thought_fuel(&mut tree, t, fresh);
     thought_airfield(&mut tree, t);
     thought_ejection(&mut tree, t);

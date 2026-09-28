@@ -3285,6 +3285,7 @@ impl ApplicationHandler for App {
                             // so the AI reads the damage combat just applied and
                             // then writes the authoritative pose back.
                             if let Some(mut bridge) = self.ai_wings.take() {
+                                bridge.report_weapon_hits(&events);
                                 let stepped =
                                     bridge.step(&mut self.combat.state, &self.flight, &self.world);
                                 for (id, message, friendly) in bridge.ejection_events.drain(..) {
@@ -4292,6 +4293,13 @@ impl ApplicationHandler for App {
 /// `--probe-player-home`, `--probe-attack`). Development harness only.
 #[derive(Clone, Debug, Default)]
 struct ProbeScript {
+    enemy_aircraft: Option<tore_formats::aircraft::AircraftId>,
+    enemy_skill: Option<usize>,
+    geometry: ProbeGeometry,
+    guns: bool,
+    researched: bool,
+    threats: Vec<(u64, ProbeThreat)>,
+    matrix: Option<PathBuf>,
     /// Take off from the ground start, climb and cruise on the autopilot.
     takeoff: bool,
     /// Aircraft in the player's wing, the player included.
@@ -4307,6 +4315,29 @@ struct ProbeScript {
     trace_ticks: u64,
     /// The leader fires its own weapons from this tick.
     attack: Option<ProbeAttack>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ProbeGeometry {
+    #[default]
+    Head,
+    Rear,
+    Side,
+}
+
+#[derive(Default)]
+struct ProbeEncounter {
+    visual: Option<u64>,
+    engage: Option<u64>,
+    defense: Option<u64>,
+    bank: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProbeThreat {
+    Hit,
+    Gun,
+    Aaa,
 }
 
 /// `--record-mission PATH` on an AI probe, with `--verify-render`.
@@ -4746,6 +4777,7 @@ struct ProbeAttacker {
     fresh: bool,
     /// The attack in progress has given up on missiles.
     guns: bool,
+    force_guns: bool,
     /// The selected missile station and the tick it began waiting for READY.
     waiting: Option<(usize, u64)>,
     /// A missile press, released on the next tick.
@@ -4776,7 +4808,12 @@ struct ProbeAttacker {
 }
 
 impl ProbeAttacker {
-    fn new(attack: ProbeAttack, combat: &combat::Combat, bridge: &ai_wings::AiWings) -> Self {
+    fn new(
+        attack: ProbeAttack,
+        combat: &combat::Combat,
+        bridge: &ai_wings::AiWings,
+        force_guns: bool,
+    ) -> Self {
         let state = &combat.state;
         let stations: Vec<_> = state
             .configuration()
@@ -4810,7 +4847,8 @@ impl ProbeAttacker {
             repeat: attack.repeat,
             next: Some(attack.from),
             fresh: true,
-            guns: false,
+            guns: force_guns,
+            force_guns,
             waiting: None,
             pressed: false,
             burst: None,
@@ -4886,7 +4924,7 @@ impl ProbeAttacker {
             self.fresh = false;
             if current != Some(id) {
                 self.end_burst(tick, combat);
-                self.guns = false;
+                self.guns = self.force_guns;
                 self.waiting = None;
                 combat.command(Command::DesignateTarget(id), launcher);
                 self.clicks += 1;
@@ -4905,11 +4943,14 @@ impl ProbeAttacker {
             return;
         };
         let range = contact.distance_ft;
-        let station = self
-            .guns
-            .then(|| probe_station(&combat.state, range, true))
-            .flatten()
-            .or_else(|| probe_station(&combat.state, range, false));
+        let station = if self.force_guns {
+            probe_station(&combat.state, range, true)
+        } else {
+            self.guns
+                .then(|| probe_station(&combat.state, range, true))
+                .flatten()
+                .or_else(|| probe_station(&combat.state, range, false))
+        };
         let Some(station) = station else {
             self.end_burst(tick, combat);
             return;
@@ -5209,13 +5250,136 @@ fn probe_label(bridge: &ai_wings::AiWings, id: u32) -> String {
     )
 }
 
+/// Deterministic test projectile, using the selected aircraft's imported gun.
+/// AAA is a stationary ground-source firing fixture, not a ground AI actor.
+fn inject_probe_threat(
+    kind: ProbeThreat,
+    ordinal: usize,
+    bridge: &mut ai_wings::AiWings,
+    combat: &mut combat::Combat,
+    world: &terrain::World,
+) -> AppResult<()> {
+    use tore_sim::combat::live;
+    let slot = bridge
+        .slots()
+        .iter()
+        .find(|s| s.side == tore_sim::ai::launch::Side::Enemy)
+        .ok_or("probe threat needs an enemy")?;
+    let target = combat
+        .state
+        .targets
+        .iter_mut()
+        .find(|t| t.id == slot.id)
+        .ok_or("probe target missing")?;
+    if kind == ProbeThreat::Hit {
+        target.hp = (target.hp - 1).max(1);
+        bridge.report_weapon_hits(&[live::Event::Hit(target.id)]);
+        return Ok(());
+    }
+    let own = bridge
+        .mission()
+        .actor(slot.id)
+        .ok_or("probe actor missing")?
+        .flight();
+    let basis = attitude::Basis::new(own.yaw, own.pitch, own.bank);
+    let mut origin: [f64; 3] = std::array::from_fn(|i| own.position[i] - basis.forward[i] * 1500.);
+    if kind == ProbeThreat::Aaa {
+        origin[1] = f64::from(world.height(origin[0] as f32, origin[2] as f32)) + 10.;
+    }
+    let station = combat
+        .state
+        .configuration()
+        .stations
+        .iter()
+        .position(|s| live::is_gun(&s.weapon))
+        .ok_or("probe aircraft has no gun")?;
+    // Fixed 3,000 ft/s ballistic firing fixture. Lead the initial measured
+    // target velocity; a 50 ft offset yields a threatening near pass.
+    let speed = 3000.;
+    let mut time = 0.;
+    let mut delta = [0.; 3];
+    for _ in 0..8 {
+        delta = std::array::from_fn(|i| {
+            own.position[i] + own.velocity[i] * time + basis.right[i] * 50. - origin[i]
+        });
+        time = delta.iter().map(|v| v * v).sum::<f64>().sqrt() / speed;
+    }
+    let length = delta.iter().map(|v| v * v).sum::<f64>().sqrt();
+    combat.state.projectiles.push(live::Projectile {
+        id: 900_000 + combat.state.tick() as u32 * 64 + ordinal as u32,
+        owner: 900_001,
+        weapon: None,
+        guidance: None,
+        motion: None,
+        guidance_ticks: None,
+        age: 0,
+        incoming: false,
+        station,
+        position: origin,
+        previous: origin,
+        direction: delta.map(|v| v / length),
+        speed_f8: (speed * 256.) as i32,
+        launched_t: (combat.state.tick() / 30) as u16,
+        target: None,
+        fall: Default::default(),
+        gun_round: Some(0),
+        tracer: true,
+    });
+    Ok(())
+}
+
+fn verify_probe_attitudes(
+    snapshot: &render_snapshot::RenderSnapshot,
+    bridge: &ai_wings::AiWings,
+) -> AppResult<()> {
+    for actor in bridge.mission().actors().iter().filter(|a| a.alive()) {
+        let pose = snapshot
+            .target(actor.id())
+            .ok_or("AI probe render snapshot omitted an actor")?;
+        let body = actor.flight();
+        let expected = attitude::Basis::new(body.yaw, body.pitch, body.bank);
+        let drawn = attitude::Basis::new(pose.attitude[0], pose.attitude[1], pose.attitude[2]);
+        if attitude::dot(expected.forward, drawn.forward) < 1. - 1e-10
+            || attitude::dot(expected.up, drawn.up) < 1. - 1e-10
+        {
+            return Err(format!(
+                "AI probe actor {} lost its simulated attitude in the recording",
+                actor.id()
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn probe_case_name(
+    player: tore_formats::aircraft::AircraftId,
+    enemy: tore_formats::aircraft::AircraftId,
+    skill: usize,
+    geometry: ProbeGeometry,
+    researched: bool,
+) -> String {
+    format!(
+        "{}-{}-skill{skill}-{geometry:?}-{}",
+        player
+            .selection_key()
+            .trim_end_matches(".PT")
+            .to_ascii_uppercase(),
+        enemy
+            .selection_key()
+            .trim_end_matches(".PT")
+            .to_ascii_uppercase(),
+        if researched { "researched" } else { "legacy" }
+    )
+}
+
 /// Deterministic headless AI probe (`--ai-probe-ticks`).
 ///
 /// It builds the same chain a flown Quick Mission builds: the existing spawner
 /// places the wings, `Combat::reset` puts them in the world, and the AI bridge
-/// takes over from the targets it finds. Nothing about the fixture path is
-/// bypassed, so a difference between this probe and a flown mission would be a
-/// real difference.
+/// takes over from the targets it finds. Probe-only geometry, adapter and
+/// threat overrides are explicit and recorded; normal mission defaults stay
+/// separate. Headless weather/audio limitations are recorded in the header.
 ///
 /// `opinionated` (agent decision, 2026-09-17): the probe overwrites four setup
 /// fields so both sides always have aircraft. Rule: the default draft populates
@@ -5244,7 +5408,17 @@ fn ai_probe_run(
     if let Some(size) = script.wing_size {
         quick.draft.values[4] = size;
     }
-    quick.draft.values[22] = 2;
+    quick.draft.values[22] = script.enemy_skill.unwrap_or(2);
+    if let Some(enemy) = script.enemy_aircraft {
+        let index = quick
+            .aircraft_files
+            .iter()
+            .position(|p| p == enemy.selection_key())
+            .ok_or("probe enemy aircraft is not imported")?;
+        for field in [23, 26, 29] {
+            quick.draft.values[field] = index;
+        }
+    }
     let wings = quick
         .wing_launches(enemy_skill)
         .map_err(|e| e.to_string())?;
@@ -5307,6 +5481,16 @@ fn ai_probe_run(
         resources,
         &airfields,
     )?;
+    combat.ai_poses = !bridge.is_empty();
+    if script.researched && flight.research.is_none() {
+        flight.enable_research(1)?;
+    }
+    let enemy_heading = match script.geometry {
+        ProbeGeometry::Head => None,
+        ProbeGeometry::Rear => Some(flight.yaw),
+        ProbeGeometry::Side => Some(flight.yaw + std::f64::consts::FRAC_PI_2),
+    };
+    bridge.configure_probe(script.researched, enemy_heading, world.wind())?;
     bridge.apply_mission_preset(ai_mission, flight.position);
     bridge.apply_group_objectives(&quick.group_objectives, flight.position);
     bridge.apply_group_survival(&quick.group_must_survive);
@@ -5403,7 +5587,7 @@ fn ai_probe_run(
     let mut attacker = script.attack.map(|attack| {
         // As a flown mission does each frame: T and Enter skip friendlies.
         combat.state.friendlies = bridge.friendly_ids();
-        ProbeAttacker::new(attack, &combat, &bridge)
+        ProbeAttacker::new(attack, &combat, &bridge, script.guns)
     });
     // A mission recording of the probe: the picture is taken the way live
     // flight takes it, and nothing it reads feeds back into the run.
@@ -5426,6 +5610,7 @@ fn ai_probe_run(
     if verify {
         pictures.push(combat.render_snapshot().clone());
     }
+    let mut encounter: std::collections::BTreeMap<u32, ProbeEncounter> = Default::default();
     let mut noted_ejections = 0;
     for tick in 0..ticks as u64 {
         let previous = recording.as_ref().map(|_| flight.clone());
@@ -5502,7 +5687,66 @@ fn ai_probe_run(
                 bridge.command_at(*order, combat.state.designated(), None, site.as_ref())?;
             println!("t={tick} order={order:?} reply={:?}", report.message);
         }
+        for (ordinal, (_, threat)) in script
+            .threats
+            .iter()
+            .enumerate()
+            .filter(|(_, (at, _))| *at == tick)
+        {
+            inject_probe_threat(*threat, ordinal, &mut bridge, &mut combat, world)?;
+            if let Some(recording) = &mut recording {
+                recording.note(
+                    tore_replay::Event::new(tore_replay::vocab::kind::SYSTEM_NOTE)
+                        .with_text(format!("controlled probe threat: {threat:?}")),
+                );
+            }
+        }
+        bridge.report_weapon_hits(&events);
         bridge.step(&mut combat.state, &flight, world)?;
+        for actor in bridge
+            .mission()
+            .actors()
+            .iter()
+            .filter(|a| a.identity().side == ai_wings::ENEMY_SIDE)
+        {
+            let stats = encounter.entry(actor.id()).or_default();
+            if actor
+                .awareness()
+                .current_observations()
+                .any(|s| s.target.id == 0 && s.source_ticks.visual == Some(tick))
+            {
+                stats.visual.get_or_insert(tick);
+            }
+            if !actor.is_neutral() {
+                stats.engage.get_or_insert(tick);
+            }
+            if actor.trace().fire.selected {
+                stats.defense.get_or_insert(tick);
+            }
+            stats.bank = stats.bank.max(actor.flight().bank.to_degrees().abs());
+        }
+        if script.trace_ticks > 0 && tick % script.trace_ticks == 0 {
+            for actor in bridge
+                .mission()
+                .actors()
+                .iter()
+                .filter(|a| a.identity().side != ai_wings::FRIENDLY_SIDE)
+            {
+                let seen = actor
+                    .awareness()
+                    .current_observations()
+                    .find(|s| s.target.id == 0);
+                println!(
+                    "AI perception: tick={tick} actor={} player_sources={:?} neutral={} target={:?} activity={:?} fire={:?}",
+                    actor.id(),
+                    seen.map(|s| s.source_ticks),
+                    actor.is_neutral(),
+                    actor.controller().target(),
+                    actor.activity(),
+                    actor.incoming_fire_cue()
+                );
+            }
+        }
         if let Some(recording) = &mut recording {
             for (id, message, friendly) in bridge.ejection_events.iter().skip(noted_ejections) {
                 recording.wing_ejection(*id, message, *friendly);
@@ -5514,6 +5758,9 @@ fn ai_probe_run(
         noted_ejections = bridge.ejection_events.len();
         if let (Some(recording), Some(previous)) = (&mut recording, &previous) {
             combat.advance_render(&flight, Some(&bridge));
+            if verify {
+                verify_probe_attitudes(combat.render_snapshot(), &bridge)?;
+            }
             let outcomes = combat.state.ledger.take_outcomes();
             // Write-only: draining the AI's messages changes nothing.
             let journal = bridge.take_ai_journal();
@@ -5610,6 +5857,20 @@ fn ai_probe_run(
         .iter()
         .flatten()
         .fold(0u64, |acc, v| acc.rotate_left(7) ^ v.to_bits());
+    for (
+        id,
+        ProbeEncounter {
+            visual,
+            engage,
+            defense,
+            bank,
+        },
+    ) in encounter
+    {
+        println!(
+            "AI probe encounter: actor={id} first_visual={visual:?} first_engage={engage:?} first_gun_defense={defense:?} peak_bank_deg={bank:.2}"
+        );
+    }
     println!(
         "AI probe totals: wings={} ticks={} shots={} dropped={} warnings={} live_projectiles={} player_hp={} target_hp={:?} checksum={checksum:016x}",
         bridge.slots().len(),
@@ -5696,6 +5957,14 @@ fn start_probe_recording(
     }
     for (tick, order) in &script.orders {
         extra.push(("probe.order".into(), format!("tick {tick}: {order:?}")));
+    }
+    extra.push(("probe.geometry".into(), format!("{:?}", script.geometry)));
+    extra.push(("probe.guns".into(), script.guns.to_string()));
+    if let Some(enemy) = script.enemy_aircraft {
+        extra.push(("probe.enemy".into(), enemy.selection_key().into()));
+    }
+    for (tick, threat) in &script.threats {
+        extra.push(("probe.threat".into(), format!("tick {tick}: {threat:?}")));
     }
     let header = recorder::header(
         tore_replay::MissionKind::Probe,
@@ -6453,6 +6722,25 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 separation_nm = Some(nm);
             }
             "--probe-wing-only" => probe_script.wing_only = true,
+            "--probe-matrix" => probe_script.matrix = Some(PathBuf::from(args.next().ok_or("--probe-matrix needs a new output directory")?)),
+            "--probe-enemy-aircraft" => probe_script.enemy_aircraft = Some(tore_formats::aircraft::AircraftId::parse(&args.next().ok_or("--probe-enemy-aircraft needs an aircraft")?)?),
+            "--probe-enemy-skill" => probe_script.enemy_skill = Some(match args.next().ok_or("--probe-enemy-skill needs novice|average|experienced|ace")?.as_str() {
+                "novice" => 0, "average" => 1, "experienced" => 2, "ace" => 3, _ => return Err("unknown probe skill".into()),
+            }),
+            "--probe-geometry" => probe_script.geometry = match args.next().ok_or("--probe-geometry needs head|rear|side")?.as_str() {
+                "head" => ProbeGeometry::Head, "rear" => ProbeGeometry::Rear, "side" => ProbeGeometry::Side, _ => return Err("unknown probe geometry".into()),
+            },
+            "--probe-guns" => probe_script.guns = true,
+            "--probe-flight-model" => probe_script.researched = match args.next().ok_or("--probe-flight-model needs legacy|researched")?.as_str() {
+                "legacy" => false, "researched" => true, _ => return Err("unknown probe flight model".into()),
+            },
+            "--probe-threat" => {
+                if probe_script.threats.len() >= 64 { return Err("at most 64 controlled threats per probe".into()); }
+                let value = args.next().ok_or("--probe-threat needs TICK:hit|gun|aaa")?;
+                let (tick, kind) = value.split_once(':').ok_or("--probe-threat needs TICK:hit|gun|aaa")?;
+                let kind = match kind { "hit" => ProbeThreat::Hit, "gun" => ProbeThreat::Gun, "aaa" => ProbeThreat::Aaa, _ => return Err("unknown probe threat".into()) };
+                probe_script.threats.push((tick.parse()?, kind));
+            }
             "--probe-wing-size" => {
                 let size: usize = args.next().ok_or("--probe-wing-size needs 1..5")?.parse()?;
                 if !(1..=5).contains(&size) {
@@ -7067,7 +7355,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns, --probe-flight-model legacy|researched and --probe-threat TICK:hit|gun|aaa configure encounter probes. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Replays: --watch-replay FILE plays a mission recording (docs/REPLAYS.md). With it, --capture-replay OUT.ppm writes one GPU frame and exits (OUT.png saves the clean view as P does); --replay-tick N pauses at a tick; --flight-view 0..11 and --replay-aircraft ID choose the view; --replay-drone starts in the follow drone; --replay-speed 0.125..16 starts playing at that speed, negative for reverse; --replay-ui labels,timer,trails,comms,subtitles chooses the interface parts; --replay-panels thought,telemetry,guidance,comms,menu opens debug panels, or the right-click menu, on the selected aircraft; --replay-clean starts with the interface hidden, as H hides it."
@@ -7134,6 +7422,17 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     if ai_probe.is_some() && (capture_terrain.is_some() || snapshot.is_some() || import_only) {
         return Err("--ai-probe-ticks is a headless probe and cannot capture or snapshot".into());
+    }
+    if (probe_script.enemy_aircraft.is_some()
+        || probe_script.enemy_skill.is_some()
+        || probe_script.geometry != ProbeGeometry::Head
+        || probe_script.guns
+        || probe_script.researched
+        || !probe_script.threats.is_empty()
+        || probe_script.matrix.is_some())
+        && (ai_probe.is_none() || ai_roster_probe)
+    {
+        return Err("encounter probe options require --ai-probe-ticks".into());
     }
     if probe_script.attack.is_some() && (ai_probe.is_none() || ai_roster_probe) {
         return Err("--probe-attack scripts the leader of an --ai-probe-ticks run".into());
@@ -7252,7 +7551,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     if record_mission.is_some() && (ai_probe.is_none() || ai_roster_probe) {
         return Err("--record-mission records an --ai-probe-ticks run".into());
     }
-    if verify_render && record_mission.is_none() {
+    if verify_render && record_mission.is_none() && probe_script.matrix.is_none() {
         return Err("--verify-render checks a --record-mission run".into());
     }
     if let Some(path) = recording_info {
@@ -8072,6 +8371,69 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     if let Some(ticks) = ai_probe {
         if ai_roster_probe {
             ai_wings::roster_probe(ticks, &theater_resources, &world)?;
+            return Ok(Outcome::Done);
+        }
+        if let Some(directory) = &probe_script.matrix {
+            if directory.exists() {
+                return Err(
+                    "--probe-matrix needs a new directory; existing evidence is never overwritten"
+                        .into(),
+                );
+            }
+            if ground_start.is_some() || probe_script.wing_only || enemy_skill.is_some() {
+                return Err("--probe-matrix requires an airborne opposing wing and uses its own four skill settings".into());
+            }
+            std::fs::create_dir_all(directory)?;
+            for player in [
+                tore_formats::aircraft::AircraftId::F22,
+                tore_formats::aircraft::AircraftId::F22n,
+                tore_formats::aircraft::AircraftId::Faxx,
+            ] {
+                let airframe = aircraft::Airframe::load(&theater_resources, player)?;
+                for enemy in tore_formats::aircraft::AircraftId::SELECTABLE {
+                    for skill in 0..4 {
+                        for geometry in [
+                            ProbeGeometry::Head,
+                            ProbeGeometry::Side,
+                            ProbeGeometry::Rear,
+                        ] {
+                            for researched in [false, true] {
+                                let mut script = probe_script.clone();
+                                script.matrix = None;
+                                script.enemy_aircraft = Some(enemy);
+                                script.enemy_skill = Some(skill);
+                                script.geometry = geometry;
+                                script.researched = researched;
+                                let mut setup = quick_mission::QuickMission::new(
+                                    player,
+                                    creator_options.clone(),
+                                    &theater_resources,
+                                );
+                                setup.theater(selection);
+                                setup.draft.values[17] = quick.draft.values[17];
+                                let name =
+                                    probe_case_name(player, enemy, skill, geometry, researched);
+                                println!("AI probe matrix: {name}");
+                                let recording = ProbeRecord {
+                                    path: directory.join(format!("{name}.tore-replay")),
+                                    verify: verify_render,
+                                };
+                                ai_probe_run(
+                                    ticks,
+                                    &mut setup,
+                                    &airframe,
+                                    &theater_resources,
+                                    &world,
+                                    None,
+                                    ai_mission,
+                                    &script,
+                                    Some(&recording),
+                                )?;
+                            }
+                        }
+                    }
+                }
+            }
             return Ok(Outcome::Done);
         }
         ai_probe_run(
@@ -9190,5 +9552,35 @@ mod probe_tests {
             (9000, PlayerOrder::BugOut)
         );
         assert!(ProbeScript::parse_order("600:attack").is_err());
+    }
+}
+
+#[cfg(test)]
+mod encounter_probe_tests {
+    use super::*;
+
+    #[test]
+    fn every_matrix_recording_has_a_unique_exact_identity() {
+        use tore_formats::aircraft::AircraftId;
+        let mut names = std::collections::BTreeSet::new();
+        for player in [AircraftId::F22, AircraftId::F22n, AircraftId::Faxx] {
+            for enemy in AircraftId::SELECTABLE {
+                for skill in 0..4 {
+                    for geometry in [
+                        ProbeGeometry::Head,
+                        ProbeGeometry::Side,
+                        ProbeGeometry::Rear,
+                    ] {
+                        for researched in [false, true] {
+                            let name = probe_case_name(player, enemy, skill, geometry, researched);
+                            assert!(names.insert(name));
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(names.len(), 1008);
+        assert!(names.contains("FAXX-SU27-skill2-Rear-researched"));
+        assert!(names.contains("F22N-SU27-skill2-Rear-researched"));
     }
 }

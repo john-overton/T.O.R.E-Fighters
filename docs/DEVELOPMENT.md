@@ -1085,19 +1085,58 @@ flies the scripted leader gear down toward the field during that tick range.
 The scripted leader is only a test harness and can hit terrain on a long cruise.
 [Reproduction and limits](baselines/ground-start.md#whole-wing-ground-start-2026-09-23).
 
-Quick Mission AI holds fire until it perceives an attack, so by default nobody
-fires in these probes. `--probe-attack TICK[:SECONDS]` makes the scripted leader
+Quick Mission AI leaders can release their wings on a currently observed hostile
+when the assigned mission permits engagement. Use `--ai-mission hold` to isolate
+self-preservation without offensive fire. `--probe-attack TICK[:SECONDS]` makes the scripted leader
 attack from that tick with the player's own controls: it clicks the nearest
 hostile aircraft on its scope, steps `]` to the longest-reaching air-to-air
 weapon whose envelope holds the range and fires when the readout says READY.
 It changes to the gun when a missile gets no lock for two seconds, and fires
 the gun only with the target under the pipper. With SECONDS it attacks again
-that long after each shot. The enemy wing is released when it perceives the
-shot; the player's own wingmen follow a human leader and join only when
-ordered, for example with `--probe-wing-order TICK:attack-on-contact`. The probe
+that long after each shot. The enemy wing can release on permitted contact or a perceived attack;
+the player's own wingmen follow a human leader and join only when ordered, for example with `--probe-wing-order TICK:attack-on-contact`. The probe
 then prints each designation, shot, perceived attack, release, missile
 defence, kill and ejection, and an `AI probe attack:` summary line. Without the
 option the probe is unchanged.
+
+### Visual contact and incoming-fire probes
+
+`--probe-enemy-aircraft ID` independently selects the opponent, using the exact
+roster identities. `--probe-enemy-skill novice|average|experienced|ace` selects
+its resolved skill. `--probe-geometry head|side|rear` sets initial enemy heading;
+`--probe-guns` keeps the attack script on its gun. `--probe-trace SECONDS` also
+prints enemy observation sources, permission, target and incoming-fire cues.
+Every probe prints first visual acquisition, first release, first gun/hit defense
+and peak bank for each enemy.
+
+The airborne probe retains its legacy adapter unless explicitly given
+`--probe-flight-model researched`, which enables the researched adapter for the
+scripted player and every AI actor. `legacy` selects the earlier path. These
+probe flags do not change normal game defaults or the native-table research path.
+
+`--probe-threat TICK:hit|gun|aaa` adds a controlled event against the first enemy.
+`hit` removes one hit point and supplies the same victim event as weapon damage.
+`gun` starts an anonymous tracer 1,500 ft behind the aircraft; `aaa` uses that
+horizontal point 10 ft above the terrain. Both use the player's imported gun
+with a fitted 3,000 ft/s initial speed and 50 ft lead offset. These are repeatable
+victim-response fixtures, not autonomous surface gunners. Up to 64 may be
+scheduled; every fixture is named in the replay header and event stream.
+
+```sh
+TORE_DATA_DIR="$PWD/.local/dev-profile" cargo run --locked -p tore-app -- \
+  --ai-probe-ticks 1200 --aircraft f22 --probe-enemy-aircraft su27 \
+  --probe-geometry rear --separation 1 --ai-mission hold \
+  --probe-threat 120:aaa --probe-flight-model researched \
+  --record-mission .local/su27-ground-fire.tore-replay --verify-render --no-audio
+```
+
+`--probe-matrix NEW_DIR` runs and records **1,008 encounters** with one imported
+world: F-22A/F-22N/F/A-XX by all 14 opponents, four skills, three initial headings
+and both flight adapters. Use `--ai-probe-ticks 360 --separation 1 --verify-render`
+for close-contact acquisition, or a larger tick budget and the attack options
+for firing. It refuses an existing output directory. The usual actor, trace and
+verification lines are grouped under `AI probe matrix: CASE`. This is an
+explicit development batch, not a retail comparison or automated balance score.
 
 ## Mission recordings for debugging
 

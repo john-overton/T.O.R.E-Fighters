@@ -14,8 +14,8 @@ use super::{
 use crate::ai::airfield::{AirfieldAnchors, GroundStart, LandingOrder, RunwayView};
 use crate::ai::controller::{
     ActorIdentity, BehaviorFamily, BehaviorProfile, Completion, Controller, DecisionFrame,
-    FrameEvent, IntentBatch, LeaderView, MissileDefense, MissionRole, MotionIntent, OwnState,
-    RouteView, SearchContact, StationView, TargetView, ThreatReport, WingView,
+    DefenseMotion, DefenseSource, FrameEvent, IntentBatch, LeaderView, MissionRole, MotionIntent,
+    OwnState, RouteView, SearchContact, StationView, TargetView, ThreatReport, WingView,
 };
 use crate::ai::engagement::{
     self, Assignment, HostileEscort, PatrolRegion, Policy, ProtectedView, Role, Stance,
@@ -168,6 +168,7 @@ impl RecordCoverage {
             self.messages.insert(match entry.message {
                 Message::AttackEvidence(_) => "attack evidence",
                 Message::FreeSelection { .. } => "free selection",
+                Message::ContactSelection { .. } => "contact selection",
                 Message::WingRequest(_) => "wing request",
                 Message::EscortPriority { .. } => "escort priority",
                 Message::MissileWarning(_) => "missile warning",
@@ -1342,11 +1343,12 @@ fn orders_for_scripted_ace(
     }
     match tick {
         1_300 => controller.track_ordered_approach(11, 30., 5.),
-        1_440 => controller.set_missile_defense(Some(MissileDefense {
+        1_440 => controller.set_defense_motion(Some(DefenseMotion {
+            source: DefenseSource::Missile,
             heading_deg: 200.,
             pitch_deg: -10.,
         })),
-        1_560 => controller.set_missile_defense(None),
+        1_560 => controller.set_defense_motion(None),
         1_680 => controller.set_search_contact(Some(SearchContact {
             id: 13,
             position: [9_000., 19_000., 15_000.],

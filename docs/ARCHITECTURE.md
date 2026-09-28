@@ -345,8 +345,8 @@ snapshot; the human leader remains outside the AI actor list.
 `ai::awareness` owns timestamped current observations and frozen aircraft memory
 for each actor. Only current observations enter target selection, weapon geometry
 and firing; lost hostile records enter a separate controller search input. The
-AI visual cone is skill-filtered independently of imported player sensor
-profiles, and the mission terrain query masks visual and radar/infrared sensing.
+AI lookout is skill-filtered independently of imported player sensor
+profiles, with six timed body directions and attention to a last measured point, and the mission terrain query masks visual and radar/infrared sensing.
 Production sensor loading fails explicitly rather than enabling the sensorless
 synthetic-fixture path. SEARCHING/ACQUIRING/REJOINING are simulation activities
 read by Target view. [Behavior and limitations](spec/ai-awareness.md).
@@ -357,13 +357,22 @@ snapshots bind each guided projectile to its own launcher, and the shared
 seeker lifecycle supplies actual pitbull and support-loss state. Countermeasure
 bursts are scheduled/debited by the mission before the bridge applies decoy
 rolls. RWR drawing reads the same records and never drives the decision clock.
+`ai::incoming_fire` observes gun rounds through the pilot's lookout and terrain
+query. It retains only consecutive visual samples, anonymous close passes and
+weapon-hit cues, never a hidden shooter identity. The app forwards victim-only
+combat hit events, and copied round positions before the mission step. The
+mission compares fire and missile urgency and supplies one `DefenseMotion` to
+the controller. Gunfire does not request devices; valid missile bursts continue
+through the existing scheduler. [Contract](spec/visual-awareness-under-fire.md).
 `ai::engagement` gates current target selection by role and stance before B41
 ranking. Quick Mission initializes a separate neutral engagement gate for every
 actor. Accepted combat orders release it; formation and disengage commands
 recall it without rewriting mission objectives. Recall suppresses repeated
 offensive reactions to known projectile IDs while retaining missile evasion.
-AI leaders release their own wings only after a perceived attack, with command
-delivery after all same-tick decisions. `AiMission` delivers perception-only attack reports to assigned escorts and wing leaders
+AI leaders release neutral wing members after a perceived attack or a current
+hostile contact allowed by their mission. Recall prevents contact-only release;
+existing individual orders survive an automatic wing release. Commands are
+delivered after all same-tick decisions. `AiMission` delivers perception-only attack reports to assigned escorts and wing leaders
 on the next tick, with a fixed expiry; bearings never become synthetic targets.
 Escorts also assess detected aircraft against each assigned friendly's protection
 zone using observed relative motion. Confirmed attackers outrank prospective

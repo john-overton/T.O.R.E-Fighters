@@ -27,6 +27,7 @@ pub mod experience;
 pub mod fitted;
 pub mod formation;
 pub mod geometry;
+pub mod incoming_fire;
 pub mod launch;
 pub mod mission;
 pub mod motion;

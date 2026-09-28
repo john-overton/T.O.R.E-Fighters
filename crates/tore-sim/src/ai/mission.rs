@@ -24,7 +24,7 @@
 use tore_formats::aircraft::AircraftId;
 use tore_input::PilotInput;
 
-use super::{defense, engagement};
+use super::{defense, engagement, incoming_fire};
 use crate::combat::threats::{MissileSnapshot, Receiver, ThreatRecord, ThreatService};
 use crate::flight;
 use crate::models::FlightModel;
@@ -227,6 +227,9 @@ pub struct AiActor {
     missile_threats: ThreatService,
     defense_state: defense::DefenseState,
     last_defense: Option<defense::DefenseDecision>,
+    incoming_fire: incoming_fire::Service,
+    lookout: Option<awareness::Lookout>,
+    fire_defending: bool,
     assignment: engagement::Assignment,
     mission_policy: engagement::Policy,
     observed_attacks: Vec<ObservedAttack>,
@@ -291,6 +294,9 @@ impl AiActor {
             missile_threats: ThreatService::new(setup.identity.actor.0),
             defense_state: defense::DefenseState::default(),
             last_defense: None,
+            incoming_fire: incoming_fire::Service::default(),
+            lookout: None,
+            fire_defending: false,
             assignment: engagement::Assignment::default(),
             mission_policy: engagement::Policy::default(),
             observed_attacks: Vec::new(),
@@ -556,6 +562,14 @@ impl AiActor {
         self.missile_threats.records()
     }
 
+    pub fn lookout(&self) -> Option<awareness::Lookout> {
+        self.lookout
+    }
+
+    pub fn incoming_fire_cue(&self) -> Option<incoming_fire::Cue> {
+        self.incoming_fire.cue()
+    }
+
     pub fn defense_decision(&self) -> Option<defense::DefenseDecision> {
         self.last_defense
     }
@@ -620,9 +634,15 @@ impl AiActor {
         self.pending_threats.push(report);
     }
 
-    /// Report that this actor was hit.
+    /// Legacy damage event, without evidence that a weapon caused it.
+    pub fn report_damage(&mut self) {
+        self.pending_events.push(FrameEvent::Hit);
+    }
+
+    /// An actual weapon hit, with no implied shooter identity.
     pub fn report_hit(&mut self) {
         self.pending_events.push(FrameEvent::Hit);
+        self.incoming_fire.hit();
     }
 
     /// Report that an object left the world.
@@ -637,7 +657,10 @@ impl AiActor {
             self.missile_threats.clear();
             self.defense_state = defense::DefenseState::default();
             self.last_defense = None;
-            self.controller.set_missile_defense(None);
+            self.incoming_fire = incoming_fire::Service::default();
+            self.fire_defending = false;
+            self.lookout = None;
+            self.controller.set_defense_motion(None);
             self.search_target = None;
             self.controller.set_search_contact(None);
         }
@@ -834,7 +857,8 @@ impl AiActor {
         output: &mut MissionOutput,
     ) -> Result<bool> {
         use super::airfield::{Control, LandingReason, Phase, Situation};
-        let defending = self.last_defense.is_some_and(|d| d.motion.is_some());
+        let defending =
+            self.last_defense.is_some_and(|d| d.motion.is_some()) || self.fire_defending;
         let warned = self.pending_threats.iter().any(|r| !r.launcher_same_side);
         let mut trace = thought::AirfieldTrace::default();
         if self.airfield.is_none()
@@ -1046,6 +1070,7 @@ pub struct AiMission {
     vertical_spacing_ft: i32,
     external_leaders: Vec<(super::targeting::Side, u8, u32)>,
     missiles: Vec<MissileSnapshot>,
+    gun_rounds: Vec<incoming_fire::Round>,
     player_assignment: engagement::Assignment,
     must_survive: Vec<u32>,
     pending_attack_reports: Vec<(u32, ObservedAttack)>,
@@ -1075,6 +1100,7 @@ impl AiMission {
             vertical_spacing_ft: super::wing::PLAYER_STACKING_FT,
             external_leaders: Vec::new(),
             missiles: Vec::new(),
+            gun_rounds: Vec::new(),
             player_assignment: engagement::Assignment::default(),
             must_survive: Vec::new(),
             pending_attack_reports: Vec::new(),
@@ -1234,6 +1260,10 @@ impl AiMission {
 
     /// Complete current missile lifecycle snapshot, shared with the player
     /// receiver. The observation service, not the controller, reads this data.
+    pub fn set_gun_rounds(&mut self, rounds: Vec<incoming_fire::Round>) {
+        self.gun_rounds = rounds;
+    }
+
     pub fn set_missiles(&mut self, missiles: Vec<MissileSnapshot>) {
         self.missiles = missiles;
     }
@@ -1397,9 +1427,9 @@ impl AiMission {
             );
         }
 
-        // Neutral AI leaders respond to an actual perceived attack, never to
-        // mere contact acquisition. Orders take effect after all decisions.
-        // The first qualifying attack is kept as the release's trigger.
+        // A neutral AI leader may respond to a perceived attack or a current
+        // hostile contact permitted by its mission. Recall disables contact-only
+        // release; player-led wings still require an accepted player order.
         let releases: Vec<_> = self
             .actors
             .iter()
@@ -1428,10 +1458,57 @@ impl AiMission {
                                         && member.identity.wing == leader.identity.wing
                                 }))
                     })
-                    .map(|attack| (leader.id(), *attack))
+                    .map(|attack| (leader.id(), Message::FreeSelection { trigger: *attack }))
+                    .or_else(|| {
+                        if leader.formation_order_tick.is_some()
+                            || leader.bugged_out
+                            || leader.is_dummy()
+                        {
+                            return None;
+                        }
+                        let targets: Vec<_> = leader
+                            .awareness
+                            .current_observations()
+                            .map(|s| s.target)
+                            .collect();
+                        let protected: Vec<_> = world
+                            .iter()
+                            .filter(|o| {
+                                o.side == leader.identity.side
+                                    && leader.assignment.protected_ids.contains(&o.id)
+                            })
+                            .map(|o| engagement::ProtectedView {
+                                id: o.id,
+                                position: o.position,
+                                velocity: o.velocity,
+                                alive: o.alive && !o.destroyed,
+                            })
+                            .collect();
+                        engagement::Policy::default()
+                            .select(
+                                leader.id(),
+                                leader.identity.side,
+                                leader.flight.position,
+                                &leader.assignment,
+                                &targets,
+                                &protected,
+                                &[],
+                                None,
+                                2,
+                            )
+                            .map(|selection| {
+                                (
+                                    leader.id(),
+                                    Message::ContactSelection {
+                                        target: selection.id,
+                                    },
+                                )
+                            })
+                    })
             })
             .collect();
-        for (leader, trigger) in releases {
+        let automatic_leaders: Vec<_> = releases.iter().map(|(id, _)| *id).collect();
+        for (leader, message) in releases {
             let request =
                 super::wing::WingRequest::TargetAssignment(super::wing::TargetOrder::FreeSelection);
             let outcome = self.order(leader, request).expect("live leader")?;
@@ -1439,7 +1516,7 @@ impl AiMission {
             self.journal.push(JournalEntry {
                 tick,
                 sender: Some(leader),
-                message: Message::FreeSelection { trigger },
+                message,
                 receipts: vec![Receipt {
                     actor: leader,
                     outcome: Outcome::Order(outcome),
@@ -1452,7 +1529,39 @@ impl AiMission {
         for (sender, request) in &output.wing {
             if let Some(actor) = self.actor(*sender).filter(|a| a.alive()) {
                 let identity = *actor.identity();
-                self.order_wing(identity.side, identity.wing, Some(*sender), *request)?;
+                if automatic_leaders.contains(sender)
+                    && matches!(
+                        request,
+                        super::wing::WingRequest::TargetAssignment(
+                            super::wing::TargetOrder::FreeSelection
+                        )
+                    )
+                {
+                    // A leader's automatic release must not cancel an explicit
+                    // assignment already accepted by an individual wingman.
+                    let recipients: Vec<_> = self
+                        .actors
+                        .iter()
+                        .filter(|a| {
+                            a.id() != *sender
+                                && a.identity.side == identity.side
+                                && a.identity.wing == identity.wing
+                                && a.neutral
+                        })
+                        .map(AiActor::id)
+                        .collect();
+                    for id in recipients {
+                        self.order_wing_report(
+                            identity.side,
+                            identity.wing,
+                            Some(*sender),
+                            Some(id),
+                            *request,
+                        )?;
+                    }
+                } else {
+                    self.order_wing(identity.side, identity.wing, Some(*sender), *request)?;
+                }
             }
         }
         self.tick += 1;
@@ -1612,7 +1721,7 @@ impl AiMission {
 
         // 2. Own state from the actor's own flight model.
         let own = actor.own_state(ground);
-        actor.update_missile_defense(tick, &self.missiles, &own, ground);
+        actor.update_defense(tick, &self.missiles, &self.gun_rounds, &own, ground);
 
         // Takeoff and landing sequences replace combat and formation flying.
         if actor.landing_order.is_none()
@@ -2478,6 +2587,24 @@ impl AiActor {
             infrared_failed: self.equipment.infrared,
             visual_failed: self.equipment.visual,
         };
+        let attention = self
+            .controller
+            .target()
+            .and_then(|id| {
+                self.awareness
+                    .current_observations()
+                    .find(|s| s.target.id == id)
+                    .or_else(|| self.awareness.snapshot(id))
+            })
+            .or_else(|| {
+                self.awareness
+                    .current_observations()
+                    .find(|s| s.target.side != self.identity.side)
+            })
+            .map(|s| s.target.position);
+        let lookout = awareness::Lookout::new(tick, observer.position, observer.basis, attention);
+        self.lookout = Some(lookout);
+        self.trace.lookout = Some(lookout);
         let contacts = if let Some(sensors) = self.sensors.as_mut() {
             let observables: Vec<Observable> = world
                 .iter()
@@ -2519,6 +2646,21 @@ impl AiActor {
                     .iter()
                     .filter(|c| c.id == object.id && !c.destroyed)
                 {
+                    if contact.channel == sensors::Channel::Visual
+                        && lookout.check(
+                            self.controller.experience().level,
+                            contact.position,
+                            None,
+                            crate::combat::live::terrain_hit(
+                                observer.position,
+                                contact.position,
+                                &ground,
+                            )
+                            .is_none(),
+                        ) != awareness::VisualResult::Visible
+                    {
+                        continue;
+                    }
                     observations.push(Observation {
                         target: self.observed_target(object, contact.position),
                         velocity: contact.velocity,
@@ -2536,11 +2678,9 @@ impl AiActor {
                 if let Some(observable) = object.observable.as_ref()
                     && !observable.destroyed
                     && observable.airborne
-                    && awareness::visual_eligible(
+                {
+                    let result = lookout.check(
                         self.controller.experience().level,
-                        observer.position,
-                        self.flight.yaw.to_degrees(),
-                        self.flight.pitch.to_degrees(),
                         observable.position,
                         None,
                         crate::combat::live::terrain_hit(
@@ -2549,13 +2689,21 @@ impl AiActor {
                             &ground,
                         )
                         .is_none(),
-                    )
-                {
-                    observations.push(Observation {
-                        target: self.observed_target(object, observable.position),
-                        velocity: observable.velocity,
-                        source: ObservationSource::Visual,
-                    });
+                    );
+                    if self.trace.visual.len() < 32 {
+                        self.trace.visual.push(awareness::VisualTrace {
+                            id: object.id,
+                            distance_ft: distance(observer.position, observable.position),
+                            result,
+                        });
+                    }
+                    if result == awareness::VisualResult::Visible {
+                        observations.push(Observation {
+                            target: self.observed_target(object, observable.position),
+                            velocity: observable.velocity,
+                            source: ObservationSource::Visual,
+                        });
+                    }
                 }
             } else {
                 // Explicit sensorless synthetic/replay fixtures supply the
@@ -2569,6 +2717,12 @@ impl AiActor {
             }
         }
         self.awareness.observe(tick, &observations);
+        self.trace.observation_sources = self
+            .awareness
+            .current_observations()
+            .take(32)
+            .map(|s| (s.target.id, s.source_ticks))
+            .collect();
         self.awareness
             .current_observations()
             .map(|snapshot| snapshot.target)
@@ -2622,14 +2776,23 @@ impl AiActor {
         self.trace.search_contact = contact;
     }
 
-    fn update_missile_defense(
+    fn update_defense(
         &mut self,
         tick: u64,
         missiles: &[MissileSnapshot],
+        rounds: &[incoming_fire::Round],
         own: &OwnState,
         ground: &dyn Fn(f64, f64) -> f64,
     ) {
-        self.missile_threats.observe(
+        let lookout = self.lookout.unwrap_or_else(|| {
+            awareness::Lookout::new(
+                tick,
+                self.flight.position,
+                crate::attitude::Basis::new(self.flight.yaw, self.flight.pitch, self.flight.bank),
+                None,
+            )
+        });
+        self.missile_threats.observe_with_visual(
             tick,
             Receiver {
                 id: self.id(),
@@ -2643,6 +2806,10 @@ impl AiActor {
                 visibility_limit_ft: None,
             },
             missiles,
+            |point| {
+                lookout.check(self.controller.experience().level, point, None, true)
+                    == awareness::VisualResult::Visible
+            },
             |from, to| crate::combat::live::terrain_hit(from, to, &ground).is_none(),
         );
         let speed = own.speed.0.max(125.0);
@@ -2653,37 +2820,90 @@ impl AiActor {
         let bank = (1.0 / g).acos().to_degrees();
         let coordinated_rate = (32.174 * (g * g - 1.0).sqrt() / speed).to_degrees();
         let contacts: Vec<_> = self.missile_threats.records().copied().collect();
+        let defense_own = defense::DefenseOwn {
+            position: own.position,
+            velocity: self.flight.velocity,
+            heading_deg: own.heading_deg,
+            flight_path_pitch_deg: own.flight_path_pitch_deg,
+            speed_ft_s: own.speed.0,
+            bank_deg: own.bank_deg,
+            usable_turn_rate_deg_s: coordinated_rate * 0.5,
+            usable_pitch_rate_deg_s: (32.174 * (g - 1.0) / speed).to_degrees() * 0.5,
+            roll_in_time_s: (bank + own.bank_deg.abs()) / own.roll_limit_deg_per_s.max(1.0) + 0.7,
+            dive_speed_safe: own.speed.0 + 32.174 * 20_f64.to_radians().sin() * 5.0
+                <= own.limits.maximum.0,
+        };
         self.last_defense = defense::decide(
             tick,
             self.controller.experience().level,
-            defense::DefenseOwn {
-                position: own.position,
-                velocity: self.flight.velocity,
-                heading_deg: own.heading_deg,
-                flight_path_pitch_deg: own.flight_path_pitch_deg,
-                speed_ft_s: own.speed.0,
-                bank_deg: own.bank_deg,
-                usable_turn_rate_deg_s: coordinated_rate * 0.5,
-                usable_pitch_rate_deg_s: (32.174 * (g - 1.0) / speed).to_degrees() * 0.5,
-                roll_in_time_s: (bank + own.bank_deg.abs()) / own.roll_limit_deg_per_s.max(1.0)
-                    + 0.7,
-                dive_speed_safe: own.speed.0 + 32.174 * 20_f64.to_radians().sin() * 5.0
-                    <= own.limits.maximum.0,
-            },
+            defense_own,
             &contacts,
             &mut self.defense_state,
             |position| ground(position[0], position[2]),
         );
+        let clear =
+            |point| crate::combat::live::terrain_hit(own.position, point, &ground).is_none();
+        self.incoming_fire.observe(
+            tick,
+            self.id(),
+            defense_own,
+            rounds,
+            |point| {
+                lookout.check(self.controller.experience().level, point, None, true)
+                    == awareness::VisualResult::Visible
+                    && clear(point)
+            },
+            clear,
+        );
+        let fire_motion = self
+            .incoming_fire
+            .motion(tick, self.id(), defense_own, |p| ground(p[0], p[2]));
+        let missile_motion = self.last_defense.and_then(|d| d.motion);
+        let fire_selected = fire_motion.is_some()
+            && (missile_motion.is_none()
+                || self.incoming_fire.cue().is_some_and(|c| {
+                    c.remaining_time(tick)
+                        < self
+                            .last_defense
+                            .and_then(|d| d.debug.estimated_threat_time_s)
+                            .unwrap_or(0.)
+                }));
+        self.fire_defending = fire_selected;
+        self.trace.fire = incoming_fire::Trace {
+            cue: self.incoming_fire.cue(),
+            motion: fire_motion,
+            selected: fire_selected,
+        };
+        if let Some(cue) = self.incoming_fire.cue().filter(|c| c.observed_tick == tick) {
+            self.remember_attack(ObservedAttack {
+                report: engagement::ThreatReport {
+                    attacker_id: None,
+                    defended_id: self.id(),
+                },
+                bearing_world_deg: cue.bearing_world_deg,
+                observed_tick: tick,
+                event_id: cue.round,
+            });
+        }
         if self.last_defense.is_none() {
             self.defense_state.clear_threat();
         }
-        self.controller
-            .set_missile_defense(self.last_defense.and_then(|d| d.motion).map(|motion| {
-                super::controller::MissileDefense {
-                    heading_deg: motion.heading_deg,
-                    pitch_deg: motion.flight_path_pitch_deg,
-                }
-            }));
+        self.controller.set_defense_motion(
+            (if fire_selected {
+                fire_motion
+            } else {
+                missile_motion
+            })
+            .map(|motion| super::controller::DefenseMotion {
+                source: if fire_selected {
+                    super::controller::DefenseSource::IncomingFire
+                } else {
+                    super::controller::DefenseSource::Missile
+                },
+                heading_deg: motion.heading_deg,
+                pitch_deg: motion.flight_path_pitch_deg,
+            }),
+        );
     }
 
     fn drain_events(&mut self, tick: u64) -> Vec<FrameEvent> {
@@ -3261,7 +3481,10 @@ mod tests {
     use crate::ai::{Experience, weapon_service::ActorId};
 
     fn aircraft_index(id: AircraftId) -> usize {
-        AircraftId::ALL.iter().position(|item| *item == id).unwrap()
+        AircraftId::SELECTABLE
+            .iter()
+            .position(|item| *item == id)
+            .unwrap()
     }
 
     // Distinct synthetic capabilities, never presented as measured retail data.
@@ -3435,6 +3658,205 @@ mod tests {
             pilot_position
         );
         assert!(!actor.alive());
+    }
+
+    #[test]
+    fn a_gun_break_changes_the_flown_path_and_increases_clearance() {
+        fn encounter(defend: bool, hybrid: bool) -> (f64, f64) {
+            let mut start = setup(1, 1, 0, [0., 20000., 0.], 0.);
+            start.flight =
+                flight::State::new(&synthetic_profile(AircraftId::Su27), start.flight.position)
+                    .unwrap();
+            start.flight.yaw = 0.;
+            start.flight.velocity = [0., 0., start.flight.speed];
+            start.home_airport = None;
+            if hybrid {
+                start.flight.enable_research(1).unwrap();
+            }
+            let mut actor = AiActor::new(start).unwrap();
+            actor.set_assignment(engagement::Assignment {
+                stance: engagement::Stance::WeaponsHold,
+                ..Default::default()
+            });
+            let mut mission = AiMission::new();
+            mission.push(actor);
+            mission.start_in_formation();
+            let mut nearest = f64::INFINITY;
+            let mut peak_bank = 0.0_f64;
+            for tick in 0..360 {
+                let position = [0., 20000., 6000. - (tick as f64 + 1.) * 2000. / 120.];
+                if defend {
+                    mission.set_gun_rounds(vec![incoming_fire::Round {
+                        id: 90,
+                        owner: 99,
+                        position,
+                        previous: [0., 20000., position[2] + 2000. / 120.],
+                        tracer: true,
+                    }]);
+                }
+                let output = mission.step(&[], &flat, TimeOfDay(tick)).unwrap();
+                assert!(output.launches.is_empty() && output.devices.is_empty());
+                let aircraft = mission.actor(1).unwrap().flight();
+                nearest = nearest.min(distance(aircraft.position, position));
+                peak_bank = peak_bank.max(aircraft.bank.abs().to_degrees());
+            }
+            (nearest, peak_bank)
+        }
+        for hybrid in [false, true] {
+            let (undefended, _) = encounter(false, hybrid);
+            let (defended, bank) = encounter(true, hybrid);
+            assert!(
+                bank > 10.,
+                "hybrid={hybrid}: bank {bank}, clearance {defended} vs {undefended}"
+            );
+            assert!(
+                defended > undefended + 25.,
+                "hybrid={hybrid}: {defended} vs {undefended}"
+            );
+        }
+    }
+
+    #[test]
+    fn anonymous_hit_defends_without_target_at_every_skill_and_in_both_flight_models() {
+        for aircraft in AircraftId::SELECTABLE {
+            for skill in Experience::ALL {
+                for hybrid in [false, true] {
+                    let mut start = setup(1, 1, 0, [0., 5000., 0.], 0.);
+                    start.identity.aircraft = aircraft;
+                    start.flight =
+                        flight::State::new(&synthetic_profile(aircraft), start.flight.position)
+                            .unwrap();
+                    if hybrid {
+                        start.flight.enable_research(1).unwrap();
+                    }
+                    start.home_airport = None;
+                    start.experience = resolved(skill);
+                    let mut actor = AiActor::new(start).unwrap();
+                    actor.set_assignment(engagement::Assignment {
+                        stance: engagement::Stance::WeaponsHold,
+                        ..Default::default()
+                    });
+                    let mut mission = AiMission::new();
+                    mission.push(actor);
+                    mission.start_in_formation();
+                    mission.actor_mut(1).unwrap().report_hit();
+                    let first = mission.step(&[], &flat, TimeOfDay(0)).unwrap();
+                    assert!(first.launches.is_empty() && first.devices.is_empty());
+                    let actor = mission.actor(1).unwrap();
+                    assert_eq!(actor.controller.target(), None);
+                    assert_eq!(actor.activity(), Activity::Defending);
+                    assert!(actor.trace.fire.selected);
+                    let mut peak_bank = 0.0_f64;
+                    for tick in 1..240 {
+                        let output = mission.step(&[], &flat, TimeOfDay(tick)).unwrap();
+                        assert!(output.launches.is_empty() && output.devices.is_empty());
+                        let actor = mission.actor(1).unwrap();
+                        peak_bank = peak_bank.max(actor.flight.bank.abs());
+                        assert!(actor.flight.position.iter().all(|v| v.is_finite()));
+                        assert!(actor.flight.position[1] > 1000.);
+                    }
+                    assert!(
+                        peak_bank.to_degrees() > 1.,
+                        "{aircraft:?} {skill:?} hybrid={hybrid}: no actual bank"
+                    );
+                    mission.step(&[], &flat, TimeOfDay(240)).unwrap();
+                    let actor = mission.actor(1).unwrap();
+                    assert!(actor.incoming_fire_cue().is_none());
+                    assert_ne!(actor.activity(), Activity::Defending);
+                    assert!(actor.is_neutral());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lookout_acquires_rear_contact_and_recall_does_not_release_again() {
+        for skill in Experience::ALL {
+            let mut mission = AiMission::new();
+            mission.push(perception_actor(skill));
+            mission.start_in_formation();
+            let target = visible_object(mission.actor(1).unwrap(), 2, [0., 20000., -5000.]);
+            let mut seen = None;
+            for tick in 0..240 {
+                mission
+                    .step(std::slice::from_ref(&target), &flat, TimeOfDay(tick))
+                    .unwrap();
+                if mission
+                    .actor(1)
+                    .unwrap()
+                    .awareness
+                    .current_observations()
+                    .any(|s| s.target.id == 2)
+                {
+                    seen = Some(tick);
+                    break;
+                }
+            }
+            assert!(seen.is_some(), "{skill:?}");
+            assert!(!mission.actor(1).unwrap().is_neutral());
+            mission
+                .order(
+                    1,
+                    super::super::wing::WingRequest::TargetAssignment(
+                        super::super::wing::TargetOrder::HoldFire,
+                    ),
+                )
+                .unwrap()
+                .unwrap();
+            for tick in 0..480 {
+                mission
+                    .step(std::slice::from_ref(&target), &flat, TimeOfDay(tick))
+                    .unwrap();
+                assert!(mission.actor(1).unwrap().is_neutral());
+                assert_eq!(mission.actor(1).unwrap().controller.target(), None);
+            }
+        }
+    }
+
+    #[test]
+    fn contact_release_respects_hold_self_defense_and_assigned_target() {
+        for (assignment, release) in [
+            (engagement::Assignment::default(), true),
+            (
+                engagement::Assignment {
+                    stance: engagement::Stance::WeaponsHold,
+                    ..Default::default()
+                },
+                false,
+            ),
+            (
+                engagement::Assignment {
+                    stance: engagement::Stance::SelfDefense,
+                    ..Default::default()
+                },
+                false,
+            ),
+            (
+                engagement::Assignment {
+                    role: engagement::Role::Intercept,
+                    destroy_ids: vec![99],
+                    ..Default::default()
+                },
+                false,
+            ),
+            (
+                engagement::Assignment {
+                    role: engagement::Role::Intercept,
+                    destroy_ids: vec![2],
+                    ..Default::default()
+                },
+                true,
+            ),
+        ] {
+            let mut mission = AiMission::new();
+            let mut actor = perception_actor(Experience::Average);
+            actor.set_assignment(assignment);
+            mission.push(actor);
+            mission.start_in_formation();
+            let target = visible_object(mission.actor(1).unwrap(), 2, [0., 20000., 5000.]);
+            mission.step(&[target], &flat, TimeOfDay(0)).unwrap();
+            assert_eq!(!mission.actor(1).unwrap().is_neutral(), release);
+        }
     }
 
     #[test]
@@ -3705,6 +4127,89 @@ mod tests {
             supporting_radar_position: Some([0., 20000., -60000.]),
             alive: true,
         }
+    }
+
+    #[test]
+    fn lookout_sees_a_rear_passive_missile_without_revealing_the_launcher() {
+        use crate::combat::missiles::Guidance;
+        let mut mission = AiMission::new();
+        mission.push(perception_actor(Experience::Novice));
+        for tick in 0..83 {
+            let mut missile = incoming_snapshot(
+                Guidance::Infrared,
+                [0., 20000., -10000. + tick as f64 * 2000. / 120.],
+            );
+            missile.target = Some(999);
+            mission.set_missiles(vec![missile]);
+            mission.step(&[], &flat, TimeOfDay(tick)).unwrap();
+            if tick < 80 {
+                assert!(mission.actor(1).unwrap().defense_decision().is_none());
+            }
+        }
+        let actor = mission.actor(1).unwrap();
+        assert_eq!(actor.activity(), Activity::Defending);
+        assert!(
+            actor
+                .missile_threats()
+                .any(|r| r.targeting_receiver && r.guidance_class.is_none())
+        );
+        assert!(actor.awareness().remembered().next().is_none());
+        assert!(
+            actor
+                .perceived_attacks()
+                .iter()
+                .all(|r| r.report.attacker_id.is_none())
+        );
+    }
+
+    #[test]
+    fn ground_supported_missile_and_anonymous_hit_share_one_safe_response() {
+        use crate::combat::missiles::Guidance;
+        let mut mission = AiMission::new();
+        let mut actor = perception_actor(Experience::Ace);
+        actor.set_assignment(engagement::Assignment {
+            stance: engagement::Stance::WeaponsHold,
+            ..Default::default()
+        });
+        actor.report_hit();
+        mission.push(actor);
+        let mut missile = incoming_snapshot(Guidance::Supported, [0., 20000., -1000.]);
+        missile.supporting_radar_position = Some([0., 10., -60000.]);
+        mission.set_missiles(vec![missile]);
+        let output = mission.step(&[], &flat, TimeOfDay(0)).unwrap();
+        let actor = mission.actor(1).unwrap();
+        assert_eq!(actor.controller.target(), None);
+        assert_eq!(actor.activity(), Activity::Defending);
+        assert_eq!(
+            actor.trace.fire.cue.unwrap().evidence,
+            incoming_fire::Evidence::Hit
+        );
+        assert!(
+            actor
+                .defense_decision()
+                .unwrap()
+                .debug
+                .estimated_threat_time_s
+                .is_some_and(|t| t > 0.)
+        );
+        assert!(
+            actor.trace.fire.selected,
+            "the hit is more urgent than the approaching missile"
+        );
+        assert!(matches!(
+            actor.controller.trace().motion.branch,
+            thought::MotionBranch::IncomingFire { .. }
+        ));
+        assert_eq!(output.devices.len(), 1);
+        assert_eq!(output.devices[0].class, SeekerClass::Radar);
+        mission.set_missiles(vec![]);
+        mission.step(&[], &flat, TimeOfDay(1)).unwrap();
+        let actor = mission.actor(1).unwrap();
+        assert!(actor.trace.fire.selected);
+        assert!(matches!(
+            actor.controller.trace().motion.branch,
+            thought::MotionBranch::IncomingFire { .. }
+        ));
     }
 
     #[test]
