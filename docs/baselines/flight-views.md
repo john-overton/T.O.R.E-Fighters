@@ -79,3 +79,45 @@ Chromium checks inspected all three sheets at 1920x1080 and 960x540. No leaf tex
 or callout overflow was detected. Tab, keyboard and hash navigation passed.
 Cockpit & View PNG exports passed at 1920x1080 and 3840x2160 with the new labels.
 ZIP, PDF and print implementations were unchanged and not separately exercised.
+
+## Second pass, 2026-09-28
+
+Implementation mode, branch `flight-views-pass`, based on `bcf85fb`, from the
+player reports in GitHub issue #1. Behavior is in the
+[view spec](../spec/flight-views.md#target-views-and-sight).
+
+Synthetic tests cover Back and Up about the aircraft's own axes at climbing,
+diving, banked and inverted attitudes; the Up view through a full loop and a
+barrel roll with no step between frames; F6 cycling in member order, wrapping,
+staying put without a press and moving on when the followed wingman is lost;
+which views draw the player's airframe; and the default Other View showing it.
+A combat-state test turns the radar off with the target 3,000 feet ahead: the
+selection, HUD target and weapon observation drop, the view target stays;
+clearing the designation drops it; out of sight drops it; and seeing it again
+does not restore it. The compass tests cover tick labels, the wrap across
+north, both span edges, the off-strip arrow and bearing staying inside the
+strip, narrowing against the real instrument window rectangles, and a render
+with no ink on or near any window.
+
+Repository checks: formatting, Clippy with warnings denied, workspace tests
+(1,817 passed, 8 ignored), workspace build, 84 Python tests, source and both
+executable asset checks, and documentation checks passed on Linux. The
+1,200-tick headless flight gave the same 436.693 knots and 5,014.249 feet as
+before, and `--smoke-test` passed. Windows and macOS were not run.
+
+GPU captures, Linux, the same NVIDIA RTX 4070 host, 960x720, original F/A-18D
+assets in an isolated copy of the dev profile. Local images are in
+`.local/views-captures/`; none are committed.
+
+| Case | Arguments | Result |
+| --- | --- | --- |
+| F2 level | `--free-flight --flight-view 3` | Spine and both tails in view; forward panel out of view |
+| F2 rolling / climbing | `--maneuver roll` or `loop`, `--flight-probe-ticks 150` or `400`, `--flight-view 3` | Tails and horizon tilt together; climbing shows ground behind |
+| F3 through a loop | `--maneuver loop --flight-probe-ticks 700`, `1100`, `1500`, `--flight-view 4` | Sky, then ground overhead while inverted, then ground; no flip |
+| F3 rolling | `--maneuver roll --flight-probe-ticks 150 --flight-view 4` | Follows the canopy roof, not the world's up |
+| F7 compass | `--hud-target-preview 40,20,6000 --flight-view 8` | Diamond at the target's bearing; strip clear of both top windows |
+| F7 target behind | `--hud-target-preview 150,10,6000 --flight-view 8` | Radar has lost it and Target Cam shows NO TARGET, F7 still follows it in sight; arrow and bearing inside the strip's right end |
+
+Not tested: F6 cycling in a live mission with several wingmen (covered
+synthetically only), a hand-flown sortie through every view, and sight loss
+behind cloud, which the visual sensor does not model.

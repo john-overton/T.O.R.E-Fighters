@@ -391,10 +391,13 @@ impl Airframe {
             c.roll = 0.;
             return c;
         }
-        if view == 3 {
-            c.yaw += std::f32::consts::PI;
-        } else if view == 4 {
-            c.pitch += 0.8;
+        if matches!(view, 3 | 4) {
+            let body = crate::attitude::Basis::new(state.yaw, state.pitch, state.bank);
+            crate::flight_views::turn(&mut c, body, view);
+            // The rear view looks over the spine and tail from the pilot's seat.
+            if view == 3 {
+                c.position = crate::mirrors::pilot_eye(state.position, body);
+            }
         } else if view != 0 {
             c.view_fraction = 1.;
             let angle = state.yaw + if view == 2 { 0.8 } else { 0. };

@@ -126,7 +126,7 @@ impl Scene {
                 player.velocity,
                 Basis::new(player.yaw, player.pitch, player.bank),
             ),
-            combat.state.display_target().map(|t| t.id),
+            combat.state.view_target().map(|t| t.id),
             combat
                 .state
                 .targets
@@ -200,7 +200,15 @@ impl Scene {
             .and_then(|id| self.body(id))
             .ok_or("No current target for this view")
     }
-    fn wing(&self, reference: Body) -> Result<Body, &'static str> {
+    /// The reference's wingman in wing/member order: `current` itself while it
+    /// still flies, otherwise the next one; with `advance`, the one after it.
+    /// The order wraps back to the first member.
+    fn wing(
+        &self,
+        reference: Body,
+        current: Option<WingKey>,
+        advance: bool,
+    ) -> Result<(WingKey, Body), &'static str> {
         let id = if reference.missile {
             self.missiles
                 .iter()
@@ -214,14 +222,32 @@ impl Scene {
         } else {
             self.wings.iter().find(|s| s.0 == id).map(|s| (s.1, s.2))
         };
-        self.wings
+        let mut members: Vec<WingKey> = self
+            .wings
             .iter()
-            .filter(|s| s.0 != id && Some((s.1, s.2)) == group)
-            .min_by_key(|s| (s.2, s.3, s.0))
-            .and_then(|s| self.body(s.0))
-            .ok_or("No wingman for this view")
+            .filter(|s| s.0 != id && Some((s.1, s.2)) == group && self.body(s.0).is_some())
+            .map(|s| (s.2, s.3, s.0))
+            .collect();
+        members.sort_unstable();
+        let key = current
+            .and_then(|current| {
+                members.iter().find(|k| {
+                    if advance {
+                        **k > current
+                    } else {
+                        **k >= current
+                    }
+                })
+            })
+            .or(members.first())
+            .copied()
+            .ok_or("No wingman for this view")?;
+        Ok((key, self.body(key.2).expect("filtered to scene bodies")))
     }
 }
+
+/// A wingman's place in view order: wing number, member number, id.
+type WingKey = (u8, u8, u32);
 
 #[derive(Clone)]
 struct Saved {
@@ -236,6 +262,9 @@ pub struct Rig {
     pub reference: Reference,
     last_missile: Option<u32>,
     fly_by: Option<Vector>,
+    /// The wingman F6 follows, and whether the next camera moves to the next.
+    wingman: Option<WingKey>,
+    advance_wingman: bool,
     other: Option<Saved>,
     /// Reject a pending GPU image after V changes the saved camera.
     pub other_pending: bool,
@@ -255,6 +284,16 @@ impl Rig {
     pub fn select(&mut self, reference: Reference) {
         self.reference = reference;
         self.fly_by = None;
+        self.wingman = None;
+        self.advance_wingman = false;
+    }
+    /// F6 pressed again: the next camera follows the next wingman.
+    pub fn next_wingman(&mut self) {
+        self.advance_wingman = true;
+    }
+    /// The aircraft F6 last followed.
+    pub fn wingman(&self) -> Option<u32> {
+        self.wingman.map(|key| key.2)
     }
     pub fn cockpit(&self, view: u8) -> bool {
         self.reference == Reference::Player && matches!(view, 0 | 3 | 4 | TRACK)
@@ -269,10 +308,16 @@ impl Rig {
             fly_by: self.fly_by,
         });
     }
+    /// Whether the player's airframe is drawn: every view outside the
+    /// cockpit, and the back view, which looks over the spine and tail.
+    pub fn shows_player(&self, view: u8) -> bool {
+        !self.cockpit(view) || view == 3
+    }
     pub fn other_shows_player(&self) -> bool {
-        self.other.as_ref().is_some_and(|s| {
-            s.reference != Reference::Player || !matches!(s.view, 0 | 3 | 4 | TRACK)
-        })
+        // The default Other View is Back, which shows the spine and tail.
+        self.other
+            .as_ref()
+            .is_none_or(|s| s.reference != Reference::Player || !matches!(s.view, 0 | 4 | TRACK))
     }
     pub fn other_view(&self) -> u8 {
         self.other.as_ref().map_or(3, |s| s.view)
@@ -359,7 +404,12 @@ impl Rig {
                         .ok_or("No inbound missile for this view")?;
                     camera = relation(subject, threat.body.position);
                 }
-                WING => camera = relation(subject, scene.wing(subject)?.position),
+                WING => {
+                    let advance = std::mem::take(&mut self.advance_wingman);
+                    let (key, wingman) = scene.wing(subject, self.wingman, advance)?;
+                    self.wingman = Some(key);
+                    camera = relation(subject, wingman.position);
+                }
                 TARGET => camera = relation(subject, scene.target()?.position),
                 TARGET_PLAYER => camera = relation(scene.target()?, subject.position),
                 FLY_BY => {
@@ -422,8 +472,7 @@ fn body_camera(body: Body, view: u8) -> Camera {
     camera.pitch = pitch as f32;
     camera.roll = -bank as f32;
     match view {
-        3 => camera.yaw += std::f32::consts::PI,
-        4 => camera.pitch += 0.8,
+        3 | 4 => turn(&mut camera, body.basis, view),
         1 | 2 => {
             let angle = yaw + if view == 2 { 0.8 } else { 0. };
             let distance = if view == 2 { 130. } else { 180. };
@@ -438,6 +487,22 @@ fn body_camera(body: Body, view: u8) -> Camera {
     }
     camera
 }
+/// Turns a cockpit camera for the back (3) or up (4) view about the
+/// aircraft's own axes, so pitch and bank read correctly from any attitude
+/// and a loop or barrel roll never flips the view.
+pub(crate) fn turn(camera: &mut Camera, body: Basis, view: u8) {
+    let turned = match view {
+        3 => crate::mirrors::rear_basis(body),
+        4 => body.rotated(body.right.map(|v| -v * UP_VIEW)),
+        _ => return,
+    };
+    let [yaw, pitch, bank] = turned.angles();
+    camera.yaw = yaw as f32;
+    camera.pitch = pitch as f32;
+    camera.roll = -bank as f32;
+}
+/// Up view elevation above the nose, in radians (about 46 degrees).
+const UP_VIEW: f64 = 0.8;
 fn distance(a: Vector, b: Vector) -> f64 {
     (a[0] - b[0]).hypot(a[1] - b[1]).hypot(a[2] - b[2])
 }
@@ -718,6 +783,115 @@ mod tests {
         rig.save(0, [0.; 2], 1.);
         assert!(rig.other_shows_player());
     }
+    fn view_basis(c: &Camera) -> Basis {
+        Basis::new(c.yaw.into(), c.pitch.into(), -f64::from(c.roll))
+    }
+    fn close(a: Vector, b: Vector) {
+        assert!(dot(a, b) > 0.99999, "{a:?} != {b:?}");
+    }
+    #[test]
+    fn back_and_up_views_turn_about_the_aircraft_axes() {
+        let (sin, cos) = UP_VIEW.sin_cos();
+        for (yaw, pitch, bank) in [
+            (0.3, 0.5, 0.7),
+            (1., -0.4, -1.2),
+            (2., 1.4, 2.5),
+            (4., 0., std::f64::consts::PI),
+        ] {
+            let body = Basis::new(yaw, pitch, bank);
+            let mut c = Camera::new();
+            // Back: facing the tail, with the aircraft's own up, so a climb
+            // lowers the view and the horizon tilts against the bank.
+            turn(&mut c, body, 3);
+            let back = view_basis(&c);
+            close(back.forward, body.forward.map(|v| -v));
+            close(back.up, body.up);
+            turn(&mut c, body, 4);
+            let up = view_basis(&c);
+            close(
+                up.forward,
+                std::array::from_fn(|i| body.forward[i] * cos + body.up[i] * sin),
+            );
+            close(up.right, body.right);
+        }
+    }
+    #[test]
+    fn up_view_stays_with_the_aircraft_through_a_loop_and_a_barrel_roll() {
+        let (sin, cos) = UP_VIEW.sin_cos();
+        let steps = 720;
+        for roll_rate in [0., 1.] {
+            let mut body = Basis::new(0.5, 0., 0.);
+            let mut previous: Option<Vector> = None;
+            for _ in 0..steps {
+                let step = std::f64::consts::TAU / f64::from(steps);
+                body = body.rotated(body.right.map(|v| -v * step));
+                body = body.rotated(body.forward.map(|v| v * step * roll_rate));
+                let mut c = Camera::new();
+                turn(&mut c, body, 4);
+                let forward = view_basis(&c).forward;
+                close(
+                    forward,
+                    std::array::from_fn(|i| body.forward[i] * cos + body.up[i] * sin),
+                );
+                // No jump from one step to the next, even across vertical.
+                if let Some(previous) = previous {
+                    assert!(dot(previous, forward) > 0.999, "view flipped");
+                }
+                previous = Some(forward);
+            }
+        }
+    }
+    #[test]
+    fn wingman_view_cycles_in_member_order_and_moves_on_when_one_is_lost() {
+        let mut scene = scene();
+        scene.bodies.push(body(3, [0., 1000., 2000.]));
+        scene.bodies.push(body(4, [0., 1000., 3000.]));
+        scene.wings = vec![
+            (1, false, 1, 1),
+            (2, true, 1, 2),
+            (3, true, 1, 4),
+            (4, true, 1, 3),
+        ];
+        let mut rig = Rig::default();
+        camera(&mut rig, WING, &scene);
+        assert_eq!(rig.wingman(), Some(2));
+        let mut order = Vec::new();
+        for _ in 0..4 {
+            rig.next_wingman();
+            camera(&mut rig, WING, &scene);
+            order.push(rig.wingman().unwrap());
+        }
+        assert_eq!(order, [4, 3, 2, 4]);
+        // Without a press the view stays on the same wingman.
+        camera(&mut rig, WING, &scene);
+        assert_eq!(rig.wingman(), Some(4));
+        // Lost: the next member in order, wrapping to the first.
+        scene.bodies.retain(|b| b.id != 4);
+        scene.wings.retain(|w| w.0 != 4);
+        camera(&mut rig, WING, &scene);
+        assert_eq!(rig.wingman(), Some(3));
+        scene.bodies.retain(|b| b.id != 3);
+        camera(&mut rig, WING, &scene);
+        assert_eq!(rig.wingman(), Some(2));
+        scene.bodies.retain(|b| b.id != 2);
+        assert!(
+            rig.camera(WING, &scene, Camera::new(), [0.; 2], 1.)
+                .is_err()
+        );
+        rig.select(Reference::Player);
+        assert_eq!(rig.wingman(), None);
+    }
+    #[test]
+    fn back_view_shows_the_player_airframe_and_other_cockpit_views_do_not() {
+        let rig = Rig::default();
+        assert!(rig.shows_player(3));
+        for view in [0, 4, TRACK] {
+            assert!(!rig.shows_player(view));
+        }
+        for view in [1, THREAT, WING, TARGET, TARGET_PLAYER, FLY_BY, MISSILE] {
+            assert!(rig.shows_player(view));
+        }
+    }
     #[test]
     fn default_other_view_is_back_and_retains_flight_keys() {
         let scene = scene();
@@ -726,8 +900,10 @@ mod tests {
         base.keys.insert("ArrowDown".into());
         let c = rig.other_camera(&scene, base).unwrap();
         assert!((c.yaw - std::f32::consts::PI).abs() < 1e-6);
-        assert!(!rig.other_shows_player());
+        assert!(rig.other_shows_player());
         assert!(c.keys.contains("ArrowDown"));
+        rig.save(0, [0.; 2], 1.);
+        assert!(!rig.other_shows_player());
         rig.save(1, [0.; 2], 1.);
         assert!(rig.other_shows_player());
     }

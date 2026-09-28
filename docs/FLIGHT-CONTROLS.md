@@ -40,10 +40,10 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | W / Shift-W | Next / previous waypoint on the NAV window | FA keys; the NAV window's airport list when it shows airports |
 | ; or L | Clear the designation | FA unlock key; L is kept |
 | F1 | Forward cockpit view; reset pan/zoom | FA `FMENUD.MNU` |
-| F2 / F3 | Look back / up | FA menu; authored angles, forward artwork projects out of view naturally |
+| F2 / F3 | Look back over the airframe / up | FA menu; turns with the aircraft, forward artwork projects out of view naturally |
 | F4 | Track current target within head-look limits | Manual p. 103; fitted limits |
-| F5 / F6 | Player to nearest inbound missile / wingman | Manual p. 103; fitted placement |
-| F7 / F8 | Player to target / target to player | Manual p. 103; fitted placement |
+| F5 / F6 | Player to nearest inbound missile / wingman; F6 again for the next wingman | Manual p. 103; fitted placement and cycling |
+| F7 / F8 | Player to target, with a bearing compass / target to player | Manual p. 103; fitted placement; compass requested 2026-09-28 |
 | F9 | Fixed-position fly-by; press again for another pass | Manual p. 103; fitted placement |
 | F10 | External chase view | FA menu; authored camera placement |
 | F12 | Last player missile to its own target | Manual p. 103; fitted placement |
@@ -173,7 +173,7 @@ instrument rasters are cached.
 
 ## View and smoothness clarification
 
-F2/F3 replaced the early prototype exterior bindings when the native menu controls were recovered. They look back/up from ownship and omit the exterior mesh. The forward cockpit/HUD overlay translates opposite head-look and fades at its viewing limits; back/up views do not duplicate the forward frame behind or above the pilot. **F10 shows the aircraft from outside**; F1 restores the cockpit. The oblique developer camera remains available through `--flight-view 2`. Other View (Shift+3) defaults to Back. Press V to save the current view, reference, look and zoom there; it opens automatically and keeps following that relation after you return to F1. Missing subjects leave a requested view unchanged, or return an active main view to F1 with feedback. See [all views and fitted placement](spec/flight-views.md).
+F2/F3 replaced the early prototype exterior bindings when the native menu controls were recovered. They look back/up from ownship, turning with the aircraft; F2 shows the airframe's spine and tails, F3 omits it. The forward cockpit/HUD overlay translates opposite head-look and fades at its viewing limits; back/up views do not duplicate the forward frame behind or above the pilot. **F10 shows the aircraft from outside**; F1 restores the cockpit. The oblique developer camera remains available through `--flight-view 2`. Other View (Shift+3) defaults to Back. Press V to save the current view, reference, look and zoom there; it opens automatically and keeps following that relation after you return to F1. Missing subjects leave a requested view unchanged, or return an active main view to F1 with feedback. See [all views and fitted placement](spec/flight-views.md).
 
 The performance pass removes the extra post-render wait, interpolates camera/aircraft/HUD poses between fixed 120 Hz ticks, and keeps live instrument GPU readbacks asynchronous. Controls still drive the same authored flight adapter; this is not a new native flight-model claim. [Measurements and diagnostics](baselines/flight-performance.md).
 
@@ -287,7 +287,8 @@ T cycles current radar contacts nearest first and Shift-T backwards, skipping
 friendly aircraft and wrecks. Enter selects the visible radar or infrared
 contact nearest the nose. A mouse click on the scope designates a contact
 directly. A target the scope loses drops completely
-([rules](spec/radar.md#target-selection-keys)). SAFE/EMPTY/STATION FAILED and the sensor and range inhibits are shown
+([rules](spec/radar.md#target-selection-keys)); only the F4, F7 and F8 views
+keep following it while the pilot can still see it. SAFE/EMPTY/STATION FAILED and the sensor and range inhibits are shown
 separately from lock; a terrain-masked target now reports NO TARGET, because
 masking clears the contact rather than inhibiting the launch. The systems continuation below adds automatic source-weighted failures
 for supported equipment. Quick Mission AI integration is described in the [AI spec](spec/ai.md).

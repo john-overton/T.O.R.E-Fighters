@@ -970,8 +970,8 @@ for timing, survival and the AI recovery assessment. Undamaged AI aircraft above
 ## Flight view shortcuts
 
 F1/F2/F3 remain Forward/Back/Up and F10 remains External. F4 tracks the target;
-F5 faces the nearest inbound missile; F6 faces a wingman; F7 faces the target
-from the player; F8 faces the player from the target; F9 is a fixed fly-by;
+F5 faces the nearest inbound missile; F6 faces a wingman, and pressing it again
+moves to the next; F7 faces the target from the player, with a bearing compass; F8 faces the player from the target; F9 is a fixed fly-by;
 F12 follows the last player missile toward its own target. V saves the current
 camera into Other View and opens Shift+3. F11 still opens keyboard help.
 

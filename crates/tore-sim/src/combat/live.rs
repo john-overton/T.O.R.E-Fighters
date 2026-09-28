@@ -786,6 +786,9 @@ pub struct State {
     /// Easy targeting's memory of the last selection, kept after sensor
     /// loss for the HUD square only; never grants weapon support.
     hud_selection: Option<u32>,
+    /// Without Easy targeting, the last selection while the pilot can still
+    /// see it after the sensors drop it. Only the flight views follow it.
+    sight_hold: Option<u32>,
     /// Friendly aircraft identities, which T and Enter skip. Set by the host.
     pub friendlies: std::collections::BTreeSet<u32>,
     /// Passive emitters received this step, for the exposure instrument.
@@ -917,6 +920,7 @@ impl State {
             bore_observation: None,
             mounted_key: None,
             hud_selection: None,
+            sight_hold: None,
             friendlies: Default::default(),
             weapon_rules: Rules::Spec,
             chaff: config.ecm.chaff[0],
@@ -1164,6 +1168,16 @@ impl State {
             .iter()
             .find(|target| target.id == id && target.hp > 0)
     }
+    /// The target the flight views follow: the display target, or without
+    /// Easy targeting a dropped selection the pilot can still see.
+    pub fn view_target(&self) -> Option<&Target> {
+        self.display_target().or_else(|| {
+            let id = self.sight_hold?;
+            self.targets
+                .iter()
+                .find(|target| target.id == id && target.hp > 0)
+        })
+    }
     pub fn command(&mut self, command: Command, launcher: Launcher) {
         match command {
             Command::ClearRange => {
@@ -1171,6 +1185,7 @@ impl State {
                     .retain(|t| self.ground_bounds.contains_key(&t.id));
                 self.sensors.clear_selection();
                 self.hud_selection = None;
+                self.sight_hold = None;
                 self.bore_observation = None;
                 self.mounted = Seeker::default();
             }
@@ -1330,6 +1345,7 @@ impl State {
             Command::ClearDesignation => {
                 self.sensors.clear_selection();
                 self.hud_selection = None;
+                self.sight_hold = None;
                 self.bore_observation = None;
                 self.mounted = Seeker::default();
                 self.mounted_key = None;
@@ -1707,6 +1723,7 @@ impl State {
         self.ground_bounds.clear();
         self.sensors.clear_selection();
         self.hud_selection = None;
+        self.sight_hold = None;
     }
     /// Register one imported, stationary surface object without consuming an
     /// aircraft roster index. The caller owns the explicit disjoint ID range.
@@ -1812,6 +1829,7 @@ impl State {
         });
         self.sensors.clear_selection();
         self.hud_selection = None;
+        self.sight_hold = None;
     }
     /// Any current observation of this object, on the selected scope channel
     /// or visually. Channels are never collapsed into one another.
@@ -2202,6 +2220,7 @@ impl State {
             obscured: &obscured,
         };
         self.sensors.keep_selection = self.cheats.easy_targeting;
+        let in_view = self.designated().or(self.sight_hold);
         self.sensors.step(&observer, &observables, &environment);
         if let Some(id) = self.designated() {
             self.hud_selection = Some(id);
@@ -2209,6 +2228,14 @@ impl State {
             // A dropped target is gone; nothing is remembered for later.
             self.hud_selection = None;
         }
+        // The views keep a dropped target only while it stays in sight;
+        // once it is out of sight it is gone for good.
+        self.sight_hold = self.designated().or(in_view.filter(|id| {
+            self.sensors
+                .visual()
+                .iter()
+                .any(|c| c.id == *id && !c.destroyed)
+        }));
         self.emitters = passive::emitters(
             &observer,
             &observables,
@@ -3823,6 +3850,55 @@ mod tests {
         state.cheats.easy_targeting = true;
         state.step(false, ownship, |_, _| 0.);
         assert!(state.display_target().is_none());
+    }
+    #[test]
+    fn views_keep_a_dropped_target_only_while_the_pilot_can_see_it() {
+        let mut state = fixture(true);
+        let ownship = launcher();
+        let blind = Launcher {
+            radar: false,
+            radar_power: false,
+            ..ownship
+        };
+        let select = |state: &mut State| {
+            for _ in 0..120 {
+                state.step(false, ownship, |_, _| 0.);
+            }
+            state.designate_next(true);
+            state.designated().expect("fixture contact")
+        };
+        let run = |state: &mut State, launcher: Launcher| {
+            for _ in 0..120 {
+                state.step(false, launcher, |_, _| 0.);
+            }
+        };
+        state.range_target(ownship);
+        let id = select(&mut state);
+        // Radar off: the selection and HUD square drop, the views keep it.
+        run(&mut state, blind);
+        assert_eq!(state.designated(), None);
+        assert!(state.display_target().is_none());
+        assert!(state.weapon_observation(blind).is_none());
+        assert_eq!(state.view_target().map(|t| t.id), Some(id));
+        state.command(Command::ClearDesignation, blind);
+        assert!(state.view_target().is_none());
+        // Out of sight it is gone, and seeing it again does not restore it.
+        assert_eq!(select(&mut state), id);
+        run(&mut state, blind);
+        assert_eq!(state.view_target().map(|t| t.id), Some(id));
+        let target = state.targets.iter_mut().find(|t| t.id == id).unwrap();
+        let ahead = target.position;
+        target.position = [0., 1000., -5000.];
+        run(&mut state, blind);
+        assert!(state.view_target().is_none());
+        state
+            .targets
+            .iter_mut()
+            .find(|t| t.id == id)
+            .unwrap()
+            .position = ahead;
+        run(&mut state, blind);
+        assert!(state.view_target().is_none());
     }
     #[test]
     fn easy_targeting_keeps_the_selection_off_scope_without_weapon_support() {

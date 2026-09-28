@@ -87,22 +87,23 @@ fn flood<const N: usize>(source: &Sprite, seeds: [[usize; 2]; N]) -> Option<Mask
     }
     Some(result)
 }
-fn rear_basis(body: Basis) -> Basis {
+pub(crate) fn rear_basis(body: Basis) -> Basis {
     Basis {
         right: body.right.map(|v| -v),
         up: body.up,
         forward: body.forward.map(|v| -v),
     }
 }
+/// Fitted pilot's eye above and forward of the model origin, in feet.
+pub(crate) fn pilot_eye(position: [f64; 3], body: Basis) -> [f32; 3] {
+    std::array::from_fn(|i| (position[i] + body.up[i] * 7. + body.forward[i] * 10.) as f32)
+}
 pub fn camera(state: &State) -> Camera {
     let body = Basis::new(state.yaw, state.pitch, state.bank);
     let [yaw, pitch, bank] = rear_basis(body).angles();
     let mut c = Camera::new();
     c.weather_slot = 1;
-    // Fitted eye above/forward of the model origin, in feet.
-    c.position = std::array::from_fn(|i| {
-        (state.position[i] + body.up[i] * 7. + body.forward[i] * 10.) as f32
-    });
+    c.position = pilot_eye(state.position, body);
     c.yaw = yaw as f32;
     c.pitch = pitch as f32;
     c.roll = -bank as f32;

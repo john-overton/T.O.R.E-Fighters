@@ -67,6 +67,7 @@ mod surface_lighting;
 mod target_window;
 mod terrain;
 mod version;
+mod view_compass;
 mod weapon_hud;
 mod weather;
 
@@ -1294,7 +1295,15 @@ impl App {
                 );
                 self.view_rig.observe(&scene);
                 let mut candidate = self.view_rig.clone();
-                candidate.select(reference);
+                // Pressing F6 again moves on to the next wingman.
+                let cycle = view == flight_views::WING
+                    && self.flight_view == flight_views::WING
+                    && self.view_rig.reference == reference;
+                if cycle {
+                    candidate.next_wingman();
+                } else {
+                    candidate.select(reference);
+                }
                 if let Err(reason) = candidate.camera(
                     view,
                     &scene,
@@ -1304,6 +1313,16 @@ impl App {
                 ) {
                     self.flight_ui.message(reason);
                     return Action::None;
+                }
+                if view == flight_views::WING
+                    && let Some(id) = candidate.wingman()
+                {
+                    let name = self
+                        .ai_wings
+                        .as_ref()
+                        .and_then(|wings| wings.radio_members().into_iter().find(|m| m.id == id))
+                        .map_or_else(|| format!("Aircraft {id}"), |m| radio_calls::label(&m));
+                    self.flight_ui.message(format!("Wingman view: {name}"));
                 }
                 self.view_rig = candidate;
                 self.flight_view = view;
@@ -3761,7 +3780,7 @@ impl ApplicationHandler for App {
                         renderer.aircraft(
                             &self.hornet,
                             &presented,
-                            !self.view_rig.cockpit(self.flight_view),
+                            self.view_rig.shows_player(self.flight_view),
                             &self.camera,
                             &self.world,
                         );
@@ -3957,6 +3976,20 @@ impl ApplicationHandler for App {
                             }
                             self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
                             self.menu.pixels.fill(0);
+                        }
+                        // F7 alone carries the bearing compass, while it has a target.
+                        if self.flight_view == flight_views::TARGET
+                            && self.view_rig.reference == flight_views::Reference::Player
+                            && !self.flight_ui.map.open
+                            && let Some(target) = self.combat.state.view_target()
+                        {
+                            view_compass::draw(
+                                &mut self.flight_canvas,
+                                &self.instruments,
+                                &self.hornet.hud_font,
+                                hud::heading(presented.yaw),
+                                view_compass::bearing(presented.position, target.position),
+                            );
                         }
                         // The debug panels show what the recording writes:
                         // its comms entries and, while they show, its trees.
