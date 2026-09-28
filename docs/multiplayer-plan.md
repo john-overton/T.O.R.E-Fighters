@@ -8,8 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, planning pass of 2026-09-28. Nothing is built yet.
-Sequencing is in the [roadmap](ROADMAP.md#milestone-2-multiplayer). What players
+Implementation mode, planning pass of 2026-09-28. Nothing is built yet. The
+design of stages A and B (types, tick order, handoff rules) is in the
+[architecture guide](ARCHITECTURE.md#mission-core-and-seats), written
+2026-09-28 and awaiting John's review. Sequencing is in the [roadmap](ROADMAP.md#milestone-2-multiplayer). What players
 experience is in the [multiplayer guide](MULTIPLAYER.md). What Fighters
 Anthology did is in the [retail multiplayer spec](spec/multiplayer.md).
 
@@ -64,22 +66,30 @@ Two parts of the spec change:
 
 ## Where the code stands
 
-Surveyed on main at `0a1e14f`. Line numbers are indicative and will drift.
+Surveyed on main at `0a1e14f` and corrected at `4ad5171` while designing
+stages A and B. Line numbers are indicative and will drift.
 
 **Simulation loop.**
 
 - The live tick sequence is written inline in the app's `RedrawRequested`
-  handler (`crates/tore-app/src/main.rs`, about lines 2870 to 3491). One tick:
-  player flight, building contact, weather, turbulence, g-effects, combat,
-  airport service, AI, render snapshot, then recorder, radio and audio.
-- Two headless paths repeat a reduced version of that order by hand:
-  `--headless-flight` (player flight model only) and `--ai-probe-ticks`
-  (player, combat, AI and radio, but no weather, turbulence, g-effects,
-  building contact or airport service).
-- There is no single world type. Mission state is spread over about fifteen
+  handler (`crates/tore-app/src/main.rs`, the `for _ in 0..steps` loop, about
+  lines 3049 to 3669). One tick: queued commands, player flight, building
+  contact, weather, turbulence, g-effects, combat, airport service, AI, render
+  snapshot, then recorder, radio and audio, with HUD messages, audio calls and
+  rumble cues interleaved between the simulation steps.
+- The weather step also advances each camera's weather presentation, so the
+  tick builds up to five cameras from the view, look and head-tracking state.
+- No headless path runs that loop. `--ai-probe-ticks` repeats a reduced version
+  by hand (player, combat, AI and radio, but no weather, turbulence, g-effects,
+  building contact, airport service or crew voice). `--headless-flight` and
+  `--replay-input` step the player's flight model alone, and several component
+  probes step combat or flight on their own.
+- There is no single world type. Mission state is spread over about twenty
   `App` fields: the player's `flight`, `combat`, `ai_wings`, the terrain `world`,
-  `airport_service`, `turbulence`, and others. There are four separate tick
-  counters.
+  `airport_service`, `turbulence`, the radio, and others. Five counters advance
+  with the tick: the player's flight ticks, combat's tick (the clock most code
+  reads), the AI mission's tick, the weather clock (256 units a second) and the
+  input tape's count.
 - Ticks come from render frames: frame time, capped at 0.25 s, times a time
   scale of 0.5 to 8. Pause comes from the menu, window focus loss, controller
   disconnect or a native fault. There is no simulation thread.
@@ -96,9 +106,11 @@ Surveyed on main at `0a1e14f`. Line numbers are indicative and will drift.
 - The AI controller refuses to drive a human-controlled aircraft
   (`crates/tore-sim/src/ai/controller.rs`, `Controller::new`). There is no way to
   hand an aircraft between AI and a human, and no way to remove an actor.
-- Hit tests are split by who is shooting: rounds marked "incoming" can hit only
-  the player, and every other round can hit only AI and ground targets
-  (`live.rs`, around line 2760).
+- Hit tests treat guns and missiles differently. A gun round can hit any
+  aircraft except its owner, on either side, the player included. A missile
+  aimed at the player can hit only the player; any other missile can hit any
+  AI or ground target, its own launcher included, but never the player
+  (`live.rs`, around line 3021).
 - The radio's listener is the player. Wing orders reach only the player's wing.
   The debrief shows the player and one wingman.
 
@@ -106,8 +118,8 @@ Surveyed on main at `0a1e14f`. Line numbers are indicative and will drift.
 and `step_surface`, which is a good foundation for handoff. Weapons are
 different: the player's weapon commands are applied between ticks from window
 events, and AI launches come out of the AI as launch events. Airborne AI
-aircraft fly the legacy flight model; the player and ground-starting wingmen fly
-the hybrid model.
+aircraft fly the legacy flight model and switch to the hybrid model when they
+begin a landing; the player and ground-starting wingmen fly the hybrid model.
 
 **State and determinism.**
 
@@ -200,8 +212,9 @@ flowchart TD
 A separate server binary matters beyond tidiness. The game binary links the
 audio library, and a Linux server without ALSA installed could not start it.
 
-The app's terrain type is also called `World`; it would be renamed during the
-move. The crate and type names are agent proposals.
+The app's terrain type is also called `World`; it is renamed `Terrain` in
+stage A's first commit (`Theater` is taken by `tore-formats`). The crate and
+type names are agent proposals.
 
 ### The core's shape
 
@@ -365,7 +378,7 @@ Sizes are relative: S, M, L, XL.
 
 | Stage | Work | Acceptance | Size |
 | --- | --- | --- | --- |
-| A. Mission core | **A1:** gather the mission state into one `World` inside `tore-app` with one `step`, moving the live loop body over unchanged in order. The windowed loop, `--headless-flight` and `--ai-probe-ticks` all call it. **A2:** move `World` and its simulation glue into `crates/tore-world`. | A1: existing golden fingerprints, replay export goldens and flight tests are unchanged, and a new headless full-tick fingerprint pins the order from then on. The AI probe switching to the full tick (it gains weather, turbulence and airport service) is a separate commit with re-blessed probe output. A2: `cargo tree -p tore-world` shows no wgpu, winit or cpal. | L |
+| A. Mission core | **A1:** gather the mission state into one `World` inside `tore-app` with one `step`, moving the live loop body over unchanged in order. The windowed loop and `--ai-probe-ticks` call it; `--headless-flight` stays the isolated flight-model probe. **A2:** split what mixes simulation with presentation, then move `World` and its simulation glue into `crates/tore-world`. Commit sequence in the [architecture guide](ARCHITECTURE.md#how-stage-a-lands). | A1: existing golden fingerprints, replay export goldens and flight tests are unchanged, and a new headless full-tick fingerprint pins the order from then on. The AI probe switching to the full tick (it gains weather, turbulence and airport service) is a separate commit with re-blessed probe output. A2: `cargo tree -p tore-world` shows no wgpu, winit or cpal. | L |
 | B. Seats | One aircraft record for every aircraft with an AI or human pilot. The player-only combat state becomes per-aircraft. Tick-stamped `SeatInput`. Any round can hit any aircraft except its owner, subject to friendly fire. AI to human handoff and back, keeping pose, fuel, stores and damage. Radio listener, orders and debrief per seat. Lead succession with "You're the Wingleader now". A multiplayer mission option that puts every aircraft on the hybrid flight model (John, 2026-09-28). | Single-player goldens unchanged, or any one-tick timing shift documented. A headless test flies two humans in each of two wings through a fight. Handoff tests show no jump in position or speed and keep fuel and stores. Succession tests cover a human lead and an AI lead. AI air combat on the hybrid model is checked with AI probe runs against the legacy baseline. | XL |
 | C. Network foundation and dedicated server | `tore-net`: transport, handshake with build and protocol version, reliable and unreliable channels, statistics, network simulator. Snapshot coder with acknowledged-baseline deltas; every packet decodes on its own; full keyframes for joiners. Real-time server driver, input jitter buffer, snapshots at 30 Hz (setting). Client prediction, correction smoothing, interpolation, clock sync. Missile hits by the host; gun lag compensation. `tore-server` runs a Quick Mission from its config file; a development `--connect` flag joins it. Network diagnostics recorded in replays. | A dedicated server and two clients on a LAN complete a Quick Mission with AI. Under the simulator at 50, 150 and 300 ms round trip with 0, 2 and 5 percent loss, corrections to the own aircraft and smoothness of others stay within limits set in the follow-up spec. Bandwidth measured against the budget above. Headless bot clients run in CI. | XL |
 | D. Player-hosted | The core runs on a real-time thread inside the host's game; the host's seat is fed directly; the renderer reads snapshots. Single player keeps the render-loop driver. | A host and one remote client complete a mission. Dragging, minimizing or stalling the host's window does not freeze the client. | M |
@@ -420,7 +433,7 @@ Each one is written at the start of its stage:
 
 | Stage | Spec | Home |
 | --- | --- | --- |
-| A, B | Mission core and seats: types, tick order, handoff rules | [Architecture](ARCHITECTURE.md#planned-multiplayer-mission-core), replacing the planned note |
+| A, B | Mission core and seats: types, tick order, handoff rules | [Architecture](ARCHITECTURE.md#mission-core-and-seats), written 2026-09-28 |
 | C | Wire protocol: packets, channels, handshake and snapshot encoding | `docs/formats/net-protocol.md` (new) |
 | C | Netcode numbers: interpolation delay, correction thresholds and smoothing, lag compensation cap, relevance bands | [Multiplayer guide](MULTIPLAYER.md) |
 | C | Dedicated server: config file, import, running and ports | `docs/DEDICATED-SERVER.md` (new) |
@@ -487,12 +500,16 @@ Each one is written at the start of its stage:
 ## Decisions needed from John
 
 Answered on 2026-09-28: retail rules, migration fidelity, flight model and comm
-rose ([decisions](MULTIPLAYER.md#decisions)). Still open before work starts:
+rose ([decisions](MULTIPLAYER.md#decisions)). Still open:
 
 - **Refactor window.** When stages A and B can move the AI bridge without
   colliding with AI work in progress, and whether AI work then keeps checkpoint
-  encoders current.
-- **Randomness.** Whether to add `getrandom` for rejoin tokens.
+  encoders current. On 2026-09-28 no other worktree was changing AI files.
+- **Single-player changes in stage B:** the missile hit rule, lead succession
+  and the mission result call without audio, listed in the
+  [architecture guide](ARCHITECTURE.md#single-player-guarantee).
+- **Randomness.** Whether to add `getrandom` for rejoin tokens. Not needed until
+  stage J.
 
 The guide's [open questions](MULTIPLAYER.md#open-questions) can be settled at
 the start of the stage that needs them.

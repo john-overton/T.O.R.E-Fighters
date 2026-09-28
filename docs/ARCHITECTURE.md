@@ -686,17 +686,507 @@ click-or-drag rule. The layer is composited centred on the view, only where a
 panel or the menu drew (`FlightCanvas::centered_rects`). In flight the panels
 only read: the menu's camera changes go through the ordinary view commands.
 
-## Planned: multiplayer mission core
-
-Not built yet. Milestone 2 moves the live tick sequence, today written inline in
-`main.rs`'s redraw handler, into one mission type in a new `tore-world` crate
-with no window, GPU or audio. Its working name is `World`, so today's terrain
-`World` would be renamed. The single-player special case becomes seats, so
-any aircraft can be flown by AI or a human, and all mutable simulation state
-gains exact checkpoints for host migration. Networking goes in a new `tore-net`
-crate. The [multiplayer plan](multiplayer-plan.md#architecture) has the crates,
-stages and diagrams. This section is replaced as the stages land.
-
 ## Promo reel capture
 
 `reel.rs` and the replay viewer's `director` module render promo footage. They read complete recordings into the same presentation helpers and `SimRenderer`, using a surface-free wgpu device and GPU readback. They never advance aircraft or AI state. Python expands the checked shot timeline and sends exact recorded ticks and camera parameters; a second cockpit pass can read back the HUD symbols alone, and the offline mixer can keep speech on its own stem. See the [production recipe](../tools/reel/README.md).
+
+## Mission core and seats
+
+Design for stages A and B of the [multiplayer plan](multiplayer-plan.md#stages),
+written 2026-09-28. **Nothing in this section is built yet.** It is rewritten
+as the stages land. The type names, the tick rules, the handoff rules and every
+choice not credited to John are agent proposals awaiting his review. John's
+decisions are in the [multiplayer guide](MULTIPLAYER.md#decisions).
+
+In short:
+
+- One type, `World`, owns the whole mission and advances it one 120 Hz tick at a
+  time, with no window, GPU or audio. Single player, a player-hosted game and a
+  dedicated server all drive the same `World`.
+- Inside `World::step` the simulation runs in today's order. What the tick did
+  for the screen, the speakers, the controllers and the replay recorder happens
+  after the step, in the same order, from what the step reports.
+- Every aircraft gets a pilot: the AI or a human seat. A human sends one
+  tick-stamped input per tick. An aircraft can pass between the AI and a human in
+  flight and keep its pose, fuel, stores and damage.
+- Single player keeps its results tick for tick, apart from the changes listed
+  under [single-player guarantee](#single-player-guarantee). Each of those needs
+  John's approval before it lands.
+
+### Where the code stands
+
+The live tick is written inline in `main.rs`'s `RedrawRequested` handler, the
+`for _ in 0..steps` loop. Its mission state is spread over about twenty `App`
+fields, and the loop interleaves simulation with HUD messages, audio calls,
+rumble cues, camera work and replay recorder calls. No headless path runs this
+loop: `--ai-probe-ticks` repeats a reduced version by hand (no weather,
+turbulence, building contact, airport service or crew voice), and
+`--headless-flight` steps the flight model alone. The player is `App.flight` plus
+one ownship's worth of player-only fields in `combat::live::State`; every AI
+aircraft is an `AiActor` in `tore-sim::ai` plus a `live::Target` row, mirrored
+into each other once per tick. The plan's
+[code findings](multiplayer-plan.md#where-the-code-stands) have the rest.
+
+### Stage A: one mission core
+
+#### What `World` owns
+
+| `World` owns | The app keeps |
+| --- | --- |
+| The player's flight state, and its state at the start of the tick | The frame clock, pause and time compression (`flight::Clock`, `FlightUi`) |
+| Combat: weapons, projectiles, targets, damage, effects, smoke, debris and the ledger | Cameras, views, look, zoom and head tracking |
+| The AI wings (`AiWings` and its `AiMission`) | The HUD, instruments, flight menu and on-screen messages |
+| The terrain and the weather clock (`Environment`) | Per-camera weather presentation, palettes and the render origin |
+| The airport service and navigation mode | Audio: radio playback, music, RWR tones and spatial sound |
+| Turbulence and its random numbers | Blackout and redout, and wing vapor, which only the renderer reads |
+| Radio call generation: the tower, the crew voice, weapon, hit and wing calls, and the radio channel | Input devices, rumble and the input tape |
+| The settings in force: cheats, AI mission preset, enemy skill and flight model | The replay recorder and library, and the debug panels |
+
+Today's terrain type `terrain::World` is renamed `Terrain` first, in a commit of
+its own. `Theater` would read better but already names the parsed T2 grid in
+`tore-formats`. In A1 `World` owns the `Terrain` whole, as `App` does now.
+Before the crate move it splits in two: the terrain the simulation queries
+(the T2 grid, the airport scene and its runway anchors), shared by reference,
+and the scenery the renderer draws (meshes, textures, sky art, palettes and the
+per-camera weather), which stays in the app.
+
+#### One tick
+
+`World::step` runs these in order. It is today's order with the presentation
+taken out:
+
+1. **Settings and commands.** Cheats, the scope controls and the friendly list
+   are applied. Queued weapon-page clicks, navigation-page selections and airport
+   commands run in the order they were given.
+2. The player's flight state at the start of the tick is kept as `previous`.
+3. **Player flight.** The flight model steps with the tick's pilot input over
+   the runway and terrain surface, with wind.
+4. **Building contact**: a crash, or a rebound under the No Crashes cheat.
+5. A fault in the restricted native research adapter stops the tick here and is
+   reported. Nothing else in the tick runs, as today.
+6. **Weather clock**: one environment step.
+7. **Turbulence** acts on the player.
+8. **Combat.** The trigger level is set, then combat steps: sensors, the player's
+   weapons, projectiles, hits, damage, wrecks and contrails.
+9. **Airport service.** It learns which runway objects were destroyed, then
+   steps. The AI wings learn whether the player is landing.
+10. **Events.** The player's system messages and combat's events are applied:
+    jolts, destruction and weapon release sounds.
+11. **AI.** Hit reports, then every AI actor, then crash sites and ejections.
+12. **The tick's picture**: the render snapshot, with this tick's shot outcomes
+    and AI journal.
+13. **Radio.** The tower, the crew voice and the weapon, hit and wing calls are
+    generated, and the calls due now are delivered.
+14. Sound emissions are collected.
+
+```mermaid
+flowchart TD
+  input["Tick input: stick, trigger,<br/>scope controls, commands"] --> s1
+  subgraph step["World::step, one 120 Hz tick"]
+    s1["Settings and commands"] --> s2["Player flight and<br/>building contact"]
+    s2 --> s3["Weather clock<br/>and turbulence"]
+    s3 --> s4["Combat"]
+    s4 --> s5["Airport service"]
+    s5 --> s6["AI wings"]
+    s6 --> s7["The tick's picture"]
+    s7 --> s8["Tower, crew voice<br/>and radio calls"]
+  end
+  s8 --> output["Tick output: events, messages,<br/>radio calls, sounds, cues"]
+  output --> present["The app, after the step: HUD, audio,<br/>rumble, camera weather, recorder"]
+```
+
+After the step the app presents the tick in the order the loop used to: HUD
+messages, rumble, tower audio, the view change when the pilot dies, per-camera
+weather, the view rig, wing vapor, blackout and redout, control-surface and
+ejection sounds, the replay recorder's calls, radio playback, situation music,
+RWR tones and spatial sound. The recorder's mid-tick call reads the finished
+tick: the steps after the picture only generate radio calls and drain queues it
+never reads, so what it records is unchanged.
+
+*Agent decision:* because presentation now runs after the whole tick, a few
+presentation steps read the end of the tick instead of its middle: per-camera
+weather, the view rig's tracking of the player's last missile, wing vapor,
+blackout and redout, and control-surface sounds. Before, they saw other
+aircraft before those had moved in this tick, and the player before combat's
+jolts. No simulation value, recording or fingerprint changes. In some views a
+cloud tint, a vapor trail or the end of a blackout can differ by one tick
+(1/120 s).
+
+#### Tick input and output
+
+`TickInput` (stage A, one player) holds the pilot input (`PilotInput`: stick,
+throttle and pilot commands such as gear, flaps, radar power and eject), the
+trigger level, the scope controls, the queued commands of step 1 and the
+settings in force. In A the other player commands (weapon selection keys,
+designation, chaff and flares, wing orders) still reach `World` between ticks
+through its methods, as today. Stage B turns every one of them into tick-stamped
+seat input.
+
+`TickOutput` holds, in tick order: combat's events; an ordered list of cues (HUD
+lines, rumble, tower audio cues, ejection notices, delivered radio calls and
+the point where the picture was taken); the player's weapon
+release sounds; shot outcomes; the AI journal; sound emissions; and the native
+fault, if the tick stopped early. Every output queue inside `World` is drained
+into it each tick, whether or not anyone reads it, so the state between ticks
+never depends on its consumers.
+
+#### Drivers
+
+- **Single player:** the render loop keeps its frame clock, pause and time
+  compression, builds each tick's input from the input devices and the
+  instruments, calls `step` once per tick and presents the output.
+- **AI probe** (`--ai-probe-ticks`, `--probe-matrix`): switches to `World::step`
+  in a commit of its own. It gains weather, turbulence, building contact, the
+  airport service, crew voice, event handling without the attack script and the
+  runway surface with wind. Its output and recordings are re-recorded then; this
+  is the one planned change of probe output. The scripted pilot, the attack
+  script, orders and threat fixtures become tick input and commands before the
+  step.
+- **Full-tick fingerprint:** a new committed test that builds a `World` from
+  synthetic fixtures, steps it with scripted input and fingerprints flight,
+  combat and AI state. It pins the tick order from then on. Like the existing
+  goldens, its recorded values are compared on the recorded platform only.
+- **Unchanged:** `--headless-flight` and `--replay-input` stay the isolated
+  flight-model probe, and the component probes (`--flight-probe-ticks`,
+  `--countermeasure-preview`, `--combat-probe-ticks`, `--replay-combat`,
+  `--combat-smoke`, `--ai-roster-probe-ticks`) keep testing one component each.
+- **Later:** the dedicated server (stage C) and the player-hosted game's thread
+  (stage D) drive the same `step` from a fixed 120 Hz clock that never pauses.
+
+#### Rules for mission state
+
+These make exact checkpoints (stage G) possible. They apply to everything that
+moves into `tore-world` and to all new mission state from stage B on:
+
+- No file handles, sockets, threads, locks, `Rc`/`RefCell` or stored closures.
+  The combat tape, the formation trace and the replay recorder are writers
+  outside `World`, fed from its input and output.
+- Imported data that never changes (terrain, aircraft, weapon and radio records)
+  is shared by reference and named by content. Mutable state holds ids, not
+  copies.
+- One authoritative tick counter, `World::tick`. The component counters that
+  exist today stay and are checked against it.
+- No wall clock, no hash-map iteration and no unseeded random numbers. Every
+  random stream has a fixed seed from the mission and, for an aircraft, its slot.
+- No environment variables read inside `World`. The weather time, wind, cloud
+  altitude and turbulence overrides are resolved into the mission setup before
+  `World::new`, so every peer runs one configuration.
+- No `log` or `tore-replay` in `tore-world`: warnings go into the tick output,
+  and conversions to replay types live in the app.
+
+#### How stage A lands
+
+A1, inside `tore-app`. Each commit is compared with the single-player baselines
+byte for byte:
+
+1. Rename `terrain::World` to `terrain::Terrain`.
+2. Add `World` (`crates/tore-app/src/world.rs`) and move the mission fields of
+   `App` into it. The tick body still runs in the redraw handler.
+3. Move the tick body into `World::step`, with presentation after it.
+4. Move mission construction and restart (the simulation half of `MissionFly`
+   and `FreeFlight`) into `World::new` and `World::restart`, from a `Setup`
+   holding the Quick Mission choices that restart now reads back from the
+   creator's UI state.
+5. Switch the AI probe to `World::step` (re-recorded output).
+6. Add the full-tick fingerprint.
+
+A2 first splits, inside `tore-app`, what mixes simulation with presentation.
+These splits touch different files and can run in parallel:
+
+- `Airframe`: the aircraft type the simulation needs (profile, flight model,
+  sensors, contrail and streamer points) apart from the render model.
+- `Combat`: its art, render history, readouts and target cameras move out;
+  plain types that live in renderer files today (`Contact`, `CombatGeometry`,
+  `Afterburner`) move to plain modules. `render_snapshot` splits its pose data
+  from its vertex building.
+- `Terrain`: the simulation half apart from the scenery, as above.
+- Quick Mission setup (layout, ground layout, runway poses) apart from the
+  creator's UI; the debrief evaluator (`capture`, `report`) apart from its
+  pages; the target window's data apart from its refresh clock.
+- File writers and environment-variable reads leave simulation code, and `log`
+  calls become output.
+
+Then `git mv` moves the simulation set into `crates/tore-world`, with a
+`[profile.dev.package.tore-world] opt-level = 2` entry like `tore-sim`'s, and
+`tore-app` depends on it. `cargo tree -p tore-world` must show no wgpu, winit,
+cpal or pollster.
+
+**Verification.** A local harness (`.local/mp-baseline/`, never committed)
+records golden fingerprints, headless flights, AI probes with their mission
+recordings, input and combat tapes and a long probe's run time, and compares
+them byte for byte after every commit. Because no headless path runs the live
+loop today, commit 3 is checked by review against the old loop, line by line,
+and by a live run on a display. From commit 5 on, the AI probe runs the same
+tick, so every later change is covered.
+
+### Stage B: seats
+
+#### Aircraft, pilots and seats
+
+```rust
+pub struct AircraftId(pub u32); // one per Quick Mission slot, for the whole mission
+pub struct SeatId(pub u8);      // one per human; single player is seat 0
+
+pub struct Aircraft {           // World's registry, in id order
+    pub id: AircraftId,
+    pub slot: Slot,             // side, wing and member, fixed at setup
+    pub pilot: Pilot,
+}
+pub enum Pilot {
+    Ai,                         // the AI actor with this id flies it
+    Human(SeatId),
+}
+pub struct Seat {
+    pub id: SeatId,
+    pub aircraft: Option<AircraftId>, // None: waiting or observing
+    // its radio queue, crew voice, tower conversation and wing recipient
+}
+pub struct SeatInput {
+    pub seat: SeatId,
+    pub tick: u64,              // the tick it applies to
+    pub pilot: PilotInput,
+    pub trigger: bool,
+    pub sensors: sensors::Controls,
+    pub commands: Vec<SeatCommand>, // applied in order at the start of the tick
+}
+```
+
+`World::step(&[SeatInput])` takes one input per human seat. Settings changes
+(cheats in single player, the King's settings in multiplayer) are a separate
+mission command, applied at the start of the tick before any seat.
+
+**Where an aircraft's state lives.** An AI-flown aircraft keeps its state where
+it lives today: the AI actor (flight state, stores, dispensers, sensors,
+awareness) and its combat target row (hit points, hit sections, fault counts,
+wreck). A human-flown aircraft has a record in `World` (flight state, its state
+at the start of the tick, turbulence and the airport service) and an ownship in
+combat (below). The flight state is the same type for both, `flight::State`.
+Stores, damage and countermeasures convert exactly at a handoff, because the AI
+and the cockpit both build them from the same `live::Configuration`.
+
+*Agent decision:* this is a registry plus exact conversion, not one struct
+holding every aircraft. One struct would mean rewriting the AI mission, about
+6,000 lines, to fly aircraft it does not own, and replacing single player's
+damage rules. The registry gives the same guarantees (one id per aircraft, one
+pilot at a time, nothing lost at a handoff) at much lower risk.
+
+**Ids.** Aircraft keep today's numbers: the lead of Friendly Wing 1 is 0, the
+other aircraft are numbered from 1 in the Quick Mission's roster order, and
+ground objects stay at `0x4000_0000` upward. No code may assume that id 0 is a
+human, since in multiplayer an AI may fly it: `PLAYER_OWNER` and `PLAYER_ID` go,
+and code asks the aircraft's pilot instead. In single player, seat 0 flies
+aircraft 0, exactly as today.
+
+```mermaid
+flowchart TB
+  seat["A seat: one human"] -->|"tick-stamped input"| human
+  subgraph world["World"]
+    registry["Aircraft registry:<br/>id, slot, pilot"]
+    human["Human-flown: flight state<br/>and a combat ownship"]
+    ai["AI-flown: AI actor<br/>and a combat target row"]
+    registry --> human
+    registry --> ai
+    human <-->|"handoff keeps pose,<br/>fuel, stores, damage"| ai
+  end
+```
+
+#### Seat input
+
+The render loop builds seat 0's input from today's sources: the pilot input,
+the trigger (Space and the bound fire control), the scope controls, and every
+command that today changes combat, the airport service or the AI wings between
+ticks: weapon selection, designation, arming, seeker mode, chaff and flares,
+jettison, trigger release, weapon-page and navigation-page clicks, airport
+commands, the wing recipient and wing orders. They apply at the start of the
+next tick, in the order given. That is when they take effect today, because
+window events always arrive between frames.
+
+Two things change timing. A command given from the menu while paused now takes
+effect on the first tick after resuming, instead of at once. And the mission
+recording must keep listing a command on the frame before the tick that applies
+it, as it does today; the step applies commands in a first phase that the
+recorder can observe before the rest of the tick runs.
+
+#### Combat: one ownship per human-flown aircraft
+
+`live::State` keeps what every aircraft shares: projectiles, the target rows of
+AI aircraft and ground objects, effects, smoke, debris, countermeasure devices,
+the ledger and combat's random stream. The player-only fields (stations and
+rounds, selection and arming, the mounted seeker, sensors, trigger and gun
+cadence, bay requests, hit points, hit sections, fault counts and failure flags,
+chaff and flares, missile warnings) move into an `Ownship`, one per human-flown
+aircraft, keyed by aircraft id, with its own `Launcher` each tick. Every
+player-only path loops over the ownships in id order: firing, sensors and
+seeker, readiness, the hit test and damage pipeline, the fault hand-off, smoke,
+fragments, threat observation and the midair pool. Player-only events carry the
+aircraft id. With one ownship this is today's code and today's order of random
+draws.
+
+A human-flown aircraft appears in every other ownship's sensor picture and in
+the AI's world snapshot. With one human there is no other ownship, so single
+player sees no difference.
+
+**Damage rules follow the pilot.** A human-flown aircraft uses today's player
+rules: twice the aircraft's hit points (native), the damage spread, instant kills
+and system faults gated by the Damage cheat, and Invulnerable. An AI-flown
+aircraft uses today's AI rules. *Agent proposal:* this keeps single player exact
+and gives every human the toughness the player has today.
+
+#### Hit tests and friendly fire
+
+Today a gun round can hit any aircraft except its owner, on either side, the
+player included. Missiles are split: one aimed at the player can hit only the
+player, and any other can hit any aircraft row, its own launcher included, but
+never the player.
+
+Stage B's rule: **any round can hit any aircraft except its owner.** Friendly
+fire becomes a mission setting. On is single player's behaviour today. Off, a
+lobby choice, means no round damages an aircraft of its shooter's side.
+Collisions ignore the setting (*agent proposal*, from the guide's open
+questions).
+
+The general rule changes single-player missiles: an enemy missile aimed at the
+player can hit a wingman in its path; a friendly or enemy missile aimed at
+someone else can hit the player; and no missile can hit its own launcher. This
+needs John's decision: apply the rule everywhere (*recommended*: one rule, and
+it retires the quirk that a decoyed missile keeps hitting only the player), or
+keep today's missile rule for single player only.
+
+#### Handoff between the AI and a human
+
+A handoff is a command, applied at the start of a tick before any other
+command: a human takes an aircraft (joining, or rejoining their reserved one),
+or gives one back (leaving, dropping or being kicked). Releasing a reserved
+aircraft changes only who may take it; the AI keeps flying it. Only a living
+aircraft whose pilot is still aboard can change hands.
+
+**AI to human:**
+
+1. The AI actor leaves the AI mission. The other actors keep their order.
+2. The flight state moves over unchanged: position, velocity, attitude, fuel,
+   systems, damage, gear and flaps, flight-model internals and their random
+   state.
+3. The combat target row becomes an ownship: the same fraction of hit points
+   under the player rule, the same hit-section fractions and fault counts, each
+   station's rounds from the AI's stores (failed stations stay failed), chaff and
+   flares from its dispensers. Its sensors and missile warnings move over; the
+   AI's equipment failures become the ownship's failure flags.
+4. The gun is selected and armed, as at an airborne start, and the AI's current
+   target is designated if the aircraft's sensors hold it (*agent proposal*).
+   The autopilot is off, and the human's controls apply from this tick.
+5. If the aircraft leads its wing, the human becomes the wing's leader and the
+   AI wingmen follow. The AI's orders and assignments are dropped.
+6. The seat's radio queue, crew voice and tower conversation follow the
+   aircraft.
+
+**Human to AI:**
+
+1. The ownship becomes a combat target row with the same fractions, the reverse
+   of the above. Its stores, dispensers, sensors and warnings go to a new AI
+   actor, built as at mission start: same slot, the same seed rule, fresh
+   awareness, neutral. It joins the actor list in id order.
+2. A wingman rejoins its leader, and a leader follows the flight plan (the
+   guide's rule for a dropped player).
+3. The flight model stays as it is.
+
+Handoff tests check that position and speed change by no more than one normal
+tick of flight, that fuel and rounds are identical, and that hit points keep
+their fraction to within one point.
+
+#### The AI with several humans
+
+- Each human-flown aircraft is a world object in the AI's snapshot, built at the
+  AI step from its flight state and ownship, as the player's is today.
+- Each wing led by a human registers that human as its external leader, so AI
+  wingmen fly formation on any human lead, not only on Friendly Wing 1.
+- Every human keeps landing priority over AI traffic, in id order.
+- Mission assignments and must-survive lists are kept per aircraft, not for "the
+  player".
+- The friendly list that T and Enter skip is built per side.
+
+#### Lead succession
+
+John's rule (2026-09-28): if a flight lead is shot down, lead passes to the next
+member, human or AI.
+
+- Each wing has a current leader. At the start of the mission it is the wing's
+  first member. When the leader's aircraft is destroyed or its pilot ejects,
+  lead passes on that tick to the lowest-numbered living member, human or AI.
+- Everything in the AI that keys on "the leader" reads the current leader
+  instead of the first member: formation, airfield clearance, escorts,
+  automatic release, contact reports and orders.
+- The new leader hears "You're the Wingleader now" (`^WNGLDR`, already imported)
+  five seconds later, spoken by the previous leader if that pilot is still alive,
+  for example after ejecting (retail: "voiced only when the previous leader is
+  still alive to send it"). Otherwise a HUD line only (*agent proposal*; retail's
+  triggers are unknown, see the
+  [radio chatter spec](spec/radio-chatter.md#youre-the-wingleader-now)).
+- Single player gains the same succession (John, 2026-09-28): when the player is
+  shot down, the first wingman leads the rest, and when an AI leader dies its
+  next member leads. This changes AI behaviour and its fingerprints, so it lands
+  as its own commit with re-recorded baselines.
+
+#### Radio, orders and debrief for each seat
+
+- **Radio.** Each call is still generated once, with one variant roll and the
+  same cooldowns, so every listener hears the same variant, as in retail. The
+  listener rule then runs for each seat, against that seat's aircraft and
+  flight, and each seat has its own delivery queue and busy hold. The crew voice
+  and the tower run for each human-flown aircraft. With one seat this is today's
+  radio.
+- **Orders.** Alt-key orders from a seat whose aircraft leads its wing go to that
+  wing, to human and AI members alike. A human wingman gets the order as text and
+  the recording. Reply and request keys for human wingmen are stage E.
+- **Debrief.** Built for each seat, with that seat's aircraft as the pilot column
+  and the first other member of its wing as the wingman column. The full
+  multiplayer results screen is stage E.
+- **Mission result call.** The "mission accomplished" and "mission failure"
+  calls become `World` output for every seat. Today they are sent only when an
+  audio device exists, so with `--no-audio` their HUD lines and recording entries
+  would now appear.
+
+#### Flight model in multiplayer
+
+A mission setting chooses the flight model of AI aircraft. `Standard` is single
+player as today: AI aircraft fly the legacy model, except wingmen that start on
+the ground and aircraft that begin a landing. `AllHybrid`, for every multiplayer
+mission (John, 2026-09-28), puts every AI aircraft on the hybrid model at mission
+start, seeded as the AI probe's `--probe-flight-model researched` does, so a
+human taking over an AI aircraft never feels its handling change. AI air combat
+on the hybrid model is checked with AI probe runs against the legacy baselines.
+
+#### Single-player guarantee
+
+Single player keeps its results tick for tick through stages A and B, checked
+by the baseline harness after every commit. These changes are the exceptions.
+Each lands as its own commit with re-recorded baselines, and only after John
+approves it:
+
+1. The AI probe's output, when it switches to the full tick (planned).
+2. The missile hit rule, if applied to single player.
+3. Lead succession (John's rule; confirmation that it lands as described).
+4. The mission result call without an audio device.
+
+Presentation only, with no change to simulation or recordings: per-camera
+weather, wing vapor, blackout and redout, the view rig and control-surface
+sounds read the end of the tick (stage A), and a menu command given while paused
+applies when play resumes (stage B).
+
+#### How stage B lands
+
+1. **B0** (lead): the types above and the registry, with seat 0 flying aircraft
+   0. No behaviour change.
+2. In parallel, each owning its own files:
+   - **B1 combat**: ownships, events with aircraft ids, the hit rule and friendly
+     fire setting (`tore-sim` combat, the app's `combat.rs`).
+   - **B2 seat input**: every between-tick command becomes a seat command (the
+     world's input path and `main.rs`'s handlers).
+   - **B3 AI**: several humans, current leaders and succession, the actor
+     removal and insertion handoff needs, and the flight-model setting
+     (`tore-sim` AI, `ai_wings`).
+   - **B4 radio**: the listener rule, queues, crew voice and tower for each seat.
+   - **B5 debrief and recorder**: both for a chosen seat.
+3. **B6** (lead): handoff, with its tests.
+4. **B7**: a headless test with two humans in each of two wings flying through a
+   fight, succession tests with a human and an AI lead, and the hybrid probe
+   comparison.
