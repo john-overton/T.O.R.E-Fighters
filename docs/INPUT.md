@@ -96,6 +96,21 @@ design drawn with the imported raster font. Every default is listed in the
   inputs on this device; Delete or Backspace clears only the focused input.
   Profile bindings for actions the screen does not list appear under
   **Other bindings**, where they can be cleared.
+- **Find**, between the mappings title and the list (John, 2026-09-28),
+  narrows the list for the selected device. **Actions** matches action names
+  and group titles, so `gear` finds Landing gear and `weapons` lists the whole
+  Weapons group: commands to bind. **Keys** (Inputs on other devices) lists
+  the actions an input is already bound to. Type its name as the rows show it
+  (`page` finds Page Up and Page Down; a short name such as `f` or `lb` must be
+  a whole word, so `f` finds F and Ctrl+F but not F1), or click **Press** and
+  press it. A pressed keyboard key matches exactly, modifiers included. A
+  pressed button, D-pad direction or axis on a controller matches every
+  binding that uses it, including combinations where it is the modifier.
+  Folded groups open while a search is active. Ctrl+F jumps to the field;
+  Backspace edits, Delete or **Clear** empties it, and Esc empties it before
+  it backs out of the screen. Typed text stays when you change device; a
+  pressed input is dropped, because it names a control on the old device.
+  There is no search on the Head tracker tab.
 - **Keyboard remapping is complete.** Stock keys show as the primary input and can
   be changed or cleared. A key given to one action is taken from its previous
   action, and the message names it. Giving an action back its own stock key simply

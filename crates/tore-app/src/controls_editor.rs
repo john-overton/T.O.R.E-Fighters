@@ -3,7 +3,9 @@
 //! pane shows the selected device's settings above its action mappings,
 //! grouped as in `input_catalog`. It edits a draft profile that is applied
 //! only by Apply. Layout and colours are an opinionated agent design after
-//! John's 2026-09-22 mockup, drawn with the imported raster font.
+//! John's 2026-09-22 mockup, drawn with the imported raster font. A search
+//! row above the mappings (requested by John on 2026-09-28) narrows them to
+//! matching actions or to the actions an input is already bound to.
 use crate::input_catalog::{self as catalog, ENTRIES, Entry, Group, Kind as Row};
 use crate::{hud::Paint, menu::Canvas};
 use std::collections::{BTreeMap, BTreeSet};
@@ -174,6 +176,8 @@ enum Focus {
     /// Visible mapping line and column: 0 primary, 1 secondary, 2 invert,
     /// 3 curve, 4 clear.
     Cell(usize, usize),
+    /// Search row control, indexed as `SEARCH`.
+    Search(usize),
     Footer(usize),
 }
 
@@ -182,6 +186,7 @@ enum Hit {
     Tab(usize),
     Setting(usize, i32),
     Cell(usize, usize),
+    Search(usize),
     Footer(usize),
 }
 
@@ -195,6 +200,26 @@ enum Source {
 enum Target {
     Slot(usize, usize),
     Modifier,
+    /// The next input pressed becomes the search.
+    Find,
+}
+
+/// What the search row looks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Find {
+    /// Actions whose name or group contains the text: commands to bind.
+    Actions,
+    /// Actions whose inputs on this device match: keys already bound.
+    Inputs,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Search {
+    find: Find,
+    text: String,
+    /// The raw control pressed to find it, in profile naming, for an exact
+    /// match on this device; `text` then holds its label.
+    pressed: Option<String>,
 }
 
 struct Capture {
@@ -213,9 +238,16 @@ const SETTINGS_TOP: i32 = 42;
 const SETTING_HEIGHT: i32 = 15;
 const MAX_SETTINGS: usize = 6;
 const MAP_TOP: i32 = 144;
-const LIST_TOP: i32 = 178;
+const SEARCH_TOP: i32 = 162;
+const LIST_TOP: i32 = 194;
 const LINE_HEIGHT: i32 = 14;
-const LIST_LINES: usize = 18;
+const LIST_LINES: usize = 17;
+/// Search row controls, as (x from `RIGHT_X`, width): Actions and Keys
+/// choices, the text field, Press to find an input, and Clear. The field and
+/// buttons line up with the mapping columns below.
+const SEARCH: [(i32, i32); 5] = [(40, 54), (96, 54), (158, 222), (386, 38), (428, 40)];
+const SEARCH_FIELD: usize = 2;
+const SEARCH_CHARS: usize = 32;
 const FOOTER_Y: i32 = 456;
 const FOOTER: [&str; 3] = ["Apply", "Reset device", "Back"];
 const COLUMNS: [(i32, i32); 5] = [(158, 104), (264, 104), (372, 16), (390, 34), (428, 40)];
@@ -250,6 +282,7 @@ pub struct Editor {
     pressed: Option<Hit>,
     /// Latest raw value of every native control seen, for held modifiers.
     held: BTreeMap<(String, String), f64>,
+    search: Search,
     dirty: bool,
 }
 
@@ -362,6 +395,11 @@ impl Editor {
             collapsed: BTreeSet::new(),
             pressed: None,
             held: BTreeMap::new(),
+            search: Search {
+                find: Find::Actions,
+                text: String::new(),
+                pressed: None,
+            },
             dirty: false,
         };
         // Older chord profiles name their modifiers only inside bindings.
@@ -389,21 +427,60 @@ impl Editor {
         editor
     }
     /// Snapshot helper: `""` keeps the opening tab; `keyboard`, `mouse` and
-    /// `head` select those tabs.
+    /// `head` select those tabs. `search` searches the opening tab's actions
+    /// for "fire"; `search-keys` finds the keyboard actions on Shift keys.
     pub fn preview(&mut self, tab: &str) -> Result<(), String> {
         let tabs = self.tabs();
         self.tab = match tab {
-            "" => self.tab,
-            "keyboard" => 0,
+            "" | "search" => self.tab,
+            "keyboard" | "search-keys" => 0,
             "mouse" => 1,
             "head" => tabs.len() - 1,
-            _ => return Err("controls snapshot tab must be keyboard, mouse or head".into()),
+            _ => {
+                return Err(
+                    "controls snapshot tab must be keyboard, mouse, head, search or search-keys"
+                        .into(),
+                );
+            }
         };
         self.focus = Focus::Tab(self.tab);
+        if let Some(text) = match tab {
+            "search" => Some("fire"),
+            "search-keys" => Some("shift"),
+            _ => None,
+        } {
+            if tab == "search-keys" {
+                self.search.find = Find::Inputs;
+            }
+            self.focus = Focus::Search(SEARCH_FIELD);
+            self.text_input(text);
+        }
         Ok(())
     }
     pub fn capturing(&self) -> bool {
         self.capture.is_some()
+    }
+    /// Whether typed text goes to the search field. The host sends printable
+    /// characters to `text_input` instead of `key` while this holds.
+    pub fn typing(&self) -> bool {
+        self.capture.is_none() && self.focus == Focus::Search(SEARCH_FIELD) && self.search_shown()
+    }
+    /// Printable text typed into the search field. Typing redraws without
+    /// the click sound buttons make.
+    pub fn text_input(&mut self, text: &str) -> ResultAction {
+        if !self.typing() {
+            return ResultAction::None;
+        }
+        if self.search.pressed.take().is_some() {
+            self.search.text.clear();
+        }
+        for c in text.chars().filter(|c| c.is_ascii_graphic() || *c == ' ') {
+            if self.search.text.len() < SEARCH_CHARS {
+                self.search.text.push(c);
+            }
+        }
+        self.searched();
+        ResultAction::None
     }
     pub fn cancel_capture(&mut self) {
         self.capture = None;
@@ -526,19 +603,25 @@ impl Editor {
     }
     fn lines(&self) -> Vec<Line> {
         let tab = self.current();
+        let searching = self.searching();
         let mut lines = vec![];
         for group in Group::ALL {
             let entries: Vec<usize> = ENTRIES
                 .iter()
                 .enumerate()
-                .filter(|(_, e)| e.group == group && self.shown(e, &tab))
+                .filter(|(i, e)| {
+                    e.group == group
+                        && self.shown(e, &tab)
+                        && (!searching || self.entry_found(*i, &tab))
+                })
                 .map(|(i, _)| i)
                 .collect();
             if entries.is_empty() {
                 continue;
             }
             lines.push(Line::Header(Some(group)));
-            if !self.collapsed.contains(&Some(group)) {
+            // Folded groups open while searching, so nothing found is hidden.
+            if searching || !self.collapsed.contains(&Some(group)) {
                 lines.extend(entries.into_iter().map(Line::Entry));
             }
         }
@@ -547,18 +630,145 @@ impl Editor {
             .bindings
             .iter()
             .enumerate()
-            .filter(|(_, b)| {
-                self.on_tab(b, &tab) && !ENTRIES.iter().any(|e| self.shown(e, &tab) && e.matches(b))
+            .filter(|(i, b)| {
+                self.on_tab(b, &tab)
+                    && !ENTRIES.iter().any(|e| self.shown(e, &tab) && e.matches(b))
+                    && (!searching || self.other_found(*i, &tab))
             })
             .map(|(i, _)| i)
             .collect();
         if !others.is_empty() {
             lines.push(Line::Header(None));
-            if !self.collapsed.contains(&None) {
+            if searching || !self.collapsed.contains(&None) {
                 lines.extend(others.into_iter().map(Line::Other));
             }
         }
         lines
+    }
+
+    // ---- search ---------------------------------------------------------
+
+    fn search_shown(&self) -> bool {
+        self.current() != Tab::Head
+    }
+    fn searching(&self) -> bool {
+        self.search_shown()
+            && (self.search.pressed.is_some() || !self.search.text.trim().is_empty())
+    }
+    fn query(&self) -> String {
+        self.search.text.trim().to_ascii_lowercase()
+    }
+    /// Action text matches anywhere in the name or the group title.
+    fn action_found(&self, text: &str) -> bool {
+        text.to_ascii_lowercase().contains(&self.query())
+    }
+    /// Input labels match a whole word ("F" finds F and Ctrl+F, not F1 or
+    /// Left); three or more characters also match anywhere ("pag" finds
+    /// Page Up).
+    fn label_found(&self, label: &str) -> bool {
+        let query = self.query();
+        let label = label.to_ascii_lowercase();
+        label.split([' ', '+']).any(|word| word == query)
+            || (query.len() >= 3 && label.contains(&query))
+    }
+    /// Whether an input is the one pressed to find it. Keyboard and mouse
+    /// inputs match exactly, modifiers included; a device input matches any
+    /// part of a chord, so finding a modifier button lists every combination
+    /// that uses it.
+    fn source_found(&self, source: &Source, tab: &Tab) -> bool {
+        let Some(found) = &self.search.pressed else {
+            return self.label_found(&self.source_label(source, tab));
+        };
+        let b = match source {
+            Source::Stock(key) => return key == found,
+            Source::Binding(i) => &self.profile.bindings[*i],
+        };
+        if !matches!(tab, Tab::Device(_)) {
+            return &b.control == found;
+        }
+        let (mods, base) = tore_input::chord_parts(&b.control);
+        let base = match b.mode {
+            Mode::Position(n) => format!("{base}={n}"),
+            _ => base.to_owned(),
+        };
+        let same = |bound: &str| {
+            // Hat directions must agree; otherwise one physical control is one input.
+            if bound.contains('=') && found.contains('=') {
+                bound == found
+            } else {
+                tore_input::token_base(bound) == tore_input::token_base(found)
+            }
+        };
+        mods.iter().any(|m| same(m)) || same(&base)
+    }
+    fn entry_found(&self, index: usize, tab: &Tab) -> bool {
+        let entry = &ENTRIES[index];
+        match self.search.find {
+            Find::Actions => {
+                self.action_found(entry.label) || self.action_found(entry.group.title())
+            }
+            Find::Inputs => self
+                .slots(index, tab)
+                .iter()
+                .any(|s| self.source_found(s, tab)),
+        }
+    }
+    fn other_found(&self, binding: usize, tab: &Tab) -> bool {
+        match self.search.find {
+            Find::Actions => {
+                self.action_found(&action_name(&self.profile.bindings[binding].action))
+            }
+            Find::Inputs => self.source_found(&Source::Binding(binding), tab),
+        }
+    }
+    /// After the search changes: back to the top of what it found.
+    fn searched(&mut self) {
+        self.scroll = 0;
+        self.keep_visible();
+    }
+    fn clear_search(&mut self) -> ResultAction {
+        self.search.text.clear();
+        self.search.pressed = None;
+        if matches!(
+            self.capture,
+            Some(Capture {
+                target: Target::Find,
+                ..
+            })
+        ) {
+            self.capture = None;
+        }
+        self.searched();
+        ResultAction::Changed
+    }
+    /// Label of an input pressed to find it, as its rows show it.
+    fn found_label(&self, token: &str, tab: &Tab) -> String {
+        match tab {
+            Tab::Keyboard => catalog::key_label(token),
+            Tab::Mouse => catalog::mouse_label(token),
+            _ => catalog::control_label("pad", token, Mode::Press, self.gamepad_tab(tab)),
+        }
+    }
+    fn found(&mut self, token: String) {
+        let tab = self.current();
+        let label = self.found_label(&token, &tab);
+        self.search = Search {
+            find: Find::Inputs,
+            text: label.clone(),
+            pressed: Some(token),
+        };
+        self.capture = None;
+        self.searched();
+        let count = self
+            .lines()
+            .iter()
+            .filter(|l| !matches!(l, Line::Header(_)))
+            .count();
+        self.message = match count {
+            0 => format!("{label} is not bound on this device"),
+            1 => format!("{label} is bound to 1 action"),
+            n => format!("{label} is bound to {n} actions"),
+        };
     }
     fn settings(&self) -> Vec<Setting> {
         match self.current() {
@@ -790,6 +1000,15 @@ impl Editor {
         self.message = match (&target, &tab) {
             (Target::Modifier, _) => {
                 "Press a button or D-pad direction to add it as a modifier, or a modifier to remove it. Esc cancels.".into()
+            }
+            (Target::Find, Tab::Keyboard) => {
+                "Press the key to find, with any Ctrl/Alt/Shift. Esc cancels.".into()
+            }
+            (Target::Find, Tab::Mouse) => {
+                "Click the middle, side or right button, or turn the wheel, to find it.".into()
+            }
+            (Target::Find, _) => {
+                "Press the button or move the axis to find. Esc cancels.".into()
             }
             (Target::Slot(i, _), Tab::Keyboard) => format!(
                 "Press a key for {}. Hold Ctrl/Alt/Shift to combine. Esc cancels.",
@@ -1080,6 +1299,11 @@ impl Editor {
             self.tab = tab;
             self.scroll = 0;
             self.capture = None;
+            // Typed searches carry across devices; a pressed input names a
+            // control on the old device only.
+            if self.search.pressed.take().is_some() {
+                self.search.text.clear();
+            }
         }
     }
     fn nearest(&self, line: usize, column: usize) -> usize {
@@ -1104,12 +1328,20 @@ impl Editor {
         } else {
             Focus::Footer(0)
         };
+        let settings_end = focusable
+            .last()
+            .map_or(Focus::Tab(self.tab), |s| Focus::Setting(*s));
+        let (below_settings, above_list) = if self.search_shown() {
+            (Focus::Search(SEARCH_FIELD), Focus::Search(SEARCH_FIELD))
+        } else {
+            (into_list, settings_end)
+        };
         self.focus = match (self.focus, key) {
             (Focus::Tab(i), "ArrowUp") => Focus::Tab((i + tabs - 1) % tabs),
             (Focus::Tab(i), "ArrowDown") => Focus::Tab((i + 1) % tabs),
-            (Focus::Tab(_), "ArrowRight") => {
-                focusable.first().map_or(into_list, |s| Focus::Setting(*s))
-            }
+            (Focus::Tab(_), "ArrowRight") => focusable
+                .first()
+                .map_or(below_settings, |s| Focus::Setting(*s)),
             (Focus::Setting(s), "ArrowUp") => focusable
                 .iter()
                 .rev()
@@ -1118,11 +1350,14 @@ impl Editor {
             (Focus::Setting(s), "ArrowDown") => focusable
                 .iter()
                 .find(|i| **i > s)
-                .map_or(into_list, |i| Focus::Setting(*i)),
+                .map_or(below_settings, |i| Focus::Setting(*i)),
+            (Focus::Search(_), "ArrowUp") => settings_end,
+            (Focus::Search(_), "ArrowDown") => into_list,
+            (Focus::Search(0), "ArrowLeft") => Focus::Tab(self.tab),
+            (Focus::Search(i), "ArrowLeft") => Focus::Search(i - 1),
+            (Focus::Search(i), "ArrowRight") => Focus::Search((i + 1).min(SEARCH.len() - 1)),
             (Focus::Cell(l, c), "ArrowUp") if l > 0 => Focus::Cell(l - 1, self.nearest(l - 1, c)),
-            (Focus::Cell(_, _), "ArrowUp") => focusable
-                .last()
-                .map_or(Focus::Tab(self.tab), |s| Focus::Setting(*s)),
+            (Focus::Cell(_, _), "ArrowUp") => above_list,
             (Focus::Cell(l, c), "ArrowDown") if l + 1 < lines => {
                 Focus::Cell(l + 1, self.nearest(l + 1, c))
             }
@@ -1137,7 +1372,7 @@ impl Editor {
                 Focus::Cell(l, *self.columns(l).iter().find(|x| **x > c).unwrap_or(&c))
             }
             (Focus::Footer(_), "ArrowUp") if lines > 0 => Focus::Cell(lines - 1, 0),
-            (Focus::Footer(_), "ArrowUp") => Focus::Tab(self.tab),
+            (Focus::Footer(_), "ArrowUp") => above_list,
             (Focus::Footer(i), "ArrowLeft") => Focus::Footer(i.saturating_sub(1)),
             (Focus::Footer(i), "ArrowRight") => Focus::Footer((i + 1).min(FOOTER.len() - 1)),
             (focus, _) => focus,
@@ -1162,6 +1397,26 @@ impl Editor {
                     Some(s) => self.adjust(*s, delta),
                     None => ResultAction::None,
                 }
+            }
+            Hit::Search(i) => {
+                self.focus = Focus::Search(i);
+                match i {
+                    0 | 1 => {
+                        let find = if i == 0 { Find::Actions } else { Find::Inputs };
+                        if find != self.search.find {
+                            self.search.find = find;
+                            // A pressed input only means something as an input.
+                            if self.search.pressed.take().is_some() {
+                                self.search.text.clear();
+                            }
+                            self.searched();
+                        }
+                    }
+                    SEARCH_FIELD => {}
+                    3 => self.begin(Target::Find),
+                    _ => return self.clear_search(),
+                }
+                ResultAction::Changed
             }
             Hit::Footer(0) => ResultAction::Save,
             Hit::Footer(1) => self.reset_device(),
@@ -1210,6 +1465,7 @@ impl Editor {
             Focus::Tab(_) => return None,
             Focus::Setting(i) => Hit::Setting(i, delta),
             Focus::Cell(l, c) => Hit::Cell(l, c),
+            Focus::Search(i) => Hit::Search(i),
             Focus::Footer(i) => Hit::Footer(i),
         })
     }
@@ -1222,9 +1478,10 @@ impl Editor {
                 self.message = "Capture cancelled".into();
                 return ResultAction::Changed;
             }
-            let Target::Slot(index, slot) = capture.target else {
+            let target = capture.target.clone();
+            if matches!(target, Target::Modifier) {
                 return ResultAction::None;
-            };
+            }
             if self.current() != Tab::Keyboard
                 || key.is_empty()
                 || matches!(key, "Shift" | "Control" | "Alt" | "Super")
@@ -1238,6 +1495,10 @@ impl Editor {
                 if shift { "Shift-" } else { "" },
                 key
             );
+            let Target::Slot(index, slot) = target else {
+                self.found(control);
+                return ResultAction::Changed;
+            };
             if catalog::PROTECTED_KEYS.contains(&control.as_str()) {
                 self.message = format!(
                     "{} is reserved; press another key",
@@ -1248,6 +1509,31 @@ impl Editor {
             let binding = self.digital_binding(index, "keyboard", control);
             self.assign(index, slot, binding);
             return ResultAction::Changed;
+        }
+        if ctrl && key == "f" && self.search_shown() {
+            self.focus = Focus::Search(SEARCH_FIELD);
+            return ResultAction::None;
+        }
+        if self.typing() {
+            match key {
+                "Backspace" => {
+                    if self.search.pressed.take().is_some() {
+                        self.search.text.clear();
+                    } else {
+                        self.search.text.pop();
+                    }
+                    self.searched();
+                    return ResultAction::None;
+                }
+                "Delete" => {
+                    self.clear_search();
+                    return ResultAction::None;
+                }
+                // Esc empties the search first, then backs out as usual.
+                "Escape" if self.searching() => return self.clear_search(),
+                "Enter" => return self.move_focus("ArrowDown"),
+                _ => {}
+            }
         }
         match key {
             "Escape" => ResultAction::Close,
@@ -1316,16 +1602,23 @@ impl Editor {
     /// A mouse button other than the left one, or a wheel notch, while the
     /// screen captures on the Mouse tab.
     pub fn mouse(&mut self, control: &str) -> ResultAction {
-        let Some(Capture {
-            target: Target::Slot(index, slot),
-            ..
-        }) = self.capture
-        else {
-            return ResultAction::None;
-        };
         if self.current() != Tab::Mouse {
             return ResultAction::None;
         }
+        let (index, slot) = match &self.capture {
+            Some(Capture {
+                target: Target::Slot(index, slot),
+                ..
+            }) => (*index, *slot),
+            Some(Capture {
+                target: Target::Find,
+                ..
+            }) => {
+                self.found(control.into());
+                return ResultAction::Changed;
+            }
+            _ => return ResultAction::None,
+        };
         if control == "button:right" && self.profile.mouse_look {
             self.message = "The right button is mouse look; turn mouse look off to bind it".into();
             return ResultAction::Changed;
@@ -1391,6 +1684,17 @@ impl Editor {
             .into_iter()
             .map(|i| self.profile.modifiers[i].1.clone())
             .collect();
+        if target == Target::Find {
+            let span = control.max - control.min;
+            let moved = matches!(control.kind, Kind::Axis)
+                && !hat
+                && (event.value - rest).abs() > span * 0.3;
+            let Some(token) = pressed.or_else(|| moved.then(|| control.id.clone())) else {
+                return false;
+            };
+            self.found(token);
+            return true;
+        }
         if target == Target::Modifier {
             let Some(token) = pressed else {
                 return false;
@@ -1596,6 +1900,10 @@ impl Editor {
             LINE_HEIGHT - 1,
         )
     }
+    fn search_rect(i: usize) -> Rect {
+        let (x, w) = SEARCH[i];
+        (RIGHT_X + x, SEARCH_TOP, w, LINE_HEIGHT)
+    }
     fn value_rect(r: Rect) -> Rect {
         (r.0 + 234, r.1 + 1, 220, r.3 - 2)
     }
@@ -1620,6 +1928,11 @@ impl Editor {
                 };
                 return Some(Hit::Setting(i, delta));
             }
+        }
+        if self.search_shown()
+            && let Some(i) = (0..SEARCH.len()).find(|i| inside(p, Self::search_rect(*i)))
+        {
+            return Some(Hit::Search(i));
         }
         let lines = self.lines();
         for row in 0..LIST_LINES {
@@ -1881,12 +2194,39 @@ impl Editor {
             .iter()
             .filter(|b| self.on_tab(b, &tab))
             .count();
-        let summary = match tab {
-            Tab::Keyboard | Tab::Mouse => format!("{count} custom"),
-            _ => format!("{count} bindings"),
+        let summary = if self.searching() {
+            match lines
+                .iter()
+                .filter(|l| !matches!(l, Line::Header(_)))
+                .count()
+            {
+                1 => "1 match".to_owned(),
+                n => format!("{n} matches"),
+            }
+        } else {
+            match tab {
+                Tab::Keyboard | Tab::Mouse => format!("{count} custom"),
+                _ => format!("{count} bindings"),
+            }
         };
         let x = RIGHT_X + RIGHT_W - 6 - text_width(font, &summary);
         Self::text(pixels, font, panel, MUTED, &summary, (x, MAP_TOP + 4));
+        self.draw_search(pixels, font, &tab);
+        if lines.is_empty() && self.searching() {
+            let what = match self.search.find {
+                Find::Actions => "No actions match",
+                Find::Inputs => "Nothing on this device is bound to",
+            };
+            let text = format!("{what} \"{}\"", self.search.text.trim());
+            Self::text(
+                pixels,
+                font,
+                panel,
+                MUTED,
+                &fit(font, &text, RIGHT_W - 20),
+                (RIGHT_X + 10, LIST_TOP + 4),
+            );
+        }
         let header = (RIGHT_X + 2, LIST_TOP - 16, RIGHT_W - 4, 14);
         Canvas(pixels).rect(header, HEADER);
         let (first, second) = if tab == Tab::Keyboard {
@@ -1992,6 +2332,80 @@ impl Editor {
             let h = (track.3 * LIST_LINES as i32 / total as i32).max(8);
             let y = track.1 + (track.3 - h) * self.scroll as i32 / (total - LIST_LINES) as i32;
             Canvas(pixels).rect((track.0, y, 2, h), TITLE);
+        }
+    }
+    fn draw_search(&self, pixels: &mut [u8], font: &Font, tab: &Tab) {
+        let row = (RIGHT_X + 2, SEARCH_TOP, RIGHT_W - 4, LINE_HEIGHT);
+        Self::text(
+            pixels,
+            font,
+            row,
+            TITLE,
+            "FIND",
+            (RIGHT_X + 6, SEARCH_TOP + 3),
+        );
+        let inputs = if *tab == Tab::Keyboard {
+            "Keys"
+        } else {
+            "Inputs"
+        };
+        for (i, (label, find)) in [("Actions", Find::Actions), (inputs, Find::Inputs)]
+            .into_iter()
+            .enumerate()
+        {
+            let r = Self::search_rect(i);
+            Self::button(pixels, font, r, label, self.focus == Focus::Search(i));
+            if self.search.find == find {
+                Canvas(pixels).rect((r.0, r.1 + r.3 - 2, r.2, 2), GOOD);
+            }
+        }
+        let field = Self::search_rect(SEARCH_FIELD);
+        let finding = matches!(
+            self.capture,
+            Some(Capture {
+                target: Target::Find,
+                ..
+            })
+        );
+        let focused = self.focus == Focus::Search(SEARCH_FIELD);
+        Canvas(pixels).rect(field, PALE);
+        Canvas(pixels).outline(field, if focused { WHITE } else { BUTTON });
+        let (text, color) = if finding {
+            ("Press...".to_owned(), INK)
+        } else if self.search.text.is_empty() {
+            let hint = match (self.search.find, tab) {
+                (Find::Actions, _) => "Type part of an action name",
+                (Find::Inputs, Tab::Keyboard) => "Type a key name, or Press it",
+                (Find::Inputs, _) => "Type an input name, or Press it",
+            };
+            (hint.to_owned(), [104, 116, 134, 255])
+        } else {
+            (self.search.text.clone(), INK)
+        };
+        let mut shown = fit(font, &text, field.2 - 12);
+        if focused && !finding {
+            if self.search.text.is_empty() {
+                shown = format!("_ {shown}");
+            } else {
+                shown.push('_');
+            }
+        }
+        Self::text(
+            pixels,
+            font,
+            field,
+            color,
+            &shown,
+            (field.0 + 4, field.1 + 3),
+        );
+        for (i, label) in [(3, "Press"), (4, "Clear")] {
+            Self::button(
+                pixels,
+                font,
+                Self::search_rect(i),
+                label,
+                self.focus == Focus::Search(i) || (i == 3 && finding),
+            );
         }
     }
     fn draw_entry(
@@ -2321,6 +2735,163 @@ mod tests {
         }
         assert_eq!(e.focus, Focus::Footer(0));
         assert_eq!(e.key("Enter", false, false, false), ResultAction::Save);
+    }
+    fn found(e: &Editor) -> Vec<&'static str> {
+        e.lines()
+            .iter()
+            .filter_map(|l| match l {
+                Line::Entry(i) => Some(ENTRIES[*i].label),
+                _ => None,
+            })
+            .collect()
+    }
+    fn type_search(e: &mut Editor, text: &str) {
+        e.focus = Focus::Search(SEARCH_FIELD);
+        assert_eq!(e.text_input(text), ResultAction::None, "typing is silent");
+    }
+    #[test]
+    fn searching_actions_opens_folded_groups_and_esc_clears_first() {
+        let mut e = Editor::new(Profile::default(), vec![], "Main menu");
+        let all = e.lines().len();
+        let gear = line(&e, "Landing gear");
+        let header = (0..gear)
+            .rev()
+            .find(|l| matches!(e.lines()[*l], Line::Header(_)))
+            .unwrap();
+        e.activate(Hit::Cell(header, 0));
+        assert!(!found(&e).contains(&"Landing gear"), "folded");
+        // Text typed without the field focused goes nowhere.
+        assert_eq!(e.text_input("gear"), ResultAction::None);
+        assert!(!e.searching());
+        type_search(&mut e, "GEAR");
+        assert!(found(&e).contains(&"Landing gear"), "{:?}", found(&e));
+        assert!(
+            found(&e)
+                .iter()
+                .all(|l| l.to_ascii_lowercase().contains("gear"))
+        );
+        // A group title finds its whole group.
+        e.key("Delete", false, false, false);
+        type_search(&mut e, "weapons");
+        assert!(found(&e).contains(&"Fire / release weapon"));
+        e.key("Backspace", false, false, false);
+        assert_eq!(e.search.text, "weapon");
+        type_search(&mut e, "zzz");
+        assert!(e.lines().is_empty());
+        assert_eq!(e.key("Escape", false, false, false), ResultAction::Changed);
+        assert!(!e.searching());
+        assert!(
+            e.lines().len() < all,
+            "the fold returns once the search ends"
+        );
+        assert_eq!(e.key("Escape", false, false, false), ResultAction::Close);
+    }
+    #[test]
+    fn key_names_match_whole_words_and_pressed_keys_match_exactly() {
+        let mut e = Editor::new(Profile::default(), vec![], "Main menu");
+        e.activate(Hit::Search(1));
+        type_search(&mut e, "f");
+        let by_name = found(&e);
+        assert!(by_name.contains(&"Flaps"));
+        assert!(!by_name.contains(&"Front cockpit view"), "F1 is not F");
+        e.key("Delete", false, false, false);
+        type_search(&mut e, "page");
+        assert!(found(&e).contains(&"Rudder right"), "Page Down");
+        // Press finds the key itself, whatever its name.
+        e.activate(Hit::Search(3));
+        assert!(e.capturing());
+        assert!(!e.typing());
+        e.key("g", false, false, false);
+        assert!(!e.capturing());
+        assert_eq!(found(&e), ["Landing gear"]);
+        assert_eq!(e.search.text, "G");
+        assert!(e.message.contains("bound to 1 action"), "{}", e.message);
+        e.activate(Hit::Search(3));
+        e.key("g", false, true, false);
+        assert!(found(&e).is_empty(), "Ctrl+G is a different key");
+        assert!(e.message.contains("not bound"), "{}", e.message);
+        // Typing replaces a pressed key; Actions drops it.
+        e.activate(Hit::Search(3));
+        e.key("g", false, false, false);
+        e.activate(Hit::Search(0));
+        assert!(!e.searching());
+    }
+    #[test]
+    fn pressing_a_modifier_finds_every_chord_that_uses_it() {
+        let mut e = Editor::new(Profile::default(), vec![pad()], "Main menu");
+        e.adjust(Setting::Modifiers, 1);
+        event(&mut e, "button:314", 1.);
+        event(&mut e, "button:314", 0.);
+        e.activate(Hit::Cell(line(&e, "Flaps"), 0));
+        event(&mut e, "button:314", 1.);
+        event(&mut e, "button:304", 1.);
+        event(&mut e, "button:304", 0.);
+        event(&mut e, "button:314", 0.);
+        e.activate(Hit::Cell(line(&e, "Landing gear"), 0));
+        event(&mut e, "axis:16", -1.);
+        event(&mut e, "axis:16", 0.);
+        for (control, value, expected) in [
+            ("button:314", 1., vec!["Flaps"]),
+            ("button:304", 1., vec!["Flaps"]),
+            ("axis:16", -1., vec!["Landing gear"]),
+            ("axis:16", 1., vec![]),
+            // An axis moved past a third of its travel is found too.
+            ("axis:1", 90., vec![]),
+        ] {
+            e.activate(Hit::Search(3));
+            event(&mut e, control, value);
+            event(&mut e, control, 0.);
+            assert!(!e.capturing(), "{control}={value}: {}", e.message);
+            assert_eq!(found(&e), expected, "{control}={value}");
+        }
+        // Typed labels work too, and a new device drops a pressed input.
+        e.activate(Hit::Search(3));
+        event(&mut e, "button:314", 1.);
+        e.select_tab(0);
+        assert!(!e.searching());
+        e.select_tab(2);
+        type_search(&mut e, "a");
+        assert_eq!(found(&e), ["Flaps"]);
+        e.select_tab(0);
+        assert_eq!(e.search.text, "a", "typed text carries across devices");
+    }
+    #[test]
+    fn search_row_joins_keyboard_navigation_except_on_the_head_tab() {
+        let mut e = Editor::new(Profile::default(), vec![], "Main menu");
+        // Keyboard settings are information only.
+        e.key("ArrowRight", false, false, false);
+        assert_eq!(e.focus, Focus::Search(SEARCH_FIELD));
+        assert!(e.typing());
+        e.key("ArrowDown", false, false, false);
+        assert_eq!(e.focus, Focus::Cell(0, 0));
+        e.key("ArrowUp", false, false, false);
+        assert_eq!(e.focus, Focus::Search(SEARCH_FIELD));
+        e.key("ArrowRight", false, false, false);
+        e.key("ArrowRight", false, false, false);
+        e.key("ArrowRight", false, false, false);
+        assert_eq!(e.focus, Focus::Search(4));
+        for _ in 0..5 {
+            e.key("ArrowLeft", false, false, false);
+        }
+        assert_eq!(e.focus, Focus::Tab(0));
+        e.focus = Focus::Footer(1);
+        e.key("ArrowUp", false, false, false);
+        assert!(matches!(e.focus, Focus::Cell(_, _)));
+        assert_eq!(e.key("f", false, true, false), ResultAction::None);
+        assert_eq!(e.focus, Focus::Search(SEARCH_FIELD));
+        let r = Editor::search_rect(1);
+        let p = ((r.0 + 3) as f64, (r.1 + 3) as f64);
+        e.pointer(Some(p), true);
+        e.pointer(Some(p), false);
+        assert_eq!(e.search.find, Find::Inputs);
+        e.preview("head").unwrap();
+        assert!(!e.search_shown());
+        assert_eq!(e.hit(p), None);
+        e.focus = Focus::Search(SEARCH_FIELD);
+        assert!(!e.typing());
+        e.focus = Focus::Tab(e.tab);
+        e.key("f", false, true, false);
+        assert_eq!(e.focus, Focus::Tab(e.tab));
     }
     #[test]
     fn pointer_requires_matching_release() {
