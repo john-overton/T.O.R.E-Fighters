@@ -182,4 +182,23 @@ feature and stays unavailable.
 | Mission logs | ☐ | ☑ | Implemented from the command line and the Replays screen's Debug log button: `--recording-log` writes a plain-English summary (per-aircraft statistics including lowest height above ground and time in each AI activity, a table of every shot with its outcome and why, the communication transcript with triggers and reasons, a timeline, bookmarks and anomaly flags) and a machine-readable JSON-lines log with every reason event and every display tree that changed; `--recording-info` and `--recording-diff` describe and compare recordings. | [Command line](REPLAYS.md#command-line) |
 | Tacview export | ☐ | ☑ | Implemented from the command line (`--recording-acmi`) and the Replays screen's Tacview button: a Tacview text file with every aircraft by its exact name, weapons with their launcher, decoys, parachutes and events, angle of attack, sideslip, Mach and height above ground from the telemetry, the lines you heard as messages, and AI decisions, orders, comms reasons and flight-model effect changes as debug events. Each theater is pinned to a fitted real-world spot. Not yet opened in Tacview itself; the map is Tacview's real-world terrain, not the game's. | [Tacview](REPLAYS.md#tacview) |
 
+## Multiplayer
+
+Planned for Milestone 2. John wrote the feature spec on 2026-09-28. The
+[multiplayer guide](MULTIPLAYER.md) holds the design, the
+[plan](multiplayer-plan.md) the stages, and the
+[retail spec](spec/multiplayer.md) what Fighters Anthology did.
+
+| Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
+| --- | :---: | :---: | --- | --- |
+| Multiplayer Quick Mission, co-op and PvP | ☑ | ☑ | Planned. Humans take wing slots in a Quick Mission and AI flies the rest; join in progress; up to 30 humans instead of retail's 8. Nothing is built; the mission core and multi-seat refactors come first. | Manual pp. 31-46; [guide](MULTIPLAYER.md#lobby-and-quick-mission-flow) |
+| Lobby, King and host roles | ☑ | ☑ | Planned. The King runs the lobby, as retail's host did; the network host is chosen separately and can move. | Manual p. 42; [guide](MULTIPLAYER.md#roles-and-identity) |
+| Server browser, master server and NAT traversal | ☐ | ☑ | Planned. Replaces retail's typed addresses, modem and serial links. | [Guide](MULTIPLAYER.md#networking) |
+| Dedicated server | ☐ | ☑ | Planned. Headless build for Linux, Windows and macOS; its operator imports their own copy of the game. | [Guide](MULTIPLAYER.md#dedicated-servers) |
+| Host migration and rejoin | ☐ | ☑ | Planned. Retail ended the game when the host left. Migration is exact, from checkpoints of the whole mission (John, 2026-09-28). | [Guide](MULTIPLAYER.md#host-migration) |
+| Multiplayer chat | ☑ | ☑ | Planned. Lobby and in-flight text chat with retail's `~` key and five receivers (John, 2026-09-28). | Manual pp. 45-46; [guide](MULTIPLAYER.md#comms-and-chat) |
+| Observer mode | ☐ | ☑ | Planned. Replay viewer controls on the live session. | [Guide](MULTIPLAYER.md#rejoin-and-observers) |
+| Flight data link | ☐ | ☑ | Planned. Shared wing picture, locks and assignments, limited by aircraft era, also in single player. | [Guide](MULTIPLAYER.md#flight-data-link) |
+| Flight lead succession | ☐ | ☑ | Planned with multiplayer. Today no one takes over when a leader dies. The succession rule (next member, human or AI) is John's, 2026-09-28; the retail game's "You're the Wingleader now" call is known from the executable, but not what triggers it. | [Radio chatter](spec/radio-chatter.md#youre-the-wingleader-now) |
+
 [manual]: https://pdfcoffee.com/famanual-pdf-free.html

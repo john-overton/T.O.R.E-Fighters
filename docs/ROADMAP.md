@@ -991,10 +991,29 @@ expands in this order as the underlying modes are implemented:
 4. **Persistent campaigns, M6.** Carry multiplayer into the persistent campaign
    world when that milestone is implemented.
 
-Work:
-- Connect online lobby and player joining to the Quick Mission creator.
-- Share the selected mission setup and run the resulting quick fight together.
-- Keep multiplayer compatible with deterministic headless simulation at 120 Hz.
+John wrote the M2 feature spec on 2026-09-28: co-op on the Quick Mission
+creator, humans in open wing slots, AI in the rest, a server core that runs
+dedicated or inside a player's game, a server browser with NAT traversal and
+relay, host migration, rejoin and a flight data link. The design is in the
+[multiplayer guide](MULTIPLAYER.md). The delivery stages, code findings and
+risks are in the [multiplayer plan](multiplayer-plan.md), planning pass only.
+Retail Fighters Anthology's own multiplayer is recorded in the
+[retail multiplayer spec](spec/multiplayer.md).
+
+Work, in the plan's stage order:
+- A, B: one mission core outside the app, and seats so several humans fly in one
+  mission and aircraft pass between AI and humans.
+- C, D: network foundation, dedicated server and player-hosted games. Then
+  E-lite, the first playable checkpoint: two players flying co-op on a LAN.
+- E: lobby through the Quick Mission creator.
+- F: flight data link and radio backing, also in single player.
+- G: exact checkpoints of the whole mission, which John chose on 2026-09-28 so
+  host migration is seamless.
+- H, I: master server, server browser and connectivity.
+- J, K: host selection, migration, rejoin and compatibility hardening.
+- Keep single player deterministic in headless simulation at 120 Hz. Networked
+  play is host-authoritative, because results are not bit-identical across
+  platforms.
 
 Deliverable: players can join a session, configure a Quick Mission and fly it
 together.

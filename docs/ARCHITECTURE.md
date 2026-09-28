@@ -639,3 +639,14 @@ right-click menu, picking through the drawn camera's projection, and the
 click-or-drag rule. The layer is composited centred on the view, only where a
 panel or the menu drew (`FlightCanvas::centered_rects`). In flight the panels
 only read: the menu's camera changes go through the ordinary view commands.
+
+## Planned: multiplayer mission core
+
+Not built yet. Milestone 2 moves the live tick sequence, today written inline in
+`main.rs`'s redraw handler, into one mission type in a new `tore-world` crate
+with no window, GPU or audio. Its working name is `World`, so today's terrain
+`World` would be renamed. The single-player special case becomes seats, so
+any aircraft can be flown by AI or a human, and all mutable simulation state
+gains exact checkpoints for host migration. Networking goes in a new `tore-net`
+crate. The [multiplayer plan](multiplayer-plan.md#architecture) has the crates,
+stages and diagrams. This section is replaced as the stages land.

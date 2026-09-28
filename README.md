@@ -179,7 +179,9 @@ checked in Tacview itself ([mission replays](docs/REPLAYS.md)).
 **Not yet:** surface AI (SAM sites, AAA, vehicles and ships as active
 opponents), the remaining weapons, carriers, missions, campaigns, the
 original's Replay Last Mission (flying it again) and multiplayer.
-Multiplayer is [Milestone 2](docs/ROADMAP.md#milestone-2-multiplayer).
+Multiplayer is [Milestone 2](docs/ROADMAP.md#milestone-2-multiplayer). Its
+[design](docs/MULTIPLAYER.md) and [delivery plan](docs/multiplayer-plan.md) are
+drafted; nothing is built yet.
 
 ## Build from source
 
