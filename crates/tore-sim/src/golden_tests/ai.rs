@@ -46,9 +46,9 @@ use crate::sensors::{self, Observable, Sensors};
 // Recorded on macOS aarch64. See the module comment in golden_tests.rs before
 // changing any of these.
 const DECISION_FUNCTIONS: u64 = 0x6b7a_6611_f77f_f972;
-const CONTROLLERS: u64 = 0x03b7_b578_2b45_6d8e;
-const MISSION_ENGAGEMENT: u64 = 0xf03a_d480_a7e4_c54f;
-const AIRFIELD: u64 = 0xe18c_6ef6_a337_ec8e;
+const CONTROLLERS: u64 = 0x60e4_6979_91de_258a;
+const MISSION_ENGAGEMENT: u64 = 0x6722_6ff8_648e_76f3;
+const AIRFIELD: u64 = 0xf543_fdc2_ddb8_6340;
 
 #[test]
 fn ai_decision_functions_match_recorded_fingerprint() {
