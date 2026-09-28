@@ -158,12 +158,13 @@ and record actual AI attitude. Radar stealth and normal adapter defaults are
 unchanged. Surface firing AI, full weather visibility, cockpit blind sectors and
 retail timing remain separate work.
 
-**Next AI work: gun employment.** The [recorded Su-27 fight](baselines/ai-gun-employment.md)
-shows two tiny gun groups per enemy followed by a permanent preparation-window
-expiry. Valid firing inputs reproduce the hang across all 14 service profiles.
-The [proposed correction](spec/ai-gun-employment.md) covers bounded retry, gun
-bursts and physical lead/alignment. These findings do not invalidate the visual
-acquisition tests; they identify a separate sustained-combat gap.
+**AI gun employment implemented.** Expired attempts retry, and live guns use
+physical bursts, observed-motion lead and barrel alignment with per-round debit.
+[Validation](baselines/ai-gun-implementation.md) includes sustained Su-27 fights
+at every skill with both flight models, non-stealth controls and shared-physics
+regressions. [Authored rules and remaining approximations](spec/ai-gun-employment.md)
+cover gun tracking and original skill/accuracy policy. Difficult turning fights
+remain a tuning area, separate from the repaired permanent weapon timeout.
 
 1. **Missile tuning and remaining evidence.** Stages 1 through 5 shipped for
    current stores, with controlled emitter fixtures. Four guidance types, silent

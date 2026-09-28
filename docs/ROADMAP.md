@@ -611,22 +611,13 @@ remain separate work. Milestones are reported in the session for Jeeves.
 
 #### AI gun employment and timeout recovery
 
-The 2026-09-28 [investigation](baselines/ai-gun-employment.md) explains the
-reported lack of enemy gunfire: sparse two-round groups followed by a permanent
-weapon-service expiry while a target remains selected. Source inspection also
-finds direct-to-current-position gun launches. Research is complete;
-[correction requirements and authored defaults](spec/ai-gun-employment.md) are
-proposed, not implemented.
-
-1. Replace terminal expiry with bounded retry without clearing legitimate
-   aircraft awareness. Test restored solutions and changed targets across every
-   profile, plus blocked/empty/hold cases and missile-service behavior.
-2. Deliver gun readiness, physical burst accounting and a valid fixed-barrel
-   lead solution together. Reuse shared projectile mechanics and preserve finite
-   inventory, recall, threat responses and compatibility modes.
-3. Validate sustained close fights, not only initial acquisition: repeat the
-   Su-27 case, a non-stealth control, all skills and the supported flight
-   adapters. Record actual rounds, solutions, ammo and outcomes beyond timeout.
+Implemented on 2026-09-28. The [investigation](baselines/ai-gun-employment.md)
+identified sparse groups, terminal timeout and target-directed launches. The
+[correction](spec/ai-gun-employment.md) now provides bounded expiry retry,
+physical burst accounting, fixed-barrel lead and replay explanations.
+[Validation](baselines/ai-gun-implementation.md) records component checks and
+sustained imported fights. Original gun timing and skill accuracy remain unknown;
+hard-turn tracking is still fitted. Surface firing AI remains separate work.
 
 #### AI backlog (2026-09-17)
 

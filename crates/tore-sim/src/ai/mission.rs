@@ -10,12 +10,13 @@
 //! **Missile physics are not duplicated.** AI-5's exit evidence forbids it. A
 //! weapon release produces a [`LaunchEvent`] after this module has debited the
 //! actor's own ammunition through
-//! [`weapon_service::release`](super::weapon_service::release); the host's
+//! [`weapon_service::release`](super::weapon_service::release), except live guns:
+//! those authorize one physical round and the host debits immediately before
+//! emission, after capacity and barrel checks. The host's
 //! existing combat layer creates and flies the projectile with the same code
 //! the player's shots use. In the other direction the host reports launches
 //! back as [`controller::ThreatReport`]s, which is what B47 warnings are built
-//! from. Free ammunition is therefore impossible here: the debit happens
-//! before the event is emitted, and an empty or inhibited store refuses.
+//! from. An empty or inhibited store refuses both release paths.
 //!
 //! Frames are built from one world snapshot per tick. An actor's permitted
 //! targets are the objects its own sensors can see, never the whole world, so
@@ -239,6 +240,8 @@ pub struct AiActor {
     received_emitters: Vec<sensors::passive::Emitter>,
     equipment: EquipmentFaults,
     stations: Vec<StationSpec>,
+    guns: std::collections::BTreeMap<u8, tore_formats::weapons::Weapon>,
+    gun_target: Option<super::gunnery::Target>,
     dispensers: Vec<DispenserStore>,
     wing_slot: u8,
     home_airport: Option<super::route::Position>,
@@ -308,6 +311,8 @@ impl AiActor {
             received_emitters: Vec::new(),
             equipment: EquipmentFaults::default(),
             stations: setup.stations,
+            guns: Default::default(),
+            gun_target: None,
             dispensers: setup.dispensers,
             wing_slot: setup.wing_slot,
             home_airport: setup.home_airport,
@@ -590,6 +595,32 @@ impl AiActor {
 
     pub fn stations_mut(&mut self) -> &mut [StationSpec] {
         &mut self.stations
+    }
+
+    pub fn set_guns(
+        &mut self,
+        guns: std::collections::BTreeMap<u8, tore_formats::weapons::Weapon>,
+    ) {
+        self.guns = guns;
+    }
+    pub fn gun_target(&self) -> Option<super::gunnery::Target> {
+        self.gun_target
+    }
+    pub fn physical_gun(&self, station: StationId) -> bool {
+        self.guns.contains_key(&station.0)
+    }
+    pub fn debit_gun_round(&mut self, station: StationId) -> bool {
+        let Some(store) = self.stations.iter_mut().find(|s| s.station == station) else {
+            return false;
+        };
+        if store.store.inhibited || store.is_empty() {
+            return false;
+        }
+        if weapon_service::debit_ammunition(&mut store.store, 1).is_err() {
+            return false;
+        }
+        self.flight.payload_lbs = (self.flight.payload_lbs - store.external_round_lbs).max(0.);
+        true
     }
 
     pub fn set_stations(&mut self, stations: Vec<StationSpec>) {
@@ -1616,6 +1647,7 @@ impl AiMission {
         let actor = &mut self.actors[index];
         // Write-only records start afresh on every mission step.
         actor.trace = ActorTrace::begin(tick);
+        actor.adapter.set_gun_aim(None);
         actor.trace.clearance = clearance;
         actor.route_random.clear_log();
         actor.controller.set_formation_observation(traffic.to_vec());
@@ -1936,6 +1968,65 @@ impl AiMission {
         actor.controller.set_mission_search_bearing(cue);
         actor.trace.search_cue_deg = cue;
         actor.update_search_contact(&protected);
+        let gun_target = selection
+            .and_then(|s| {
+                actor
+                    .awareness
+                    .current_observations()
+                    .find(|o| o.target.id == s.id)
+            })
+            .map(|s| super::gunnery::Target {
+                id: s.target.id,
+                position: s.target.position,
+                velocity: s.velocity,
+                basis: world
+                    .iter()
+                    .find(|o| o.id == s.target.id)
+                    .and_then(|o| o.observable.as_ref())
+                    .map(|o| o.basis)
+                    .unwrap_or(crate::attitude::Basis::new(
+                        s.target.heading_deg.to_radians(),
+                        s.target.pitch_deg.to_radians(),
+                        0.,
+                    )),
+            });
+        actor.gun_target = gun_target;
+        let launcher = crate::combat::live::Launcher {
+            position: actor.flight.position,
+            basis: crate::attitude::Basis::new(
+                actor.flight.yaw,
+                actor.flight.pitch,
+                actor.flight.bank,
+            ),
+            speed_fps: actor.flight.speed,
+            velocity: actor.flight.velocity,
+            radar: actor.flight.radar,
+            radar_power: actor.flight.radar,
+            alive: actor.alive(),
+            bay_ready: true,
+            jammer: false,
+            controls: crate::sensors::Controls::default(),
+        };
+        let gun_views = actor
+            .guns
+            .iter()
+            .filter_map(|(index, weapon)| {
+                let station = actor.stations.iter().find(|s| s.station.0 == *index)?;
+                Some(super::gunnery::View {
+                    station: station.station,
+                    ammunition: station.store.rounds,
+                    target: gun_target.map(|t| t.id),
+                    solution: gun_target
+                        .and_then(|t| super::gunnery::solve(weapon, &launcher, station.mount, t)),
+                    rounds: u64::from(weapon.burst.actual_rounds_per_game.max(1))
+                        * u64::from(weapon.burst.game_rounds_in_burst.max(1)),
+                    period_ticks: u64::from(weapon.burst.game_burst_t.max(1)) * 30,
+                    target_speed: gun_target
+                        .map_or(0., |t| crate::combat::missiles::length(t.velocity)),
+                })
+            })
+            .collect();
+        actor.controller.set_gun_views(gun_views);
         let stations = actor.station_views(&targets, &own);
         actor.trace.station_aim = actor.station_aim(&targets, &own).map(|t| t.id);
         let wing = WingView {
@@ -2099,6 +2190,7 @@ impl AiMission {
         }
 
         // 6. Motion through the adapter and this actor's own flight model.
+        actor.adapter.set_gun_aim(batch.gun_aim);
         actor.fly(batch.motion.as_ref(), &own, ground, surface)?;
         Ok(())
     }
@@ -3170,11 +3262,9 @@ impl AiActor {
             .collect()
     }
 
-    /// Debit this actor's own ammunition and produce the launch event.
-    ///
-    /// Returns `None` when the debit refuses, so an inhibited or empty station
-    /// can never produce a projectile. The debit happens first, exactly as
-    /// B45 records, and the host is told how many projectiles to create.
+    /// Authorize a launch from this actor's own nonempty, uninhibited store.
+    /// Live guns defer their per-round debit to physical emission in the host;
+    /// other stores debit here through the shared B45 release service.
     fn release(
         &mut self,
         intent: &super::controller::WeaponIntent,
@@ -3185,6 +3275,20 @@ impl AiActor {
             .iter()
             .position(|s| s.station == intent.request.station)?;
         let spec = &mut self.stations[index];
+        if self.guns.contains_key(&spec.station.0) {
+            if spec.store.inhibited || spec.is_empty() {
+                return None;
+            }
+            // The host debits this single physical round only after allocation
+            // and a final alignment check succeed.
+            return Some(LaunchEvent {
+                actor: self.id(),
+                station: intent.request.station,
+                target: intent.request.target.0,
+                request_id: intent.request.request_id,
+                projectiles: 1,
+            });
+        }
         let request = weapon_service::ReleaseRequest {
             debit: spec.debit.max(1),
             projectile_count: spec.projectile_count.max(1),

@@ -227,13 +227,12 @@ target-class damage share rounds to zero. Such contacts do not add fictitious
 regional structural damage. Gun dispersion applies to each bullet independently.
 Missile, rocket and bomb release rules are unchanged.
 
-Actor-owned guns use the same spacing for physical bullets within an authorized
-release. Existing actor decisions still determine when a release is authorized,
-so short groups may have longer gaps between them. Their ammunition is already
-debited by that service before the bridge receives a release. The bridge must
-not debit it again. Existing allocation failures can therefore drop paid-for
-bullets; they cannot create free rounds. No autonomous targeting or engagement
-policy is changed by this weapon-mechanics correction.
+Actor-owned live guns use this same physical cadence and per-round damage.
+Their [employment contract](ai-gun-employment.md) supplies burst/recovery timing,
+fixed-barrel lead and interruption rules. The host debits each physical round
+only after capacity and alignment checks succeed. A refused release consumes
+no ammunition. Earlier prepaid representative-group behavior remains in legacy
+synthetic fixtures, not imported gun employment.
 
 ## Detached pieces and ground cleanup
 

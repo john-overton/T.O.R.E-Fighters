@@ -10,7 +10,8 @@
 
 Research mode, 2026-09-28, on `7589bcaaa5d29d98c8eb25e700bc37e17608878d` in
 `fix/visual-awareness-under-fire`. No gameplay changes in this investigation.
-The [proposed behavior](../spec/ai-gun-employment.md) is a separate contract.
+The [behavior contract](../spec/ai-gun-employment.md) and subsequent
+[implementation results](ai-gun-implementation.md) are separate from this evidence.
 This measures the rebuild, not original-game or real-aircraft gun behavior.
 
 ## Player-session evidence

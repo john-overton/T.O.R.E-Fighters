@@ -241,7 +241,7 @@ than reconstructing the original executable's combat tick.
 (hit with damage, missed, spoofed by a decoy, jammed), keyed by shooter,
 intended target and retail weapon class, plus credited kills and each target's
 last attacker. Nothing in flight reads it. The app's `debrief.rs` turns it into
-the post-mission pages; `ai_wings.rs` supplies the aim of AI gun rounds and
+the post-mission pages; `ai_wings.rs` supplies the intended target of AI gun rounds and
 reports decoyed missiles. See the [debrief spec](spec/debrief.md).
 
 `combat::gunsight` supplies a renderer-independent fixed-step gun solution using
@@ -250,6 +250,14 @@ draws its pipper/range arc and projects a selected target into a square or edge
 chevron. Combat retains a separate display-only target identity through sensor
 loss; this never substitutes for `sensors` launch support or radar observations.
 [Behavior and evidence](spec/gunsight-targeting.md).
+
+`ai::gunnery` uses the same trajectory solver with explicitly permitted visual
+or sensor observations. The controller chooses gun tracking through ordinary
+flight inputs and authorizes individual rounds. `ai_wings` rechecks barrel
+alignment after flight movement, debits one round only when emitting it, and
+launches along the mounted forward axis. Shared live combat applies dispersion
+and collision, excluding the shooter. See [gun employment](spec/ai-gun-employment.md).
+
 
 The app merges independent keyboard/controller trigger holds, dispatches explicit
 commands and consumes confirmed events for instruments, graphics, audio and the

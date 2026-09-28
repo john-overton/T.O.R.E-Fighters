@@ -324,6 +324,7 @@ pub struct AiWings {
     /// A line for `FlightUi::message`, taken by the host once.
     pending_message: Option<String>,
     pending_guns: BTreeMap<(u32, u8), PendingGun>,
+    gun_ordinals: BTreeMap<(u32, u8), u64>,
     /// Enemy AI cheat level in force; None leaves each aircraft its own.
     enemy_skill: Option<tore_sim::ai::Experience>,
     /// Each enemy's mission skill, kept so Unchanged can restore it.
@@ -587,6 +588,15 @@ impl AiWings {
                     .sum::<f64>();
             actor.flight_mut().set_payload(payload)?;
             actor.set_stations(stores);
+            actor.set_guns(
+                config
+                    .stations
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| live::is_gun(&s.weapon))
+                    .map(|(i, s)| (i as u8, s.weapon.clone()))
+                    .collect(),
+            );
             actor.set_dispensers(vec![
                 tore_sim::ai::threat::DispenserStore {
                     class: SeekerClass::Infrared,
@@ -803,6 +813,7 @@ impl AiWings {
             threat_reports: Vec::new(),
             pending_message: None,
             pending_guns: BTreeMap::new(),
+            gun_ordinals: BTreeMap::new(),
             enemy_skill: None,
             mission_skill: BTreeMap::new(),
             guns_only: false,
@@ -1001,7 +1012,25 @@ impl AiWings {
         self.observe_chatter(&output, player);
         for event in &output.launches {
             if let Some(weapon) = self.weapons.get(&(event.actor, event.station.0)).cloned() {
-                if live::is_gun(&weapon) {
+                if live::is_gun(&weapon)
+                    && self
+                        .mission
+                        .actor(event.actor)
+                        .is_some_and(|a| a.physical_gun(event.station))
+                {
+                    let key = (event.actor, event.station.0);
+                    let ordinal = *self.gun_ordinals.entry(key).or_default();
+                    let emitted = self.realise(
+                        event,
+                        &mut state.projectiles,
+                        &weapon,
+                        usize::from(event.station.0),
+                        player.position,
+                        Some(ordinal),
+                    );
+                    aim_latest(state, emitted, event.target);
+                    *self.gun_ordinals.get_mut(&key).unwrap() += u64::from(emitted);
+                } else if live::is_gun(&weapon) {
                     let rounds = u16::from(weapon.burst.actual_rounds_per_game.max(1))
                         .saturating_mul(event.projectiles.min(u32::from(u16::MAX)) as u16);
                     let now = self.mission.tick();
@@ -1759,8 +1788,8 @@ impl AiWings {
     }
 
     /// Turn one AI launch into a real projectile flown by the existing combat
-    /// code. The ammunition was already debited inside the AI, so nothing here
-    /// touches a store.
+    /// code. Live guns debit only after all release checks, once per emitted
+    /// round. Missiles and legacy synthetic groups were already debited.
     fn realise(
         &mut self,
         event: &LaunchEvent,
@@ -1774,7 +1803,44 @@ impl AiWings {
             self.dropped_launches += event.projectiles;
             return 0;
         };
-        let origin = actor.flight().position;
+        let gun = live::is_gun(weapon);
+        let physical_gun = gun && actor.physical_gun(event.station);
+        if physical_gun && !actor.alive() {
+            return 0;
+        }
+        let flight = actor.flight();
+        let basis = Basis::new(flight.yaw, flight.pitch, flight.bank);
+        let mount = actor
+            .stations()
+            .iter()
+            .find(|s| s.station == event.station)
+            .map_or([0.; 3], |s| s.mount);
+        let origin = if gun {
+            std::array::from_fn(|i| {
+                flight.position[i]
+                    + basis.right[i] * mount[0]
+                    + basis.up[i] * mount[1]
+                    + basis.forward[i] * mount[2]
+            })
+        } else {
+            flight.position
+        };
+        if physical_gun {
+            let Some(target) = actor.gun_target().filter(|t| t.id == event.target) else {
+                return 0;
+            };
+            if !tore_sim::ai::gunnery::solve(
+                weapon,
+                &crate::combat::launcher(flight),
+                mount,
+                target,
+            )
+            .is_some_and(|s| s.aligned)
+            {
+                return 0;
+            }
+        }
+        let launch_velocity = flight.velocity;
         let observed = actor
             .awareness()
             .current_observations()
@@ -1797,7 +1863,11 @@ impl AiWings {
             self.dropped_launches += event.projectiles;
             return 0;
         };
-        let direction = unit([aim[0] - origin[0], aim[1] - origin[1], aim[2] - origin[2]]);
+        let direction = if gun {
+            basis.forward
+        } else {
+            unit([aim[0] - origin[0], aim[1] - origin[1], aim[2] - origin[2]])
+        };
         if direction.iter().any(|v| !v.is_finite()) {
             self.dropped_launches += event.projectiles;
             return 0;
@@ -1834,6 +1904,14 @@ impl AiWings {
                 self.dropped_launches += 1;
                 continue;
             }
+            if physical_gun
+                && !self
+                    .mission
+                    .actor_mut(event.actor)
+                    .is_some_and(|a| a.debit_gun_round(event.station))
+            {
+                break;
+            }
             let id = self.next_projectile_id;
             self.next_projectile_id = self.next_projectile_id.wrapping_add(1);
             projectiles.push(live::Projectile {
@@ -1843,8 +1921,7 @@ impl AiWings {
                 owner: event.actor,
                 weapon: Some(weapon.clone()),
                 guidance: guidance.clone(),
-                motion: profile
-                    .map(|_| Motion::new(&weapon.movement, actor.flight().velocity, origin[1])),
+                motion: profile.map(|_| Motion::new(&weapon.movement, launch_velocity, origin[1])),
                 guidance_ticks: profile.map(|p| p.guidance_ticks),
                 age: 0,
                 incoming,
@@ -3544,6 +3621,136 @@ pub(crate) mod tests {
                 .iter()
                 .all(|p| p.weapon(combat.configuration()).seeker.signature == 0)
         );
+    }
+
+    #[test]
+    fn physical_gun_debits_only_emitted_rounds_and_respects_barrel_and_store_gates() {
+        use tore_sim::ai::{
+            gunnery,
+            weapon_service::{RequestId, Rounds, StationId},
+            wing::{TargetOrder, WingRequest},
+        };
+        let (mut wings, mut targets) = build(None);
+        for actor in wings.mission.actors_mut() {
+            actor.set_stations(Vec::new());
+        }
+        let mut gun = combat_fixture(false).configuration().stations[0]
+            .weapon
+            .clone();
+        gun.source = "M61.JT".into();
+        let actor = wings.mission.actor_mut(3).unwrap();
+        actor.set_stations(simple_stations(0, 3, AI_STORE_SPEED));
+        actor.set_guns([(1, gun.clone())].into());
+        actor.flight_mut().position = [0., 20000., 1000.];
+        actor.flight_mut().yaw = std::f64::consts::PI;
+        wings
+            .mission
+            .order(3, WingRequest::TargetAssignment(TargetOrder::FreeSelection))
+            .unwrap()
+            .unwrap();
+        wings
+            .advance(player_object([0., 20000., 0.]), &mut targets, &flat)
+            .unwrap();
+        let actor = wings.mission.actor_mut(3).unwrap();
+        let observed = actor.gun_target().expect("current permitted target");
+        let aim = gunnery::solve(
+            &gun,
+            &crate::combat::launcher(actor.flight()),
+            [0.; 3],
+            observed,
+        )
+        .unwrap()
+        .aim
+        .direction;
+        actor.flight_mut().yaw = aim[0].atan2(aim[2]);
+        actor.flight_mut().pitch = aim[1].asin();
+        let aligned = actor.flight().clone();
+        assert_eq!(
+            actor.rounds_remaining(),
+            3,
+            "controller intent does not debit"
+        );
+        let event = LaunchEvent {
+            actor: 3,
+            station: StationId(1),
+            target: observed.id,
+            request_id: RequestId(77),
+            projectiles: 1,
+        };
+        let mut rounds = Vec::new();
+        assert_eq!(
+            wings.realise(&event, &mut rounds, &gun, 1, [0.; 3], Some(0)),
+            1
+        );
+        assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 2);
+        assert_eq!(
+            rounds[0].direction,
+            Basis::new(aligned.yaw, aligned.pitch, aligned.bank).forward
+        );
+        assert!(rounds[0].target.is_none() && rounds[0].tracer);
+        wings.mission.actor_mut(3).unwrap().flight_mut().yaw += 0.2;
+        assert_eq!(
+            wings.realise(&event, &mut rounds, &gun, 1, [0.; 3], Some(1)),
+            0
+        );
+        assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 2);
+        *wings.mission.actor_mut(3).unwrap().flight_mut() = aligned.clone();
+        let mut full = vec![rounds[0].clone(); MAX_PROJECTILES];
+        assert_eq!(
+            wings.realise(&event, &mut full, &gun, 1, [0.; 3], Some(1)),
+            0
+        );
+        assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 2);
+        wings.mission.actor_mut(3).unwrap().stations_mut()[0]
+            .store
+            .inhibited = true;
+        assert_eq!(
+            wings.realise(&event, &mut rounds, &gun, 1, [0.; 3], Some(1)),
+            0
+        );
+        wings.mission.actor_mut(3).unwrap().stations_mut()[0]
+            .store
+            .inhibited = false;
+        for ordinal in 1..=2 {
+            assert_eq!(
+                wings.realise(&event, &mut rounds, &gun, 1, [0.; 3], Some(ordinal)),
+                1
+            );
+        }
+        assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 0);
+        assert_eq!(
+            wings.realise(&event, &mut rounds, &gun, 1, [0.; 3], Some(3)),
+            0
+        );
+        wings.mission.actor_mut(3).unwrap().stations_mut()[0]
+            .store
+            .rounds = Rounds::Finite(1);
+        wings.mission.actor_mut(3).unwrap().set_alive(false);
+        assert_eq!(
+            wings.realise(&event, &mut rounds, &gun, 1, [0.; 3], Some(3)),
+            0
+        );
+        assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 1);
+        wings.mission.actor_mut(3).unwrap().set_alive(true);
+        for request in [
+            WingRequest::TargetAssignment(TargetOrder::HoldFire),
+            WingRequest::FormationSelection(tore_sim::ai::wing::Formation::Echelon),
+        ] {
+            wings
+                .mission
+                .order(3, WingRequest::TargetAssignment(TargetOrder::FreeSelection))
+                .unwrap()
+                .unwrap();
+            wings.mission.order(3, request).unwrap().unwrap();
+            for _ in 0..120 {
+                *wings.mission.actor_mut(3).unwrap().flight_mut() = aligned.clone();
+                let output = wings
+                    .advance(player_object([0., 20000., 0.]), &mut targets, &flat)
+                    .unwrap();
+                assert!(output.launches.iter().all(|e| e.actor != 3), "{request:?}");
+            }
+            assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 1);
+        }
     }
 
     #[test]

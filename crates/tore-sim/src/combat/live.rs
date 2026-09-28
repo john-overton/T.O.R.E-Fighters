@@ -586,7 +586,7 @@ impl SystemFaults {
 
 pub const DAMAGE_SECTIONS: usize = 6;
 /// Contact sphere for an aircraft, feet.
-const AIRCRAFT_RADIUS_FT: f64 = 28.;
+pub const AIRCRAFT_RADIUS_FT: f64 = 28.;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DamageSection {
     Nose = 0,
@@ -639,56 +639,15 @@ impl LocalizedDamage {
         target: &Target,
         scale: f64,
     ) -> Option<(f64, DamageSection)> {
-        let local = |point: Vector| {
-            let offset = sub(point, target.position);
-            let radius = target.radius.max(1.) * scale;
-            [
-                crate::attitude::dot(offset, target.basis.right) / radius,
-                crate::attitude::dot(offset, target.basis.up) / radius,
-                crate::attitude::dot(offset, target.basis.forward) / radius,
-            ]
-        };
-        let a = local(from);
-        let b = local(to);
-        let boxes = [
-            (
-                DamageSection::Cockpit,
-                [-0.22, 0.08, 0.08],
-                [0.22, 0.48, 0.48],
-            ),
-            (
-                DamageSection::Core,
-                [-0.28, -0.28, -0.38],
-                [0.28, 0.22, 0.18],
-            ),
-            (
-                DamageSection::Nose,
-                [-0.32, -0.30, 0.42],
-                [0.32, 0.32, 0.92],
-            ),
-            (
-                DamageSection::LeftWing,
-                [-0.92, -0.18, -0.28],
-                [-0.25, 0.18, 0.38],
-            ),
-            (
-                DamageSection::RightWing,
-                [0.25, -0.18, -0.28],
-                [0.92, 0.18, 0.38],
-            ),
-            (
-                DamageSection::Tail,
-                [-0.34, -0.25, -0.92],
-                [0.34, 0.40, -0.34],
-            ),
-        ];
-        boxes
-            .into_iter()
-            .filter_map(|(section, lo, hi)| {
-                segment_box_fraction(a, b, lo, hi).map(|at| (at, section))
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0))
+        aircraft_contact(
+            from,
+            to,
+            target.position,
+            target.basis,
+            target.radius * scale,
+        )
     }
+
     fn record(&mut self, section: DamageSection, amount: i32, initial_hp: i32) {
         let slot = section as usize;
         self.amounts[slot] = self.amounts[slot].saturating_add(amount.max(0));
@@ -733,6 +692,63 @@ pub struct Projectile {
     pub gun_round: Option<u8>,
     /// Fitted presentation marker: every third physical gun round.
     pub tracer: bool,
+}
+
+/// The same measured aircraft volume for predicted and live gun contact.
+pub fn aircraft_contact(
+    from: Vector,
+    to: Vector,
+    position: Vector,
+    basis: Basis,
+    radius: f64,
+) -> Option<(f64, DamageSection)> {
+    let local = |point: Vector| {
+        let offset = sub(point, position);
+        let radius = radius.max(1.);
+        [
+            crate::attitude::dot(offset, basis.right) / radius,
+            crate::attitude::dot(offset, basis.up) / radius,
+            crate::attitude::dot(offset, basis.forward) / radius,
+        ]
+    };
+    let a = local(from);
+    let b = local(to);
+    let boxes = [
+        (
+            DamageSection::Cockpit,
+            [-0.22, 0.08, 0.08],
+            [0.22, 0.48, 0.48],
+        ),
+        (
+            DamageSection::Core,
+            [-0.28, -0.28, -0.38],
+            [0.28, 0.22, 0.18],
+        ),
+        (
+            DamageSection::Nose,
+            [-0.32, -0.30, 0.42],
+            [0.32, 0.32, 0.92],
+        ),
+        (
+            DamageSection::LeftWing,
+            [-0.92, -0.18, -0.28],
+            [-0.25, 0.18, 0.38],
+        ),
+        (
+            DamageSection::RightWing,
+            [0.25, -0.18, -0.28],
+            [0.92, 0.18, 0.38],
+        ),
+        (
+            DamageSection::Tail,
+            [-0.34, -0.25, -0.92],
+            [0.34, 0.40, -0.34],
+        ),
+    ];
+    boxes
+        .into_iter()
+        .filter_map(|(section, lo, hi)| segment_box_fraction(a, b, lo, hi).map(|at| (at, section)))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
 }
 
 /// One actor's current fire-control answer. The host replaces these snapshots
@@ -2842,7 +2858,7 @@ impl State {
             p.age += 1;
             let mut first: Option<(f64, Option<usize>)> = None;
             if armed
-                && p.incoming
+                && (p.incoming || (is_gun(w) && p.owner != PLAYER_OWNER))
                 && p.guidance.as_ref().is_none_or(|f| f.eligible(w, &player))
                 && player.hp > 0
                 && let Some(at) = if is_gun(w) {
@@ -2860,8 +2876,13 @@ impl State {
             {
                 first = Some((at, Some(usize::MAX)));
             }
-            if armed && !p.incoming {
-                for (i, t) in self.targets.iter().enumerate().filter(|(_, t)| t.hp > 0) {
+            if armed && (!p.incoming || is_gun(w)) {
+                for (i, t) in self
+                    .targets
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, t)| t.hp > 0 && (!is_gun(w) || t.id != p.owner))
+                {
                     if p.guidance.as_ref().is_some_and(|f| !f.eligible(w, t)) {
                         continue;
                     }
@@ -3628,6 +3649,87 @@ mod tests {
         }
         assert_eq!(s.take_sound_events().len(), 256);
     }
+    #[test]
+    fn fixed_barrel_lead_flies_into_moving_targets_and_never_hits_its_shooter() {
+        use crate::ai::gunnery;
+        for velocity in [[0., 0., -200.], [0., 0., 200.], [250., 0., 0.]] {
+            for incoming in [false, true] {
+                for aimed in [false, true] {
+                    let mut state = fixture(false);
+                    let mut gun = super::super::gunsight::tests::weapon();
+                    gun.source = "M61.JT".into();
+                    state.config.stations[0].weapon = gun.clone();
+                    let mut own = launcher();
+                    own.radar = false;
+                    let observed = gunnery::Target {
+                        id: 99,
+                        position: [0., 1000., 800.],
+                        velocity,
+                        basis: Basis::new(0., 0., 0.),
+                    };
+                    let aim = gunnery::solve(&gun, &own, [0.; 3], observed).unwrap();
+                    let d = aim.aim.direction;
+                    own.basis = Basis::new(
+                        d[0].atan2(d[2]) + if aimed { 0. } else { 0.2 },
+                        d[1].asin(),
+                        0.,
+                    );
+                    assert_eq!(
+                        gunnery::solve(&gun, &own, [0.; 3], observed)
+                            .unwrap()
+                            .aligned,
+                        aimed
+                    );
+                    let mut victim = target(99, observed.position, 1000, 0x80);
+                    victim.radius = AIRCRAFT_RADIUS_FT;
+                    victim.velocity = velocity;
+                    state.targets = vec![target(7, own.position, 1000, 0x80), victim];
+                    let player = Launcher {
+                        position: [10000., 1000., 0.],
+                        ..own
+                    };
+                    state.command(Command::Incoming, player);
+                    let p = &mut state.projectiles[0];
+                    p.owner = 7;
+                    p.incoming = incoming;
+                    p.position = own.position;
+                    p.previous = own.position;
+                    p.direction = own.basis.forward;
+                    // Isolate nominal ballistics. Live launches at age zero
+                    // also receive dispersion, already covered separately.
+                    p.age = 1;
+                    for _ in 0..240 {
+                        state.step(false, player, |_, _| 0.);
+                    }
+                    assert_eq!(state.targets[0].hp, 1000, "shooter, {velocity:?}");
+                    assert_eq!(
+                        state.targets[1].hp < 1000,
+                        aimed,
+                        "{velocity:?}, incoming={incoming}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ai_gun_can_hit_player_even_when_aim_metadata_names_another_aircraft() {
+        let mut state = fixture(false);
+        state.config.stations[0].weapon.source = "M61.JT".into();
+        let own = launcher();
+        state.command(Command::Incoming, own);
+        let p = &mut state.projectiles[0];
+        p.owner = 7;
+        p.incoming = false;
+        p.position = [0., 1000., 100.];
+        p.previous = p.position;
+        let before = state.player_hp;
+        for _ in 0..120 {
+            state.step(false, own, |_, _| 0.);
+        }
+        assert!(state.player_hp < before);
+    }
+
     /// A gun round fired into the player's cockpit, stepped until it lands
     /// or the player is destroyed.
     fn cockpit_gun_hit(damage: crate::cheats::Damage) -> (State, Vec<Event>) {

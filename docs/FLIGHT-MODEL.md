@@ -349,6 +349,9 @@ That model alone advances attitude, velocity, position, fuel and telemetry;
 there is no post-step AI movement override. Imported external stores contribute
 payload mass and releases reduce it. The controller and its fitted limits are
 specified in [input-only AI control](spec/ai.md#input-only-aircraft-control).
+[Gun tracking](spec/ai-gun-employment.md#physical-bursts-and-aiming) adds fitted
+lead-rate inputs through this same adapter, retaining physical limits and defense
+priority. It cannot rotate the barrel or steer a projectile after release.
 Ground-started AI aircraft use the researched model for runway contact.
 An airborne AI actor switches to that model when its landing sequence begins.
 The control mapping accounts for current flap lift and low-speed G authority.

@@ -92,6 +92,7 @@ pub struct ControllerTrace {
     pub geometry: Option<TargetGeometry>,
     /// Store choice, lock and the weapon service (B42, B45).
     pub weapons: Option<WeaponTrace>,
+    pub gun: Option<super::gunnery::Trace>,
     /// Which motion branch produced this tick's maneuver.
     pub motion: MotionTrace,
     /// The tactical choice, when a new maneuver was chosen this tick.
@@ -310,6 +311,10 @@ pub struct MotionTrace {
 /// controller tries them.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum MotionBranch {
+    GunTracking {
+        heading_deg: f64,
+        pitch_deg: f64,
+    },
     #[default]
     None,
     /// The shared missile-defense policy is flying the aircraft.

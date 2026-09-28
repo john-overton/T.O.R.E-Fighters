@@ -334,9 +334,22 @@ fn activity_reason(look: &Look, activity: Activity) -> String {
             None => "pursuing".to_owned(),
         },
         Activity::Acquiring => {
-            let why = trace.weapons.as_ref().filter(|_| fresh).and_then(|w| {
-                trees::fire_reason(w, target, &look.act.stations, &|q| look.at_quarter(q))
-            });
+            let why = trace
+                .gun
+                .filter(|_| fresh)
+                .and_then(|g| g.view.solution)
+                .filter(|s| !s.aligned)
+                .map(|s| {
+                    format!(
+                        "fixed barrel misses the predicted target by {:.1} ft",
+                        s.miss_ft
+                    )
+                })
+                .or_else(|| {
+                    trace.weapons.as_ref().filter(|_| fresh).and_then(|w| {
+                        trees::fire_reason(w, target, &look.act.stations, &|q| look.at_quarter(q))
+                    })
+                });
             match (target, why) {
                 (Some(t), Some(why)) => format!("{} chosen; no firing solution yet: {why}", who(t)),
                 (Some(t), None) => format!("{} chosen; no firing solution yet", who(t)),

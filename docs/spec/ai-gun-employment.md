@@ -10,16 +10,15 @@
 
 ## Status and provenance
 
-Research mode, 2026-09-28. **Proposed correction, not implemented.** John asked
-why enemies appear never to use their guns. The
-[investigation](../baselines/ai-gun-employment.md) confirms sparse two-round
-releases followed by a permanent weapon-service timeout in his recorded fight.
-The current [B42 service](ai.md#b42-weapon-preparation-search-cadence-and-firing)
-and [B45 store eligibility](ai.md#b45-seeker-visibility-launch-eligibility-and-ammunition)
-remain the shipped implementation.
+Implementation mode, 2026-09-28. Implemented at John's request on the existing
+AI-awareness branch. The [investigation](../baselines/ai-gun-employment.md)
+records the original host faults; the
+[implementation checks](../baselines/ai-gun-implementation.md) record results.
 
-The rules below are **opinionated agent proposals**. The existing imported
-weapon envelopes and fitted physical bullet cadence retain their provenance.
+Recovery and burst policy are **opinionated agent decisions**. Lead prediction,
+collision-volume gating and tracking controls are **fitted agent decisions**.
+The implementation is spec-derived from the rules below. Imported weapon
+envelopes and the shared physical bullet model retain their existing provenance.
 Original expiry recovery, gun-specific preparation, burst duty cycle and lead
 policy are **unknown**. The next research step, if original parity is needed,
 is a bounded behavior contract for those specific decisions using the build
@@ -32,7 +31,7 @@ A living aircraft with a current target and ammunition must remain capable of
 firing after a previous attempt expired. Expiry must not require forgetting its
 target, losing sight, changing aircraft or restarting the mission.
 
-For the shared weapon service, the initial proposal is to replace permanent
+For the shared weapon service, replace permanent
 expiry with the existing bounded no-station retry, **2 seconds plus the existing
 optional 0.5-second delay**. Re-evaluate current eligibility after that delay.
 Keep target identity, observations, ammunition, orders and missile-support state.
@@ -47,7 +46,7 @@ make the gun permanently unavailable or require a target-memory reset.
 
 ## Physical bursts and aiming
 
-Initial authored burst policy: **0.5 seconds of permitted fire followed by
+Authored burst policy: **0.5 seconds of permitted fire followed by
 0.5 seconds of recovery**, while a valid solution persists. This gives 16 bullets
 per complete burst for the reviewed guns at the existing fitted 32 bullets/s.
 Other profiles use their own imported cadence. These values define a starting
@@ -71,10 +70,29 @@ Bullets remain unguided. Frozen memory and a hidden target position cannot suppl
 a firing solution. Do not compensate for poor alignment by rotating each bullet
 directly toward the target or weakening F-22 stealth.
 
-Original alignment tolerance and tracking policy remain unknown. Using the
-existing target collision volume and projectile model for the predicted
-intersection is an agent-authored starting rule; validate it on approaching,
-receding and crossing targets before choosing any additional aim tolerance.
+The nominal trajectory must cross the existing aircraft collision volume. The
+shared collision query uses the predicted impact and the local relative path
+through that volume, with a 56-foot half-segment around the predicted impact.
+This is fitted and assumes constant observed target velocity. Maneuvering after
+release and the ordinary quarter-degree dispersion can still cause a miss.
+Collision checks exclude the shooter but include other aircraft and the player,
+regardless of which aircraft the release originally intended to hit.
+
+Tracking commands the aircraft through its existing flight adapter. It preserves
+terrain, bank, roll-rate and G limits, defensive motion and explicit orders.
+Heading error uses a 0.6-second response horizon, pitch error 0.8 seconds. Both
+include the predicted lead direction's angular rate, including changing intercept
+time and gravity compensation. The existing roll response remains 0.7 seconds.
+Target speed plus `(range_ft - 1500) / 10` feet/second sets desired speed, clamped
+to 1.25 times minimum speed through maximum speed. These are fitted agent choices,
+not researched retail timings. Hard turning engagements can still defeat nose
+tracking; a poor solution withholds fire instead of redirecting the bullets.
+
+Replay explanations show the predicted miss before dispersion, flight time,
+burst/recovery deadline and ammunition before that tick's release. Actual launch
+and hit events remain the evidence of physical fire, not the activity label.
+Original alignment tolerance, skill-dependent gun accuracy and tracking policy
+remain unknown. Next research would recover bounded contracts for those behaviors.
 
 ## Acceptance
 

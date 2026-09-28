@@ -497,6 +497,13 @@ pub fn motion_branch(
 ) -> (&'static str, String) {
     match branch {
         MotionBranch::None => ("none", String::new()),
+        MotionBranch::GunTracking {
+            heading_deg,
+            pitch_deg,
+        } => (
+            "gun lead tracking",
+            format!("heading {heading_deg:.1}, flight pitch {pitch_deg:.1}"),
+        ),
         MotionBranch::MissileDefense {
             heading_deg,
             pitch_deg,
@@ -579,6 +586,7 @@ pub fn branch_code(controller: &ControllerTrace, actor: &ActorTrace) -> u8 {
         MotionBranch::None => 1,
         MotionBranch::MissileDefense { .. } => 2,
         MotionBranch::IncomingFire { .. } => 11,
+        MotionBranch::GunTracking { .. } => 12,
         MotionBranch::MissionRejoin { .. } => 3,
         MotionBranch::SearchBearing { .. } => 4,
         MotionBranch::OrderedApproach { .. } => 5,
@@ -674,7 +682,7 @@ pub fn service_text(outcome: &ServiceOutcome, at: &dyn Fn(u64) -> String) -> Str
         ServiceOutcome::StoreDepleted { deadline } => {
             format!("store empty after firing; retry at {}", at(*deadline))
         }
-        ServiceOutcome::WindowExpired => "the 15 s window to fire expired".into(),
+        ServiceOutcome::WindowExpired => "attempt expired; bounded retry pending".into(),
     }
 }
 
@@ -894,6 +902,57 @@ pub fn ai_thought(t: &Thought) -> Vec<Node> {
         _ => {
             tree.text(0, "Weapon", "none", "no target this tick");
             tree.text(1, "Phase", phase_label(t.weapon_phase), "");
+        }
+    }
+    if fresh && let Some(gun) = t.controller.gun {
+        tree.text(
+            0,
+            "Gunnery",
+            if gun.requested_round {
+                "round requested"
+            } else {
+                "waiting"
+            },
+            "fixed barrel; measured target motion only",
+        );
+        tree.text(
+            1,
+            "Ammunition",
+            format!("{:?}", gun.view.ammunition),
+            "before this tick's release; debit only emitted rounds",
+        );
+        if let Some(solution) = gun.view.solution {
+            tree.text(
+                1,
+                "Barrel",
+                if solution.aligned {
+                    "on predicted volume"
+                } else {
+                    "not aligned"
+                },
+                "actual bullets use the shared dispersion",
+            );
+            tree.text(
+                1,
+                "Predicted miss",
+                format!("{:.1} ft", solution.miss_ft),
+                "before dispersion",
+            );
+            tree.text(
+                1,
+                "Flight time",
+                format!("{:.2} s", solution.seconds),
+                "shared projectile trajectory",
+            );
+        }
+        tree.text(
+            1,
+            "Cycle",
+            phase_label(gun.phase),
+            "0.5 s burst, 0.5 s recovery; cadence retained",
+        );
+        if let Some(due) = gun.deadline {
+            tree.text(1, "Cycle ends", clock(due), "simulation time");
         }
     }
     thought_defense(&mut tree, t);

@@ -1104,7 +1104,9 @@ option the probe is unchanged.
 `--probe-enemy-aircraft ID` independently selects the opponent, using the exact
 roster identities. `--probe-enemy-skill novice|average|experienced|ace` selects
 its resolved skill. `--probe-geometry head|side|rear` sets initial enemy heading;
-`--probe-guns` keeps the attack script on its gun. `--probe-trace SECONDS` also
+`--probe-guns` keeps the player attack script on its gun.
+`--probe-ai-guns-only` restricts AI stores to their carried gun without changing
+the player script. It is useful for sustained [gun-employment checks](baselines/ai-gun-implementation.md). `--probe-trace SECONDS` also
 prints enemy observation sources, permission, target and incoming-fire cues.
 Every probe prints first visual acquisition, first release, first gun/hit defense
 and peak bank for each enemy.
