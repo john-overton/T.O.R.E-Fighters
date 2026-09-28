@@ -55,7 +55,13 @@ const DATA: &[&str] = &[
     "&BUTTON.11K",
     "&TOGGLE1.5K",
 ];
-const MAX_PACK_BYTES: u64 = 256 * 1024 * 1024;
+/// Sanity bounds on the import pack, far above a full Fighters Anthology
+/// import (about 4,100 resources and 180 MB in 2026-09), so a corrupt file is
+/// refused without capping what an import may hold. The pack is read as a
+/// stream, so memory follows the resources kept, not the bound.
+const MAX_PACK_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_PACK_RESOURCES: usize = 32_768;
+const MAX_RESOURCE_BYTES: usize = 2 * 1024 * 1024;
 pub struct Assets {
     pub creator_options: tore_formats::ui::creator::Options,
     pub theater_resources: BTreeMap<String, Vec<u8>>,
@@ -558,34 +564,8 @@ impl Assets {
         let generation = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_nanos();
-        let encoded_size = 16u64
-            + resources
-                .iter()
-                .map(|(name, bytes)| 6 + name.len() as u64 + bytes.len() as u64)
-                .sum::<u64>();
-        if encoded_size > MAX_PACK_BYTES || resources.len() > 4096 {
-            return Err(format!(
-                "import exceeds cache bounds: {} resources, {} bytes",
-                resources.len(),
-                encoded_size
-            )
-            .into());
-        }
         let path = destination.join(format!("menu-{generation}.pack"));
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)?;
-        file.write_all(b"TOREMENU\x01\0\0\0")?;
-        file.write_all(&(resources.len() as u32).to_le_bytes())?;
-        for (name, bytes) in resources {
-            file.write_all(&(name.len() as u16).to_le_bytes())?;
-            file.write_all(name.as_bytes())?;
-            file.write_all(&(bytes.len() as u32).to_le_bytes())?;
-            file.write_all(&bytes)?;
-        }
-        file.sync_all()?;
-        drop(file);
+        write_pack(&path, &resources)?;
         fs::write(destination.join("import-report.txt"), report)?;
         // Verify the on-disk pack before removing any previously usable import.
         drop(assets);
@@ -631,53 +611,96 @@ impl Assets {
         Err(last_error.into())
     }
     fn load_pack(path: &Path) -> AppResult<Self> {
-        let file = fs::File::open(path)?;
-        if file.metadata()?.len() > MAX_PACK_BYTES {
-            return Err("asset pack exceeds 256 MiB".into());
-        }
-        let mut data = Vec::new();
-        file.take(MAX_PACK_BYTES + 1).read_to_end(&mut data)?;
-        let mut cursor = std::io::Cursor::new(data);
-        let mut header = [0; 12];
-        cursor.read_exact(&mut header)?;
-        if &header != b"TOREMENU\x01\0\0\0" {
-            return Err("unsupported menu pack".into());
-        }
-        fn word(c: &mut impl Read) -> AppResult<usize> {
-            let mut b = [0; 4];
-            c.read_exact(&mut b)?;
-            Ok(u32::from_le_bytes(b) as usize)
-        }
-        let count = word(&mut cursor)?;
-        if count > 4096 {
-            return Err("too many menu resources".into());
-        }
-        let mut resources = BTreeMap::new();
-        for _ in 0..count {
-            let mut len = [0; 2];
-            cursor.read_exact(&mut len)?;
-            let len = u16::from_le_bytes(len) as usize;
-            if len == 0 || len > 32 {
-                return Err("invalid resource name length".into());
-            }
-            let mut name = vec![0; len];
-            cursor.read_exact(&mut name)?;
-            let name = String::from_utf8(name)?;
-            let length = word(&mut cursor)?;
-            if length > 2 * 1024 * 1024 {
-                return Err("menu resource exceeds limit".into());
-            }
-            let mut bytes = vec![0; length];
-            cursor.read_exact(&mut bytes)?;
-            if resources.insert(name, bytes).is_some() {
-                return Err("duplicate menu resource".into());
-            }
-        }
-        if cursor.position() != cursor.get_ref().len() as u64 {
-            return Err("trailing menu pack bytes".into());
-        }
-        Self::decode(&resources)
+        Self::decode(&read_pack(path)?)
     }
+}
+
+/// Writes a new pack. `path` must not exist yet; the file is synced before
+/// returning.
+fn write_pack(path: &Path, resources: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
+    let encoded_size = 16u64
+        + resources
+            .iter()
+            .map(|(name, bytes)| 6 + name.len() as u64 + bytes.len() as u64)
+            .sum::<u64>();
+    if encoded_size > MAX_PACK_BYTES
+        || resources.len() > MAX_PACK_RESOURCES
+        || resources.iter().any(|(name, bytes)| {
+            !(1..=32).contains(&name.len()) || bytes.len() > MAX_RESOURCE_BYTES
+        })
+    {
+        return Err(format!(
+            "import exceeds cache bounds: {} resources, {} bytes",
+            resources.len(),
+            encoded_size
+        )
+        .into());
+    }
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    let mut out = std::io::BufWriter::new(file);
+    out.write_all(b"TOREMENU\x01\0\0\0")?;
+    out.write_all(&(resources.len() as u32).to_le_bytes())?;
+    for (name, bytes) in resources {
+        out.write_all(&(name.len() as u16).to_le_bytes())?;
+        out.write_all(name.as_bytes())?;
+        out.write_all(&(bytes.len() as u32).to_le_bytes())?;
+        out.write_all(bytes)?;
+    }
+    out.into_inner()
+        .map_err(|error| error.into_error())?
+        .sync_all()?;
+    Ok(())
+}
+
+fn read_pack(path: &Path) -> AppResult<BTreeMap<String, Vec<u8>>> {
+    let file = fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    if size > MAX_PACK_BYTES {
+        return Err("asset pack exceeds 1 GiB".into());
+    }
+    let mut cursor = std::io::BufReader::new(file.take(size));
+    let mut header = [0; 12];
+    cursor.read_exact(&mut header)?;
+    if &header != b"TOREMENU\x01\0\0\0" {
+        return Err("unsupported menu pack".into());
+    }
+    fn word(c: &mut impl Read) -> AppResult<usize> {
+        let mut b = [0; 4];
+        c.read_exact(&mut b)?;
+        Ok(u32::from_le_bytes(b) as usize)
+    }
+    let count = word(&mut cursor)?;
+    if count > MAX_PACK_RESOURCES {
+        return Err("too many menu resources".into());
+    }
+    let mut resources = BTreeMap::new();
+    for _ in 0..count {
+        let mut len = [0; 2];
+        cursor.read_exact(&mut len)?;
+        let len = u16::from_le_bytes(len) as usize;
+        if len == 0 || len > 32 {
+            return Err("invalid resource name length".into());
+        }
+        let mut name = vec![0; len];
+        cursor.read_exact(&mut name)?;
+        let name = String::from_utf8(name)?;
+        let length = word(&mut cursor)?;
+        if length > MAX_RESOURCE_BYTES {
+            return Err("menu resource exceeds limit".into());
+        }
+        let mut bytes = vec![0; length];
+        cursor.read_exact(&mut bytes)?;
+        if resources.insert(name, bytes).is_some() {
+            return Err("duplicate menu resource".into());
+        }
+    }
+    if cursor.read(&mut [0])? != 0 {
+        return Err("trailing menu pack bytes".into());
+    }
+    Ok(resources)
 }
 
 #[cfg(test)]
@@ -745,6 +768,41 @@ mod cache_tests {
         }
         #[cfg(unix)]
         assert!(directory.0.join("menu-2.pack").is_symlink());
+    }
+
+    #[test]
+    fn packs_hold_more_than_the_old_four_thousand_resources() {
+        let directory = CacheDirectory::new();
+        let path = directory.0.join("menu-1.pack");
+        let resources: BTreeMap<String, Vec<u8>> = (0..9000u32)
+            .map(|n| (format!("R{n:05}.RAW"), n.to_le_bytes().to_vec()))
+            .collect();
+        write_pack(&path, &resources).unwrap();
+        assert_eq!(read_pack(&path).unwrap(), resources);
+        // A pack is never overwritten in place.
+        assert!(write_pack(&path, &resources).is_err());
+        let mut bytes = fs::read(&path).unwrap();
+        bytes.push(0);
+        fs::write(&path, &bytes).unwrap();
+        assert!(read_pack(&path).is_err());
+        bytes.truncate(bytes.len() - 2);
+        fs::write(&path, &bytes).unwrap();
+        assert!(read_pack(&path).is_err());
+    }
+
+    #[test]
+    fn packs_refuse_resources_the_reader_would_reject() {
+        let directory = CacheDirectory::new();
+        for (name, size) in [
+            ("", 1),
+            ("A_NAME_LONGER_THAN_THIRTY_TWO_BYTES", 1),
+            ("BIG.RAW", MAX_RESOURCE_BYTES + 1),
+        ] {
+            let path = directory.0.join("menu-2.pack");
+            let resources = BTreeMap::from([(name.to_string(), vec![0; size])]);
+            assert!(write_pack(&path, &resources).is_err(), "{name}");
+            assert!(!path.exists());
+        }
     }
 
     #[test]

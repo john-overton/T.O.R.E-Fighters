@@ -95,7 +95,9 @@ messages, decoy odds or seekers.
 - Each is thrown sideways along the wings **20 to 30 feet** (John's range,
   random per flare), 95 percent of the way within 0.75 seconds.
 - Drag slows a flare hard. Behind a 400-knot jet it is more than 250 feet
-  back after one second, and it settles toward a 100 ft/s fall.
+  back after one second, and it settles toward a 100 ft/s fall. Drag acts on
+  its motion through the air, so once the throw is spent the mission wind
+  carries it (John, 2026-09-28). A flare resting on the ground stays put.
 - **Life: 30 seconds from release, then it is gone** (John). It flickers by
   plus or minus 15 percent while it burns. **Over the last 3 seconds it dims to
   nothing while the flicker grows into a sputter** (John). A flare that
@@ -147,7 +149,9 @@ messages, decoy odds or seekers.
 
 - A cartridge becomes one cloud of 600 foil strips. It leaves from the same
   point as flares at the aircraft's speed, stops relative to the air almost
-  at once (0.12-second time constant), then settles at 4 ft/s.
+  at once (0.12-second time constant), then settles at 4 ft/s and drifts with
+  the mission wind (John, 2026-09-28). A cloud that reaches the ground stays
+  where it lies.
 - The cloud's radius grows from 3 feet to about 35 feet within 1.5 seconds,
   then keeps spreading 1.5 feet per second. Each strip falls at its own 2 to
   6 ft/s, flutters, and spins 2 to 8 turns per second.

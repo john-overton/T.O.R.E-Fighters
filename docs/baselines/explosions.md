@@ -36,7 +36,8 @@ reaching 15,000 feet and Doppler on.
 The first start after the change found the dev profile's cache stale and
 re-imported it from the remembered source: 4,082 resources, up from 4,066, with
 all 16 new recordings. The 23 explosion sheets, `CRATERS.PIC` and `FIREA.PIC`
-were already in the cache. The pack limit is 4,096 resources.
+were already in the cache. The pack limit was then 4,096 resources; it was raised to 32,768 the same day
+([pack bounds](../spec/import-cache.md#pack-bounds)).
 
 ## Visual check
 

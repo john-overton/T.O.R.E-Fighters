@@ -30,4 +30,14 @@ assets. Remaining older packs can be retried on a later successful startup or
 import. Cache location follows the existing platform default or TORE_DATA_DIR.
 See [development setup](../DEVELOPMENT.md) for paths.
 
+## Pack bounds
+
+Agent implementation choice, 2026-09-28: a pack holds at most 32,768
+resources, 2 MiB each, with names of 1 to 32 bytes, and 1 GiB in all. These
+are sanity bounds that let a corrupt file be refused; a full Fighters
+Anthology import is about 4,100 resources and 180 MB. The import refuses to
+write a pack the reader would reject, and the reader streams the file rather
+than holding a second copy of it in memory. The format is unchanged, so packs
+written before the bounds were raised still load.
+
 Validation: [import cache cleanup](../baselines/import-cache.md).

@@ -135,11 +135,14 @@ impl Flare {
     fn step(&mut self, ground: &impl Fn(f64, f64) -> f64, wind: Vector) {
         let before = self.position;
         if !self.resting {
-            let speed = dot(self.velocity, self.velocity).sqrt();
+            // Drag works on the flare's motion through the air, so once its
+            // throw is spent the wind carries it as it falls.
+            let air: Vector = std::array::from_fn(|i| self.velocity[i] - wind[i]);
+            let speed = dot(air, air).sqrt();
             let drag = GRAVITY / (FLARE_TERMINAL * FLARE_TERMINAL) * speed;
             let damping = 1. / (1. + drag * TICK);
             for i in 0..3 {
-                self.velocity[i] *= damping;
+                self.velocity[i] = wind[i] + air[i] * damping;
             }
             self.velocity[1] -= GRAVITY * TICK;
             let t = f64::from(self.age) * TICK;
@@ -226,21 +229,30 @@ impl Chaff {
             / f32::from(CHAFF_FADE_TICKS))
         .min(1.)
     }
-    fn step(&mut self, ground: &impl Fn(f64, f64) -> f64) {
-        // Relative to still air the cloud stops almost at once, then settles.
+    fn step(&mut self, ground: &impl Fn(f64, f64) -> f64, wind: Vector) {
+        self.age = self.age.saturating_add(1);
+        // A cloud that has come down stays where it lies.
+        if self.position[1] <= ground(self.position[0], self.position[2]) {
+            return;
+        }
+        // Relative to the air the cloud stops almost at once, then settles
+        // and drifts with the wind.
         let keep = (-TICK / CHAFF_DRAG_SECONDS).exp();
-        self.velocity[0] *= keep;
-        self.velocity[2] *= keep;
-        self.velocity[1] = -CHAFF_FALL + (self.velocity[1] + CHAFF_FALL) * keep;
-        for i in 0..3 {
-            self.position[i] += self.velocity[i] * TICK;
+        let settled = [wind[0], wind[1] - CHAFF_FALL, wind[2]];
+        for ((position, velocity), settled) in self
+            .position
+            .iter_mut()
+            .zip(&mut self.velocity)
+            .zip(settled)
+        {
+            *velocity = settled + (*velocity - settled) * keep;
+            *position += *velocity * TICK;
         }
         let floor = ground(self.position[0], self.position[2]);
         if self.position[1] < floor {
             self.position[1] = floor;
             self.velocity = [0.; 3];
         }
-        self.age = self.age.saturating_add(1);
     }
 }
 
@@ -248,8 +260,8 @@ impl Chaff {
 pub struct Devices {
     pub flares: VecDeque<Flare>,
     pub chaff: VecDeque<Chaff>,
-    /// The mission wind, world feet per second, set by the host; flare smoke
-    /// drifts with it.
+    /// The mission wind, world feet per second, set by the host; flares, their
+    /// smoke and chaff clouds drift with it.
     pub wind: Vector,
     releases: u64,
 }
@@ -313,7 +325,7 @@ impl Devices {
         }
         self.flares.retain(|f| !f.finished());
         for chaff in &mut self.chaff {
-            chaff.step(ground);
+            chaff.step(ground, self.wind);
         }
         self.chaff.retain(|c| c.age < CHAFF_LIFETIME_TICKS);
     }
@@ -440,27 +452,71 @@ mod tests {
 
     #[test]
     fn flare_smoke_is_carried_by_the_wind() {
-        let mut still = Devices::default();
-        let mut windy = Devices {
+        let mut devices = Devices {
             wind: [0., 0., 30.],
             ..Devices::default()
         };
-        for devices in [&mut still, &mut windy] {
-            devices.release_flare(level(675.));
-            for _ in 0..240 {
-                devices.step(&|_, _| 0.);
+        devices.release_flare(level(675.));
+        run(&mut devices, 240);
+        let before: Vec<FlarePuff> = devices.puffs().cloned().collect();
+        run(&mut devices, 1);
+        // Each puff moves by its own dying push plus the whole wind.
+        let mut matched = 0;
+        for puff in devices.puffs() {
+            let Some(old) = before.iter().find(|p| p.path == puff.path) else {
+                continue;
+            };
+            for i in 0..3 {
+                let expected = old.position[i] + (old.velocity[i] + devices.wind[i]) / 120.;
+                assert!((puff.position[i] - expected).abs() < 1e-9);
             }
+            matched += 1;
         }
-        // Same flare, same puffs; each windy puff 30 ft/s farther downwind.
-        for (a, b) in still.puffs().zip(windy.puffs()) {
-            let seconds = f64::from(a.age) / 120.;
-            assert!((b.position[2] - a.position[2] - 30. * seconds).abs() < 1e-6);
-            assert_eq!(
-                (a.position[0], a.position[1]),
-                (b.position[0], b.position[1])
-            );
+        assert!(matched > 10);
+    }
+
+    #[test]
+    fn chaff_and_flares_drift_with_the_wind() {
+        let wind = [0., 0., 30.];
+        let mut devices = Devices {
+            wind,
+            ..Devices::default()
+        };
+        let release = Release {
+            position: [0., 20000., 0.],
+            ..level(675.)
+        };
+        devices.release_chaff(release);
+        // Dropped from a hover, so only the wind can move the flare sideways.
+        devices.release_flare(Release {
+            position: [0., 20000., 0.],
+            ..level(0.)
+        });
+        for _ in 0..1200 {
+            devices.step(&|_, _| 0.);
         }
-        assert!(windy.puffs().count() > 10);
+        let chaff = &devices.chaff[0];
+        assert!((chaff.velocity[2] - 30.).abs() < 0.01);
+        assert!((chaff.velocity[1] + CHAFF_FALL).abs() < 0.01);
+        // The falling flare has taken up nearly all of the wind.
+        let flare = &devices.flares[0];
+        assert!(flare.velocity[2] > 27. && flare.velocity[2] <= 30.);
+        assert!(flare.velocity[0].abs() < 1e-9);
+        // A chaff cloud on the ground stays put.
+        let mut landed = Devices {
+            wind,
+            ..Devices::default()
+        };
+        landed.release_chaff(Release {
+            position: [0., 3., 0.],
+            ..level(0.)
+        });
+        for _ in 0..600 {
+            landed.step(&|_, _| 0.);
+        }
+        let resting = landed.chaff[0].position;
+        landed.step(&|_, _| 0.);
+        assert_eq!(landed.chaff[0].position, resting);
     }
 
     #[test]

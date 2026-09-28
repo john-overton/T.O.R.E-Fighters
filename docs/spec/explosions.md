@@ -104,7 +104,7 @@ Opinionated:
   spread, wind drift and fade between 1,300 and 1,500 feet, which John set the
   same day after seeing the first versions. The crash explosion types, crater size
   6, puff size and darkness (0.5), and the fire's one-minute fade and loop
-  level (0.3) are agent choices. All other smoke, contrails and flare smoke
+  level (0.3) are agent choices. All other smoke, contrails, flares, flare smoke and chaff
   drift with the wind too ([smoke](damage-smoke.md)).
 
 ## Unknown

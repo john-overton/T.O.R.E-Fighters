@@ -155,7 +155,7 @@ striped OK/Fly cap and left button edge. Load Ordnance also requires
 Older caches missing these resources are refreshed from
 local media automatically, or with `--import` for media stored elsewhere.
 
-The app uses the same profile predicate at import time, reading FA_1/FA_2 directly. It does not consume `.local/ukraine-import` as a runtime directory. Refresh an external-media cache with `--import`; a missing theater resource invalidates an older menu-only cache and triggers local automatic import when default media exists. The app pack now permits 2,048 entries and 128 MiB total; it is still a development cache, not an interchange format.
+The app uses the same profile predicate at import time, reading FA_1/FA_2 directly. It does not consume `.local/ukraine-import` as a runtime directory. Refresh an external-media cache with `--import`; a missing theater resource invalidates an older menu-only cache and triggers local automatic import when default media exists. The app pack permits 32,768 entries, 2 MiB per entry and 1 GiB total; it is still a development cache, not an interchange format.
 
 See [theater recovery](formats/theater.md) for native addresses, sky/celestial dependencies, corrected T2 fields and remaining weather-engine work.
 
