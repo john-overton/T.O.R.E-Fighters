@@ -694,9 +694,9 @@ only read: the menu's camera changes go through the ordinary view commands.
 
 Design for stages A and B of the [multiplayer plan](multiplayer-plan.md#stages),
 written 2026-09-28. **Nothing in this section is built yet.** It is rewritten
-as the stages land. The type names, the tick rules, the handoff rules and every
-choice not credited to John are agent proposals awaiting his review. John's
-decisions are in the [multiplayer guide](MULTIPLAYER.md#decisions).
+as the stages land. John approved the design on 2026-09-28 with the decisions
+credited to him below; every other choice is an agent decision. His decisions
+are also in the [multiplayer guide](MULTIPLAYER.md#decisions).
 
 In short:
 
@@ -709,9 +709,8 @@ In short:
 - Every aircraft gets a pilot: the AI or a human seat. A human sends one
   tick-stamped input per tick. An aircraft can pass between the AI and a human in
   flight and keep its pose, fuel, stores and damage.
-- Single player keeps its results tick for tick, apart from the changes listed
-  under [single-player guarantee](#single-player-guarantee). Each of those needs
-  John's approval before it lands.
+- Single player keeps its results tick for tick, apart from the changes John
+  approved, listed under [single-player guarantee](#single-player-guarantee).
 
 ### Where the code stands
 
@@ -964,7 +963,8 @@ combat (below). The flight state is the same type for both, `flight::State`.
 Stores, damage and countermeasures convert exactly at a handoff, because the AI
 and the cockpit both build them from the same `live::Configuration`.
 
-*Agent decision:* this is a registry plus exact conversion, not one struct
+*Agent proposal, approved by John on 2026-09-28:* this is a registry plus exact
+conversion, not one struct
 holding every aircraft. One struct would mean rewriting the AI mission, about
 6,000 lines, to fly aircraft it does not own, and replacing single player's
 damage rules. The registry gives the same guarantees (one id per aircraft, one
@@ -1029,8 +1029,9 @@ player sees no difference.
 **Damage rules follow the pilot.** A human-flown aircraft uses today's player
 rules: twice the aircraft's hit points (native), the damage spread, instant kills
 and system faults gated by the Damage cheat, and Invulnerable. An AI-flown
-aircraft uses today's AI rules. *Agent proposal:* this keeps single player exact
-and gives every human the toughness the player has today.
+aircraft uses today's AI rules. *Agent proposal, approved by John on
+2026-09-28:* this keeps single player exact and gives every human the toughness
+the player has today.
 
 #### Hit tests and friendly fire
 
@@ -1039,18 +1040,17 @@ player included. Missiles are split: one aimed at the player can hit only the
 player, and any other can hit any aircraft row, its own launcher included, but
 never the player.
 
-Stage B's rule: **any round can hit any aircraft except its owner.** Friendly
-fire becomes a mission setting. On is single player's behaviour today. Off, a
-lobby choice, means no round damages an aircraft of its shooter's side.
-Collisions ignore the setting (*agent proposal*, from the guide's open
-questions).
+Stage B's rule (John, 2026-09-28, single player included): **a gun round can
+hit any aircraft except the one that fired it, and a missile or bomb can hit any
+aircraft once its fuze has armed**, whether it is an aircraft that gets in the
+way, a new target it shifts to or its own launcher. This ends the missile split:
+an enemy missile aimed at the player can hit a wingman in its path, a missile
+aimed at someone else can hit the player, and a decoyed missile no longer keeps
+aiming its hit at the player alone.
 
-The general rule changes single-player missiles: an enemy missile aimed at the
-player can hit a wingman in its path; a friendly or enemy missile aimed at
-someone else can hit the player; and no missile can hit its own launcher. This
-needs John's decision: apply the rule everywhere (*recommended*: one rule, and
-it retires the quirk that a decoyed missile keeps hitting only the player), or
-keep today's missile rule for single player only.
+Friendly fire becomes a mission setting. On is single player's behaviour. Off,
+a lobby choice, means no round damages an aircraft of its shooter's side, the
+shooter included. Collisions stay on whatever the setting (John, 2026-09-28).
 
 #### Handoff between the AI and a human
 
@@ -1106,12 +1106,14 @@ their fraction to within one point.
 
 #### Lead succession
 
-John's rule (2026-09-28): if a flight lead is shot down, lead passes to the next
-member, human or AI.
+John's rule (2026-09-28): if a flight lead is shot down, a human in the flight
+takes the lead if there is one; otherwise the next AI member does, and the
+flight re-forms on the new leader.
 
 - Each wing has a current leader. At the start of the mission it is the wing's
   first member. When the leader's aircraft is destroyed or its pilot ejects,
-  lead passes on that tick to the lowest-numbered living member, human or AI.
+  lead passes on that tick to the lowest-numbered living human member, or, if
+  there is none, to the lowest-numbered living AI member.
 - Everything in the AI that keys on "the leader" reads the current leader
   instead of the first member: formation, airfield clearance, escorts,
   automatic release, contact reports and orders.
@@ -1122,8 +1124,8 @@ member, human or AI.
   triggers are unknown, see the
   [radio chatter spec](spec/radio-chatter.md#youre-the-wingleader-now)).
 - Single player gains the same succession (John, 2026-09-28): when the player is
-  shot down, the first wingman leads the rest, and when an AI leader dies its
-  next member leads. This changes AI behaviour and its fingerprints, so it lands
+  shot down, the first living wingman leads the rest, and when an AI leader dies
+  its next living member leads. This changes AI behaviour and its fingerprints, so it lands
   as its own commit with re-recorded baselines.
 
 #### Radio, orders and debrief for each seat
@@ -1143,7 +1145,7 @@ member, human or AI.
 - **Mission result call.** The "mission accomplished" and "mission failure"
   calls become `World` output for every seat. Today they are sent only when an
   audio device exists, so with `--no-audio` their HUD lines and recording entries
-  would now appear.
+  now appear (John, 2026-09-28).
 
 #### Flight model in multiplayer
 
@@ -1158,13 +1160,13 @@ on the hybrid model is checked with AI probe runs against the legacy baselines.
 #### Single-player guarantee
 
 Single player keeps its results tick for tick through stages A and B, checked
-by the baseline harness after every commit. These changes are the exceptions.
-Each lands as its own commit with re-recorded baselines, and only after John
-approves it:
+by the baseline harness after every commit. These changes are the exceptions,
+approved by John on 2026-09-28. Each lands as its own commit with re-recorded
+baselines:
 
-1. The AI probe's output, when it switches to the full tick (planned).
-2. The missile hit rule, if applied to single player.
-3. Lead succession (John's rule; confirmation that it lands as described).
+1. The AI probe's output, when it switches to the full tick.
+2. The missile hit rule.
+3. Lead succession.
 4. The mission result call without an audio device.
 
 Presentation only, with no change to simulation or recordings: per-camera

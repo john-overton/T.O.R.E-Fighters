@@ -209,6 +209,6 @@ Planned for Milestone 2. John wrote the feature spec on 2026-09-28. The
 | Multiplayer chat | ☑ | ☑ | Planned. Lobby and in-flight text chat with retail's `~` key and five receivers (John, 2026-09-28). | Manual pp. 45-46; [guide](MULTIPLAYER.md#comms-and-chat) |
 | Observer mode | ☐ | ☑ | Planned. Replay viewer controls on the live session. | [Guide](MULTIPLAYER.md#rejoin-and-observers) |
 | Flight data link | ☐ | ☑ | Planned. Shared wing picture, locks and assignments, limited by aircraft era, also in single player. | [Guide](MULTIPLAYER.md#flight-data-link) |
-| Flight lead succession | ☐ | ☑ | Planned with multiplayer. Today no one takes over when a leader dies. The succession rule (next member, human or AI) is John's, 2026-09-28; the retail game's "You're the Wingleader now" call is known from the executable, but not what triggers it. | [Radio chatter](spec/radio-chatter.md#youre-the-wingleader-now) |
+| Flight lead succession | ☐ | ☑ | Planned with multiplayer. Today no one takes over when a leader dies. The succession rule is John's (2026-09-28): a human in the flight takes the lead if there is one, otherwise the next AI member; the retail game's "You're the Wingleader now" call is known from the executable, but not what triggers it. | [Radio chatter](spec/radio-chatter.md#youre-the-wingleader-now) |
 
 [manual]: https://pdfcoffee.com/famanual-pdf-free.html
