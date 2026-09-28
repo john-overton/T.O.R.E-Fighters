@@ -34,9 +34,9 @@ pub fn camera(eye: [f64; 3], target: [f64; 3]) -> crate::terrain::Camera {
     let distance = delta.iter().map(|v| v * v).sum::<f64>().sqrt();
     let maximum = tore_sim::sensors::FEET_PER_NAUTICAL_MILE;
     camera.position = if distance > maximum {
-        std::array::from_fn(|i| (target[i] - delta[i] * maximum / distance) as f32)
+        std::array::from_fn(|i| target[i] - delta[i] * maximum / distance)
     } else {
-        eye.map(|v| v as f32)
+        eye
     };
     camera.yaw = delta[0].atan2(delta[2]) as f32;
     camera.pitch = delta[1].atan2(delta[0].hypot(delta[2])) as f32;
@@ -49,7 +49,7 @@ pub fn camera(eye: [f64; 3], target: [f64; 3]) -> crate::terrain::Camera {
 pub fn fit(camera: &mut crate::terrain::Camera, points: impl IntoIterator<Item = [f64; 3]>) {
     use tore_sim::attitude::{Basis, dot};
     let basis = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.);
-    let eye = camera.position.map(f64::from);
+    let eye = camera.position;
     let mut zoom = f64::INFINITY;
     let mut nearest = f64::INFINITY;
     for point in points {
@@ -280,11 +280,11 @@ mod tests {
             let camera = camera(eye, target);
             let delta = std::array::from_fn(|i| target[i] - eye[i]);
             let distance = dot(delta, delta).sqrt();
-            let to_target = std::array::from_fn(|i| target[i] - f64::from(camera.position[i]));
+            let to_target = std::array::from_fn(|i| target[i] - camera.position[i]);
             let remaining = dot(to_target, to_target).sqrt();
             assert!((remaining - distance.min(6076.)).abs() < 0.01);
             if distance <= 6076. {
-                assert_eq!(camera.position, eye.map(|v| v as f32));
+                assert_eq!(camera.position, eye);
             }
             let along = dot(to_target, delta) / dot(delta, delta);
             assert!((0. ..=1.).contains(&along));
@@ -296,7 +296,7 @@ mod tests {
             assert!(dot(to_target, basis.forward) > 0.);
         }
         let coincident = camera(eye, eye);
-        assert_eq!(coincident.position, eye.map(|v| v as f32));
+        assert_eq!(coincident.position, eye);
         assert!(coincident.yaw.is_finite() && coincident.pitch.is_finite());
     }
 

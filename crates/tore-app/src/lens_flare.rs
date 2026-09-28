@@ -41,14 +41,14 @@ pub fn circles(world: &World, camera: &Camera, size: [u32; 2]) -> Vec<[f32; 4]> 
     if !world.glare_enabled() {
         return vec![];
     }
-    let Some(layer) = world.weather.sample(camera.position[1] as f64) else {
+    let Some(layer) = world.weather.sample(camera.position[1]) else {
         return vec![];
     };
     let sun = if world.smooth_weather {
         let Some(sun) = crate::celestial::visual_sun_direction(&layer, &world.weather) else {
             return vec![];
         };
-        if crate::celestial::glare_strength(world, f64::from(camera.position[1]), sun) <= 0. {
+        if crate::celestial::glare_strength(world, camera.position[1], sun) <= 0. {
             return vec![];
         }
         sun
@@ -205,10 +205,10 @@ impl LensFlare {
         let strength = if world.smooth_weather {
             world
                 .weather
-                .sample(f64::from(camera.position[1]))
+                .sample(camera.position[1])
                 .and_then(|layer| crate::celestial::visual_sun_direction(&layer, &world.weather))
                 .map_or(0., |sun| {
-                    crate::celestial::glare_strength(world, f64::from(camera.position[1]), sun)
+                    crate::celestial::glare_strength(world, camera.position[1], sun)
                 })
         } else {
             1.

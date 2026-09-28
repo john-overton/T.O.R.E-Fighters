@@ -102,7 +102,7 @@ impl Drone {
         anchor: Option<[f64; 3]>,
         heading: f64,
     ) -> Self {
-        let eye = camera.position.map(f64::from);
+        let eye = camera.position;
         if mode == Mode::Follow
             && let Some(anchor) = anchor
             && (0..3)
@@ -208,7 +208,7 @@ impl Drone {
         let mut position = self.position(anchor);
         position[1] = position[1].max(ground(position[0], position[2]) + GROUND_CLEARANCE);
         let mut camera = Camera::new();
-        camera.position = position.map(|v| v as f32);
+        camera.position = position;
         camera.yaw = self.yaw as f32;
         camera.pitch = self.pitch as f32;
         camera.roll = 0.;

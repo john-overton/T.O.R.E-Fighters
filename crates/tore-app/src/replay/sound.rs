@@ -215,7 +215,7 @@ pub fn listener(camera: &Camera, cut: u8) -> Listener {
         -f64::from(camera.roll),
     );
     Listener {
-        position: camera.position.map(f64::from),
+        position: camera.position,
         right: basis.right,
         view: cut,
         external: camera.hidden_target != Some(0),

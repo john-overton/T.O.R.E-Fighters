@@ -84,7 +84,7 @@ ZIP, PDF and print implementations were unchanged and not separately exercised.
 
 Implementation mode, branch `flight-views-pass`, based on `bcf85fb`, from the
 player reports in GitHub issue #1. Behavior is in the
-[view spec](../spec/flight-views.md#target-views-and-sight).
+[view spec](../spec/flight-views.md#target-views-and-visual-range).
 
 Synthetic tests cover Back and Up about the aircraft's own axes at climbing,
 diving, banked and inverted attitudes; the Up view through a full loop and a
@@ -93,11 +93,11 @@ staying put without a press and moving on when the followed wingman is lost;
 which views draw the player's airframe; and the default Other View showing it.
 A combat-state test turns the radar off with the target 3,000 feet ahead: the
 selection, HUD target and weapon observation drop, the view target stays;
-clearing the designation drops it; out of sight drops it; and seeing it again
-does not restore it. The compass tests cover tick labels, the wrap across
-north, both span edges, the off-strip arrow and bearing staying inside the
-strip, narrowing against the real instrument window rectangles, and a render
-with no ink on or near any window.
+clearing the designation drops it; 5,000 feet behind the pilot keeps it;
+past the 10 nmi visual range drops it; and coming back inside does not
+restore it (range rule revised the same day after John's play test). The compass tests cover tick labels centered on the
+bearing, the wrap across north, narrowing against the real instrument window
+rectangles, and a render with no ink on or near any window.
 
 Repository checks: formatting, Clippy with warnings denied, workspace tests
 (1,817 passed, 8 ignored), workspace build, 84 Python tests, source and both
@@ -115,9 +115,40 @@ assets in an isolated copy of the dev profile. Local images are in
 | F2 rolling / climbing | `--maneuver roll` or `loop`, `--flight-probe-ticks 150` or `400`, `--flight-view 3` | Tails and horizon tilt together; climbing shows ground behind |
 | F3 through a loop | `--maneuver loop --flight-probe-ticks 700`, `1100`, `1500`, `--flight-view 4` | Sky, then ground overhead while inverted, then ground; no flip |
 | F3 rolling | `--maneuver roll --flight-probe-ticks 150 --flight-view 4` | Follows the canopy roof, not the world's up |
-| F7 compass | `--hud-target-preview 40,20,6000 --flight-view 8` | Diamond at the target's bearing; strip clear of both top windows |
-| F7 target behind | `--hud-target-preview 150,10,6000 --flight-view 8` | Radar has lost it and Target Cam shows NO TARGET, F7 still follows it in sight; arrow and bearing inside the strip's right end |
+| F7 compass | `--hud-target-preview 40,20,6000 --flight-view 8` | Strip clear of both top windows (first version, with a target diamond) |
+| F7 target behind | `--hud-target-preview 150,10,6000 --flight-view 8` | Radar has lost it and Target Cam shows NO TARGET, F7 still follows it within visual range; after John's play test the strip centers on the target's bearing, reading 167 |
 
 Not tested: F6 cycling in a live mission with several wingmen (covered
 synthetically only), a hand-flown sortie through every view, and sight loss
 behind cloud, which the visual sensor does not model.
+
+### Exterior aircraft shimmer, 2026-09-28
+
+John saw exterior aircraft jitter and vibrate slightly. A 120 samples a second
+Tacview export of his Quick Mission showed no attitude or position noise beyond
+the export's 0.01 degree and 1 cm rounding, and render interpolation was
+already per tick. The cause was 32-bit world coordinates: at about 1,070,000
+feet they step 1/8 foot, and every aircraft vertex and the camera snapped
+separately. The fix and its design are in
+[architecture](../ARCHITECTURE.md). A unit test builds the same aircraft near
+the map origin and a million feet away: world coordinates are off by more than
+0.03 feet, and origin-relative vertices by less than 0.002 feet.
+
+GPU captures, 960x720, F10 at 4x zoom looking up from behind in clear weather,
+eight consecutive ticks, the pre-fix build against this one, measuring the
+airframe's pixel centre:
+
+| Case | Before | After |
+| --- | --- | --- |
+| Straight and level | 0.01 pixel per tick | 0.01 pixel per tick |
+| Steady banked turn, same tick compared | centre off by 0.06 to 0.27 pixel, alternating sign | reference |
+| Steady banked turn, worst tick-to-tick move | 0.99 pixel | 0.66 pixel |
+
+In straight flight the old chase camera rounded with the aircraft, so the
+error held still; it moved in turns, relation views and for other aircraft.
+Over 60 ticks of the turn the fixed build's centre drifts smoothly by about 3
+pixels at normal zoom, which is the aircraft's own attitude changing, not a
+rendering effect. The seven GPU tests, including shadows across terrain and
+objects and airports under distant moving cameras, and `--smoke-test` pass.
+Relation views could not be measured this way over city terrain and are
+covered by the unit test only.

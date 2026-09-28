@@ -1,6 +1,6 @@
 //! Bearing compass for the F7 player to target view: the HUD heading strip
-//! stretched across the top of the view, with a marker at the target's
-//! bearing. Opinionated, requested by John on 2026-09-28.
+//! stretched across the top of the view, centered on the bearing to the
+//! target. Opinionated, requested by John on 2026-09-28.
 use crate::{
     flight_canvas::{FlightCanvas, HUD_SCALE},
     instruments::Instruments,
@@ -12,70 +12,42 @@ use tore_formats::font::Font;
 const LEFT: f64 = 160.;
 const RIGHT: f64 = 480.;
 const PER_DEGREE: f64 = 2.;
-/// Degrees either side of the heading the strip shows.
+/// Degrees either side of the target's bearing the strip shows.
 const SPAN: f64 = (RIGHT - LEFT) / 2. / PER_DEGREE;
 /// Gap above the strip, in 640x480 layer units.
 const MARGIN: f64 = 6.;
 /// Clearance from an instrument window's inner edge, in layer units.
 const GAP: f64 = 4.;
-/// Length of the off-strip arrow, in HUD units.
-const ARROW: f64 = 12.;
 // Rows below the strip's top, in HUD units, spaced as the HUD's own strip.
-const MARKER: f64 = 4.;
-const LABEL: f64 = 11.;
-const TICK: f64 = 24.;
-const CARET: f64 = 31.;
-const READOUT: f64 = 39.;
+const LABEL: f64 = 4.;
+const TICK: f64 = 17.;
+const CARET: f64 = 24.;
+const READOUT: f64 = 32.;
 
-#[derive(Debug, PartialEq)]
-enum Target {
-    /// Strip x of the target's bearing.
-    Marker(f64),
-    /// Off the left end, with the three-digit bearing.
-    Left(String),
-    Right(String),
-}
 #[derive(Debug, PartialEq)]
 struct Layout {
     /// Strip x and two-digit label of each 10-degree tick.
     ticks: Vec<(f64, String)>,
-    heading: String,
-    target: Target,
+    bearing: String,
 }
-/// The strip in 640-wide units for compass `heading` and target `bearing`.
-fn layout(heading: f64, bearing: f64) -> Layout {
-    let heading = heading.rem_euclid(360.);
-    let first = ((heading - SPAN) / 10.).ceil() as i32 * 10;
+/// The strip in 640-wide units, centered on compass `bearing`.
+fn layout(bearing: f64) -> Layout {
+    let bearing = bearing.rem_euclid(360.);
+    let first = ((bearing - SPAN) / 10.).ceil() as i32 * 10;
     let ticks = (0..)
         .map(|i| first + i * 10)
-        .take_while(|&tick| f64::from(tick) <= heading + SPAN)
+        .take_while(|&tick| f64::from(tick) <= bearing + SPAN)
         .map(|tick| {
             (
-                strip_x(f64::from(tick) - heading),
+                (LEFT + RIGHT) / 2. + (f64::from(tick) - bearing) * PER_DEGREE,
                 format!("{:02}", tick.rem_euclid(360) / 10),
             )
         })
         .collect();
-    // Relative bearing in (-180, 180]: a target dead astern reads right.
-    let off = 180. - (heading - bearing + 180.).rem_euclid(360.);
-    let target = if off.abs() <= SPAN {
-        Target::Marker(strip_x(off))
-    } else if off > 0. {
-        Target::Right(three_digits(bearing))
-    } else {
-        Target::Left(three_digits(bearing))
-    };
     Layout {
         ticks,
-        heading: three_digits(heading),
-        target,
+        bearing: format!("{:03}", bearing.round() as u32 % 360),
     }
-}
-fn strip_x(off: f64) -> f64 {
-    (LEFT + RIGHT) / 2. + off * PER_DEGREE
-}
-fn three_digits(degrees: f64) -> String {
-    format!("{:03}", degrees.rem_euclid(360.).round() as u32 % 360)
 }
 /// Compass bearing in degrees from `from` to `to`, as `hud::heading` reads a
 /// yaw: x east, z north.
@@ -85,36 +57,22 @@ pub fn bearing(from: [f64; 3], to: [f64; 3]) -> f64 {
         .to_degrees()
         .rem_euclid(360.)
 }
-/// Draw the strip over the flight view for aircraft `heading` and target
-/// `bearing`, both compass degrees, in the HUD's font and color at the HUD's
-/// on-screen size, smoothed like the in-flight messages. It narrows to clear
-/// the instrument windows shown beside it.
-pub fn draw(
-    canvas: &mut FlightCanvas,
-    instruments: &Instruments,
-    font: &Font,
-    heading: f64,
-    bearing: f64,
-) {
+/// Draw the strip over the flight view, centered on the target's compass
+/// `bearing`, in the HUD's font and color at the HUD's on-screen size,
+/// smoothed like the in-flight messages. It narrows to clear the instrument
+/// windows shown beside it.
+pub fn draw(canvas: &mut FlightCanvas, instruments: &Instruments, font: &Font, bearing: f64) {
     let size = canvas.size.map(f64::from);
     let windows: Vec<_> = (0..instruments.pages.len())
         .map(|slot| instruments.screen_rect(slot, size))
         .collect();
-    draw_within(
-        canvas,
-        font,
-        instruments.hud_color,
-        heading,
-        bearing,
-        &windows,
-    );
+    draw_within(canvas, font, instruments.hud_color, bearing, &windows);
 }
 type Rect = (f64, f64, f64, f64);
 fn draw_within(
     canvas: &mut FlightCanvas,
     font: &Font,
     color: [u8; 3],
-    heading: f64,
     bearing: f64,
     windows: &[Rect],
 ) {
@@ -132,20 +90,10 @@ fn draw_within(
         width: canvas.size[0] as usize,
         scale,
     };
-    let layout = layout(heading, bearing);
-    let side = match layout.target {
-        Target::Marker(_) => 0.,
-        Target::Left(_) => -1.,
-        Target::Right(_) => 1.,
-    };
-    let end = c + side * half;
+    let layout = layout(bearing);
     let centered = |text: &str, x: f64| x - FlightCanvas::text_width(font, text, scale) / 2.;
     for (x, label) in &layout.ticks {
         let x = across(*x);
-        // The edge arrow takes the place of the ticks it would cross.
-        if side != 0. && (end - x) * side < ARROW * scale {
-            continue;
-        }
         ink.line((x, y(TICK)), (x, y(TICK + 5.)));
         ink.text(font, label, centered(label, x), y(LABEL));
     }
@@ -153,31 +101,10 @@ fn draw_within(
     ink.line((c, y(CARET + 5.)), (c + 5. * scale, y(CARET)));
     ink.text(
         font,
-        &layout.heading,
-        centered(&layout.heading, c),
+        &layout.bearing,
+        centered(&layout.bearing, c),
         y(READOUT),
     );
-    match &layout.target {
-        Target::Marker(x) => {
-            let (x, m, r) = (across(*x), y(MARKER), 4. * scale);
-            ink.line((x, m - r), (x + r, m));
-            ink.line((x + r, m), (x, m + r));
-            ink.line((x, m + r), (x - r, m));
-            ink.line((x - r, m), (x, m - r));
-        }
-        Target::Left(text) | Target::Right(text) => {
-            // Outward arrow on the tick row inside the strip's end, the
-            // bearing beneath it on the readout row.
-            let at = |units: f64| end - side * units * scale;
-            let m = y(TICK + 2.5);
-            ink.line((at(ARROW - 1.), m), (at(0.5), m));
-            ink.line((at(0.5), m), (at(4.5), m - 4. * scale));
-            ink.line((at(0.5), m), (at(4.5), m + 4. * scale));
-            let width = FlightCanvas::text_width(font, text, scale);
-            let left = if side > 0. { end - width } else { end };
-            ink.text(font, text, left, y(READOUT));
-        }
-    }
     ink.blend(canvas, color);
 }
 /// Half the strip's width on a `width`-wide view: a quarter of the view, less
@@ -261,54 +188,28 @@ impl Ink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn marker(heading: f64, bearing: f64) -> Target {
-        layout(heading, bearing).target
-    }
     #[test]
-    fn ticks_every_ten_degrees_at_two_pixels_per_degree() {
-        let north = layout(0., 0.);
+    fn ticks_every_ten_degrees_centered_on_the_bearing() {
+        let north = layout(0.);
         assert_eq!(north.ticks.len(), 17);
         assert_eq!(north.ticks[0], (160., "28".to_owned()));
         assert_eq!(north.ticks[8], (320., "00".to_owned()));
         assert_eq!(north.ticks[16], (480., "08".to_owned()));
         assert!(north.ticks.windows(2).all(|t| t[1].0 - t[0].0 == 20.));
-        assert_eq!(north.heading, "000");
-        let east = layout(90., 0.);
+        assert_eq!(north.bearing, "000");
+        let east = layout(90.);
         assert_eq!(east.ticks[0], (160., "01".to_owned()));
         assert_eq!(east.ticks[8], (320., "09".to_owned()));
         assert_eq!(east.ticks[16], (480., "17".to_owned()));
-        assert_eq!(east.heading, "090");
-        let between = layout(355., 0.);
+        assert_eq!(east.bearing, "090");
+        // Across north, and a bearing between ticks.
+        let between = layout(355.);
         assert_eq!(between.ticks[0], (170., "28".to_owned()));
+        assert_eq!(between.ticks[8], (330., "00".to_owned()));
         assert_eq!(between.ticks.last().unwrap(), &(470., "07".to_owned()));
-        assert_eq!(between.heading, "355");
-    }
-    #[test]
-    fn marker_wraps_across_north() {
-        assert_eq!(marker(355., 5.), Target::Marker(340.));
-        assert_eq!(marker(5., 355.), Target::Marker(300.));
-        assert_eq!(marker(-5., 5.), Target::Marker(340.));
-    }
-    #[test]
-    fn marker_reaches_both_ends_of_the_strip() {
-        assert_eq!(marker(10., 90.), Target::Marker(480.));
-        assert_eq!(marker(10., 290.), Target::Marker(160.));
-        assert_eq!(marker(0., 80.6), Target::Right("081".to_owned()));
-        assert_eq!(marker(0., 279.4), Target::Left("279".to_owned()));
-    }
-    #[test]
-    fn targets_beyond_the_strip_point_off_the_matching_end() {
-        assert_eq!(marker(0., 100.), Target::Right("100".to_owned()));
-        assert_eq!(marker(0., 250.), Target::Left("250".to_owned()));
-        assert_eq!(marker(350., 200.), Target::Left("200".to_owned()));
-        assert_eq!(marker(300., 60.), Target::Right("060".to_owned()));
-        assert_eq!(marker(0., 359.5), Target::Marker(319.));
-    }
-    #[test]
-    fn target_dead_astern_points_right() {
-        assert_eq!(marker(0., 180.), Target::Right("180".to_owned()));
-        assert_eq!(marker(90., 270.), Target::Right("270".to_owned()));
-        assert_eq!(marker(270., 90.), Target::Right("090".to_owned()));
+        assert_eq!(between.bearing, "355");
+        assert_eq!(layout(-5.), between);
+        assert_eq!(layout(359.6).bearing, "000");
     }
     #[test]
     fn bearing_matches_hud_heading() {
@@ -371,11 +272,11 @@ mod tests {
     }
     #[test]
     fn draws_only_along_the_top_clear_of_the_windows() {
-        for (size, bearing) in [([960, 720], 20.), ([1280, 720], 20.), ([960, 720], 180.)] {
+        for (size, bearing) in [([960, 720], 20.), ([1280, 720], 20.), ([960, 720], 355.)] {
             let instruments = Instruments::default();
             let mut canvas = FlightCanvas::default();
             canvas.blank(size);
-            draw(&mut canvas, &instruments, &font(), 0., bearing);
+            draw(&mut canvas, &instruments, &font(), bearing);
             let rects = windows(&instruments, size.map(f64::from));
             let ink = inked(&canvas);
             assert!(!ink.is_empty());
@@ -388,25 +289,6 @@ mod tests {
                     "{size:?} ink at {x},{y} touches a window"
                 );
             }
-        }
-    }
-    #[test]
-    fn edge_arrow_and_bearing_stay_inside_the_strip() {
-        let size = [960u32, 720];
-        let rects = windows(&Instruments::default(), size.map(f64::from));
-        for (heading, bearing, side) in [(0., 150., 1.), (0., 210., -1.), (350., 170., 1.)] {
-            let mut canvas = FlightCanvas::default();
-            canvas.blank(size);
-            draw_within(&mut canvas, &font(), [0, 255, 0], heading, bearing, &rects);
-            let scale = 1.5 * HUD_SCALE;
-            let inset = GAP * 1.5 + FlightCanvas::text_width(&font(), "00", scale) / 2.;
-            let half = half_width(960., &rects, 80., inset);
-            let end = 480. + side * half;
-            let ink = inked(&canvas);
-            // Nothing beyond the arrow's end of the strip.
-            assert!(ink.iter().all(|&(x, _)| (x + 0.5 - end) * side < 1.));
-            // The arrow tip and the bearing text reach that end.
-            assert!(ink.iter().any(|&(x, _)| (x + 0.5 - end).abs() < 1.5));
         }
     }
 }

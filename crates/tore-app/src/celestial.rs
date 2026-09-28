@@ -160,8 +160,8 @@ impl Celestial {
             .filter(|r| *r > 0.)
             .max_by(f32::total_cmp)
     }
-    pub fn sun_uniform(&self, world: &World, altitude: f32) -> Vec<f32> {
-        let layer = world.weather.sample(altitude as f64);
+    pub fn sun_uniform(&self, world: &World, altitude: f64) -> Vec<f32> {
+        let layer = world.weather.sample(altitude);
         let seconds = world.weather.seconds_of_day();
         let direction = layer.as_ref().and_then(|layer| {
             if world.smooth_weather {
@@ -194,7 +194,7 @@ impl Celestial {
         out
     }
     pub fn vertices(&self, world: &World, camera: &Camera, height: u32) -> Vec<f32> {
-        let Some(layer) = world.weather.sample(camera.position[1] as f64) else {
+        let Some(layer) = world.weather.sample(camera.position[1]) else {
             return Vec::new();
         };
         if layer.flags & 16 == 0 {

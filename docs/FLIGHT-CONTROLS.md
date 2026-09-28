@@ -288,7 +288,7 @@ friendly aircraft and wrecks. Enter selects the visible radar or infrared
 contact nearest the nose. A mouse click on the scope designates a contact
 directly. A target the scope loses drops completely
 ([rules](spec/radar.md#target-selection-keys)); only the F4, F7 and F8 views
-keep following it while the pilot can still see it. SAFE/EMPTY/STATION FAILED and the sensor and range inhibits are shown
+keep following it while it is within visual range (10 nmi). SAFE/EMPTY/STATION FAILED and the sensor and range inhibits are shown
 separately from lock; a terrain-masked target now reports NO TARGET, because
 masking clears the contact rather than inhibiting the launch. The systems continuation below adds automatic source-weighted failures
 for supported equipment. Quick Mission AI integration is described in the [AI spec](spec/ai.md).

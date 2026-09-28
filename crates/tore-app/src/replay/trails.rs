@@ -70,7 +70,7 @@ pub fn ribbon(
     camera: &Camera,
     height: f64,
 ) {
-    let eye = camera.position.map(f64::from);
+    let eye = camera.position;
     let focal = height / 2. * 3f64.sqrt() * f64::from(camera.zoom.max(0.01));
     let pixels = WIDTH * height / 480.;
     let (sy, cy) = f64::from(camera.yaw).sin_cos();

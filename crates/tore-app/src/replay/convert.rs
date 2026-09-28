@@ -1199,7 +1199,8 @@ mod tests {
                             art.vertices_for(
                                 s.pilots.iter().map(|p| (p.position, p.heading, p.phase)),
                                 &ownship.palette,
-                                camera.position.map(f64::from),
+                                camera.position,
+                                [0.; 3],
                             )
                         });
                         assert_same_vertices("ejected pilots", &pa, &pb);

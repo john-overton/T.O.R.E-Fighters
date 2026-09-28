@@ -467,7 +467,7 @@ pub fn aircraft_batches<'a>(
                 contacts.extend(Contact::new(
                     first,
                     vertices.len() / 10,
-                    pose.position,
+                    world.relative(pose.position),
                     extent,
                 ));
             }
@@ -496,6 +496,12 @@ pub fn combat_geometry(
     let mut v = Vec::new();
     let mut contacts = Vec::new();
     let extent = ownship.visual_extent();
+    // Everything here is built relative to the render origin, in f64 until
+    // the vertex is written.
+    let local = |p: Vector| world.relative(p);
+    let mut eye = Camera::new();
+    eye.position = local(camera.position);
+    [eye.yaw, eye.pitch, eye.roll] = [camera.yaw, camera.pitch, camera.roll];
     for target in snapshot
         .targets
         .iter()
@@ -504,7 +510,12 @@ pub fn combat_geometry(
         let pose = ownship_pose(ownship_state, target);
         let first = v.len() / 10;
         v.extend(ownship.vertices(&pose, camera, world));
-        contacts.extend(Contact::new(first, v.len() / 10, pose.position, extent));
+        contacts.extend(Contact::new(
+            first,
+            v.len() / 10,
+            local(pose.position),
+            extent,
+        ));
     }
     for piece in snapshot.debris.iter().filter(|p| p.draw == Draw::Ownship) {
         let mut pose = ownship_state.clone();
@@ -529,7 +540,7 @@ pub fn combat_geometry(
             mesh(
                 &mut v,
                 shape,
-                p.position,
+                local(p.position),
                 right,
                 cross(p.direction, right),
                 p.direction,
@@ -537,13 +548,14 @@ pub fn combat_geometry(
             );
         }
         if p.gun && p.tracer {
-            tracer(&mut v, p.previous, p.position, camera);
+            tracer(&mut v, local(p.previous), local(p.position), &eye);
         } else if !p.gun {
             // A visible thin strip marks the actual swept projectile segment.
             let right = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.).right;
-            let a: Vector = std::array::from_fn(|i| p.previous[i] + right[i] * 0.4);
-            let b: Vector = std::array::from_fn(|i| p.previous[i] - right[i] * 0.4);
-            for pos in [a, b, p.position] {
+            let previous = local(p.previous);
+            let a: Vector = std::array::from_fn(|i| previous[i] + right[i] * 0.4);
+            let b: Vector = std::array::from_fn(|i| previous[i] - right[i] * 0.4);
+            for pos in [a, b, local(p.position)] {
                 vertex(&mut v, pos, [1., 0.8, 0.3]);
             }
         }
@@ -586,8 +598,9 @@ pub fn combat_geometry(
                 [1. / 20., 0.],
                 [1. / 20., 1. / 20.],
             ] {
+                let at = local(e.position);
                 let pos: Vector = std::array::from_fn(|i| {
-                    e.position[i]
+                    at[i]
                         + basis.right[i] * f64::from(xy[0] + d[0]) * scale
                         + basis.up[i] * f64::from(xy[1] + d[1]) * scale
                 });
@@ -776,7 +789,7 @@ fn tracer(out: &mut Vec<f32>, previous: Vector, position: Vector, camera: &Camer
     if tore_sim::attitude::dot(segment, segment) < 1e-12 {
         return;
     }
-    let view: Vector = std::array::from_fn(|i| f64::from(camera.position[i]) - position[i]);
+    let view: Vector = std::array::from_fn(|i| camera.position[i] - position[i]);
     let cross = cross(segment, view);
     let (start, ribbon, side) = if tore_sim::attitude::dot(cross, cross)
         > 0.25 * tore_sim::attitude::dot(view, view).max(1e-12)

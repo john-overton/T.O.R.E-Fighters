@@ -3465,7 +3465,7 @@ impl ApplicationHandler for App {
                                 );
                                 audio.spatial_tick(
                                     tore_sim::acoustics::Listener {
-                                        position: listener_camera.position.map(f64::from),
+                                        position: listener_camera.position,
                                         right: basis.right,
                                         view: self.flight_view,
                                         external: !self.view_rig.cockpit(self.flight_view),
@@ -3579,7 +3579,7 @@ impl ApplicationHandler for App {
                             let [yaw, pitch] = tore_sim::g_effects::shake(presented.g, seconds);
                             look::apply(
                                 &mut self.camera,
-                                presented.view_position().map(|v| v as f32),
+                                presented.view_position(),
                                 [yaw as f32, pitch as f32],
                                 false,
                             );
@@ -3587,8 +3587,8 @@ impl ApplicationHandler for App {
                         self.camera.zoom = self.flight_ui.zoom;
                         // One resolved instant per frame, shared by the main view,
                         // the mirrors and the camera panels.
-                        self.world
-                            .resolve_palette(f64::from(self.camera.position[1]));
+                        self.world.resolve_palette(self.camera.position[1]);
+                        self.world.set_origin(self.camera.position);
                         let vapor = vapor_vertices(
                             &self.vapor,
                             &self.world,
@@ -3759,7 +3759,8 @@ impl ApplicationHandler for App {
                                         .iter()
                                         .map(|p| (p.position, p.heading, p.phase)),
                                     &self.hornet.palette,
-                                    self.camera.position.map(f64::from),
+                                    self.camera.position,
+                                    self.world.origin,
                                 ),
                             );
                         }
@@ -3830,7 +3831,7 @@ impl ApplicationHandler for App {
                         );
                         let cockpit_palette = self.hornet.cockpit_palette(
                             &self.world,
-                            self.camera.position[1] as f64,
+                            self.camera.position[1],
                             self.flight_ui.brightness,
                         );
                         self.instruments.hud_color =
@@ -3987,7 +3988,6 @@ impl ApplicationHandler for App {
                                 &mut self.flight_canvas,
                                 &self.instruments,
                                 &self.hornet.hud_font,
-                                hud::heading(presented.yaw),
                                 view_compass::bearing(presented.position, target.position),
                             );
                         }
@@ -4062,8 +4062,8 @@ impl ApplicationHandler for App {
                         for _ in 0..self.flight_clock.steps(elapsed) {
                             self.world.step_weather(0., &self.camera);
                         }
-                        self.world
-                            .resolve_palette(f64::from(self.camera.position[1]));
+                        self.world.resolve_palette(self.camera.position[1]);
+                        self.world.set_origin(self.camera.position);
                         self.frame_time = now;
                         quick_mission::hud(
                             &mut self.menu.pixels,
@@ -8032,7 +8032,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         {
             return Err("TORE_WEATHER_VIEW needs x,y,z,yaw,pitch[,roll] in feet/degrees".into());
         }
-        camera.position.copy_from_slice(&values[..3]);
+        camera.position = std::array::from_fn(|i| f64::from(values[i]));
         camera.yaw = values[3].to_radians();
         camera.pitch = values[4].to_radians();
         camera.roll = values.get(5).copied().unwrap_or(0.).to_radians();
@@ -8151,7 +8151,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             let mut weather_view = hornet.camera(&flight, flight_view, Default::default());
             look::apply(
                 &mut weather_view,
-                flight.position.map(|v| v as f32),
+                flight.position,
                 flight_look.map(f32::to_radians),
                 matches!(flight_view, 1 | 2),
             );
@@ -8315,7 +8315,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 let mut weather_view = hornet.camera(&flight, flight_view, Default::default());
                 look::apply(
                     &mut weather_view,
-                    flight.position.map(|v| v as f32),
+                    flight.position,
                     flight_look.map(f32::to_radians),
                     matches!(flight_view, 1 | 2),
                 );

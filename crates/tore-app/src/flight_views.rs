@@ -364,12 +364,7 @@ impl Rig {
             if self.reference != Reference::Player {
                 camera = body_camera(subject, view);
             }
-            crate::look::apply(
-                &mut camera,
-                subject.position.map(|v| v as f32),
-                look,
-                matches!(view, 1 | 2),
-            );
+            crate::look::apply(&mut camera, subject.position, look, matches!(view, 1 | 2));
         } else {
             match view {
                 TRACK => {
@@ -384,7 +379,7 @@ impl Rig {
                     camera = body_camera(subject, 0);
                     crate::look::apply(
                         &mut camera,
-                        subject.position.map(|v| v as f32),
+                        subject.position,
                         [yaw as f32, pitch as f32],
                         false,
                     );
@@ -466,7 +461,7 @@ impl Rig {
 }
 fn body_camera(body: Body, view: u8) -> Camera {
     let mut camera = Camera::new();
-    camera.position = body.position.map(|v| v as f32);
+    camera.position = body.position;
     let [yaw, pitch, bank] = body.basis.angles();
     camera.yaw = yaw as f32;
     camera.pitch = pitch as f32;
@@ -476,8 +471,8 @@ fn body_camera(body: Body, view: u8) -> Camera {
         1 | 2 => {
             let angle = yaw + if view == 2 { 0.8 } else { 0. };
             let distance = if view == 2 { 130. } else { 180. };
-            camera.position[0] -= (angle.sin() * distance) as f32;
-            camera.position[2] -= (angle.cos() * distance) as f32;
+            camera.position[0] -= angle.sin() * distance;
+            camera.position[2] -= angle.cos() * distance;
             camera.position[1] += 60.;
             camera.yaw = angle as f32;
             camera.pitch = -0.3;
@@ -520,7 +515,7 @@ fn direction(from: Vector, to: Vector, fallback: Vector) -> Vector {
 fn facing(eye: Vector, target: Vector, fallback: Vector) -> Camera {
     let d = direction(eye, target, fallback);
     let mut c = Camera::new();
-    c.position = eye.map(|v| v as f32);
+    c.position = eye;
     c.yaw = d[0].atan2(d[2]) as f32;
     c.pitch = d[1].atan2(d[0].hypot(d[2])) as f32;
     c
@@ -582,15 +577,12 @@ mod tests {
         let scene = scene();
         let mut rig = Rig::default();
         let c = camera(&mut rig, TARGET, &scene);
-        near(c.position.map(f64::from), [-180., 1060., 0.]);
+        near(c.position, [-180., 1060., 0.]);
         assert!((c.yaw - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
         let c = camera(&mut rig, TARGET_PLAYER, &scene);
-        near(c.position.map(f64::from), [1180., 1060., 0.]);
+        near(c.position, [1180., 1060., 0.]);
         assert!((c.yaw + std::f32::consts::FRAC_PI_2).abs() < 1e-6);
-        near(
-            camera(&mut rig, WING, &scene).position.map(f64::from),
-            [0., 1060., -180.],
-        );
+        near(camera(&mut rig, WING, &scene).position, [0., 1060., -180.]);
         assert!(!rig.cockpit(TARGET));
     }
     #[test]
@@ -615,7 +607,7 @@ mod tests {
         let mut scene = scene();
         let mut rig = Rig::default();
         let first = camera(&mut rig, FLY_BY, &scene);
-        near(first.position.map(f64::from), [300., 1100., 600.]);
+        near(first.position, [300., 1100., 600.]);
         rig.other_pending = true;
         rig.save(FLY_BY, [0.; 2], 2.);
         assert!(!rig.other_pending);
@@ -642,7 +634,7 @@ mod tests {
         ];
         let c = camera(&mut rig, THREAT, &scene);
         assert_eq!(c.yaw, 0.);
-        near(c.position.map(f64::from), [0., 1060., -180.]);
+        near(c.position, [0., 1060., -180.]);
     }
     #[test]
     fn last_missile_keeps_its_target_and_does_not_revert_to_older_shots() {
@@ -653,7 +645,7 @@ mod tests {
             shot(11, 0, Some(2), [0., 1000., 100.]),
         ];
         let c = camera(&mut rig, MISSILE, &scene);
-        near(c.position.map(f64::from), [0., 1010., 70.]);
+        near(c.position, [0., 1010., 70.]);
         scene.target = Some(1);
         assert_eq!(camera(&mut rig, MISSILE, &scene).yaw, 0.);
         scene.missiles.pop();
@@ -686,10 +678,8 @@ mod tests {
         scene.bodies[0].position = scene.player.position;
         let c = camera(&mut rig, TARGET, &scene);
         assert!(
-            c.position
-                .iter()
-                .chain([&c.yaw, &c.pitch])
-                .all(|v| v.is_finite())
+            c.position.iter().all(|v| v.is_finite())
+                && [c.yaw, c.pitch].iter().all(|v| v.is_finite())
         );
         rig.save(TARGET, [0.; 2], 1.5);
         scene.bodies[0].position = [1000., 1000., 0.];
@@ -756,16 +746,16 @@ mod tests {
         assert_eq!(camera(&mut rig, 1, &scene).hidden_target, None);
         // Its newest missile, toward that missile's target.
         near(
-            camera(&mut rig, MISSILE, &scene).position.map(f64::from),
+            camera(&mut rig, MISSILE, &scene).position,
             [0., 1010., 470.],
         );
         // The missile aimed at it, and its wingman.
         near(
-            camera(&mut rig, THREAT, &scene).position.map(f64::from),
+            camera(&mut rig, THREAT, &scene).position,
             [1000., 1060., -180.],
         );
         near(
-            camera(&mut rig, WING, &scene).position.map(f64::from),
+            camera(&mut rig, WING, &scene).position,
             [1000., 1060., 180.],
         );
         // The player by id, and an aircraft no longer in the scene.

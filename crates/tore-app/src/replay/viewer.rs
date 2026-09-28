@@ -290,7 +290,7 @@ pub fn name_labels<'a>(
     who: &dyn Fn(u32) -> (String, Side),
 ) -> Vec<Label> {
     let scale = Placement::new(size).scale();
-    let eye = camera.position.map(f64::from);
+    let eye = camera.position;
     let mut out = Vec::new();
     for pose in poses {
         if Some(pose.id) == camera.hidden_target || (!pose.airborne && pose.crashed) {
@@ -1841,7 +1841,8 @@ impl Viewer {
             selected: self.selected,
         };
         self.sound.frame(audio, &moment);
-        self.world.resolve_palette(f64::from(camera.position[1]));
+        self.world.resolve_palette(camera.position[1]);
+        self.world.set_origin(camera.position);
         let vapor = match self.playback.vapor(tick, &self.ownship, &mut self.scratch) {
             Some(vapor) => crate::vapor_vertices(
                 &vapor,
@@ -1898,7 +1899,8 @@ impl Viewer {
                         .iter()
                         .map(|p| (p.position, p.heading, p.phase)),
                     &self.ownship.palette,
-                    camera.position.map(f64::from),
+                    camera.position,
+                    self.world.origin,
                 ),
             );
         }
@@ -1989,7 +1991,7 @@ impl Viewer {
         };
         let hud_color = self
             .ownship
-            .cockpit_palette(&self.world, f64::from(camera.position[1]), 0)
+            .cockpit_palette(&self.world, camera.position[1], 0)
             [usize::from(self.ownship.hud.primary_color)];
         let mut panel_rects = Vec::new();
         let mut menu_rect = None;
@@ -2359,7 +2361,7 @@ mod tests {
         assert!(v.toast.is_some());
         let external = f::position(0, 50);
         let offset: f64 = (0..3)
-            .map(|i| (f64::from(outside.position[i]) - external[i]).powi(2))
+            .map(|i| (outside.position[i] - external[i]).powi(2))
             .sum::<f64>()
             .sqrt();
         assert!(offset > 100. && offset < 250., "{offset}");

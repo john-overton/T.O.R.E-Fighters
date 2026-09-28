@@ -1,8 +1,11 @@
 struct Band { info:vec4<f32>, ramp:vec4<f32> }
-struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32> }
+struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32> }
 // quality: spotting aid strength (0 off), terrain filtering (0/1), reserved,
 // reserved. viewport: world image width and height in pixels, MSAA
 // samples, render scale. See graphics.rs.
+// origin: the frame's render origin, a whole-foot point near the camera that
+// moving objects' vertices are relative to; local_eye: the camera relative to
+// it, exact, since 32-bit world coordinates step 1/8 foot in a theater.
 @group(0) @binding(0) var<uniform> scene:Scene;
 // Only target-camera readbacks use alpha as scenery/subject coverage.
 fn scenery(color:vec3<f32>)->vec4<f32> {
@@ -316,8 +319,12 @@ fn world_depth_clip(z:f32)->f32 {
  let near=max(scene.view.x,1.0);let far=2200000.0;
  return near*((far-z)/(far-near));
 }
+// World geometry reaches the camera through the origin, so a static vertex
+// loses no more than its own storage precision.
 fn world_vertex(position:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec3<f32>,index:f32)->VertexOut {
- let p=position-scene.eye.xyz;
+ return placed_vertex(position,(position-scene.origin.xyz)-scene.local_eye.xyz,uv,layer,color,index);
+}
+fn placed_vertex(position:vec3<f32>,p:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec3<f32>,index:f32)->VertexOut {
  let z=dot(p,scene.forward.xyz);
  let f=1.7320508*scene.up.w;
  var out:VertexOut;
@@ -335,6 +342,10 @@ fn world_vertex(position:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec3<f32>,index:
 }
 @vertex fn vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
  return world_vertex(position,uv,layer,color,index);
+}
+// Aircraft, pilots, weapons and debris: `position` is relative to the origin.
+@vertex fn object_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
+ return placed_vertex(position+scene.origin.xyz,position-scene.local_eye.xyz,uv,layer,color,index);
 }
 @vertex fn terrain_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32,@location(5) normal:vec3<f32>)->VertexOut {
  var out=world_vertex(position,uv,layer,color,index);

@@ -95,8 +95,8 @@ pub(crate) fn rear_basis(body: Basis) -> Basis {
     }
 }
 /// Fitted pilot's eye above and forward of the model origin, in feet.
-pub(crate) fn pilot_eye(position: [f64; 3], body: Basis) -> [f32; 3] {
-    std::array::from_fn(|i| (position[i] + body.up[i] * 7. + body.forward[i] * 10.) as f32)
+pub(crate) fn pilot_eye(position: [f64; 3], body: Basis) -> [f64; 3] {
+    std::array::from_fn(|i| position[i] + body.up[i] * 7. + body.forward[i] * 10.)
 }
 pub fn camera(state: &State) -> Camera {
     let body = Basis::new(state.yaw, state.pitch, state.bank);

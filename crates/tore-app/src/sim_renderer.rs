@@ -33,7 +33,7 @@ fn bytes(values: &[f32]) -> Vec<u8> {
 }
 /// The shared `Scene` uniform, ending with the graphics `quality` and
 /// `viewport` vectors.
-const UNIFORM_BYTES: u64 = 1392;
+const UNIFORM_BYTES: u64 = 1424;
 type AircraftBatch = (wgpu::BindGroup, wgpu::Buffer, u32);
 /// One other aircraft inside a geometry batch, for the spotting aid: its
 /// vertex range, presented position and airframe extent in feet.
@@ -222,7 +222,12 @@ impl Pipelines {
             multiview: None,
             cache: None,
         };
+        // Aircraft, pilots, weapons, debris and tracers are built relative to
+        // the render origin; static airports and terrain stay in world space.
+        surface_descriptor.label = Some("Moving objects");
+        surface_descriptor.vertex.entry_point = Some("object_vertex");
         let pipeline = device.create_render_pipeline(&surface_descriptor);
+        surface_descriptor.vertex.entry_point = Some("vertex");
         surface_descriptor.label = Some("Static airport surfaces");
         surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("airport_solid_fragment");
         // Rendered terrain is recessed below the fixed airport plane. Neither
@@ -268,7 +273,7 @@ impl Pipelines {
         surface_descriptor.vertex.entry_point = Some("terrain_vertex");
         surface_descriptor.vertex.buffers = &terrain_buffers;
         let terrain_pipeline = device.create_render_pipeline(&surface_descriptor);
-        surface_descriptor.vertex.entry_point = Some("vertex");
+        surface_descriptor.vertex.entry_point = Some("object_vertex");
         surface_descriptor.vertex.buffers = surface_buffers;
         // Share the aircraft material bindings. First select the nearest glass
         // without changing color, then blend that surface once over opaque art.
@@ -1298,7 +1303,7 @@ impl SimRenderer {
         let output = size;
         let slot = self.targets(device, output);
         let size = self.targets[slot].size;
-        let weather = world.sample_view(f64::from(camera.position[1]), camera.weather_slot);
+        let weather = world.sample_view(camera.position[1], camera.weather_slot);
         // The recovered haze color the visibility ramp blends toward.
         let sky = weather.haze;
         let mut uniform = camera.uniform(
@@ -1318,7 +1323,7 @@ impl SimRenderer {
                 queue.write_buffer(&self.celestial_vertices, 0, &bytes(&data));
             }
             uniform[27] = celestial.sun_remap as f32;
-            if let Some(layer) = world.weather.sample(camera.position[1] as f64) {
+            if let Some(layer) = world.weather.sample(camera.position[1]) {
                 let shade = world.weather.configuration().shade_remap(layer.shade);
                 uniform[31] = celestial.shade_rows[&shade.color] as f32;
             }
@@ -1350,9 +1355,8 @@ impl SimRenderer {
             }
         }
         uniform.resize(328, 0.);
-        if let Some(layer) = world.weather.sample(camera.position[1] as f64) {
-            let horizon =
-                tore_sim::environment::horizon::Horizon::new(&layer, camera.position[1] as f64);
+        if let Some(layer) = world.weather.sample(camera.position[1]) {
+            let horizon = tore_sim::environment::horizon::Horizon::new(&layer, camera.position[1]);
             uniform[70] = horizon.lower_extent as f32;
             uniform[71] = (u16::from(horizon.flags())
                 | ((layer.flags & 0x40) >> 4)
@@ -1365,7 +1369,7 @@ impl SimRenderer {
                     size, roll,
                 )) / 32767.;
         }
-        let ocean = world.weather.sample(camera.position[1] as f64);
+        let ocean = world.weather.sample(camera.position[1]);
         let ocean_decks = ocean.as_ref().map_or([false; 2], |layer| {
             std::array::from_fn(|i| layer.decks[i].name.starts_with("OCEAN"))
         });
@@ -1415,6 +1419,10 @@ impl SimRenderer {
             self.samples as f32,
             self.options.scale(),
         ]);
+        // The render origin, and the eye relative to it at full precision.
+        let [x, y, z] = world.origin.map(|v| v as f32);
+        let [ex, ey, ez] = world.local(camera.position);
+        uniform.extend([x, y, z, 0., ex, ey, ez, 0.]);
         debug_assert_eq!(uniform.len() * 4, UNIFORM_BYTES as usize);
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         self.smoke.update(
@@ -1871,11 +1879,11 @@ mod lighting_tests {
                     renderer.airports = Some((vertex(&apron), 6));
                 }
                 let mut camera = Camera::new();
-                camera.position = [0., 15., -distance];
+                camera.position = [0., 15., -f64::from(distance)];
                 camera.pitch = (-7.0_f32).atan2(distance);
                 camera.yaw = 0.;
                 if overhead {
-                    camera.position = [0., distance, 0.];
+                    camera.position = [0., f64::from(distance), 0.];
                     camera.pitch = -std::f32::consts::FRAC_PI_2;
                 }
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -2021,7 +2029,8 @@ mod lighting_tests {
                     origin[0] + 1000. + shift,
                     origin[1] + 1500.,
                     origin[2] - distance,
-                ];
+                ]
+                .map(f64::from);
                 camera.yaw = (-1000. - shift).atan2(distance);
                 camera.pitch = (-1500_f32).atan2(distance.hypot(1000. + shift));
                 let image = device.create_texture(&wgpu::TextureDescriptor {
@@ -2394,7 +2403,7 @@ mod lighting_tests {
                 camera.pitch = -std::f32::consts::FRAC_PI_2;
                 camera.yaw = 0.;
                 if view_x != 0. {
-                    camera.position[0] = view_x;
+                    camera.position[0] = f64::from(view_x);
                     camera.yaw = -view_x.signum() * std::f32::consts::FRAC_PI_2;
                     camera.pitch = -200_f32.atan2(view_x.abs());
                 }

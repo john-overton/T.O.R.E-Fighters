@@ -82,7 +82,7 @@ pub fn combine(look: [f32; 2], head: [f32; 2], external: bool) -> [f32; 2] {
     [wrap(look[0] + head[0]), limit(look[1] + head[1], external)]
 }
 
-pub fn apply(camera: &mut Camera, target: [f32; 3], look: [f32; 2], external: bool) {
+pub fn apply(camera: &mut Camera, target: [f64; 3], look: [f32; 2], external: bool) {
     if !external {
         let basis = crate::attitude::Basis::new(
             camera.yaw as f64,
@@ -100,14 +100,15 @@ pub fn apply(camera: &mut Camera, target: [f32; 3], look: [f32; 2], external: bo
     let offset = std::array::from_fn::<_, 3, _>(|i| camera.position[i] - target[i]);
     let horizontal = offset[0].hypot(offset[2]);
     let radius = horizontal.hypot(offset[1]);
-    let elevation = offset[1].atan2(horizontal) + look[1];
+    let elevation = offset[1].atan2(horizontal) + f64::from(look[1]);
     camera.yaw += look[0];
-    camera.pitch = -elevation;
+    camera.pitch = -elevation as f32;
     camera.roll = 0.;
+    let yaw = f64::from(camera.yaw);
     let forward = [
-        camera.yaw.sin() * elevation.cos(),
+        yaw.sin() * elevation.cos(),
         -elevation.sin(),
-        camera.yaw.cos() * elevation.cos(),
+        yaw.cos() * elevation.cos(),
     ];
     camera.position = std::array::from_fn(|i| target[i] - radius * forward[i]);
 }
@@ -216,7 +217,10 @@ mod tests {
                 ];
                 let radius = 180f32.hypot(60.);
                 for i in 0..3 {
-                    assert!((camera.position[i] + radius * direction[i] - target[i]).abs() < 0.001);
+                    assert!(
+                        (camera.position[i] + f64::from(radius * direction[i]) - target[i]).abs()
+                            < 0.001
+                    );
                 }
             }
         }

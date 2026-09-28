@@ -12,10 +12,18 @@ fn shadow_project(relative:vec3<f32>,cascade:i32)->vec3<f32> {
  return vec3<f32>(dot(m.right,p),dot(m.up,p),dot(m.depth,p));
 }
 struct ShadowOut { @builtin(position) position:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) @interpolate(flat) layer:f32 }
-@vertex fn shadow_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@builtin(instance_index) cascade:u32)->ShadowOut {
+// The shadow origin is the camera; casters reach it through the render
+// origin exactly as the main pass places them (terrain.wgsl).
+fn shadow_out(relative:vec3<f32>,uv:vec2<f32>,layer:f32,cascade:u32)->ShadowOut {
  var out:ShadowOut;
- out.position=vec4<f32>(shadow_project(position-surface.origin.xyz,i32(cascade)),1.0);
+ out.position=vec4<f32>(shadow_project(relative,i32(cascade)),1.0);
  out.uv=uv;out.layer=layer;return out;
+}
+@vertex fn shadow_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@builtin(instance_index) cascade:u32)->ShadowOut {
+ return shadow_out((position-scene.origin.xyz)-scene.local_eye.xyz,uv,layer,cascade);
+}
+@vertex fn shadow_object_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@builtin(instance_index) cascade:u32)->ShadowOut {
+ return shadow_out(position-scene.local_eye.xyz,uv,layer,cascade);
 }
 fn shadow_cutout(uv:vec2<f32>,layer:i32) {
  let size=vec2<i32>(tile_size());

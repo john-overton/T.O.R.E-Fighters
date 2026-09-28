@@ -260,7 +260,11 @@ impl SurfaceLighting {
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: shader,
-                    entry_point: Some("shadow_vertex"),
+                    entry_point: Some(if terrain {
+                        "shadow_vertex"
+                    } else {
+                        "shadow_object_vertex"
+                    }),
                     compilation_options: Default::default(),
                     buffers: &[wgpu::VertexBufferLayout {
                         array_stride: 40,
@@ -309,7 +313,7 @@ impl SurfaceLighting {
         world: &World,
         flares: &[crate::countermeasure_renderer::FlareLight],
     ) -> bool {
-        let layer = world.weather.sample(f64::from(camera.position[1]));
+        let layer = world.weather.sample(camera.position[1]);
         let sun = layer
             .as_ref()
             .and_then(|l| crate::celestial::visual_sun_direction(l, &world.weather))
@@ -327,12 +331,12 @@ impl SurfaceLighting {
         let active = world.smooth_weather && strength > 0.;
         let mut values = Vec::with_capacity(64);
         for extent in EXTENTS {
-            values.extend(projection(camera.position, light, extent));
+            values.extend(projection(camera.position.map(|v| v as f32), light, extent));
         }
         values.extend([
-            camera.position[0],
-            camera.position[1],
-            camera.position[2],
+            camera.position[0] as f32,
+            camera.position[1] as f32,
+            camera.position[2] as f32,
             f32::from(active),
         ]);
         values.extend([
@@ -342,7 +346,7 @@ impl SurfaceLighting {
             f32::from(world.smooth_weather),
         ]);
         values.extend([moon[0], moon[1], moon[2], 0.]);
-        let origin = camera.position.map(f64::from);
+        let origin = camera.position;
         let flares = crate::countermeasure_renderer::nearest(flares, origin);
         values.extend([strength, sun[1], radius.tan(), flares.len() as f32]);
         let count = flares.len();

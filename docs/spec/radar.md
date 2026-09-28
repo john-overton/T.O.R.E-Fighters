@@ -122,8 +122,9 @@ unavailable.
   it: the selection then stays set while the aircraft is off the scope, without
   radar support.
 - The target views F4, F7 and F8 keep following a dropped target while the
-  pilot can still see it (John, 2026-09-28). The selection and everything else
-  above still drop; see [flight views](flight-views.md#target-views-and-sight).
+  target is within visual range, 10 nmi (John, 2026-09-28). The selection and
+  everything else above still drop; see
+  [flight views](flight-views.md#target-views-and-visual-range).
 
 Clicking a contact on the scope still selects it at once, including a
 search-only RWS contact, as John requested on 2026-09-16; it now drops with the

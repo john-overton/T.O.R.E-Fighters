@@ -15,7 +15,7 @@ No simulation, sensor permission or autonomous decisions change.
 
 Second pass, 2026-09-28, from the player reports in GitHub issue #1, requested
 by John: F2 and F3 turn with the aircraft, F2 shows the airframe, F6 cycles
-wingmen, the target views keep a target the pilot can still see, and F7 gains a
+wingmen, the target views keep a target within visual range, and F7 gains a
 bearing compass. Sensor selection and weapon permission are unchanged.
 
 ## Evidence
@@ -120,32 +120,35 @@ the target's last live missile and missile-relative F12 follows the player missi
 Next research: bounded review of the original camera selection and placement
 handlers, only if closer tuning is wanted. These gaps do not block fitted views.
 
-## Target views and sight
+## Target views and visual range
 
 Without the Easy targeting cheat, a target drops when the radar or infrared
 scope loses it ([selection rules](radar.md#target-selection-keys)). The target
 views are the exception, requested by John on 2026-09-28: F4, F7 and F8, and
-their Alt references, keep following a dropped target while the pilot can still
-see it. "Can see it" is the pilot's visual sensor: inside its visual envelope
-(about 10 nmi for the imported aircraft) and not masked by terrain. Once it is
-out of sight the views lose it for good, and seeing it again does not bring it
-back; a new selection is needed. The selection itself, radar support, missile
-guidance, the HUD square and the Shift-4 target window still drop at once.
-Easy targeting keeps the target for the views as before. Cloud does not yet
-block sight, because the visual sensor does not model it.
+their Alt references, keep following a dropped target while it is within visual
+range, in any direction. Visual range is the search range of the aircraft's
+visual sensor, 10 nmi for every imported aircraft; the sensor's viewing cone,
+its blind spot behind the tail and terrain masking do not apply, so a target
+behind or below the player stays (John, 2026-09-28, after the first version cut
+out too soon). A pilot who is dead or whose visual sensor has failed has no
+visual range. Once the target is beyond it the views lose it for good, and
+coming back inside does not restore it; a new selection is needed. The
+selection itself, radar support, missile guidance, the HUD square and the
+Shift-4 target window still drop at once. Easy targeting keeps the target for
+the views as before.
 
 ## F7 bearing compass
 
 Opinionated addition, requested by John on 2026-09-28. F7 draws a compass strip
 at the top of the screen, in the HUD's color and font, styled after the HUD
-heading strip: a tick every 10 degrees with two-digit labels, a caret over the
-aircraft's heading and a three-digit heading readout below it. The strip is
-centered on the player's heading, spans the middle half of the screen and stops
-short of the top instrument windows. A diamond marks the target's bearing. A
-target beyond the strip's span shows an outward arrow at that end with its
-three-digit bearing. The compass shows only in F7 with the player as the
-reference, only while the view has a target, and never over the Shift-M map. It
-leaves with the target. Layout and scale are agent choices.
+heading strip: a tick every 10 degrees with two-digit labels, a caret at the
+center and a three-digit readout below it. The strip stays centered on the
+compass bearing from the player to the target, so the caret and readout always
+show the target's direction; there is no separate target marker. It spans the
+middle half of the screen, about 80 degrees either side, and narrows to stop
+short of the top instrument windows. The compass shows only in F7 with the
+player as the reference, only while the view has a target, and never over the
+Shift-M map. It leaves with the target. Layout and scale are agent choices.
 
 The existing View transitions preference and Other View numeric instrument
 overlays are outside this camera-selection pass.

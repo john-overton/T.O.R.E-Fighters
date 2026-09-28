@@ -89,13 +89,13 @@ fn spot_background(ray:vec3<f32>)->vec3<f32> {
  let horizon=horizon_color(horizon_index(vec3<f32>(ray.x,0.0,ray.z)),0,-1);
  return mix(horizon,RIM_GROUND,clear);
 }
-// `contact` is the aircraft's presented center and extent in feet; `range.x`
-// is its first vertex. Every decision uses the center, so all of an
+// `contact` is the aircraft's presented center, relative to the render
+// origin like its vertices, and extent in feet; `range.x` is its first vertex. Every decision uses the center, so all of an
 // aircraft's vertices agree.
 @vertex fn rim_vertex(@location(0) position:vec3<f32>,@location(2) layer:f32,@location(10) contact:vec4<f32>,@location(11) range:vec4<f32>,@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->RimOut {
  var out:RimOut;
  out.color=vec3<f32>(0.0);out.depth=0.0;out.light=0.0;
- let c=contact.xyz-scene.eye.xyz;
+ let c=contact.xyz-scene.local_eye.xyz;
  let z=dot(c,scene.forward.xyz);
  let distance=max(length(c),1.0);
  let fraction=contact.w*1.7320508*scene.up.w/(2.0*max(z,1.0));
@@ -104,7 +104,7 @@ fn spot_background(ray:vec3<f32>)->vec3<f32> {
  let size=1.0-smoothstep(RIM_FULL_FRACTION,RIM_ZERO_FRACTION,fraction);
  let sight=smoothstep(RIM_ZERO_ANGLE,RIM_FULL_ANGLE,angle);
  // The rim outlasts the aircraft's own contrast a little, but not past it.
- let strength=scene.quality.x*size*sight*sqrt(spot_clarity(c,distance,contact.y));
+ let strength=scene.quality.x*size*sight*sqrt(spot_clarity(c,distance,contact.y+scene.origin.y));
  if z<=max(scene.view.x,1.0)+contact.w || strength<0.02 {
   out.clip=spot_collapsed();return out;
  }
@@ -125,7 +125,7 @@ fn spot_background(ray:vec3<f32>)->vec3<f32> {
  } else if pixels>=OUTLINE_FROM_PIXELS && !spot_skipped(layer) {
   let directions=array<vec2<f32>,8>(vec2<f32>(1.0,0.0),vec2<f32>(-1.0,0.0),vec2<f32>(0.0,1.0),vec2<f32>(0.0,-1.0),
       vec2<f32>(1.0,1.0),vec2<f32>(-1.0,1.0),vec2<f32>(1.0,-1.0),vec2<f32>(-1.0,-1.0));
-  let clip=spot_clip(position-scene.eye.xyz);
+  let clip=spot_clip(position-scene.local_eye.xyz);
   let shift=directions[copy]*2.0/spot_output();
   out.clip=vec4<f32>(clip.xy+shift*clip.w,out.depth*clip.w,clip.w);
  } else {

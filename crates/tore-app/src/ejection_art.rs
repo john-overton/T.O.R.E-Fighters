@@ -100,9 +100,13 @@ impl Art {
         pilots: impl IntoIterator<Item = ([f64; 3], f64, Phase)>,
         palette: &[[u8; 3]; 256],
         camera: [f64; 3],
+        origin: [f64; 3],
     ) -> Vec<f32> {
+        // Built relative to the render origin, like every moving object.
+        let camera: [f64; 3] = std::array::from_fn(|i| camera[i] - origin[i]);
         let mut out = Vec::new();
-        for (position, heading, phase) in pilots {
+        for (world, heading, phase) in pilots {
+            let position: [f64; 3] = std::array::from_fn(|i| world[i] - origin[i]);
             let pose = match phase {
                 Phase::Seat => 0,
                 Phase::Freefall | Phase::Impact => 1,

@@ -2691,7 +2691,7 @@ pub(crate) mod render_hash_tests {
         s.damage_variant = Some(DamageSection::LeftWing as usize);
         s
     }
-    fn camera(position: [f32; 3], [yaw, pitch, roll]: [f32; 3]) -> Camera {
+    fn camera(position: [f64; 3], [yaw, pitch, roll]: [f32; 3]) -> Camera {
         let mut camera = Camera::new();
         camera.position = position;
         camera.yaw = yaw;
@@ -2868,7 +2868,8 @@ pub(crate) mod render_hash_tests {
             hashes[4].floats(&art.vertices_for(
                 pilots.iter().map(|p| (p.position, p.heading, p.phase)),
                 &ownship.palette,
-                camera.position.map(f64::from),
+                camera.position,
+                [0.; 3],
             ));
         }
         assert!(drawn.iter().all(|&floats| floats > 10_000), "{drawn:?}");
@@ -2925,6 +2926,39 @@ pub(crate) mod render_hash_tests {
     /// with the target's pose, damage and crash flag, devices stowed. The
     /// player states cover afterburner, dry, engine off, no fuel and a
     /// crashed player whose afterburner switch is still on.
+    /// Far from the map origin, 32-bit world coordinates step 1/8 foot, which
+    /// made aircraft shimmer. Built relative to the render origin, the model
+    /// keeps its exact shape there.
+    #[test]
+    fn aircraft_keep_their_shape_far_from_the_map_origin() {
+        let ownship = hornet_airframe(true);
+        let mut world = crate::terrain::tests::world();
+        let near = player();
+        let camera = cameras().remove(0);
+        let reference = ownship.vertices(&near, &camera, &world);
+        let shift = [1_070_000.37, 0., 590_000.61];
+        let mut far = near.clone();
+        far.position = std::array::from_fn(|i| near.position[i] + shift[i]);
+        let mut far_camera = cameras().remove(0);
+        far_camera.position = std::array::from_fn(|i| camera.position[i] + shift[i]);
+        let error = |world: &crate::terrain::World| {
+            let vertices = ownship.vertices(&far, &far_camera, world);
+            assert_eq!(vertices.len(), reference.len());
+            vertices
+                .chunks_exact(10)
+                .zip(reference.chunks_exact(10))
+                .flat_map(|(a, b)| {
+                    (0..3).map(move |i| {
+                        (f64::from(a[i]) + world.origin[i] - f64::from(b[i]) - shift[i]).abs()
+                    })
+                })
+                .fold(0., f64::max)
+        };
+        assert!(error(&world) > 0.03, "world coordinates snap");
+        world.set_origin(far_camera.position);
+        assert_eq!(world.origin, [1_070_080., 5120., 590_848.]);
+        assert!(error(&world) < 0.002, "{}", error(&world));
+    }
     #[test]
     fn fixture_targets_keep_the_player_copy_rule() {
         let ownship = hornet_airframe(true);

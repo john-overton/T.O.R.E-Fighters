@@ -151,6 +151,19 @@ orthographic shadow maps keep their existing depth convention. This is an
 agent-selected host correction for distant surface flicker; see
 [NVIDIA's depth-precision analysis](https://developer.nvidia.com/blog/visualizing-depth-precision/).
 
+Theaters are about a million feet across, where a 32-bit float steps 1/8 foot,
+so aircraft built in world coordinates snapped a little differently every
+frame and shimmered in exterior views. Camera positions are kept in f64, and
+each frame `World::set_origin` picks a render origin: the camera position
+snapped to a 1,024-foot grid, shared by every camera that frame. Aircraft,
+ejected pilots, weapons, debris, tracers and effects are built relative to it
+(`World::local`), and the scene uniform carries the origin and the camera's
+exact offset from it. `object_vertex` and `shadow_object_vertex` place those
+vertices through the offset; terrain and airports stay in world coordinates
+and reach the camera through the origin, so only their own storage rounding
+remains. Smoke, vapor and countermeasures stay in world coordinates. An origin
+of zero reproduces world-coordinate vertices exactly.
+
 Active simulation views request the next redraw without a post-render timer; AutoVsync and a requested maximum frame latency of one provide presentation backpressure. Idle menu behavior is unchanged. Failed/zero-size presentation does not continually schedule simulation redraws. `performance.rs` provides opt-in bounded CPU wall-time sampling via environment variables, with warmup exclusion and view cycling.
 
 The GPU cockpit texture survives view and size changes; projection uniforms track the current aspect. Aircraft GPU resources are prepared when the renderer/theater loads. Live camera panels submit bounded asynchronous readbacks (at most one pending per camera page), consume completed rasters on later frames, and retain their last image while pending. The simulation renderer caches world-pass attachments (depth, multisampled colour and the render-scale image) for up to five output sizes, so the display, mirrors and 138×114 panels do not reallocate at every refresh. World pipelines live together in `sim_renderer::Pipelines` and are rebuilt when the anti-aliasing sample count changes. After the world pass, an optional resample pass scales the render-scale image to the output, and the spotting-aid pass draws single-sampled outlines using the world depth; `graphics.rs` holds the options and the [graphics options](spec/graphics-options.md) page specifies them. Offline captures retain an explicit blocking readback so smoke evidence contains the requested image. Direct GPU panel composition, full GPU UI rendering and native terrain LOD remain future optimization work.

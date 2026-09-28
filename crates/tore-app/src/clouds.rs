@@ -90,7 +90,7 @@ impl Clouds {
         };
         let mut centers = tore_sim::clouds::centers_for_view(
             &self.layout,
-            camera.position.map(f64::from),
+            camera.position,
             self.altitude,
             tore_sim::clouds::View {
                 heading: angle(camera.yaw),
@@ -100,23 +100,19 @@ impl Clouds {
             },
         );
         centers.retain(|(center, _)| {
-            tore_sim::clouds::within_shape_range(
-                camera.position.map(f64::from),
-                *center,
-                self.exponent,
-            )
+            tore_sim::clouds::within_shape_range(camera.position, *center, self.exponent)
         });
         let distance = |p: [f64; 3]| {
             p.iter()
                 .zip(camera.position)
-                .map(|(a, b)| (a - f64::from(b)).powi(2))
+                .map(|(a, b)| (a - b).powi(2))
                 .sum::<f64>()
         };
         centers.sort_by(|a, b| distance(b.0).total_cmp(&distance(a.0)));
         let mut out = Vec::with_capacity(centers.len() * 60);
         // Two coincident source faces have opposite normals and reversed UVs.
         // Select the viewer-facing side instead of double-blending both faces.
-        let face = &self.shape.faces[usize::from(camera.position[1] >= self.altitude as f32)];
+        let face = &self.shape.faces[usize::from(camera.position[1] >= f64::from(self.altitude))];
         for (center, yaw) in centers {
             for i in [0, 1, 2, 0, 2, 3] {
                 let p = face.positions[i];

@@ -355,7 +355,7 @@ impl Airframe {
 
     pub fn start(&self, world: &World) -> flight::State {
         let c = Camera::for_world(world);
-        let mut p = c.position.map(|v| v as f64);
+        let mut p = c.position;
         p[1] = 5000f64.max(world.height(p[0] as f32, p[2] as f32) as f64 + 2000.);
         let mut state = flight::State::from_model(self.model.clone(), p);
         // State velocity is ground-relative; initialize the requested airspeed
@@ -376,16 +376,16 @@ impl Airframe {
     pub fn camera(&self, state: &flight::State, view: u8, keys: BTreeSet<String>) -> Camera {
         let mut c = Camera::new();
         c.keys = keys;
-        c.position = state.position.map(|v| v as f32);
+        c.position = state.position;
         c.yaw = state.yaw as f32;
         c.pitch = state.pitch as f32;
         c.roll = -state.bank as f32;
         c.view_fraction = 1.;
         if let Some(pilot) = &state.escape {
-            c.position = pilot.position.map(|v| v as f32);
+            c.position = pilot.position;
             c.yaw = pilot.heading as f32;
-            c.position[0] -= c.yaw.sin() * 60.;
-            c.position[2] -= c.yaw.cos() * 60.;
+            c.position[0] -= pilot.heading.sin() * 60.;
+            c.position[2] -= pilot.heading.cos() * 60.;
             c.position[1] += 22.;
             c.pitch = -0.34;
             c.roll = 0.;
@@ -402,8 +402,8 @@ impl Airframe {
             c.view_fraction = 1.;
             let angle = state.yaw + if view == 2 { 0.8 } else { 0. };
             let dist = if view == 2 { 130. } else { 180. };
-            c.position[0] -= (angle.sin() * dist) as f32;
-            c.position[2] -= (angle.cos() * dist) as f32;
+            c.position[0] -= angle.sin() * dist;
+            c.position[2] -= angle.cos() * dist;
             c.position[1] += 60.;
             c.yaw = angle as f32;
             c.pitch = -0.3;
@@ -506,17 +506,15 @@ impl Airframe {
             let (y, z) = (y * cp + z * sp, -y * sp + z * cp);
             [x * cy + z * sy, y, -x * sy + z * cy]
         };
-        let lighting = world
-            .weather
-            .sample(camera.position[1] as f64)
-            .map(|layer| {
-                let direction = crate::celestial::rotate(
-                    [0., 0., 1.],
-                    tore_sim::environment::light_angles(&layer, world.weather.seconds_of_day()),
-                );
-                direction.map(|v| (v * 32767.).round().clamp(-32767., 32767.) as i16)
-            });
+        let lighting = world.weather.sample(camera.position[1]).map(|layer| {
+            let direction = crate::celestial::rotate(
+                [0., 0., 1.],
+                tore_sim::environment::light_angles(&layer, world.weather.seconds_of_day()),
+            );
+            direction.map(|v| (v * 32767.).round().clamp(-32767., 32767.) as i16)
+        });
         let model_scale = self.rig.as_ref().map_or(1. / 3., |r| r.scale());
+        let at = world.local(s.position);
         let hornet_rig = self.profile.id == tore_formats::aircraft::AircraftId::F18;
         let damaged = if fragment {
             crate::damage_art::DamageArt::variant(self.profile.id, s.damage_variant)
@@ -578,7 +576,7 @@ impl Airframe {
                 let p = f.positions[0];
                 let p = orient([p[0] * model_scale, p[2] * model_scale, p[1] * model_scale]);
                 (0..3)
-                    .map(|i| normal[i] * (camera.position[i] - s.position[i] as f32 - p[i]))
+                    .map(|i| normal[i] * ((camera.position[i] - s.position[i]) as f32 - p[i]))
                     .sum::<f32>()
             })
         };
@@ -704,9 +702,9 @@ impl Airframe {
                             -1.
                         };
                         result.extend_from_slice(&[
-                            pos[0] + s.position[0] as f32,
-                            pos[1] + s.position[1] as f32,
-                            pos[2] + s.position[2] as f32,
+                            pos[0] + at[0],
+                            pos[1] + at[1],
+                            pos[2] + at[2],
                             uv[0],
                             uv[1],
                             layer,

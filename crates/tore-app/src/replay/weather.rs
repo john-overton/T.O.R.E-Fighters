@@ -26,7 +26,7 @@ pub const ENVIRONMENT_KEY_TICKS: u64 = 1_200;
 /// The camera live flight's forward view would have had.
 fn camera(view: &View) -> Camera {
     let mut camera = Camera::new();
-    camera.position = view.position.map(|v| v as f32);
+    camera.position = view.position;
     camera.yaw = view.attitude[0] as f32;
     camera.pitch = view.attitude[1] as f32;
     camera.roll = -view.attitude[2] as f32;

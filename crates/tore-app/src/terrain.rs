@@ -66,6 +66,10 @@ pub struct World {
     /// fractions at each, plus the haze color those distances blend toward.
     pub fog: [f32; 4],
     pub haze: [u8; 3],
+    /// This frame's render origin: moving objects' vertices are relative to it
+    /// so they keep sub-inch precision where 32-bit world coordinates step
+    /// 1/8 foot. Zero places them in world coordinates.
+    pub origin: [f64; 3],
 }
 /// Fitted grounding: align the largest aggregate horizontal pavement layer,
 /// not a terminal roof or the whole mesh's midpoint, with airport ground.
@@ -313,6 +317,22 @@ fn wind_setting(fps: [f64; 3]) -> AppResult<Option<[i32; 2]>> {
 }
 
 impl World {
+    /// Grid the render origin snaps to, in feet, so it is exact in 32 bits
+    /// and moves only when the camera crosses a cell.
+    pub const ORIGIN_CELL: f64 = 1024.;
+    /// Place this frame's render origin near `eye`, before any moving
+    /// object's vertices are built. Every camera drawn this frame shares it.
+    pub fn set_origin(&mut self, eye: [f64; 3]) {
+        self.origin = eye.map(|v| (v / Self::ORIGIN_CELL).round() * Self::ORIGIN_CELL);
+    }
+    /// A world position relative to the render origin.
+    pub fn relative(&self, position: [f64; 3]) -> [f64; 3] {
+        std::array::from_fn(|i| position[i] - self.origin[i])
+    }
+    /// A world position relative to the render origin, for vertices.
+    pub fn local(&self, position: [f64; 3]) -> [f32; 3] {
+        self.relative(position).map(|v| v as f32)
+    }
     pub fn for_theater(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> AppResult<Self> {
         Self::for_mission(resources, code, None)
     }
@@ -598,6 +618,7 @@ impl World {
             fog_palette: Vec::new(),
             fog: [0.; 4],
             haze: [0; 3],
+            origin: [0.; 3],
         };
         out.resolve_palette(0.);
         out.build_mesh();
@@ -1126,7 +1147,7 @@ impl World {
     /// Each fixed camera slot advances once per simulation tick, even if hidden.
     /// Slots have independent seeded presentation state; queries never consume RNG.
     pub fn step_view_weather(&mut self, camera: &Camera, speed_fps: f64) {
-        let altitude = f64::from(camera.position[1]);
+        let altitude = camera.position[1];
         let alignment = if self.glare_enabled() {
             self.weather
                 .sample(altitude)
@@ -1278,7 +1299,7 @@ pub struct Camera {
     pub weather_slot: usize,
     pub hidden_target: Option<u32>,
     pub hidden_projectile: Option<u32>,
-    pub position: [f32; 3],
+    pub position: [f64; 3],
     pub yaw: f32,
     pub pitch: f32,
     pub roll: f32,
@@ -1308,13 +1329,13 @@ impl Camera {
         let mut camera = Self::new();
         if tore_formats::theater::base_theater(&world.layout) != Some("UKR") {
             camera.position = [
-                (world.theater.cols as f32 - 1.0) * CELL_FEET * 0.5,
+                f64::from((world.theater.cols as f32 - 1.0) * CELL_FEET * 0.5),
                 28000.0,
-                (world.theater.rows as f32 - 1.0) * CELL_FEET * 0.5,
+                f64::from((world.theater.rows as f32 - 1.0) * CELL_FEET * 0.5),
             ];
         }
-        camera.position[1] =
-            camera.position[1].max(world.height(camera.position[0], camera.position[2]) + 3000.0);
+        let ground = world.height(camera.position[0] as f32, camera.position[2] as f32);
+        camera.position[1] = camera.position[1].max(f64::from(ground + 3000.0));
         camera
     }
     pub fn step(&mut self, dt: f32, fast: bool, world: &World) {
@@ -1329,16 +1350,19 @@ impl Camera {
         );
         let norm = (f * f + r * r + h * h).sqrt().max(1.0);
         let speed = dt * 12_000.0 * if fast { 8.0 } else { 1.0 } / norm;
-        self.position[0] += (f * self.yaw.sin() + r * self.yaw.cos()) * speed;
-        self.position[2] += (f * self.yaw.cos() - r * self.yaw.sin()) * speed;
-        self.position[0] =
-            self.position[0].clamp(0.0, (world.theater.cols - 1) as f32 * CELL_FEET - 1.0);
-        self.position[2] =
-            self.position[2].clamp(0.0, (world.theater.rows - 1) as f32 * CELL_FEET - 1.0);
-        self.position[1] = (self.position[1] + h * speed).clamp(
-            world.height(self.position[0], self.position[2]) + 100.0,
-            400_000.0,
+        self.position[0] += f64::from((f * self.yaw.sin() + r * self.yaw.cos()) * speed);
+        self.position[2] += f64::from((f * self.yaw.cos() - r * self.yaw.sin()) * speed);
+        self.position[0] = self.position[0].clamp(
+            0.0,
+            f64::from((world.theater.cols - 1) as f32 * CELL_FEET - 1.0),
         );
+        self.position[2] = self.position[2].clamp(
+            0.0,
+            f64::from((world.theater.rows - 1) as f32 * CELL_FEET - 1.0),
+        );
+        let ground = world.height(self.position[0] as f32, self.position[2] as f32);
+        self.position[1] =
+            (self.position[1] + f64::from(h * speed)).clamp(f64::from(ground + 100.0), 400_000.0);
     }
     /// Where the renderer draws a world point in a `size` pixel view, if it is
     /// in front of the camera and on screen.
@@ -1349,7 +1373,7 @@ impl Camera {
         let right = [cy * cr - sy * sp * sr, cp * sr, -sy * cr - cy * sp * sr];
         let up = [-cy * sr - sy * sp * cr, cp * cr, sy * sr - cy * sp * cr];
         let forward = [sy * cp, sp, cy * cp];
-        let d: [f64; 3] = std::array::from_fn(|i| point[i] - f64::from(self.position[i]));
+        let d: [f64; 3] = std::array::from_fn(|i| point[i] - self.position[i]);
         let dot = |a: [f64; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
         let z = dot(forward);
         if z <= 1. {
@@ -1368,7 +1392,7 @@ impl Camera {
         let right = [cy * cr - sy * sp * sr, cp * sr, -sy * cr - cy * sp * sr];
         let up = [-cy * sr - sy * sp * cr, cp * cr, sy * sr - cy * sp * cr];
         [
-            self.position.to_vec(),
+            self.position.map(|v| v as f32).to_vec(),
             vec![aspect],
             vec![right[0], right[1], right[2], 0.],
             vec![up[0], up[1], up[2], self.zoom],
@@ -1619,6 +1643,7 @@ pub(crate) mod tests {
             decks: [[0., 1., -1., 0.]; 2],
             fog: [0., 1., 0., 0.],
             haze: [0; 3],
+            origin: [0.; 3],
             weather: tore_sim::environment::Environment::new(
                 tore_sim::environment::Configuration::new(
                     tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(
@@ -2006,6 +2031,8 @@ pub(crate) mod tests {
         a.keys.clear();
         a.keys.insert("q".into());
         a.step(0.05, false, &w);
-        assert!(a.position[1] >= w.height(a.position[0], a.position[2]) + 99.9);
+        assert!(
+            a.position[1] >= f64::from(w.height(a.position[0] as f32, a.position[2] as f32) + 99.9)
+        );
     }
 }

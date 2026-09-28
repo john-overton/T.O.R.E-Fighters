@@ -2228,13 +2228,25 @@ impl State {
             // A dropped target is gone; nothing is remembered for later.
             self.hud_selection = None;
         }
-        // The views keep a dropped target only while it stays in sight;
-        // once it is out of sight it is gone for good.
+        // The views keep a dropped target while it is within visual range, in
+        // any direction (John, 2026-09-28); beyond it the target is gone for good.
+        let visual_range = self
+            .sensors
+            .profiles
+            .visual
+            .as_ref()
+            .filter(|_| !observer.visual_failed)
+            .map_or(0., |visual| visual.search.maximum_ft);
         self.sight_hold = self.designated().or(in_view.filter(|id| {
-            self.sensors
-                .visual()
-                .iter()
-                .any(|c| c.id == *id && !c.destroyed)
+            self.targets.iter().any(|t| {
+                t.id == *id
+                    && t.hp > 0
+                    && (0..3)
+                        .map(|i| (t.position[i] - launcher.position[i]).powi(2))
+                        .sum::<f64>()
+                        .sqrt()
+                        <= visual_range
+            })
         }));
         self.emitters = passive::emitters(
             &observer,
@@ -3852,7 +3864,7 @@ mod tests {
         assert!(state.display_target().is_none());
     }
     #[test]
-    fn views_keep_a_dropped_target_only_while_the_pilot_can_see_it() {
+    fn views_keep_a_dropped_target_only_within_visual_range() {
         let mut state = fixture(true);
         let ownship = launcher();
         let blind = Launcher {
@@ -3882,22 +3894,24 @@ mod tests {
         assert_eq!(state.view_target().map(|t| t.id), Some(id));
         state.command(Command::ClearDesignation, blind);
         assert!(state.view_target().is_none());
-        // Out of sight it is gone, and seeing it again does not restore it.
+        // Behind the pilot but inside visual range it stays; past the 10 nmi
+        // range it is gone, and coming back does not restore it.
         assert_eq!(select(&mut state), id);
         run(&mut state, blind);
+        let place = |state: &mut State, position| {
+            state
+                .targets
+                .iter_mut()
+                .find(|t| t.id == id)
+                .unwrap()
+                .position = position;
+            run(state, blind);
+        };
+        place(&mut state, [0., 1000., -5000.]);
         assert_eq!(state.view_target().map(|t| t.id), Some(id));
-        let target = state.targets.iter_mut().find(|t| t.id == id).unwrap();
-        let ahead = target.position;
-        target.position = [0., 1000., -5000.];
-        run(&mut state, blind);
+        place(&mut state, [0., 1000., -70_000.]);
         assert!(state.view_target().is_none());
-        state
-            .targets
-            .iter_mut()
-            .find(|t| t.id == id)
-            .unwrap()
-            .position = ahead;
-        run(&mut state, blind);
+        place(&mut state, [0., 1000., 3000.]);
         assert!(state.view_target().is_none());
     }
     #[test]

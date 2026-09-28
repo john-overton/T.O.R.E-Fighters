@@ -356,7 +356,7 @@ mod tests {
             camera.yaw = 0.;
             camera.pitch = 0.;
             let mut values = camera.uniform(1., [0., 1000000., 0., 0.], [0; 3]);
-            values.resize(348, 0.);
+            values.resize(356, 0.);
             values[336] = 1.;
             let raw: Vec<_> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
             let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
