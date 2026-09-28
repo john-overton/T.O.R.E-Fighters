@@ -152,3 +152,61 @@ rendering effect. The seven GPU tests, including shadows across terrain and
 objects and airports under distant moving cameras, and `--smoke-test` pass.
 Relation views could not be measured this way over city terrain and are
 covered by the unit test only.
+
+## Replay views pass, 2026-09-28
+
+Implementation mode, branch `replay-views`, based on `f02a320`, requested by
+John. Behaviour is in the [view spec](../spec/flight-views.md#mission-replay)
+and the [replay viewer](../REPLAYS.md#cameras).
+
+Synthetic flight view tests cover the fly-by staying put at 18,227 feet from
+its point and moving on at 18,229 feet to a new point by the same rule, then
+keeping it; a saved Other View fly-by moving on by itself while the main
+view's point is untouched, and the reverse; Back from the target and from any
+aircraft at that aircraft's pilot's eye with its airframe shown, while
+Front, Up and Track still hide it and a missile's Back stays hidden; the
+missile reference following a chosen owner's newest shot, counting its
+incoming shots, never an older one, with the player's default unchanged; and
+the object camera facing a ground object 50 nmi away and keeping 20 feet
+above the ground when looking up from one.
+
+Viewer tests on the synthetic recording cover F6 naming the wingman and
+cycling Enemy 1-2, Enemy 1-3, Enemy 1-2; F2 at the pilot's eye with no hidden
+aircraft and no label; Alt+F1 from the target, Ctrl+F1 from the aircraft's
+missile until it hits; keypad 5 and Shift+/ recentering without changing zoom;
+= and - zoom limits; F7's compass bearing only from the aircraft itself; the
+fly-by point ahead of the motion forwards and backwards; O and Shift+O order
+across aircraft, a weapon and two ground objects, with a destroyed building
+and the starting object left out; the object view's facing and range readout
+at 50 nmi, its refusal to look at itself, and its place after F12 on the
+camera button; falling back while a missile has hit or a building has fallen,
+saying so once, and recovering when stepping back; and the right-click menu
+on a ground object. Menu tests confirm live flight never offers the object
+view items.
+
+Repository checks: formatting, Clippy with warnings denied, workspace tests
+(1,914 passed, 8 ignored, tore-sim's golden fingerprints unchanged), workspace
+build, 97 Python tests, source and both executable asset checks, and
+documentation checks passed on Linux. The 1,200-tick headless flight gave the
+same 436.693 knots and 5,014.249 feet, and `--smoke-test` passed with an
+isolated copy of the dev profile. Windows and macOS were not run.
+
+GPU captures, Linux, NVIDIA RTX 4070, 960x720, with
+`TORE_DATA_DIR` an isolated copy of the dev profile and its F-14 Quick
+Mission recording `2026-09-28_1854_UKR_F14`, tick 3000 unless noted:
+
+| Case | Arguments | Result |
+| --- | --- | --- |
+| F2 on an AI F/A-18D | `--replay-aircraft 1 --flight-view 3` | Spine, both tails and wings from its seat; no label over it |
+| F2 on the player | `--flight-view 3` | The F-14's spine and tails, as in flight |
+| F7 from the player | `--flight-view 8` | Compass across the middle half of the top in the HUD's green, reading 017 toward the designated Enemy 1-1 |
+| Object view onto a missile | `--replay-look-at weapon:0` | Player in front, the AIM-54's smoke trail on the sightline; readout "You > AIM-54 from You 1.1 nmi" |
+| Object view onto an aircraft | `--replay-look-at aircraft:1 --replay-tick 6000` | Enemy 1-1 37.2 nmi away on the sightline |
+| Object view onto a runway | `--replay-look-at ground:1073741832` | Odesa 59.8 nmi away, centred |
+| Flight Alt+F2 | `--hud-target-preview 40,20,6000 --flight-view 3 --flight-reference target` (flight capture) | The target Hornet's spine and tails from its seat |
+
+The keyboard map's Replay sheet was checked in headless Chromium at
+1920x1080 and 960x540. Not tested: the PNG, ZIP and PDF exports of the map,
+the keys pressed by hand in a window (the view keys, Alt and Ctrl routing
+through the window, O cycling), a view from a ground object or a weapon in a
+real recording (covered synthetically), and replay sound in the back view.

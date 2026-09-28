@@ -30,11 +30,15 @@ const EDGE: i32 = 4;
 const BODY: [u8; 4] = [20, 28, 38, 246];
 const BORDER: [u8; 4] = [110, 130, 156, 255];
 
-/// What a right-click landed on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// What a right-click landed on. In this order the replay's object view
+/// steps through what is present: aircraft, weapons, then ground objects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Target {
     Aircraft(u32),
+    /// Any weapon in flight but a gun round: missiles, bombs and rockets.
     Missile(u32),
+    /// A ground object of the recorded world (replay only).
+    Ground(u32),
     Nothing,
 }
 
@@ -58,6 +62,10 @@ pub enum Action {
     Trails,
     /// Select the aircraft, keeping the camera as it is.
     Jump(u32),
+    /// The replay's object view starts from this object.
+    ViewFrom(Target),
+    /// The replay's object view looks at this object.
+    LookAt(Target),
 }
 
 /// One menu row: a heading, or an item with an optional detail on the
@@ -127,6 +135,14 @@ impl Aircraft {
     }
 }
 
+/// The replay's object view items for `target`.
+fn object_items(items: &mut Vec<Item>, target: Target, options: Options) {
+    if !options.live {
+        items.push(Item::new("View from here", Action::ViewFrom(target)));
+        items.push(Item::new("Look at this", Action::LookAt(target)));
+    }
+}
+
 fn switches(items: &mut Vec<Item>, options: Options) {
     items.push(Item::switch("Name labels", Action::Labels, options.labels));
     if !options.live {
@@ -148,6 +164,7 @@ pub fn aircraft_items(aircraft: &Aircraft, options: Options) -> Vec<Item> {
     if !options.live {
         items.push(Item::new("Drone here", Action::Drone(id)));
     }
+    object_items(&mut items, Target::Aircraft(id), options);
     if aircraft.ai {
         items.push(Item::new("AI thinking", Action::Thought(id)));
     }
@@ -163,11 +180,20 @@ pub fn missile_items(missile: u32, owner: Option<&Aircraft>, options: Options) -
     if !options.live {
         items.push(Item::new("Drone here", Action::DroneMissile(missile)));
     }
+    object_items(&mut items, Target::Missile(missile), options);
     if let Some(owner) = owner {
         let mut item = Item::new("Go to the shooter", Action::Jump(owner.id));
         item.detail = ascii(&owner.label);
         items.push(item);
     }
+    switches(&mut items, options);
+    items
+}
+
+/// The items for a ground object, which only a replay offers.
+pub fn ground_items(object: u32, options: Options) -> Vec<Item> {
+    let mut items = Vec::new();
+    object_items(&mut items, Target::Ground(object), options);
     switches(&mut items, options);
     items
 }
@@ -649,6 +675,8 @@ mod tests {
                 "Follow (chase view)",
                 "Cockpit view",
                 "Drone here",
+                "View from here",
+                "Look at this",
                 "AI thinking",
                 "Telemetry",
                 "Comms for this aircraft",
@@ -672,12 +700,39 @@ mod tests {
             ]
         );
         let items = aircraft_items(&fleet[2], replay);
-        assert_eq!(items[6].detail, "On");
-        assert_eq!(items[7].detail, "Off");
+        assert_eq!(items[3].action, Some(Action::ViewFrom(Target::Aircraft(3))));
+        assert_eq!(items[4].action, Some(Action::LookAt(Target::Aircraft(3))));
+        assert_eq!(items[8].detail, "On");
+        assert_eq!(items[9].detail, "Off");
         let missile = missile_items(7, Some(&fleet[2]), replay);
         assert_eq!(missile[0].action, Some(Action::Guidance(7)));
-        assert_eq!(missile[2].action, Some(Action::Jump(3)));
-        assert_eq!(missile[2].detail, "Enemy 2-1");
+        assert_eq!(
+            missile[2].action,
+            Some(Action::ViewFrom(Target::Missile(7)))
+        );
+        assert_eq!(missile[3].action, Some(Action::LookAt(Target::Missile(7))));
+        assert_eq!(missile[4].action, Some(Action::Jump(3)));
+        assert_eq!(missile[4].detail, "Enemy 2-1");
+        // A ground object: the object view and the switches, replay only.
+        assert_eq!(
+            labels(&ground_items(40, replay)),
+            [
+                "View from here",
+                "Look at this",
+                "Name labels",
+                "Flight path trails"
+            ]
+        );
+        // Live flight never offers the object view.
+        let live_items = aircraft_items(&fleet[2], live)
+            .into_iter()
+            .chain(missile_items(7, Some(&fleet[2]), live))
+            .chain(ground_items(40, live));
+        assert!(
+            live_items
+                .into_iter()
+                .all(|i| !matches!(i.action, Some(Action::ViewFrom(_) | Action::LookAt(_))))
+        );
     }
 
     #[test]
@@ -815,9 +870,10 @@ mod tests {
         );
         let centre = |r: Rect| Some((f64::from(r.0 + r.2 / 2), f64::from(r.1 + r.3 / 2)));
         let row = |i: usize| centre(menu.row_rect(i));
-        let (third, fourth) = (row(3), row(4));
+        // AI thinking, after the replay's two object view items.
+        let (third, fourth) = (row(5), row(6));
         menu.pointer(third);
-        assert_eq!(menu.focus, 3);
+        assert_eq!(menu.focus, 5);
         assert!(menu.down(third));
         assert_eq!(menu.up(fourth), Outcome::Handled);
         assert!(menu.down(third));

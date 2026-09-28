@@ -46,6 +46,14 @@ const TOAST: Duration = Duration::from_secs(3);
 const LABEL_REACH: f64 = 607_600.;
 /// The view the viewer opens in: F10, outside the aircraft.
 const EXTERNAL: u8 = 1;
+/// The object view, from any object to any other: numbered after the
+/// flight views, and only in a replay.
+pub const OBJECT: u8 = 12;
+/// Feet in a nautical mile, for the object view's range readout.
+const NMI: f64 = 6_076.12;
+/// An aircraft whose model origin is this close to the camera is the one
+/// the camera sits in, as in the back view from its pilot's eye: no label.
+const INSIDE: f64 = 30.;
 
 /// What the viewer shows besides the 3D view. Every part can be switched
 /// on its own; `hidden` hides all of them at once, trails excepted.
@@ -159,6 +167,22 @@ pub struct Options {
     pub panels: Vec<Request>,
     /// Start with the Escape menu open at this page, for captures.
     pub menu: Option<pause::Start>,
+    /// Start in the object view, looking at this.
+    pub look_at: Option<Target>,
+}
+
+/// An object named on the command line: `aircraft:ID`, `ground:ID` or
+/// `weapon:ID`.
+pub fn parse_object(text: &str) -> Result<Target, String> {
+    let bad = || format!("{text:?} is not an object: use aircraft:ID, ground:ID or weapon:ID");
+    let (kind, id) = text.split_once(':').ok_or_else(bad)?;
+    let id: u32 = id.trim().parse().map_err(|_| bad())?;
+    match kind.trim() {
+        "aircraft" => Ok(Target::Aircraft(id)),
+        "ground" => Ok(Target::Ground(id)),
+        "weapon" => Ok(Target::Missile(id)),
+        _ => Err(bad()),
+    }
 }
 
 /// How long one frame's parts took, in milliseconds, for the
@@ -208,6 +232,7 @@ fn view_name(view: u8) -> &'static str {
         flight_views::TARGET_PLAYER => "F8 Target view",
         flight_views::FLY_BY => "F9 Fly-by",
         flight_views::MISSILE => "F12 Missile",
+        OBJECT => "O Object view",
         _ => "View",
     }
 }
@@ -311,7 +336,7 @@ pub fn name_labels<'a>(
             .map(|i| (pose.position[i] - eye[i]).powi(2))
             .sum::<f64>()
             .sqrt();
-        if distance > LABEL_REACH {
+        if !(INSIDE..=LABEL_REACH).contains(&distance) {
             continue;
         }
         let Some([x, y]) = camera.project(size, pose.position) else {
@@ -353,6 +378,8 @@ struct Interface<'a> {
     panels: PanelLayer<'a>,
     /// The cockpit messages on screen, in the HUD's font and colour.
     messages: Option<Messages<'a>>,
+    /// F7's bearing compass, in the same font and colour, and the bearing.
+    compass: Option<(&'a tore_formats::font::Font, [u8; 3], f64)>,
 }
 
 /// Cockpit messages drawn as flight draws them, above the transport bar.
@@ -381,6 +408,9 @@ fn compose(
     for label in interface.labels {
         canvas.text(font, &label.text, label.at, scale, label.color);
     }
+    if let Some((font, color, bearing)) = interface.compass {
+        crate::view_compass::draw_clear(canvas, font, color, bearing);
+    }
     let panels = &interface.panels;
     canvas.centered_rects(panels.pixels, panels.panels);
     if let Some(messages) = &interface.messages {
@@ -400,6 +430,31 @@ fn compose(
     if let Some(menu) = panels.menu {
         canvas.centered_rects(panels.pixels, &[menu]);
     }
+}
+
+/// Straight-line feet between two points.
+fn feet(a: [f64; 3], b: [f64; 3]) -> f64 {
+    (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
+}
+
+/// The flight views' body for an aircraft as drawn, its velocity times
+/// `sign`: playing backwards, it moves the other way.
+fn aircraft_body(pose: &AircraftPose, sign: f64) -> Body {
+    let [yaw, pitch, bank] = pose.attitude;
+    Body::new(
+        pose.id,
+        pose.position,
+        pose.velocity.map(|v| v * sign),
+        Basis::new(yaw, pitch, bank),
+    )
+}
+
+/// The flight views' body for a weapon in flight, its velocity times `sign`.
+fn weapon_body(p: &crate::render_snapshot::ProjectilePose, sign: f64) -> Body {
+    let d = p.direction;
+    let speed = f64::from(p.speed_f8) / 256. * sign;
+    let basis = Basis::new(d[0].atan2(d[2]), d[1].atan2(d[0].hypot(d[2])), 0.);
+    Body::missile(p.id, p.position, d.map(|v| v * speed), basis)
 }
 
 /// An aircraft's label for people: its label, else its type, else its id.
@@ -660,6 +715,17 @@ pub struct Viewer {
     anchor: Option<[f64; 3]>,
     rig: Rig,
     selected: u32,
+    /// Where the object view starts from when it is not the selected
+    /// aircraft: a ground object or a weapon chosen with View from here.
+    from: Option<Target>,
+    /// What the object view looks at.
+    look_at: Option<Target>,
+    /// F6 was pressed: name the wingman once the camera has found it.
+    announce_wingman: bool,
+    /// The bearing F7's compass shows this frame, when it shows.
+    compass: Option<f64>,
+    /// The object view's names and range this frame.
+    readout: Option<String>,
     look: [f32; 2],
     zoom: f32,
     camera: Camera,
@@ -823,11 +889,20 @@ impl Viewer {
             requests: options.panels.clone(),
             size: [overlay::WIDTH as u32, overlay::HEIGHT as u32],
             layout: panels::REPLAY,
-            view: options.view.unwrap_or(EXTERNAL),
+            view: if options.look_at.is_some() {
+                OBJECT
+            } else {
+                options.view.unwrap_or(EXTERNAL)
+            },
             drone: None,
             anchor: None,
             rig,
             selected,
+            from: None,
+            look_at: options.look_at,
+            announce_wingman: false,
+            compass: None,
+            readout: None,
             look: [0.; 2],
             zoom: 1.,
             camera: Camera::new(),
@@ -942,11 +1017,23 @@ impl Viewer {
         self.select(next);
     }
 
+    /// Selects an aircraft, which the object view then starts from too. An
+    /// Alt or Ctrl reference carries over to the new aircraft's target or
+    /// missiles.
     fn select(&mut self, id: u32) {
+        self.from = None;
         if id != self.selected {
             self.selected = id;
             self.anchor = None;
-            self.rig.select(Reference::Aircraft(id));
+            let reference = match self.rig.reference {
+                Reference::Target => Reference::Target,
+                Reference::Missile => {
+                    self.rig.follow_missiles_of(id);
+                    Reference::Missile
+                }
+                Reference::Player | Reference::Aircraft(_) => Reference::Aircraft(id),
+            };
+            self.rig.select(reference);
             self.camera_error = None;
             self.look = [0.; 2];
             self.panels.follow(id);
@@ -955,13 +1042,222 @@ impl Viewer {
 
     /// F1 to F12: a flight view on the selected aircraft, leaving the drone.
     pub fn set_view(&mut self, view: u8) {
+        self.show_view(view, Reference::Aircraft(self.selected));
+    }
+
+    /// A flight view from `reference`: the selected aircraft, its target
+    /// (Alt) or its newest missile (Ctrl), as flight's modifiers choose.
+    /// F6 again on the same reference moves to the next wingman.
+    fn show_view(&mut self, view: u8, reference: Reference) {
+        let again = view == flight_views::WING
+            && self.view == flight_views::WING
+            && self.drone.is_none()
+            && self.rig.reference == reference;
         self.drone = None;
         self.view = view;
         self.look = [0.; 2];
         self.zoom = 1.;
         self.camera_error = None;
-        // The fly-by point is chosen afresh each time the view is picked.
-        self.rig.select(Reference::Aircraft(self.selected));
+        if reference == Reference::Missile {
+            self.rig.follow_missiles_of(self.selected);
+        }
+        if again {
+            self.rig.next_wingman();
+        } else {
+            // The fly-by point is chosen afresh each time the view is picked.
+            self.rig.select(reference);
+        }
+        self.announce_wingman = view == flight_views::WING;
+    }
+
+    /// Alt or Ctrl with a view key, as in flight: Alt looks from the selected
+    /// aircraft's target, Ctrl from its newest missile. True when taken.
+    pub fn view_key(&mut self, name: &str, alt: bool, control: bool) -> bool {
+        // The Escape menu takes every key while it is open.
+        if alt == control || self.pause.is_open() {
+            return false;
+        }
+        let Some(view) = flight_views::key(name) else {
+            return false;
+        };
+        self.menu = None;
+        self.show_view(
+            view,
+            if alt {
+                Reference::Target
+            } else {
+                Reference::Missile
+            },
+        );
+        true
+    }
+
+    /// The object view on what it looks at now, leaving the drone.
+    fn object_view(&mut self) {
+        if self.view != OBJECT || self.drone.is_some() {
+            self.drone = None;
+            self.view = OBJECT;
+            self.look = [0.; 2];
+            self.zoom = 1.;
+        }
+        self.camera_error = None;
+    }
+
+    /// Where the object view starts from: the selected aircraft unless View
+    /// from here chose a ground object or a weapon.
+    fn from(&self) -> Target {
+        self.from.unwrap_or(Target::Aircraft(self.selected))
+    }
+
+    /// Ground objects of the recorded world still standing at `tick`, in id
+    /// order, with where each is.
+    fn ground_objects(&self, tick: u64) -> Vec<(u32, [f64; 3])> {
+        let destroyed = self.tracks.destroyed(tick);
+        self.world
+            .airport_scene
+            .objects
+            .iter()
+            .filter(|o| !destroyed.contains(&o.id))
+            .map(|o| (o.id, o.bounds.center))
+            .collect()
+    }
+
+    /// Where `object` is in `picture` at `tick`, for the object view: an
+    /// aircraft flying or not yet destroyed, a standing ground object, or a
+    /// weapon in flight.
+    fn body_of(&self, picture: &RenderSnapshot, tick: u64, object: Target) -> Option<Body> {
+        match object {
+            Target::Aircraft(0) => Some(aircraft_body(&picture.player, 1.)),
+            Target::Aircraft(id) => picture
+                .target(id)
+                .filter(|pose| pose.airborne || pose.damage.hp > 0)
+                .map(|pose| aircraft_body(pose, 1.)),
+            Target::Ground(id) => {
+                let object = self
+                    .world
+                    .airport_scene
+                    .objects
+                    .iter()
+                    .find(|o| o.id == id)?;
+                if self.tracks.destroyed(tick).contains(&id) {
+                    return None;
+                }
+                let b = object.bounds;
+                Some(Body::new(
+                    id,
+                    b.center,
+                    [0.; 3],
+                    Basis::new(b.heading, 0., 0.),
+                ))
+            }
+            Target::Missile(id) => picture
+                .projectiles
+                .iter()
+                .find(|p| p.id == id && !p.gun)
+                .map(|p| weapon_body(p, 1.)),
+            Target::Nothing => None,
+        }
+    }
+
+    /// A name for `object` as people read it: an aircraft's label, a ground
+    /// object's name, or a weapon and who fired it.
+    fn object_name(&self, object: Target) -> String {
+        match object {
+            Target::Aircraft(id) => self.label(id),
+            Target::Ground(id) => self
+                .world
+                .airport_scene
+                .objects
+                .iter()
+                .find(|o| o.id == id)
+                .and_then(|o| {
+                    [&o.name, &o.object_type]
+                        .into_iter()
+                        .find(|n| !n.trim().is_empty())
+                        .cloned()
+                })
+                .unwrap_or_else(|| format!("Ground object {id}")),
+            Target::Missile(id) => match self.missiles.get(&id) {
+                Some((owner, weapon)) => format!("{weapon} from {}", self.label(*owner)),
+                None => format!("Weapon {id}"),
+            },
+            Target::Nothing => "nothing".into(),
+        }
+    }
+
+    /// Everything the object view can look at on the current tick, in a
+    /// stable order: aircraft, weapons in flight, then standing ground
+    /// objects, each by id, without the object the view starts from.
+    fn objects_now(&mut self) -> Vec<Target> {
+        let tick = self.clock.tick();
+        let picture = self.playback.picture(tick, self.clock.alpha());
+        let from = self.from();
+        let mut out: Vec<Target> = std::iter::once(&picture.player)
+            .chain(&picture.targets)
+            .filter(|pose| pose.id == 0 || pose.airborne || pose.damage.hp > 0)
+            .map(|pose| Target::Aircraft(pose.id))
+            .chain(
+                self.ground_objects(tick)
+                    .into_iter()
+                    .map(|(id, _)| Target::Ground(id)),
+            )
+            .chain(
+                picture
+                    .projectiles
+                    .iter()
+                    .filter(|p| !p.gun)
+                    .map(|p| Target::Missile(p.id)),
+            )
+            .filter(|t| *t != from)
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
+    /// O and Shift+O: the object view looks at the next or previous object
+    /// present now.
+    fn cycle_look_at(&mut self, forward: bool) {
+        let objects = self.objects_now();
+        let (Some(first), Some(last)) = (objects.first(), objects.last()) else {
+            self.toast("Nothing else to look at now");
+            return;
+        };
+        let next = match self.look_at {
+            None if forward => *first,
+            None => *last,
+            Some(now) if forward => *objects.iter().find(|t| **t > now).unwrap_or(first),
+            Some(now) => *objects.iter().rev().find(|t| **t < now).unwrap_or(last),
+        };
+        self.look_at = Some(next);
+        self.object_view();
+    }
+
+    /// What View from here looks at when nothing else is chosen: a weapon's
+    /// own target while it flies, otherwise the nearest other aircraft.
+    fn first_look_at(&mut self) -> Option<Target> {
+        let tick = self.clock.tick();
+        let picture = self.playback.picture(tick, self.clock.alpha());
+        let from = self.from();
+        let at = self.body_of(&picture, tick, from)?.position();
+        if let Target::Missile(id) = from
+            && let Some(target) = picture
+                .projectiles
+                .iter()
+                .find(|p| p.id == id)
+                .and_then(|p| p.target)
+                .map(Target::Aircraft)
+            && self.body_of(&picture, tick, target).is_some()
+        {
+            return Some(target);
+        }
+        std::iter::once(&picture.player)
+            .chain(&picture.targets)
+            .map(|pose| Target::Aircraft(pose.id))
+            .filter(|t| *t != from)
+            .filter_map(|t| Some((t, self.body_of(&picture, tick, t)?.position())))
+            .min_by(|a, b| feet(a.1, at).total_cmp(&feet(b.1, at)))
+            .map(|(t, _)| t)
     }
 
     /// Where the selected aircraft is drawn in `picture`.
@@ -1001,21 +1297,29 @@ impl Viewer {
         match &self.drone {
             Some(drone) if drone.mode == Mode::Follow => "Drone follow".into(),
             Some(_) => "Drone free".into(),
+            None if self.view == OBJECT => format!(
+                "Object: {} > {}",
+                self.object_name(self.from()),
+                self.look_at
+                    .map_or_else(|| "nothing".to_owned(), |t| self.object_name(t))
+            ),
             None => view_name(self.view).to_owned(),
         }
     }
 
-    /// The camera button: the next flight view in F-key order, then the
-    /// two drones, then the first view again.
+    /// The camera button: the next flight view in F-key order, the object
+    /// view when something to look at is chosen, then the two drones, then
+    /// the first view again.
     fn next_camera(&mut self) {
         match &self.drone {
             Some(drone) if drone.mode == Mode::Follow => self.drone_mode(Some(Mode::Free)),
             Some(_) => self.set_view(VIEW_ORDER[0]),
             None => {
                 let at = VIEW_ORDER.iter().position(|v| *v == self.view);
-                match at.map(|i| i + 1).filter(|i| *i < VIEW_ORDER.len()) {
-                    Some(i) => self.set_view(VIEW_ORDER[i]),
-                    None => self.drone_mode(Some(Mode::Follow)),
+                match at.map(|i| i + 1) {
+                    Some(i) if i < VIEW_ORDER.len() => self.set_view(VIEW_ORDER[i]),
+                    Some(_) if self.look_at.is_some() => self.object_view(),
+                    _ => self.drone_mode(Some(Mode::Follow)),
                 }
             }
         }
@@ -1107,7 +1411,13 @@ impl Viewer {
             }
             "ArrowUp" if !repeat => self.clock.faster(),
             "ArrowDown" if !repeat => self.clock.slower(),
+            // Zoom as in flight, keypad plus and minus included.
+            "=" => self.zoom = (self.zoom * 1.1).min(4.),
+            "-" => self.zoom = (self.zoom / 1.1).max(0.5),
             _ if repeat => return Command::None,
+            // Recenter the look, keeping the view and the zoom.
+            "Numpad5" => self.look = [0.; 2],
+            "/" if shift => self.look = [0.; 2],
             "Space" => self.clock.toggle(),
             "j" => self.clock.reverse(),
             "k" => self.clock.pause(),
@@ -1120,6 +1430,7 @@ impl Viewer {
                 }
             }
             "Tab" => self.cycle_aircraft(!shift),
+            "o" => self.cycle_look_at(!shift),
             "`" => self.drone_mode(None),
             "h" => {
                 self.ui.hidden = !self.ui.hidden;
@@ -1447,6 +1758,10 @@ impl Viewer {
                     context_menu::missile_items(id, owner.as_ref(), options),
                 )
             }
+            Target::Ground(id) => (
+                self.object_name(target),
+                context_menu::ground_items(id, options),
+            ),
             Target::Nothing => {
                 let entries: Vec<_> = self
                     .present()
@@ -1564,16 +1879,45 @@ impl Viewer {
             Action::Labels => self.ui.labels = !self.ui.labels,
             Action::Trails => self.ui.trails = !self.ui.trails,
             Action::Jump(id) => self.select(id),
+            Action::ViewFrom(target) => {
+                match target {
+                    Target::Aircraft(id) => self.select(id),
+                    Target::Nothing => return,
+                    other => self.from = Some(other),
+                }
+                if self.look_at.is_none_or(|t| t == self.from()) {
+                    self.look_at = self.first_look_at();
+                }
+                self.object_view();
+            }
+            Action::LookAt(target) => {
+                if target == self.from() {
+                    self.toast("The object view already starts from there");
+                } else {
+                    self.look_at = Some(target);
+                    self.object_view();
+                }
+            }
         }
         self.ui.comms = self.panels.comms_open();
     }
 
     /// What a right-click can pick in `picture`: every recorded aircraft,
-    /// with its name label when one is drawn, and every weapon but gun
-    /// rounds.
-    fn pickables_for(picture: &RenderSnapshot, labels: &[Label]) -> Vec<Pickable> {
+    /// with its name label when one is drawn, every weapon but gun rounds,
+    /// and the `ground` objects still standing, by id and place.
+    fn pickables_for(
+        picture: &RenderSnapshot,
+        labels: &[Label],
+        ground: &[(u32, [f64; 3])],
+    ) -> Vec<Pickable> {
         let labels: Vec<(u32, [f64; 4])> = labels.iter().map(|l| (l.id, l.rect())).collect();
-        context_menu::pickables(picture, &labels, |_| true)
+        let mut out = context_menu::pickables(picture, &labels, |_| true);
+        out.extend(ground.iter().map(|&(id, position)| Pickable {
+            target: Target::Ground(id),
+            position,
+            label: None,
+        }));
+        out
     }
 
     /// The panels and menu asked for at start, once the first picture is
@@ -1610,23 +1954,28 @@ impl Viewer {
         at.checked_sub(1).map(|i| list[i].1)
     }
 
+    /// The target the flight views use at `tick`: the selected aircraft's
+    /// when the recording knows it, otherwise the player's.
+    fn view_target(&self, tick: u64) -> Option<u32> {
+        self.target_of(self.selected, tick)
+            .or_else(|| self.target_of(0, tick))
+            .flatten()
+    }
+
     /// The scene the flight views read, built from the picture: the
     /// selected aircraft's target when the recording knows it, otherwise
     /// the player's.
     fn scene(&self, picture: &RenderSnapshot, tick: u64) -> Scene {
-        let body = |pose: &AircraftPose| {
-            let [yaw, pitch, bank] = pose.attitude;
-            Body::new(
-                pose.id,
-                pose.position,
-                pose.velocity,
-                Basis::new(yaw, pitch, bank),
-            )
+        // Playing backwards everything moves the other way, so the fly-by
+        // point goes ahead of the motion the viewer sees; paused, nothing
+        // moves, and the direction it will play on in decides.
+        let sign = if self.clock.direction() == Direction::Reverse {
+            -1.
+        } else {
+            1.
         };
-        let target = self
-            .target_of(self.selected, tick)
-            .or_else(|| self.target_of(0, tick))
-            .flatten();
+        let body = |pose: &AircraftPose| aircraft_body(pose, sign);
+        let target = self.view_target(tick);
         let flying = |pose: &&AircraftPose| pose.airborne && pose.damage.hp > 0;
         let wings = picture
             .targets
@@ -1648,17 +1997,7 @@ impl Viewer {
             .projectiles
             .iter()
             .filter(|p| !p.gun)
-            .map(|p| {
-                let d = p.direction;
-                let speed = f64::from(p.speed_f8) / 256.;
-                let basis = Basis::new(d[0].atan2(d[2]), d[1].atan2(d[0].hypot(d[2])), 0.);
-                Shot::new(
-                    Body::missile(p.id, p.position, d.map(|v| v * speed), basis),
-                    p.owner,
-                    p.target,
-                    p.incoming,
-                )
-            })
+            .map(|p| Shot::new(weapon_body(p, sign), p.owner, p.target, p.incoming))
             .collect();
         Scene::from_parts(
             body(&picture.player),
@@ -1687,9 +2026,14 @@ impl Viewer {
     ) -> Camera {
         let anchor = self.anchor(picture).or(self.anchor);
         self.anchor = anchor;
+        self.compass = None;
+        self.readout = None;
         if let Some(drone) = &mut self.drone {
             drone.step(seconds, &self.held, shift, anchor, ground(&self.world));
             return drone.camera(anchor, ground(&self.world));
+        }
+        if self.view == OBJECT {
+            return self.object_camera(picture, tick);
         }
         let scene = self.scene(picture, tick);
         match self
@@ -1698,9 +2042,26 @@ impl Viewer {
         {
             Ok(camera) => {
                 self.camera_error = None;
+                if std::mem::take(&mut self.announce_wingman)
+                    && let Some(id) = self.rig.wingman()
+                {
+                    let name = self.label(id);
+                    self.toast(format!("Wingman view: {name}"));
+                }
+                // F7 from the selected aircraft carries the bearing compass.
+                if self.view == flight_views::TARGET
+                    && self.rig.reference == Reference::Aircraft(self.selected)
+                    && let Some(target) = self.view_target(tick)
+                    && let Some(from) = self.body_of(picture, tick, Target::Aircraft(self.selected))
+                    && let Some(to) = self.body_of(picture, tick, Target::Aircraft(target))
+                {
+                    self.compass =
+                        Some(crate::view_compass::bearing(from.position(), to.position()));
+                }
                 camera
             }
             Err(reason) => {
+                self.announce_wingman = false;
                 if self.camera_error != Some(reason) {
                     self.camera_error = Some(reason);
                     self.toast(reason);
@@ -1721,6 +2082,47 @@ impl Viewer {
                     })
                     .unwrap_or_else(|_| copy(&self.camera))
             }
+        }
+    }
+
+    /// The object view's camera: from the object it starts from toward the
+    /// one it looks at, at any range. With either end missing it says why
+    /// once and shows the starting object from outside, or keeps the last
+    /// camera when that is gone too; it comes back when both are there.
+    fn object_camera(&mut self, picture: &RenderSnapshot, tick: u64) -> Camera {
+        let from = self.body_of(picture, tick, self.from());
+        let to = self.look_at.and_then(|t| self.body_of(picture, tick, t));
+        if let (Some(from), Some(to), Some(look_at)) = (from, to, self.look_at) {
+            self.camera_error = None;
+            self.readout = Some(format!(
+                "{} > {}   {:.1} nmi",
+                self.object_name(self.from()),
+                self.object_name(look_at),
+                feet(from.position(), to.position()) / NMI
+            ));
+            let mut camera = flight_views::object_camera(from, to.position(), ground(&self.world));
+            camera.zoom = self.zoom;
+            return camera;
+        }
+        let reason = if self.look_at.is_none() {
+            "Nothing to look at: press O or right-click an object"
+        } else if from.is_none() {
+            "The object the view starts from is not in the recording now"
+        } else {
+            "The object to look at is not in the recording now"
+        };
+        if self.camera_error != Some(reason) {
+            self.camera_error = Some(reason);
+            self.toast(reason);
+        }
+        let player = (!self.shown).then(|| aircraft_body(&picture.player, 1.));
+        match from.or(player) {
+            Some(from) => {
+                let mut camera = flight_views::outside(from);
+                camera.zoom = self.zoom;
+                camera
+            }
+            None => copy(&self.camera),
         }
     }
 
@@ -1881,6 +2283,7 @@ impl Viewer {
                 .as_ref()
                 .filter(|(_, at)| at.elapsed() < TOAST)
                 .map(|(text, _)| text.clone()),
+            readout: self.readout.clone(),
             // The Comms panel lists every line, where the subtitles would
             // sit over it.
             subtitles: if self.ui.subtitles && !self.panels.comms_open() {
@@ -1923,11 +2326,26 @@ impl Viewer {
         self.weather.seek(&mut self.world, &self.tracks, tick);
         let player = self.player_state(&picture, tick);
         let camera = self.frame_camera(&picture, tick, seconds, shift);
+        // The back view from the player's seat draws its airframe but is
+        // heard from the cockpit, as flight hears it.
+        let seat = crate::mirrors::pilot_eye(
+            picture.player.position,
+            aircraft_body(&picture.player, 1.).basis(),
+        );
+        let listening = (self.drone.is_none()
+            && self.view == 3
+            && camera.hidden_target.is_none()
+            && feet(camera.position, seat) < 1.)
+            .then(|| {
+                let mut inside = copy(&camera);
+                inside.hidden_target = Some(0);
+                inside
+            });
         let moment = sound::Moment {
             from,
             clock: &self.clock,
             scrubbing: self.bar.scrubbing,
-            camera: &camera,
+            camera: listening.as_ref().unwrap_or(&camera),
             view: self.drone.is_none().then_some(self.view),
             selected: self.selected,
         };
@@ -2070,7 +2488,7 @@ impl Viewer {
             Vec::new()
         };
         self.size = size;
-        self.pickables = Self::pickables_for(picture, &labels);
+        self.pickables = Self::pickables_for(picture, &labels, &self.ground_objects(tick));
         if !self.requests.is_empty() {
             self.open_requests(camera);
         }
@@ -2133,6 +2551,9 @@ impl Viewer {
                     font: &self.ownship.hud_font,
                     color: hud_color,
                 }),
+                compass: self
+                    .compass
+                    .map(|bearing| (&self.ownship.hud_font, hud_color, bearing)),
             },
         );
         // The Escape menu goes over everything, the hidden interface too,
@@ -2235,6 +2656,7 @@ mod tests {
                 menu: Some(menu),
             },
             messages: None,
+            compass: None,
         };
         let mut canvas = FlightCanvas::default();
         let mut layer = vec![0; overlay::WIDTH * overlay::HEIGHT * 4];
@@ -2799,7 +3221,8 @@ mod tests {
     fn shown(v: &mut Viewer, tick: u64, camera: Camera, size: [u32; 2]) {
         v.clock.seek(tick as f64);
         let picture = v.playback.picture(tick, 1.);
-        v.pickables = Viewer::pickables_for(&picture, &[]);
+        let ground = v.ground_objects(tick);
+        v.pickables = Viewer::pickables_for(&picture, &[], &ground);
         v.camera = camera;
         v.size = size;
     }
@@ -2835,7 +3258,7 @@ mod tests {
         assert!(v.menu.is_none());
         // Keys move through the menu and choose: AI thinking.
         right_click(&mut v, [640., 480.], size);
-        for _ in 0..3 {
+        for _ in 0..5 {
             assert_eq!(press(&mut v, "ArrowDown"), Command::None);
         }
         assert_eq!(press(&mut v, "Enter"), Command::None);
@@ -2891,6 +3314,375 @@ mod tests {
         press(&mut v, "h");
         right_click(&mut v, [640., 480.], size);
         assert!(v.menu.is_none());
+    }
+
+    /// The camera the viewer chooses at `tick`, as a frame would show it.
+    fn frame_at(v: &mut Viewer, tick: u64) -> Camera {
+        v.clock.seek(tick as f64);
+        let picture = v.playback.picture(tick, 1.);
+        let camera = v.frame_camera(&picture, tick, 0., false);
+        v.camera = copy(&camera);
+        v.shown = true;
+        camera
+    }
+
+    fn toast(v: &Viewer) -> String {
+        v.toast.as_ref().map(|(t, _)| t.clone()).unwrap_or_default()
+    }
+
+    fn forward(c: &Camera) -> [f64; 3] {
+        Basis::new(f64::from(c.yaw), f64::from(c.pitch), -f64::from(c.roll)).forward
+    }
+
+    fn toward(from: [f64; 3], to: [f64; 3]) -> [f64; 3] {
+        let d: [f64; 3] = std::array::from_fn(|i| to[i] - from[i]);
+        let length = feet(from, to);
+        d.map(|x| x / length)
+    }
+
+    #[test]
+    fn views_match_flight_wingmen_back_view_modifiers_and_look_keys() {
+        let dir = TempDir::new("viewer-flight-keys");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.pause();
+        press(&mut v, "Tab");
+        assert_eq!(v.selected, 1);
+        // F6 names the wingman; again, the next one, wrapping round.
+        press(&mut v, "F6");
+        frame_at(&mut v, 300);
+        assert_eq!(toast(&v), "Wingman view: Enemy 1-2");
+        for expected in ["Enemy 1-3", "Enemy 1-2"] {
+            press(&mut v, "F6");
+            frame_at(&mut v, 300);
+            assert_eq!(toast(&v), format!("Wingman view: {expected}"));
+        }
+        // F2 looks from the pilot's eye over the airframe, which shows, but
+        // its own label does not.
+        press(&mut v, "F2");
+        let back = frame_at(&mut v, 300);
+        let picture = v.playback.picture(300, 1.);
+        let pose = picture.target(1).unwrap();
+        let body = aircraft_body(pose, 1.);
+        let eye = crate::mirrors::pilot_eye(pose.position, body.basis());
+        assert!(feet(back.position, eye) < 1e-6);
+        assert_eq!((back.hidden_target, back.hidden_projectile), (None, None));
+        let labels = v.labels(&picture, &back, [1280, 960]);
+        assert!(labels.iter().all(|l| l.id != 1));
+        // F1 still hides it.
+        press(&mut v, "F1");
+        assert_eq!(frame_at(&mut v, 300).hidden_target, Some(1));
+        // Alt: from its target, the player. Ctrl: from its newest missile.
+        assert!(v.view_key("F1", true, false));
+        assert_eq!(v.rig.reference, Reference::Target);
+        let c = frame_at(&mut v, 300);
+        let player = v.playback.picture(300, 1.).player.position;
+        assert_eq!((c.position, c.hidden_target), (player, Some(0)));
+        assert!(v.view_key("F1", false, true));
+        let c = frame_at(&mut v, f::LAUNCH + 20);
+        assert_eq!(c.hidden_projectile, Some(f::MISSILE));
+        assert_eq!(v.camera_error, None);
+        // Once it has hit, the view says so and shows the aircraft outside.
+        frame_at(&mut v, f::IMPACT + 20);
+        assert_eq!(
+            v.camera_error,
+            Some("No last-launched missile for this view")
+        );
+        // Unmodified, the aircraft itself again; Ctrl+Alt and other keys are
+        // not views.
+        press(&mut v, "F1");
+        assert_eq!(v.rig.reference, Reference::Aircraft(1));
+        assert!(!v.view_key("F1", true, true));
+        assert!(!v.view_key("x", true, false));
+        // The Escape menu takes Alt and Ctrl view keys too.
+        press(&mut v, "Escape");
+        assert!(!v.view_key("F7", true, false));
+        assert_eq!((v.view, v.rig.reference), (0, Reference::Aircraft(1)));
+        press(&mut v, "Escape");
+        // Recentering keeps the view and zoom; = and - zoom as in flight.
+        v.look = [0.4, 0.2];
+        press(&mut v, "=");
+        assert!((v.zoom - 1.1).abs() < 1e-6);
+        press(&mut v, "Numpad5");
+        assert_eq!((v.look, v.view), ([0.; 2], 0));
+        assert!((v.zoom - 1.1).abs() < 1e-6);
+        v.look = [0.4, 0.2];
+        press(&mut v, "/");
+        assert_eq!(v.look, [0.4, 0.2]);
+        v.key("/", true, false, true);
+        assert_eq!(v.look, [0.; 2]);
+        for _ in 0..30 {
+            v.key("=", true, true, false);
+        }
+        assert_eq!(v.zoom, 4.);
+        for _ in 0..30 {
+            press(&mut v, "-");
+        }
+        assert_eq!(v.zoom, 0.5);
+    }
+
+    #[test]
+    fn f7_carries_the_bearing_compass_from_the_selected_aircraft() {
+        let dir = TempDir::new("viewer-compass");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.pause();
+        press(&mut v, "F7");
+        // No target yet: no compass.
+        frame_at(&mut v, 50);
+        assert_eq!(v.compass, None);
+        frame_at(&mut v, 200);
+        let picture = v.playback.picture(200, 1.);
+        let target = picture.target(2).unwrap().position;
+        let expected = crate::view_compass::bearing(picture.player.position, target);
+        assert!((v.compass.unwrap() - expected).abs() < 1e-9);
+        // Only from the aircraft itself, and only in F7.
+        v.view_key("F7", true, false);
+        frame_at(&mut v, 200);
+        assert_eq!(v.compass, None);
+        press(&mut v, "F10");
+        frame_at(&mut v, 200);
+        assert_eq!(v.compass, None);
+    }
+
+    #[test]
+    fn fly_by_goes_ahead_of_the_motion_either_way() {
+        let dir = TempDir::new("viewer-fly-by");
+        let mut v = viewer(&dir, &Options::default());
+        let tick = 300;
+        let picture = v.playback.picture(tick, 1.);
+        let pose = picture.player.clone();
+        let right = aircraft_body(&pose, 1.).basis().right;
+        let point = |sign: f64| -> [f64; 3] {
+            std::array::from_fn(|i| {
+                pose.position[i]
+                    + pose.velocity[i] * 3. * sign
+                    + right[i] * 300.
+                    + if i == 1 { 100. } else { 0. }
+            })
+        };
+        press(&mut v, "F9");
+        v.clock.pause();
+        assert!(feet(frame_at(&mut v, tick).position, point(1.)) < 1e-6);
+        press(&mut v, "j");
+        v.clock.pause();
+        press(&mut v, "F9");
+        assert!(feet(frame_at(&mut v, tick).position, point(-1.)) < 1e-6);
+        // Paused, the point stays put.
+        assert!(feet(frame_at(&mut v, tick).position, point(-1.)) < 1e-6);
+    }
+
+    fn site(id: u32, name: &str, center: [f64; 3]) -> tore_sim::airport::StaticObject {
+        use tore_sim::airport::{OrientedBox, SourceKey, StaticObject};
+        StaticObject {
+            id,
+            source: SourceKey {
+                layout: "test".into(),
+                ordinal: id,
+            },
+            name: name.into(),
+            object_type: "Bunker".into(),
+            bounds: OrientedBox {
+                center,
+                half: [20.; 3],
+                heading: 0.,
+                pitch: 0.,
+                bank: 0.,
+            },
+            hit_points: 100,
+            category: 0,
+            radar_signature: 1.,
+            infrared_signature: 1.,
+            runway: false,
+        }
+    }
+
+    /// A viewer with two ground objects: the fixture's building, destroyed
+    /// at its second hit, and a site 50 nmi east of the player at `FAR_AT`.
+    fn with_ground(name: &str) -> (TempDir, Viewer) {
+        let dir = TempDir::new(name);
+        let mut v = viewer(&dir, &Options::default());
+        let far = far_site();
+        v.world.airport_scene.objects = vec![
+            site(f::SURFACE[0].1, "Hangar", [101_000., 0., 99_000.]),
+            site(9_050, "", far),
+        ];
+        v.finish_tracks();
+        v.clock.pause();
+        (dir, v)
+    }
+
+    const FAR_AT: u64 = 200;
+    fn far_site() -> [f64; 3] {
+        let at = f::position(0, FAR_AT);
+        [at[0] + 50. * NMI, at[1], at[2]]
+    }
+
+    #[test]
+    fn o_steps_through_aircraft_ground_objects_and_weapons_in_flight() {
+        let (_dir, mut v) = with_ground("viewer-object-cycle");
+        v.clock.seek(FAR_AT as f64);
+        let (a, g, m) = (Target::Aircraft, Target::Ground, Target::Missile);
+        let order = [a(1), a(2), m(f::MISSILE), g(9_001), g(9_050)];
+        assert_eq!(v.objects_now(), order);
+        for expected in order.iter().chain(&order[..1]) {
+            press(&mut v, "o");
+            assert_eq!((v.look_at, v.view), (Some(*expected), OBJECT));
+        }
+        v.key("o", true, false, true);
+        assert_eq!(v.look_at, Some(g(9_050)));
+        v.key("o", true, false, true);
+        v.key("o", true, false, true);
+        assert_eq!(v.look_at, Some(m(f::MISSILE)));
+        // The launch event names no weapon, so it is a missile.
+        assert_eq!(v.camera_label(), "Object: You > Missile from Enemy 1-1");
+        frame_at(&mut v, FAR_AT);
+        assert!(
+            v.readout
+                .as_ref()
+                .unwrap()
+                .starts_with("You > Missile from Enemy 1-1   ")
+        );
+        // The building has fallen and the late aircraft has arrived; the
+        // missile has hit. The object it starts from never appears.
+        v.clock.seek(f::IMPACT as f64 + 20.);
+        assert_eq!(v.objects_now(), [a(1), a(2), a(f::LATE), g(9_050)]);
+        press(&mut v, "Tab");
+        assert!(!v.objects_now().contains(&a(1)) && v.objects_now().contains(&a(0)));
+        // A ground object is named, or else numbered.
+        assert_eq!(v.object_name(g(9_001)), "Hangar");
+        assert_eq!(v.object_name(g(9_050)), "Bunker");
+        v.world.airport_scene.objects[1].object_type.clear();
+        assert_eq!(v.object_name(g(9_050)), "Ground object 9050");
+    }
+
+    #[test]
+    fn object_view_faces_what_it_looks_at_at_any_range() {
+        let (_dir, mut v) = with_ground("viewer-object-far");
+        v.perform(Action::LookAt(Target::Ground(9_050)));
+        assert_eq!(v.view, OBJECT);
+        let c = frame_at(&mut v, FAR_AT);
+        let far = far_site();
+        assert!(tore_sim::attitude::dot(forward(&c), toward(c.position, far)) > 0.99999);
+        assert!(tore_sim::attitude::dot(forward(&c), toward(f::position(0, FAR_AT), far)) > 0.9999);
+        assert_eq!(v.readout.as_deref(), Some("You > Bunker   50.0 nmi"));
+        // Looking at the object it starts from is refused.
+        v.perform(Action::LookAt(Target::Aircraft(0)));
+        assert_eq!(v.look_at, Some(Target::Ground(9_050)));
+        assert!(toast(&v).contains("already starts from there"));
+        // From the ground object: it was the look-at, so the view turns to
+        // the nearest aircraft; then back at the player.
+        v.perform(Action::ViewFrom(Target::Ground(9_050)));
+        assert_eq!(v.from(), Target::Ground(9_050));
+        assert_eq!(v.look_at, Some(Target::Aircraft(2)));
+        v.perform(Action::LookAt(Target::Aircraft(0)));
+        let c = frame_at(&mut v, FAR_AT);
+        let at = v.playback.picture(FAR_AT, 1.).player.position;
+        assert!(tore_sim::attitude::dot(forward(&c), toward(c.position, at)) > 0.99999);
+        assert!(feet(c.position, far) < 250.);
+        // The camera button reaches it after F12, then the drones.
+        press(&mut v, "F12");
+        v.left_owner = None;
+        v.next_camera();
+        assert_eq!((v.view, v.drone.is_none()), (OBJECT, true));
+        v.next_camera();
+        assert!(v.drone.is_some());
+        // Tab selects an aircraft, which the view then starts from.
+        press(&mut v, "Tab");
+        assert_eq!(v.from(), Target::Aircraft(1));
+    }
+
+    #[test]
+    fn object_view_falls_back_while_an_end_is_missing_and_recovers() {
+        let (_dir, mut v) = with_ground("viewer-object-missing");
+        // Nothing chosen yet.
+        v.set_view(OBJECT);
+        frame_at(&mut v, FAR_AT);
+        assert!(toast(&v).starts_with("Nothing to look at"));
+        v.perform(Action::LookAt(Target::Missile(f::MISSILE)));
+        let good = frame_at(&mut v, FAR_AT);
+        assert_eq!(v.camera_error, None);
+        // The missile has hit: the player from outside, and the view keeps
+        // waiting for it rather than moving on.
+        v.toast = None;
+        let outside = frame_at(&mut v, f::IMPACT + 20);
+        assert_eq!(
+            v.camera_error,
+            Some("The object to look at is not in the recording now")
+        );
+        assert!(!toast(&v).is_empty());
+        let offset = feet(outside.position, f::position(0, f::IMPACT + 20));
+        assert!(offset > 100. && offset < 250., "{offset}");
+        assert_eq!(v.look_at, Some(Target::Missile(f::MISSILE)));
+        // Said once.
+        v.toast = None;
+        frame_at(&mut v, f::IMPACT + 30);
+        assert!(v.toast.is_none());
+        // Back before the hit, it recovers.
+        let again = frame_at(&mut v, FAR_AT);
+        assert_eq!((v.camera_error, again.position), (None, good.position));
+        // From the missile: it looks at the missile's target, the player,
+        // from 30 feet behind; once the missile is gone the last camera stays.
+        v.perform(Action::ViewFrom(Target::Missile(f::MISSILE)));
+        assert_eq!(v.look_at, Some(Target::Aircraft(0)));
+        let from_missile = frame_at(&mut v, FAR_AT);
+        let picture = v.playback.picture(FAR_AT, 1.);
+        let missile = picture
+            .projectiles
+            .iter()
+            .find(|p| p.id == f::MISSILE)
+            .unwrap();
+        let behind = feet(from_missile.position, missile.position);
+        assert!((20. ..45.).contains(&behind), "{behind}");
+        let player = picture.player.position;
+        assert!(
+            tore_sim::attitude::dot(
+                forward(&from_missile),
+                toward(from_missile.position, player)
+            ) > 0.99999
+        );
+        let kept = frame_at(&mut v, f::IMPACT + 20);
+        assert_eq!(kept.position, from_missile.position);
+        assert_eq!(
+            v.camera_error,
+            Some("The object the view starts from is not in the recording now")
+        );
+        // A destroyed ground object is missing too.
+        v.perform(Action::ViewFrom(Target::Ground(9_001)));
+        frame_at(&mut v, 310);
+        assert_eq!(v.camera_error, None);
+        frame_at(&mut v, f::SURFACE[1].0 + 1);
+        assert!(v.camera_error.is_some());
+    }
+
+    #[test]
+    fn right_click_on_a_ground_object_offers_the_object_view() {
+        let (_dir, mut v) = with_ground("viewer-object-menu");
+        let size = [1280, 960];
+        let hangar = [101_000., 0., 99_000.];
+        let camera = Drone::looking(
+            Mode::Free,
+            [hangar[0], 3_000., hangar[2] - 6_000.],
+            hangar,
+            None,
+        )
+        .camera(None, |_, _| 0.);
+        shown(&mut v, FAR_AT, camera, size);
+        right_click(&mut v, [640., 480.], size);
+        let menu = v.menu.take().unwrap();
+        assert_eq!(menu.target, Target::Ground(9_001));
+        assert_eq!(menu.title, "Hangar");
+        let actions: Vec<_> = menu.items.iter().filter_map(|i| i.action).collect();
+        assert_eq!(
+            actions[..2],
+            [
+                Action::ViewFrom(Target::Ground(9_001)),
+                Action::LookAt(Target::Ground(9_001))
+            ]
+        );
+        // Once it has fallen it is not there to pick.
+        let same = copy(&v.camera);
+        shown(&mut v, 400, same, size);
+        right_click(&mut v, [640., 480.], size);
+        assert_eq!(v.menu.take().unwrap().target, Target::Nothing);
     }
 
     #[test]
@@ -2985,6 +3777,7 @@ mod tests {
             ui: Ui::parse("trails,comms").unwrap(),
             panels: Request::parse("thought, telemetry,menu").unwrap(),
             menu: None,
+            look_at: None,
         };
         let mut v = viewer(&dir, &options);
         assert!(v.panels.comms_open());
@@ -3012,6 +3805,21 @@ mod tests {
         );
         assert!(v.clock.paused());
         assert!(Ui::parse("labels,sparkles").is_err());
+        // Starting in the object view.
+        assert_eq!(parse_object("weapon:7"), Ok(Target::Missile(7)));
+        assert_eq!(parse_object("ground: 12"), Ok(Target::Ground(12)));
+        assert_eq!(parse_object("aircraft:2"), Ok(Target::Aircraft(2)));
+        for bad in ["tank:3", "weapon", "weapon:x"] {
+            assert!(parse_object(bad).is_err(), "{bad}");
+        }
+        let v = viewer(
+            &dir,
+            &Options {
+                look_at: Some(Target::Aircraft(2)),
+                ..Default::default()
+            },
+        );
+        assert_eq!((v.view, v.look_at), (OBJECT, Some(Target::Aircraft(2))));
         let bad = Options {
             speed: Some(3.),
             ..Default::default()

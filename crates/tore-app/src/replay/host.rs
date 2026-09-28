@@ -190,8 +190,13 @@ impl App {
                 {
                     return Some(event);
                 }
-                // The viewer's keys take no Control, Alt or Command.
+                // Alt or Ctrl with a view key picks the view's reference, as
+                // in flight; the viewer's other keys take no Control, Alt
+                // or Command.
                 if pressed && (alt || command || control) {
+                    if !command && let Some(replay) = self.replay.as_mut() {
+                        replay.viewer.view_key(&name, alt, control);
+                    }
                     return None;
                 }
                 let result = self.replay.as_mut().map_or(Command::None, |replay| {

@@ -18,12 +18,18 @@ pub enum Reference {
     Target,
     Missile,
     /// Any aircraft by id, 0 being the player. It never selects the cockpit:
-    /// the front, back, up and track views sit at that aircraft and hide it
-    /// through the camera's hidden target, and the missile view follows that
-    /// aircraft's newest missile.
-    #[allow(dead_code)] // Selected by the mission replay viewer.
+    /// the front, up and track views sit at that aircraft and hide it through
+    /// the camera's hidden target, the back view looks from its pilot's eye
+    /// over its airframe, and the missile view follows that aircraft's
+    /// newest missile.
     Aircraft(u32),
 }
+
+/// How far the subject may get from the fly-by point before a new point is
+/// chosen: 3 nautical miles in straight-line feet. Opinionated: John asked
+/// on 2026-09-28 for the fly-by to reset after "like 3-4 miles"; 3 nmi is an
+/// agent choice.
+pub const FLY_BY_RESET: f64 = 18_228.;
 
 pub fn key(key: &str) -> Option<u8> {
     Some(match key {
@@ -66,6 +72,12 @@ impl Body {
             missile: true,
             ..Self::new(id, position, velocity, basis)
         }
+    }
+    pub(crate) fn position(&self) -> Vector {
+        self.position
+    }
+    pub(crate) fn basis(&self) -> Basis {
+        self.basis
     }
 }
 /// A missile in flight: its body, who fired it and at what.
@@ -260,6 +272,9 @@ struct Saved {
 #[derive(Clone, Default)]
 pub struct Rig {
     pub reference: Reference,
+    /// Whose missiles the missile reference follows: 0, the player, in
+    /// flight; the selected aircraft in a replay.
+    missile_owner: u32,
     last_missile: Option<u32>,
     fly_by: Option<Vector>,
     /// The wingman F6 follows, and whether the next camera moves to the next.
@@ -270,11 +285,26 @@ pub struct Rig {
     pub other_pending: bool,
 }
 impl Rig {
+    /// Whether `shot` counts as a launch of the missile reference's owner.
+    /// The player's own shots exclude the incoming fixtures, which can share
+    /// the player's shot counter; another aircraft's shots at the player are
+    /// incoming and count.
+    fn owns(&self, shot: &Shot) -> bool {
+        shot.owner == self.missile_owner && (self.missile_owner != 0 || !shot.incoming)
+    }
+    /// The missile reference follows `owner`'s newest launch from now on,
+    /// forgetting another owner's last missile.
+    pub fn follow_missiles_of(&mut self, owner: u32) {
+        if self.missile_owner != owner {
+            self.missile_owner = owner;
+            self.last_missile = None;
+        }
+    }
     pub fn observe(&mut self, scene: &Scene) {
         if let Some(id) = scene
             .missiles
             .iter()
-            .filter(|p| p.owner == 0 && !p.incoming)
+            .filter(|p| self.owns(p))
             .map(|p| p.body.id)
             .max()
         {
@@ -322,7 +352,9 @@ impl Rig {
     pub fn other_view(&self) -> u8 {
         self.other.as_ref().map_or(3, |s| s.view)
     }
-    pub fn other_camera(&self, scene: &Scene, base: Camera) -> Result<Camera, &'static str> {
+    /// The saved Other View's camera. A saved fly-by keeps its own point,
+    /// which moves on by the same rule as the main view's, independently.
+    pub fn other_camera(&mut self, scene: &Scene, base: Camera) -> Result<Camera, &'static str> {
         let saved = self.other.clone().unwrap_or(Saved {
             view: 3,
             reference: Reference::Player,
@@ -334,6 +366,9 @@ impl Rig {
         rig.reference = saved.reference;
         rig.fly_by = saved.fly_by;
         let mut camera = rig.camera(saved.view, scene, base, saved.look, saved.zoom)?;
+        if let Some(other) = &mut self.other {
+            other.fly_by = rig.fly_by;
+        }
         camera.weather_slot = 3;
         Ok(camera)
     }
@@ -341,7 +376,7 @@ impl Rig {
         scene
             .missiles
             .iter()
-            .find(|p| p.owner == 0 && !p.incoming && Some(p.body.id) == self.last_missile)
+            .find(|p| self.owns(p) && Some(p.body.id) == self.last_missile)
             .ok_or("No last-launched missile for this view")
     }
     pub fn camera(
@@ -408,14 +443,10 @@ impl Rig {
                 TARGET => camera = relation(subject, scene.target()?.position),
                 TARGET_PLAYER => camera = relation(scene.target()?, subject.position),
                 FLY_BY => {
-                    let eye = *self.fly_by.get_or_insert_with(|| {
-                        std::array::from_fn(|i| {
-                            subject.position[i]
-                                + subject.velocity[i] * 3.
-                                + subject.basis.right[i] * 300.
-                                + if i == 1 { 100. } else { 0. }
-                        })
-                    });
+                    let eye = match self.fly_by {
+                        Some(eye) if distance(eye, subject.position) <= FLY_BY_RESET => eye,
+                        _ => *self.fly_by.insert(fly_by_point(subject)),
+                    };
                     camera = facing(eye, subject.position, subject.basis.forward);
                 }
                 MISSILE => {
@@ -447,7 +478,10 @@ impl Rig {
                 _ => return Err("Unknown flight view"),
             }
         }
-        if matches!(view, 0 | 3 | 4 | TRACK) && self.reference != Reference::Player {
+        // Back from another aircraft looks from its pilot's eye and shows its
+        // airframe, as the player's own Back does; a missile stays hidden.
+        let hides = matches!(view, 0 | 4 | TRACK) || (view == 3 && subject.missile);
+        if hides && self.reference != Reference::Player {
             if subject.missile {
                 camera.hidden_projectile = Some(subject.id);
             } else {
@@ -459,6 +493,20 @@ impl Rig {
         Ok(camera)
     }
 }
+/// Where a fly-by watches `subject` from: three seconds of its velocity
+/// ahead, 300 feet to its right and 100 feet above.
+fn fly_by_point(subject: Body) -> Vector {
+    std::array::from_fn(|i| {
+        subject.position[i]
+            + subject.velocity[i] * 3.
+            + subject.basis.right[i] * 300.
+            + if i == 1 { 100. } else { 0. }
+    })
+}
+/// The external view of `body`, as F10 shows it: the replay's fallback.
+pub(crate) fn outside(body: Body) -> Camera {
+    body_camera(body, 1)
+}
 fn body_camera(body: Body, view: u8) -> Camera {
     let mut camera = Camera::new();
     camera.position = body.position;
@@ -467,7 +515,12 @@ fn body_camera(body: Body, view: u8) -> Camera {
     camera.pitch = pitch as f32;
     camera.roll = -bank as f32;
     match view {
-        3 | 4 => turn(&mut camera, body.basis, view),
+        3 | 4 => {
+            turn(&mut camera, body.basis, view);
+            if view == 3 && !body.missile {
+                camera.position = crate::mirrors::pilot_eye(body.position, body.basis);
+            }
+        }
         1 | 2 => {
             let angle = yaw + if view == 2 { 0.8 } else { 0. };
             let distance = if view == 2 { 130. } else { 180. };
@@ -519,6 +572,20 @@ fn facing(eye: Vector, target: Vector, fallback: Vector) -> Camera {
     c.yaw = d[0].atan2(d[2]) as f32;
     c.pitch = d[1].atan2(d[0].hypot(d[2])) as f32;
     c
+}
+/// The replay's object view: the relation camera from `from` toward `to`,
+/// at any range, with its eye kept at least 20 feet above `ground` (height
+/// under an east and north position) so a view from a ground object up at
+/// an aircraft never looks from under the terrain. The clearance is fitted.
+pub(crate) fn object_camera(from: Body, to: Vector, ground: impl Fn(f64, f64) -> f64) -> Camera {
+    let mut camera = relation(from, to);
+    let floor = ground(camera.position[0], camera.position[2]) + 20.;
+    if camera.position[1] < floor {
+        camera.position[1] = floor;
+        let d = direction(camera.position, to, from.basis.forward);
+        camera = facing(camera.position, to, d);
+    }
+    camera
 }
 fn relation(subject: Body, target: Vector) -> Camera {
     let d = direction(subject.position, target, subject.basis.forward);
@@ -622,6 +689,137 @@ mod tests {
         assert_eq!(stored.position, first.position);
         assert_eq!(stored.zoom, 2.);
         assert_eq!(stored.weather_slot, 3);
+    }
+    #[test]
+    fn fly_by_moves_on_once_the_subject_is_three_miles_from_its_point() {
+        let mut scene = scene();
+        let mut rig = Rig::default();
+        let first = camera(&mut rig, FLY_BY, &scene).position;
+        near(first, [300., 1100., 600.]);
+        // Straight along its path: 18,227 feet from the point, it stays.
+        let place = |scene: &mut Scene, feet: f64| {
+            let d = FLY_BY_RESET + feet;
+            // Further up its path, `d` feet in a straight line from the point.
+            let dz = (d * d - 300f64.powi(2) - 100f64.powi(2)).sqrt();
+            scene.player.position = [0., 1000., first[2] + dz];
+        };
+        place(&mut scene, -1.);
+        assert_eq!(camera(&mut rig, FLY_BY, &scene).position, first);
+        // Just over: a new point by the same rule from where it is now.
+        place(&mut scene, 1.);
+        let moved = camera(&mut rig, FLY_BY, &scene).position;
+        let p = scene.player.position;
+        near(moved, [p[0] + 300., p[1] + 100., p[2] + 600.]);
+        // It then keeps the new point.
+        scene.player.position[2] += 500.;
+        assert_eq!(camera(&mut rig, FLY_BY, &scene).position, moved);
+        // Paused, nothing moves, so neither does the point.
+        assert_eq!(camera(&mut rig, FLY_BY, &scene).position, moved);
+    }
+    #[test]
+    fn saved_fly_by_moves_on_by_itself() {
+        let mut scene = scene();
+        let mut rig = Rig::default();
+        let first = camera(&mut rig, FLY_BY, &scene).position;
+        rig.save(FLY_BY, [0.; 2], 1.);
+        assert_eq!(
+            rig.other_camera(&scene, Camera::new()).unwrap().position,
+            first
+        );
+        // Far away, the saved copy picks its own new point and keeps it.
+        scene.player.position = [0., 1000., 30_000.];
+        let saved = rig.other_camera(&scene, Camera::new()).unwrap().position;
+        near(saved, [300., 1100., 30_600.]);
+        scene.player.position[2] += 400.;
+        assert_eq!(
+            rig.other_camera(&scene, Camera::new()).unwrap().position,
+            saved
+        );
+        // The main view has not moved on yet: it resets on its own next frame,
+        // from where the subject is then, and the saved copy is untouched.
+        assert_eq!(rig.fly_by, Some(first));
+        let main = camera(&mut rig, FLY_BY, &scene).position;
+        near(main, [300., 1100., 31_000.]);
+        assert_eq!(
+            rig.other_camera(&scene, Camera::new()).unwrap().position,
+            saved
+        );
+    }
+    #[test]
+    fn back_from_another_aircraft_sits_at_its_pilot_eye_and_shows_it() {
+        let mut scene = scene();
+        scene.missiles = vec![shot(10, 1, Some(0), [500., 1000., 0.])];
+        let mut rig = Rig::default();
+        rig.select(Reference::Target);
+        let c = camera(&mut rig, 3, &scene);
+        near(c.position, [1000., 1007., 10.]);
+        assert_eq!(c.hidden_target, None);
+        assert!((c.yaw.abs() - std::f32::consts::PI).abs() < 1e-6);
+        // Front, up and track still hide it.
+        for view in [0, 4, TRACK] {
+            let mut rig = Rig::default();
+            rig.select(Reference::Aircraft(1));
+            let c = rig
+                .camera(view, &scene, Camera::new(), [0.; 2], 1.)
+                .unwrap_or_else(|_| panic!("{view}"));
+            assert_eq!(c.hidden_target, Some(1), "{view}");
+        }
+        // A missile's back view stays at the missile and hides it.
+        rig.follow_missiles_of(1);
+        rig.select(Reference::Missile);
+        let c = camera(&mut rig, 3, &scene);
+        assert_eq!(c.position, [500., 1000., 0.]);
+        assert_eq!(c.hidden_projectile, Some(10));
+    }
+    #[test]
+    fn missile_reference_follows_the_chosen_owner_newest_shot() {
+        let mut scene = scene();
+        scene.missiles = vec![
+            shot(10, 1, Some(0), [0., 1000., 50.]),
+            shot(11, 1, Some(0), [0., 1000., 100.]),
+            shot(12, 2, Some(0), [0., 1000., 150.]),
+            shot(13, 0, Some(1), [0., 1000., 200.]),
+        ];
+        let mut rig = Rig::default();
+        // The player's by default, as in flight.
+        rig.select(Reference::Missile);
+        assert_eq!(camera(&mut rig, 0, &scene).position, [0., 1000., 200.]);
+        // Another aircraft's newest, incoming at the player or not.
+        rig.follow_missiles_of(1);
+        rig.select(Reference::Missile);
+        assert_eq!(camera(&mut rig, 0, &scene).position, [0., 1000., 100.]);
+        assert_eq!(camera(&mut rig, 0, &scene).hidden_projectile, Some(11));
+        // Once it is gone, no older shot stands in.
+        scene.missiles.retain(|p| p.body.id != 11);
+        assert!(rig.camera(0, &scene, Camera::new(), [0.; 2], 1.).is_err());
+        rig.follow_missiles_of(2);
+        assert_eq!(camera(&mut rig, 0, &scene).position, [0., 1000., 150.]);
+    }
+    #[test]
+    fn object_camera_faces_the_far_end_at_any_range_and_stays_above_ground() {
+        let level = Basis::new(0., 0., 0.);
+        let from = Body::new(4, [0., 5_000., 0.], [0.; 3], level);
+        // 50 nmi east and a mile up.
+        let to = [50. * 6_076., 10_280., 0.];
+        let c = object_camera(from, to, |_, _| 0.);
+        let forward = Basis::new(c.yaw.into(), c.pitch.into(), 0.).forward;
+        close(forward, direction(c.position, to, [0.; 3]));
+        close(forward, direction(from.position, to, [0.; 3]));
+        // From a ground object up at an aircraft, the eye stays 20 feet above
+        // the terrain and still faces the aircraft.
+        let ground = Body::new(5, [0., 100., 0.], [0.; 3], level);
+        let above = [0., 20_000., 1_000.];
+        let c = object_camera(ground, above, |_, _| 100.);
+        assert!((c.position[1] - 120.).abs() < 1e-9, "{:?}", c.position);
+        let forward = Basis::new(c.yaw.into(), c.pitch.into(), 0.).forward;
+        close(forward, direction(c.position, above, [0.; 3]));
+        // A missile end sits 30 feet back and 10 up.
+        let missile = Body::missile(9, [0., 5_000., 0.], [0.; 3], level);
+        let level_east = [50. * 6_076., 5_000., 0.];
+        near(
+            object_camera(missile, level_east, |_, _| 0.).position,
+            [-30., 5_010., 0.],
+        );
     }
     #[test]
     fn threat_chooses_nearest_inbound_not_nearest_outgoing_round() {
