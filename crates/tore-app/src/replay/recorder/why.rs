@@ -378,6 +378,15 @@ fn activity_reason(look: &Look, activity: Activity) -> String {
             Some(RejoinReason::OutsidePatrol) => "outside its patrol region".to_owned(),
             None => "flying back to a friendly".to_owned(),
         },
+        Activity::ReturningToBase if look.actor.damage_return().is_some() => {
+            format!(
+                "{}: recovering with weapons held",
+                look.actor.damage_return().unwrap().label()
+            )
+        }
+        Activity::Waiting if look.act.damage.ground_hold => {
+            "holding on the ground because of system damage".into()
+        }
         Activity::ReturningToBase => {
             let state = trace.fuel.and_then(|f| f.state).filter(|_| fresh);
             match state {

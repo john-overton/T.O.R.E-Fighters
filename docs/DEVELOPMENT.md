@@ -1104,6 +1104,14 @@ option the probe is unchanged.
 `--probe-enemy-aircraft ID` independently selects the opponent, using the exact
 roster identities. `--probe-enemy-skill novice|average|experienced|ace` selects
 its resolved skill. `--probe-geometry head|side|rear` sets initial enemy heading;
+`--probe-fault TICK:INDEX` delivers a controlled fault to the first enemy through
+its combat fault counts and the ordinary AI damage bridge. It is bounded to
+indices 0 through 44 and at most 64 combined fault/threat injections. Useful
+cases: pilot 34, compressor 7, oil pump 12, flameout 4, weak structure 30,
+engine fire 11, stuck throttle 29. This is a developer fixture, not a weapon hit
+or proof of a fault's combat probability. The probe prints final fault counts,
+recovery phase and physical throttle/power/temperature. [Validation](baselines/ai-damage-response.md).
+
 `--probe-guns` keeps the player attack script on its gun.
 `--probe-ai-guns-only` restricts AI stores to their carried gun without changing
 the player script. It is useful for sustained [gun-employment checks](baselines/ai-gun-implementation.md). `--probe-trace SECONDS` also

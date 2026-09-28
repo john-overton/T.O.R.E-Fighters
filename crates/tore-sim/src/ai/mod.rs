@@ -21,6 +21,7 @@
 pub mod airfield;
 pub mod awareness;
 pub mod controller;
+pub mod damage;
 pub mod defense;
 pub mod engagement;
 pub mod experience;

@@ -343,6 +343,13 @@ and terrain. `--combat-command compatibility-weapons` explicitly selects the old
 weapon adapter. Flight adapter selection is independent. Fitted seeker synthesis
 consumes the mounted-seeker amplitude and never controls acquisition.
 
+`ai::damage` reads live component failures and proposes recovery and control
+restrictions. `AiActor` latches the recovery commitment, uses the existing
+landing path, and applies protective throttle commands to every real flight
+path. The diagnostic damage trace is write-only. Dummies bypass these decisions
+and flight stepping. Fire enters the existing per-pilot ejection monitor.
+[Contract](spec/systems-damage.md#ai-pilot-response-to-faults).
+
 Quick Mission launches AI wings by default; `--fixture-wings` retains the
 straight-flight compatibility path. `Combat::mission_aircraft` retains the six
 wing groups and their fitted spawn poses for restart. `AiWings` builds actors

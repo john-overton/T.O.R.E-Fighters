@@ -169,12 +169,14 @@ pub enum LandingReason {
     Fuel,
     /// An AI wingman joining its landing leader (B48 join-landing).
     JoinLeader,
+    /// An autonomous return caused by a live system fault.
+    Damage,
 }
 
 impl LandingReason {
     /// Whether a later disengage or formation order cancels this landing
     /// while it is still in the early approach (fitted, agent decision
-    /// 2026-09-23). Bug out and fuel landings cannot be cancelled.
+    /// 2026-09-23). Bug out, fuel and damage landings cannot be cancelled.
     pub fn cancellable(self) -> bool {
         matches!(self, Self::Ordered | Self::JoinLeader)
     }

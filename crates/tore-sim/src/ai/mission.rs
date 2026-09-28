@@ -239,6 +239,7 @@ pub struct AiActor {
     ignored_attack_ids: Vec<u32>,
     received_emitters: Vec<sensors::passive::Emitter>,
     equipment: EquipmentFaults,
+    damage_return: Option<super::damage::Reason>,
     stations: Vec<StationSpec>,
     guns: std::collections::BTreeMap<u8, tore_formats::weapons::Weapon>,
     gun_target: Option<super::gunnery::Target>,
@@ -310,6 +311,7 @@ impl AiActor {
             ignored_attack_ids: Vec::new(),
             received_emitters: Vec::new(),
             equipment: EquipmentFaults::default(),
+            damage_return: None,
             stations: setup.stations,
             guns: Default::default(),
             gun_target: None,
@@ -430,6 +432,10 @@ impl AiActor {
         self.flight.velocity = crate::attitude::Basis::new(self.flight.yaw, 0., 0.)
             .forward
             .map(|v| v * super::launch::DUMMY_SPEED_FPS);
+    }
+
+    pub fn damage_return(&self) -> Option<super::damage::Reason> {
+        self.damage_return
     }
 
     pub fn is_dummy(&self) -> bool {
@@ -714,6 +720,14 @@ impl AiActor {
         if self.bugged_out {
             return Ok(ReceiverOutcome::Rejected(RejectReason::BuggedOut));
         }
+        if self.damage_return.is_some()
+            && !matches!(
+                request,
+                WingRequest::Land(_) | WingRequest::TargetAssignment(TargetOrder::HoldFire)
+            )
+        {
+            return Ok(ReceiverOutcome::Rejected(RejectReason::DamageRecovery));
+        }
         let phase = self.airfield_phase();
         if phase == Some(super::airfield::Phase::Parked) {
             return Ok(ReceiverOutcome::Rejected(RejectReason::Landed));
@@ -732,7 +746,8 @@ impl AiActor {
             request,
             WingRequest::FormationSelection(_)
                 | WingRequest::TargetAssignment(TargetOrder::HoldFire)
-        ) && self.landing_order.is_some_and(|o| o.reason.cancellable())
+        ) && self.damage_return.is_none()
+            && self.landing_order.is_some_and(|o| o.reason.cancellable())
             && phase.is_none_or(|p| {
                 matches!(
                     p,
@@ -972,7 +987,16 @@ impl AiActor {
             free_slot: clearance.free_slot,
         };
         let sequence = self.airfield.as_mut().expect("phase read above");
-        let step = sequence.step(&situation);
+        let mut step = sequence.step(&situation);
+        if self.damage_return.is_some()
+            && let Control::Air(guidance) = &mut step.command.control
+            && !guidance.full_power
+        {
+            guidance.speed_fps = guidance.speed_fps.min(own.limits.minimum.0 * 1.6);
+            if matches!(phase, Phase::Inbound | Phase::Marshal | Phase::Approach) {
+                step.command.brakes = self.flight.speed > guidance.speed_fps + 20.;
+            }
+        }
         trace.situation = Some(situation);
         trace.step = Some(step);
         self.trace.airfield = Some(trace);
@@ -1659,7 +1683,11 @@ impl AiMission {
                     ..EjectionTrace::default()
                 });
             } else {
-                let mut assessment = crate::ejection::assess(&actor.flight, ground);
+                let mut assessment = super::damage::fire_assessment(
+                    &actor.flight,
+                    ground(actor.flight.position[0], actor.flight.position[2]),
+                )
+                .or_else(|| crate::ejection::assess(&actor.flight, ground));
                 let mut ejection = EjectionTrace {
                     assessment,
                     ..EjectionTrace::default()
@@ -1746,6 +1774,68 @@ impl AiMission {
             output.activities.push((actor_id, Activity::Idle));
             actor.trace.path = ActorPath::Dummy;
             return Ok(());
+        }
+
+        let response =
+            super::damage::Response::assess(&actor.flight.systems, actor.flight.damage_fraction);
+        if actor.damage_return.is_none() && response.reason.is_some() {
+            actor.damage_return = response.reason;
+            actor.controller.return_to_formation();
+            actor.search_target = None;
+            actor.mission_policy.reset();
+            if let Some(sensors) = &mut actor.sensors {
+                sensors.clear_selection();
+            }
+        }
+        actor
+            .controller
+            .set_damage_recovery(actor.damage_return.is_some());
+        actor.trace.damage = super::damage::Trace {
+            response,
+            returning: actor.damage_return,
+            home_known: actor.home().is_some() || actor.landing_order.is_some(),
+            runway_known: actor.home_runway.is_some() || actor.landing_order.is_some(),
+            ..Default::default()
+        };
+        if actor.damage_return.is_some() {
+            if actor.landing_order.is_none()
+                && let Some(runway) = actor.home_runway
+            {
+                actor.landing_order = Some(super::airfield::LandingOrder {
+                    runway,
+                    reason: super::airfield::LandingReason::Damage,
+                });
+            }
+            let on_ground = actor.flight.research.as_ref().is_some_and(|r| r.on_ground);
+            if on_ground
+                && !matches!(
+                    actor.airfield_phase(),
+                    Some(
+                        super::airfield::Phase::Final
+                            | super::airfield::Phase::Rollout
+                            | super::airfield::Phase::TaxiClear
+                            | super::airfield::Phase::Parked
+                    )
+                )
+            {
+                actor.trace.damage.ground_hold = true;
+                actor.fly_input(
+                    PilotInput {
+                        throttle: Some(0.),
+                        commands: vec![
+                            tore_input::PilotCommand::Set(tore_input::Switch::Burner, false),
+                            tore_input::PilotCommand::Set(tore_input::Switch::Airbrake, true),
+                        ],
+                        ..Default::default()
+                    },
+                    ground,
+                    surface,
+                );
+                actor.activity = Activity::Waiting;
+                actor.trace.path = ActorPath::DamageHold;
+                output.activities.push((actor_id, Activity::Waiting));
+                return Ok(());
+            }
         }
 
         // 1. The actor's own sensors, stepped with the actor as observer.
@@ -1870,7 +1960,14 @@ impl AiMission {
             },
             ..engagement::Assignment::default()
         };
-        let permission = if actor.neutral {
+        let damage_assignment = engagement::Assignment {
+            role: engagement::Role::Disengage,
+            stance: engagement::Stance::WeaponsHold,
+            ..Default::default()
+        };
+        let permission = if actor.damage_return.is_some() {
+            &damage_assignment
+        } else if actor.neutral {
             &neutral_assignment
         } else {
             &actor.assignment
@@ -1915,9 +2012,10 @@ impl AiMission {
             must_rejoin,
             explanation,
         });
-        actor
-            .controller
-            .set_mission_hold_fire(actor.assignment.stance == engagement::Stance::WeaponsHold);
+        actor.controller.set_mission_hold_fire(
+            actor.damage_return.is_some()
+                || actor.assignment.stance == engagement::Stance::WeaponsHold,
+        );
         actor.controller.set_mission_target(selection.map(|s| s.id));
         let rejoin = if must_rejoin {
             protected
@@ -3031,7 +3129,15 @@ impl AiActor {
             minimum_altitude_ft: MINIMUM_ALTITUDE_FT,
             at_ceiling: false,
             on_ground: agl <= GROUND_CONTACT_FT,
-            g_limit: positive_g,
+            g_limit: positive_g.min(
+                super::damage::Response::assess(&self.flight.systems, self.flight.damage_fraction)
+                    .g_cap
+                    .unwrap_or(if self.damage_return.is_some() {
+                        2.5
+                    } else {
+                        f64::INFINITY
+                    }),
+            ),
             roll_limit_deg_per_s: self
                 .flight
                 .model()
@@ -3040,7 +3146,11 @@ impl AiActor {
                 .roll_limit_rad_per_second
                 .to_degrees()
                 * self.control_health(),
-            maximum_bank_deg: MAXIMUM_BANK_DEG,
+            maximum_bank_deg: if self.damage_return.is_some() {
+                30.
+            } else {
+                MAXIMUM_BANK_DEG
+            },
             alive: self.alive(),
             fuel_endurance_s: self.endurance_s(),
             time_home_s: self.time_home_s(),
@@ -3136,8 +3246,8 @@ impl AiActor {
         )
     }
 
-    /// Fitted until axis-specific AI damage is imported: remaining airframe
-    /// health scales both pitch and roll authority linearly.
+    /// Fitted caution factor: remaining airframe health scales requested
+    /// authority. Actual component and regional effects stay in flight physics.
     fn control_health(&self) -> f64 {
         (1.0 - self.flight.damage_fraction).clamp(0.0, 1.0)
     }
@@ -3386,10 +3496,35 @@ impl AiActor {
 
     fn fly_input(
         &mut self,
-        input: PilotInput,
+        mut input: PilotInput,
         ground: &dyn Fn(f64, f64) -> f64,
         surface: &dyn Fn(f64, f64) -> Surface,
     ) {
+        let response =
+            super::damage::Response::assess(&self.flight.systems, self.flight.damage_fraction);
+        let safety = super::damage::safety_power(
+            &self.flight,
+            self.speed_limits().minimum.0,
+            self.flight.position[1] - ground(self.flight.position[0], self.flight.position[2]),
+            self.airfield_phase(),
+        ) || self.airfield.as_ref().is_some_and(|s| s.climbing_away());
+        let ground_hold = self.damage_return.is_some()
+            && self.flight.research.as_ref().is_some_and(|r| r.on_ground)
+            && !matches!(
+                self.airfield_phase(),
+                Some(
+                    super::airfield::Phase::Final
+                        | super::airfield::Phase::Rollout
+                        | super::airfield::Phase::TaxiClear
+                        | super::airfield::Phase::Parked
+                )
+            );
+        if !ground_hold {
+            super::damage::controls(response, &self.flight, safety, &mut input);
+        }
+        self.trace.damage.safety_power = safety && response.power == super::damage::Power::Protect;
+        self.trace.damage.throttle_requested = input.throttle;
+        self.trace.damage.throttle_locked = self.flight.systems.controls.throttle_lock;
         // Airborne actors on the legacy adapter keep the terrain-only surface
         // they have always used; researched actors see runways and wind.
         if self.flight.research.is_some() {

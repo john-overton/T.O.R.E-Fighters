@@ -39,6 +39,9 @@ pub struct Structure {
     exposure: f64,
 }
 impl Structure {
+    pub fn fire_seconds(&self) -> Option<f64> {
+        self.fire_remaining
+    }
     pub fn burning(&self) -> bool {
         self.fire_remaining.is_some()
     }

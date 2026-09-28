@@ -720,6 +720,7 @@ pub struct Controller {
     gun_views: Vec<super::gunnery::View>,
     gun_cycles: std::collections::BTreeMap<u8, super::gunnery::Cycle>,
     gun_phase: Option<weapon_service::Phase>,
+    damage_recovery: bool,
     gun_tracking: Option<super::gunnery::View>,
     variation: FormationVariation,
     smooth_variation: [f64; 3],
@@ -883,6 +884,7 @@ impl Controller {
             gun_views: Vec::new(),
             gun_cycles: Default::default(),
             gun_phase: None,
+            damage_recovery: false,
             gun_tracking: None,
             identity,
             profile,
@@ -993,6 +995,10 @@ impl Controller {
     /// The weapon service's current phase (B42).
     pub fn weapon_phase(&self) -> weapon_service::Phase {
         self.gun_phase.unwrap_or(self.service.phase())
+    }
+
+    pub fn set_damage_recovery(&mut self, recovery: bool) {
+        self.damage_recovery = recovery;
     }
 
     pub fn set_gun_views(&mut self, views: Vec<super::gunnery::View>) {
@@ -1165,6 +1171,19 @@ impl Controller {
                     pitch_deg: defense.pitch_deg,
                 }
             };
+        } else if self.damage_recovery {
+            let request = MotionRequest::new(
+                self.home_heading(frame, frame.own.heading_deg.round() as i32),
+                PitchRequest::Explicit(0),
+                Bank::Unconstrained,
+                SpeedRequest::Explicit(ScalarSpeed(
+                    (frame.own.limits.minimum.0 * 1.6).min(frame.own.limits.maximum.0),
+                )),
+                Duration::Timed(1),
+            );
+            batch.motion = Some(self.resolve(frame, clock, request, None, None, &mut batch)?);
+            batch.activity = Some(Activity::ReturningToBase);
+            self.trace.0.motion.branch = MotionBranch::DamageRecovery;
         } else if let Some(point) = self.mission_rejoin.filter(|_| !recovering) {
             let delta = std::array::from_fn::<_, 3, _>(|i| point[i] - frame.own.position[i]);
             let heading = delta[0].atan2(delta[2]).to_degrees();

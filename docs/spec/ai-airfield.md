@@ -175,6 +175,18 @@ its home airport at cruise speed.
   Gear rises at 200 ft above the runway and flaps above 200 kt. The climb
   ends at 1,000 ft above the runway or after 60 seconds, then it tries again.
 
+## Recovery after system damage
+
+[Damage responses](systems-damage.md#ai-pilot-response-to-faults) use the same
+landing sequence and runway/traffic gates. A damaged departure holds on the
+ground. Airborne recovery keeps defensive reactions, then resumes landing;
+formation/attack orders cannot cancel it, but an explicit new landing destination
+is accepted. Slower recovery speed makes the restricted bank compatible with
+the approach geometry. No damage response grants a nonexistent runway or repairs
+jammed gear, controls or throttle. Legacy aircraft use the existing switch to
+researched flight for landing; restricted native research flight retains its
+existing fallback.
+
 ## Orders and warnings
 
 - **Bug out** (spec-derived): ignored while taking off, landing (from the

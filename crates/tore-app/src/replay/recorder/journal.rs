@@ -48,6 +48,7 @@ fn reject_reason(reason: RejectReason) -> String {
         RejectReason::IneligibleState(state) => {
             format!("its state ({state}) does not allow a maneuver")
         }
+        RejectReason::DamageRecovery => "it is returning because of system damage".into(),
         RejectReason::BuggedOut => "it bugged out and no longer answers".into(),
         RejectReason::Landed => "it has landed".into(),
         RejectReason::OnAirfield => "taking off, landing or on the ground".into(),

@@ -101,6 +101,12 @@ landing ejections on 2026-09-23. Thresholds and the extension to takeoff are
 agent decisions. Player ejection and other airborne AI decisions keep the
 rules above.
 
+The [system-fault response](systems-damage.md#ai-pilot-response-to-faults) adds
+uncontained fire as an AI danger even in level flight. It uses the same seat and
+pilot exclusions, eligibility delay, per-pilot random stream and once-per-second
+chance above. It is an agent-authored response to the component's existing fatal
+fire timer. Player automatic ejection remains disabled.
+
 ## Audio and art
 
 Load retail resources at runtime. Play pilot ejection speech on launch, friendly

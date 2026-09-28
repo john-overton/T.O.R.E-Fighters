@@ -619,6 +619,16 @@ physical burst accounting, fixed-barrel lead and replay explanations.
 sustained imported fights. Original gun timing and skill accuracy remain unknown;
 hard-turn tracking is still fitted. Surface firing AI remains separate work.
 
+#### AI response to system damage
+
+Implemented after integrating main's Realistic NPC damage. Pilots react to live
+faults, stop offensive engagement, use their existing recovery destination and
+protect engines where flight safety permits. The existing physical model still
+owns jammed controls, progressive failures and death. Dummies retain fixed-course
+behavior and damage capacities are unchanged. [Authored contract](spec/systems-damage.md#ai-pilot-response-to-faults),
+[validation](baselines/ai-damage-response.md). Original fault-response tactics,
+unreachable-field diversion and component repair remain outside this delivery.
+
 #### AI backlog (2026-09-17)
 
 Established rules with tests are listed in the

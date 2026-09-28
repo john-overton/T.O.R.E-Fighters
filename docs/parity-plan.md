@@ -166,6 +166,12 @@ regressions. [Authored rules and remaining approximations](spec/ai-gun-employmen
 cover gun tracking and original skill/accuracy policy. Difficult turning fights
 remain a tuning area, separate from the repaired permanent weapon timeout.
 
+**AI fault response implemented.** The AI branch incorporates main's Realistic
+NPC system damage. Pilots now commit to recovery and make protective control
+requests from live faults. Dummies and health thresholds are unchanged.
+[Rules and limitations](spec/systems-damage.md#ai-pilot-response-to-faults),
+[rebase and validation](baselines/ai-damage-response.md).
+
 1. **Missile tuning and remaining evidence.** Stages 1 through 5 shipped for
    current stores, with controlled emitter fixtures. Four guidance types, silent
    active flight, same-target reacquisition through guidance expiry, inherited

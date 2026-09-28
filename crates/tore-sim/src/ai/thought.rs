@@ -311,6 +311,7 @@ pub struct MotionTrace {
 /// controller tries them.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum MotionBranch {
+    DamageRecovery,
     GunTracking {
         heading_deg: f64,
         pitch_deg: f64,
@@ -489,6 +490,7 @@ pub struct ActiveManeuverView {
 /// What the mission runtime decided for one actor on its latest step.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ActorTrace {
+    pub damage: super::damage::Trace,
     pub lookout: Option<super::awareness::Lookout>,
     pub visual: Vec<super::awareness::VisualTrace>,
     pub observation_sources: Vec<(u32, super::awareness::SourceTimestamps)>,
@@ -535,6 +537,7 @@ impl ActorTrace {
 /// Which way through the mission step the actor went.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ActorPath {
+    DamageHold,
     #[default]
     NotRun,
     /// Destroyed, or the pilot has ejected: nothing flies.

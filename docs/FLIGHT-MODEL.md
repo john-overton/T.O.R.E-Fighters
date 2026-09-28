@@ -352,6 +352,10 @@ specified in [input-only AI control](spec/ai.md#input-only-aircraft-control).
 [Gun tracking](spec/ai-gun-employment.md#physical-bursts-and-aiming) adds fitted
 lead-rate inputs through this same adapter, retaining physical limits and defense
 priority. It cannot rotate the barrel or steer a projectile after release.
+AI [damage responses](spec/systems-damage.md#ai-pilot-response-to-faults) constrain
+requested power and maneuvering through these controls. Actual faults, jammed
+actuators and engine progression remain in the shared systems model. Damaged
+pilots can request recovery but cannot repair a component or override physics.
 Ground-started AI aircraft use the researched model for runway contact.
 An airborne AI actor switches to that model when its landing sequence begins.
 The control mapping accounts for current flap lift and low-speed G authority.

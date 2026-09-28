@@ -220,6 +220,9 @@ impl ControlAdapter {
                 / 100.0;
         low /= loading;
         high /= loading;
+        if state.systems.has(30) {
+            low = low.max(-g_limit);
+        }
         let mut flap_gain = 1.0;
         if state.research.is_some() {
             if let Some(continuous) = crate::flight::low_speed_positive_g_ceiling(

@@ -497,6 +497,7 @@ pub fn motion_branch(
 ) -> (&'static str, String) {
     match branch {
         MotionBranch::None => ("none", String::new()),
+        MotionBranch::DamageRecovery => ("damage recovery", "returning with weapons held".into()),
         MotionBranch::GunTracking {
             heading_deg,
             pitch_deg,
@@ -575,6 +576,7 @@ pub fn motion_branch(
 pub fn branch_code(controller: &ControllerTrace, actor: &ActorTrace) -> u8 {
     if actor.path != ActorPath::Controller {
         return match actor.path {
+            ActorPath::DamageHold => 23,
             ActorPath::NotRun => 0,
             ActorPath::Destroyed => 20,
             ActorPath::Dummy => 21,
@@ -584,6 +586,7 @@ pub fn branch_code(controller: &ControllerTrace, actor: &ActorTrace) -> u8 {
     }
     match controller.motion.branch {
         MotionBranch::None => 1,
+        MotionBranch::DamageRecovery => 13,
         MotionBranch::MissileDefense { .. } => 2,
         MotionBranch::IncomingFire { .. } => 11,
         MotionBranch::GunTracking { .. } => 12,
@@ -892,6 +895,68 @@ pub fn ai_thought(t: &Thought) -> Vec<Node> {
         );
     }
 
+    if let Some(reason) = t.actor.damage.returning {
+        let d = t.actor.damage;
+        tree.text(
+            0,
+            "Damage response",
+            reason.label(),
+            if d.ground_hold {
+                "holding on the ground"
+            } else {
+                "offensive engagement ended"
+            },
+        );
+        tree.text(
+            1,
+            "Recovery",
+            if d.runway_known {
+                "landing at a known runway"
+            } else if d.home_known {
+                "home position only; no runway known"
+            } else {
+                "no destination known; holding heading"
+            },
+            "defense and terrain avoidance remain available",
+        );
+        tree.text(
+            1,
+            "Power policy",
+            match d.response.power {
+                tore_sim::ai::damage::Power::Normal => "military power as needed",
+                tore_sim::ai::damage::Power::Protect => "protect engine: at most 25%",
+                tore_sim::ai::damage::Power::RestartIdle => "flameout: low throttle to arm restart",
+                tore_sim::ai::damage::Power::RestartRaise => "restart: raise throttle to 50%",
+            },
+            if d.safety_power {
+                "flight safety permits power above the protective cap"
+            } else {
+                "component fault response"
+            },
+        );
+        if let Some(throttle) = d.throttle_requested {
+            tree.text(
+                1,
+                "Throttle requested",
+                format!("{:.0}%", throttle * 100.),
+                "request before mechanical limits",
+            );
+        }
+        if let Some(throttle) = d.throttle_locked {
+            tree.text(
+                1,
+                "Throttle jammed",
+                format!("{:.0}%", throttle * 100.),
+                "the pilot cannot move the lever",
+            );
+        }
+        tree.text(
+            1,
+            "Maneuver limits",
+            format!("30 deg bank, {:.2} G", d.response.g_cap.unwrap_or(2.5)),
+            "existing aircraft limits still apply",
+        );
+    }
     let fresh = t.fresh();
     thought_target(&mut tree, t, fresh);
     if fresh {
@@ -1523,6 +1588,7 @@ fn thought_motion(tree: &mut Tree, t: &Thought, fresh: bool) {
             ActorPath::Dummy => "a training target flying straight",
             ActorPath::NotRun => "not stepped yet",
             ActorPath::Controller => "the decision did not run this tick",
+            ActorPath::DamageHold => "holding on the ground because of system damage",
         };
         tree.text(0, "Motion", "not deciding", why);
     }
@@ -1758,9 +1824,15 @@ pub fn hazard_text(assessment: &tore_sim::ejection::Assessment) -> String {
         tore_sim::ejection::Hazard::Destroyed => "the aircraft is destroyed",
         tore_sim::ejection::Hazard::Dive => "a dive it cannot pull out of",
         tore_sim::ejection::Hazard::Lift => "not enough lift to stay up",
+        tore_sim::ejection::Hazard::Fire => "uncontained fire will destroy the aircraft",
     };
     if assessment.impact_seconds.is_finite() {
-        format!("{what}, impact in {:.1} s", assessment.impact_seconds)
+        let end = if assessment.hazard == tore_sim::ejection::Hazard::Fire {
+            "fatal fire in"
+        } else {
+            "impact in"
+        };
+        format!("{what}, {end} {:.1} s", assessment.impact_seconds)
     } else {
         what.into()
     }
