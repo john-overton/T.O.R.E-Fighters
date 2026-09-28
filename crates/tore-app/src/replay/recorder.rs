@@ -1488,10 +1488,11 @@ fn fit(frame: &mut Frame) {
 fn cheat_changes(
     before: &tore_sim::cheats::Cheats,
     after: &tore_sim::cheats::Cheats,
-) -> [(&'static str, bool, bool); 15] {
+) -> [(&'static str, bool, bool); 16] {
     type Switch = fn(&tore_sim::cheats::Cheats) -> bool;
-    let list: [(&'static str, Switch); 15] = [
-        ("invulnerable", |c| c.invulnerable),
+    let list: [(&'static str, Switch); 16] = [
+        ("invulnerable", |c| c.invulnerable()),
+        ("realistic_damage", |c| c.system_damage()),
         ("unlimited_ammo", |c| c.unlimited_ammo),
         ("unlimited_fuel", |c| c.unlimited_fuel),
         ("no_spins", |c| c.no_spins),

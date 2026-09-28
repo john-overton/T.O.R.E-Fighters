@@ -3,6 +3,7 @@ use crate::{hud::Paint, menu::Canvas};
 use std::time::{Duration, Instant};
 use tore_formats::{font::Font, ui::MenuNode};
 use tore_input::Switch;
+use tore_sim::cheats::Damage;
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Wing(tore_sim::ai::wing::PlayerOrder),
@@ -219,8 +220,9 @@ impl FlightUi {
         let on = match label {
             WEAPON_DIAGNOSTICS => self.weapon_diagnostics,
             DEBUG_PANELS => self.debug_panels,
-            "Invulnerable" => cheats.invulnerable,
-            "Normal" => !cheats.invulnerable,
+            "Invulnerable" => cheats.damage == Damage::Invulnerable,
+            "Normal" => cheats.damage == Damage::Normal,
+            "Realistic" => cheats.damage == Damage::Realistic,
             "Novice" => cheats.enemy_ai == Some(tore_sim::ai::Experience::Novice),
             "Average" => cheats.enemy_ai == Some(tore_sim::ai::Experience::Average),
             "Unchanged" => cheats.enemy_ai.is_none(),
@@ -357,8 +359,12 @@ impl FlightUi {
                 self.message(format!("Enemy AI: {}", label.to_lowercase()));
                 Command::Click
             }
-            "Invulnerable" | "Normal" => {
-                self.cheats.invulnerable = label == "Invulnerable";
+            "Invulnerable" | "Normal" | "Realistic" => {
+                self.cheats.damage = match label {
+                    "Invulnerable" => Damage::Invulnerable,
+                    "Realistic" => Damage::Realistic,
+                    _ => Damage::Normal,
+                };
                 self.message(format!("Damage: {}", label.to_lowercase()));
                 Command::Click
             }
@@ -1389,11 +1395,17 @@ mod tests {
         assert_eq!(ui.cheat_state("Normal"), Some("Off"));
         ui.reset_for_flight();
         let c = ui.cheats;
-        assert!(c.invulnerable && c.unlimited_ammo && c.unlimited_fuel);
+        assert!(c.invulnerable() && c.unlimited_ammo && c.unlimited_fuel);
         assert!(c.no_spins && c.extra_g && c.ignore_weapon_weights);
+        ui.activate("Realistic", "");
+        assert_eq!(ui.cheats.damage, Damage::Realistic);
+        assert_eq!(ui.cheat_state("Realistic"), Some("On"));
+        assert_eq!(ui.cheat_state("Invulnerable"), Some("Off"));
+        assert_eq!(ui.cheat_state("Normal"), Some("Off"));
+        ui.reset_for_flight();
+        assert_eq!(ui.cheats.damage, Damage::Realistic);
         ui.activate("Normal", "");
-        assert!(!ui.cheats.invulnerable);
-        assert_eq!(ui.cheat_state("Realistic"), None);
+        assert_eq!(ui.cheats.damage, Damage::Normal);
         assert_eq!(ui.cheat_state("Enemy AI?"), None);
         assert_eq!(ui.cheat_state("Unchanged"), Some("On"));
         ui.activate("Novice", "");

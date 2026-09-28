@@ -967,8 +967,9 @@ Slices, in order:
 
 Current (2026-09-23): slices 1 to 6 are implemented on the `cheats` branch.
 Slices 4 and 6 touch AI files another agent is working in, so merging needs a
-check against that work. Damage Realistic is parked until its behaviour is
-described. The fitted numbers in the specification await John's review.
+check against that work. Damage Normal (hit points only) and Realistic (hit
+points plus system faults) were split on 2026-09-28. The fitted numbers in the
+specification await John's review.
 
 Deliverable: each cheat toggles mid-flight from the menu, shows On or Off, and
 survives Restart.

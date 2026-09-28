@@ -32,6 +32,10 @@ fuel, propulsion, fluid, device, surface, structure, avionics, pilot and hardpoi
 faults. Original modules are never executed. Existing hit selection and repeat
 limits remain in use; the player-visible progression below is fitted.
 
+The player's aircraft takes these faults only with the Cheat menu's Damage
+set to Realistic; Normal takes hit points only. See the
+[cheats specification](cheats.md#behaviour-of-each-cheat).
+
 ## Component ownership
 
 The model is split into engine, fuel, fluids, controls, structure and pilot

@@ -1281,6 +1281,8 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             .sum::<u32>()
     );
     let mut damaged = live::State::new(combat.state.configuration().clone(), true)?;
+    // System faults are part of the check, so exercise Realistic damage.
+    damaged.cheats.damage = tore_sim::cheats::Damage::Realistic;
     let l = launcher(&h.start(&world));
     // A source missile followed by gun hits exercises selection on a varied
     // damage history; a particular all-gun seed can legitimately select no fault.
@@ -1344,6 +1346,7 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             break;
         }
         let mut gradual = live::State::new(combat.state.configuration().clone(), true)?;
+        gradual.cheats.damage = tore_sim::cheats::Damage::Realistic;
         gradual.selected = source;
         if source > 0 {
             gradual.command(live::Command::Incoming, l);

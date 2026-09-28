@@ -844,7 +844,7 @@ pub struct State {
     service_remainder: u16,
     triggers: Vec<PlayerTrigger>,
     gun_cadence: Vec<GunCadence>,
-    /// Player session cheats: Invulnerable and Unlimited ammo.
+    /// Player session cheats, including the Damage setting.
     pub cheats: crate::cheats::Cheats,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1447,6 +1447,18 @@ impl State {
         self.player_hp -= applied;
         self.player_damage = self.player_damage.saturating_add(amount);
         events.push(Event::PlayerDamaged(applied));
+        // Normal damage takes hit points only; system faults are Realistic.
+        if self.cheats.system_damage() {
+            self.damage_systems(amount, events);
+        }
+        if self.player_hp == 0 {
+            self.release();
+            events.push(Event::PlayerDestroyed);
+        }
+    }
+    /// Realistic damage: a hit may fault a subsystem, and accumulated
+    /// damage brings on the faults the aircraft's thresholds call for.
+    fn damage_systems(&mut self, amount: i32, events: &mut Vec<Event>) {
         let chance = super::systems::subsystem_chance(
             self.player_damage,
             self.config.damage_capacity,
@@ -1507,10 +1519,6 @@ impl State {
             self.subsystem_counts[index] += 1;
             self.last_subsystem = Some(index);
             events.push(Event::SubsystemDamaged(index));
-        }
-        if self.player_hp == 0 {
-            self.release();
-            events.push(Event::PlayerDestroyed);
         }
     }
     /// Ownship subsystem lifecycle reached a fatal outcome outside a projectile hit.
@@ -2996,16 +3004,19 @@ impl State {
             self.strike(strike);
         }
         // Invulnerable: hits still show their impact effect but do no damage.
-        if self.cheats.invulnerable {
+        if self.cheats.invulnerable() {
             player_hits.clear();
         }
         for (amount, section, direct_gun, owner, weapon_flags) in player_hits {
             self.player_localized_damage
                 .record(section, amount, self.config.damage_capacity);
-            if direct_gun && section == DamageSection::Cockpit && self.player_hp > 0 {
+            // Normal damage takes hit points only; the pilot-kill and
+            // heavy core hits belong to Realistic.
+            let lethal = direct_gun && self.cheats.system_damage();
+            if lethal && section == DamageSection::Cockpit && self.player_hp > 0 {
                 events.push(Event::PilotKilled);
             }
-            let amount = if direct_gun
+            let amount = if lethal
                 && (section == DamageSection::Cockpit
                     || (section == DamageSection::Core
                         && amount >= self.config.damage_capacity / 2))
@@ -3162,7 +3173,7 @@ impl State {
             ));
         }
         // Invulnerable spares the player; whatever it hits is still destroyed.
-        let player_spared = self.cheats.invulnerable;
+        let player_spared = self.cheats.invulnerable();
         let mut struck = std::collections::BTreeSet::new();
         let mut blasts = Vec::new();
         for (n, a) in bodies.iter().enumerate() {
@@ -3578,9 +3589,11 @@ mod tests {
         }
         assert_eq!(s.take_sound_events().len(), 256);
     }
-    #[test]
-    fn incoming_cockpit_hit_reports_pilot_death_without_needing_nose_breakup() {
+    /// A gun round fired into the player's cockpit, stepped until it lands
+    /// or the player is destroyed.
+    fn cockpit_gun_hit(damage: crate::cheats::Damage) -> (State, Vec<Event>) {
         let mut s = fixture(false);
+        s.cheats.damage = damage;
         // Synthetic gun data uses the exact reviewed gun identity for contact classification.
         s.config.stations[0].weapon.source = AircraftId::F18.gun().into();
         let l = launcher();
@@ -3598,9 +3611,22 @@ mod tests {
                 break;
             }
         }
+        (s, events)
+    }
+    #[test]
+    fn incoming_cockpit_hit_reports_pilot_death_without_needing_nose_breakup() {
+        let (s, events) = cockpit_gun_hit(crate::cheats::Damage::Realistic);
         assert!(events.contains(&Event::PilotKilled));
         assert!(events.contains(&Event::PlayerDestroyed));
         assert_eq!(s.player_damage_section(), None);
+    }
+    #[test]
+    fn normal_damage_cockpit_hit_takes_hit_points_without_killing_the_pilot() {
+        let (s, events) = cockpit_gun_hit(crate::cheats::Damage::Normal);
+        assert!(!events.contains(&Event::PilotKilled));
+        assert!(!events.contains(&Event::SubsystemDamaged(26)));
+        assert!(events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))));
+        assert!(s.player_hp < s.config.damage_capacity);
     }
     #[test]
     fn player_impact_explosion_cleans_up_once_and_excludes_later_airbursts() {
@@ -3675,6 +3701,7 @@ mod tests {
     #[test]
     fn heavy_enemy_hit_degrades_components_without_detaching_a_live_nose() {
         let mut s = fixture(false);
+        s.cheats.damage = crate::cheats::Damage::Realistic;
         s.config.damage_capacity = 100;
         s.player_hp = 100;
         s.config.system_damage = [0; 45];
@@ -3730,8 +3757,30 @@ mod tests {
         assert_eq!(s.debris.len(), 1);
     }
     #[test]
+    fn normal_damage_takes_hit_points_without_system_faults() {
+        let run = |damage| {
+            let mut s = fixture(false);
+            s.cheats.damage = damage;
+            s.config.system_damage = [0x1f; 45];
+            s.config.damage_capacity = 200;
+            s.player_hp = 200;
+            let mut events = Vec::new();
+            for _ in 0..30 {
+                s.apply_player_damage(4, &mut events);
+            }
+            assert_eq!(s.player_hp, 80);
+            s
+        };
+        let normal = run(crate::cheats::Damage::Normal);
+        assert_eq!(normal.subsystem_counts, [0; 45]);
+        assert_eq!(normal.last_subsystem, None);
+        let realistic = run(crate::cheats::Damage::Realistic);
+        assert!(realistic.subsystem_counts.iter().any(|n| *n > 0));
+    }
+    #[test]
     fn rwr_damage_is_a_receiver_fault_and_systems_destruction_is_once_only() {
         let mut s = fixture(false);
+        s.cheats.damage = crate::cheats::Damage::Realistic;
         s.config.rwr_hardpoint = Some(4);
         s.config.system_damage = [0; 45];
         s.config.system_damage[40] = 0x1f;
@@ -4858,7 +4907,7 @@ mod tests {
     #[test]
     fn invulnerable_cockpit_hit_neither_damages_nor_kills_the_pilot() {
         let mut s = fixture(false);
-        s.cheats.invulnerable = true;
+        s.cheats.damage = crate::cheats::Damage::Invulnerable;
         s.config.stations[0].weapon.source = AircraftId::F18.gun().into();
         let l = launcher();
         s.command(Command::Incoming, l);
@@ -4979,7 +5028,7 @@ mod tests {
     #[test]
     fn an_incoming_missile_jolts_the_player_even_when_invulnerable() {
         let mut s = fixture(false);
-        s.cheats.invulnerable = true;
+        s.cheats.damage = crate::cheats::Damage::Invulnerable;
         let l = launcher();
         s.command(Command::Incoming, l);
         let p = s.projectiles.last_mut().unwrap();
@@ -5024,7 +5073,9 @@ mod tests {
     fn midair_collisions_destroy_everyone_but_an_invulnerable_player_unless_ignored() {
         let run = |ignore: bool, invulnerable: bool| {
             let mut s = fixture(false);
-            s.cheats.invulnerable = invulnerable;
+            if invulnerable {
+                s.cheats.damage = crate::cheats::Damage::Invulnerable;
+            }
             s.cheats.ignore_midair_collisions = ignore;
             // Two AI aircraft closing head-on, and one well clear.
             let mut a = target(7, [0., 5000., 1000.], 20, 0x80);
@@ -5441,6 +5492,7 @@ mod tests {
     fn automatic_station_radar_ecm_failures_keep_mass_and_reset() {
         for index in [36, 37, 38] {
             let mut s = fixture(false);
+            s.cheats.damage = crate::cheats::Damage::Realistic;
             s.config.system_damage = [0; 45];
             s.config.system_damage[index] = 0x1f;
             s.config.damage_capacity = 1;
@@ -5560,6 +5612,7 @@ mod tests {
     #[test]
     fn automatic_radar_failure_inhibits_launch_and_breaks_illumination() {
         let mut s = fixture(true);
+        s.cheats.damage = crate::cheats::Damage::Realistic;
         let l = launcher();
         s.range_target(l);
         observe(&mut s, l, 1);

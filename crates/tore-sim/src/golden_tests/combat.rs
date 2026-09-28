@@ -799,6 +799,8 @@ fn guns_and_damage(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         true,
     )
     .expect("synthetic configuration");
+    // Recorded with the full damage model, system faults included.
+    s.cheats.damage = crate::cheats::Damage::Realistic;
     let mut l = launcher([0., 3_000., 0.], 0., 0., 600.);
     s.range_target(l);
     s.targets.push(aircraft_target(
@@ -898,6 +900,8 @@ fn guided_missiles(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         true,
     )
     .expect("synthetic configuration");
+    // Recorded with the full damage model, system faults included.
+    s.cheats.damage = crate::cheats::Damage::Realistic;
     let mut l = launcher([0., 20_000., 0.], 0., 0., 800.);
     s.targets.push(aircraft_target(
         40,
@@ -1144,6 +1148,8 @@ fn player_countermeasures(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
     config.ecm.chaff = [4, 80, 0, 0];
     config.ecm.flare = [4, 60, 0, 0];
     let mut s = State::new(config, true).expect("synthetic configuration");
+    // Recorded with the full damage model, system faults included.
+    s.cheats.damage = crate::cheats::Damage::Realistic;
     let mut l = launcher([0., 1_200., 0.], 0., 0., 600.);
     // Missiles at the player: radar ones that always, sometimes and never
     // follow chaff, and infrared ones that always or sometimes follow flares.

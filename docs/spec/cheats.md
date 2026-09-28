@@ -47,9 +47,20 @@ turbulence, No sun whiteout). **Proposed:** they are not saved to preferences.
 **Damage.** Invulnerable means weapon hits do no damage: no hit-point loss, no
 system faults, no pilot kill and no breakup. It also survives a midair
 collision (John, 2026-09-23). Hits still physically jolt the
-aircraft (see [missile hit jolt](#missile-hit-jolt)). Normal is the current
-damage model. Realistic is not yet described. Invulnerable does not prevent
-ground crashes; that is the separate No crashes cheat.
+aircraft (see [missile hit jolt](#missile-hit-jolt)). Invulnerable does not
+prevent ground crashes; that is the separate No crashes cheat.
+
+Normal, the starting choice, takes hit points only: each hit lowers the
+aircraft's hit points by its damage and the aircraft is destroyed when they run
+out, with no [system faults](systems-damage.md) (John, 2026-09-28). Realistic
+takes the same hit points and adds the system faults (John, 2026-09-28).
+**Agent decision:** the two one-shot gun rules also belong to Realistic, since
+they are not hit-point damage: a direct gun hit on the cockpit kills the pilot,
+and a direct gun hit on the core worth at least half the aircraft's hit points
+destroys it. Under Normal those hits take their own damage like any other.
+Damage, like every cheat, covers the player only; AI aircraft are unchanged.
+Damage smoke, the damaged look and breakup on destruction follow hit points and
+appear under both.
 
 **Unlimited ammo.** Gun rounds and stores never run out. **Proposed:** applies to
 the player only.
@@ -218,7 +229,6 @@ Details: [ordnance menu format](../formats/ordnance-menu.md).
 
 ## Unknown
 
-- **Damage, Realistic:** how it differs from Normal.
 - Whether Unlimited ammo and Unlimited fuel covered AI aircraft.
 - Loadout cheat: what "participant count above one" means to a player, and the
   exact projectile flag the station default checks.
