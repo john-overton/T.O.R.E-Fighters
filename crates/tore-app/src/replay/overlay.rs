@@ -259,6 +259,8 @@ pub struct Model {
     pub aircraft: String,
     pub timer: Option<String>,
     pub toast: Option<String>,
+    /// The object view's two ends and their range, under the messages.
+    pub readout: Option<String>,
     pub subtitles: Vec<String>,
     /// How far above their usual place the subtitles sit, clear of the
     /// cockpit messages over the bar.
@@ -410,6 +412,10 @@ pub fn draw(pixels: &mut [u8], font: &Font, model: &Model) {
     }
     if let Some(toast) = &model.toast {
         caption(pixels, font, &fit(font, toast, 420), 320, 12, TITLE);
+    }
+    if let Some(readout) = &model.readout {
+        let y = 12 + font.height as i32 + 10;
+        caption(pixels, font, &fit(font, readout, 420), 320, y, PALE);
     }
 }
 

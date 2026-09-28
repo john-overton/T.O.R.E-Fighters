@@ -42,7 +42,9 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   [the controls list](CONTROLS.md#built-in-controls-outside-the-tables) and
   check [the viewer's key handling](../crates/tore-app/src/replay/viewer.rs)
   and [its window routing](../crates/tore-app/src/replay/host.rs): Alt+Enter
-  and Alt+F4 reach the game, every other Ctrl or Alt combination is ignored.
+  and Alt+F4 reach the game, Alt or Ctrl with a view key picks the view's
+  reference (shown in the note beside the function keys), and every other
+  Ctrl or Alt combination is ignored.
   Flight keys the viewer does not read stay dim. Ctrl+B, the flight's "Mark
   replay moment" default, is on this sheet because its purpose is replays;
   the sheet says it works in flight.
@@ -50,7 +52,8 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   for its command, with the same label as the key it stands for: keypad 0 and
   period (chaff, flare), 1 and 3 (rudder), 8, 2, 4 and 6 (stick) and Enter on
   Fly & Fight; keypad 5 (center) and plus and minus (zoom) on Cockpit & View;
-  keypad 7, 8, 9, 4, 6, 1, 2 and 3 (playback) on Replay.
+  keypad 7, 8, 9, 4, 6, 1, 2 and 3 (playback), 5 (center) and plus and minus
+  (zoom) on Replay.
 - Identify context or capability limits in the key label, tooltip or callout.
   Examples include F-22 weapon bays and Home while the live map is open.
   Instrument button letters are not automatically global keyboard bindings.

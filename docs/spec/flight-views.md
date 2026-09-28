@@ -18,6 +18,11 @@ by John: F2 and F3 turn with the aircraft, F2 shows the airframe, F6 cycles
 wingmen, the target views keep a target within visual range, and F7 gains a
 bearing compass. Sensor selection and weapon permission are unchanged.
 
+Third pass, 2026-09-28, requested by John: the fly-by moves on once the
+subject is 3 nmi away, Back from another aircraft shows that aircraft's
+airframe, and the [mission replay viewer](../REPLAYS.md#cameras) gets the
+same views (see [Mission replay](#mission-replay)).
+
 ## Evidence
 
 The local 1999 EA/Jane's Fighters Anthology manual, printed pages 89 and 103-104
@@ -42,13 +47,14 @@ placement or timing. Retail comparison is unavailable.
 | F6 | External view of the player, facing a wingman; press again for the next |
 | F7 | External view of the player, facing the current target, with a bearing compass |
 | F8 | External view of the current target, facing the player |
-| F9 | Watch the player fly past a fixed world position |
+| F9 | Watch the player fly past a fixed world position; a new one once the player is 3 nmi from it |
 | F10 | External player view, with orbit controls |
 | F12 | External view of the last player missile, facing that missile's target |
 
 Alt plus a view key references the selected target instead of the player. Ctrl
 references the last player-launched missile. An unmodified view key restores the
-normal reference. Alt+F4 remains the protected desktop exit shortcut; target-relative
+normal reference. In the mission replay the same modifiers work from the
+selected aircraft: Alt its target, Ctrl its newest missile. Alt+F4 remains the protected desktop exit shortcut; target-relative
 tracking can be rebound in Controls. F11 remains TORE keyboard help. These two
 host compatibility decisions are opinionated agent choices.
 
@@ -78,10 +84,13 @@ scene camera without a second cockpit overlay.
   origin (the rear-view mirrors' eye), and draws the player's airframe, so the
   spine and tails are in view. The default Other View is Back and shows it too.
   F1, F3 and F4 still omit the airframe. External sits 180 feet behind and 60
-  feet above the subject.
+  feet above the subject. Back from another aircraft (Alt's target, or any
+  aircraft in the mission replay) does the same from that aircraft's pilot's
+  eye and draws its airframe; a missile reference's Back stays at the missile
+  and hides it.
 - Tracking uses the subject's attitude, full horizontal rotation and elevation
   clamped to 0..90 degrees relative to its eye line, matching existing head look.
-  The cockpit/HUD remain tied to the player's nose. Remote forward/back/up/track
+  The cockpit/HUD remain tied to the player's nose. Remote forward/up/track
   views omit the player's cockpit and hide the reference aircraft or missile.
   Ground-reference eye positions use the object's origin; ground interiors are
   not modeled.
@@ -92,6 +101,12 @@ scene camera without a second cockpit overlay.
 - Fly-by sets its position once per selection: three seconds of current velocity
   ahead, 300 feet to the subject's right and 100 feet above. It keeps that world
   position and turns toward the moving subject. Press F9 again for another pass.
+  Once the subject is more than 3 nmi (18,228 feet, straight line in three
+  dimensions) from that position, the view picks a new one by the same rule,
+  so a long fly-by keeps passing instead of watching a dot. John asked on
+  2026-09-28 for a reset after "like 3-4 miles"; the 3 nmi figure is an
+  opinionated agent choice. A saved fly-by in Other View moves on by the same
+  rule, independently of the main view's.
 - F6 chooses the first living airborne member by wing/member order in the same
   friendly wing as the player (wing 1). Pressing F6 again, with the same
   reference, moves to the next member and wraps back to the first; a message
@@ -104,7 +119,9 @@ scene camera without a second cockpit overlay.
   also qualifies. This view does not grant sensor locks or weapon support.
 - The last player missile is the highest launched projectile identity observed
   during the flight, excluding guns and incoming fixtures. Its expiration does
-  not switch the view back to an older missile. F12 uses its retained target,
+  not switch the view back to an older missile. The mission replay follows the
+  selected aircraft's missiles by the same rule; another aircraft's shots at
+  the player count. F12 uses its retained target,
   independent of the player's later designation. Without a retained target,
   it looks along the missile's flight direction.
 - Missing subjects at selection leave the current view untouched and explain
@@ -152,3 +169,16 @@ Shift-M map. It leaves with the target. Layout and scale are agent choices.
 
 The existing View transitions preference and Other View numeric instrument
 overlays are outside this camera-selection pass.
+
+## Mission replay
+
+The [replay viewer](../REPLAYS.md#cameras) uses these views with any recorded
+aircraft as the reference, and matches the game: F6 again moves to the next
+wingman with the same message, F2 shows the aircraft's airframe, Alt and Ctrl
+pick the target and missile references, F7 carries the compass, and keypad 5,
+Shift+/ and the zoom keys work as in flight. It differs in one way John
+chose on 2026-09-28: a view whose subject is missing says why once and shows
+the aircraft from outside, then recovers when the subject returns, instead of
+refusing the key or returning to F1. Playing backwards, the fly-by point is
+placed ahead of the reversed motion (an agent choice). The replay also has an
+object view from any object to any other, described there.

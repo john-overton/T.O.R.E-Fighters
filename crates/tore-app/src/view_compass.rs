@@ -68,6 +68,11 @@ pub fn draw(canvas: &mut FlightCanvas, instruments: &Instruments, font: &Font, b
         .collect();
     draw_within(canvas, font, instruments.hud_color, bearing, &windows);
 }
+/// Draw the strip over a view with no instrument windows, as the mission
+/// replay shows F7, in `font` and `color`: the middle half of the view.
+pub fn draw_clear(canvas: &mut FlightCanvas, font: &Font, color: [u8; 3], bearing: f64) {
+    draw_within(canvas, font, color, bearing, &[]);
+}
 type Rect = (f64, f64, f64, f64);
 fn draw_within(
     canvas: &mut FlightCanvas,
@@ -269,6 +274,23 @@ mod tests {
         assert_eq!(small.len(), 6);
         assert_eq!(half_width(960., &small, 80., 10.), 240.);
         assert_eq!(half_width(960., &[], 80., 10.), 240.);
+    }
+    #[test]
+    fn without_windows_the_strip_spans_the_middle_half() {
+        let mut canvas = FlightCanvas::default();
+        canvas.blank([960, 720]);
+        draw_clear(&mut canvas, &font(), [0, 255, 0], 90.);
+        let ink = inked(&canvas);
+        let (left, right) = ink
+            .iter()
+            .fold((f64::MAX, 0f64), |(l, r), &(x, _)| (l.min(x), r.max(x)));
+        // A quarter of the view either side of the middle, plus half a label.
+        assert!(left < 250. && left > 200., "{left}");
+        assert!(right > 710. && right < 760., "{right}");
+        assert!(ink.iter().all(|&(_, y)| (8. ..80.).contains(&y)));
+        let at = |x: usize, y: usize| canvas.pixels[(y * 960 + x) * 4..][..4].to_vec();
+        let (x, y) = ink[0];
+        assert_eq!(at(x as usize, y as usize)[..3], [0, 255, 0]);
     }
     #[test]
     fn draws_only_along_the_top_clear_of_the_windows() {

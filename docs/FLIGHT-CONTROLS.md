@@ -44,10 +44,10 @@ Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity
 | F4 | Track current target within head-look limits | Manual p. 103; fitted limits |
 | F5 / F6 | Player to nearest inbound missile / wingman; F6 again for the next wingman | Manual p. 103; fitted placement and cycling |
 | F7 / F8 | Player to target, with a bearing compass / target to player | Manual p. 103; fitted placement; compass requested 2026-09-28 |
-| F9 | Fixed-position fly-by; press again for another pass | Manual p. 103; fitted placement |
+| F9 | Fixed-position fly-by; press again for another pass; a new point once the aircraft is 3 nmi from it | Manual p. 103; fitted placement; opinionated 3 nmi reset (requested by John, 2026-09-28) |
 | F10 | External chase view | FA menu; authored camera placement |
 | F12 | Last player missile to its own target | Manual p. 103; fitted placement |
-| Alt + view key / Ctrl + view key | Reference selected target / last player missile; Alt+F4 still exits | Manual p. 104; [view rules](spec/flight-views.md) |
+| Alt + view key / Ctrl + view key | Reference selected target / last player missile; Alt+F2 looks back over the target's own airframe; Alt+F4 still exits | Manual p. 104; [view rules](spec/flight-views.md) |
 | V | Save current camera into Other View and open its window | Manual p. 89 |
 | Shift + arrows | Cockpit look-around; exterior orbit | FA manual p. 104; Ctrl + arrows is FA thrust vectoring and does nothing yet |
 | Keypad 5 or Shift + / | Recenter look/orbit without changing view or zoom; also recenters a head tracker | Keypad 5 is FA's; Shift + / is a T.O.R.E second key |

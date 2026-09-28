@@ -401,6 +401,11 @@ impl Live {
                     context_menu::missile_items(id, owner.as_ref(), options),
                 )
             }
+            // Live flight picks ground objects as targets, never as these.
+            Target::Ground(id) => (
+                format!("Object {id}"),
+                context_menu::ground_items(id, options),
+            ),
             Target::Nothing => {
                 let entries: Vec<_> = self
                     .pickables
@@ -447,8 +452,12 @@ impl Live {
             Action::Guidance(id) => open(&mut self.panels, Kind::Guidance, id),
             Action::Comms(id) => self.panels.open_comms(Some(id)),
             Action::Labels => self.labels = !self.labels,
-            // Live flight has no drone or trails.
-            Action::Drone(_) | Action::DroneMissile(_) | Action::Trails => {}
+            // Live flight has no drone, trails or object view.
+            Action::Drone(_)
+            | Action::DroneMissile(_)
+            | Action::Trails
+            | Action::ViewFrom(_)
+            | Action::LookAt(_) => {}
         }
         None
     }

@@ -788,8 +788,8 @@ showed at the same moment.
 
 Along the bottom of the view: start, step back, reverse, pause, play, fast
 forward, step forward and end; the speed; the time and the recording's
-length; the camera, which a click steps through the flight views and the
-two drone modes; the selected aircraft, which a click moves to the next one;
+length; the camera, which a click steps through the flight views, the
+object view once something to look at is chosen, and the two drone modes; the selected aircraft, which a click moves to the next one;
 and Hide. Above the buttons is the timeline: click it to jump, drag along it
 to scrub. The lit button shows what playback is doing. The bar uses the
 Controls screen's colours, font and button style in the 640x480 interface
@@ -813,7 +813,11 @@ as in flight.
 | Home / End | Start or end |
 | PageUp / PageDown | Previous or next marker |
 | Tab / Shift+Tab | Next or previous aircraft |
-| F1 to F10, F12 | The flight views, on the selected aircraft |
+| F1 to F10, F12 | The flight views, on the selected aircraft; F6 again for the next wingman |
+| Alt / Ctrl + F1 to F10, F12 | The same views from the selected aircraft's target / its newest missile; Alt+F4 still quits |
+| O / Shift+O | [Object view](#object-view): look at the next or previous object present now |
+| Keypad 5 or Shift+/ | Recenter the look, keeping the view and zoom |
+| + / - (keypad too) | Zoom in or out, 1.1 times a press, 0.5x to 4x |
 | Backquote | Drone following the selected aircraft, then flying free, then back |
 | W A S D, E / Q | Drone: move along the view and sideways, climb / descend; Shift is four times faster |
 | Mouse wheel | Scrolls a panel or menu under the pointer; otherwise drone speed, or zoom in a flight view |
@@ -821,7 +825,7 @@ as in flight.
 | N / T / C | Name labels / mission timer / [Comms panel](#the-comms-panel) |
 | I / F / G | [AI thinking / telemetry](#debug-panels) of the selected aircraft / guidance of its newest missile in flight; again to close |
 | M / X | The [right-click menu](#the-right-click-menu) on the selected aircraft / close every panel |
-| Right-click | The right-click menu on the aircraft or missile under the pointer |
+| Right-click | The right-click menu on the aircraft, weapon or ground object under the pointer |
 | R / Shift+R | Trails on or off / next trail length |
 | H | Hide or show the whole interface and the pointer |
 | P | Save the view without the interface as a PNG |
@@ -830,15 +834,56 @@ as in flight.
 ### Cameras
 
 - **Flight views on any aircraft.** Tab picks the aircraft; F1 to F12 give
-  the same views as in flight, from that aircraft: front, back and up sit at
-  the aircraft and hide it (there is no cockpit in a replay), and track,
-  threat, wing, target, fly-by and missile views work from it. The target is
-  that aircraft's own target when the recording has its AI target changes,
-  otherwise the player's designated target, which the recording notes with
-  every command the player gives. A view that cannot be shown (no target, no
-  wingman, no missile) says why and shows the aircraft from outside; once
-  the aircraft has left the recording (a wreck that exploded), the camera
-  stays where it was. The viewer opens in the external view of the player.
+  the same views as in flight, from that aircraft, following the
+  [view rules](spec/flight-views.md#mission-replay): front, up and track sit
+  at the aircraft and hide it (there is no cockpit in a replay); back looks
+  from its pilot's eye over its spine and tails, as the player's own F2
+  does; threat, wing, target, fly-by and missile views work from it. F6
+  pressed again moves to the next wingman and names it ("Wingman view: Enemy
+  1-2", the recorded label). Alt with a view key uses the aircraft's target
+  as the reference and Ctrl its newest missile in flight (its shots at the
+  player included); an unmodified key goes back to the aircraft itself. F7
+  from the aircraft carries flight's bearing compass along the top of the
+  view, in the recorded aircraft's HUD font and colour, the strip across the
+  middle half of the view since a replay has no instrument windows; it hides
+  with the interface. Keypad 5 and Shift+/ recenter a right-drag look, and
+  + and - zoom as in flight. The fly-by picks a new point once the aircraft
+  is 3 nmi from it, as in flight, and playing backwards puts the point ahead
+  of the reversed motion. The target is that aircraft's own target when the
+  recording has its AI target changes, otherwise the player's designated
+  target, which the recording notes with every command the player gives. A
+  view that cannot be shown (no target, no wingman, no missile) says why
+  once and shows the aircraft from outside, coming back when it can be shown
+  again (John's choice, 2026-09-28: the replay does not refuse the key or
+  return to F1 as flight does); once the aircraft has left the recording (a
+  wreck that exploded), the camera stays where it was. The viewer opens in
+  the external view of the player.
+- <a id="object-view"></a>**Object view.** A camera from any object to any
+  other, at any range: aircraft, ground objects of the recorded world
+  (buildings, runways and the like, until they are destroyed) and weapons in
+  flight (missiles, bombs and rockets, not gun rounds). Requested by John on
+  2026-09-28; the keys, menu items, order and fallback below are agent
+  decisions. It starts from the selected aircraft, or from a ground object or
+  weapon chosen with **View from here** on the right-click menu; **Look at
+  this** chooses what it looks at. View from here with nothing else chosen
+  yet looks at a weapon's own target while it flies, otherwise the nearest
+  other aircraft. O and Shift+O step what it looks at
+  forwards and backwards through everything present on the current tick, in
+  a fixed order: aircraft, then weapons, then ground objects, each by id,
+  leaving out the object it starts from. Any of these switches to the view.
+  The camera is flight's relation camera: 180 feet behind the starting
+  object and 60 above (30 and 10 for a weapon), on the line to the other
+  object, so both sit on the centre sightline; its eye stays at least 20
+  feet above the ground (fitted), so a view from a building up at an
+  aircraft never looks from under the terrain. The camera button reads
+  "Object: You > AIM-54 from You", and a line under the messages at the top
+  gives both names and the range in nautical miles. When either end is
+  missing it says why once and shows the starting object from outside, or
+  keeps the last camera when that is gone too; it waits for the object
+  rather than moving to another, and comes back when both are present again,
+  for example after stepping back before a missile hit. F-keys leave it as
+  usual, Tab selects an aircraft to start from, and the camera button steps
+  to it after F12 once something to look at has been chosen.
 - **Drone.** Backquote switches to a drone that follows the selected
   aircraft at a fixed offset in world axes, so the aircraft stays where it
   was framed while the drone travels with it; Backquote again lets it fly
@@ -852,7 +897,8 @@ as in flight.
   feet above the ground and moves in real time, so shots can be framed while
   playback is paused. Speed range and offsets are fitted.
 - Right-drag looks around, at the mouse-look sensitivity set on the
-  Controls screen.
+  Controls screen. The object view and flight's relation views keep their
+  own direction, as in flight.
 
 ### What is drawn
 
@@ -1046,6 +1092,7 @@ For checking the viewer without a keyboard:
 ```sh
 tore-app --watch-replay FILE --capture-replay OUT.ppm --replay-tick N \
     [--flight-view 0..11] [--replay-aircraft ID] [--replay-drone] \
+    [--replay-look-at aircraft:ID|ground:ID|weapon:ID] \
     [--replay-ui labels,timer,trails,comms,subtitles] [--replay-clean]
 ```
 
@@ -1053,7 +1100,10 @@ The capture waits for the background pass, draws the frame at tick `N`
 with the interface as chosen, writes a PPM like `--capture-flight` and
 exits. A path ending in `.png` instead saves the 3D view without the
 interface through the same code and PNG writer as P. `--replay-clean`
-starts with the interface hidden, as H hides it.
+starts with the interface hidden, as H hides it. `--replay-look-at` starts
+in the [object view](#object-view) from the selected aircraft toward that
+aircraft, ground object or weapon (a weapon by its projectile id, as the
+debug log's launch events give it).
 `--replay-speed S` starts playing at a ladder speed, negative for reverse,
 and with `TORE_PERF_FRAMES=N` the viewer reports frame timings like live
 flight. `--replay-panels thought,telemetry,guidance,comms,menu` opens
@@ -1077,6 +1127,10 @@ about 1,200 ticks a frame, frames take about 2 ms more.
   recordings; a recording of a flight flown by hand has not been watched
   yet.
 - Gun rounds have no trails.
+- The object view's ground objects are the recorded world's fixed objects
+  (Ukraine has 257), so after the aircraft and weapons O steps through all
+  of them before it wraps round. It has no look-around, as flight's
+  relation views have none.
 
 ## Debug panels
 
@@ -1119,8 +1173,9 @@ missile.
 
 | Right-click on | Items |
 | --- | --- |
-| An aircraft | Follow (chase view): F10 on it. Cockpit view: the front view from it, the player's own cockpit in live flight. Drone here (replay): the follow drone beside it. AI thinking (aircraft the AI flies). Telemetry. Comms for this aircraft. Name labels. Flight path trails (replay) |
-| A missile | Guidance. Drone here (replay): a free drone beside it. Go to the shooter. Name labels. Flight path trails (replay) |
+| An aircraft | Follow (chase view): F10 on it. Cockpit view: the front view from it, the player's own cockpit in live flight. Drone here (replay): the follow drone beside it. View from here and Look at this (replay): the [object view](#object-view) from it or toward it. AI thinking (aircraft the AI flies). Telemetry. Comms for this aircraft. Name labels. Flight path trails (replay) |
+| A missile | Guidance. Drone here (replay): a free drone beside it. View from here and Look at this (replay). Go to the shooter. Name labels. Flight path trails (replay) |
+| A ground object (replay) | View from here and Look at this. Name labels. Flight path trails |
 | Empty space | Every aircraft in the picture, grouped by side and wing, to jump to: a replay selects it, live flight puts the chase view on it. Then the switches |
 
 Up, Down and Tab (Shift+Tab back), Home, End, PageUp and PageDown move;
